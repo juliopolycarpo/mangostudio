@@ -127,7 +127,9 @@ describe('production NODE_ENV guard', () => {
     expect(escaped.includes('NODE_ENV')).toBe(false);
     const root = makeSourceTree('apps/api/src/escaped.ts', escaped);
 
-    expect(() => assertNoProductionNodeEnvBranches(root)).toThrow(/apps\/api\/src\/escaped\.ts:1:/);
+    expect(() => assertNoProductionNodeEnvBranches(root)).toThrow(
+      `${join('apps', 'api', 'src', 'escaped.ts')}:1:33`
+    );
   });
 
   it('accepts a scanned file whose backslash is not an escaped NODE_ENV', () => {

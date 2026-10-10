@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -31,7 +32,8 @@ import {
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'mango-safe-file-'));
+  // Ancestor aliases must not add hops to the explicit 32-link boundary fixture.
+  dir = realpathSync(mkdtempSync(join(tmpdir(), 'mango-safe-file-')));
 });
 
 afterEach(() => {

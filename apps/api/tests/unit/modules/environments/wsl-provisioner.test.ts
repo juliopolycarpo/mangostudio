@@ -21,7 +21,16 @@ const DIGEST = createHash('sha256').update(ARCHIVE).digest('hex');
 const CHECKSUMS = `${DIGEST}  ${RAW_ASSET}\n${DIGEST}  ${ASSET}\n`;
 const DISTRO_HOME = '/home/dev';
 /** The hub cache these tests pretend to use. Shaped like `~/.mango/runtime-cache`; never on disk. */
-const CACHE_ROOT = '/hub-home/.mango/runtime-cache';
+const CACHE_ROOT = join('/hub-home', '.mango', 'runtime-cache');
+
+/** A file in the hub cache, spelled the way the provisioner's own `join` spells it on this host. */
+function cachedPath(version: string, name: string): string {
+  return join(CACHE_ROOT, version, name);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 interface DistroCall {
   readonly distro: string;
@@ -86,7 +95,7 @@ function harness(
   const provisioner = createWslProvisioner({
     version: () => version,
     hubHost: () => 'win-desktop',
-    cacheDir: (cacheVersion) => `${CACHE_ROOT}/${cacheVersion}`,
+    cacheDir: (cacheVersion) => join(CACHE_ROOT, cacheVersion),
     cacheFs: cache.fs,
     localBuildPath: (platformId) => `/repo/.mango/out/${platformId}/mangostudio-runtime`,
     readBytes: (path) => {
@@ -185,7 +194,7 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${RAW_ASSET}`,
     ]);
-    expect(written.get(`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}`)).toEqual(ARCHIVE);
+    expect(written.get(cachedPath(VERSION, RAW_ASSET))).toEqual(ARCHIVE);
     expect(calls.every((call) => call.distro === 'Ubuntu')).toBe(true);
 
     const unpack = calls.find((call) => call.script.includes('cat > '));
@@ -216,8 +225,8 @@ describe('WslProvisioner', () => {
     const { provisioner, calls, written } = harness({
       offline: true,
       cacheFiles: {
-        [`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}`]: ARCHIVE,
-        [`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}.sha256`]: new TextEncoder().encode(DIGEST),
+        [cachedPath(VERSION, RAW_ASSET)]: ARCHIVE,
+        [`${cachedPath(VERSION, RAW_ASSET)}.sha256`]: new TextEncoder().encode(DIGEST),
       },
     });
 
@@ -235,8 +244,8 @@ describe('WslProvisioner', () => {
     const { provisioner, calls, written } = harness({
       offline: true,
       cacheFiles: {
-        [`${CACHE_ROOT}/${VERSION}/${ASSET}`]: ARCHIVE,
-        [`${CACHE_ROOT}/${VERSION}/${ASSET}.sha256`]: new TextEncoder().encode(DIGEST),
+        [cachedPath(VERSION, ASSET)]: ARCHIVE,
+        [`${cachedPath(VERSION, ASSET)}.sha256`]: new TextEncoder().encode(DIGEST),
       },
     });
 
@@ -251,7 +260,7 @@ describe('WslProvisioner', () => {
   it('refuses an unreachable release when nothing recorded what the cache holds', async () => {
     const { provisioner } = harness({
       offline: true,
-      cacheFiles: { [`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}`]: ARCHIVE },
+      cacheFiles: { [cachedPath(VERSION, RAW_ASSET)]: ARCHIVE },
     });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(WslProvisioningError);
@@ -262,7 +271,7 @@ describe('WslProvisioner', () => {
 
     await provisioner.ensure('Ubuntu');
 
-    expect(new TextDecoder().decode(written.get(`${CACHE_ROOT}/${VERSION}/SHA256SUMS`))).toBe(
+    expect(new TextDecoder().decode(written.get(cachedPath(VERSION, 'SHA256SUMS')))).toBe(
       CHECKSUMS
     );
   });
@@ -279,7 +288,7 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${ASSET}`,
     ]);
-    expect(written.get(`${CACHE_ROOT}/${VERSION}/${ASSET}`)).toEqual(ARCHIVE);
+    expect(written.get(cachedPath(VERSION, ASSET))).toEqual(ARCHIVE);
     const unpack = calls.find((call) => call.script.includes('tar -xzf -'));
     expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
   });
@@ -301,7 +310,7 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/${canaryAsset}`,
     ]);
-    expect(written.get(`${CACHE_ROOT}/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
+    expect(written.get(cachedPath(canaryVersion, canaryAsset))).toEqual(ARCHIVE);
   });
 
   // A cache entry is only as good as the checksum that vouches for it: a
@@ -322,7 +331,7 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${canaryVersion}/${canaryAsset}`,
     ]);
-    expect(written.get(`${CACHE_ROOT}/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
+    expect(written.get(cachedPath(canaryVersion, canaryAsset))).toEqual(ARCHIVE);
   });
 
   // Pruning deletes the whole release, so SHA256SUMS 404s before anything can
@@ -540,7 +549,7 @@ describe('WslProvisioner', () => {
   it('names both ways out when the release cannot be reached', async () => {
     const provisioner = createWslProvisioner({
       version: () => VERSION,
-      cacheDir: (version) => `${CACHE_ROOT}/${version}`,
+      cacheDir: (version) => join(CACHE_ROOT, version),
       cacheFs: recordingCacheFs([]).fs,
       readBytes: () => Promise.resolve(null),
       // Only the slot probe runs before the download fails.
@@ -554,7 +563,7 @@ describe('WslProvisioner', () => {
     // where the cache expects the asset, and where the binary belongs.
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
       new RegExp(
-        `Could not download .*\\. Either download .*/${RAW_ASSET} to ${CACHE_ROOT}/${VERSION}/${RAW_ASSET} ` +
+        `Could not download .*\\. Either download .*/${RAW_ASSET} to ${escapeRegExp(cachedPath(VERSION, RAW_ASSET))} ` +
           'on this host and connect again, or put the 1\\.2\\.3 runtime at ' +
           '~/\\.mango/runtime/wsl/current/mangostudio-runtime inside "Ubuntu" yourself\\.',
         's'
@@ -719,7 +728,7 @@ describe('WslProvisioner', () => {
 
     await provisioner.ensure('Ubuntu');
 
-    const sidecar = written.get(`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}.sha256`);
+    const sidecar = written.get(`${cachedPath(VERSION, RAW_ASSET)}.sha256`);
     expect(sidecar).toBeDefined();
     expect(new TextDecoder().decode(sidecar)).toBe(DIGEST);
   });
@@ -731,8 +740,8 @@ describe('WslProvisioner', () => {
 
     await provisioner.ensure('Ubuntu');
 
-    expect(written.has(`${CACHE_ROOT}/${VERSION}/${RAW_ASSET}.sha256`)).toBe(false);
-    expect(new TextDecoder().decode(written.get(`${CACHE_ROOT}/${VERSION}/${ASSET}.sha256`))).toBe(
+    expect(written.has(`${cachedPath(VERSION, RAW_ASSET)}.sha256`)).toBe(false);
+    expect(new TextDecoder().decode(written.get(`${cachedPath(VERSION, ASSET)}.sha256`))).toBe(
       DIGEST
     );
   });

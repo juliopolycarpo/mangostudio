@@ -30,6 +30,9 @@ function serverEnv(home: string, port: number): Record<string, string> {
     ...(process.env as Record<string, string>),
     NODE_ENV: 'production',
     HOME: home,
+    // `os.homedir()` reads this one on Windows; without it the state file lands in
+    // whatever profile the parent had.
+    USERPROFILE: home,
     API_PORT: String(port),
     API_HOST: '127.0.0.1',
     DATABASE_PATH: ':memory:',
@@ -80,35 +83,54 @@ describe('startServer via __serve', () => {
     fixture = null;
   });
 
+  /** Starts the server and waits until it is healthy and has written its state file. */
+  async function startServing(
+    running: ManagedProcessFixture
+  ): Promise<{ pid: number | undefined; pidFile: string }> {
+    const { port, tempDir: home } = running;
+    const pidFile = join(home, '.mango', 'run', 'server.json');
+
+    const child = running.spawn({
+      cmd: ['bun', ENTRY, '__serve', String(port)],
+      env: {
+        ...serverEnv(home, port),
+        BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+      },
+    });
+
+    await running.waitUntilReady(() => probeHealthOnce('127.0.0.1', port), {
+      label: `server health at 127.0.0.1:${port}`,
+      timeoutMs: START_TIMEOUT_MS,
+      intervalMs: 150,
+    });
+    await running.waitUntilReady(() => existsSync(pidFile), {
+      label: `server state file ${pidFile}`,
+      timeoutMs: START_TIMEOUT_MS,
+    });
+    return { pid: child.pid, pidFile };
+  }
+
   it(
-    'listens, writes state, serves health, and cleans up on SIGTERM',
+    'listens, serves health, and writes its state',
     async () => {
       if (!fixture) throw new Error('Expected a managed process fixture.');
-      const { port, tempDir: home } = fixture;
-      const pidFile = join(home, '.mango', 'run', 'server.json');
 
-      const child = fixture.spawn({
-        cmd: ['bun', ENTRY, '__serve', String(port)],
-        env: {
-          ...serverEnv(home, port),
-          BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
-        },
-      });
-
-      await fixture.waitUntilReady(() => probeHealthOnce('127.0.0.1', port), {
-        label: `server health at 127.0.0.1:${port}`,
-        timeoutMs: START_TIMEOUT_MS,
-        intervalMs: 150,
-      });
-      await fixture.waitUntilReady(() => existsSync(pidFile), {
-        label: `server state file ${pidFile}`,
-        timeoutMs: START_TIMEOUT_MS,
-      });
+      const { pid, pidFile } = await startServing(fixture);
 
       const state = JSON.parse(await readFile(pidFile, 'utf8'));
-      expect(state.pid).toBe(child.pid);
-      expect(state.port).toBe(port);
+      expect(state.pid).toBe(pid);
+      expect(state.port).toBe(fixture.port);
       expect(state.host).toBe('127.0.0.1');
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  // Windows has no SIGTERM: a kill there terminates the process, so no handler runs.
+  it.skipIf(process.platform === 'win32')(
+    'exits cleanly and removes its state on SIGTERM',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const { pidFile } = await startServing(fixture);
 
       const exitCode = await fixture.stop('SIGTERM');
 

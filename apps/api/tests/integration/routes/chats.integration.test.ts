@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Chat } from '@mangostudio/shared/chat';
@@ -44,7 +44,7 @@ afterEach(async () => {
 });
 
 async function createTempDir(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), 'mango-chat-workdir-'));
+  const path = await realpath(await mkdtemp(join(tmpdir(), 'mango-chat-workdir-')));
   tempDirs.push(path);
   return path;
 }

@@ -42,6 +42,7 @@ import {
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
 import { registerTools } from '../../../../src/services/tools/register-tools';
+import { bashPath } from '../../../support/bash-path';
 import {
   type ChatFixture,
   insertTestChat,
@@ -249,7 +250,10 @@ describe('delegated file mutations', () => {
       await enableShellForUser(chat.userId);
       const path = join(tempDir, 'written-by-subagent-shell.txt');
       const result = await delegate(
-        { name: 'bash', args: { command: `printf 'from the subagent\\n' > ${path}`, cwd: null } },
+        {
+          name: 'bash',
+          args: { command: `printf 'from the subagent\\n' > ${bashPath(path)}`, cwd: null },
+        },
         ['bash']
       );
 

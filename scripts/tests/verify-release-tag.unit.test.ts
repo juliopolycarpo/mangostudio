@@ -188,8 +188,9 @@ describe('trusted release tag verification', () => {
       expect(verify).toBeDefined();
       const env = {
         ...process.env,
-        RUNNER_TEMP: archive,
-        GITHUB_WORKSPACE: directory,
+        // Git Bash needs shell-readable paths when the fixture runs on Windows.
+        RUNNER_TEMP: archive.replaceAll('\\', '/'),
+        GITHUB_WORKSPACE: directory.replaceAll('\\', '/'),
         RELEASE_TAG: 'v1.0.5',
         RELEASE_REF_TYPE: 'tag',
         EXPECTED_RELEASE_TAG: 'v1.0.5',
@@ -203,7 +204,7 @@ describe('trusted release tag verification', () => {
           env,
         });
         if (step === load) {
-          expect(result.exitCode).toBe(0);
+          expect(result.exitCode, new TextDecoder().decode(result.stderr)).toBe(0);
           continue;
         }
         expect(result.exitCode).toBe(1);

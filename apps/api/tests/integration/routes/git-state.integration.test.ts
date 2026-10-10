@@ -17,6 +17,7 @@ import {
 } from '../../../src/services/realtime/realtime-bus';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { gitFixtureEnv } from '../../support/git-fixture-env';
+import { asGitPath } from '../../support/git-path';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
@@ -92,7 +93,7 @@ describe('git routes', () => {
     const initializedPayload = await initialized.json();
     expect(initialized.status).toBe(200);
     expect(Value.Check(InitRepoResponseSchema, initializedPayload)).toBe(true);
-    expect(initializedPayload).toEqual({ root: workdir });
+    expect(initializedPayload).toEqual({ root: asGitPath(workdir) });
     expect(events.filter((event) => event.topic === gitTopic(chat.id))).toEqual([
       {
         type: 'invalidate',
@@ -107,7 +108,7 @@ describe('git routes', () => {
     expect(Value.Check(GitRepoStateSchema, afterPayload)).toBe(true);
     expect(afterPayload.state).toBe('repo');
     if (afterPayload.state === 'repo') {
-      expect(afterPayload.root).toBe(workdir);
+      expect(afterPayload.root).toBe(asGitPath(workdir));
       expect(afterPayload.status.clean).toBe(true);
     }
   });

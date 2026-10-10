@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
@@ -25,7 +25,7 @@ const tempDirs: string[] = [];
 let restoreAuth: (() => void) | null = null;
 
 async function createTempDir(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), 'mango-workspace-routes-'));
+  const path = await realpath(await mkdtemp(join(tmpdir(), 'mango-workspace-routes-')));
   tempDirs.push(path);
   return path;
 }

@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix, win32 } from 'node:path';
 import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { LIBRARY_SCOPES, LibraryScopeSchema } from '@mangostudio/shared/library';
 import {
@@ -31,8 +31,11 @@ const LINUX_ENV: PathEnv = { platform: 'linux', homeDir: '/home/ada', env: {} };
  */
 const WORKSPACE_FIXTURE: Pick<LocationDefinition, 'scope' | 'resolvePath'> = {
   scope: 'workspace',
+  // Joins by the env's platform, as every registry resolver does, not the host's.
   resolvePath: (env) =>
-    env.workspaceRoot === undefined ? null : join(env.workspaceRoot, '.claude', 'skills'),
+    env.workspaceRoot === undefined
+      ? null
+      : (env.platform === 'win32' ? win32 : posix).join(env.workspaceRoot, '.claude', 'skills'),
 };
 
 describe('library scope contract', () => {

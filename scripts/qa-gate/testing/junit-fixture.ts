@@ -3,6 +3,8 @@
 // `ReadText` port. Named fakes, so a failure-mode test states what is missing
 // instead of stubbing a reader inline.
 
+import { normalize } from 'node:path';
+
 import type { ReadText } from '../results/evidence';
 
 export interface FixtureCase {
@@ -60,20 +62,23 @@ export const receiptJson = (shard: number | string, exitCode: number): string =>
   `${JSON.stringify({ shard, exitCode, durationSeconds: 40 })}\n`;
 
 /**
- * In-memory files keyed by path; a path not present reads as missing, exactly
- * like a job that never uploaded it. Records what was read so a test can assert
- * the adapter consumed existing files and nothing else.
+ * In-memory files keyed by normalized native path; a path not present reads
+ * as missing, exactly like a job that never uploaded it. Records the original
+ * read paths so a test can assert the adapter consumed existing files and nothing else.
  * // Usage: const fs = fakeFiles({ 'shards/test-shard-1/shard-meta.json': receiptJson(1, 0) })
  */
 export const fakeFiles = (
   files: Readonly<Record<string, string>>
 ): { readonly readText: ReadText; readonly reads: string[] } => {
+  const normalizedFiles = new Map(
+    Object.entries(files).map(([path, text]) => [normalize(path), text])
+  );
   const reads: string[] = [];
   return {
     reads,
     readText: (path) => {
       reads.push(path);
-      return Promise.resolve(files[path] ?? null);
+      return Promise.resolve(normalizedFiles.get(normalize(path)) ?? null);
     },
   };
 };

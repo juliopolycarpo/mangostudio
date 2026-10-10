@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 import {
   checkAuthSecret,
   checkConfig,
@@ -131,7 +132,7 @@ describe('checkDatabase', () => {
 
 describe('checkFrontend', () => {
   it('passes when index.html is present', () => {
-    const fs = new FakeFsProbe(new Set(['/app', '/app/index.html']), new Set());
+    const fs = new FakeFsProbe(new Set(['/app', join('/app', 'index.html')]), new Set());
     expect(checkFrontend('/app', fs).status).toBe('ok');
   });
 

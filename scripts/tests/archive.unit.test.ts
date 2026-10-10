@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -12,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { extractTarArchive, openTarArchive } from '../lib/archive';
+import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { captureCommand } from '../lib/exec';
 
 let tempDirs: string[] = [];
@@ -27,14 +29,17 @@ function makeTempDir(): string {
   return dir;
 }
 
-async function stageGnuTarball(rootDir: string): Promise<string> {
+async function stageTarball(rootDir: string): Promise<string> {
   const sourceDir = join(rootDir, 'source');
   mkdirSync(join(sourceDir, 'nested'), { recursive: true });
   writeFileSync(join(sourceDir, 'mangostudio'), 'binary', { mode: 0o755 });
   writeFileSync(join(sourceDir, 'nested', 'README.md'), 'readme');
 
   const archivePath = join(rootDir, 'bundle.tar.gz');
-  const result = await captureCommand(['tar', '-czf', archivePath, '-C', sourceDir, '.']);
+  const { command, cwd } = tarCreationCommand(archivePath, [
+    { directory: sourceDir, members: ['.'] },
+  ]);
+  const result = await captureCommand([...command], { cwd });
   if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout);
   return archivePath;
 }
@@ -42,7 +47,7 @@ async function stageGnuTarball(rootDir: string): Promise<string> {
 describe('native archive reading', () => {
   test('lists file entries and extracts the same instance', async () => {
     const rootDir = makeTempDir();
-    const archivePath = await stageGnuTarball(rootDir);
+    const archivePath = await stageTarball(rootDir);
 
     const archive = await openTarArchive(archivePath);
     expect([...archive.entries].sort()).toEqual(['./mangostudio', './nested/README.md']);
@@ -54,7 +59,7 @@ describe('native archive reading', () => {
 
   test('extracts without a listing pass', async () => {
     const rootDir = makeTempDir();
-    const archivePath = await stageGnuTarball(rootDir);
+    const archivePath = await stageTarball(rootDir);
 
     const destination = join(rootDir, 'out');
     await extractTarArchive(archivePath, destination);
@@ -63,7 +68,7 @@ describe('native archive reading', () => {
 
   // The shape target distribution bundles ship in: stored, not gzipped, because
   // their one large member is an already-compressed platform archive.
-  test('reads a stored tar and keeps the executable bit', async () => {
+  test('reads a stored tar and preserves contents and POSIX executable mode', async () => {
     const rootDir = makeTempDir();
     const sourceDir = join(rootDir, 'source');
     mkdirSync(sourceDir, { recursive: true });
@@ -71,7 +76,12 @@ describe('native archive reading', () => {
 
     // Named `.tar`, and detected from the bytes rather than from that name.
     const archivePath = join(rootDir, 'bundle.tar');
-    const result = await captureCommand(['tar', '-cf', archivePath, '-C', sourceDir, '.']);
+    const { command, cwd } = tarCreationCommand(
+      archivePath,
+      [{ directory: sourceDir, members: ['.'] }],
+      { format: 'tar' }
+    );
+    const result = await captureCommand([...command], { cwd });
     if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout);
 
     const archive = await openTarArchive(archivePath);
@@ -79,7 +89,10 @@ describe('native archive reading', () => {
 
     const destination = join(rootDir, 'out');
     await archive.extract(destination);
-    expect(statSync(join(destination, 'mangostudio')).mode & 0o111).toBeGreaterThan(0);
+    expect(readFileSync(join(destination, 'mangostudio'), 'utf8')).toBe('binary');
+    if (process.platform !== 'win32') {
+      expect(statSync(join(destination, 'mangostudio')).mode & 0o111).toBeGreaterThan(0);
+    }
   });
 
   test('names the archive in read and extract failures', async () => {
@@ -102,18 +115,24 @@ describe('native archive reading', () => {
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
 
-    for (const [flag, name] of [
-      ['-cJf', 'bundle.tar.xz'],
-      ['-cjf', 'bundle.tar.bz2'],
+    for (const [format, name] of [
+      ['tar.xz', 'bundle.tar.xz'],
+      ['tar.bz2', 'bundle.tar.bz2'],
     ] as const) {
       const archivePath = join(rootDir, name);
-      const result = await captureCommand(['tar', flag, archivePath, '-C', sourceDir, '.']);
+      const { command, cwd } = tarCreationCommand(
+        archivePath,
+        [{ directory: sourceDir, members: ['.'] }],
+        { format }
+      );
+      const result = await captureCommand([...command], { cwd });
       if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout);
       await expect(openTarArchive(archivePath)).rejects.toThrow(/Unrecognized archive format/);
     }
 
     const zipPath = join(rootDir, 'bundle.zip');
-    const zipped = await captureCommand(['zip', '-qr', zipPath, '.'], { cwd: sourceDir });
+    const zip = zipCreationCommand(zipPath, sourceDir);
+    const zipped = await captureCommand([...zip.command], { cwd: zip.cwd });
     if (zipped.exitCode !== 0) throw new Error(zipped.stderr || zipped.stdout);
     await expect(openTarArchive(zipPath)).rejects.toThrow(/Unrecognized archive format/);
   });

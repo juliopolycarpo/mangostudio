@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { parseLcovLineHits, readCoveredSources } from './lcov-sources';
 
@@ -29,7 +29,7 @@ describe('parseLcovLineHits', () => {
 
     expect(result.recordCount).toBe(1);
     expect(result.files).toHaveLength(1);
-    expect(result.files[0]?.sourcePath).toBe('/workspace/src/a.ts');
+    expect(result.files[0]?.sourcePath).toBe(resolve('/workspace', 'src', 'a.ts'));
     expect(result.files[0]?.lineHits.get(1)).toBe(2);
     expect(result.malformedRecords).toEqual(['DA:oops', 'SF:']);
   });
@@ -51,7 +51,9 @@ describe('readCoveredSources', () => {
     await writeFile(lcovPath, records.join('\n'), 'utf8');
 
     await expect(readCoveredSources(lcovPath, dir)).rejects.toThrow(
-      /7 source file\(s\) missing .* src\/missing-0\.ts, .* \(\+2 more\)/
+      `${lcovPath} references 7 source file(s) missing under ${dir}: ` +
+        Array.from({ length: 5 }, (_, i) => join('src', `missing-${i}.ts`)).join(', ') +
+        ' (+2 more)'
     );
   });
 

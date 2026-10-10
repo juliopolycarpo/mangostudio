@@ -86,7 +86,8 @@ and its `--version`, when this machine can run it — before it is staged.
 ## actions-lint/ — workflow static analysis
 
 `bun run check` runs three pinned binaries against the repository's automation
-surface, as does CI's Check job (same script):
+surface, as does CI's Check job (same script), on Linux/macOS x64/arm64 and
+Windows x64:
 
 - **actionlint** over `.github/workflows/**`, with ShellCheck applied to
   embedded `run:` scripts;

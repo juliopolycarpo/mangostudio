@@ -27,6 +27,7 @@ import {
 } from '../../../../src/services/mcp/connection-manager';
 import { registerTools } from '../../../../src/services/tools/register-tools';
 import type { EffectiveToolSettings } from '../../../../src/services/tools/types';
+import { bashPath } from '../../../support/bash-path';
 import { type ChatFixture, insertTestChat, type UserFixture } from '../../../support/factories';
 import { insertUserWithLocalRuntime } from '../../../support/fixtures/local-runtime-user';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
@@ -187,7 +188,7 @@ describe('revert reporting of writes it never checkpointed', () => {
     const shellWritten = join(tempDir, 'shell-written.txt');
     await runTurnTools([
       writeFileCall('call-1', checkpointed, 'from write_file\n'),
-      bashCall('call-2', `printf 'from bash\\n' > ${shellWritten}`),
+      bashCall('call-2', `printf 'from bash\\n' > ${bashPath(shellWritten)}`),
     ]);
     expect(existsSync(shellWritten)).toBe(true);
 
@@ -230,7 +231,9 @@ describe('revert reporting of writes it never checkpointed', () => {
   });
 
   it.skipIf(!hasBash)('reports the sources of a turn that checkpointed nothing', async () => {
-    await runTurnTools([bashCall('call-1', `printf 'x\\n' > ${join(tempDir, 'only-shell.txt')}`)]);
+    await runTurnTools([
+      bashCall('call-1', `printf 'x\\n' > ${bashPath(join(tempDir, 'only-shell.txt'))}`),
+    ]);
 
     // No manifest means no revert affordance, so this never reaches the UI —
     // but the API must not answer "nothing happened" when something did.
@@ -244,7 +247,7 @@ describe('revert reporting of writes it never checkpointed', () => {
       writeFileCall('call-1', join(tempDir, 'checkpointed.txt'), 'kept\n'),
       // Writes, then exits non-zero. A source recorded only on success would
       // leave exactly this turn claiming a complete revert.
-      bashCall('call-2', `printf 'partial\\n' > ${path}; exit 3`),
+      bashCall('call-2', `printf 'partial\\n' > ${bashPath(path)}; exit 3`),
     ]);
 
     expect(existsSync(path)).toBe(true);

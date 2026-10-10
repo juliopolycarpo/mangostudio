@@ -19,6 +19,7 @@ import {
 import { createTargetPaths } from '../../../src/services/runtime-client/target-paths';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { gitFixtureEnv } from '../../support/git-fixture-env';
+import { asGitPath } from '../../support/git-path';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const hasGit = Bun.which('git') !== null;
@@ -119,9 +120,9 @@ describe('Git worktree routes', () => {
 
     expect(response.status).toBe(200);
     expect(Value.Check(GitWorktreeListResponseSchema, payload)).toBe(true);
-    expect(payload.worktrees[0]).toMatchObject({ path: root, isMain: true });
+    expect(payload.worktrees[0]).toMatchObject({ path: asGitPath(root), isMain: true });
     expect(payload.worktrees[1]).toMatchObject({
-      path: linked,
+      path: asGitPath(linked),
       branch: 'feat/panel',
       isMain: false,
       isDetached: false,
@@ -147,7 +148,9 @@ describe('Git worktree routes', () => {
 
     expect(response.status).toBe(200);
     expect(Value.Check(GitWorktreeListResponseSchema, payload)).toBe(true);
-    expect(payload.worktrees.map((worktree) => worktree.path)).toEqual([root, target]);
+    expect(payload.worktrees.map((worktree) => worktree.path)).toEqual(
+      [root, target].map(asGitPath)
+    );
     expect(await runFixtureGit(target, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('feat/panel');
     // The bus also carries environment events; only the git topic is this route's.
     expect(events.filter((event) => event.topic === gitTopic(chatId))).toEqual([
@@ -170,7 +173,10 @@ describe('Git worktree routes', () => {
     const payload = (await response.json()) as GitWorktreeListResponse;
 
     expect(response.status).toBe(200);
-    expect(payload.worktrees[1]).toMatchObject({ path: target, branch: 'feat/existing' });
+    expect(payload.worktrees[1]).toMatchObject({
+      path: asGitPath(target),
+      branch: 'feat/existing',
+    });
   });
 
   it.skipIf(!hasGit)('refuses a path or branch Git would read as an option', async () => {
@@ -222,7 +228,7 @@ describe('Git worktree routes', () => {
     const payload = (await response.json()) as GitWorktreeListResponse;
 
     expect(response.status).toBe(200);
-    expect(payload.worktrees.map((worktree) => worktree.path)).toEqual([root]);
+    expect(payload.worktrees.map((worktree) => worktree.path)).toEqual([asGitPath(root)]);
   });
 
   it.skipIf(!hasGit)('refuses to remove the main worktree', async () => {
@@ -279,7 +285,7 @@ describe('Git worktree routes', () => {
     const forced = await sendJson(app, 'DELETE', { chatId, path: target, force: true });
     const payload = (await forced.json()) as GitWorktreeListResponse;
     expect(forced.status).toBe(200);
-    expect(payload.worktrees.map((worktree) => worktree.path)).toEqual([root]);
+    expect(payload.worktrees.map((worktree) => worktree.path)).toEqual([asGitPath(root)]);
   });
 
   it.skipIf(!hasGit)('answers 404 for a path no worktree occupies', async () => {
@@ -344,7 +350,7 @@ describe('Git worktree routes', () => {
       // finished writing rather than one it was halfway through.
       const listed = (await (await listWorktrees(app, chatId)).json()) as GitWorktreeListResponse;
       expect(listed.worktrees.map((worktree) => worktree.path).sort()).toEqual(
-        [root, linked, join(parent, 'from-main'), join(parent, 'from-linked')].sort()
+        [root, linked, join(parent, 'from-main'), join(parent, 'from-linked')].map(asGitPath).sort()
       );
     }
   );

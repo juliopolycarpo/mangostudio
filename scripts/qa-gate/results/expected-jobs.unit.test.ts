@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 
 import { TEST_LANES, type TestLane } from '../../lib/test-lanes';
 import { expectedLocalJobs, expectedShardJobs } from './expected-jobs';
@@ -23,7 +24,7 @@ describe('expectedShardJobs', () => {
 
     const whole = jobs.filter((job) => !job.id.startsWith('shard '));
     expect(whole.map((job) => [job.id, job.dir, job.lanes.map((lane) => lane.id)])).toEqual(
-      UNSHARDED.map((lane) => [lane.id, `shards/test-shard-${lane.id}`, [lane.id]])
+      UNSHARDED.map((lane) => [lane.id, join('shards', `test-shard-${lane.id}`), [lane.id]])
     );
   });
 

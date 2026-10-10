@@ -7,6 +7,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -97,6 +98,7 @@ beforeAll(() => {
 function pruneStalePathEntries(): void {
   const command = [
     "$path = [Environment]::GetEnvironmentVariable('Path','User')",
+    "if ($path -notmatch 'mango-ps1-') { return }",
     "$entries = $path -split ';' | Where-Object { $_ -and $_ -notmatch 'mango-ps1-' }",
     "[Environment]::SetEnvironmentVariable('Path', ($entries -join ';'), 'User')",
   ].join('; ');
@@ -191,6 +193,27 @@ function originRecord(rootLinux: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(rootLinux, 'install-origin.json'), 'utf8'));
 }
 
+/**
+ * Create a single-member ZIP with the host PowerShell, without a Unix zip dependency.
+ * @example buildZipMember(join(stage, 'mangostudio.exe'), join(fixture, 'release.zip'));
+ */
+function buildZipMember(member: string, archive: string): string {
+  const windowsMember = toWindowsPath(member);
+  const windowsArchive = toWindowsPath(archive);
+  const result = sh([
+    POWERSHELL as string,
+    '-NoProfile',
+    '-Command',
+    `Compress-Archive -LiteralPath ${psQuote(windowsMember)} -DestinationPath ${psQuote(windowsArchive)}`,
+  ]);
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `ZIP fixture ${windowsArchive} from ${windowsMember} | expected PowerShell exit: 0 | received exit: ${result.exitCode}: ${result.stderr || result.stdout}`
+    );
+  }
+  return windowsArchive;
+}
+
 // PowerShell (the process actually reading these) needs a C:\... path, not
 // the /mnt/c/... one node:fs used to create the fixture.
 function buildReleaseZip(linuxDir: string, name: string): string {
@@ -198,9 +221,7 @@ function buildReleaseZip(linuxDir: string, name: string): string {
   mkdirSync(stageDir, { recursive: true });
   copyFileSync(WINDOWS_BINARY as string, join(stageDir, 'mangostudio.exe'));
   const zipPath = join(linuxDir, name);
-  const result = sh(['zip', '-jq', zipPath, join(stageDir, 'mangostudio.exe')]);
-  if (result.exitCode !== 0) throw new Error(`zip failed: ${result.stderr}`);
-  return toWindowsPath(zipPath);
+  return buildZipMember(join(stageDir, 'mangostudio.exe'), zipPath);
 }
 
 /** A zip with no mangostudio.exe at all — Expand-InstallArchive must Fail() on it, with no real exe needed. */
@@ -209,9 +230,7 @@ function buildZipMissingExe(linuxDir: string, name: string): string {
   mkdirSync(stageDir, { recursive: true });
   writeFileSync(join(stageDir, 'not-mangostudio.txt'), 'not a binary');
   const zipPath = join(linuxDir, name);
-  const result = sh(['zip', '-jq', zipPath, join(stageDir, 'not-mangostudio.txt')]);
-  if (result.exitCode !== 0) throw new Error(`zip failed: ${result.stderr}`);
-  return toWindowsPath(zipPath);
+  return buildZipMember(join(stageDir, 'not-mangostudio.txt'), zipPath);
 }
 
 /** A System32 binary, at the path this process can read and copy it from. */
@@ -308,12 +327,12 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
 
       const result = run(l.scriptPath, ['-Prune'], l.env);
 
-      expect(result.exitCode).toBe(0);
-      expect(sh(['test', '-d', join(l.rootLinux, '0.0.9')]).exitCode).not.toBe(0);
-      expect(sh(['test', '-d', join(l.rootLinux, '0.1.0')]).exitCode).toBe(0);
-      expect(sh(['test', '-d', join(l.rootLinux, '0.2.0')]).exitCode).toBe(0);
-      expect(sh(['test', '-d', join(l.rootLinux, 'not-a-version')]).exitCode).toBe(0);
-      expect(sh(['test', '-f', join(l.rootLinux, 'random-file.txt')]).exitCode).toBe(0);
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(existsSync(join(l.rootLinux, '0.0.9'))).toBe(false);
+      expect(statSync(join(l.rootLinux, '0.1.0')).isDirectory()).toBe(true);
+      expect(statSync(join(l.rootLinux, '0.2.0')).isDirectory()).toBe(true);
+      expect(statSync(join(l.rootLinux, 'not-a-version')).isDirectory()).toBe(true);
+      expect(statSync(join(l.rootLinux, 'random-file.txt')).isFile()).toBe(true);
     }
   );
 
@@ -329,7 +348,7 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
 
       const result = run(l.scriptPath, ['-Prune'], l.env);
 
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
       expect(originRecord(l.rootLinux).futureField).toBe('keep-me');
       expect(originRecord(l.rootLinux).version).toBe('0.2.0');
     }
@@ -361,9 +380,9 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
 
     const result = run(l.scriptPath, ['-Uninstall'], l.env);
 
-    expect(result.exitCode).toBe(0);
-    expect(sh(['test', '-e', l.rootLinux]).exitCode).not.toBe(0);
-    expect(sh(['test', '-e', join(l.binLinux, 'mangostudio.cmd')]).exitCode).not.toBe(0);
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    expect(existsSync(l.rootLinux)).toBe(false);
+    expect(existsSync(join(l.binLinux, 'mangostudio.cmd'))).toBe(false);
   });
 
   test.skipIf(!POWERSHELL)(
@@ -377,9 +396,11 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
         `@echo off\r\n"${l.root}\\..\\elsewhere\\mangostudio.exe" %*\r\n`
       );
 
-      run(l.scriptPath, ['-Uninstall'], l.env);
+      const result = run(l.scriptPath, ['-Uninstall'], l.env);
 
-      expect(sh(['test', '-f', join(l.binLinux, 'mangostudio.cmd')]).exitCode).toBe(0);
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(existsSync(l.rootLinux)).toBe(false);
+      expect(statSync(join(l.binLinux, 'mangostudio.cmd')).isFile()).toBe(true);
     }
   );
 
@@ -400,11 +421,11 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
       };
 
       const pruneResult = run(l.scriptPath, ['-Prune'], bogusArchEnv);
-      expect(pruneResult.exitCode).toBe(0);
+      expect(pruneResult.exitCode, JSON.stringify(pruneResult)).toBe(0);
       expect(pruneResult.stderr).not.toContain('unsupported architecture');
 
       const uninstallResult = run(l.scriptPath, ['-Uninstall'], bogusArchEnv);
-      expect(uninstallResult.exitCode).toBe(0);
+      expect(uninstallResult.exitCode, JSON.stringify(uninstallResult)).toBe(0);
       expect(uninstallResult.stderr).not.toContain('unsupported architecture');
     }
   );
@@ -424,11 +445,11 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
 
       const result = run(l.scriptPath, ['-Prune'], l.env);
 
-      expect(result.exitCode).toBe(0);
-      expect(sh(['test', '-d', join(l.rootLinux, '.install-0.2.0-1234')]).exitCode).not.toBe(0);
-      expect(sh(['test', '-d', join(l.rootLinux, '.staging-0.2.0-1234')]).exitCode).not.toBe(0);
-      expect(sh(['test', '-d', join(l.rootLinux, '.rollback-0.0.9-1234')]).exitCode).not.toBe(0);
-      expect(sh(['test', '-d', join(l.rootLinux, '0.1.0')]).exitCode).toBe(0);
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(existsSync(join(l.rootLinux, '.install-0.2.0-1234'))).toBe(false);
+      expect(existsSync(join(l.rootLinux, '.staging-0.2.0-1234'))).toBe(false);
+      expect(existsSync(join(l.rootLinux, '.rollback-0.0.9-1234'))).toBe(false);
+      expect(statSync(join(l.rootLinux, '0.1.0')).isDirectory()).toBe(true);
     }
   );
 
@@ -444,15 +465,13 @@ describe('install.ps1 layout (hand-crafted state, no real exe needed)', () => {
 
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).toContain('missing mangostudio.exe');
-      // ls -1 hides dotfiles by default — -A is required, or a leftover
-      // `.install-*` directory (always a dotfile) silently passes either way.
-      const leftovers = sh([
-        'sh',
-        '-c',
-        `ls -1A "${l.rootLinux}" 2>/dev/null | grep '^\\.install-' || true`,
-      ]);
-      expect(leftovers.stdout.trim()).toBe('');
-    }
+      // readdir includes dotfiles, so a leftover staging directory cannot hide.
+      const leftovers = readdirSync(l.rootLinux).filter((name) => name.startsWith('.install-'));
+      expect(leftovers).toEqual([]);
+    },
+    // The one case here that builds and extracts a real archive: the budget of the
+    // archive cases below, not the default sized for a single PowerShell call.
+    90000
   );
 });
 
@@ -505,7 +524,7 @@ describe('install.ps1 shim target', () => {
         ].join('; ')
       );
 
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
       // Not just "no ? placeholders": every byte in the file is ascii, so no
       // console code page can mangle the path cmd.exe has to resolve.
       expect(result.stdout).toContain('ascii=True');
@@ -525,7 +544,7 @@ describe('install.ps1 shim target', () => {
       `Write-Output ('target=' + (Get-ShimTarget 'Z:\\tools\\bin' (Join-Path ${psQuote(root)} '0.1.0\\mangostudio.exe')))`
     );
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
     expect(result.stdout).toContain(`target=${root}\\0.1.0\\mangostudio.exe`);
   });
 
@@ -539,7 +558,7 @@ describe('install.ps1 shim target', () => {
       `Write-Output ('version=' + (Get-CurrentVersionFromCmd ${psQuote(l.root)} ${psQuote(`${l.bin}\\mangostudio.cmd`)}))`
     );
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
     expect(result.stdout).toContain('version=0.1.0');
   });
 
@@ -554,8 +573,8 @@ describe('install.ps1 shim target', () => {
 
     const result = run(l.scriptPath, ['-Uninstall'], l.env);
 
-    expect(result.exitCode).toBe(0);
-    expect(sh(['test', '-e', join(l.binLinux, 'mangostudio.cmd')]).exitCode).not.toBe(0);
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    expect(existsSync(join(l.binLinux, 'mangostudio.cmd'))).toBe(false);
   });
 
   test.skipIf(!POWERSHELL)(
@@ -568,9 +587,11 @@ describe('install.ps1 shim target', () => {
         '@echo off\r\n"%~dp0..\\elsewhere\\0.1.0\\mangostudio.exe" %*\r\n'
       );
 
-      run(l.scriptPath, ['-Uninstall'], l.env);
+      const result = run(l.scriptPath, ['-Uninstall'], l.env);
 
-      expect(sh(['test', '-f', join(l.binLinux, 'mangostudio.cmd')]).exitCode).toBe(0);
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(existsSync(l.rootLinux)).toBe(false);
+      expect(statSync(join(l.binLinux, 'mangostudio.cmd')).isFile()).toBe(true);
     }
   );
 });
@@ -603,7 +624,7 @@ describe('install.ps1 current junction', () => {
       ].join('; ')
     );
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
     expect(result.stdout).toContain('linkType=Junction');
     expect(result.stdout).toContain('reads=0.2.0');
     // Rename-Item moves the reparse point; the old target keeps its contents.
@@ -617,9 +638,9 @@ describe('install.ps1 current junction', () => {
 
     const result = runDotSourced(l.scriptPath, `Set-CurrentJunction ${psQuote(l.root)} '0.1.0'`);
 
-    expect(result.exitCode).toBe(0);
-    const leftovers = sh(['sh', '-c', `ls -1A "${l.rootLinux}" | grep '^\\.current' || true`]);
-    expect(leftovers.stdout.trim()).toBe('');
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    const leftovers = readdirSync(l.rootLinux).filter((name) => name.startsWith('.current'));
+    expect(leftovers).toEqual([]);
   });
 
   test.skipIf(!POWERSHELL)('fails the install when the pointer cannot be replaced', () => {
@@ -649,12 +670,12 @@ describe('install.ps1 current junction', () => {
       l.scriptPath,
       `New-Item -ItemType Junction -Path (Join-Path ${psQuote(l.root)} '.current.1234') -Target (Join-Path ${psQuote(l.root)} '0.1.0') | Out-Null`
     );
-    expect(staged.exitCode).toBe(0);
+    expect(staged.exitCode, JSON.stringify(staged)).toBe(0);
 
     const result = run(l.scriptPath, ['-Prune'], l.env);
 
-    expect(result.exitCode).toBe(0);
-    expect(sh(['test', '-e', join(l.rootLinux, '.current.1234')]).exitCode).not.toBe(0);
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    expect(readdirSync(l.rootLinux)).not.toContain('.current.1234');
     expect(readFileSync(join(l.rootLinux, '0.1.0', 'keep.txt'), 'utf8')).toBe('survives');
   });
 
@@ -703,7 +724,7 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
       const result = run(l.scriptPath, ['-Local', archive], l.env);
 
       expect(result.stderr).toBe('');
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
       expect(readCmd(l.binLinux)).toContain(`\\${goodVersion}\\mangostudio.exe`);
     },
     90000
@@ -742,11 +763,11 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
       const archive = buildReleaseZip(l.linuxDir, `mangostudio-${goodVersion}-windows-x64.zip`);
 
       const first = run(l.scriptPath, ['-Local', archive], l.env);
-      expect(first.exitCode).toBe(0);
+      expect(first.exitCode, JSON.stringify(first)).toBe(0);
       expect(originRecord(l.rootLinux).previousVersion).toBe('0.0.1');
 
       const second = run(l.scriptPath, ['-Local', archive], l.env);
-      expect(second.exitCode).toBe(0);
+      expect(second.exitCode, JSON.stringify(second)).toBe(0);
       expect(originRecord(l.rootLinux).previousVersion).toBe('0.0.1');
     },
     90000
@@ -779,7 +800,7 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
 
       const result = run(l.scriptPath, ['-Use', goodVersion], l.env);
 
-      expect(result.exitCode).toBe(0);
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
       expect(readCmd(l.binLinux)).toContain(`\\${goodVersion}\\mangostudio.exe`);
       const record = originRecord(l.rootLinux);
       expect(record.version).toBe(goodVersion);
@@ -804,10 +825,8 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
       const archive = buildReleaseZip(l.linuxDir, `mangostudio-${goodVersion}-windows-x64.zip`);
       const result = run(l.scriptPath, ['-Local', archive], l.env);
 
-      expect(result.exitCode).toBe(0);
-      expect(sh(['test', '-f', join(l.rootLinux, legacyVersion, 'mangostudio.exe')]).exitCode).toBe(
-        0
-      );
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(statSync(join(l.rootLinux, legacyVersion, 'mangostudio.exe')).isFile()).toBe(true);
       expect(originRecord(l.rootLinux).previousVersion).toBe(legacyVersion);
     },
     90000
@@ -825,10 +844,8 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
 
       const result = run(l.scriptPath, ['-Local', tarball, '-Version', goodVersion], l.env);
 
-      expect(result.exitCode).toBe(0);
-      expect(sh(['test', '-f', join(l.rootLinux, goodVersion, 'mangostudio.exe')]).exitCode).toBe(
-        0
-      );
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(statSync(join(l.rootLinux, goodVersion, 'mangostudio.exe')).isFile()).toBe(true);
       expect(originRecord(l.rootLinux).source).toBe('npm-registry');
     },
     90000
@@ -847,7 +864,7 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).toContain(`expected version: 9.9.9 | received: ${goodVersion}`);
       expect(readCmd(l.binLinux)).toContain(`\\${goodVersion}\\mangostudio.exe`);
-      expect(sh(['test', '-d', join(l.rootLinux, '9.9.9')]).exitCode).not.toBe(0);
+      expect(existsSync(join(l.rootLinux, '9.9.9'))).toBe(false);
     },
     90000
   );
@@ -869,7 +886,7 @@ describe('install.ps1 canary tag selection', () => {
   test.skipIf(!POWERSHELL)('picks the newest per-commit canary tag', () => {
     const result = selectFrom('v0.1.2', 'v0.1.1-canary.abc1234', 'v0.1.1-canary.9876543');
 
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
     expect(result.stdout).toContain('tag=v0.1.1-canary.abc1234');
   });
 
@@ -1142,7 +1159,7 @@ describe('install.ps1 failed version probe (fake mangostudio.exe)', () => {
         '-Command',
         `Compress-Archive -LiteralPath ${psQuote(toWindowsPath(join(staged, 'mangostudio.exe')))} -DestinationPath ${psQuote(toWindowsPath(archive))}`,
       ]);
-      expect(packed.exitCode).toBe(0);
+      expect(packed.exitCode, JSON.stringify(packed)).toBe(0);
       expect(existsSync(archive)).toBe(true);
 
       const result = run(

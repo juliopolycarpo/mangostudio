@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import {
   createInstallerDownloader,
   InstallerDownloadError,
 } from '../../../../src/modules/environments/infrastructure/installer-download';
+
+/** The scratch directory the fake `createTempDir` hands out; files land beside it by host join. */
+const TEMP_DIR = '/tmp/mangostudio-installer-test';
 
 const SCRIPT = `#!/usr/bin/env bash
 set -eu
@@ -43,7 +47,7 @@ function createDownloaderWithFetch(fetchImpl: typeof fetch) {
   const downloader = createInstallerDownloader({
     fetch: fetchImpl,
     resolveHostname,
-    createTempDir: () => Promise.resolve('/tmp/mangostudio-installer-test'),
+    createTempDir: () => Promise.resolve(TEMP_DIR),
     writeFile: (path, data) => {
       written = data;
       writtenPath = path;
@@ -77,7 +81,7 @@ describe('installer download', () => {
       maxBytes: 1024,
     });
 
-    expect(artifact.path).toBe('/tmp/mangostudio-installer-test/installer.sh');
+    expect(artifact.path).toBe(join(TEMP_DIR, 'installer.sh'));
     expect(artifact.url).toBe('https://example.test/install.sh');
     expect(artifact.sizeBytes).toBe(new TextEncoder().encode(SCRIPT).byteLength);
     expect(artifact.sha256).toMatch(/^[a-f0-9]{64}$/);
@@ -295,7 +299,7 @@ describe('installer download', () => {
       maxBytes: 1024,
     });
 
-    expect(artifact.path).toBe('/tmp/mangostudio-installer-test/installer.ps1');
-    expect(fixture.getWrittenPath()).toBe('/tmp/mangostudio-installer-test/installer.ps1');
+    expect(artifact.path).toBe(join(TEMP_DIR, 'installer.ps1'));
+    expect(fixture.getWrittenPath()).toBe(join(TEMP_DIR, 'installer.ps1'));
   });
 });

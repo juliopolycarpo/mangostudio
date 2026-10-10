@@ -232,6 +232,26 @@ describe('propagation apply — file-backed resources', () => {
     return { taken, request, entry: onlyEntry(taken) };
   }
 
+  async function previewSubagentConversion() {
+    mkdirSync(join(home, '.claude', 'agents'), { recursive: true });
+    writeFileSync(
+      join(home, '.claude', 'agents', 'reviewer.md'),
+      '---\nname: reviewer\ndescription: Review changes\n---\nReview changes.\n'
+    );
+    mkdirSync(join(home, '.codex', 'agents'), { recursive: true });
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['subagent:reviewer'],
+      targetLocationIds: ['codex-agents'],
+    };
+    const taken = await preview(request);
+    return {
+      taken,
+      request,
+      entry: onlyEntry(taken),
+      destinationPath: join(home, '.codex', 'agents', 'reviewer.toml'),
+    };
+  }
+
   it('sends one copy of the bytes however many destinations share them', async () => {
     writeInstruction('claude-instructions', '# House rules\n');
     mkdirSync(join(home, '.mango'), { recursive: true });
@@ -270,55 +290,49 @@ describe('propagation apply — file-backed resources', () => {
   });
 
   it('requires an explicit strategy before adapting a destination', async () => {
-    writeInstruction('claude-instructions', '# House rules\n');
-    mkdirSync(join(home, '.cursor', 'rules'), { recursive: true });
-    const request: PropagationPreviewRequest = {
-      resourceKeys: ['instruction:global'],
-      targetLocationIds: ['cursor-rules'],
-    };
-    const taken = await preview(request);
-    const entry = onlyEntry(taken);
+    const { taken, request, entry, destinationPath } = await previewSubagentConversion();
 
     const failure = applyLibraryPropagation(
       userId(),
-      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'claude-instructions'))]),
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'claude-agents'))]),
       applyDeps()
     );
 
-    await expect(failure).rejects.toMatchObject({ status: 422 });
-    expect(existsSync(instructionPath('cursor-rules'))).toBe(false);
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message:
+        'Writing "subagent:reviewer" to "codex-agents" requires an explicit adapter strategy.',
+    });
+    expect(existsSync(destinationPath)).toBe(false);
   });
 
   it('does not write adapter failures or return partial output', async () => {
-    writeInstruction('claude-instructions', '# House rules\n');
-    mkdirSync(join(home, '.cursor', 'rules'), { recursive: true });
-    const request: PropagationPreviewRequest = {
-      resourceKeys: ['instruction:global'],
-      targetLocationIds: ['cursor-rules'],
-    };
-    const taken = await preview(request);
-    const entry = onlyEntry(taken);
+    const { taken, request, entry, destinationPath } = await previewSubagentConversion();
+    let adaptationAttempted = false;
+
+    function failAdaptation() {
+      adaptationAttempted = true;
+      return Promise.resolve({
+        ok: false as const,
+        error: { code: 'provider-failed', message: 'connector unavailable' },
+      });
+    }
 
     const result = await applyLibraryPropagation(
       userId(),
       toRequest(taken, request, [
-        adoptAll(entry, winnerFrom(entry, 'claude-instructions'), [], 'mechanical'),
+        adoptAll(entry, winnerFrom(entry, 'claude-agents'), [], 'mechanical'),
       ]),
-      applyDeps({
-        adapt: () =>
-          Promise.resolve({
-            ok: false,
-            error: { code: 'provider-failed', message: 'connector unavailable' },
-          }),
-      })
+      applyDeps({ adapt: failAdaptation })
     );
 
+    expect(adaptationAttempted).toBe(true);
     expect(result).toMatchObject({
       partial: false,
       applied: [],
-      failed: [{ locationId: 'cursor-rules', reason: 'adaptation-failed' }],
+      failed: [{ locationId: 'codex-agents', reason: 'adaptation-failed' }],
     });
-    expect(existsSync(instructionPath('cursor-rules'))).toBe(false);
+    expect(existsSync(destinationPath)).toBe(false);
   });
 
   it('refuses edited text for a directory resource', async () => {

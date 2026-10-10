@@ -139,22 +139,42 @@ describe('skill discovery', () => {
     expect(await listUsableSkills(getDb(), userId)).toEqual([]);
   });
 
-  it('flags oversized and symlinked SKILL.md files invalid', async () => {
+  it('flags an oversized SKILL.md invalid', async () => {
     const oversizedDir = join(skillsDir, 'oversized');
     mkdirSync(oversizedDir);
     writeFileSync(join(oversizedDir, 'SKILL.md'), 'x'.repeat(256 * 1024 + 1), 'utf8');
 
+    const [skill] = await listSkills(getDb(), nextUserId());
+    expect(skill?.error).toContain('exceeds');
+  });
+
+  /** A `linked` skill whose SKILL.md is a symlink to a valid file outside its directory. */
+  function writeSymlinkedSkill(): void {
     const target = join(skillsDir, 'target.md');
     writeFileSync(target, '---\nname: linked\ndescription: via symlink\n---\nbody', 'utf8');
     const linkedDir = join(skillsDir, 'linked');
     mkdirSync(linkedDir);
     symlinkSync(target, join(linkedDir, 'SKILL.md'));
+  }
 
-    const skills = await listSkills(getDb(), nextUserId());
-    const errors = new Map(skills.map((skill) => [skill.slug, skill.error]));
-    expect(errors.get('oversized')).toContain('exceeds');
-    expect(errors.get('linked')).toContain('not a regular file');
+  // The read opens with O_NOFOLLOW, which only exists off Windows.
+  it.skipIf(process.platform === 'win32')('flags a symlinked SKILL.md invalid', async () => {
+    writeSymlinkedSkill();
+
+    const [skill] = await listSkills(getDb(), nextUserId());
+    expect(skill?.error).toContain('not a regular file');
   });
+
+  // Windows has no O_NOFOLLOW, so `safe-file` documents following the link there.
+  it.skipIf(process.platform !== 'win32')(
+    'reads a symlinked SKILL.md through the link on Windows',
+    async () => {
+      writeSymlinkedSkill();
+
+      const [skill] = await listSkills(getDb(), nextUserId());
+      expect(skill).toMatchObject({ slug: 'linked', valid: true, description: 'via symlink' });
+    }
+  );
 
   it('memoizes within the TTL and refreshes after expiry', async () => {
     writeSkill('first', 'name: first\ndescription: First skill');

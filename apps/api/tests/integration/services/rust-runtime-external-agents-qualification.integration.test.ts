@@ -70,7 +70,10 @@ const fakeCursorAgent = resolveFakeCursorAgent();
  * canonical home path, device and inode joined by NUL, with no method prefix.
  */
 function localCredentialHomeAttestation() {
-  const home = realpathSync(homedir());
+  // The runtime expands a Windows 8.3 short name (the test home sits under `RUNNER~1`
+  // on hosted runners) and normalizes casing; only the native call does the same.
+  const home =
+    process.platform === 'win32' ? realpathSync.native(homedir()) : realpathSync(homedir());
   const info = statSync(home);
   const identity = [
     process.platform,

@@ -1,0 +1,145 @@
+name: Native Bun qualification
+
+# Full native suites are an explicit qualification, not a second suite on
+# every PR. Changes to this producer or its workflow tools qualify both the
+# untouched base and the candidate. Dispatch qualifies any selected branch.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/native-bun-qualification.yml
+      - scripts/ci/native-bun-qualification.ts
+      - scripts/lib/native-bun-qualification*.ts
+      - scripts/tests/native-bun-qualification*.unit.test.ts
+      - scripts/tests/native-bun-compiler-helpers.unit.test.ts
+      - scripts/lib/native-windows-job*.ps1
+      - scripts/lib/actions-lint/**
+      - scripts/lib/zip-archive.ts
+      - scripts/tests/actions-lint.unit.test.ts
+      - scripts/tests/zip-archive.unit.test.ts
+  workflow_dispatch:
+    inputs:
+      baseline_sha:
+        description: Optional full source SHA to record as an unrepaired baseline
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  sources:
+    name: Resolve immutable qualification sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.sources.outputs.matrix }}
+      tooling: ${{ steps.sources.outputs.tooling }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - id: sources
+        name: Select the candidate and optional baseline
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha || inputs.baseline_sha }}
+        run: |
+          bun -e '
+            const candidate = process.env.CANDIDATE_SHA;
+            const baseline = process.env.BASELINE_SHA;
+            const sources = [{ name: "candidate", sha: candidate, baseline: false }];
+            if (baseline) sources.push({ name: "baseline", sha: baseline, baseline: true });
+            for (const source of sources) {
+              if (!/^[a-f0-9]{40}$/.test(source.sha ?? "")) {
+                throw new Error("Invalid source SHA " + JSON.stringify(source.sha) + "; expected 40 lowercase hex characters");
+              }
+            }
+            const matrix = { os: ["ubuntu-latest", "macos-latest", "windows-latest"], source: sources };
+            await Bun.write(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify(matrix) + "\ntooling=" + candidate + "\n");
+          '
+
+  qualify:
+    name: Native ${{ matrix.source.name }} (${{ matrix.os }})
+    needs: [sources]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.sources.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    # The producer bounds itself at 55 minutes. Around it sit the Windows probe (10 at most),
+    # two checkouts, the tooling install and the evidence upload: a job that ends first cancels
+    # the producer before its final seals and census, leaving a receipt that still says running.
+    timeout-minutes: 80
+    # A failing untouched baseline is retained as evidence. Candidate failures
+    # remain blocking; no baseline failure is represented as a passing suite.
+    continue-on-error: ${{ matrix.source.baseline }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Preserve tracked source bytes on every host
+        run: git config --global core.autocrlf false
+
+      - name: Check out the qualification producer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.sources.outputs.tooling }}
+          path: tooling
+          persist-credentials: false
+
+      - name: Check out the source under qualification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.source.sha }}
+          path: source
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: source/.bun-version
+
+      # Each matrix runner owns its checkout, result cache and two Cargo
+      # targets. No native result or writable Cargo target is restored/shared.
+      - name: Install frozen qualification-tooling dependencies
+        working-directory: tooling
+        run: bun install --frozen-lockfile > ../tooling-setup.log 2>&1
+
+      - name: Verify native Windows Job ownership and failure controls
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'tooling\scripts\lib\native-windows-job.probe.ps1'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'job-proof'
+          & $probe -OutDirectory $out -BunPath (Get-Command bun.exe).Source
+          if ($LASTEXITCODE -ne 0) { throw "Native Windows Job probes failed with exit $LASTEXITCODE" }
+
+      - name: Run complete native verification and retain its evidence
+        env:
+          TURBO_TELEMETRY_DISABLED: "1"
+          QUALIFICATION_SOURCE_SHA: ${{ matrix.source.sha }}
+        run: bun tooling/scripts/ci/native-bun-qualification.ts --root source --out evidence --sha "$QUALIFICATION_SOURCE_SHA"
+
+      - name: Upload source, setup, check, test and terminal receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-bun-${{ matrix.source.name }}-${{ matrix.os }}-${{ matrix.source.sha }}
+          path: |
+            evidence/
+            job-proof/
+            tooling-setup.log
+            !evidence/targets/**
+          if-no-files-found: error
+          retention-days: 14

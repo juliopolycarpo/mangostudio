@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isShellAvailable } from '@mangostudio/shared/process/host';
@@ -33,6 +33,11 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 const tempDirs: string[] = [];
+
+// The shell on Windows is Git Bash, whose `pwd` prints the POSIX form of the
+// directory (`/c/Users/...`). `cygpath -w` prints the same directory the way
+// the host names it, which is the form the chat workdir is stored in.
+const PRINT_WORKING_DIRECTORY = process.platform === 'win32' ? 'cygpath -w "$PWD"' : 'pwd';
 
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   for (let attempt = 0; attempt < 500; attempt += 1) {
@@ -421,7 +426,7 @@ describe('POST /respond/stream — tools', () => {
   it.skipIf(!isShellAvailable('bash'))(
     'runs shell calls without cwd from the chat workdir',
     async () => {
-      const workdir = await mkdtemp(join(tmpdir(), 'mango-stream-workdir-'));
+      const workdir = await realpath(await mkdtemp(join(tmpdir(), 'mango-stream-workdir-')));
       tempDirs.push(workdir);
       let iteration = 0;
       let capturedToolResults: AgentTurnRequest['toolResults'];
@@ -458,7 +463,7 @@ describe('POST /respond/stream — tools', () => {
           type: 'tool_call_completed',
           callId: 'bash-workdir',
           name: 'bash',
-          arguments: JSON.stringify({ command: 'pwd' }),
+          arguments: JSON.stringify({ command: PRINT_WORKING_DIRECTORY }),
         };
         yield { type: 'turn_completed', providerState: null };
       });

@@ -1,0 +1,207 @@
+// The Windows helper and its probe only execute on a Windows runner. These cases read their
+// source on every host, so a contract another file depends on cannot drift unnoticed.
+
+import { describe, expect, test } from 'bun:test';
+
+import { NATIVE_BUILDS } from '../lib/native-bun-qualification-source';
+import {
+  NATIVE_WINDOWS_HELPER_PHASES,
+  nativeWindowsWrapperDeadlineMs,
+} from '../lib/native-bun-qualification-windows';
+import { readText } from './support/read-text';
+
+const HELPER = 'scripts/lib/native-windows-job.ps1';
+const PROBE = 'scripts/lib/native-windows-job.probe.ps1';
+const WORKFLOW = '.github/workflows/native-bun-qualification.yml';
+
+/** A script's statements in order, without blank lines or whole-line comments. */
+function statements(source: string): string[] {
+  return source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('#'));
+}
+
+/** The items of each `@('a', 'b')` literal on the line that assigns `$name`, in order. */
+function assignedArrays(source: string, name: string): string[][] {
+  const line = source.split(/\r?\n/).find((each) => each.trim().startsWith(`$${name} = `));
+  if (line === undefined)
+    throw new Error(`Missing $${name} assignment; expected $${name} = ... in ${HELPER}`);
+  return [...line.matchAll(/@\(([^)]*)\)/g)].map((literal) =>
+    [...literal[1].matchAll(/'([^']*)'/g)].map((item) => item[1])
+  );
+}
+
+describe('native Windows Job helper compiler policy', () => {
+  const helper = readText(HELPER);
+
+  // The helper decides cleanup eligibility from its own copy of the argv. A flag added to the
+  // producer's command alone would drop Windows to strict mode and fail on a surviving VCTIP.
+  test.each(['runtime', 'fake'] as const)(
+    'grants %s compiler cleanup to exactly the argv the producer runs',
+    (target) => {
+      const [received] = assignedArrays(helper, `${target}Args`);
+      const expected = NATIVE_BUILDS[target].command.slice(1);
+      expect(
+        received,
+        `expected $${target}Args: ${expected.join(' ')} | received: ${received?.join(' ')}`
+      ).toEqual(expected);
+    }
+  );
+
+  test('expects the SDK features the producer requires of each build', () => {
+    const [fake, runtime] = assignedArrays(helper, 'sdkFeatures');
+    expect(
+      { fake, runtime },
+      `expected $sdkFeatures branches: fake then runtime | received: ${JSON.stringify({ fake, runtime })}`
+    ).toEqual({
+      fake: [...NATIVE_BUILDS.fake.sdkFeatures],
+      runtime: [...NATIVE_BUILDS.runtime.sdkFeatures],
+    });
+  });
+});
+
+describe('native Windows Job helper census', () => {
+  const helper = readText(HELPER);
+
+  // The receipt validator refuses a foreign command line, but only on a Windows runner. Here the
+  // source shows where the helper could read one at all, and that every census it persists
+  // after the Job exists is told which processes are the Job's own.
+  test('reads a command line only to judge it or to keep it for a Job member', () => {
+    const reads = statements(helper).filter((line) => line.includes('$_.CommandLine'));
+    expect(
+      reads,
+      `expected two CommandLine reads: the helper verdict and the owned branch | received: ${reads.length}`
+    ).toEqual([
+      '$isHelper = Test-NativeJobCompilerHelper $_.Name $_.ExecutablePath $_.CommandLine',
+      '$command = if ($owned.ContainsKey($identity)) { $_.CommandLine } else { $null }',
+    ]);
+    expect(helper).toContain('command = $command; compilerHelper = $isHelper }');
+  });
+
+  test('names the observed members to every census taken once the Job exists', () => {
+    const taken = statements(helper).filter((line) =>
+      /^\$\w+(\.\w+)? = Get-NativeJobCensus/.test(line)
+    );
+    // The baseline precedes the Job, so nothing is owned and no command line is kept. The
+    // comment-based help repeats two of these as its examples.
+    expect(
+      taken.filter((line) => !line.startsWith('$current = ')),
+      `expected the baseline and two member-aware censuses | received: ${taken.join(' ; ')}`
+    ).toEqual([
+      '$before = Get-NativeJobCensus',
+      expect.stringMatching(/^\$before = Get-NativeJobCensus; \$receipt\.before = \$before;/),
+      '$receipt.preCleanupCensus = Get-NativeJobCensus @($seen.Values)',
+      '$receipt.postCleanupCensus = Get-NativeJobCensus @($seen.Values)',
+    ]);
+    expect(helper).toContain(
+      'Complete-NativeJobEvidence $receipt $child $before $out -CensusContext $receipt.observed'
+    );
+    expect(helper).toContain('$full = & $Census $CensusContext');
+  });
+});
+
+describe('native Windows Job helper natural VCTIP exit', () => {
+  const lines = statements(readText(HELPER));
+
+  // An eligible VCTIP may finish by itself between the pre-cleanup snapshot and its verification.
+  // The helper may call that settlement only behind the guard below; the receipt validator
+  // then holds the record to the same identity proof a termination needs.
+  test('records a natural exit only after a stable snapshot stops listing that identity', () => {
+    const verify = lines.indexOf('try { $fresh = $child.VerifyIdentity($member.Identity) }');
+    const guard = lines.indexOf(
+      'if (-not $remaining.Stable -or @($remaining.Members | Where-Object { $_.Identity -eq $member.Identity }).Count) { throw }'
+    );
+    const records = lines.flatMap((line, index) =>
+      line.startsWith('$receipt.naturalExits += ') ? [index] : []
+    );
+
+    expect(lines[verify + 1], 'expected the natural-exit branch to be the verification catch').toBe(
+      'catch {'
+    );
+    expect(lines[guard - 1]).toBe('$remaining = $child.Query()');
+    expect(
+      records,
+      `expected one natural-exit record right after its guard | received at statements: ${records.join(', ')} with the guard at ${guard}`
+    ).toEqual([guard + 1]);
+    expect(lines[guard + 3]).toBe('continue');
+  });
+
+  test('writes the authority and observation the receipt validator requires', () => {
+    const record = lines.find((line) => line.startsWith('$receipt.naturalExits += ')) ?? '';
+    for (const field of [
+      "authority = 'retained creation identity + complete stable exact job membership'",
+      "observation = 'eligible VCTIP member left the still-open job before any cleanup'",
+      'identity = $member.Identity; pid = $member.Pid; creationFileTime = $member.CreationFileTime; path = $member.Path; tool = $member.Tool',
+      'snapshot = $remaining }',
+    ])
+      expect(record, `expected the natural-exit record to carry: ${field}`).toContain(field);
+    expect(lines.some((line) => line.includes('cleanupActions = @(); naturalExits = @();'))).toBe(
+      true
+    );
+  });
+});
+
+describe('native Windows Job probe exit status', () => {
+  test('ends with an explicit status for the workflow gate that reads $LASTEXITCODE', () => {
+    const probe = statements(readText(PROBE));
+
+    // The gate: a probe that only falls off its end leaves $LASTEXITCODE at whatever the last
+    // native command inside a probe returned, or unset when none ran.
+    expect(readText(WORKFLOW)).toContain('if ($LASTEXITCODE -ne 0) { throw');
+    expect(probe.at(-1), `expected final probe statement: exit 0 | received: ${probe.at(-1)}`).toBe(
+      'exit 0'
+    );
+    expect(probe.at(-2)).toBe("if ($receipt.status -ne 'passed') { exit 1 }");
+  });
+});
+
+describe('native Windows Job helper wrapper deadline', () => {
+  const helper = readText(HELPER);
+  const phases = NATIVE_WINDOWS_HELPER_PHASES;
+
+  // The wrapper is contained when its deadline passes, which discards the receipt. A command
+  // that ends at its cap still owes the helper every phase below before that receipt is final.
+  test('leaves a command ending at its cap time to finish its evidence', () => {
+    const request = { timeoutSeconds: 900, observationMs: 5_000 };
+    const owed =
+      phases.startupMs +
+      phases.censusCount * phases.censusTimeoutMs +
+      phases.ambiguityPassCount * phases.imageQueryBudgetMs +
+      phases.terminationWaitMs +
+      phases.postCleanupMs;
+    const expected = request.timeoutSeconds * 1_000 + request.observationMs + owed;
+    const received = nativeWindowsWrapperDeadlineMs(request);
+
+    expect(
+      received,
+      `expected wrapper deadline: ${expected}ms (cap + observation + ${owed}ms of helper phases) | received: ${received}ms`
+    ).toBe(expected);
+  });
+
+  // The helper only runs on Windows, so its timing is pinned here: a census, pass or wait added
+  // to it must be added to the wrapper's budget in the same change.
+  test('budgets every bounded phase the helper source runs', () => {
+    const count = (pattern: RegExp): number => [...helper.matchAll(pattern)].length;
+    const received = {
+      // The baseline, the two member-aware censuses, and the two around the final Job close.
+      censusCount:
+        count(/^\s+\$before = Get-NativeJobCensus; /gm) +
+        count(/^\s+\$receipt\.\w+Census = Get-NativeJobCensus @\(\$seen\.Values\)$/gm) +
+        count(/\$full = & \$Census \$CensusContext/g),
+      censusTimeoutMs: Number(/-OperationTimeoutSec (\d+)/.exec(helper)?.[1]) * 1_000,
+      ambiguityPassCount: count(/= @\(Find-NativeJobAmbiguity /g),
+      imageQueryBudgetMs: Number(/const int MaximumMilliseconds=(\d+);/.exec(helper)?.[1]),
+      terminationWaitMs: Number(
+        /\$child\.TerminateVerifiedMember\(\$member\.Identity, (\d+)\)/.exec(helper)?.[1]
+      ),
+      postCleanupMs: Number(/\$postTimer\.ElapsedMilliseconds -lt (\d+)/.exec(helper)?.[1]),
+    };
+    const { startupMs: _startupMs, ...expected } = phases;
+
+    expect(
+      received,
+      `expected helper phases: ${JSON.stringify(expected)} | received: ${JSON.stringify(received)}`
+    ).toEqual(expected);
+  });
+});

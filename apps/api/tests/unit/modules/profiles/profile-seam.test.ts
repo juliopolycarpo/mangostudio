@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { sql } from 'kysely';
@@ -118,10 +118,12 @@ describe('profile seam', () => {
   it('every query against a profile-scoped table mentions profileId', async () => {
     const offenders: string[] = [];
 
-    for await (const relativePath of new Bun.Glob('src/**/*.ts').scan({
+    for await (const scanned of new Bun.Glob('src/**/*.ts').scan({
       cwd: API_ROOT,
       onlyFiles: true,
     })) {
+      // The scan yields host separators; the checks and messages below speak `/`.
+      const relativePath = scanned.split(sep).join('/');
       // Migrations are a one-time, app-wide data transformation reviewed on
       // their own merits, not a request-time read/write that could leak one
       // profile's rows into another's — the thing this check guards against.

@@ -19,6 +19,9 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInstallRunner } from '../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
+import { waitUntil } from './wait-until';
+
+export { waitUntil };
 
 export interface FakeInstaller {
   /** The hub-built argv the runtime launches. */
@@ -65,18 +68,21 @@ export async function writeFakeInstaller(
   if (isWindows && interpreter === 'powershell') {
     if (mode === 'grandchild') throw new Error('The grandchild installer is POSIX-only.');
     const script = join(directory, `${name}.ps1`);
+    // .NET calls only, no cmdlets. A cmdlet makes Windows PowerShell load and analyse its
+    // modules, and under the launcher's allowlisted environment that took 18-33 s on
+    // windows-latest against 0.26 s for this script: longer than the tests wait for a line.
     const wait =
       mode === 'waits'
-        ? `while (-not (Test-Path -LiteralPath '${release}')) { Start-Sleep -Milliseconds 50 }`
-        : 'Start-Sleep -Seconds 1';
+        ? `while (-not [IO.File]::Exists('${release}')) { [Threading.Thread]::Sleep(50) }`
+        : '[Threading.Thread]::Sleep(1000)';
     await writeFile(
       script,
       [
-        "Write-Output 'waiting'",
+        "[Console]::Out.WriteLine('waiting')",
         "[Console]::Error.WriteLine('warn')",
         wait,
-        `Add-Content -LiteralPath '${marker}' -Value 'run'`,
-        "Write-Output 'done'",
+        `[IO.File]::AppendAllText('${marker}', "run\`r\`n")`,
+        "[Console]::Out.WriteLine('done')",
         '',
       ].join('\r\n')
     );
@@ -194,28 +200,6 @@ export function startRelayedInstall(
         describe
       ),
   };
-}
-
-/**
- * Polls `condition` until it holds, failing with what was expected.
- *
- * @example
- * await waitUntil(() => existsSync(marker), 'the installer marker');
- */
-export async function waitUntil(
-  condition: () => boolean,
-  what: string,
-  timeoutMs = 10_000,
-  context?: () => string
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() >= deadline) {
-      const detail = context ? `; ${context()}` : '';
-      throw new Error(`expected ${what} | received: nothing within ${timeoutMs}ms${detail}`);
-    }
-    await Bun.sleep(20);
-  }
 }
 
 /**

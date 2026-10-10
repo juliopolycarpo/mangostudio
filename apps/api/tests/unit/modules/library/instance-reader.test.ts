@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,6 +24,49 @@ function skillLocation(): LocationDefinition {
   const location = getLibraryLocation('mango-skills');
   if (!location) throw new Error('Missing mango-skills test fixture.');
   return location;
+}
+
+/**
+ * The Node file system plus one file that exists only for the reader: it is
+ * listed in `directory`, and can be stat-ed, resolved and read like any other.
+ * For names the host cannot store on disk.
+ */
+function nodeFsWithVirtualFile(
+  directory: string,
+  name: string,
+  content: string
+): LibraryInstanceReaderFs {
+  // The reader may name the directory by its canonical path: /private/tmp on macOS,
+  // the long form of an 8.3 short name on Windows (only `realpathSync.native` expands those).
+  const directories = new Set([directory, realpathSync(directory), realpathSync.native(directory)]);
+  const virtualPaths = new Set([...directories].map((each) => join(each, name)));
+  const bytes = new TextEncoder().encode(content);
+  const entry = {
+    name,
+    isFile: () => true,
+    isDirectory: () => false,
+    isSymbolicLink: () => false,
+  };
+  return {
+    async readDirectory(path) {
+      const entries = await readdir(path, { withFileTypes: true });
+      return directories.has(path) ? [...entries, entry] : entries;
+    },
+    readFile: (path) => (virtualPaths.has(path) ? Promise.resolve(bytes) : readFile(path)),
+    realPath: (path) => (virtualPaths.has(path) ? Promise.resolve(path) : realpath(path)),
+    async stat(path) {
+      if (virtualPaths.has(path)) {
+        return { size: bytes.byteLength, mtimeMs: 0, isFile: true, isDirectory: false };
+      }
+      const value = await stat(path);
+      return {
+        size: value.size,
+        mtimeMs: value.mtimeMs,
+        isFile: value.isFile(),
+        isDirectory: value.isDirectory(),
+      };
+    },
+  };
 }
 
 describe('readLocationInstances', () => {
@@ -142,11 +185,13 @@ describe('readLocationInstances', () => {
       join(skillDir, 'SKILL.md'),
       '---\nname: newline-skill\ndescription: Newline\n---\n'
     );
-    writeFileSync(join(skillDir, 'a\nb.md'), 'content');
 
     const result = await readLocationInstances(skillLocation(), root, {
       cache: new LibraryCache(),
       force: false,
+      // NTFS refuses a newline in a file name, so the file cannot be written
+      // to disk on every host; the reader is shown it through its fs seam.
+      fs: nodeFsWithVirtualFile(skillDir, 'a\nb.md', 'content'),
     });
 
     expect(result.instances[0]?.instance).toMatchObject({

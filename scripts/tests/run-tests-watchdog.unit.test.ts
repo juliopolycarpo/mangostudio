@@ -615,7 +615,17 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
     `;
     const result = await runTestsWithWatchdog(
       optionsIn(dir, {
-        command: ['bash', '-c', script],
+        // MSYS Bash reports a self-SIGABRT as exit0 to native Windows callers.
+        // Use its conventional status explicitly there; preserve the actual
+        // POSIX signal fixture on hosts that expose that process status.
+        command:
+          process.platform === 'win32'
+            ? [
+                'bun',
+                '-e',
+                `const fs = require('node:fs'); const marker = ${JSON.stringify(marker)}; if (fs.existsSync(marker)) process.exit(0); fs.writeFileSync(marker, ''); process.exit(134);`,
+              ]
+            : ['bash', '-c', script],
         retryOnCrash: true,
         // Only so the assertion below has attempt 1's log to read; the retry
         // would otherwise truncate it.

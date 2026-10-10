@@ -106,6 +106,28 @@ function removeTestHome(root: string, host: TemporaryHomeHost = launcherHost()):
 const SIGNAL_NUMBERS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
 const FORWARDED = Object.keys(SIGNAL_NUMBERS) as (keyof typeof SIGNAL_NUMBERS)[];
 
+/** The child status and signal operations the temporary-home launcher owns. */
+export interface TestHomeChild {
+  readonly exited: Promise<number>;
+  readonly signalCode: string | null;
+  kill(signal: number): unknown;
+}
+
+/** Native spawn by default; replace external process I/O in launcher tests. */
+export interface TestHomeDependencies {
+  readonly spawn: (command: readonly string[], env: NodeJS.ProcessEnv) => TestHomeChild;
+}
+
+function spawnTestChild(command: readonly string[], env: NodeJS.ProcessEnv): TestHomeChild {
+  return Bun.spawn({
+    cmd: [...command],
+    stdin: 'inherit',
+    stdout: 'inherit',
+    stderr: 'inherit',
+    env,
+  });
+}
+
 /**
  * The exit code a shell would report: the child's own, or 128 plus the signal
  * that ended it. The watchdog and the coverage orchestrator read this.
@@ -130,7 +152,8 @@ export function shellExitCode(exitCode: number | null, signal: number | null): n
  */
 export async function runWithTestHome(
   command: readonly string[],
-  ambient: NodeJS.ProcessEnv = process.env
+  ambient: NodeJS.ProcessEnv = process.env,
+  dependencies: TestHomeDependencies = { spawn: spawnTestChild }
 ): Promise<number> {
   if (command.length === 0) {
     throw new Error('with-test-home: expected a command to run | received: none');
@@ -138,23 +161,20 @@ export async function runWithTestHome(
   const host = launcherHost(ambient);
   const root = createTestHome(host);
   const [program, ...args] = command as [string, ...string[]];
-  const child = Bun.spawn({
-    // The same Bun that runs the launcher, not whatever PATH says next.
-    cmd: [program === 'bun' ? process.execPath : program, ...args],
-    stdin: 'inherit',
-    stdout: 'inherit',
-    stderr: 'inherit',
-    env: { ...ambient, ...testHomeEnv(root, ambient, host) },
-  });
-  const forwarders = FORWARDED.map((name) => {
-    const forward = (): void => {
-      child.kill(SIGNAL_NUMBERS[name]);
-    };
-    process.on(name, forward);
-    return () => process.off(name, forward);
-  });
-
+  const forwarders: (() => void)[] = [];
   try {
+    const child = dependencies.spawn(
+      // The same Bun that runs the launcher, not whatever PATH says next.
+      [program === 'bun' ? process.execPath : program, ...args],
+      { ...ambient, ...testHomeEnv(root, ambient, host) }
+    );
+    for (const name of FORWARDED) {
+      const forward = (): void => {
+        child.kill(SIGNAL_NUMBERS[name]);
+      };
+      process.on(name, forward);
+      forwarders.push(() => process.off(name, forward));
+    }
     const exitCode = await child.exited;
     return shellExitCode(exitCode, child.signalCode ? signalNumber(child.signalCode) : null);
   } finally {

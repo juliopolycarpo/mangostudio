@@ -132,7 +132,7 @@ describe('readSourceBranchCoverageSummary', () => {
     );
 
     await expect(readSourceBranchCoverageSummary(lcovPath, workspaceDir)).rejects.toThrow(
-      'src/example.ts'
+      join('src', 'example.ts')
     );
   });
 });

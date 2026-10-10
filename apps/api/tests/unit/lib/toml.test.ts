@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { parseTomlDocument, stringifyTomlDocument } from '../../../src/lib/toml';
 
 const API_ROOT = resolve(import.meta.dir, '../../..');
@@ -57,7 +57,7 @@ describe('TOML library boundary', () => {
   it(`imports ${TOML_LIBRARY} only from ${ADAPTER}`, () => {
     const offenders = ['src', 'tests']
       .flatMap((directory) => sourceFilesUnder(join(API_ROOT, directory)))
-      .map((path) => relative(API_ROOT, path))
+      .map((path) => relative(API_ROOT, path).split(sep).join('/'))
       .filter((path) => path !== ADAPTER)
       .filter((path) => TOML_LIBRARY_SPECIFIER.test(readFileSync(join(API_ROOT, path), 'utf8')));
 

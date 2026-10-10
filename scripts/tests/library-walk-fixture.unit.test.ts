@@ -79,6 +79,7 @@ describe('scripts/bench/library-fixture', () => {
     expect((await readdir(join(base, 'files'))).sort()).toEqual(['f0.md', 'f1.md']);
     expect(await readFile(join(base, 'files', 'f1.md'), 'utf8')).toBe('file 1\n');
     expect((await lstat(join(base, 'links', 'l0.md'))).isSymbolicLink()).toBe(true);
-    expect(await readlink(join(base, 'links', 'l0.md'))).toBe('../files/f0.md');
+    expect(await readlink(join(base, 'links', 'l0.md'))).toBe(join('..', 'files', 'f0.md'));
+    expect(await readFile(join(base, 'links', 'l0.md'), 'utf8')).toBe('file 0\n');
   });
 });

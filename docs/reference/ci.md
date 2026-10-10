@@ -148,6 +148,55 @@ governs called workflows on a PR. Callables that also support
 `workflow_dispatch` declare their own group to cover direct runs (for example
 `browser-smoke.yml` keys on `github.ref`).
 
+## Native Bun qualification
+
+`.github/workflows/native-bun-qualification.yml` runs the complete
+`bun run check` and `bun run test` commands on hosted Linux, macOS and Windows
+x64 runners. Changes to the qualification producer or workflow-analysis tools
+run both the untouched PR base and the candidate. Other PRs retain the existing
+CI gates without repeating these full native suites.
+
+To qualify a branch after rebasing it, dispatch the workflow at that branch:
+
+```sh
+gh workflow run native-bun-qualification.yml --ref <branch>
+```
+
+The optional `baseline_sha` input adds a baseline at a full commit SHA. Every
+run records immutable source identity, toolchains, separate default-runtime and
+fake-vendor builds, binary hashes, setup/check/test results, case outcomes and
+scoped terminal process observations. Each native job owns its source checkout
+and two Cargo targets; it restores no test-result or Cargo-target cache.
+
+Windows commands start atomically inside a private Job. Membership queries and
+retained native handles provide ownership through child exit and captured pipe
+EOF. Ordinary commands must leave the Job naturally empty. The two original
+Cargo setup commands may close a surviving VCTIP process only after successful
+compiler JSON, unchanged runtime or fake-agent features, complete membership
+and independently attested installed MSVC path, versions and hash agree. Each
+cleanup records the retained handle identity and completion. A VCTIP that was
+eligible for that cleanup and leaves the still-open Job by itself first is
+recorded as a natural exit instead, with the same identity proof and a stable
+snapshot that no longer lists it. Final Job closure
+is containment and never establishes successful settlement. Full native
+censuses before and after each command reject unattributed compiler helpers.
+
+The producer installs its own frozen dependencies and seals its Windows helper
+checkout separately from the fresh tested source. Requests containing the inherited environment live outside uploaded
+evidence and are deleted after each invocation. Uploaded evidence keeps raw
+stdout/stderr, source and tool identities, membership snapshots, explicit
+cleanup actions and final open-Job proof. A full census keeps a command line
+only for a process the qualification owns; every other process on the runner
+is recorded by PID, parent, creation identity and image, plus the compiler-helper
+verdict its command line gave. A bounded native Windows probe gate
+checks orphan, pipe, PID reuse and crash behavior before full qualification.
+
+Baseline failures remain visible in the receipts and logs. Candidate failures
+fail the job. A check failure still permits the complete test command to run,
+so workflow-tool setup cannot hide test failures. Hosted native results cover
+these producers and their observed process settlement; interactive Ctrl-C,
+local hardware and live vendors require their own evidence.
+
 ## Workflow hygiene
 
 `scripts/tests/workflow-hygiene.unit.test.ts` enforces repository-wide workflow

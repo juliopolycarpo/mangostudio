@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, parse, resolve } from 'node:path';
 
 import { assertDirectory, assertFile, assertSafeToDelete, fileError } from '../lib/fs-assert';
 
@@ -101,7 +101,8 @@ describe('fileError', () => {
 });
 
 describe('assertSafeToDelete', () => {
-  const rootDir = '/repo';
+  const filesystemRoot = parse(resolve('.')).root;
+  const rootDir = join(filesystemRoot, 'repo');
   const dockerLabel = 'Docker context';
   const options = {
     rootDir,
@@ -120,8 +121,8 @@ describe('assertSafeToDelete', () => {
   });
 
   test('rejects the filesystem root', () => {
-    expect(() => assertSafeToDelete('/', options)).toThrow(
-      `Refusing to remove ${dockerLabel} outside the workspace: /`
+    expect(() => assertSafeToDelete(filesystemRoot, options)).toThrow(
+      `Refusing to remove ${dockerLabel} outside the workspace: ${filesystemRoot}`
     );
   });
 
@@ -132,20 +133,23 @@ describe('assertSafeToDelete', () => {
   });
 
   test('rejects a parent of the workspace root', () => {
-    expect(() =>
-      assertSafeToDelete('/repo-parent', { ...options, rootDir: join('/repo-parent', 'repo') })
-    ).toThrow(/Refusing to remove Docker context outside the workspace: \/repo-parent/);
+    const parent = join(filesystemRoot, 'repo-parent');
+    expect(() => assertSafeToDelete(parent, { ...options, rootDir: join(parent, 'repo') })).toThrow(
+      `Refusing to remove ${dockerLabel} outside the workspace: ${parent}`
+    );
   });
 
   test('rejects a path outside the workspace and temp directory', () => {
-    expect(() => assertSafeToDelete('/etc/passwd', options)).toThrow(
-      `Refusing to remove ${dockerLabel} outside the workspace: /etc/passwd`
+    const outside = join(filesystemRoot, 'etc', 'passwd');
+    expect(() => assertSafeToDelete(outside, options)).toThrow(
+      `Refusing to remove ${dockerLabel} outside the workspace: ${outside}`
     );
   });
 
   test('rejects short absolute paths that previously passed the length guard', () => {
-    expect(() => assertSafeToDelete('/a/b', options)).toThrow(
-      `Refusing to remove ${dockerLabel} outside the workspace: /a/b`
+    const shortPath = join(filesystemRoot, 'a', 'b');
+    expect(() => assertSafeToDelete(shortPath, options)).toThrow(
+      `Refusing to remove ${dockerLabel} outside the workspace: ${shortPath}`
     );
   });
 });

@@ -7,13 +7,15 @@
 
 export type ToolName = 'actionlint' | 'zizmor' | 'shellcheck';
 
-export type PlatformKey = 'linux-x64' | 'linux-arm64' | 'darwin-x64' | 'darwin-arm64';
+export type PlatformKey = 'linux-x64' | 'linux-arm64' | 'darwin-x64' | 'darwin-arm64' | 'win32-x64';
 
 interface ToolAsset {
   /** Release asset file name, appended to the tool's baseUrl. */
   readonly assetName: string;
   /** Hex SHA-256 of the release archive. */
   readonly sha256: string;
+  /** Executable member when this platform differs from the tool's default. */
+  readonly binaryPath?: string;
 }
 
 export interface ToolManifestEntry {
@@ -49,6 +51,11 @@ export const TOOL_MANIFEST: Readonly<Record<ToolName, ToolManifestEntry>> = {
         assetName: 'actionlint_1.7.12_darwin_arm64.tar.gz',
         sha256: 'aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f',
       },
+      'win32-x64': {
+        assetName: 'actionlint_1.7.12_windows_amd64.zip',
+        sha256: '6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9',
+        binaryPath: 'actionlint.exe',
+      },
     },
   },
   zizmor: {
@@ -72,6 +79,11 @@ export const TOOL_MANIFEST: Readonly<Record<ToolName, ToolManifestEntry>> = {
       'darwin-arm64': {
         assetName: 'zizmor-aarch64-apple-darwin.tar.gz',
         sha256: '68ab2b37836bbd44f6cfffcc102b9ffffbc20c5d67d84293dafb63bd2775a1da',
+      },
+      'win32-x64': {
+        assetName: 'zizmor-x86_64-pc-windows-msvc.zip',
+        sha256: 'c6cea156935e3b9d36faeca4fd8f622d23f7a7578da26adb34e6456abd9beb9a',
+        binaryPath: 'zizmor.exe',
       },
     },
   },
@@ -97,6 +109,11 @@ export const TOOL_MANIFEST: Readonly<Record<ToolName, ToolManifestEntry>> = {
         assetName: 'shellcheck-v0.11.0.darwin.aarch64.tar.gz',
         sha256: '339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f',
       },
+      'win32-x64': {
+        assetName: 'shellcheck-v0.11.0.zip',
+        sha256: '8a4e35ab0b331c85d73567b12f2a444df187f483e5079ceffa6bda1faa2e740e',
+        binaryPath: 'shellcheck.exe',
+      },
     },
   },
 };
@@ -108,12 +125,14 @@ const PLATFORM_KEYS: Readonly<Record<string, PlatformKey>> = {
   'linux:arm64': 'linux-arm64',
   'darwin:x64': 'darwin-x64',
   'darwin:arm64': 'darwin-arm64',
+  'win32:x64': 'win32-x64',
 };
 
 /**
  * Map a Node platform/arch pair onto a manifest platform key, or throw an
  * actionable message so an unsupported host fails loudly instead of silently
  * skipping workflow analysis.
+ * // Usage: resolvePlatformKey('win32', 'x64')
  */
 export function resolvePlatformKey(
   platform: string = process.platform,
@@ -125,7 +144,7 @@ export function resolvePlatformKey(
       `Workflow static analysis has no pinned binaries for ${platform}/${arch}. ` +
         `Add a manifest entry (asset name + SHA-256) for this platform to ` +
         `scripts/lib/actions-lint/manifest.ts, or run \`bun run check\` on ` +
-        `linux/macOS x64/arm64 (CI runs it on every pull request).`
+        `Linux/macOS x64/arm64 or Windows x64 (CI runs it on every pull request).`
     );
   }
   return key;

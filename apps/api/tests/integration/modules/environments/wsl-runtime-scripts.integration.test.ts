@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readlink, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, type } from 'node:os';
 import { join } from 'node:path';
 import {
   CONFIG_LOCK_BUSY_EXIT,
@@ -198,7 +198,7 @@ describe.skipIf(!hasPosixShell)('WSL config scripts against a real shell', () =>
     // preamble is exactly four lines regardless of whether a runtime is
     // installed. PROBE_SLOT_SCRIPT never runs the runtime binary itself: see
     // VERSION_SCRIPT below for why that stays a separate round trip.
-    expect(probe.kernel).toBe('Linux');
+    expect(probe.kernel).toBe(type());
     expect(probe.machine.length).toBeGreaterThan(0);
     expect(probe.config).toBeNull();
   });

@@ -7,14 +7,61 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { tarCreationCommand } from '../lib/archive-creation';
 
 const INSTALL_SH = join(import.meta.dir, '..', 'install', 'install.sh');
+const IS_WINDOWS = process.platform === 'win32';
+const BASH = fixtureBash();
+
+// These are Linux layout fixtures, even when native Bun runs them in Git Bash.
+// The production installer still rejects the real Windows uname below.
+const FIXTURE_LINUX_UNAME = `
+fixture_linux_uname() {
+  case "\${1:-}" in
+    -s) printf 'Linux\\n' ;;
+    -m) printf 'x86_64\\n' ;;
+    *) command uname "$@" ;;
+  esac
+}
+uname() { fixture_linux_uname "$@"; }
+export -f fixture_linux_uname uname
+`;
+
+/** Select Git Bash rather than the Windows WSL launcher, e.g. fixtureBash(). */
+function fixtureBash(): string {
+  const bash = Bun.which('bash');
+  if (!IS_WINDOWS) return bash ?? 'bash';
+  const git = Bun.which('git');
+  const candidates = git
+    ? [
+        join(dirname(git), '..', 'bin', 'bash.exe'),
+        join(dirname(git), '..', '..', 'bin', 'bash.exe'),
+      ]
+    : [];
+  if (bash) candidates.push(bash);
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    const probe = Bun.spawnSync({ cmd: [candidate, '-c', 'uname -s'] });
+    if (probe.exitCode === 0 && /^MINGW|^MSYS/.test(probe.stdout.toString())) return candidate;
+  }
+  throw new Error(
+    `Invalid Bash candidates ${JSON.stringify(candidates)}; expected native Git Bash`
+  );
+}
+
+/** Give Git Bash a POSIX path without a tar drive colon, e.g. shellPath('C:\\tmp\\file'). */
+function shellPath(path: string): string {
+  if (!IS_WINDOWS) return path;
+  return path
+    .replaceAll('\\', '/')
+    .replace(/^([A-Za-z]):\//, (_, drive: string) => `/${drive.toLowerCase()}/`);
+}
 
 let tempDirs: string[] = [];
 
@@ -24,7 +71,9 @@ afterEach(() => {
 });
 
 function tempDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  // The long form: under an 8.3 short temp path the Windows shell reads a link back as
+  // /tmp/..., which no longer matches the install root the script was given.
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), prefix)));
   tempDirs.push(dir);
   return dir;
 }
@@ -35,10 +84,17 @@ interface RunResult {
   readonly stderr: string;
 }
 
-function run(args: string[], env: Record<string, string | undefined>): RunResult {
+/** Execute the real POSIX shell with real symlinks, e.g. shell(['-c', 'uname -s']). */
+function shell(args: string[], env: Record<string, string | undefined> = {}): RunResult {
+  const shellEnv = { ...process.env, ...env };
+  if (IS_WINDOWS) shellEnv.MSYS = 'winsymlinks:nativestrict';
+  for (const key of ['MANGOSTUDIO_INSTALL_DIR', 'MANGOSTUDIO_BIN_DIR', 'TMPDIR']) {
+    const value = shellEnv[key];
+    if (value) shellEnv[key] = shellPath(value);
+  }
   const result = Bun.spawnSync({
-    cmd: ['bash', INSTALL_SH, ...args],
-    env: { ...process.env, ...env } as Record<string, string>,
+    cmd: [BASH, ...args],
+    env: shellEnv as Record<string, string>,
   });
   return {
     exitCode: result.exitCode ?? 1,
@@ -47,22 +103,45 @@ function run(args: string[], env: Record<string, string | undefined>): RunResult
   };
 }
 
-/** Call an internal function without running main(), like a unit test of a plain module. */
-function sourceAndCall(expression: string): RunResult {
-  const result = Bun.spawnSync({
-    cmd: ['bash', '-c', `source "$1"; ${expression}`, 'bash', INSTALL_SH],
-  });
-  return {
-    exitCode: result.exitCode ?? 1,
-    stdout: result.stdout.toString(),
-    stderr: result.stderr.toString(),
-  };
+function run(args: string[], env: Record<string, string | undefined>): RunResult {
+  const command = [shellPath(INSTALL_SH), ...args.map(shellPath)];
+  if (!IS_WINDOWS) return shell(command, env);
+  return shell(
+    ['-c', `${FIXTURE_LINUX_UNAME}\nexec "$BASH" "$@"`, 'linux-layout-fixture', ...command],
+    env
+  );
+}
+
+/** Call an internal function, e.g. sourceAndCall('swap_current "$1" 0.2.0', [root]). */
+function sourceAndCall(expression: string, paths: string[] = [], linuxLayout = true): RunResult {
+  const uname = IS_WINDOWS && linuxLayout ? FIXTURE_LINUX_UNAME : '';
+  return shell([
+    '-c',
+    `${uname}\nsource "$1"; shift; ${expression}`,
+    'installer-unit-fixture',
+    shellPath(INSTALL_SH),
+    ...paths.map(shellPath),
+  ]);
+}
+
+/** Create the fixture link through its POSIX host, e.g. fixtureSymlink('0.1.0', current). */
+function fixtureSymlink(target: string, link: string): void {
+  const result = shell([
+    '-c',
+    'ln -s "$1" "$2"',
+    'symlink-fixture',
+    shellPath(target),
+    shellPath(link),
+  ]);
+  if (result.exitCode !== 0) throw new Error(`Fixture symlink failed: ${JSON.stringify(result)}`);
 }
 
 let PLATFORM: string;
 
 beforeAll(() => {
-  PLATFORM = sourceAndCall('detect_platform').stdout.trim();
+  const result = sourceAndCall('detect_platform');
+  expect(result.exitCode, JSON.stringify(result)).toBe(0);
+  PLATFORM = result.stdout.trim();
 });
 
 function makeFixtureBin(dir: string, printedVersion: string, execPath = 'mangostudio'): void {
@@ -70,15 +149,20 @@ function makeFixtureBin(dir: string, printedVersion: string, execPath = 'mangost
   chmodSync(join(dir, execPath), 0o755);
 }
 
+/** Preserve fixture members and modes, e.g. createFixtureTar(archive, source, ['mangostudio']). */
+function createFixtureTar(archivePath: string, directory: string, members: string[]): string {
+  const { command, cwd } = tarCreationCommand(archivePath, [{ directory, members }]);
+  const result = Bun.spawnSync({ cmd: [...command], cwd });
+  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
+  return archivePath;
+}
+
 /** A release archive shaped like archive-assets.ts produces: mangostudio at the root. */
 function buildReleaseArchive(dir: string, name: string, printedVersion: string): string {
   const srcDir = join(dir, `src-${name}`);
   mkdirSync(srcDir, { recursive: true });
   makeFixtureBin(srcDir, printedVersion);
-  const archivePath = join(dir, name);
-  const result = Bun.spawnSync({ cmd: ['tar', '-czf', archivePath, '-C', srcDir, 'mangostudio'] });
-  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
-  return archivePath;
+  return createFixtureTar(join(dir, name), srcDir, ['mangostudio']);
 }
 
 /** A release archive whose mangostudio prints `stderr` and exits `exitCode` — a hub the OS cannot start. */
@@ -94,10 +178,7 @@ function buildFailingArchive(
     `#!/bin/sh\nprintf '%s\\n' '${failure.stderr}' >&2\nexit ${failure.exitCode}\n`
   );
   chmodSync(join(srcDir, 'mangostudio'), 0o755);
-  const archivePath = join(dir, name);
-  const result = Bun.spawnSync({ cmd: ['tar', '-czf', archivePath, '-C', srcDir, 'mangostudio'] });
-  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
-  return archivePath;
+  return createFixtureTar(join(dir, name), srcDir, ['mangostudio']);
 }
 
 /**
@@ -113,16 +194,13 @@ function buildFloodingArchive(dir: string, name: string, leakReport: string): st
       '#!/bin/sh',
       'i=0',
       'while [ "$i" -lt 3000 ]; do printf \'%01000d\\n\' "$i" >&2; i=$((i + 1)); done',
-      `find "$TMPDIR" -type f -size +64k > '${leakReport}'`,
+      `find "$TMPDIR" -type f -size +64k > '${shellPath(leakReport)}'`,
       'exit 3',
       '',
     ].join('\n')
   );
   chmodSync(join(srcDir, 'mangostudio'), 0o755);
-  const archivePath = join(dir, name);
-  const result = Bun.spawnSync({ cmd: ['tar', '-czf', archivePath, '-C', srcDir, 'mangostudio'] });
-  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
-  return archivePath;
+  return createFixtureTar(join(dir, name), srcDir, ['mangostudio']);
 }
 
 /** An npm platform tarball: members live under package/, per pack-npm.ts. */
@@ -130,10 +208,7 @@ function buildNpmTarball(dir: string, printedVersion: string): string {
   const srcDir = join(dir, 'npm-src');
   mkdirSync(join(srcDir, 'package'), { recursive: true });
   makeFixtureBin(join(srcDir, 'package'), printedVersion);
-  const archivePath = join(dir, 'mangostudio-npm.tgz');
-  const result = Bun.spawnSync({ cmd: ['tar', '-czf', archivePath, '-C', srcDir, 'package'] });
-  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
-  return archivePath;
+  return createFixtureTar(join(dir, 'mangostudio-npm.tgz'), srcDir, ['package']);
 }
 
 /** A broken archive with no `mangostudio` at all — extract_archive must fail() on it. */
@@ -141,12 +216,7 @@ function buildArchiveMissingBinary(dir: string, name: string): string {
   const srcDir = join(dir, `src-bad-${name}`);
   mkdirSync(srcDir, { recursive: true });
   writeFileSync(join(srcDir, 'not-mangostudio'), 'not a binary');
-  const archivePath = join(dir, name);
-  const result = Bun.spawnSync({
-    cmd: ['tar', '-czf', archivePath, '-C', srcDir, 'not-mangostudio'],
-  });
-  if (result.exitCode !== 0) throw new Error(`tar failed: ${result.stderr.toString()}`);
-  return archivePath;
+  return createFixtureTar(join(dir, name), srcDir, ['not-mangostudio']);
 }
 
 interface Layout {
@@ -164,7 +234,7 @@ function layout(): Layout {
     workDir,
     root,
     bin,
-    env: { MANGOSTUDIO_INSTALL_DIR: root, MANGOSTUDIO_BIN_DIR: bin },
+    env: { MANGOSTUDIO_INSTALL_DIR: shellPath(root), MANGOSTUDIO_BIN_DIR: shellPath(bin) },
   };
 }
 
@@ -280,7 +350,7 @@ describe('install.sh layout', () => {
     mkdirSync(legacyDir, { recursive: true });
     makeFixtureBin(legacyDir, '0.1.1');
     mkdirSync(bin, { recursive: true });
-    symlinkSync(join(legacyDir, 'mangostudio'), join(bin, 'mangostudio'));
+    fixtureSymlink(join(legacyDir, 'mangostudio'), join(bin, 'mangostudio'));
 
     const archive = buildReleaseArchive(workDir, `mangostudio-0.1.2-${PLATFORM}.tar.gz`, '0.1.2');
     const result = run(['--local', archive], env);
@@ -396,7 +466,11 @@ describe('install.sh layout', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('expected version: 0.1.0 | received: 9.9.9');
     expect(readlinkSync(join(root, 'current'))).toBe('0.1.0');
-    const stillGood = Bun.spawnSync({ cmd: [join(root, '0.1.0', 'mangostudio'), '--version'] });
+    const survivingBinary = join(root, '0.1.0', 'mangostudio');
+    const stillGood = IS_WINDOWS
+      ? shell([shellPath(survivingBinary), '--version'])
+      : Bun.spawnSync({ cmd: [survivingBinary, '--version'] });
+    expect(stillGood.exitCode, stillGood.stderr.toString()).toBe(0);
     expect(stillGood.stdout.toString().trim()).toBe('0.1.0');
   });
 
@@ -536,7 +610,7 @@ describe('install.sh layout', () => {
     mkdirSync(bin, { recursive: true });
     const elsewhere = join(workDir, 'elsewhere-mangostudio');
     writeFileSync(elsewhere, '');
-    symlinkSync(elsewhere, join(bin, 'mangostudio'));
+    fixtureSymlink(elsewhere, join(bin, 'mangostudio'));
 
     run(['--uninstall'], env);
 
@@ -545,6 +619,18 @@ describe('install.sh layout', () => {
 });
 
 describe('install.sh internals (network-free)', () => {
+  test('the Linux layout fixture keeps production Windows platform rejection intact', () => {
+    const nativePlatform = sourceAndCall('detect_platform', [], false);
+    if (!IS_WINDOWS) {
+      expect(nativePlatform.exitCode, JSON.stringify(nativePlatform)).toBe(0);
+      expect(nativePlatform.stdout.trim()).toBe(PLATFORM);
+      return;
+    }
+    expect(nativePlatform.exitCode).toBe(1);
+    expect(nativePlatform.stderr).toContain('unsupported OS:');
+    expect(PLATFORM).toBe('linux-x64');
+  });
+
   test('extract_canary_tag picks the newest per-commit canary tag_name', () => {
     // GitHub lists newest first, and canary now cuts one release per green
     // commit, so the first match is the build to install.
@@ -596,9 +682,9 @@ describe('install.sh internals (network-free)', () => {
     const root = tempDir('mango-swap-');
     mkdirSync(join(root, '0.1.0'));
     mkdirSync(join(root, '0.2.0'));
-    symlinkSync('0.1.0', join(root, 'current'));
+    fixtureSymlink('0.1.0', join(root, 'current'));
 
-    const result = sourceAndCall(`swap_current '${root}' 0.2.0`);
+    const result = sourceAndCall('swap_current "$1" 0.2.0', [root]);
 
     expect(result.exitCode).toBe(0);
     expect(readlinkSync(join(root, 'current'))).toBe('0.2.0');
@@ -617,9 +703,9 @@ describe('install.sh internals (network-free)', () => {
     const root = tempDir('mango-swap-race-');
     mkdirSync(join(root, '0.1.0'));
     mkdirSync(join(root, '0.2.0'));
-    symlinkSync('0.1.0', join(root, 'current'));
+    fixtureSymlink('0.1.0', join(root, 'current'));
 
-    const result = sourceAndCall(`rm() { :; }; swap_current '${root}' 0.2.0`);
+    const result = sourceAndCall('rm() { :; }; swap_current "$1" 0.2.0', [root]);
 
     expect(result.exitCode).toBe(0);
     expect(readlinkSync(join(root, 'current'))).toBe('0.2.0');
@@ -642,8 +728,8 @@ describe('install.sh internals (network-free)', () => {
       )
     );
 
-    const version = sourceAndCall(`parse_manifest_field '${manifestPath}' version`);
-    const sourceSha = sourceAndCall(`parse_manifest_field '${manifestPath}' sourceSha`);
+    const version = sourceAndCall('parse_manifest_field "$1" version', [manifestPath]);
+    const sourceSha = sourceAndCall('parse_manifest_field "$1" sourceSha', [manifestPath]);
 
     expect(version.stdout.trim()).toBe('0.1.1-canary.abc1234');
     expect(sourceSha.stdout.trim()).toBe('abc1234');

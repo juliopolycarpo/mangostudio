@@ -1338,7 +1338,87 @@ unsafe fn close_except(keep: &[RawFd], descriptor_limit: RawFd) {
             return;
         }
     }
+    #[cfg(target_os = "macos")]
+    {
+        if unsafe { close_except_with_descriptor_census(keep) } {
+            return;
+        }
+    }
     unsafe { close_except_one_by_one(keep, descriptor_limit) };
+}
+
+/// One `PROC_PIDLISTFDS` row. libc declares `proc_pidinfo` but not this layout.
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct ProcFdInfo {
+    proc_fd: i32,
+    proc_fdtype: u32,
+}
+
+#[cfg(target_os = "macos")]
+const PROC_PIDLISTFDS: libc::c_int = 1;
+
+/// Closes the descriptors this process actually has open instead of walking the whole range.
+///
+/// macOS has no `close_range`, and `_SC_OPEN_MAX` there can be 1,048,576: walking it costs about
+/// 150 ms, and a guardian does it four times per launch. Returns `false` when the census cannot
+/// vouch for every descriptor, so the caller still falls back to the full walk: when the listing
+/// fails, and when the descriptor table is larger than the stack buffer the listing is read into.
+#[cfg(target_os = "macos")]
+unsafe fn close_except_with_descriptor_census(keep: &[RawFd]) -> bool {
+    const ROWS: usize = 1024;
+    const ROW_BYTES: usize = std::mem::size_of::<ProcFdInfo>();
+    // Stack storage only: this runs between `fork` and `exec`, where the allocator is off limits.
+    let mut rows = [ProcFdInfo {
+        proc_fd: -1,
+        proc_fdtype: 0,
+    }; ROWS];
+    // SAFETY: `getpid` has no arguments and cannot fail.
+    let pid = unsafe { libc::getpid() };
+    // A null buffer asks the kernel only how large the descriptor table is: its slot count plus
+    // slack, in bytes. Kernels before macOS 11 list by slot rather than by open descriptor, so a
+    // buffer of `ROWS` rows covers slots `0..ROWS` and a descriptor numbered above them is
+    // silently absent from a listing that still looks complete. A table that fits the buffer is
+    // listed whole on every kernel; a larger one is left to the full walk.
+    // SAFETY: with a null buffer and a zero size the kernel writes nothing.
+    let table_bytes =
+        unsafe { libc::proc_pidinfo(pid, PROC_PIDLISTFDS, 0, std::ptr::null_mut(), 0) };
+    if table_bytes <= 0 || table_bytes as usize > ROWS * ROW_BYTES {
+        return false;
+    }
+    loop {
+        // SAFETY: `rows` is valid writable storage of exactly the byte length passed.
+        let bytes = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                PROC_PIDLISTFDS,
+                0,
+                rows.as_mut_ptr().cast(),
+                (ROWS * ROW_BYTES) as libc::c_int,
+            )
+        };
+        if bytes <= 0 || !(bytes as usize).is_multiple_of(ROW_BYTES) {
+            return false;
+        }
+        let count = bytes as usize / ROW_BYTES;
+        let mut closed = 0;
+        for row in &rows[..count] {
+            if row.proc_fd >= 0 && !keep.contains(&row.proc_fd) {
+                // SAFETY: the kernel just listed this descriptor as open in this process.
+                unsafe { libc::close(row.proc_fd) };
+                closed += 1;
+            }
+        }
+        // A full buffer may be a truncated listing. Closing made room, so list again; a full
+        // pass that closed nothing can never finish.
+        if count < ROWS {
+            return true;
+        }
+        if closed == 0 {
+            return false;
+        }
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -1975,6 +2055,113 @@ mod tests {
     use std::ffi::OsString;
 
     use super::collect_inheritable;
+
+    #[test]
+    fn close_except_closes_every_unlisted_descriptor_and_keeps_the_listed_one() {
+        use std::os::fd::AsRawFd;
+
+        let (kept_read, kept_write) = super::pipe_cloexec().expect("kept pipe opens");
+        let (stray_read, stray_write) = super::pipe_cloexec().expect("stray pipe opens");
+        let limit = super::descriptor_limit().expect("descriptor limit is finite");
+        let kept = kept_write.as_raw_fd();
+        let strays = [stray_read.as_raw_fd(), stray_write.as_raw_fd(), 0];
+
+        // SAFETY: the child calls only async-signal-safe functions before `_exit`.
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "expected fork to succeed | received {pid}");
+        if pid == 0 {
+            unsafe { super::close_except(&[kept], limit) };
+            for (index, stray) in strays.iter().enumerate() {
+                if unsafe { libc::fcntl(*stray, libc::F_GETFD) } >= 0 {
+                    unsafe { libc::_exit(10 + index as libc::c_int) };
+                }
+            }
+            if unsafe { libc::write(kept, b"k".as_ptr().cast(), 1) } != 1 {
+                unsafe { libc::_exit(20) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        drop(kept_write);
+
+        let status = super::wait_for_guardian(pid).expect("child is reaped");
+        let mut byte = [0_u8; 1];
+        // SAFETY: `byte` is valid storage for the one byte requested.
+        let read = unsafe { libc::read(kept_read.as_raw_fd(), byte.as_mut_ptr().cast(), 1) };
+        assert_eq!(
+            (status.code(), read, byte[0]),
+            (Some(0), 1, b'k'),
+            "expected child exit 0 with the kept pipe still writable | received exit {:?} \
+             (10-12: stray read end, stray write end or stdin stayed open; 20: kept pipe closed)",
+            status.code()
+        );
+    }
+
+    /// A descriptor numbered above what the macOS census can list from its stack buffer must
+    /// still be closed: there the census cannot vouch for the table, and the full walk takes over.
+    #[test]
+    fn close_except_closes_a_descriptor_numbered_above_the_census_buffer() {
+        use std::os::fd::{AsRawFd, RawFd};
+
+        const HIGH: RawFd = 1100;
+        const SOFT_LIMIT: libc::rlim_t = 2048;
+        // The exit status of a child whose host cannot give it a descriptor numbered that high.
+        const UNAVAILABLE: libc::c_int = 77;
+
+        let (kept_read, kept_write) = super::pipe_cloexec().expect("kept pipe opens");
+        let (stray_read, _stray_write) = super::pipe_cloexec().expect("stray pipe opens");
+        let kept = kept_write.as_raw_fd();
+        let stray = stray_read.as_raw_fd();
+
+        // The high descriptor is made in the child, so this process keeps its small table and
+        // every other test in it keeps the fast path.
+        // SAFETY: the child calls only async-signal-safe functions before `_exit`.
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "expected fork to succeed | received {pid}");
+        if pid == 0 {
+            let mut limits = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limits) } != 0 {
+                unsafe { libc::_exit(UNAVAILABLE) };
+            }
+            if limits.rlim_cur < SOFT_LIMIT {
+                limits.rlim_cur = SOFT_LIMIT.min(limits.rlim_max);
+                if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raw const limits) } != 0 {
+                    unsafe { libc::_exit(UNAVAILABLE) };
+                }
+            }
+            let high = unsafe { libc::fcntl(stray, libc::F_DUPFD, HIGH) };
+            if high < HIGH {
+                unsafe { libc::_exit(UNAVAILABLE) };
+            }
+            unsafe { super::close_except(&[kept], high + 1) };
+            if unsafe { libc::fcntl(high, libc::F_GETFD) } >= 0 {
+                unsafe { libc::_exit(10) };
+            }
+            if unsafe { libc::write(kept, b"k".as_ptr().cast(), 1) } != 1 {
+                unsafe { libc::_exit(20) };
+            }
+            unsafe { libc::_exit(0) };
+        }
+        drop(kept_write);
+
+        let status = super::wait_for_guardian(pid).expect("child is reaped");
+        if status.code() == Some(UNAVAILABLE) {
+            eprintln!("skipped: this host's RLIMIT_NOFILE cannot provide descriptor {HIGH}");
+            return;
+        }
+        let mut byte = [0_u8; 1];
+        // SAFETY: `byte` is valid storage for the one byte requested.
+        let read = unsafe { libc::read(kept_read.as_raw_fd(), byte.as_mut_ptr().cast(), 1) };
+        assert_eq!(
+            (status.code(), read, byte[0]),
+            (Some(0), 1, b'k'),
+            "expected child exit 0 with descriptor {HIGH} closed and the kept pipe still writable \
+             | received exit {:?} (10: the high descriptor stayed open; 20: kept pipe closed)",
+            status.code()
+        );
+    }
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
