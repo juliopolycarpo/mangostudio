@@ -48,6 +48,27 @@ function git(root: string, args: readonly string[]): string {
   return result.stdout.toString().trim();
 }
 
+/** The source's default test producer, reduced to the lines the inventory reads. */
+const PRODUCER = [
+  '// !hasExplicitLaneSelection || runUnitLane',
+  '// !hasExplicitLaneSelection || runIntegrationLane',
+  "// workspaceLaneTasks('test:unit')",
+  "// workspaceLaneTasks('test:integration')",
+  "const PROTOCOL_TEST_COMMAND = ['bun', './scripts/protocol/test.ts', '--ts-only'];",
+  "runCommand('root:test:protocol', PROTOCOL_TEST_COMMAND, { cwd: ROOT_DIR });",
+  '',
+].join('\n');
+
+const PROTOCOL_TASKS_PATH = 'scripts/protocol/tasks.ts';
+/** The protocol launcher's TypeScript suite task, as the source spells its argv. */
+const PROTOCOL_TASKS = [
+  'tasks.push({',
+  "  label: 'protocol:bun-test',",
+  "  cmd: ['bun', 'test', '--timeout', '15000', 'packages/protocol', ...bunTestArgs],",
+  '});',
+  '',
+].join('\n');
+
 async function checkout(): Promise<{ root: string; out: string; sha: string }> {
   const base = await mkdtemp(join(tmpdir(), 'native-qualification-'));
   temporary.push(base);
@@ -64,10 +85,8 @@ async function checkout(): Promise<{ root: string; out: string; sha: string }> {
       },
     })
   );
-  await file(
-    join(root, 'scripts/test.ts'),
-    "// !hasExplicitLaneSelection || runUnitLane\n// !hasExplicitLaneSelection || runIntegrationLane\n// workspaceLaneTasks('test:unit')\n// workspaceLaneTasks('test:integration')\n"
-  );
+  await file(join(root, 'scripts/test.ts'), PRODUCER);
+  await file(join(root, PROTOCOL_TASKS_PATH), PROTOCOL_TASKS);
   await file(
     join(root, 'scripts/lib/config.ts'),
     "export const ALL_WORKSPACE_NAMES = ['frontend', 'api', 'shared'];\n"
@@ -443,6 +462,37 @@ describe('qualification inputs and seals', () => {
         seal.files.map((entry) => entry.path)
       )
     ).rejects.toThrow('Unknown default test producer');
+  });
+
+  test('reads the protocol lane from the source and refuses a changed launcher or suite', async () => {
+    const source = await checkout();
+    const tracked = (await sealNativeSource(source.root)).files.map((entry) => entry.path);
+    const protocol = async (): Promise<string | undefined> =>
+      (await nativeTestInventory(source.root, tracked)).find((lane) => lane.id === 'protocol')
+        ?.script;
+    expect(await protocol()).toBe('bun test --timeout 15000 packages/protocol');
+
+    await file(
+      join(source.root, PROTOCOL_TASKS_PATH),
+      PROTOCOL_TASKS.replace("'packages/protocol'", "'packages/protocol', '--retry', '2'")
+    );
+    await expect(
+      protocol(),
+      'expected the source suite argv with --retry to be refused | received: an accepted inventory'
+    ).rejects.toThrow('expected an unfiltered single-attempt suite');
+
+    await file(
+      join(source.root, PROTOCOL_TASKS_PATH),
+      PROTOCOL_TASKS.replace('...bunTestArgs', '...bunTestArgs, ...selection')
+    );
+    await expect(protocol()).rejects.toThrow('Unknown protocol test producer');
+
+    await file(join(source.root, PROTOCOL_TASKS_PATH), PROTOCOL_TASKS);
+    await file(
+      join(source.root, 'scripts/test.ts'),
+      PRODUCER.replace("'--ts-only']", "'--ts-only', '--', '--test-name-pattern', 'codec']")
+    );
+    await expect(protocol()).rejects.toThrow('Unknown protocol test producer');
   });
 
   test('refuses source scripts that select cases or repeat attempts', async () => {

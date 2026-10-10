@@ -245,7 +245,13 @@ async function producerFixture(workers: boolean): Promise<{ root: string; files:
     'apps/shared/package.json',
     'apps/frontend/package.json',
   ];
-  for (const path of [...manifests, 'scripts/test.ts', 'scripts/lib/config.ts']) {
+  // The protocol suite task is the repository's own, so a changed argv there fails this file.
+  for (const path of [
+    ...manifests,
+    'scripts/test.ts',
+    'scripts/lib/config.ts',
+    'scripts/protocol/tasks.ts',
+  ]) {
     await mkdir(dirname(join(root, path)), { recursive: true });
     await cp(join(ROOT_DIR, path), join(root, path));
   }
@@ -268,7 +274,9 @@ async function producerFixture(workers: boolean): Promise<{ root: string; files:
   api.scripts['test:integration'] =
     'MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --timeout 15000 tests/integration';
   const producer =
-    "const unit = !hasExplicitLaneSelection || runUnitLane; const integration = !hasExplicitLaneSelection || runIntegrationLane; workspaceLaneTasks('test:unit'); workspaceLaneTasks('test:integration');\n";
+    "const unit = !hasExplicitLaneSelection || runUnitLane; const integration = !hasExplicitLaneSelection || runIntegrationLane; workspaceLaneTasks('test:unit'); workspaceLaneTasks('test:integration');\n" +
+    "const PROTOCOL_TEST_COMMAND = ['bun', './scripts/protocol/test.ts', '--ts-only'];\n" +
+    "runCommand('root:test:protocol', PROTOCOL_TEST_COMMAND, { cwd: ROOT_DIR });\n";
   await fixtureFile(root, 'scripts/test.ts', producer);
   await fixtureFile(root, 'package.json', JSON.stringify(manifest));
   await fixtureFile(root, 'apps/api/package.json', JSON.stringify(api));
@@ -322,6 +330,27 @@ describe('accepted native producers', () => {
           : []
       );
     }
+  });
+
+  // The fixtures above reduce `scripts/test.ts` to the lines the inventory reads. This case reads
+  // the real one, so a producer or protocol launcher the inventory no longer recognises fails here
+  // rather than on the next qualification run.
+  test('accepts the default producer of this repository, protocol launcher included', async () => {
+    const listed = Bun.spawnSync(['git', 'ls-files'], {
+      cwd: ROOT_DIR,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(listed.exitCode, `git ls-files stderr: ${listed.stderr.toString()}`).toBe(0);
+
+    const lanes = await nativeTestInventory(
+      ROOT_DIR,
+      listed.stdout.toString().split('\n').filter(Boolean)
+    );
+
+    expect(lanes.find((lane) => lane.id === 'protocol')?.script).toBe(
+      'bun test --timeout 15000 packages/protocol'
+    );
   });
 
   test('rejects directory sub-suites, changed flags, retry flags, and coverage substitutions', async () => {

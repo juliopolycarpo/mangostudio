@@ -88,6 +88,38 @@ function normalizedPath(path: string): string {
   return posix.normalize(path.replaceAll('\\', '/').replace(/^\.\//, ''));
 }
 
+/** The quoted items of an argv array literal, and whatever else it holds besides them. */
+function argvLiteral(literal: string | undefined): { items: string[]; rest: string } {
+  const text = literal ?? '';
+  return {
+    items: [...text.matchAll(/'([^']*)'/g)].map((item) => item[1]),
+    rest: text.replace(/'[^']*'/g, '').replace(/[\s,]/g, ''),
+  };
+}
+
+/**
+ * Read the command the source's protocol lane runs. The lane has no package script: the
+ * producer starts a launcher, and the launcher's TypeScript task holds the Bun argv, with only
+ * the launcher's own pass-through arguments appended, which the producer never supplies.
+ */
+async function protocolLaneScript(root: string, producer: string): Promise<string> {
+  const tasks = await readFile(join(root, 'scripts/protocol/tasks.ts'), 'utf8');
+  const launcher = argvLiteral(/const PROTOCOL_TEST_COMMAND = \[([^\]]*)\];/.exec(producer)?.[1]);
+  const suite = argvLiteral(/label: 'protocol:bun-test',\s*cmd: \[([^\]]*)\]/.exec(tasks)?.[1]);
+  if (
+    !producer.includes("runCommand('root:test:protocol', PROTOCOL_TEST_COMMAND") ||
+    launcher.items.join(' ') !== 'bun ./scripts/protocol/test.ts --ts-only' ||
+    launcher.rest !== '' ||
+    suite.items.length === 0 ||
+    suite.rest !== '...bunTestArgs'
+  ) {
+    throw new Error(
+      `Unknown protocol test producer ${JSON.stringify(launcher)} running ${JSON.stringify(suite)}; expected the --ts-only launcher and its one literal Bun suite argv`
+    );
+  }
+  return suite.items.join(' ');
+}
+
 /**
  * Inventory every tracked test file selected by the source's default lanes.
  * Refuse an unfamiliar producer instead of certifying a smaller test command.
@@ -140,6 +172,7 @@ export async function nativeTestInventory(
       );
     }
   }
+  const protocolScript = await protocolLaneScript(root, producer);
   const lanes: NativeTestLane[] = [];
   for (const [id, task, cwd, directory, key] of EXPECTED_LANES) {
     const manifest = cwd ? `${cwd}/package.json` : 'package.json';
@@ -147,12 +180,13 @@ export async function nativeTestInventory(
     const worker = workers && id in WORKER_SCRIPTS;
     const script =
       id === 'protocol'
-        ? DIRECT_SCRIPTS.protocol
+        ? protocolScript
         : source.scripts?.[worker && id === 'root' ? 'test:scripts:workers' : key];
+    // Where the script was read, for the refusals below: the protocol lane has no package script.
+    const origin =
+      id === 'protocol' ? 'scripts/protocol/tasks.ts protocol:bun-test' : `${manifest} ${key}`;
     if (typeof script !== 'string') {
-      throw new Error(
-        `Invalid ${manifest} ${key}: ${JSON.stringify(script)}; expected ${directory} suite`
-      );
+      throw new Error(`Invalid ${origin}: ${JSON.stringify(script)}; expected ${directory} suite`);
     }
     if (
       /(?:^|\s)(?:-t[^\s]*|--(?:test-name-pattern|only|changed|shard|path-ignore-patterns|retry|rerun-each|pass-with-no-tests)(?:\s|=|$))/.test(
@@ -160,13 +194,13 @@ export async function nativeTestInventory(
       )
     ) {
       throw new Error(
-        `Invalid ${manifest} ${key}: ${JSON.stringify(script)}; expected an unfiltered single-attempt suite`
+        `Invalid ${origin}: ${JSON.stringify(script)}; expected an unfiltered single-attempt suite`
       );
     }
     const expected = worker ? WORKER_SCRIPTS[id] : DIRECT_SCRIPTS[id];
     if (script !== expected) {
       throw new Error(
-        `Invalid ${manifest} ${key}: ${JSON.stringify(script)}; expected accepted ${worker ? 'worker' : 'direct'} producer ${JSON.stringify(expected)}`
+        `Invalid ${origin}: ${JSON.stringify(script)}; expected accepted ${worker ? 'worker' : 'direct'} producer ${JSON.stringify(expected)}`
       );
     }
     const prefix = cwd ? `${cwd}/${directory}/` : `${directory}/`;
