@@ -415,6 +415,7 @@ export async function runNativeQualification(
   let inventory: NativeTestLane[] = [];
   let processesBefore: readonly NativeProcess[] = [];
   let windowsContext: NativeWindowsJobContext | null = null;
+  const receiptless: string[] = [];
   const toolingRoot = fileURLToPath(new URL('../../', import.meta.url));
   const nativeRun = (command: NativeCommandOptions): Promise<NativeCommandReceipt> => {
     if (dependencies.runCommand) return dependencies.runCommand(command);
@@ -434,14 +435,22 @@ export async function runNativeQualification(
       throw new Error(
         `Qualification exceeded ${TOTAL_TIMEOUT_SECONDS}s; expected completion below the workflow bound`
       );
-    const result = await nativeRun({
-      label,
-      command,
-      root,
-      out,
-      env: { ...env, ...overrides },
-      timeoutSeconds: Math.min(timeout, remaining),
-    });
+    let result: NativeCommandReceipt;
+    try {
+      result = await nativeRun({
+        label,
+        command,
+        root,
+        out,
+        env: { ...env, ...overrides },
+        timeoutSeconds: Math.min(timeout, remaining),
+      });
+    } catch (error) {
+      // The Windows Job runner refuses any failed command outright, so nothing here records
+      // whether that command's processes settled. The final census must not read as empty.
+      receiptless.push(label);
+      throw error;
+    }
     receipt.commands.push(result);
     await Bun.write(join(out, `command-${label}.json`), `${JSON.stringify(result, null, 2)}\n`);
     await writeReceipt(receipt);
@@ -568,11 +577,16 @@ export async function runNativeQualification(
   } catch (error) {
     receipt.validationErrors.push(`Final identity evidence: ${String(error)}`);
   }
-  const terminalErrors = receipt.commands.flatMap((command) =>
-    command.settlement.empty
-      ? []
-      : [`${command.label}: terminal census failed`, ...command.settlement.snapshotErrors]
-  );
+  const terminalErrors = [
+    ...receipt.commands.flatMap((command) =>
+      command.settlement.empty
+        ? []
+        : [`${command.label}: terminal census failed`, ...command.settlement.snapshotErrors]
+    ),
+    ...receiptless.map(
+      (label) => `${label}: no command receipt; expected observed terminal settlement`
+    ),
+  ];
   let survivors: NativeProcess[] = [];
   let unattributedCompilerHelpers: NativeProcess[] = [];
   try {

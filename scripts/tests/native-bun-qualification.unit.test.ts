@@ -128,6 +128,8 @@ class FakeNativeCommands {
   mutateSource = false;
   mutateArtifact = false;
   unobservedLabel: string | null = null;
+  /** A command whose runner fails before it can produce any receipt, as a refused Windows Job does. */
+  receiptlessLabel: string | null = null;
   sdkFeatures: Record<'runtime' | 'fake', readonly string[]> = {
     runtime: ['stdio'],
     fake: ['stdio', 'testing'],
@@ -136,6 +138,8 @@ class FakeNativeCommands {
 
   run = async (options: NativeCommandOptions): Promise<NativeCommandReceipt> => {
     this.calls.push(options);
+    if (options.label === this.receiptlessLabel)
+      throw new Error(`fixture runner refused ${options.label} evidence`);
     let content = '';
     if (options.label === 'bun-revision') content = '1.4.2+744846f84\n';
     if (options.label === 'rustc-version') content = 'rustc 1.99.0\n';
@@ -478,6 +482,26 @@ describe('full qualification receipts', () => {
     expect(fake.calls.filter((call) => call.label === 'test')).toHaveLength(1);
     expect(receipt.tests?.complete).toBe(true);
     expect(receipt.validationErrors.join('\n')).toContain('check: exit 1');
+  });
+
+  test('never reports an empty terminal census for a command that left no receipt', async () => {
+    const source = await checkout();
+    const fake = new FakeNativeCommands();
+    fake.receiptlessLabel = 'check';
+    const receipt = await runNativeQualification(source, {
+      runCommand: fake.run,
+      snapshotProcesses: emptyNativeCensus,
+    });
+    expect(receipt.status).toBe('validation-failed');
+    expect(receipt.commands.some((command) => command.label === 'check')).toBe(false);
+    expect(fake.calls.filter((call) => call.label === 'test')).toHaveLength(1);
+    expect(
+      receipt.terminal.empty,
+      `expected terminal census empty: false | received: ${receipt.terminal.empty} with errors ${JSON.stringify(receipt.terminal.errors)}`
+    ).toBe(false);
+    expect(receipt.terminal.errors).toEqual([
+      'check: no command receipt; expected observed terminal settlement',
+    ]);
   });
 
   test('requires an observed full-suite root while recording fast metadata scope honestly', async () => {
