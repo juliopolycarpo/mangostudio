@@ -4,6 +4,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import { NATIVE_BUILDS } from '../lib/native-bun-qualification-source';
+import {
+  NATIVE_WINDOWS_HELPER_PHASES,
+  nativeWindowsWrapperDeadlineMs,
+} from '../lib/native-bun-qualification-windows';
 import { readText } from './support/read-text';
 
 const HELPER = 'scripts/lib/native-windows-job.ps1';
@@ -149,5 +153,55 @@ describe('native Windows Job probe exit status', () => {
       'exit 0'
     );
     expect(probe.at(-2)).toBe("if ($receipt.status -ne 'passed') { exit 1 }");
+  });
+});
+
+describe('native Windows Job helper wrapper deadline', () => {
+  const helper = readText(HELPER);
+  const phases = NATIVE_WINDOWS_HELPER_PHASES;
+
+  // The wrapper is contained when its deadline passes, which discards the receipt. A command
+  // that ends at its cap still owes the helper every phase below before that receipt is final.
+  test('leaves a command ending at its cap time to finish its evidence', () => {
+    const request = { timeoutSeconds: 900, observationMs: 5_000 };
+    const owed =
+      phases.startupMs +
+      phases.censusCount * phases.censusTimeoutMs +
+      phases.ambiguityPassCount * phases.imageQueryBudgetMs +
+      phases.terminationWaitMs +
+      phases.postCleanupMs;
+    const expected = request.timeoutSeconds * 1_000 + request.observationMs + owed;
+    const received = nativeWindowsWrapperDeadlineMs(request);
+
+    expect(
+      received,
+      `expected wrapper deadline: ${expected}ms (cap + observation + ${owed}ms of helper phases) | received: ${received}ms`
+    ).toBe(expected);
+  });
+
+  // The helper only runs on Windows, so its timing is pinned here: a census, pass or wait added
+  // to it must be added to the wrapper's budget in the same change.
+  test('budgets every bounded phase the helper source runs', () => {
+    const count = (pattern: RegExp): number => [...helper.matchAll(pattern)].length;
+    const received = {
+      // The baseline, the two member-aware censuses, and the two around the final Job close.
+      censusCount:
+        count(/^\s+\$before = Get-NativeJobCensus; /gm) +
+        count(/^\s+\$receipt\.\w+Census = Get-NativeJobCensus @\(\$seen\.Values\)$/gm) +
+        count(/\$full = & \$Census \$CensusContext/g),
+      censusTimeoutMs: Number(/-OperationTimeoutSec (\d+)/.exec(helper)?.[1]) * 1_000,
+      ambiguityPassCount: count(/= @\(Find-NativeJobAmbiguity /g),
+      imageQueryBudgetMs: Number(/const int MaximumMilliseconds=(\d+);/.exec(helper)?.[1]),
+      terminationWaitMs: Number(
+        /\$child\.TerminateVerifiedMember\(\$member\.Identity, (\d+)\)/.exec(helper)?.[1]
+      ),
+      postCleanupMs: Number(/\$postTimer\.ElapsedMilliseconds -lt (\d+)/.exec(helper)?.[1]),
+    };
+    const { startupMs: _startupMs, ...expected } = phases;
+
+    expect(
+      received,
+      `expected helper phases: ${JSON.stringify(expected)} | received: ${JSON.stringify(received)}`
+    ).toEqual(expected);
   });
 });

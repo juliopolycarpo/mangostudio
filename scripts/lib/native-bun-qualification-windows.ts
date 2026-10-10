@@ -734,6 +734,50 @@ export function parseNativeWindowsJobReceipt(
   };
 }
 
+/**
+ * The bounded work `native-windows-job.ps1` does outside its command stopwatch. Its source is
+ * pinned to these values by `native-bun-qualification-powershell.unit.test.ts`.
+ */
+export const NATIVE_WINDOWS_HELPER_PHASES = {
+  /** PowerShell start, `Add-Type` compilation and the helper hash; the helper does not bound it. */
+  startupMs: 60_000,
+  /** Baseline, pre-cleanup, post-cleanup, final open-job and post-close censuses. */
+  censusCount: 5,
+  /** `Get-CimInstance -OperationTimeoutSec`. */
+  censusTimeoutMs: 10_000,
+  /** One ambiguity pass after every census but the baseline. */
+  ambiguityPassCount: 4,
+  /**
+   * `ImageQueryBudget.MaximumMilliseconds`, allowed once per ambiguity pass. The helper grants
+   * it per queried row, so this is an allowance for one slow row per pass, not a bound.
+   */
+  imageQueryBudgetMs: 10_000,
+  /** One `TerminateVerifiedMember` wait. The helper waits per eligible member, normally one. */
+  terminationWaitMs: 5_000,
+  /** The wait for an empty Job after cleanup. */
+  postCleanupMs: 5_000,
+} as const;
+
+/**
+ * How long the PowerShell wrapper may live before it is contained: the command's own cap and
+ * observation window, plus every bounded phase the helper runs outside its command stopwatch.
+ * @example setTimeout(contain, nativeWindowsWrapperDeadlineMs({ timeoutSeconds: 900, observationMs: 5000 }));
+ */
+export function nativeWindowsWrapperDeadlineMs(
+  request: Pick<NativeWindowsJobRequest, 'timeoutSeconds' | 'observationMs'>
+): number {
+  const phases = NATIVE_WINDOWS_HELPER_PHASES;
+  return (
+    request.timeoutSeconds * 1000 +
+    request.observationMs +
+    phases.startupMs +
+    phases.censusCount * phases.censusTimeoutMs +
+    phases.ambiguityPassCount * phases.imageQueryBudgetMs +
+    phases.terminationWaitMs +
+    phases.postCleanupMs
+  );
+}
+
 async function executeHelper(
   command: readonly string[],
   request: NativeWindowsJobRequest,
@@ -795,13 +839,10 @@ async function executeHelper(
       resolveUnclosed?.();
     }, 5000);
   };
-  const timer = setTimeout(
-    () => {
-      timedOut = true;
-      contain();
-    },
-    request.timeoutSeconds * 1000 + request.observationMs + 30000
-  );
+  const timer = setTimeout(() => {
+    timedOut = true;
+    contain();
+  }, nativeWindowsWrapperDeadlineMs(request));
   try {
     while (!closed) {
       await readOutput('stdout');
