@@ -102,7 +102,10 @@ export function parseNativeQualificationArgs(args: readonly string[]): NativeQua
   const values: Record<string, string> = {};
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
-    const [key, inline] = arg.split('=', 2);
+    // Only the first `=` separates the flag: `split('=', 2)` drops the rest of a path holding one.
+    const separator = arg.indexOf('=');
+    const key = separator === -1 ? arg : arg.slice(0, separator);
+    const inline = separator === -1 ? undefined : arg.slice(separator + 1);
     if (!['--root', '--out', '--sha'].includes(key) || values[key] !== undefined) {
       throw new Error(
         `Invalid argument ${JSON.stringify(arg)}; expected one --root, --out, or --sha`

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 import {
   nativeQualificationEnvironment,
@@ -270,6 +270,14 @@ describe('qualification inputs and seals', () => {
     expect(() =>
       parseNativeQualificationArgs(['--root', 'source', '--root', 'other', '--out', 'receipts'])
     ).toThrow('expected one --root');
+  });
+
+  test('keeps an inline path value whole when the path itself contains an equals sign', () => {
+    const parsed = parseNativeQualificationArgs(['--root=source=a', '--out=receipts=b=c']);
+    expect(
+      [parsed.root, parsed.out],
+      `expected inline values: source=a, receipts=b=c | received: ${parsed.root}, ${parsed.out}`
+    ).toEqual([resolve('source=a'), resolve('receipts=b=c')]);
   });
 
   test('clears inherited subset/cache/Cargo configuration while retaining PATH', () => {
