@@ -47,14 +47,15 @@ describe('test script', () => {
   test('runs root script tests through Turbo and keeps browser smoke outside', () => {
     const testScript = readText('scripts/test.ts');
 
-    expect(testScript).toContain("'//#test:scripts'");
+    expect(testScript).toContain('createRootScriptsCommand');
+    expect(readText('scripts/lib/test.ts')).toContain("'//#test:scripts'");
     expect(testScript).toContain("runCommand('e2e', [...BROWSER_SMOKE_TEST_COMMAND]");
     expect(testScript).not.toContain("createTurboTestCommand('test:e2e'");
   });
 
   test('declares env and cache boundaries for test lanes', () => {
     const testEnv = ['DATABASE_PATH', 'CI', 'MANGOSTUDIO_*'];
-    expect(turboConfig.tasks['test:unit']).toEqual({ env: testEnv });
+    expect(turboConfig.tasks['test:unit']).toEqual({ dependsOn: ['transit'], env: testEnv });
     expect(turboConfig.tasks['test:integration']).toEqual({ cache: false, env: testEnv });
     expect(turboConfig.tasks['test:coverage']).toEqual({
       cache: false,
@@ -78,8 +79,8 @@ describe('test script', () => {
 
   test('leaves the shared JUnit directory out of per-workspace outputs', () => {
     // Every workspace writes into one directory, so declaring it would have
-    // four tasks claiming the same glob — the overlap the typecheck task's own
-    // comment warns cross-contaminates a restored cache.
+    // four tasks claiming the same glob, and overlapping globs cross-contaminate
+    // a restored cache.
     for (const task of ['test:unit', 'test:integration', 'test:coverage']) {
       for (const output of turboConfig.tasks[task]?.outputs ?? []) {
         expect(output).not.toContain('junit');

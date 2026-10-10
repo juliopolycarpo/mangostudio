@@ -99,6 +99,8 @@ describe('classifyChangedPaths', () => {
     ['spec/fixtures/1/negotiation.json', true, true],
     ['scripts/tests/support/SHA256SUMS.sample', true, true],
     ['packages/protocol/src/testing/conformance.ts', true, true],
+    // The nextest parity step runs this script in the workspace job.
+    ['scripts/bench/rust-test-inventory.ts', true, true],
     ['apps/frontend/src/main.tsx', false, false],
     ['docs/reference/releasing.md', false, false],
     ['docs/protocol/conformance.md', false, false],

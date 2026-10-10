@@ -36,6 +36,7 @@
     "code-health": "knip --reporter markdown",
     "test": "bun ./scripts/test.ts",
     "test:scripts": "mkdir -p .mango/artifacts/junit && bun test --timeout 15000 --reporter=junit --reporter-outfile=.mango/artifacts/junit/root.xml $MANGOSTUDIO_BUN_TEST_ARGS scripts",
+    "test:scripts:workers": "bun ./scripts/run-test-workers.ts --lane=root -- bun test --timeout 15000 scripts",
     "test:e2e:setup": "bun ./scripts/test-e2e-setup.ts",
     "fix": "bun ./scripts/fix.ts",
     "verify": "bun ./scripts/verify.ts",

@@ -227,12 +227,15 @@ describe('protocol lane selection', () => {
   });
 
   test('the feature-powerset lane appears only when cargo-hack is installed', () => {
-    expect(labels(protocolCheckTasks(['--rs-only'], INSTALLED))).toContain(
-      'protocol:feature-powerset'
-    );
-    expect(
-      labels(protocolCheckTasks(['--rs-only'], { cargo: true, cargoHack: false }))
-    ).not.toContain('protocol:feature-powerset');
+    const powerset = (probe: ToolchainProbe): string[] =>
+      labels(protocolCheckTasks(['--rs-only'], probe)).filter((label) =>
+        label.startsWith('protocol:feature-powerset')
+      );
+    expect(powerset(INSTALLED)).toEqual([
+      'protocol:feature-powerset (1/2)',
+      'protocol:feature-powerset (2/2)',
+    ]);
+    expect(powerset({ cargo: true, cargoHack: false })).toEqual([]);
   });
 
   // Where CI runs each local protocol check. Every entry of `shimWorkspace` is one
@@ -244,7 +247,8 @@ describe('protocol lane selection', () => {
   const shimWorkspace: Record<string, string> = {
     'protocol:clippy':
       'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings',
-    'protocol:cargo-test': 'cargo test --workspace --all-targets --all-features --locked',
+    'protocol:cargo-test':
+      'cargo nextest run --workspace --all-targets --all-features --locked --retries 0',
     'protocol:cargo-test-doc': 'cargo test --doc --workspace --all-features --locked',
     'protocol:doc': 'cargo doc --no-deps --workspace --all-features --locked',
   };
@@ -268,9 +272,16 @@ describe('protocol lane selection', () => {
       ...protocolCheckTasks(['--rs-only'], INSTALLED),
       ...protocolTestTasks(['--rs-only'], [], INSTALLED),
     ];
-    const task = tasks.find((entry) => entry.label === label);
+    // The powerset runs as `<label> (<i>/<n>)` partitions: the same command plus
+    // `--partition <i>/<n>`, which protocol-powerset.unit.test.ts pins. CI is
+    // compared on the command itself.
+    const task = tasks.find(
+      (entry) => entry.label === label || entry.label.startsWith(`${label} (`)
+    );
     expect(task, label).toBeDefined();
-    const command = task?.cmd ?? [];
+    const whole = task?.cmd ?? [];
+    const slice = whole.indexOf('--partition');
+    const command = slice === -1 ? whole : [...whole.slice(0, slice), ...whole.slice(slice + 2)];
     const packageIndex = command.indexOf('-p');
     expect(packageIndex, `${label}: missing package selection`).toBeGreaterThan(0);
     expect(command[packageIndex + 1]).toBe('mango-protocol');
@@ -300,7 +311,9 @@ describe('protocol lane selection', () => {
       expect(
         readText('.github/workflows/rust-coverage.yml'),
         `${label}: expected rust-coverage to run the Ubuntu copy instrumented`
-      ).toContain(`cargo llvm-cov --no-report ${shimCommand.replace('cargo test ', '')}`);
+      ).toContain(
+        `cargo llvm-cov --no-report ${shimCommand.replace('cargo nextest run ', '').replace(' --retries 0', '')}`
+      );
       expect(
         protocolStep,
         `${label}: "${scoped}" duplicates cargo-shim; expected it only in cargo-shim`
@@ -424,7 +437,7 @@ describe('the protocol tree at the repository root', () => {
       files: string[];
     };
     // Nothing in the Turbo graph builds dist/ before a typecheck or a test lane
-    // (`typecheck` is dependsOn ["^typecheck"], the test lanes declare none), so
+    // (`typecheck` is dependsOn ["transit"], the test lanes declare none), so
     // a dist-pointing workspace link is unresolvable on a clean checkout.
     for (const [subpath, target] of Object.entries(manifest.exports)) {
       if (subpath === './package.json') continue;

@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
-import { extractJobBlock, extractJobBlocks, parseNeedsList } from './support/workflow-blocks';
+import {
+  extractJobBlock,
+  extractJobBlocks,
+  extractStepBlocks,
+  parseNeedsList,
+} from './support/workflow-blocks';
 
 // The sharded Test workflow has one failure mode that is silent by
 // construction: a run that covers a fraction of the files and exits 0. Every
@@ -63,10 +68,17 @@ describe('Test workflow shard matrix', () => {
   });
 
   test('only the first shard writes the shared turbo cache', () => {
-    // All eight resolve the same primary key; letting each save turns seven
-    // post-job steps into "cache already exists" warnings that read as a fault.
-    const saves = [...extractJobBlock(workflow, 'shard').matchAll(/mode: .*matrix\.shard == 1/g)];
-    expect(saves).toHaveLength(1);
+    // Every shard restores, so a save in each would upload eight copies of one
+    // snapshot, keyed apart only by the run.
+    const turboSteps = extractStepBlocks(extractJobBlock(workflow, 'shard')).filter((step) =>
+      step.includes('family: turbo')
+    );
+    const saves = turboSteps.filter((step) => /^\s+mode: save$/m.test(step));
+    expect(saves, `expected one turbo save step | received: ${saves.length}`).toHaveLength(1);
+    expect(saves[0]).toMatch(/if: success\(\) && matrix\.shard == 1/);
+    expect(turboSteps.filter((step) => !saves.includes(step))).toSatisfy((rest: string[]) =>
+      rest.every((step) => /^\s+mode: restore$/m.test(step))
+    );
   });
 });
 
@@ -181,7 +193,9 @@ describe('Test workflow shape', () => {
   test('leaves the Windows runtime slot tests to the cargo workspace matrix', () => {
     const cargo = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
     expect(cargo).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
-    expect(cargo).toContain('cargo test --workspace --all-targets --all-features --locked');
+    expect(cargo).toContain(
+      'cargo nextest run --workspace --all-targets --all-features --locked --retries 0'
+    );
     expect(workflow).not.toContain('windows-latest');
   });
 

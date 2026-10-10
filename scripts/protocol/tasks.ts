@@ -7,12 +7,29 @@
  * protocolCheckTasks(['--ts-only']).map((task) => task.label);
  */
 
+import { join } from 'node:path';
+import { TYPECHECK_TASK } from '../lib/check';
+import { ROOT_DIR } from '../lib/config';
+import { cargoTargetDir } from '../lib/runtime-build';
 import { hasCargo, hasCargoHack, warnNoCargo, warnNoCargoHack } from './toolchain';
+
+/**
+ * One slice of a command that is run as `count` slices at once. The command
+ * only counts as run when every slice from 1 to `count` ran and passed, which
+ * `run-tasks.ts` enforces.
+ */
+interface ProtocolPartition {
+  readonly group: string;
+  /** 1-based, so it reads the same as cargo-hack's `--partition <index>/<count>`. */
+  readonly index: number;
+  readonly count: number;
+}
 
 export interface ProtocolTask {
   readonly label: string;
   readonly cmd: string[];
   readonly env?: Record<string, string>;
+  readonly partition?: ProtocolPartition;
 }
 
 /**
@@ -92,7 +109,7 @@ function typescriptCheckTasks(tsOnly: boolean, cargo: boolean): ProtocolTask[] {
       cmd: [
         'turbo',
         'run',
-        'typecheck',
+        TYPECHECK_TASK,
         'circular',
         '--ui=stream',
         '--filter=@mangostudio/protocol',
@@ -123,19 +140,28 @@ function typescriptCheckTasks(tsOnly: boolean, cargo: boolean): ProtocolTask[] {
   ];
 }
 
-function rustCheckTasks(format: boolean, cargoHack: boolean): ProtocolTask[] {
-  const tasks: ProtocolTask[] = [];
-  if (format)
-    tasks.push({ label: 'protocol:rustfmt', cmd: ['cargo', 'fmt', '--all', '--', '--check'] });
-  tasks.push({ label: 'protocol:clippy', cmd: [...CARGO_CLIPPY] });
-  tasks.push({
-    label: 'protocol:doc',
-    cmd: ['cargo', 'doc', '-p', 'mango-protocol', '--no-deps', '--all-features', '--locked'],
-    env: { RUSTDOCFLAGS: '-D warnings' },
-  });
-  if (cargoHack) {
-    tasks.push({
-      label: 'protocol:feature-powerset',
+/** The label the partitioned feature-powerset run is reported under. */
+const FEATURE_POWERSET_LABEL = 'protocol:feature-powerset';
+
+/** How many slices the feature powerset is cut into, each with a target directory of its own. */
+const FEATURE_POWERSET_PARTITIONS = 2;
+
+/**
+ * The feature powerset as `FEATURE_POWERSET_PARTITIONS` disjoint cargo-hack
+ * partitions that run at the same time. Each builds into its own directory under
+ * `targetRoot`: partitions sharing one target queue on its build-directory lock
+ * and finish barely sooner than the single command did.
+ *
+ * @example
+ * featurePowersetTasks('/repo/target').map((task) => task.env?.CARGO_TARGET_DIR);
+ * // → ['/repo/target/protocol-powerset-1', '/repo/target/protocol-powerset-2']
+ */
+function featurePowersetTasks(targetRoot: string): ProtocolTask[] {
+  const count = FEATURE_POWERSET_PARTITIONS;
+  return Array.from({ length: count }, (_, slot) => {
+    const index = slot + 1;
+    return {
+      label: `${FEATURE_POWERSET_LABEL} (${index}/${count})`,
       cmd: [
         'cargo',
         'hack',
@@ -145,12 +171,29 @@ function rustCheckTasks(format: boolean, cargoHack: boolean): ProtocolTask[] {
         '--feature-powerset',
         '--all-targets',
         '--locked',
+        '--partition',
+        `${index}/${count}`,
         '--',
         '-D',
         'warnings',
       ],
-    });
-  }
+      env: { CARGO_TARGET_DIR: join(targetRoot, `protocol-powerset-${index}`) },
+      partition: { group: FEATURE_POWERSET_LABEL, index, count },
+    };
+  });
+}
+
+function rustCheckTasks(format: boolean, cargoHack: boolean, targetRoot: string): ProtocolTask[] {
+  const tasks: ProtocolTask[] = [];
+  if (format)
+    tasks.push({ label: 'protocol:rustfmt', cmd: ['cargo', 'fmt', '--all', '--', '--check'] });
+  tasks.push({ label: 'protocol:clippy', cmd: [...CARGO_CLIPPY] });
+  tasks.push({
+    label: 'protocol:doc',
+    cmd: ['cargo', 'doc', '-p', 'mango-protocol', '--no-deps', '--all-features', '--locked'],
+    env: { RUSTDOCFLAGS: '-D warnings' },
+  });
+  if (cargoHack) tasks.push(...featurePowersetTasks(targetRoot));
   return tasks;
 }
 
@@ -159,13 +202,17 @@ function rustCheckTasks(format: boolean, cargoHack: boolean): ProtocolTask[] {
  * with a warning when no toolchain is present, so a contributor without Cargo
  * still gets the TypeScript half rather than a failure — unless `--rs-only`
  * asked for that half alone, which is refused rather than passing on nothing.
+ * `targetRoot` is where the feature-powerset partitions put their own Cargo
+ * target directories; it defaults to the checkout's (`CARGO_TARGET_DIR` or
+ * `target/`).
  *
  * @example
  * protocolCheckTasks([]).map((task) => task.label);
  */
 export function protocolCheckTasks(
   args: readonly string[],
-  probe: ToolchainProbe = probeToolchain()
+  probe: ToolchainProbe = probeToolchain(),
+  targetRoot: string = cargoTargetDir(ROOT_DIR, process.env)
 ): ProtocolTask[] {
   const { typescript, rust, format } = selectLanes(args);
   const { cargo, cargoHack } = probe;
@@ -181,7 +228,7 @@ export function protocolCheckTasks(
   }
 
   if (!cargoHack) warnNoCargoHack();
-  tasks.push(...rustCheckTasks(format, cargoHack));
+  tasks.push(...rustCheckTasks(format, cargoHack, targetRoot));
   // The round trip drives the Rust decoder from the TypeScript encoder, so it
   // belongs to neither half alone and is skipped whenever one was narrowed out.
   if (typescript) {

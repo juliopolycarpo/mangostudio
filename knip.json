@@ -11,7 +11,6 @@
         "scripts/bench/runtime-handshake.ts",
         "scripts/bench/grep.ts",
         "scripts/bench/library-walk.ts",
-        "scripts/bench/rust-test-inventory.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,native-bun-qualification,verify-cross-runtimes}.ts",
         "scripts/examples/external-api-smoke.ts",
         "scripts/protocol/*.test.ts",
@@ -23,7 +22,8 @@
         "scripts/qa-gate/{collect,collect-test-metrics,render-coverage-summary,render-report}.ts",
         "scripts/release/*.sh",
         "scripts/release/{archive-assets,bundle-distribution,distribution-manifest,extract-distribution,fill-dry-run-checksums,pack-npm,prepare-release,publish-npm,push-dist-repo,stage-docker-ctx,update-homebrew,update-scoop,verify-checksum}.ts",
-        "scripts/tests/**/*.test.ts"
+        "scripts/tests/**/*.test.ts",
+        "scripts/tests/support/fake-smoke-server.ts"
       ],
       "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"]
     },

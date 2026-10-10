@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { GitBatchStateRequest, GitSummary } from '@mangostudio/shared/git';
 import { useQuery } from '@tanstack/react-query';
 import type * as ApiClient from '@/lib/api-client';
-import { act, renderHook, waitFor } from '../../support/harness/render';
+import { act, flushAsyncRender, renderHook, waitFor } from '../../support/harness/render';
 
 const mockBatch = jest.fn();
 const mockCommit = jest.fn();
@@ -58,6 +58,7 @@ describe('useBatchedGitSummaries', () => {
 
     const { result } = renderHook(() => useBatchedGitSummaries(['b', 'a', 'null-c']));
 
+    await flushAsyncRender();
     await waitFor(() => expect(Object.keys(result.current)).toHaveLength(3));
     expect(mockBatch).toHaveBeenCalledTimes(1);
     expect(mockBatch).toHaveBeenCalledWith({ chatIds: ['a', 'b', 'null-c'] });
@@ -75,6 +76,7 @@ describe('useBatchedGitSummaries', () => {
 
     const { result } = renderHook(() => useBatchedGitSummaries(chatIds));
 
+    await flushAsyncRender();
     await waitFor(() => expect(Object.keys(result.current)).toHaveLength(60));
     expect(mockBatch).toHaveBeenCalledTimes(2);
     const requested = mockBatch.mock.calls.map(
@@ -92,6 +94,7 @@ describe('useBatchedGitSummaries', () => {
       { initialProps: { chatIds: ['b', 'a'] } }
     );
 
+    await flushAsyncRender();
     await waitFor(() => expect(Object.keys(result.current)).toHaveLength(2));
     const first = result.current;
 
@@ -124,6 +127,7 @@ describe('useBatchedGitSummaries', () => {
       { initialProps: { ids: chatIds as readonly string[] } }
     );
 
+    await flushAsyncRender();
     await waitFor(() => expect(Object.keys(result.current)).toHaveLength(2));
     const settled = reads;
     rerender({ ids: chatIds });
@@ -140,9 +144,11 @@ describe('useBatchedGitSummaries', () => {
       { initialProps: { chatIds: ['a'] } }
     );
 
+    await flushAsyncRender();
     await waitFor(() => expect(result.current.a).toEqual(summaryFor('a')));
     rerender({ chatIds: ['a', 'b'] });
 
+    await flushAsyncRender();
     await waitFor(() => expect(result.current.b).toEqual(summaryFor('b')));
     expect(mockBatch).toHaveBeenLastCalledWith({ chatIds: ['a', 'b'] });
   });
@@ -152,6 +158,7 @@ describe('useBatchedGitSummaries', () => {
 
     const { result } = renderHook(() => useBatchedGitSummaries(['chat-1', 'chat-2']));
 
+    await flushAsyncRender();
     await waitFor(() => expect(Object.keys(result.current)).toHaveLength(2));
     expect(result.current['chat-1']).toBeNull();
     expect(result.current['chat-2']).toBeNull();
@@ -180,6 +187,7 @@ describe('useBatchedGitSummaries', () => {
       return { summaries, commit: useCommit('chat-1') };
     });
 
+    await flushAsyncRender();
     await waitFor(() => expect(result.current.summaries['chat-1']).toEqual(summaryFor('chat-1')));
     expect(mockBatch).toHaveBeenCalledTimes(1);
 

@@ -167,6 +167,29 @@ export function changedTestArg(base: string): string {
   return `--changed=${base}`;
 }
 
+/** The phase of `bun run test` that runs the root scripts lane: the plain unit phase or the coverage phase. */
+export type RootScriptsPhase = 'unit' | 'coverage';
+
+/**
+ * The Turbo command that runs the root scripts lane in a phase, scoped with
+ * `--changed=<base>` when a base is given. `--log-order=stream` for the same
+ * reason `createTurboTestCommand` carries it: this lane runs concurrently with
+ * the workspace fan-out inside the same watchdogged CI step.
+ *
+ * Both phases run the same tests. The coverage phase runs `//#test:scripts`, one
+ * `bun test` that writes `.mango/artifacts/junit/root.xml`, the evidence the QA
+ * gate and the shard merge read. The unit phase runs the worker-split task.
+ * // Usage: runCommand('root:test:scripts', createRootScriptsCommand('unit', null), opts);
+ */
+export function createRootScriptsCommand(
+  phase: RootScriptsPhase,
+  changedBase: string | null
+): string[] {
+  const task = phase === 'unit' ? '//#test:scripts:workers' : '//#test:scripts';
+  const command = ['turbo', 'run', task, '--ui=stream', '--log-order=stream'];
+  return changedBase === null ? command : [...command, '--', changedTestArg(changedBase)];
+}
+
 /**
  * The Turbo commands that run one test task for the planned workspace lanes:
  * one scoped with `--changed=<base>` for the lanes Bun can select for, one

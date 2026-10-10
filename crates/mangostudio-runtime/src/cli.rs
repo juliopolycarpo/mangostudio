@@ -33,22 +33,6 @@ use crate::transport::connect::RandomJitter;
 #[path = "cli/native_operation.rs"]
 mod native_operation;
 
-/// The release this binary reports: `--version`, the handshake's peer
-/// version, and every health payload.
-///
-/// `scripts/build.ts` stamps the distribution's release version in at compile
-/// time through `MANGOSTUDIO_RELEASE_VERSION`, because a canary or dry-run
-/// build carries a version (`0.0.0-dryrun`, `<x>-canary.<sha>`) the committed
-/// manifest never does, and the hub refuses a sibling runtime whose release
-/// differs from its own. A plain `cargo build` falls back to the manifest
-/// version, which `bun run check:versions` keeps in lockstep with the app.
-/// This is a compile-time stamp, not host configuration: nothing reads it
-/// from the process environment at run time.
-const VERSION: &str = match option_env!("MANGOSTUDIO_RELEASE_VERSION") {
-    Some(version) => version,
-    None => env!("CARGO_PKG_VERSION"),
-};
-
 const USAGE: &str = "mangostudio-runtime {VERSION}\n\
 \n\
 Usage: mangostudio-runtime <command> [options]\n\
@@ -500,8 +484,8 @@ fn parse_connect(args: &[String]) -> Invocation {
     Invocation::Connect(ConnectArgs { hub, token_source })
 }
 
-/// Runs the CLI over `args` (excluding `argv[0]`), reading environment
-/// variables from `env`, and returns the process exit code.
+/// Runs the CLI over `args` (excluding `argv[0]`) with the manifest version,
+/// reading environment variables from `env`, and returns the process exit code.
 ///
 /// `env` is threaded through explicitly, the same way [`RuntimeConfig`]
 /// itself takes an [`EnvSource`] — every disk path this module touches
@@ -519,49 +503,78 @@ fn parse_connect(args: &[String]) -> Invocation {
 /// ```
 #[must_use]
 pub fn run(args: &[String], env: &impl EnvSource) -> i32 {
+    run_with_version(args, env, env!("CARGO_PKG_VERSION"))
+}
+
+/// Runs the CLI like [`run`], reporting `version` as the release instead of
+/// the manifest version.
+///
+/// `version` is what `--version`, the help header, the handshake's peer
+/// version and every health payload report. The process entry point
+/// (`src/main.rs`) owns the compile-time `MANGOSTUDIO_RELEASE_VERSION` stamp
+/// and passes it here, so a stamp change recompiles the binary and leaves this
+/// library untouched. `tests/release_stamp_boundary.rs` keeps it that way.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::cli::run_with_version;
+/// use mangostudio_runtime::config::MapEnv;
+///
+/// assert_eq!(run_with_version(&["--version".into()], &MapEnv::default(), "1.2.3"), 0);
+/// ```
+#[must_use]
+pub fn run_with_version(args: &[String], env: &impl EnvSource, version: &str) -> i32 {
     match parse(args) {
         Invocation::Version => {
             // The bare version, the same line the TypeScript runtime prints:
             // the hub's doctor probe and the WSL/SSH provisioning checks
             // compare `--version` stdout to a release string verbatim.
-            println!("{VERSION}");
+            println!("{version}");
             0
         }
         Invocation::Help | Invocation::Empty => {
-            print_help();
+            print_help(version);
             0
         }
         Invocation::Unknown(argument) => {
             eprintln!("mangostudio-runtime: unrecognised argument \"{argument}\"");
             eprintln!();
-            print_help();
+            print_help(version);
             1
         }
         Invocation::Invalid(reason) => {
             eprintln!("mangostudio-runtime: {reason}");
             1
         }
-        Invocation::Setup(args) => run_setup(args, env),
-        Invocation::Install(args) => native_operation::run_install(args, env, VERSION),
-        Invocation::Health { json } => native_operation::run_health(json, env, VERSION),
-        Invocation::Doctor { json } => native_operation::run_doctor(json, env, VERSION),
+        Invocation::Setup(args) => run_setup(args, env, version),
+        Invocation::Install(args) => native_operation::run_install(args, env, version),
+        Invocation::Health { json } => native_operation::run_health(json, env, version),
+        Invocation::Doctor { json } => native_operation::run_doctor(json, env, version),
         Invocation::Service(args) => native_operation::run_service(args, env),
         Invocation::Audit(args) => native_operation::run_audit(args, env),
-        Invocation::Stdio => run_stdio(env),
-        Invocation::Serve(args) => run_serve(args, env),
-        Invocation::Connect(args) => run_connect(args, env),
+        Invocation::Stdio => run_stdio(env, version),
+        Invocation::Serve(args) => run_serve(args, env, version),
+        Invocation::Connect(args) => run_connect(args, env, version),
     }
 }
 
-fn print_help() {
-    println!("{}", USAGE.replace("{VERSION}", VERSION));
+/// The usage text, headed by `version`.
+///
+/// Usage: `help_text("1.2.3")` starts with `mangostudio-runtime 1.2.3\n`.
+fn help_text(version: &str) -> String {
+    USAGE.replace("{VERSION}", version)
+}
+
+fn print_help(version: &str) {
+    println!("{}", help_text(version));
 }
 
 fn mango_home(env: &impl EnvSource) -> std::io::Result<PathBuf> {
     RuntimeConfig::from_env(env).map(|config| config.mango_home)
 }
 
-fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
+fn run_setup(args: SetupArgs, env: &impl EnvSource, version: &str) -> i32 {
     let config = match RuntimeConfig::from_env(env) {
         Ok(config) => config,
         Err(error) => {
@@ -608,14 +621,14 @@ fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
                     crate::runtime_home::resolve_runtime_source_for_current_exe(&home)
                 )),
             ),
-            ("version", Some(serde_json::json!(VERSION))),
+            ("version", Some(serde_json::json!(version))),
         ];
         match write_runtime_slot_config(slot, &home, &updates) {
             Ok(outcome) => report_replaced_unusable(outcome.replaced_unusable.as_ref()),
             Err(error) => return setup_fail(args.json, &error.to_string()),
         }
         if args.json {
-            return setup_health_json(slot, &home);
+            return setup_health_json(slot, &home, version);
         }
         println!(
             "Audit {} for the {slot} runtime.\n  {}",
@@ -648,7 +661,7 @@ fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
         Ok(outcome) => {
             report_replaced_unusable(outcome.replaced_unusable.as_ref());
             if args.json {
-                return setup_health_json(slot, &home);
+                return setup_health_json(slot, &home, version);
             }
             println!(
                 "Configured the {slot} runtime as {}.",
@@ -660,8 +673,8 @@ fn run_setup(args: SetupArgs, env: &impl EnvSource) -> i32 {
     }
 }
 
-fn setup_health_json(slot: RuntimeSlot, home: &std::path::Path) -> i32 {
-    match native_operation::health_value_for(slot, home, VERSION) {
+fn setup_health_json(slot: RuntimeSlot, home: &std::path::Path, version: &str) -> i32 {
+    match native_operation::health_value_for(slot, home, version) {
         Ok(report) => {
             println!("{report}");
             0
@@ -792,7 +805,7 @@ async fn settle_installer_until(
     }
 }
 
-fn run_stdio(env: &impl EnvSource) -> i32 {
+fn run_stdio(env: &impl EnvSource, version: &str) -> i32 {
     let Some(home) = mango_home_or_report(env) else {
         return 1;
     };
@@ -809,7 +822,7 @@ fn run_stdio(env: &impl EnvSource) -> i32 {
         return 1;
     };
     let result = runtime.block_on(crate::transport::stdio::run_with_signals(
-        VERSION, &home, signals,
+        version, &home, signals,
     ));
     shut_down(runtime);
     match result {
@@ -821,7 +834,7 @@ fn run_stdio(env: &impl EnvSource) -> i32 {
     }
 }
 
-fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
+fn run_serve(args: ServeArgs, env: &impl EnvSource, version: &str) -> i32 {
     let Some(home) = mango_home_or_report(env) else {
         return 1;
     };
@@ -868,7 +881,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
         return 1;
     }
 
-    if !remote_invocation_consent(&home) {
+    if !remote_invocation_consent(&home, version) {
         return 1;
     }
 
@@ -946,7 +959,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
             token,
             slot: RuntimeSlot::Remote,
             mango_home: home,
-            runtime_version: VERSION.to_string(),
+            runtime_version: version.to_string(),
         };
         let code =
             match crate::transport::serve::run_with_restart(listen, cancel, restart.clone(), log)
@@ -978,7 +991,7 @@ fn run_serve(args: ServeArgs, env: &impl EnvSource) -> i32 {
     code
 }
 
-fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
+fn run_connect(args: ConnectArgs, env: &impl EnvSource, version: &str) -> i32 {
     let Some(home) = mango_home_or_report(env) else {
         return 1;
     };
@@ -1009,7 +1022,7 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
         return 1;
     };
 
-    if !remote_invocation_consent(&home) {
+    if !remote_invocation_consent(&home, version) {
         return 1;
     }
 
@@ -1068,7 +1081,7 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
             token,
             slot: RuntimeSlot::Remote,
             mango_home: home,
-            runtime_version: VERSION.to_string(),
+            runtime_version: version.to_string(),
         };
         let restart = crate::transport::UpdateRestart::for_current_exe(&config.mango_home);
         match crate::transport::connect::run_with_restart(config, cancel, restart, &jitter, log)
@@ -1104,8 +1117,8 @@ fn run_connect(args: ConnectArgs, env: &impl EnvSource) -> i32 {
 /// The remote slot's "invocation is consent" gate shared by `serve` and
 /// `connect`: reports a refusal or a freshly recorded grant on stderr and
 /// returns whether this invocation may serve.
-fn remote_invocation_consent(home: &std::path::Path) -> bool {
-    let consent = consent_by_invocation(RuntimeSlot::Remote, home, VERSION, &SystemWallClock);
+fn remote_invocation_consent(home: &std::path::Path, version: &str) -> bool {
+    let consent = consent_by_invocation(RuntimeSlot::Remote, home, version, &SystemWallClock);
     report_replaced_unusable(consent.replaced_unusable.as_ref());
     if !consent.granted {
         if let Some(reason) = &consent.reason {
@@ -1241,8 +1254,8 @@ fn parse_listen_address(value: &str) -> Option<SocketAddr> {
 #[cfg(test)]
 mod tests {
     use super::{
-        InstallArgs, Invocation, ServiceAction, ServiceMode, TokenSource, parse,
-        parse_listen_address, parse_token_source, run,
+        InstallArgs, Invocation, ServiceAction, ServiceMode, TokenSource, help_text, parse,
+        parse_listen_address, parse_token_source, run, run_with_version,
     };
     use crate::config::MapEnv;
     use crate::runtime_home::RuntimeSlot;
@@ -1545,6 +1558,81 @@ mod tests {
         assert_eq!(after["allow"], before["allow"]);
         assert_eq!(after["audit"]["enabled"], false);
         assert_eq!(after["setup"], before["setup"]);
+    }
+
+    /// A release no manifest ever carries, so a read of `CARGO_PKG_VERSION`
+    /// instead of the injected value cannot match it by accident.
+    const INJECTED: &str = "9.8.7-injected";
+
+    #[test]
+    fn the_help_header_names_the_injected_version() {
+        let help = help_text(INJECTED);
+        let header = format!("mangostudio-runtime {INJECTED}\n");
+        assert!(
+            help.starts_with(&header),
+            "expected help header: {header:?} | received: {:?}",
+            help.lines().next()
+        );
+    }
+
+    #[test]
+    fn audit_only_setup_stores_the_injected_version_and_keeps_the_answer() {
+        let (home, env) = scratch_env("injected-version-audit");
+        assert_eq!(
+            run(
+                &[
+                    "setup".into(),
+                    "--slot".into(),
+                    "remote".into(),
+                    "--profile".into(),
+                    "readonly".into()
+                ],
+                &env,
+            ),
+            0,
+        );
+        let before = crate::runtime_home::read_runtime_slot_config(RuntimeSlot::Remote, &home)
+            .stored
+            .expect("setup wrote the scratch slot");
+        assert_eq!(
+            run_with_version(
+                &[
+                    "setup".into(),
+                    "--slot".into(),
+                    "remote".into(),
+                    "--audit".into(),
+                    "off".into(),
+                    "--yes".into()
+                ],
+                &env,
+                INJECTED,
+            ),
+            0,
+        );
+        let stored = crate::runtime_home::read_runtime_slot_config(RuntimeSlot::Remote, &home)
+            .stored
+            .expect("setup wrote the scratch slot");
+        assert!(
+            stored["version"] == INJECTED,
+            "expected audit-only setup version: {INJECTED} | received: {}",
+            stored["version"]
+        );
+        assert_eq!(stored["allow"], before["allow"]);
+        assert_eq!(stored["setup"], before["setup"]);
+    }
+
+    #[test]
+    fn remote_invocation_consent_records_the_injected_version() {
+        let (home, _env) = scratch_env("injected-version-consent");
+        assert!(super::remote_invocation_consent(&home, INJECTED));
+        let stored = crate::runtime_home::read_runtime_slot_config(RuntimeSlot::Remote, &home)
+            .stored
+            .expect("remote invocation wrote the scratch slot");
+        assert!(
+            stored["version"] == INJECTED,
+            "expected consent-recorded version: {INJECTED} | received: {}",
+            stored["version"]
+        );
     }
 
     #[test]

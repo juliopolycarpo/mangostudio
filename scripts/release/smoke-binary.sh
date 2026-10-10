@@ -69,6 +69,9 @@ printf 'console.log("%s")\n' "$stale_sentinel" >"${staging_dir}/public/assets/in
 
 native_tmp_home="$(to_native_path "$tmp_home")"
 
+# `exec` makes the subshell become the server, so $! below is the server's own
+# PID. Without it $! names the subshell, cleanup() signals only that, and the
+# server outlives the helper.
 (
   cd "$staging_dir"
   HOME="$native_tmp_home" \
@@ -78,7 +81,7 @@ native_tmp_home="$(to_native_path "$tmp_home")"
     API_PORT="$port" \
     BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-smoke-test-secret-at-least-32-characters-long}" \
     GEMINI_API_KEY="${GEMINI_API_KEY:-dummy}" \
-    "$staged_binary" serve "127.0.0.1:${port}" >"$server_log" 2>&1
+    exec "$staged_binary" serve "127.0.0.1:${port}" >"$server_log" 2>&1
 ) &
 server_pid="$!"
 

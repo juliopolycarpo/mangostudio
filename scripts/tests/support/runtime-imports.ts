@@ -95,7 +95,9 @@ export function walkRuntimeImports(entryRelativePath: string): RuntimeImportWalk
     const source = stripComments(readFileSync(filePath, 'utf8'));
 
     function visitSpecifier(specifier: string): void {
-      if (specifier.startsWith('node:') || specifier === 'bun') {
+      // Runtime builtins ship inside the executable: `node:*`, `bun` and `bun:*`
+      // (`bun:ffi`, `bun:sqlite`), never a package a `--no-install` job lacks.
+      if (specifier.startsWith('node:') || specifier === 'bun' || specifier.startsWith('bun:')) {
         return;
       }
       if (specifier.startsWith('.')) {

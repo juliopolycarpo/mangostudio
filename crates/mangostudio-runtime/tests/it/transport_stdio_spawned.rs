@@ -51,6 +51,13 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
         .expect("the handshake succeeds");
     assert_eq!(remote.peer.name, "mangostudio-runtime");
     assert_eq!(remote.peer.role, "runtime");
+    let health = tokio::time::timeout(
+        Duration::from_secs(10),
+        session.request("runtime.health", serde_json::json!({})),
+    )
+    .await
+    .expect("the child must answer health within the timeout")
+    .expect("the stamped runtime serves health");
     assert!(launched.pid().is_some());
 
     // Release cleanly: the hub side closes, the child exits 0 (see the
@@ -59,6 +66,13 @@ async fn a_spawned_stdio_child_completes_the_handshake_over_real_pipes() {
         .close(close_codes::RELEASED, Some("test done"))
         .await;
     let _ = driver.await;
+    super::cli::assert_all_report_stamp(&[
+        ("stdio hello peer", &remote.peer.version),
+        (
+            "stdio runtime.health runtimeVersion",
+            &super::cli::runtime_version_of(&health),
+        ),
+    ]);
 }
 
 /// A hub one wire minor behind still drives the runtime: the handshake runs
