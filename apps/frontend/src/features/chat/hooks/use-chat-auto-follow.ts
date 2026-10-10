@@ -1,4 +1,5 @@
-import type { GeneratedImagePart, Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
+import type { GeneratedImagePart } from '@mangostudio/shared/types';
 import type { RefObject, UIEvent } from 'react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 

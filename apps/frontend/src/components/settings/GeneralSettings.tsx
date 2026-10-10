@@ -1,4 +1,3 @@
-import type { ModelOption } from '@mangostudio/shared';
 import type {
   ChatTitleSettings,
   ChatTitleStrategy,
@@ -10,6 +9,7 @@ import {
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
 } from '@mangostudio/shared/app-settings';
+import type { ModelOption } from '@mangostudio/shared/catalog';
 import type { Locale } from '@mangostudio/shared/i18n';
 import {
   CHAT_SIDEBAR_WIDTH_DEFAULT,

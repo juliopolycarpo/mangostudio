@@ -2,12 +2,12 @@
  * Connector API mutation functions.
  */
 
-import type { Connector } from '@mangostudio/shared';
 import type {
   ChatGptOAuthStatus,
   ChatGptUsageHistoryResponse,
   ChatGptUsageStatsResponse,
   ChatGptUsageWindowKey,
+  Connector,
   RedeemChatGptResetCreditResponse,
   StartChatGptOAuthBody,
   StartChatGptOAuthResponse,

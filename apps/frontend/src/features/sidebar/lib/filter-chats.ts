@@ -4,7 +4,7 @@
  * filtering is a pure pass over it.
  */
 
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import { workdirBasename } from '@/lib/paths';
 
 /**

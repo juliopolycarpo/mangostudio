@@ -5,12 +5,12 @@
  * is still streaming.
  */
 
-import type { MessagePart } from '@mangostudio/shared';
 import type {
   McpElicitationField,
   McpElicitationStatus,
   RespondMcpElicitationBody,
 } from '@mangostudio/shared/mcp';
+import type { MessagePart } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, CircleHelp } from 'lucide-react';
 import { useState } from 'react';

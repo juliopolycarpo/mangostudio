@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "ignoreUnknown": true,
@@ -43,13 +43,25 @@
           "options": { "inputComponents": ["Checkbox", "Input", "Select", "Toggle"] }
         }
       },
-      "nursery": { "useAwaitThenable": "off" },
+      "nursery": { "useAwaitThenable": "off", "noSelfImport": "error" },
       "performance": { "noDelete": "warn" },
       "style": {
         "noNestedTernary": "off",
-        "useBlockStatements": "off"
+        "useBlockStatements": "off",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@mangostudio/shared": {
+                "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
+              }
+            }
+          }
+        }
       },
-      "suspicious": {}
+      "suspicious": {
+        "noImportCycles": { "level": "error", "options": { "ignoreTypes": false } }
+      }
     }
   },
   "javascript": {
@@ -119,6 +131,9 @@
                   },
                   "@mangostudio/shared/i18n/pt-BR": {
                     "message": "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()."
+                  },
+                  "@mangostudio/shared": {
+                    "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
                   }
                 }
               }
@@ -177,7 +192,22 @@
         "apps/frontend/src/lib/locale-dictionaries.ts",
         "apps/frontend/tests/**/*.{ts,tsx}"
       ],
-      "linter": { "rules": { "style": { "noRestrictedImports": "off" } } }
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@mangostudio/shared": {
+                    "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     },
     {
       "includes": [
@@ -220,6 +250,74 @@
             "noCommentText": "error",
             "noReactForwardRef": "warn",
             "noSuspiciousSemicolonInJsx": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/frontend/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+        "!apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@mangostudio/shared": {
+                    "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
+                  },
+                  "@mangostudio/shared/i18n": {
+                    "allowImportNames": ["Locale", "Messages", "defaultLocale"],
+                    "message": "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests."
+                  },
+                  "@mangostudio/shared/i18n/en": {
+                    "message": "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()."
+                  },
+                  "@mangostudio/shared/i18n/pt-BR": {
+                    "message": "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()."
+                  }
+                },
+                "patterns": [
+                  {
+                    "group": ["@mangostudio/api/internal/**"],
+                    "message": "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "apps/frontend/src/hooks/use-i18n.tsx",
+        "apps/frontend/src/lib/locale-dictionaries.ts",
+        "apps/frontend/tests/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+        "!apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@mangostudio/shared": {
+                    "message": "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath."
+                  }
+                },
+                "patterns": [
+                  {
+                    "group": ["@mangostudio/api/internal/**"],
+                    "message": "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere."
+                  }
+                ]
+              }
+            }
           }
         }
       }

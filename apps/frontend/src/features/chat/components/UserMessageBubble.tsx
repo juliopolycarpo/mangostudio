@@ -1,4 +1,4 @@
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { FileText, Image, ImageOff } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';

@@ -1,0 +1,7 @@
+{
+  "name": "@mangostudio/bun-host-peer",
+  "version": "1.4.2",
+  "private": true,
+  "description": "Metadata for the externally installed Bun toolchain, satisfying the Tailwind plugin peer without downloading a registry runtime.",
+  "exports": {}
+}

@@ -1,4 +1,4 @@
-import type { Connector } from '@mangostudio/shared';
+import type { Connector } from '@mangostudio/shared/connectors';
 import { Card } from '@/components/ui/Card';
 import { ChatGptResetCreditAction } from '@/features/settings/connectors/components/ChatGptResetCreditAction';
 import { ChatGptResetCreditList } from '@/features/settings/connectors/components/ChatGptResetCreditList';

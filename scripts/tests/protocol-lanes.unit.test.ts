@@ -156,6 +156,14 @@ describe('protocol lane selection', () => {
   });
 
   test('the --ts-only check lane still typechecks, verifies the spec and the fixtures', () => {
+    expect(protocolCheckTasks(['--ts-only'])[0]?.cmd).toEqual([
+      'turbo',
+      'run',
+      'check:quick',
+      'typecheck',
+      '--ui=stream',
+      '--filter=@mangostudio/protocol',
+    ]);
     expect(labels(protocolCheckTasks(['--ts-only']))).toEqual([
       'protocol:workspace',
       'protocol:versions',

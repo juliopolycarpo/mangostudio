@@ -91,7 +91,7 @@ type LinkedPackage = WorkspaceName | 'protocol';
  * manifests and fails if this table drifts from them.
  */
 export const CHANGED_LANE_DEPENDENCIES: Readonly<Record<ChangedLane, readonly LinkedPackage[]>> = {
-  root: ['shared', 'protocol'],
+  root: ['api', 'shared', 'protocol'],
   shared: ['protocol'],
   api: ['shared', 'protocol'],
   frontend: ['api', 'shared', 'protocol'],

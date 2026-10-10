@@ -1,4 +1,5 @@
-import type { ModelCatalogResponse, ModelOption, ProviderType } from '@mangostudio/shared';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
+import type { ProviderType } from '@mangostudio/shared/types';
 import { Activity, Check, ChevronDown, Cpu, Lock, Sparkles, Zap } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';

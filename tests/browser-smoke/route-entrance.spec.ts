@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { dismissWorkdirPicker } from './support/workdir-picker';
+import { observeMotionNodes, readMotionObservations } from './support/motion-observer';
 
 /**
  * The authenticated layout's route container, in a real browser: the first
@@ -13,40 +13,14 @@ import { dismissWorkdirPicker } from './support/workdir-picker';
  * and a settled entrance starts at 1.
  */
 
-type RouteContainerEntry = { path: string; opacity: number };
-
-declare global {
-  interface Window {
-    __routeContainerEntries?: RouteContainerEntry[];
-  }
-}
-
 const ROUTE_CONTAINER = '[data-testid="route-container"]';
 
-/** Records every route container's opacity as it is inserted, from the first byte of the page. */
-function recordRouteContainerEntries(selector: string): void {
-  const entries: RouteContainerEntry[] = [];
-  window.__routeContainerEntries = entries;
-  const record = (element: Element) => {
-    entries.push({
-      path: window.location.pathname,
-      opacity: Number(getComputedStyle(element).opacity),
-    });
-  };
-  const observer = new MutationObserver((mutations) => {
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        if (!(node instanceof Element)) continue;
-        if (node.matches(selector)) record(node);
-        for (const nested of node.querySelectorAll(selector)) record(nested);
-      }
-    }
-  });
-  observer.observe(document, { childList: true, subtree: true });
-}
-
-function routeContainerEntries(page: Page): Promise<RouteContainerEntry[]> {
-  return page.evaluate(() => window.__routeContainerEntries ?? []);
+/** Each route container's path and the opacity it was inserted with, in mount order. */
+async function routeContainerEntries(page: Page): Promise<{ path: string; opacity: number }[]> {
+  const observations = await readMotionObservations(page);
+  return observations
+    .filter((observation) => observation.surface === 'route')
+    .map(({ path, samples }) => ({ path, opacity: samples[0]?.opacity ?? Number.NaN }));
 }
 
 // Pinned rather than inherited: under reduced motion every page enters at
@@ -58,10 +32,12 @@ test('the first page appears settled and later pages still fade in', async ({ pa
 
   const consoleErrors: string[] = [];
   page.on('pageerror', (error) => consoleErrors.push(error.message));
-  await page.addInitScript(recordRouteContainerEntries, ROUTE_CONTAINER);
+  await page.addInitScript(observeMotionNodes, { route: ROUTE_CONTAINER });
 
-  await page.goto('/');
-  await expect(page.getByTestId('composer')).toBeVisible({ timeout: 20_000 });
+  // The dashboard has no chat picker to reopen when another smoke spec changes
+  // the shared account's active chat. It exercises the same first-page latch.
+  await page.goto('/home');
+  await expect(page.getByTestId('home-dashboard')).toBeVisible({ timeout: 20_000 });
 
   const firstLoad = await routeContainerEntries(page);
   expect(
@@ -75,7 +51,6 @@ test('the first page appears settled and later pages still fade in', async ({ pa
 
   // In-app, never `page.goto`: a full load mounts the layout again and takes
   // the first-page path, which is exactly what this half must not measure.
-  await dismissWorkdirPicker(page, 10_000);
   await page
     .getByRole('button', { name: 'Gallery', exact: true })
     .filter({ visible: true })

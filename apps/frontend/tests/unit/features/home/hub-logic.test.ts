@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Chat } from '@mangostudio/shared';
+import type { Chat } from '@mangostudio/shared/chat';
 import type { Environment } from '@mangostudio/shared/environments';
 import type { GitRepoState, GitSummary } from '@mangostudio/shared/git';
 import { en, ptBR } from '@mangostudio/shared/i18n';

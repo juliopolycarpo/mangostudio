@@ -1,10 +1,10 @@
-import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import type {
   AgentProfile,
   AgentProfileUpsertBody,
   CreateAgentProfileBody,
   UserAgentId,
 } from '@mangostudio/shared/agents';
+import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';

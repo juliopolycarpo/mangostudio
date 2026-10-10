@@ -1,10 +1,10 @@
-import type { MessagePart } from '@mangostudio/shared';
 import {
   isActiveToolExecutionStatus,
   resolveToolCallStatus,
   type ToolExecutionSnapshot,
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
+import type { MessagePart } from '@mangostudio/shared/types';
 
 /**
  * Tool names whose consecutive calls collapse into a single grouped block.

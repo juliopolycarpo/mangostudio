@@ -1,4 +1,4 @@
-import type { Message } from '@mangostudio/shared';
+import type { Message } from '@mangostudio/shared/chat';
 import { Check, Copy } from 'lucide-react';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { extractRawMarkdown } from './message-content';
