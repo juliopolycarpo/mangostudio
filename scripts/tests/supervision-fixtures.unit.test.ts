@@ -43,12 +43,14 @@ async function runFixture(pattern: string, file: string) {
   expect(report.failed).toBe(0);
   expect(report.passed).toBe(1);
   expect(report.tests).toBe(report.skipped + 1);
-  expect(report.cases.filter((test) => test.outcome === 'passed').map((test) => test.file)).toEqual(
-    [file]
-  );
+  expect(
+    report.cases
+      .filter((test) => test.outcome === 'passed')
+      .map((test) => test.file?.replaceAll('\\', '/'))
+  ).toEqual([file]);
   // Bun inventories filtered cases as skipped. Require the full actual lane
   // file census as well as the selected case, rather than assuming one case.
-  expect([...new Set(report.cases.map((test) => test.file))].sort()).toEqual(
+  expect([...new Set(report.cases.map((test) => test.file?.replaceAll('\\', '/')))].sort()).toEqual(
     [...discoverTestFiles(spec.cwd, spec.testDir), ...(spec.alsoRuns ?? [])].sort()
   );
 }
