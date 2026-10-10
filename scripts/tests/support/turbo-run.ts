@@ -32,16 +32,20 @@ export interface TurboResult {
 }
 
 /**
- * Run the repository's own Turbo binary in `cwd`.
+ * Run the repository's own Turbo binary in `cwd`, with optional fixture environment overrides.
  *
  * @example
- * const { exitCode } = await runTurbo(root, ['run', 'typecheck', '--ui=stream']);
+ * const { exitCode } = await runTurbo(root, ['run', 'typecheck'], { TURBO_CONFIG_DIR_PATH: configDir });
  */
-export async function runTurbo(cwd: string, args: readonly string[]): Promise<TurboResult> {
+export async function runTurbo(
+  cwd: string,
+  args: readonly string[],
+  extraEnv: Record<string, string> = {}
+): Promise<TurboResult> {
   const proc = Bun.spawn({
     cmd: [join(ROOT_DIR, 'node_modules', '.bin', 'turbo'), ...args],
     cwd,
-    env: { ...(process.env as Record<string, string>), ...QUIET_TURBO_ENV },
+    env: { ...(process.env as Record<string, string>), ...extraEnv, ...QUIET_TURBO_ENV },
     stdout: 'pipe',
     stderr: 'pipe',
   });

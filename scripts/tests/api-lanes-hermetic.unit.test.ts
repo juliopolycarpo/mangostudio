@@ -19,6 +19,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
@@ -26,6 +27,7 @@ import { REAL_HOME_ENV, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
 import { laneById, type TestLaneId } from '../lib/test-lanes';
 import { laneSpec, planWorkers, WORKERS_ENV } from '../lib/test-workers';
 import { canonicalPath as canonical } from './support/canonical-path';
+import { runTurbo } from './support/turbo-run';
 
 const ROOT = join(import.meta.dir, '..', '..');
 const API_DIR = join(ROOT, 'apps', 'api');
@@ -302,24 +304,22 @@ describe('Turbo task definitions of the API lanes', () => {
   }
 
   async function dryRun(extraEnv: Record<string, string> = {}): Promise<Map<string, DryRunTask>> {
-    const turbo = join(ROOT, 'node_modules', '.bin', 'turbo');
-    const probe = Bun.spawn({
-      cmd: [turbo, 'run', ...TURBO_LANES, '--filter=@mangostudio/api', '--dry=json'],
-      cwd: ROOT,
-      env: { ...(process.env as Record<string, string>), ...extraEnv },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [out, err, code] = await Promise.all([
-      new Response(probe.stdout).text(),
-      new Response(probe.stderr).text(),
-      probe.exited,
-    ]);
-    expect(code, `expected turbo dry run exit: 0 | received: ${code} | stderr: ${err.trim()}`).toBe(
-      0
-    );
-    const { tasks } = JSON.parse(out) as { tasks: DryRunTask[] };
-    return new Map(tasks.map((task) => [task.taskId.replace('@mangostudio/api#', ''), task]));
+    const configDir = realpathSync(mkdtempSync(join(tmpdir(), 'mango-api-turbo-config-')));
+    try {
+      const { stdout, stderr, exitCode } = await runTurbo(
+        ROOT,
+        ['run', ...TURBO_LANES, '--filter=@mangostudio/api', '--dry=json'],
+        { ...extraEnv, TURBO_CONFIG_DIR_PATH: configDir }
+      );
+      expect(
+        exitCode,
+        `expected turbo dry run exit: 0 | received: ${exitCode} | stderr: ${stderr.trim()}`
+      ).toBe(0);
+      const { tasks } = JSON.parse(stdout) as { tasks: DryRunTask[] };
+      return new Map(tasks.map((task) => [task.taskId.replace('@mangostudio/api#', ''), task]));
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
   }
 
   test('the test:unit closure is the eleven files the cache key names', () => {
@@ -357,6 +357,18 @@ describe('Turbo task definitions of the API lanes', () => {
       hashed.includes('package.json'),
       'an explicit inputs list replaces the tracked package files | expected: "$TURBO_DEFAULT$" kept in the inputs | received: apps/api/package.json not hashed'
     ).toBe(true);
+  });
+
+  test('the lane probe uses private global configuration instead of an inherited Turbo path', async () => {
+    const inheritedConfig = realpathSync(mkdtempSync(join(tmpdir(), 'mango-turbo-host-')));
+    mkdirSync(join(inheritedConfig, 'turborepo'));
+    writeFileSync(join(inheritedConfig, 'turborepo', 'config.json'), 'not-json\n');
+    try {
+      const tasks = await dryRun({ TURBO_CONFIG_DIR_PATH: inheritedConfig });
+      for (const lane of TURBO_LANES) expect(tasks.has(lane)).toBe(true);
+    } finally {
+      rmSync(inheritedConfig, { recursive: true, force: true });
+    }
   });
 
   test('every lane passes the pinned toolchain variables through', async () => {
