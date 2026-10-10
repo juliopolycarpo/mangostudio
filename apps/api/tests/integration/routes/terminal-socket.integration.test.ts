@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { realpathSync } from 'node:fs';
 import {
   decodeTerminalServerMessage,
   encodeTerminalClientMessage,
@@ -927,10 +928,15 @@ describe('terminal socket over a real Rust runtime', () => {
           getRuntimeClient: () => Promise.resolve(runtime.client),
           isIdentityAttested: () => true,
         });
+        // PowerShell expands Windows short paths in its prompt. Launch in the
+        // canonical fixture home so the returned cwd has that same spelling.
+        const fixtureHome = realpathSync.native(runtime.client.manifest.homeDir);
         const session = await service.open(user.id, {
           environmentId: 'rust-terminal',
           shell,
+          cwd: fixtureHome,
         });
+        expect(session.cwd).toBe(fixtureHome);
         const hub = await startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
         // Native PTY startup can exceed the fake runtime's two-second budget.
         // This observation remains bounded inside the case's 30-second budget.
