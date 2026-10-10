@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { CaptureResult } from '../lib/exec';
-import { extractZipArchive, openZipArchive, zipArchiveCommands } from '../lib/zip-archive';
+import {
+  extractZipArchive,
+  openZipArchive,
+  resolveZipArchiveTool,
+  zipArchiveCommands,
+} from '../lib/zip-archive';
 
 class FakeArchiveCommands {
   readonly commands: string[][] = [];
@@ -116,5 +121,20 @@ describe('ZIP archive reader', () => {
     await expect(archive.extract('cache')).rejects.toThrow(
       'Failed to extract ZIP archive tools.zip: exit 3'
     );
+  });
+
+  test('pins the tool choice so a later call cannot resolve another one', () => {
+    const absent = resolveZipArchiveTool({ unzipCommand: null, platform: 'win32' });
+    const probed = resolveZipArchiveTool();
+
+    expect(absent, 'expected an injected absence of unzip to stay absent').toEqual({
+      unzipCommand: null,
+      platform: 'win32',
+    });
+    expect(
+      probed.unzipCommand,
+      `expected a decided unzip command: string | null | received: ${probed.unzipCommand}`
+    ).not.toBeUndefined();
+    expect(resolveZipArchiveTool(probed)).toEqual(probed);
   });
 });

@@ -10,7 +10,12 @@ import { dirname, isAbsolute, join, win32 } from 'node:path';
 
 import { extractTarArchive, openTarArchive } from '../archive';
 import { ROOT_DIR } from '../config';
-import { extractZipArchive, openZipArchive, type ZipArchiveDependencies } from '../zip-archive';
+import {
+  extractZipArchive,
+  openZipArchive,
+  resolveZipArchiveTool,
+  type ZipArchiveDependencies,
+} from '../zip-archive';
 import {
   type PlatformKey,
   resolvePlatformKey,
@@ -37,6 +42,13 @@ export interface BootstrapIo {
  * // Usage: const io = createBootstrapIo({ unzipCommand: null, platform: 'win32' });
  */
 export function createBootstrapIo(zipDependencies: ZipArchiveDependencies = {}): BootstrapIo {
+  // Chosen on the first ZIP and kept: the listing `installTool` judges and the extraction that
+  // follows it are separate calls, and must not resolve different tools.
+  let pinned: ZipArchiveDependencies | undefined;
+  const zipTool = (): ZipArchiveDependencies => {
+    pinned ??= resolveZipArchiveTool(zipDependencies);
+    return pinned;
+  };
   return {
     async download(url) {
       const response = await fetch(url);
@@ -47,14 +59,14 @@ export function createBootstrapIo(zipDependencies: ZipArchiveDependencies = {}):
     },
     async listArchiveEntries(archivePath) {
       const archive = archivePath.endsWith('.zip')
-        ? await openZipArchive(archivePath, zipDependencies)
+        ? await openZipArchive(archivePath, zipTool())
         : await openTarArchive(archivePath);
       return [...archive.entries];
     },
     async extractArchive(archivePath, destDir) {
       if (archivePath.endsWith('.zip')) {
         // `installTool` already listed and judged the entries; listing again is a second process.
-        await extractZipArchive(archivePath, destDir, zipDependencies);
+        await extractZipArchive(archivePath, destDir, zipTool());
         return;
       }
       await extractTarArchive(archivePath, destDir);

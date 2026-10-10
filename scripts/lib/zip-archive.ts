@@ -67,7 +67,7 @@ export async function openZipArchive(
   dependencies: ZipArchiveDependencies = {}
 ): Promise<ArchiveReader> {
   // Resolved once, so the listing and the extraction run the same tool.
-  const resolved = { ...dependencies, unzipCommand: resolveUnzipCommand(dependencies) };
+  const resolved = resolveZipArchiveTool(dependencies);
   const commands = zipArchiveCommands(archivePath, '', resolved.unzipCommand, resolved.platform);
   const listing = await runArchiveCommand(
     'list',
@@ -104,6 +104,17 @@ export async function extractZipArchive(
     extract,
     dependencies.runCommand ?? captureCommand
   );
+}
+
+/**
+ * Pin the ZIP tool choice, so a caller that lists and extracts in separate calls runs one tool:
+ * the result always carries an `unzipCommand`, and passing it back never probes PATH again.
+ * // Usage: const zip = resolveZipArchiveTool(); await extractZipArchive('tools.zip', 'tools', zip)
+ */
+export function resolveZipArchiveTool(
+  dependencies: ZipArchiveDependencies = {}
+): ZipArchiveDependencies & { readonly unzipCommand: string | null } {
+  return { ...dependencies, unzipCommand: resolveUnzipCommand(dependencies) };
 }
 
 /** An injected `null` means "no unzip here"; only an absent choice probes PATH. */

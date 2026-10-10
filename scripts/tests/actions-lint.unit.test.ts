@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -185,6 +185,31 @@ describe('actions-lint bootstrap', () => {
       `expected ZIP commands: list, extract | received ${commands.commands.length} commands`
     ).toEqual(['list', 'extract']);
     expect(commands.commands.at(-1)?.[3]).toContain('Expand-Archive');
+  });
+
+  test('extracts a ZIP with the tool that listed it when PATH changes in between', async () => {
+    const recorded: string[][] = [];
+    const answers: (string | null)[] = ['/usr/bin/unzip', null];
+    const which = spyOn(Bun, 'which').mockImplementation(() => answers.shift() ?? null);
+    try {
+      const io = createBootstrapIo({
+        platform: 'linux',
+        runCommand: (command) => {
+          recorded.push(command);
+          return Promise.resolve({ stdout: 'fake-tool\n', stderr: '', exitCode: 0 });
+        },
+      });
+
+      await io.listArchiveEntries('/tmp/tool.zip');
+      await io.extractArchive('/tmp/tool.zip', '/tmp/extracted');
+    } finally {
+      which.mockRestore();
+    }
+
+    expect(
+      recorded.map((command) => command[0]),
+      `expected listing and extraction tools: /usr/bin/unzip, /usr/bin/unzip | received: ${recorded.map((command) => command[0]).join(', ')}`
+    ).toEqual(['/usr/bin/unzip', '/usr/bin/unzip']);
   });
 
   test('keeps same-version binaries from different platforms in separate caches', async () => {
