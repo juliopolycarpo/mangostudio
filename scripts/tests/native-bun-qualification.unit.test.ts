@@ -280,6 +280,16 @@ describe('qualification inputs and seals', () => {
     ).toEqual([resolve('source=a'), resolve('receipts=b=c')]);
   });
 
+  test('keeps Turbo telemetry disabled after clearing every inherited TURBO_ selector', () => {
+    const env = nativeQualificationEnvironment({ TURBO_TELEMETRY_DISABLED: '1', TURBO_TEAM: 'x' });
+    expect(
+      env.TURBO_TELEMETRY_DISABLED,
+      `expected TURBO_TELEMETRY_DISABLED: 1 | received: ${env.TURBO_TELEMETRY_DISABLED}`
+    ).toBe('1');
+    expect(env.TURBO_TEAM).toBeUndefined();
+    expect(nativeQualificationEnvironment({}).TURBO_TELEMETRY_DISABLED).toBe('1');
+  });
+
   test('clears inherited subset/cache/Cargo configuration while retaining PATH', () => {
     const env = nativeQualificationEnvironment({
       PATH: '/fixture/path',

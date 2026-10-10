@@ -133,6 +133,7 @@ export function parseNativeQualificationArgs(args: readonly string[]): NativeQua
 /**
  * Clear inherited selection, remote-cache, host configuration, and Cargo override inputs.
  * Explicit runtime paths are added after the fresh default-feature builds succeed.
+ * Turbo telemetry stays off: the `TURBO_` sweep would otherwise drop the caller's opt-out.
  * @example nativeQualificationEnvironment(process.env);
  */
 export function nativeQualificationEnvironment(
@@ -166,6 +167,7 @@ export function nativeQualificationEnvironment(
     FORCE_COLOR: '0',
     NO_COLOR: '1',
     TURBO_FORCE: 'true',
+    TURBO_TELEMETRY_DISABLED: '1',
     MANGOSTUDIO_BUN_TEST_ARGS: '',
   };
 }
