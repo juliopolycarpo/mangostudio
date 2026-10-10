@@ -16,6 +16,7 @@ import {
   scopeNativeProcesses,
   snapshotNativeProcesses,
   unattributedNativeCompilerHelpers,
+  withoutUnownedCommandLines,
 } from './native-bun-qualification-process';
 import {
   collectNativeTestEvidence,
@@ -416,7 +417,11 @@ export async function runNativeQualification(
   };
   try {
     if (process.platform === 'win32') {
-      processesBefore = await (dependencies.snapshotProcesses ?? snapshotNativeProcesses)();
+      // Nothing is owned before the first command: identities and images, no command lines.
+      processesBefore = withoutUnownedCommandLines(
+        await (dependencies.snapshotProcesses ?? snapshotNativeProcesses)(),
+        []
+      );
       await Bun.write(
         join(out, 'processes-before-qualification.json'),
         `${JSON.stringify(processesBefore, null, 2)}\n`
@@ -549,7 +554,11 @@ export async function runNativeQualification(
   let unattributedCompilerHelpers: NativeProcess[] = [];
   try {
     const observed = receipt.commands.flatMap((command) => command.settlement.observed);
-    const snapshot = await (dependencies.snapshotProcesses ?? snapshotNativeProcesses)();
+    const taken = await (dependencies.snapshotProcesses ?? snapshotNativeProcesses)();
+    const scoped = { rootPid: -1, rootAlive: false, rootIdentity: null, observed };
+    survivors = scopeNativeProcesses(taken, scoped).current;
+    // Scoped first: a survivor adopted through its parent is owned and keeps its command line.
+    const snapshot = withoutUnownedCommandLines(taken, [...observed, ...survivors]);
     if (process.platform === 'win32') {
       await Bun.write(
         join(out, 'processes-after-qualification.json'),
@@ -565,12 +574,6 @@ export async function runNativeQualification(
           `Unattributed compiler helpers ${JSON.stringify(unattributedCompilerHelpers)}; expected verified ownership and an empty terminal census`
         );
     }
-    survivors = scopeNativeProcesses(snapshot, {
-      rootPid: -1,
-      rootAlive: false,
-      rootIdentity: null,
-      observed,
-    }).current;
     if (survivors.length)
       terminalErrors.push(`${survivors.length} owned processes remain in the final native census`);
   } catch (error) {

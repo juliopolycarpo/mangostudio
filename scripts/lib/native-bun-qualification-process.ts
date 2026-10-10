@@ -269,6 +269,20 @@ export function unattributedNativeCompilerHelpers(
 }
 
 /**
+ * Drop the command line of every process this qualification does not own before a census is
+ * persisted. Another program's argv is not evidence here and may carry its secrets; PID, parent,
+ * creation identity and image metadata stay, which is all the ownership checks read.
+ * @example await Bun.write(path, JSON.stringify(withoutUnownedCommandLines(rows, observed)));
+ */
+export function withoutUnownedCommandLines(
+  snapshot: readonly NativeProcess[],
+  owned: readonly NativeProcess[]
+): NativeProcess[] {
+  const identities = new Set(owned.map((row) => row.identity));
+  return snapshot.map((row) => (identities.has(row.identity) ? row : { ...row, command: '' }));
+}
+
+/**
  * Adopt descendants only through a live owned identity, retaining reparented observed descendants.
  * A reused PID does not inherit ownership from an earlier process with that PID.
  * @example scopeNativeProcesses(snapshot, { rootPid: 42, rootAlive: true, rootIdentity: null, observed: [] });
@@ -331,7 +345,8 @@ export async function runNativeCommand(
   let before: readonly NativeProcess[] = [];
   if (guardCompilerHelpers) {
     try {
-      before = await snapshot();
+      // Nothing is owned yet, so the baseline keeps identities and images only.
+      before = withoutUnownedCommandLines(await snapshot(), []);
       await Bun.write(
         join(options.out, `processes-before-${options.label}.json`),
         `${JSON.stringify(before, null, 2)}\n`
@@ -438,10 +453,11 @@ export async function runNativeCommand(
       observed = scoped.observed;
       current = scoped.current;
       if (guardCompilerHelpers) {
-        unattributedCompilerHelpers = unattributedNativeCompilerHelpers(before, rows, observed);
+        const recorded = withoutUnownedCommandLines(rows, observed);
+        unattributedCompilerHelpers = unattributedNativeCompilerHelpers(before, recorded, observed);
         await Bun.write(
           join(options.out, `processes-latest-${options.label}.json`),
-          `${JSON.stringify(rows, null, 2)}\n`
+          `${JSON.stringify(recorded, null, 2)}\n`
         );
       }
       await appendFile(

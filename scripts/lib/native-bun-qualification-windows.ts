@@ -268,6 +268,11 @@ function census(value: unknown): Row[] {
       row.command,
       'a string or inaccessible command'
     );
+    requireValue(
+      typeof row.compilerHelper === 'boolean',
+      row.compilerHelper,
+      'a recorded compiler-helper verdict'
+    );
     return row;
   });
   requireValue(
@@ -280,11 +285,27 @@ function census(value: unknown): Row[] {
   return rows;
 }
 
+/**
+ * A census may carry a command line only for a process the Job itself observed. Any other
+ * program's argv is not evidence and may hold its secrets, so the refusal names identities only.
+ */
+function ownedCommandLines(rows: Row[], owned: ReadonlySet<unknown>): void {
+  const foreign = rows.filter((row) => row.command !== null && !owned.has(row.identity));
+  requireValue(
+    foreign.length === 0,
+    foreign.map((row) => row.identity),
+    'command lines recorded only for observed exact-job members'
+  );
+}
+
 function compilerHelper(row: Row): boolean {
+  // The helper's own verdict reads the command line it then withholds for a process outside the Job.
   return (
+    row.compilerHelper === true ||
     /^(vctip|cl|link|mspdbsrv|mspdbcmf|mspdbcore|c1|c1xx|c2|ml|ml64|rc|mt)\.exe$/i.test(
       String(row.name)
-    ) || /[\\/]VC[\\/]Tools[\\/]MSVC[\\/]/i.test(`${row.path ?? ''} ${row.command ?? ''}`)
+    ) ||
+    /[\\/]VC[\\/]Tools[\\/]MSVC[\\/]/i.test(`${row.path ?? ''} ${row.command ?? ''}`)
   );
 }
 
@@ -627,6 +648,15 @@ export function parseNativeWindowsJobReceipt(
     observed,
     'unique observed full process identities'
   );
+  const owned = new Set(observed.map((item) => item.CensusIdentity));
+  for (const recorded of [
+    row.before,
+    row.preCleanupCensus,
+    row.postCleanupCensus,
+    final.census,
+    row.postCloseCensus,
+  ])
+    ownedCommandLines(census(recorded), owned);
   return {
     label: '',
     command: request.command,

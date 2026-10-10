@@ -111,7 +111,9 @@ function observerCensus(): Row[] {
       identity: `7:${START}`,
       name: 'powershell.exe',
       path: 'C:\\Windows\\powershell.exe',
-      command: 'powershell.exe -File helper.ps1',
+      // Outside the Job: the helper keeps its verdict and withholds its command line.
+      command: null,
+      compilerHelper: false,
     },
   ];
 }
@@ -232,6 +234,7 @@ class FakeJobEvidence {
       name: 'vctip.exe',
       path: metadata.path,
       command: 'vctip.exe',
+      compilerHelper: true,
     };
     this.set('status', 'qualified-after-explicit-compiler-cleanup');
     this.set('naturalSettlement', {
@@ -531,6 +534,46 @@ describe('parseNativeWindowsJobReceipt', () => {
         name: 'vctip.exe',
         path: TOOL.path,
       },
+    ]);
+    expect(() => evidence.parse()).toThrow('no new unattributed compiler helper');
+  });
+  for (const key of ['before', 'preCleanupCensus', 'postCloseCensus', 'finalClose.census'])
+    test(`rejects a ${key} that records the command line of a process outside the Job`, () => {
+      const evidence = new FakeJobEvidence(request());
+      evidence.set(key, [{ ...observerCensus()[0], command: 'tool.exe --token=hunter2' }]);
+      let refusal = '';
+      try {
+        evidence.parse();
+      } catch (error) {
+        refusal = String(error);
+      }
+      expect(
+        refusal,
+        `expected refusal: command lines recorded only for observed exact-job members | received: ${refusal || 'an accepted receipt'}`
+      ).toContain('command lines recorded only for observed exact-job members');
+      // The refusal names the process, never the argv it refused to keep.
+      expect(refusal).toContain(`7:${START}`);
+      expect(refusal).not.toContain('hunter2');
+    });
+  test('keeps the command line of an observed Job member in a census', () => {
+    const evidence = new FakeJobEvidence(request('runtime'));
+    evidence.cleanup();
+    const census = evidence.value.preCleanupCensus as Row[];
+    expect(census.at(-1)?.command).toBe('vctip.exe');
+    expect(evidence.parse().settlement.empty).toBe(true);
+  });
+  test('rejects a census row without a compiler-helper verdict', () => {
+    const evidence = new FakeJobEvidence(request());
+    const { compilerHelper: _verdict, ...row } = observerCensus()[0];
+    evidence.set('before', [row]);
+    expect(() => evidence.parse()).toThrow('a recorded compiler-helper verdict');
+  });
+  test('reads a withheld command line through the recorded helper verdict', () => {
+    const evidence = new FakeJobEvidence(request());
+    evidence.set('postCloseCensus', [
+      ...observerCensus(),
+      // Neither name nor path says compiler; only the argv did, and it is withheld.
+      { ...observerCensus()[0], pid: 99, identity: `99:${START}`, compilerHelper: true },
     ]);
     expect(() => evidence.parse()).toThrow('no new unattributed compiler helper');
   });

@@ -9,6 +9,7 @@ import {
   runNativeCommand,
   snapshotNativeProcesses,
   unattributedNativeCompilerHelpers,
+  withoutUnownedCommandLines,
 } from '../lib/native-bun-qualification-process';
 
 const temporary: string[] = [];
@@ -77,9 +78,52 @@ test('new unattributed compiler helper blocks a falsely empty command scope', as
   expect(result.settlement.rootObserved).toBe(true);
   expect(result.settlement.observed.some((row) => row.pid === census.helper.pid)).toBe(false);
   expect(result.settlement.empty).toBe(false);
-  expect(result.settlement.unattributedCompilerHelpers).toEqual([census.helper]);
+  // The helper is reported by identity and image; its argv is not this command's to record.
+  expect(result.settlement.unattributedCompilerHelpers).toEqual([
+    { ...census.helper, command: '' },
+  ]);
   expect(result.errors.join('\n')).toContain('Unattributed compiler helpers');
+  const owned = new Set(result.settlement.observed.map((row) => row.identity));
+  for (const name of [
+    'processes-before-compiler-guard.json',
+    'processes-latest-compiler-guard.json',
+  ]) {
+    const recorded: NativeProcess[] = await Bun.file(join(dir, name)).json();
+    const exposed = recorded.filter((row) => row.command !== '' && !owned.has(row.identity));
+    expect(
+      exposed.length,
+      `expected ${name} command lines: owned processes only | received ${exposed.length} from other processes, first PID ${exposed[0]?.pid}`
+    ).toBe(0);
+  }
 }, 60_000);
+
+test('a persisted census keeps the command line of owned processes only', () => {
+  const helper = new NewCompilerHelperCensus().helper;
+  const owned = {
+    ...helper,
+    pid: 7,
+    identity: '7:2026-10-09T01:25:07.0000000Z',
+    command: 'bun run test',
+  };
+  const other = {
+    ...helper,
+    pid: 8,
+    identity: '8:2026-10-09T01:25:08.0000000Z',
+    command: 'tool --token=secret',
+  };
+  const reusedPid = {
+    ...owned,
+    identity: '7:2026-10-09T02:00:00.0000000Z',
+    command: 'other --key=secret',
+  };
+
+  expect(withoutUnownedCommandLines([owned, other, reusedPid], [owned])).toEqual([
+    owned,
+    { ...other, command: '' },
+    { ...reusedPid, command: '' },
+  ]);
+  expect(withoutUnownedCommandLines([owned], [])).toEqual([{ ...owned, command: '' }]);
+});
 
 test('preexisting and owned helper identities grant no new termination authority', () => {
   const helper = new NewCompilerHelperCensus().helper;

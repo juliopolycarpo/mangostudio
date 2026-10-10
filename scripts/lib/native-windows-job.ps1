@@ -631,15 +631,32 @@ function Write-NativeJobJson([string]$Path, [object]$Value) {
 
 <#
 .SYNOPSIS
-Preserves full native process identities independently of the private job.
+Names an MSVC compiler helper from its image name, image path or command line.
+.EXAMPLE
+$isHelper = Test-NativeJobCompilerHelper 'vctip.exe' $null $null
+#>
+function Test-NativeJobCompilerHelper([string]$Name, [string]$Path, [string]$Command) {
+    return [bool]($Name -match '^(vctip|cl|link|mspdbsrv|mspdbcmf|mspdbcore|c1|c1xx|c2|ml|ml64|rc|mt)\.exe$' -or $Path -match '\\VC\\Tools\\MSVC\\' -or $Command -match '\\VC\\Tools\\MSVC\\')
+}
+
+<#
+.SYNOPSIS
+Preserves full native process identities independently of the private job, keeping a command line only for the job's own observed members.
 .EXAMPLE
 $before = Get-NativeJobCensus
+$current = Get-NativeJobCensus @($seen.Values)
 #>
-function Get-NativeJobCensus {
+function Get-NativeJobCensus([object[]]$Members = @()) {
+    $owned = @{}
+    foreach ($member in @($Members)) { if ($member -and $member.CensusIdentity) { $owned[[string]$member.CensusIdentity] = $true } }
     $rows = @(Get-CimInstance Win32_Process -OperationTimeoutSec 10 -ErrorAction Stop | Where-Object ProcessId -GT 0 | ForEach-Object {
         if (-not $_.CreationDate -or -not $_.Name) { throw "Invalid creation date/name for PID $($_.ProcessId); expected native process metadata" }
         $created = $_.CreationDate.ToUniversalTime().ToString('o')
-        [pscustomobject]@{ pid = [uint32]$_.ProcessId; parentPid = [uint32]$_.ParentProcessId; created = $created; identity = "$($_.ProcessId):$created"; name = $_.Name; path = $_.ExecutablePath; command = $_.CommandLine }
+        $identity = "$($_.ProcessId):$created"
+        # Another program's command line is not this evidence and may carry its secrets. Only the helper verdict drawn from it is kept.
+        $isHelper = Test-NativeJobCompilerHelper $_.Name $_.ExecutablePath $_.CommandLine
+        $command = if ($owned.ContainsKey($identity)) { $_.CommandLine } else { $null }
+        [pscustomobject]@{ pid = [uint32]$_.ProcessId; parentPid = [uint32]$_.ParentProcessId; created = $created; identity = $identity; name = $_.Name; path = $_.ExecutablePath; command = $command; compilerHelper = $isHelper }
     })
     Assert-NativeJobCensus $rows
     return ,$rows
@@ -669,8 +686,7 @@ function Find-NativeJobAmbiguity([object[]]$Before, [object[]]$Current, [object[
     $owned = @{}; foreach ($row in $Members) { $owned[$row.Identity] = $row }
     $helpers = @($Current | Where-Object {
         -not $original.ContainsKey($_.identity) -and
-        ($_.name -match '^(vctip|cl|link|mspdbsrv|mspdbcmf|mspdbcore|c1|c1xx|c2|ml|ml64|rc|mt)\.exe$' -or
-            $_.path -match '\\VC\\Tools\\MSVC\\' -or $_.command -match '\\VC\\Tools\\MSVC\\')
+        ($_.compilerHelper -eq $true -or (Test-NativeJobCompilerHelper $_.name $_.path $_.command))
     })
     $unknown = [Collections.Generic.List[object]]::new()
     foreach ($row in $helpers) {
@@ -835,7 +851,7 @@ function Invoke-NativeWindowsJob([object]$Request) {
             if ($observe.ElapsedMilliseconds -lt $Request.observationMs) { Start-Sleep -Milliseconds 100 }
         } while ($observe.ElapsedMilliseconds -lt $Request.observationMs)
         $receipt.naturalSettlement = @{ empty = $snapshot.Empty; observedMs = $observe.ElapsedMilliseconds; snapshot = $snapshot }
-        $receipt.preCleanupCensus = Get-NativeJobCensus
+        $receipt.preCleanupCensus = Get-NativeJobCensus @($seen.Values)
         Write-NativeJobJson (Join-Path $out 'processes-pre-cleanup.json') $receipt.preCleanupCensus
         $snapshot = $child.Query(); $receipt.preCleanup = $snapshot
         $receipt.ambiguity = @(Find-NativeJobAmbiguity $before $receipt.preCleanupCensus $snapshot.Members $child $receipt.censusMappings)
@@ -857,7 +873,7 @@ function Invoke-NativeWindowsJob([object]$Request) {
         $postTimer = [Diagnostics.Stopwatch]::StartNew()
         do { $snapshot = $child.Query(); if (-not $snapshot.Empty) { Start-Sleep -Milliseconds 100 } } while (-not $snapshot.Empty -and $postTimer.ElapsedMilliseconds -lt 5000)
         $receipt.postCleanup = $snapshot; Write-NativeJobJson (Join-Path $out 'job-post-cleanup.json') $snapshot
-        $receipt.postCleanupCensus = Get-NativeJobCensus
+        $receipt.postCleanupCensus = Get-NativeJobCensus @($seen.Values)
         Write-NativeJobJson (Join-Path $out 'processes-post-cleanup.json') $receipt.postCleanupCensus
         $unknown = @(Find-NativeJobAmbiguity $before $receipt.postCleanupCensus $snapshot.Members $child $receipt.censusMappings)
         if (-not $snapshot.Empty -or $unknown.Count) { throw "Post-cleanup failed: exact job empty=$($snapshot.Empty), new unattributed helpers=$($unknown.Count); expected complete kernel empty and unambiguous full census" }
@@ -867,7 +883,7 @@ function Invoke-NativeWindowsJob([object]$Request) {
         $receipt.observed = @($seen.Values | ForEach-Object { $_ })
         $receipt.status = if ($receipt.errors.Count) { 'failed' } elseif ($receipt.cleanupActions.Count) { 'qualified-after-explicit-compiler-cleanup' } else { 'naturally-settled' }
         if ($child) {
-            Complete-NativeJobEvidence $receipt $child $before $out
+            Complete-NativeJobEvidence $receipt $child $before $out -CensusContext $receipt.observed
         }
         $receipt.finishedAt = [DateTime]::UtcNow.ToString('o'); Write-NativeJobJson $receiptPath $receipt
     }

@@ -57,6 +57,46 @@ describe('native Windows Job helper compiler policy', () => {
   });
 });
 
+describe('native Windows Job helper census', () => {
+  const helper = readText(HELPER);
+
+  // The receipt validator refuses a foreign command line, but only on a Windows runner. Here the
+  // source shows where the helper could read one at all, and that every census it persists
+  // after the Job exists is told which processes are the Job's own.
+  test('reads a command line only to judge it or to keep it for a Job member', () => {
+    const reads = statements(helper).filter((line) => line.includes('$_.CommandLine'));
+    expect(
+      reads,
+      `expected two CommandLine reads: the helper verdict and the owned branch | received: ${reads.length}`
+    ).toEqual([
+      '$isHelper = Test-NativeJobCompilerHelper $_.Name $_.ExecutablePath $_.CommandLine',
+      '$command = if ($owned.ContainsKey($identity)) { $_.CommandLine } else { $null }',
+    ]);
+    expect(helper).toContain('command = $command; compilerHelper = $isHelper }');
+  });
+
+  test('names the observed members to every census taken once the Job exists', () => {
+    const taken = statements(helper).filter((line) =>
+      /^\$\w+(\.\w+)? = Get-NativeJobCensus/.test(line)
+    );
+    // The baseline precedes the Job, so nothing is owned and no command line is kept. The
+    // comment-based help repeats two of these as its examples.
+    expect(
+      taken.filter((line) => !line.startsWith('$current = ')),
+      `expected the baseline and two member-aware censuses | received: ${taken.join(' ; ')}`
+    ).toEqual([
+      '$before = Get-NativeJobCensus',
+      expect.stringMatching(/^\$before = Get-NativeJobCensus; \$receipt\.before = \$before;/),
+      '$receipt.preCleanupCensus = Get-NativeJobCensus @($seen.Values)',
+      '$receipt.postCleanupCensus = Get-NativeJobCensus @($seen.Values)',
+    ]);
+    expect(helper).toContain(
+      'Complete-NativeJobEvidence $receipt $child $before $out -CensusContext $receipt.observed'
+    );
+    expect(helper).toContain('$full = & $Census $CensusContext');
+  });
+});
+
 describe('native Windows Job probe exit status', () => {
   test('ends with an explicit status for the workflow gate that reads $LASTEXITCODE', () => {
     const probe = statements(readText(PROBE));

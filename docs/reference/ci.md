@@ -182,7 +182,10 @@ The producer installs its own frozen dependencies and seals its Windows helper
 checkout separately from the fresh tested source. Requests containing the inherited environment live outside uploaded
 evidence and are deleted after each invocation. Uploaded evidence keeps raw
 stdout/stderr, source and tool identities, membership snapshots, explicit
-cleanup actions and final open-Job proof. A bounded native Windows probe gate
+cleanup actions and final open-Job proof. A full census keeps a command line
+only for a process the qualification owns; every other process on the runner
+is recorded by PID, parent, creation identity and image, plus the compiler-helper
+verdict its command line gave. A bounded native Windows probe gate
 checks orphan, pipe, PID reuse and crash behavior before full qualification.
 
 Baseline failures remain visible in the receipts and logs. Candidate failures
