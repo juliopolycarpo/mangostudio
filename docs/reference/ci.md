@@ -174,7 +174,10 @@ EOF. Ordinary commands must leave the Job naturally empty. The two original
 Cargo setup commands may close a surviving VCTIP process only after successful
 compiler JSON, unchanged runtime or fake-agent features, complete membership
 and independently attested installed MSVC path, versions and hash agree. Each
-cleanup records the retained handle identity and completion. Final Job closure
+cleanup records the retained handle identity and completion. A VCTIP that was
+eligible for that cleanup and leaves the still-open Job by itself first is
+recorded as a natural exit instead, with the same identity proof and a stable
+snapshot that no longer lists it. Final Job closure
 is containment and never establishes successful settlement. Full native
 censuses before and after each command reject unattributed compiler helpers.
 

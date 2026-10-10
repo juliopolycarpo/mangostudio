@@ -97,6 +97,47 @@ describe('native Windows Job helper census', () => {
   });
 });
 
+describe('native Windows Job helper natural VCTIP exit', () => {
+  const lines = statements(readText(HELPER));
+
+  // An eligible VCTIP may finish by itself between the pre-cleanup snapshot and its verification.
+  // The helper may call that settlement only behind the guard below; the receipt validator
+  // then holds the record to the same identity proof a termination needs.
+  test('records a natural exit only after a stable snapshot stops listing that identity', () => {
+    const verify = lines.indexOf('try { $fresh = $child.VerifyIdentity($member.Identity) }');
+    const guard = lines.indexOf(
+      'if (-not $remaining.Stable -or @($remaining.Members | Where-Object { $_.Identity -eq $member.Identity }).Count) { throw }'
+    );
+    const records = lines.flatMap((line, index) =>
+      line.startsWith('$receipt.naturalExits += ') ? [index] : []
+    );
+
+    expect(lines[verify + 1], 'expected the natural-exit branch to be the verification catch').toBe(
+      'catch {'
+    );
+    expect(lines[guard - 1]).toBe('$remaining = $child.Query()');
+    expect(
+      records,
+      `expected one natural-exit record right after its guard | received at statements: ${records.join(', ')} with the guard at ${guard}`
+    ).toEqual([guard + 1]);
+    expect(lines[guard + 3]).toBe('continue');
+  });
+
+  test('writes the authority and observation the receipt validator requires', () => {
+    const record = lines.find((line) => line.startsWith('$receipt.naturalExits += ')) ?? '';
+    for (const field of [
+      "authority = 'retained creation identity + complete stable exact job membership'",
+      "observation = 'eligible VCTIP member left the still-open job before any cleanup'",
+      'identity = $member.Identity; pid = $member.Pid; creationFileTime = $member.CreationFileTime; path = $member.Path; tool = $member.Tool',
+      'snapshot = $remaining }',
+    ])
+      expect(record, `expected the natural-exit record to carry: ${field}`).toContain(field);
+    expect(lines.some((line) => line.includes('cleanupActions = @(); naturalExits = @();'))).toBe(
+      true
+    );
+  });
+});
+
 describe('native Windows Job probe exit status', () => {
   test('ends with an explicit status for the workflow gate that reads $LASTEXITCODE', () => {
     const probe = statements(readText(PROBE));

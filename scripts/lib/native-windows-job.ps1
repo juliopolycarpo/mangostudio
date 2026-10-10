@@ -810,7 +810,7 @@ function Invoke-NativeWindowsJob([object]$Request) {
         os64Bit = [Environment]::Is64BitOperatingSystem; process64Bit = [Environment]::Is64BitProcess
         timeoutSeconds = $Request.timeoutSeconds; observationMs = $Request.observationMs; timedOut = $false
         rootIdentity = $null; rootExitAt = $null; exitCode = $null; stdoutEof = $false; stderrEof = $false
-        job = $null; naturalSettlement = $null; eligibility = $null; preCleanup = $null; cleanupActions = @(); postCleanup = $null
+        job = $null; naturalSettlement = $null; eligibility = $null; preCleanup = $null; cleanupActions = @(); naturalExits = @(); postCleanup = $null
         before = @(); preCleanupCensus = @(); postCleanupCensus = @(); ambiguity = @(); censusMappings = [Collections.Generic.List[object]]::new(); finalClose = $null; postCloseCensus = @(); observed = @(); imageQueryDiagnostics = @(); errors = @()
     }
     Write-NativeJobJson $receiptPath $receipt
@@ -861,7 +861,16 @@ function Invoke-NativeWindowsJob([object]$Request) {
         if (-not $snapshot.Empty) {
             if ($Request.mode -ne 'msvc-compile' -or -not $receipt.eligibility.eligible) { throw "Terminal job retained $($snapshot.Members.Count) members; compiler cleanup ineligible: $($receipt.eligibility.reasons -join '; ')" }
             foreach ($member in $snapshot.Members) {
-                $fresh = $child.VerifyIdentity($member.Identity)
+                $fresh = $null
+                try { $fresh = $child.VerifyIdentity($member.Identity) }
+                catch {
+                    # Every member here is an already eligible attested VCTIP, and it may finish by itself while the evidence above is written. That is natural settlement only when a fresh complete stable snapshot of the still-open job no longer lists this exact identity. A member that is still listed, or an unstable snapshot, keeps its verification failure.
+                    $remaining = $child.Query()
+                    if (-not $remaining.Stable -or @($remaining.Members | Where-Object { $_.Identity -eq $member.Identity }).Count) { throw }
+                    $receipt.naturalExits += [ordered]@{ at = [DateTime]::UtcNow.ToString('o'); identity = $member.Identity; pid = $member.Pid; creationFileTime = $member.CreationFileTime; path = $member.Path; tool = $member.Tool; authority = 'retained creation identity + complete stable exact job membership'; observation = 'eligible VCTIP member left the still-open job before any cleanup'; snapshot = $remaining }
+                    Write-NativeJobJson $receiptPath $receipt
+                    continue
+                }
                 $matching = @($Request.expectedVctip | Where-Object { $_.path -ieq $fresh.Path -and $_.fileVersion -eq $fresh.Tool.FileVersion -and $_.productVersion -eq $fresh.Tool.ProductVersion -and $_.sha256 -eq $fresh.Tool.Sha256 })
                 if (-not $fresh.IsMember -or -not $fresh.Alive -or $matching.Count -ne 1) { throw "Invalid fresh cleanup member $($member.Identity); expected live exact-job VCTIP handle matching one attested tool" }
                 $action = [ordered]@{ at = [DateTime]::UtcNow.ToString('o'); identity = $fresh.Identity; pid = $fresh.Pid; creationFileTime = $fresh.CreationFileTime; path = $fresh.Path; tool = $fresh.Tool; authority = 'retained process handle + creation identity + exact job membership'; operation = 'TerminateProcess'; reason = 'successful default compiler setup completed and both raw pipes reached EOF'; requested = $true; completed = $false }

@@ -190,6 +190,7 @@ class FakeJobEvidence {
       preCleanup: nativeSnapshot(),
       postCleanup: nativeSnapshot(),
       cleanupActions: [],
+      naturalExits: [],
       before: observerCensus(),
       preCleanupCensus: observerCensus(),
       postCleanupCensus: observerCensus(),
@@ -273,6 +274,27 @@ class FakeJobEvidence {
       },
     ]);
     this.set('finalClose.outcomeBeforeClose', 'qualified-after-explicit-compiler-cleanup');
+  }
+  /** The same surviving VCTIP, but it left the Job by itself before the helper could verify it. */
+  naturalExit(metadata = TOOL): void {
+    this.cleanup(metadata);
+    const [action] = this.value.cleanupActions as Row[];
+    this.set('status', 'naturally-settled');
+    this.set('finalClose.outcomeBeforeClose', 'naturally-settled');
+    this.set('cleanupActions', []);
+    this.set('naturalExits', [
+      {
+        at: EXIT,
+        identity: action.identity,
+        pid: action.pid,
+        creationFileTime: action.creationFileTime,
+        path: action.path,
+        tool: action.tool,
+        authority: 'retained creation identity + complete stable exact job membership',
+        observation: 'eligible VCTIP member left the still-open job before any cleanup',
+        snapshot: nativeSnapshot(),
+      },
+    ]);
   }
   parse(wrapper = WRAPPER, stdout: Uint8Array = this.stdout) {
     return parseNativeWindowsJobReceipt(
@@ -623,6 +645,94 @@ describe('parseNativeWindowsJobReceipt', () => {
       evidence.set(path, value);
       expect(() => evidence.parse()).toThrow('expected');
     });
+
+  test('accepts an eligible VCTIP member that left the Job by itself before cleanup', () => {
+    const evidence = new FakeJobEvidence(request('runtime'));
+    evidence.naturalExit();
+    let refusal = 'none';
+    try {
+      evidence.parse();
+    } catch (error) {
+      refusal = String(error);
+    }
+    expect(
+      refusal,
+      `expected a naturally settled receipt for a VCTIP that exited by itself | received: ${refusal}`
+    ).toBe('none');
+    expect(evidence.parse().settlement.empty).toBe(true);
+  });
+  const NO_LONGER_LISTED = 'no longer lists the eligible VCTIP member';
+  for (const [name, path, value, refusal] of [
+    [
+      'member still listed',
+      'naturalExits.0.snapshot',
+      nativeSnapshot([nativeMember(88, TOOL.path, TOOL)]),
+      NO_LONGER_LISTED,
+    ],
+    [
+      'unstable snapshot',
+      'naturalExits.0.snapshot.Stable',
+      false,
+      'complete stable exact-job membership',
+    ],
+    [
+      'tool outside the attested VCTIP',
+      'naturalExits.0.tool.Sha256',
+      'd'.repeat(64),
+      'actual installed VCTIP path, versions and hash',
+    ],
+    [
+      'truncated creation identity',
+      'naturalExits.0.creationFileTime',
+      '1',
+      'the same exact retained VCTIP process identity',
+    ],
+    ['PID authority', 'naturalExits.0.authority', 'PID lookup', NO_LONGER_LISTED],
+    ['exit before the root', 'naturalExits.0.at', START, 'a natural exit observed after root exit'],
+    [
+      'member neither cleaned nor exited',
+      'naturalExits',
+      [],
+      'exactly one explicit compiler action or natural exit',
+    ],
+    [
+      'ineligible compiler',
+      'eligibility.eligible',
+      false,
+      'complete independent compiler eligibility',
+    ],
+  ] as const)
+    test(`rejects a natural VCTIP exit with ${name}`, () => {
+      const evidence = new FakeJobEvidence(request('runtime'));
+      evidence.naturalExit();
+      evidence.set(path, value);
+      expect(() => evidence.parse()).toThrow(refusal);
+    });
+  test('rejects a member that is both terminated and recorded as a natural exit', () => {
+    const evidence = new FakeJobEvidence(request('runtime'));
+    evidence.cleanup();
+    const cleaned = evidence.value.cleanupActions;
+    evidence.naturalExit();
+    evidence.set('cleanupActions', cleaned);
+    evidence.set('status', 'qualified-after-explicit-compiler-cleanup');
+    evidence.set('finalClose.outcomeBeforeClose', 'qualified-after-explicit-compiler-cleanup');
+    expect(() => evidence.parse()).toThrow('exactly one explicit compiler action or natural exit');
+  });
+  test('rejects a natural exit outside the two compiler setup commands', () => {
+    const compiler = new FakeJobEvidence(request('runtime'));
+    compiler.naturalExit();
+    const strict = new FakeJobEvidence(request());
+    for (const key of [
+      'naturalSettlement',
+      'preCleanup',
+      'preCleanupCensus',
+      'censusMappings',
+      'observed',
+      'naturalExits',
+    ])
+      strict.set(key, compiler.value[key]);
+    expect(() => strict.parse()).toThrow('no strict cleanup or exit allowance');
+  });
 });
 
 describe('runNativeWindowsJob', () => {

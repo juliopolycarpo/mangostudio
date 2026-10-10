@@ -380,9 +380,50 @@ function compilerProof(
   );
 }
 
+/**
+ * Hold one pre-cleanup member's record, a termination or a natural exit, to the member's
+ * retained creation identity and to the independently attested VCTIP it must be.
+ */
+function vctipRecord(
+  record: Row,
+  members: Row[],
+  identities: Set<string>,
+  request: NativeWindowsJobRequest
+): void {
+  const owned = members.find((item) => item.Identity === record.identity);
+  requireValue(
+    owned && !identities.has(String(record.identity)),
+    record,
+    'one retained full creation identity from the pre-cleanup Job'
+  );
+  identities.add(String(record.identity));
+  const actual = tool(record.tool);
+  const attested = request.expectedVctip?.find((item) => samePath(actual.path, item.path));
+  requireValue(
+    attested &&
+      sameTool(actual, attested) &&
+      samePath(owned.Path, attested.path) &&
+      sameTool(tool(owned.Tool), actual),
+    record,
+    'actual installed VCTIP path, versions and hash matching the retained member'
+  );
+  requireValue(
+    record.pid === owned.Pid &&
+      record.creationFileTime === owned.CreationFileTime &&
+      samePath(record.path, actual.path),
+    record,
+    'the same exact retained VCTIP process identity'
+  );
+}
+
 function cleanupProof(row: Row, request: NativeWindowsJobRequest, pre: Row): void {
   const actions = list(row.cleanupActions, 'explicit retained-member cleanup actions').map(
     (value) => object(value, 'a cleanup action')
+  );
+  // An eligible VCTIP may finish by itself while the helper writes its evidence. That is
+  // settlement, not a failure, but only with the same identity proof a termination needs.
+  const exits = list(row.naturalExits, 'natural exits of eligible compiler members').map((value) =>
+    object(value, 'a natural exit')
   );
   const members = list(pre.Members, 'pre-cleanup members').map(member);
   requireValue(
@@ -392,34 +433,36 @@ function cleanupProof(row: Row, request: NativeWindowsJobRequest, pre: Row): voi
     'a status consistent with explicit cleanup'
   );
   requireValue(
-    actions.length === members.length && (!actions.length || request.mode === 'msvc-compile'),
-    actions,
-    'exactly one explicit compiler action per surviving member, and no strict cleanup'
+    actions.length + exits.length === members.length &&
+      ((!actions.length && !exits.length) || request.mode === 'msvc-compile'),
+    { cleanupActions: actions.length, naturalExits: exits.length, members: members.length },
+    'exactly one explicit compiler action or natural exit per surviving member, and no strict cleanup or exit allowance'
   );
   const identities = new Set<string>();
+  for (const exit of exits) {
+    vctipRecord(exit, members, identities, request);
+    const remaining = list(
+      snapshot(exit.snapshot, false).Members,
+      'members remaining after the natural exit'
+    ).map(member);
+    requireValue(
+      exit.authority === 'retained creation identity + complete stable exact job membership' &&
+        exit.observation === 'eligible VCTIP member left the still-open job before any cleanup' &&
+        remaining.every((item) => item.Identity !== exit.identity),
+      exit,
+      'a complete stable still-open Job snapshot that no longer lists the eligible VCTIP member'
+    );
+    requireValue(
+      date(exit.at, 'natural exit time') >= date(row.rootExitAt, 'root exit time') &&
+        date(exit.at, 'natural exit time') <= date(row.finishedAt, 'receipt finish time'),
+      exit,
+      'a natural exit observed after root exit and before receipt completion'
+    );
+  }
   for (const action of actions) {
-    const owned = members.find((item) => item.Identity === action.identity);
+    vctipRecord(action, members, identities, request);
     requireValue(
-      owned && !identities.has(String(action.identity)),
-      action,
-      'one retained full creation identity from the pre-cleanup Job'
-    );
-    identities.add(String(action.identity));
-    const actual = tool(action.tool);
-    const attested = request.expectedVctip?.find((item) => samePath(actual.path, item.path));
-    requireValue(
-      attested &&
-        sameTool(actual, attested) &&
-        samePath(owned.Path, attested.path) &&
-        sameTool(tool(owned.Tool), actual),
-      action,
-      'actual installed VCTIP path, versions and hash matching the retained member'
-    );
-    requireValue(
-      action.pid === owned.Pid &&
-        action.creationFileTime === owned.CreationFileTime &&
-        samePath(action.path, actual.path) &&
-        action.authority === 'retained process handle + creation identity + exact job membership' &&
+      action.authority === 'retained process handle + creation identity + exact job membership' &&
         action.operation === 'TerminateProcess' &&
         action.requested === true &&
         action.completed === true,
