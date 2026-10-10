@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildFakeGh, FAKE_GH_EXECUTABLE_NAME, installFakeGh } from '../../support/fake-gh/install';
+import {
+  buildFakeGh,
+  FAKE_GH_EXECUTABLE_NAME,
+  type FakeGhInstallDependencies,
+  installFakeGh,
+} from '../../support/fake-gh/install';
 import {
   DEFAULT_PR_OUTPUT,
   DEFAULT_REPO_OUTPUT,
@@ -10,6 +15,27 @@ import {
   FAKE_GH_SCENARIO_FILE,
   fakeGhReply,
 } from '../../support/fake-gh/program';
+
+/** The real hard link, with every request it was asked for. */
+class RecordingLink implements FakeGhInstallDependencies {
+  readonly calls: [string, string][] = [];
+  readonly link = async (existing: string, target: string): Promise<void> => {
+    this.calls.push([existing, target]);
+    await link(existing, target);
+  };
+}
+
+/** A file system that cannot hard link: another volume (`EXDEV`), or one without the right. */
+class RefusingLink implements FakeGhInstallDependencies {
+  attempts = 0;
+  constructor(private readonly code: string) {}
+  readonly link = (): Promise<void> => {
+    this.attempts += 1;
+    return Promise.reject(
+      Object.assign(new Error(`${this.code}: link refused`), { code: this.code })
+    );
+  };
+}
 
 const AUTH = ['auth', 'status', '--json', 'hosts'];
 const REPO = ['repo', 'view', '--json', 'nameWithOwner,defaultBranchRef,url'];
@@ -119,6 +145,35 @@ describe('compiled fake gh', () => {
     expect(Object.keys(JSON.parse((await run(loggedIn, AUTH)).stdout).hosts)).toEqual([
       'github.example',
     ]);
+  });
+
+  test('installs the template as a hard link instead of writing its bytes again', async () => {
+    const linking = new RecordingLink();
+    const directory = await installFakeGh(built, {}, await mkdtemp(join(work, 'bin-')), linking);
+
+    expect(
+      linking.calls,
+      `expected one hard link from the template | received: ${linking.calls.length} link calls`
+    ).toEqual([[built, join(directory, FAKE_GH_EXECUTABLE_NAME)]]);
+    expect((await run(directory, ['--version'])).exitCode).toBe(0);
+  });
+
+  test('copies the template when the file system refuses the hard link', async () => {
+    const refusing = new RefusingLink('EXDEV');
+    const directory = await installFakeGh(
+      built,
+      { authenticated: false },
+      await mkdtemp(join(work, 'bin-')),
+      refusing
+    );
+
+    expect(refusing.attempts).toBe(1);
+    const auth = await run(directory, AUTH);
+    expect(
+      auth.exitCode,
+      `expected the copied fake to run: exit 0 | received: ${auth.exitCode} ${auth.stderr}`
+    ).toBe(0);
+    expect(JSON.parse(auth.stdout)).toEqual({ hosts: {} });
   });
 
   test('reports a missing scenario file rather than guessing one', async () => {

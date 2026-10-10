@@ -1,13 +1,13 @@
 /**
- * Builds the fake `gh` of `program.ts` into a real executable and puts a copy
- * of it, with a scenario, in a directory a test can prepend to `PATH`.
+ * Builds the fake `gh` of `program.ts` into a real executable and puts it,
+ * with a scenario, in a directory a test can prepend to `PATH`.
  *
  * Why compiled rather than a script: see `program.ts`. `bun build --compile`
  * copies the running Bun and appends the bundle, so no toolchain beyond Bun is
  * needed and the result runs wherever the test runs.
  */
 
-import { chmod, copyFile, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, link, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FAKE_GH_SCENARIO_FILE, type FakeGhScenario } from './program';
 
@@ -20,7 +20,7 @@ const PROGRAM_PATH = join(import.meta.dir, 'program.ts');
  * Compiles the fake `gh` into `directory` and returns the executable's path.
  *
  * The executable is a template: it does nothing useful until
- * {@link installFakeGh} copies it next to a scenario. Build it once per test
+ * {@link installFakeGh} places it next to a scenario. Build it once per test
  * file; the build writes an executable the size of Bun itself.
  *
  * Autoloading is off because the fake runs with whatever working directory the
@@ -58,9 +58,21 @@ export async function buildFakeGh(directory: string): Promise<string> {
   return outfile;
 }
 
+/** The one file-system call an install may be refused; a test replaces it to reach the fallback. */
+export interface FakeGhInstallDependencies {
+  readonly link: (existing: string, target: string) => Promise<void>;
+}
+
 /**
- * Copies the built fake into `directory` as `gh` (`gh.exe` on Windows), writes
+ * Puts the built fake in `directory` as `gh` (`gh.exe` on Windows), writes
  * `scenario` beside it, and returns `directory`, ready to go on `PATH`.
+ *
+ * The executable is a hard link to the template: every scenario would otherwise
+ * write a file the size of Bun, which Windows also scans on first write. The
+ * fake finds its scenario through its own path, which a hard link keeps
+ * distinct, and nothing writes to an installed executable, so the shared bytes
+ * cannot leak one scenario into another. A file system that refuses the link
+ * (another volume, no such right) gets a copy instead.
  *
  * @example
  * const binDir = await installFakeGh(built, { authenticated: false }, await mkdtemp(prefix));
@@ -69,11 +81,17 @@ export async function buildFakeGh(directory: string): Promise<string> {
 export async function installFakeGh(
   built: string,
   scenario: FakeGhScenario,
-  directory: string
+  directory: string,
+  dependencies: FakeGhInstallDependencies = { link }
 ): Promise<string> {
   const target = join(directory, FAKE_GH_EXECUTABLE_NAME);
-  await copyFile(built, target);
-  await chmod(target, 0o755);
+  try {
+    await dependencies.link(built, target);
+  } catch {
+    // Whatever the reason, the copy is always possible and yields the same executable.
+    await copyFile(built, target);
+    await chmod(target, 0o755);
+  }
   await writeFile(join(directory, FAKE_GH_SCENARIO_FILE), JSON.stringify(scenario));
   return directory;
 }
