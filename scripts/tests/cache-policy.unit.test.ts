@@ -506,9 +506,9 @@ describe('Turbo snapshot rotation', () => {
   });
 
   // The composite and the Turbo lanes run on ubuntu-latest, and the three groups
-  // below execute its bash and GNU find (`-printf`, `-newer`), which a native
-  // Windows host does not ship. The static pins above run everywhere.
-  const onLinuxRunners = test.skipIf(process.platform === 'win32');
+  // below execute its bash and GNU find (`-printf`, `-newer`). Native macOS uses
+  // BSD find and Windows lacks this toolchain. The static pins above run everywhere.
+  const onLinuxRunners = test.skipIf(process.platform !== 'linux');
 
   onLinuxRunners(
     'Turbo evicts the oldest restored entries beyond the configured size',
@@ -649,7 +649,7 @@ while (existsSync(archive)) {
     }
   );
 
-  describe.skipIf(process.platform === 'win32')('the keys the composite resolves', () => {
+  describe.skipIf(process.platform !== 'linux')('the keys the composite resolves', () => {
     test('keep the unrotated key when rotation is off', async () => {
       await withTempDir(async (dir) => {
         const result = await runCompositeStep('keys', keysEnv({ ROTATE: 'false' }), dir);
@@ -772,7 +772,7 @@ while (existsSync(archive)) {
     });
   });
 
-  describe.skipIf(process.platform === 'win32')('the save decision', () => {
+  describe.skipIf(process.platform !== 'linux')('the save decision', () => {
     const DAY_MS = 24 * 60 * 60 * 1000;
     const SAVE_KEY = `${KEYS_PREFIX}-pr-12-${KEYS_VALIDITY}-4242-1`;
 
