@@ -475,7 +475,7 @@ async fn prompt_budget_small_cancel_control_fits_beside_a_maximum_prompt() {
         .outbound_buffer_bytes();
     assert!(
         prompt + cancel < outbound,
-        "the actual outbound allowance includes the held prompt and its control frame"
+        "expected the prompt and its control frame to fit inside one outbound frame allowance of {outbound} bytes | received {prompt} + {cancel}"
     );
     assert!(cancel < 2048);
     assert_eq!(rig.launcher.fake.live_children(), 1);
