@@ -56,6 +56,24 @@ function readWorkflows() {
   };
 }
 
+// Kept apart from the braces so no Actions expression opens in this source.
+const DOLLAR = '$';
+const READY = "steps.ready.outcome == 'success'";
+const MUSL_DOWNLOADED =
+  "(steps.musl_runtime.outcome == 'success' || steps.musl_target.outcome == 'success')";
+
+// An assertion survives an earlier assertion's failure, but not failed setup:
+// without staged bytes it could only add a second, misleading failure.
+function expectedAssertionCondition(id: string): string {
+  if (id.startsWith('binary/')) return `${DOLLAR}{{ !cancelled() && ${READY} }}`;
+  if (id.startsWith('docker/')) {
+    const staged = id.startsWith('docker/alpine/') ? `${READY} && ${MUSL_DOWNLOADED}` : READY;
+    return `${DOLLAR}{{ !cancelled() && ${staged} && matrix.docker_arch }}`;
+  }
+  if (id.startsWith('container/')) return '$' + '{{ !cancelled() }}';
+  throw new Error(`expected a binary/, docker/ or container/ assertion id | received: ${id}`);
+}
+
 describe('smoke workflow assertion inventory', () => {
   test('preserves all fourteen original platform, Docker variant and engine/libc assertions', () => {
     assertSmokeInventory(smokeAssertions(readWorkflows()), ORIGINAL_SMOKE_ASSERTIONS);
@@ -133,14 +151,72 @@ describe('smoke workflow assertion inventory', () => {
   test('every folded assertion runs after failure and retains its failure result', () => {
     const workflows = readWorkflows();
     for (const { id, job, step } of smokeAssertions(workflows)) {
-      const condition = id.startsWith('docker/')
-        ? '$' + '{{ !cancelled() && matrix.docker_arch }}'
-        : '$' + '{{ !cancelled() }}';
-      expect(step.if, id).toBe(condition);
+      const condition = expectedAssertionCondition(id);
+      if (step.if !== condition) {
+        throw new Error(`expected ${id} step if: ${condition} | received: ${step.if}`);
+      }
       expect(step['continue-on-error'], id).toBeUndefined();
       const [workflowName, jobName] = job.split('/');
       const workflow = workflows[workflowName as keyof typeof workflows];
       expect(workflow.jobs[jobName]['continue-on-error'], id).toBeUndefined();
+    }
+  });
+
+  test('the binary job marks setup complete once, before its first assertion', () => {
+    const steps = [...(readWorkflows().binary.jobs.binary.steps ?? [])];
+    const first = steps.findIndex(({ run }) => run?.includes('scripts/test-build.ts'));
+    const marker = steps[first - 1];
+    // The default condition is what makes the marker fail-closed: it is
+    // skipped as soon as any checkout, toolchain or download step fails.
+    if (marker?.id !== 'ready' || marker.if !== undefined) {
+      throw new Error(
+        `expected the step before the binary smoke to be { id: ready, if: undefined } | received: ${JSON.stringify({ id: marker?.id, if: marker?.if })}`
+      );
+    }
+    for (const step of steps.slice(0, first - 1)) {
+      const label = step.name ?? step.uses;
+      if (step.if?.includes('cancelled()') || step.if?.includes('always()')) {
+        throw new Error(
+          `expected setup step "${label}" to stop after an earlier failure | received: ${step.if}`
+        );
+      }
+    }
+  });
+
+  test('every step outcome a binary job condition reads belongs to an earlier step', () => {
+    // An unknown id reads as an empty outcome: no error, just a silent skip.
+    const steps = [...(readWorkflows().binary.jobs.binary.steps ?? [])];
+    for (const [index, step] of steps.entries()) {
+      const earlier = steps.slice(0, index).map(({ id }) => id);
+      for (const [, id] of (step.if ?? '').matchAll(/steps\.(\w+)\./g)) {
+        if (!earlier.includes(id)) {
+          throw new Error(
+            `expected "${step.name}" to read the outcome of an earlier step id [${earlier.filter(Boolean).join(', ')}] | received: ${id}`
+          );
+        }
+      }
+    }
+  });
+
+  test('the Alpine downloads wait for setup and the teardown checks never skip', () => {
+    const steps = readWorkflows().binary.jobs.binary.steps ?? [];
+    const expected: Record<string, string> = {
+      musl_runtime: `${DOLLAR}{{ !cancelled() && ${READY} && matrix.docker_arch && inputs.rebuild }}`,
+      musl_target: `${DOLLAR}{{ !cancelled() && ${READY} && matrix.docker_arch && !inputs.rebuild }}`,
+    };
+    for (const [id, condition] of Object.entries(expected)) {
+      const received = steps.find((step) => step.id === id)?.if;
+      if (received !== condition) {
+        throw new Error(`expected step ${id} if: ${condition} | received: ${received}`);
+      }
+    }
+    const teardowns = steps.filter(({ name }) => name?.endsWith('teardown'));
+    expect(teardowns).toHaveLength(3);
+    for (const { name, if: received } of teardowns) {
+      const condition = '$' + '{{ !cancelled() && matrix.docker_arch }}';
+      if (received !== condition) {
+        throw new Error(`expected "${name}" if: ${condition} | received: ${received}`);
+      }
     }
   });
 

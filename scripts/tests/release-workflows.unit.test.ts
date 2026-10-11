@@ -556,7 +556,8 @@ describe('release workflow binary gate', () => {
       'name: smoke-rebuild-runtime-$' + '{{ matrix.musl_platform }}'
     );
     expect(runtimeDownloads[1]).toContain(
-      'if: $' + '{{ !cancelled() && matrix.docker_arch && inputs.rebuild }}'
+      'if: $' +
+        "{{ !cancelled() && steps.ready.outcome == 'success' && matrix.docker_arch && inputs.rebuild }}"
     );
   });
 
