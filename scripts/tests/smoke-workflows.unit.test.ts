@@ -75,7 +75,7 @@ function expectedAssertionCondition(id: string): string {
     const staged = id.startsWith('docker/alpine/') ? `${READY} && ${MUSL_DOWNLOADED}` : READY;
     return `${DOLLAR}{{ !cancelled() && ${staged} && matrix.docker_arch }}`;
   }
-  if (id.startsWith('container/')) return '$' + '{{ !cancelled() }}';
+  if (id.startsWith('container/')) return `${DOLLAR}{{ !cancelled() && ${READY} }}`;
   throw new Error(`expected a binary/, docker/ or container/ assertion id | received: ${id}`);
 }
 
@@ -170,6 +170,33 @@ describe('smoke workflow assertion inventory', () => {
       const [workflowName, jobName] = job.split('/');
       const workflow = workflows[workflowName as keyof typeof workflows];
       expect(workflow.jobs[jobName]['continue-on-error'], id).toBeUndefined();
+    }
+  });
+
+  test('container suites wait on one readiness marker that follows every setup step', () => {
+    // A suite that starts after a failed checkout, setup or download only
+    // reports the missing bytes again. The marker runs under the default
+    // condition, so it succeeds only when every step before it did.
+    const steps = readWorkflows().container.jobs.container.steps ?? [];
+    const markers = steps.filter(({ id }) => id === 'ready');
+    const [ready] = markers;
+    if (markers.length !== 1 || !ready) {
+      throw new Error(
+        `expected exactly one container step with id: ready | received: ${markers.length}`
+      );
+    }
+    if (ready.if !== undefined || ready['continue-on-error'] !== undefined) {
+      throw new Error(
+        `expected the ready step to keep the default condition and result | received: if=${ready.if} continue-on-error=${ready['continue-on-error']}`
+      );
+    }
+    const readyIndex = steps.indexOf(ready);
+    const lastSetup = steps.map(({ uses }) => uses !== undefined).lastIndexOf(true);
+    const firstSuite = steps.findIndex(({ run }) => run?.includes(PAIRING_SCRIPT));
+    if (readyIndex !== lastSetup + 1 || readyIndex >= firstSuite) {
+      throw new Error(
+        `expected the ready step right after the last setup step (${lastSetup}) and before the first suite (${firstSuite}) | received: step ${readyIndex}`
+      );
     }
   });
 

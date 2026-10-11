@@ -86,10 +86,17 @@ jobs:
           channel: ${{ inputs.channel }}
           target: linux-x64-musl
 
+      # Succeeds only when checkout, setup and both downloads did. The musl
+      # download still runs after a failed glibc one, so a single run names
+      # every missing target; no suite then starts against half the bytes.
+      - name: Mark container smoke inputs ready
+        id: ready
+        run: echo "Both runtime targets are in place."
+
       # Each suite carries its own deadline. A hung suite then fails its step
       # and leaves the remaining pairings and leak checks inside the job's.
       - name: Run docker glibc container transport smoke
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
         timeout-minutes: 3
         working-directory: apps/api
         env:
@@ -104,7 +111,7 @@ jobs:
         run: ../../scripts/release/smoke-container-pairing.sh
 
       - name: Run docker musl container transport smoke
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
         timeout-minutes: 3
         working-directory: apps/api
         env:
@@ -128,7 +135,7 @@ jobs:
         run: scripts/release/assert-no-leftover-containers.sh
 
       - name: Run podman glibc container transport smoke
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
         timeout-minutes: 3
         working-directory: apps/api
         env:
@@ -143,7 +150,7 @@ jobs:
         run: ../../scripts/release/smoke-container-pairing.sh
 
       - name: Run podman musl container transport smoke
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
         timeout-minutes: 3
         working-directory: apps/api
         env:

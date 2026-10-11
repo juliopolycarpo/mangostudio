@@ -252,6 +252,8 @@ whose import graph stays inside the checkout (no `node_modules`).
 The Linux `binary` jobs also stage and test the Bookworm and Alpine Docker
 images. `smoke-container.yml` runs all four Docker/Podman and glibc/musl
 transport pairings in one job with one `setup-mango` dependency install.
+Its suites start only once checkout, setup and both runtime downloads have
+succeeded; after that, one failed pairing does not stop the others.
 
 Every step in both smoke jobs declares its own `timeout-minutes`, setup,
 downloads and teardown checks included. A step deadline fails only that step; the
