@@ -181,9 +181,9 @@ jobs:
           GEMINI_API_KEY: dummy
         run: |
           set -euo pipefail
-          listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+          listeners="$(ss -H -ltn '( sport = :13002 )')"
           if [ -n "$listeners" ]; then
-            echo "::error::expected smoke ports 13001 and 13002 released; listeners [$listeners]"
+            echo "::error::expected smoke port 13002 released; listeners [$listeners]"
             exit 1
           fi
           if [ "$REBUILD" = "true" ]; then
@@ -208,7 +208,7 @@ jobs:
           listeners=""
           for _ in $(seq 1 20); do
             leftover="$(docker ps -a --format '{{.Names}}' --filter "name=mangostudio-smoke-linux-${DOCKER_ARCH}-13002")"
-            listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+            listeners="$(ss -H -ltn '( sport = :13002 )')"
             if [ -z "$leftover$listeners" ]; then
               break
             fi
@@ -257,9 +257,9 @@ jobs:
           GEMINI_API_KEY: dummy
         run: |
           set -euo pipefail
-          listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+          listeners="$(ss -H -ltn '( sport = :13002 )')"
           if [ -n "$listeners" ]; then
-            echo "::error::expected smoke ports 13001 and 13002 released; listeners [$listeners]"
+            echo "::error::expected smoke port 13002 released; listeners [$listeners]"
             exit 1
           fi
           if [ "$REBUILD" = "true" ]; then
@@ -284,7 +284,7 @@ jobs:
           listeners=""
           for _ in $(seq 1 20); do
             leftover="$(docker ps -a --format '{{.Names}}' --filter "name=mangostudio-smoke-linux-${DOCKER_ARCH}-13002")"
-            listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+            listeners="$(ss -H -ltn '( sport = :13002 )')"
             if [ -z "$leftover$listeners" ]; then
               break
             fi

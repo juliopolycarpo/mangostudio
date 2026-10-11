@@ -59,7 +59,7 @@ function stageWorkflowRun() {
 async function runWorkflowSteps(
   job: SmokeJob,
   matrix: Record<string, string>,
-  failure: 'binary' | 'container' | 'ports' | 'none',
+  failure: 'binary' | 'container' | 'ports' | 'native-port' | 'none',
   rebuild = false
 ) {
   const fixture = stageWorkflowRun();
@@ -125,6 +125,35 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       []
     );
     expect(containers).toEqual([]);
+  });
+
+  test('a leaked native hub fails only the native teardown check, not the image assertions', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+    if (!matrix)
+      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+    const { outcomes, events } = await runWorkflowSteps(job, matrix, 'native-port');
+    // The images bind 13002 only, so a listener on 13001 is the native
+    // step's finding alone; repeating it would leave both images untested.
+    const received = outcomes
+      .filter(({ name }) => name.includes('Docker') || name.includes('teardown'))
+      .map(({ name, code }) => `${name}=${code}`)
+      .join(', ');
+    const expected = [
+      'Assert native binary teardown=1',
+      'Run Bookworm Docker smoke test=0',
+      'Assert Bookworm Docker teardown=0',
+      'Run Alpine Docker smoke test=0',
+      'Assert Alpine Docker teardown=0',
+    ].join(', ');
+    if (received !== expected) {
+      throw new Error(
+        `expected a port 13001 listener to fail only the native teardown check (${expected}) | received: ${received}`
+      );
+    }
+    expect(
+      events.filter(({ command, args }) => command === 'docker' && args[0] === 'run')
+    ).toHaveLength(2);
   });
 
   test('a broken first container assertion still reports the other three and both leak checks', async () => {

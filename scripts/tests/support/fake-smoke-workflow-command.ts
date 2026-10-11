@@ -64,11 +64,13 @@ if (command === 'curl') {
   process.exit(0);
 }
 if (command === 'ss') {
-  if (
-    process.env.FAKE_SMOKE_WORKFLOW_FAILURE === 'ports' &&
-    args.some((arg) => arg.includes('13002'))
-  ) {
+  const fail = process.env.FAKE_SMOKE_WORKFLOW_FAILURE;
+  if (fail === 'ports' && args.some((arg) => arg.includes('13002'))) {
     console.log('LISTEN 0 128 127.0.0.1:13002 0.0.0.0:*');
+  }
+  // A native hub that outlived its smoke: only a filter naming 13001 sees it.
+  if (fail === 'native-port' && args.some((arg) => arg.includes('13001'))) {
+    console.log('LISTEN 0 128 127.0.0.1:13001 0.0.0.0:*');
   }
   process.exit(0);
 }
