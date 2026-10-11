@@ -590,10 +590,16 @@ impl Supervisor {
             ));
         }
         if slots.len() >= self.ports.session_cap {
-            return Err(tool_argument(format!(
-                "External-agent session capacity is {}; close a session before opening another.",
-                self.ports.session_cap
-            )));
+            // Its own kind, not `tool_argument`: the cap frees when a session's close ends, which
+            // can take longer than the hub waited for it, so the hub may retry this refusal.
+            return Err(RemoteError::new(
+                codes::INTERNAL,
+                format!(
+                    "External-agent session capacity is {}; close a session before opening another.",
+                    self.ports.session_cap
+                ),
+            )
+            .with_detail("kind", "external_agent_capacity"));
         }
         let opening = Arc::new(Opening {
             target: params.target_id,
@@ -1173,12 +1179,6 @@ impl Supervisor {
         });
     }
 
-    /// One bounded, coalesced watcher read. Only an explicit denial revokes;
-    /// a read that does not finish in time is [`ConsentRead::Unknown`], which
-    /// keeps every session until the next poll (see [`ConsentRead::revokes`]).
-    async fn consent_read(&self) -> ConsentRead {
-        let probe = Arc::clone(&self.ports.consent);
-        self.consent_reader
     /// Closes every session for a withdrawn consent without holding the watcher.
     ///
     /// A close can take as long as the SDK documents (up to 43 s for Codex at the default limits),
@@ -1196,6 +1196,12 @@ impl Supervisor {
         });
     }
 
+    /// One bounded, coalesced watcher read. Only an explicit denial revokes;
+    /// a read that does not finish in time is [`ConsentRead::Unknown`], which
+    /// keeps every session until the next poll (see [`ConsentRead::revokes`]).
+    async fn consent_read(&self) -> ConsentRead {
+        let probe = Arc::clone(&self.ports.consent);
+        self.consent_reader
             .read(self.ports.consent_read_timeout, move || probe())
             .await
     }

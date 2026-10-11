@@ -40,7 +40,7 @@ export interface FakeExternalRuntimeOptions {
   /** Resolves the vendor's `resumeRef` to whether the resume actually worked. */
   readonly resumeSucceeds?: boolean;
   readonly onOpen?: (params: ExternalAgentOpenParams) => void;
-  readonly openFailure?: () => Error;
+  readonly openFailure?: () => Error | undefined;
   readonly turnFailure?: () => Error | undefined;
   readonly capabilities?: ExternalAgentCapabilities;
   /**

@@ -1180,6 +1180,12 @@ async fn the_session_cap_counts_opening_sessions() {
         "expected a capacity refusal | received: {}",
         error.message
     );
+    assert_eq!(
+        error.details.as_ref().map(|details| &details["kind"]),
+        Some(&serde_json::json!("external_agent_capacity")),
+        "expected the refusal to carry the kind the hub retries on | received {:?}",
+        error.details
+    );
     release.send_replace(true);
     held.await.unwrap().unwrap();
     rig.close("one").await;
@@ -1523,12 +1529,6 @@ async fn a_hung_consent_read_does_not_hold_up_hub_shutdown() {
     assert_eq!(rig.log.closes(), vec![CloseReason::Shutdown]);
 }
 
-#[tokio::test]
-async fn the_hub_session_ending_shuts_every_session_down() {
-    let rig = rig(RigOptions::default()).await;
-    rig.open("one").await.unwrap();
-    rig.hub.close_now(4000, None);
-    eventually(
 /// A close the hub abandons mid-flight (its request is dropped) still removes the session's scratch
 /// leaf; nothing else would, and a stalled vendor close never reaches the removal after it.
 #[tokio::test]
@@ -1604,6 +1604,12 @@ async fn a_slow_revocation_close_does_not_hold_up_hub_shutdown() {
     .await;
 }
 
+#[tokio::test]
+async fn the_hub_session_ending_shuts_every_session_down() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.unwrap();
+    rig.hub.close_now(4000, None);
+    eventually(
         "the live session closed at hub shutdown",
         || rig.live_count(),
         |live| *live == 0,

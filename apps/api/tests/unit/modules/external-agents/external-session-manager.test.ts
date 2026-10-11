@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { RemoteError } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
 import { getDb } from '../../../../src/db/database';
@@ -7,6 +8,7 @@ import {
   type EnsureExternalSessionInput,
   type ExternalSessionConsumer,
   ExternalSessionReapedError,
+  isUnconfirmedClose,
 } from '../../../../src/modules/external-agents/application/external-session-manager';
 import {
   acquireAdoptionLease,
@@ -16,6 +18,8 @@ import {
   readContinuation,
   writeContinuation,
 } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
+import { RuntimeRequestNoReplyError } from '../../../../src/services/runtime-client/request-not-sent';
+import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 import {
   createFakeExternalRuntime,
   type FakeExternalRuntime,
@@ -95,6 +99,79 @@ beforeEach(async () => {
   userId = user.id;
   chatId = `chat-${crypto.randomUUID()}`;
   await insertExternalChat(userId, chatId);
+});
+
+function capacityRefusal(): RemoteError {
+  return new RemoteError(
+    'INTERNAL',
+    'External-agent session capacity is 4; close a session first.',
+    {
+      kind: 'external_agent_capacity',
+    }
+  );
+}
+
+function retryingManager(runtime: FakeExternalRuntime, capacityRetryMs: number) {
+  return createExternalSessionManager({
+    resolveRuntimeClient: () => Promise.resolve(runtime.client),
+    newSessionId: () => 'session-a',
+    now: () => 1_000,
+    capacityRetryMs,
+    capacityRetryIntervalMs: 5,
+  });
+}
+
+describe('isUnconfirmedClose', () => {
+  it('is true only for a close the hub stopped waiting for', () => {
+    const hubDeadline = new ToolExecutionTimedOutError('late', {
+      cause: new RuntimeRequestNoReplyError(new RemoteError('TIMEOUT', 'late'), 'deadline'),
+    });
+    const connectionClosed = new RuntimeRequestNoReplyError(
+      new RemoteError('UNAVAILABLE', 'closed'),
+      'connection-closed'
+    );
+    const refused = new RemoteError('INTERNAL', 'cleanup failed');
+    const received = [hubDeadline, connectionClosed, refused, 'x'].map(isUnconfirmedClose);
+    expect(received).toEqual([true, false, false, false]);
+  });
+});
+
+describe('opening against a runtime at its session cap', () => {
+  it('retries the refusal until the slot frees, then opens', async () => {
+    // A reap that stopped waiting for a slow runtime close is followed by an open: the runtime
+    // frees the slot when its close ends, so the refusal is retried rather than failing the send.
+    let refusals = 2;
+    const runtime = createFakeExternalRuntime({
+      openFailure: () => (refusals-- > 0 ? capacityRefusal() : undefined),
+    });
+
+    const handle = await retryingManager(runtime, 2_000).ensureSession(baseInput());
+
+    expect({ opens: runtime.calls.open.length, session: handle.sessionId }).toEqual({
+      opens: 3,
+      session: 'session-a',
+    });
+  });
+
+  it("gives up with the runtime's own refusal once the wait has passed", async () => {
+    const runtime = createFakeExternalRuntime({ openFailure: () => capacityRefusal() });
+
+    const attempt = retryingManager(runtime, 40).ensureSession(baseInput());
+
+    await expect(attempt).rejects.toMatchObject({ details: { kind: 'external_agent_capacity' } });
+    expect(runtime.calls.open.length).toBeGreaterThan(1);
+  });
+
+  it('does not retry any other refusal', async () => {
+    const runtime = createFakeExternalRuntime({
+      openFailure: () => new RemoteError('INTERNAL', 'not installed', { kind: 'tool_argument' }),
+    });
+
+    await expect(retryingManager(runtime, 2_000).ensureSession(baseInput())).rejects.toThrow(
+      'not installed'
+    );
+    expect(runtime.calls.open).toHaveLength(1);
+  });
 });
 
 describe('external session manager', () => {
