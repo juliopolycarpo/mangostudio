@@ -18,9 +18,15 @@ const collectFailedTasks = (text: string): string[] => {
   return failedTasks;
 };
 
-/** Run the repo check and capture its exit code + failed task labels. */
-export const collectToolingStats = async (): Promise<ToolingCheckStats> => {
-  const result = await runCapture(['bun', 'run', 'check']);
+/**
+ * Run the repository check and retain its exit code and failed task labels.
+ * `run` is injected so tests can fake the check process.
+ * // Usage: await collectToolingStats()
+ */
+export const collectToolingStats = async (
+  run: typeof runCapture = runCapture
+): Promise<ToolingCheckStats> => {
+  const result = await run(['bun', 'run', 'check']);
   const combined = `${result.stdout}\n${result.stderr}`;
 
   return {
