@@ -92,7 +92,7 @@ jobs:
           MANGO_CONTAINER_E2E_RUNTIME: ${{ github.workspace }}/.mango/out/linux-x64/mangostudio-runtime
           MANGO_CONTAINER_E2E_ENGINE: docker
         # Build before the suite, so registry failures cannot look like skipped
-        # transport coverage. Alpine needs bash and libstdc++ for this pairing.
+        # transport coverage. Bookworm already provides the required shell.
         run: |
           set -euo pipefail
           if [ -z "$PACKAGES" ]; then
@@ -169,7 +169,7 @@ jobs:
           MANGO_CONTAINER_E2E_RUNTIME: ${{ github.workspace }}/.mango/out/linux-x64/mangostudio-runtime
           MANGO_CONTAINER_E2E_ENGINE: podman
         # Build before the suite, so registry failures cannot look like skipped
-        # transport coverage. Alpine needs bash and libstdc++ for this pairing.
+        # transport coverage. Bookworm already provides the required shell.
         run: |
           set -euo pipefail
           if [ -z "$PACKAGES" ]; then
