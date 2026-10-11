@@ -81,8 +81,11 @@ jobs:
           channel: ${{ inputs.channel }}
           target: linux-x64-musl
 
+      # Each suite carries its own deadline. A hung suite then fails its step
+      # and leaves the remaining pairings and leak checks inside the job's.
       - name: Run docker glibc container transport smoke
         if: ${{ !cancelled() }}
+        timeout-minutes: 3
         working-directory: apps/api
         env:
           CONTAINER_CLI: docker
@@ -111,6 +114,7 @@ jobs:
 
       - name: Run docker musl container transport smoke
         if: ${{ !cancelled() }}
+        timeout-minutes: 3
         working-directory: apps/api
         env:
           CONTAINER_CLI: docker
@@ -160,6 +164,7 @@ jobs:
 
       - name: Run podman glibc container transport smoke
         if: ${{ !cancelled() }}
+        timeout-minutes: 3
         working-directory: apps/api
         env:
           CONTAINER_CLI: podman
@@ -188,6 +193,7 @@ jobs:
 
       - name: Run podman musl container transport smoke
         if: ${{ !cancelled() }}
+        timeout-minutes: 3
         working-directory: apps/api
         env:
           CONTAINER_CLI: podman

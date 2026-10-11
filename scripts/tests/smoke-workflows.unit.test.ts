@@ -123,6 +123,35 @@ describe('smoke workflow assertion inventory', () => {
     }
   });
 
+  test('every folded assertion times out as a failed step before its job is cancelled', () => {
+    // A job timeout cancels the job, which skips every later !cancelled()
+    // assertion and teardown check. A step timeout only fails that step.
+    const workflows = readWorkflows();
+    for (const { id, job, step } of smokeAssertions(workflows)) {
+      const [workflowName, jobName] = job.split('/');
+      const workflow = workflows[workflowName as keyof typeof workflows];
+      const jobTimeout = workflow.jobs[jobName]['timeout-minutes'];
+      const stepTimeout = step['timeout-minutes'];
+      if (jobTimeout === undefined || stepTimeout === undefined || stepTimeout >= jobTimeout) {
+        throw new Error(
+          `expected ${id} step timeout-minutes below its job's ${jobTimeout} | received: ${stepTimeout}`
+        );
+      }
+    }
+  });
+
+  test('a hung container suite leaves the remaining pairings inside the job deadline', () => {
+    const job = readWorkflows().container.jobs.container;
+    const suiteMinutes = (job.steps ?? [])
+      .filter(({ run }) => run?.includes('connect-container-runtime.integration.test.ts'))
+      .map((step) => step['timeout-minutes'] ?? Number.POSITIVE_INFINITY);
+    expect(suiteMinutes).toHaveLength(4);
+    const total = suiteMinutes.reduce((sum, minutes) => sum + minutes, 0);
+    expect(total, `container suite step timeouts ${suiteMinutes.join('+')}`).toBeLessThan(
+      job['timeout-minutes'] ?? 0
+    );
+  });
+
   test('checks each container engine for leaks once after both libc assertions', () => {
     const job = readWorkflows().container.jobs.container;
     expect(smokeMatrixCases(job)).toEqual([{}]);

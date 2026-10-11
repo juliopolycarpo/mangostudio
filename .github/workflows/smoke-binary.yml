@@ -125,8 +125,11 @@ jobs:
           target: ${{ matrix.platform }}
 
       # Linux also proves both Docker variants on its native runner below.
+      # The step deadline fails a hung smoke before the job deadline cancels
+      # the job, which would skip the Docker assertions and teardown checks.
       - name: Run binary smoke test
         if: ${{ !cancelled() }}
+        timeout-minutes: 10
         run: bun --no-install run scripts/test-build.ts
         env:
           # Read by the rebuild's `build:binary`; inert when SKIP_BUILD=1.

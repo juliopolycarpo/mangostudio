@@ -12,6 +12,7 @@ export interface SmokeStep {
   readonly with?: Record<string, string>;
   readonly 'working-directory'?: string;
   readonly 'continue-on-error'?: boolean;
+  readonly 'timeout-minutes'?: number;
 }
 
 export interface SmokeJob {
@@ -20,6 +21,7 @@ export interface SmokeJob {
   readonly strategy?: { readonly matrix: Record<string, string[] | MatrixEntry[]> };
   readonly 'runs-on'?: string;
   readonly 'continue-on-error'?: boolean;
+  readonly 'timeout-minutes'?: number;
 }
 
 export interface SmokeWorkflow {
