@@ -75,6 +75,9 @@ afterEach(() => {
 const optionsIn = (dir: string, overrides: Partial<WatchdogOptions>): WatchdogOptions => ({
   label: '3',
   command: ['bun', '-e', 'console.log("ok")'],
+  // Keep synthetic findings out of the outer run's log: another lane may
+  // hang after these fixtures pass, and its watchdog must see only real findings.
+  stdout: new CaptureSink(),
   timeoutSeconds: 30,
   killGraceSeconds: 1,
   // The CI default is 2s, and every crash-path test below reaches the reap.
@@ -195,13 +198,19 @@ describe('runTestsWithWatchdog', () => {
   // `timeoutSeconds` is generous here on purpose: the first attempt has to
   // reach its `writeFileSync` before the watchdog kills it, and a loaded CI
   // runner can spend most of a second just starting `bun`.
-  it('retries a hung first attempt and reports the second attempt green', async () => {
+  it('retries a hung first attempt and keeps a green retry green despite mirrored failures', async () => {
     const dir = await makeTemp();
     // First run leaves a marker and hangs; the second sees the marker and exits 0.
     const marker = join(dir, 'first-attempt-ran');
     const script = `
       const fs = require("node:fs");
-      if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("@mangostudio/api:test: (fail) quoted by a fixture [1.00ms]");
+        console.log("@mangostudio/api:test:  2 fail");
+        console.log("@mangostudio/api:test: # Unhandled error between tests");
+        console.log("@mangostudio/api:test:  1 error");
+        process.exit(0);
+      }
       fs.writeFileSync(${JSON.stringify(marker)}, "");
       setInterval(() => {}, 1000);
     `;
@@ -210,6 +219,44 @@ describe('runTestsWithWatchdog', () => {
     );
 
     expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
+  });
+
+  // The merge-gate coverage caller retries hangs without opting into crash
+  // retries. A clean second attempt must still surface its first findings.
+  it.each([
+    ['inline failure', '@mangostudio/api:test: (fail) stale database [1.20ms]'],
+    ['failure summary', '@mangostudio/api:test:  2 fail'],
+    ['unhandled-error heading', '@mangostudio/api:test: # Unhandled error between tests'],
+    ['unhandled-error count', '@mangostudio/api:test:  1 error'],
+  ])('retains findings from a hung attempt without crash retry: %s', async (_signal, line) => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+    const sink = new CaptureSink();
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) {
+        console.log("@mangostudio/api:test:  0 fail");
+        process.exit(0);
+      }
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log(${JSON.stringify(line)});
+      setInterval(() => {}, 1000);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 3, stdout: sink })
+    );
+
+    expect(result).toMatchObject({ exitCode: 1, attempts: 2 });
+    expect(await Bun.file(join(dir, 'shard-meta.json')).json()).toMatchObject({
+      exitCode: 1,
+      attempts: 2,
+    });
+    expect(sink.text()).toContain(line);
+    expect(sink.text()).toContain('retaining exit code 1 after a clean retry');
+    expect(await Bun.file(githubOutput).text()).toBe('');
   });
 
   // The cold-cache half of the same invariant: with no baseline to restore,
@@ -466,7 +513,10 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
   // every line with `<package>:<task>: `. A `^`-anchored scan of the raw text
   // matches nothing under that caller — silently, and in the direction that
   // reads as green.
-  it('finds failures behind a turbo stream prefix', async () => {
+  it.each([
+    ['inline failures', '@mangostudio/api:test: (fail) stale database [1.20ms]'],
+    ['failure summaries', '@mangostudio/api:test:  2 fail'],
+  ])('finds %s behind a turbo stream prefix', async (_signal, line) => {
     const dir = await makeTemp();
     const marker = join(dir, 'first-attempt-ran');
     const script = `
@@ -476,7 +526,7 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
         process.exit(0);
       }
       fs.writeFileSync(${JSON.stringify(marker)}, "");
-      console.log("@mangostudio/api:test:  2 fail");
+      console.log(${JSON.stringify(line)});
       process.exit(134);
     `;
     const result = await runTestsWithWatchdog(
@@ -492,19 +542,22 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
   // does, through the fixtures above — would otherwise turn its own exit 0
   // into a phantom 1. Bun cannot exit 0 with a failing test, so only a retry
   // can legitimately hide findings.
-  it('does not turn a single green attempt into a failure over mirrored output', async () => {
-    const dir = await makeTemp();
-    const script = `
+  it.each([undefined, true])(
+    'does not turn a single green attempt into a failure over mirrored output with retryOnCrash=%s',
+    async (retryOnCrash) => {
+      const dir = await makeTemp();
+      const script = `
       console.log("(fail) some suite > quoted by a fixture [1.00ms]");
       console.log("2 fail");
       process.exit(0);
     `;
-    const result = await runTestsWithWatchdog(
-      optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash: true })
-    );
+      const result = await runTestsWithWatchdog(
+        optionsIn(dir, { command: ['bun', '-e', script], retryOnCrash })
+      );
 
-    expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
-  });
+      expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
+    }
+  );
 
   // Regression: the same mirrored-output trap, one attempt later. A crash with
   // no findings hands the verdict to the retry — and a *green* retry whose log
@@ -520,7 +573,7 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
           '-e',
           crashOnceThenScript(
             marker,
-            'console.log("(fail) some suite > quoted by a fixture [1.00ms]"); process.exit(0);'
+            'console.log("@mangostudio/api:test: (fail) quoted by a fixture [1.00ms]"); console.log("@mangostudio/api:test:  2 fail"); process.exit(0);'
           ),
         ],
         retryOnCrash: true,

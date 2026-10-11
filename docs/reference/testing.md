@@ -336,7 +336,9 @@ Two mitigations are in place until it ships:
 - Every CI test invocation runs under `scripts/ci/run-tests-watchdog.ts`,
   which kills the invocation's process group after a per-attempt bound and
   retries once, restoring the timings baseline first so the retry computes the
-  same shard partition as the other seven jobs.
+  same shard partition as the other seven jobs. Test failures or unhandled
+  errors reported before the hang still fail the invocation after a clean
+  retry, even when crash retries are disabled.
 
 **Why "re-run failed jobs" used to re-hang while "re-run all jobs" passed:**
 the hang follows specific files, and the file-to-shard partition is a function
@@ -904,11 +906,11 @@ Every lane runs under `scripts/ci/run-tests-watchdog.ts` with
 the watchdog's per-attempt bound rather than burning the step budget, and a
 crash gets one same-seed retry so the rest of the lane's file list still runs.
 Both are annotated `::warning` so an infra failure does not read as an ordering
-finding — but neither is allowed to hide one. The watchdog scans the crashed
-attempt's log for Bun's inline `(fail)` lines, its `N fail` summary, and the
+finding — but neither is allowed to hide one. The watchdog scans the hung or
+crashed attempt's log for Bun's inline `(fail)` lines, its `N fail` summary, and the
 unhandled-error signal (`# Unhandled error between tests` / `N error(s)`)
 that JUnit cannot carry, and reports non-zero when any is present even if the
-retry came back clean: a crash proves the runner recovered, not that the
+retry came back clean: the retry proves the runner recovered, not that the
 failures did not happen. A retried night keeps attempt 1 at
 `run.log.attempt-1` and uploads it even when the step itself is green, since a
 truncated attempt is exactly where the night's only finding may sit.

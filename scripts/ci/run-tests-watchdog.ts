@@ -28,6 +28,8 @@
 //
 // A run that *fails* is not retried — only one that had to be killed. Real
 // failures should surface, not get a second roll of the dice.
+// Findings reported before a hang still fail the invocation after a clean
+// retry, independently of the crash-retry option below.
 //
 // `retryOnCrash` (opt-in, unset for every merge-gate caller) extends the same
 // bound to a second failure class: the isolate runner aborting outright
@@ -64,7 +66,7 @@ export interface WatchdogOptions {
    * the crash-path tests would otherwise each pay the full CI-sized wait.
    */
   readonly crashReapGraceSeconds?: number;
-  /** Combined stdout+stderr of the attempt whose exit code is reported. */
+  /** Combined stdout+stderr of the final attempt. */
   readonly logFile: string;
   /**
    * Where the child's output is mirrored live. Defaults to this process's own
@@ -252,9 +254,8 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
   if (!executable) throw new Error('Watchdog needs a command after --');
 
   // Truncated per attempt, not appended: the file feeds the unhandled-error
-  // extraction and the failure artifact, and both must describe the attempt
-  // whose exit code the job reports — a killed first attempt's partial output
-  // would count phantom errors against a green retry. Every attempt is still
+  // extraction and the failure artifact, and both describe the final attempt.
+  // `observe` retains earlier findings separately. Every attempt is still
   // streamed to stdout, so the job log keeps the full history.
   const log = createWriteStream(options.logFile, { flags: 'w' });
   const mirror = options.stdout ?? process.stdout;
@@ -389,9 +390,8 @@ const restoreTimings = async (timingsDir: string, backup: string | null): Promis
 
 /**
  * Run a test command with a hang watchdog and one retry, and record the
- * shard-meta the merge job reads. The exit code is the final attempt's — a
- * hang reports 124, and with `retryOnCrash` on, a clean retry after findings
- * elsewhere still reports non-zero (see below).
+ * shard-meta the merge job reads. A final hang reports 124, and a clean retry
+ * after an earlier test failure or unhandled error still reports non-zero.
  * // Usage: const { exitCode } = await runTestsWithWatchdog({ label: '3', command: ['bun', 'run', 'test'], timeoutSeconds: 240, logFile: 'coverage-run.log', metaFile: 'shard-meta.json' });
  */
 export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<WatchdogResult> => {
@@ -418,9 +418,9 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
    *
    * Reads the log while it still sits at `options.logFile` — before any retry
    * renames it out of the way — so both the crash check and the failure scan
-   * see the bytes that attempt actually produced. Returns false whenever crash
-   * retry is off, which is what keeps every merge-gate caller on the old
-   * fail-once-and-surface contract.
+   * see the bytes that attempt actually produced. Failure retention applies
+   * to hang retries even when crash retry is off; the returned crash verdict
+   * still requires the caller's opt-in.
    *
    * An attempt that exited 0 is skipped outright, and that gate is what makes
    * the failure scan safe to run on *every* attempt rather than only the
@@ -433,12 +433,12 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
    * for a full log read it could not act on.
    */
   const observe = async (result: AttemptResult): Promise<boolean> => {
-    if (!crashRetryEnabled || result.exitCode === 0) return false;
+    if (result.exitCode === 0) return false;
     const text = await Bun.file(options.logFile)
       .text()
       .catch(() => '');
     if (hasFailure(text)) failuresSeen = true;
-    const crashed = !result.hung && isCrash(result, text);
+    const crashed = crashRetryEnabled && !result.hung && isCrash(result, text);
     crashedAny ||= crashed;
     return crashed;
   };
@@ -488,10 +488,10 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   }
   if (backup) await rm(backup, { recursive: true, force: true });
 
-  // A crash that struck after real findings must not read as green just
+  // A hang or crash after real findings must not read as green just
   // because the retry came back clean — the retry proves the isolate runner
   // recovered, not that the earlier failures didn't happen. `1` rather than
-  // the crashed attempt's own code: a plain `bun test` failure is never
+  // the interrupted attempt's own code: a plain `bun test` failure is never
   // retried, so the only way in here is a hang (124) or a crash (134/marker),
   // neither of which is a meaningful "test failure" exit code to persist.
   //
@@ -503,7 +503,13 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   // itself; `attempts === 2` covers the single-attempt case, where there is no
   // earlier attempt whose findings a clean run could be hiding.
   let exitCode = attempt.exitCode;
-  if (crashRetryEnabled && attempts === 2 && failuresSeen && exitCode === 0) exitCode = 1;
+  if (attempts === 2 && failuresSeen && exitCode === 0) {
+    exitCode = 1;
+    mirror.write(
+      `\n::warning::Test invocation for '${options.label}' reported failures or unhandled errors ` +
+        'before retrying; retaining exit code 1 after a clean retry.\n'
+    );
+  }
 
   const durationSeconds = Math.round((Date.now() - startedAt) / 1000);
   const shard = /^\d+$/.test(options.label) ? Number(options.label) : options.label;
