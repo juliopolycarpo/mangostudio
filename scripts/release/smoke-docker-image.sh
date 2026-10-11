@@ -29,7 +29,7 @@ cleanup
 if command -v ss >/dev/null 2>&1; then
   listeners="$(ss -H -ltn "( sport = :${port} )")"
   if [ -n "$listeners" ]; then
-    echo "::error::expected smoke port ${port} released; listeners [$listeners]" >&2
+    echo "::error::expected smoke port ${port} released; listeners [$listeners]"
     exit 1
   fi
 fi
