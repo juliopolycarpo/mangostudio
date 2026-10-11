@@ -52,6 +52,10 @@ pub(crate) const EVENT_TOPIC: &str = "external-agent.event";
 const TURN_PAYLOAD_MAX_BYTES: usize = 2 * 1024 * 1024;
 /// Held back from the budget so the error that reports its overflow still fits.
 const TURN_ERROR_RESERVE_BYTES: usize = 4_096;
+/// `MAX_EXTERNAL_NOTICES_PER_TURN`: how many vendor notices the hub keeps for one turn. The relay
+/// forwards no more, so a vendor that repeats itself cannot spend the payload budget above on
+/// asides and end the turn. `apps/shared/tests/unit/external-notice.test.ts` reads this line.
+const NOTICES_PER_TURN: usize = 8;
 
 /// What one accepted `clientMessageId` answered, so a retry is answered
 /// rather than run twice. A turn and a review share the id space.
@@ -451,6 +455,8 @@ impl Supervisor {
                 spent: 0,
                 failed: false,
                 shown_commands: None,
+                notices: 0,
+                notices_dropped: false,
             };
             let mut subscription = live.session.subscribe();
             relay.commands(subscription.current());
@@ -639,6 +645,9 @@ struct Relay {
     spent: usize,
     failed: bool,
     shown_commands: Option<Vec<super::wire::Command>>,
+    /// Notices forwarded so far, and whether one was dropped (said once per turn).
+    notices: usize,
+    notices_dropped: bool,
 }
 
 impl Relay {
@@ -715,7 +724,29 @@ impl Relay {
         if self.failed {
             return;
         }
+        if matches!(wire, Event::Notice { .. }) && !self.admit_notice() {
+            return;
+        }
         self.publish(at, wire);
+    }
+
+    /// Whether one more notice may go to the hub. Past the cap it is dropped, and the first drop of
+    /// a turn is said once on stderr, without any of the vendor's text.
+    fn admit_notice(&mut self) -> bool {
+        if self.notices < NOTICES_PER_TURN {
+            self.notices += 1;
+            return true;
+        }
+        if !std::mem::replace(&mut self.notices_dropped, true) {
+            eprintln!(
+                "mangostudio-runtime: external_agent_notices_dropped {}",
+                serde_json::json!({
+                    "sessionId": self.live.session_id,
+                    "kept": NOTICES_PER_TURN,
+                })
+            );
+        }
+        false
     }
 
     /// Sends one event within the budget; past it, or for an envelope the
