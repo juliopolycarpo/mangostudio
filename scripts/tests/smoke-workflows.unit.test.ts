@@ -7,6 +7,7 @@ import {
   smokeAssertions,
   smokeMatrixCases,
   smokeStepEnv,
+  smokeStepTimeout,
 } from './support/smoke-workflows';
 
 // Pin the original 14 assertions, not whatever the current workflow happens
@@ -132,7 +133,7 @@ describe('smoke workflow assertion inventory', () => {
     for (const { job, matrix, step } of smokeAssertions(workflows)) {
       const key = matrix.platform ? `${job} (${matrix.platform})` : job;
       const sequence = sequences.get(key) ?? { job, minutes: [] };
-      sequence.minutes.push(step['timeout-minutes'] ?? Number.POSITIVE_INFINITY);
+      sequence.minutes.push(smokeStepTimeout(step, matrix) ?? Number.POSITIVE_INFINITY);
       sequences.set(key, sequence);
     }
     for (const [key, { job, minutes }] of sequences) {
@@ -148,11 +149,41 @@ describe('smoke workflow assertion inventory', () => {
     }
   });
 
+  test('a binary leg with no folded assertion after it keeps rebuild headroom', () => {
+    // A manual rebuild compiles inside the smoke step. Linux needs the short
+    // deadline to leave room for its Docker assertions; macOS and Windows run
+    // nothing after it, so they take the budget the Linux legs split in three.
+    const assertions = smokeAssertions(readWorkflows()).filter(
+      ({ job }) => job === 'binary/binary'
+    );
+    for (const { id, matrix, step } of assertions.filter(({ id }) => id.startsWith('binary/'))) {
+      const folded = assertions.filter((other) => other.matrix.platform === matrix.platform);
+      const expected = folded.length > 1 ? 4 : 12;
+      const minutes = smokeStepTimeout(step, matrix);
+      if (minutes !== expected) {
+        throw new Error(
+          `expected ${id} step timeout-minutes: ${expected} (${folded.length} assertion(s) share its job) | received: ${minutes}`
+        );
+      }
+    }
+  });
+
+  test('a step deadline resolves through its matrix field', () => {
+    const step = { name: 'smoke', 'timeout-minutes': '$' + '{{ matrix.smoke_timeout }}' };
+    expect(smokeStepTimeout(step, { smoke_timeout: '12' })).toBe(12);
+    expect(smokeStepTimeout({ 'timeout-minutes': 4 }, {})).toBe(4);
+    expect(smokeStepTimeout({}, {})).toBeUndefined();
+    expect(() => smokeStepTimeout(step, {})).toThrow(
+      'expected step "smoke" timeout-minutes to be a number or a matrix field holding one | received: $' +
+        '{{ matrix.smoke_timeout }}'
+    );
+  });
+
   test('a hung container suite leaves the remaining pairings inside the job deadline', () => {
     const job = readWorkflows().container.jobs.container;
     const suiteMinutes = (job.steps ?? [])
       .filter(({ run }) => run?.includes('connect-container-runtime.integration.test.ts'))
-      .map((step) => step['timeout-minutes'] ?? Number.POSITIVE_INFINITY);
+      .map((step) => smokeStepTimeout(step, {}) ?? Number.POSITIVE_INFINITY);
     expect(suiteMinutes).toHaveLength(4);
     const total = suiteMinutes.reduce((sum, minutes) => sum + minutes, 0);
     expect(total, `container suite step timeouts ${suiteMinutes.join('+')}`).toBeLessThan(

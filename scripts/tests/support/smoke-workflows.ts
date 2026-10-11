@@ -12,7 +12,7 @@ export interface SmokeStep {
   readonly with?: Record<string, string>;
   readonly 'working-directory'?: string;
   readonly 'continue-on-error'?: boolean;
-  readonly 'timeout-minutes'?: number;
+  readonly 'timeout-minutes'?: number | string;
 }
 
 export interface SmokeJob {
@@ -75,6 +75,20 @@ export function smokeStepEnv(
       String(value).replace(/\$\{\{ matrix\.(\w+) \}\}/g, (_, key: string) => matrix[key] ?? ''),
     ])
   );
+}
+
+/** Resolve a step deadline, following a matrix field to the leg's own value. // Usage: smokeStepTimeout(step, { smoke_timeout: '12' }) */
+export function smokeStepTimeout(step: SmokeStep, matrix: MatrixEntry): number | undefined {
+  const declared = step['timeout-minutes'];
+  if (declared === undefined) return undefined;
+  const field = /^\$\{\{ matrix\.(\w+) \}\}$/.exec(String(declared))?.[1];
+  const minutes = Number(field ? matrix[field] : declared);
+  if (!Number.isFinite(minutes)) {
+    throw new Error(
+      `expected step "${step.name}" timeout-minutes to be a number or a matrix field holding one | received: ${String(declared)}`
+    );
+  }
+  return minutes;
 }
 
 /** Identify every binary, Docker image and container pairing assertion. // Usage: smokeAssertions({ binary: parsed }) */

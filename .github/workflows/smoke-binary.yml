@@ -73,24 +73,30 @@ jobs:
             musl_platform: linux-x64-musl
             musl_artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-x64-musl'] }}
             artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-x64'] }}
+            smoke_timeout: 4
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
             docker_arch: arm64
             musl_platform: linux-arm64-musl
             musl_artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-arm64-musl'] }}
             artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-arm64'] }}
+            smoke_timeout: 4
           - platform: darwin-arm64
             runner: macos-latest
             artifact_name: ${{ fromJSON(inputs.target_artifacts)['darwin-arm64'] }}
+            smoke_timeout: 12
           - platform: darwin-x64
             runner: macos-15-intel
             artifact_name: ${{ fromJSON(inputs.target_artifacts)['darwin-x64'] }}
+            smoke_timeout: 12
           - platform: windows-x64
             runner: windows-latest
             artifact_name: ${{ fromJSON(inputs.target_artifacts)['windows-x64'] }}
+            smoke_timeout: 12
           - platform: windows-arm64
             runner: windows-11-arm
             artifact_name: ${{ fromJSON(inputs.target_artifacts)['windows-arm64'] }}
+            smoke_timeout: 12
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,9 +134,11 @@ jobs:
       # The step deadline fails a hung smoke before the job deadline cancels
       # the job, which would skip the Docker assertions and teardown checks.
       # The three Linux deadlines total 12 minutes so they stay inside it.
+      # macOS and Windows run nothing after this step, so `smoke_timeout`
+      # gives them the whole 12: a manual rebuild compiles inside it.
       - name: Run binary smoke test
         if: ${{ !cancelled() }}
-        timeout-minutes: 4
+        timeout-minutes: ${{ matrix.smoke_timeout }}
         run: bun --no-install run scripts/test-build.ts
         env:
           # Read by the rebuild's `build:binary`; inert when SKIP_BUILD=1.
