@@ -65,7 +65,9 @@ if (command === 'curl') {
 }
 if (command === 'ss') {
   const fail = process.env.FAKE_SMOKE_WORKFLOW_FAILURE;
-  if (fail === 'ports' && args.some((arg) => arg.includes('13002'))) {
+  // A container that is still up holds its published port, like docker-proxy.
+  const published = readdirSync(stateDir).some((name) => name.endsWith('-13002'));
+  if ((fail === 'ports' || published) && args.some((arg) => arg.includes('13002'))) {
     console.log('LISTEN 0 128 127.0.0.1:13002 0.0.0.0:*');
   }
   // A native hub that outlived its smoke: only a filter naming 13001 sees it.

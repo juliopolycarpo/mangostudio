@@ -60,9 +60,11 @@ async function runWorkflowSteps(
   job: SmokeJob,
   matrix: Record<string, string>,
   failure: 'binary' | 'container' | 'ports' | 'native-port' | 'none',
-  rebuild = false
+  rebuild = false,
+  leftoverContainers: readonly string[] = []
 ) {
   const fixture = stageWorkflowRun();
+  for (const name of leftoverContainers) writeFileSync(join(fixture.stateDir, name), 'running');
   const outcomes: Array<{ name: string; code: number }> = [];
   const resolveValue = (value: string) =>
     value
@@ -126,6 +128,28 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     );
     expect(containers).toEqual([]);
   });
+
+  test('a container left up by a killed image step is removed before the port precheck', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+    if (!matrix)
+      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+    // A step killed at its deadline never runs its EXIT trap, so the next
+    // image step meets the same-named container still publishing 13002.
+    const { outcomes, containers } = await runWorkflowSteps(job, matrix, 'none', false, [
+      'mangostudio-smoke-linux-amd64-13002',
+    ]);
+    const received = outcomes
+      .filter(({ name }) => name.includes('Docker smoke test'))
+      .map(({ name, code }) => `${name}=${code}`)
+      .join(', ');
+    const expected = 'Run Bookworm Docker smoke test=0, Run Alpine Docker smoke test=0';
+    if (received !== expected || containers.length) {
+      throw new Error(
+        `expected the leftover container removed and both images tested (${expected}; containers []) | received: ${received}; containers [${containers.join(', ')}]`
+      );
+    }
+  }, 15_000);
 
   test('a leaked native hub fails only the native teardown check, not the image assertions', async () => {
     const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;

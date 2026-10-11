@@ -181,11 +181,6 @@ jobs:
           GEMINI_API_KEY: dummy
         run: |
           set -euo pipefail
-          listeners="$(ss -H -ltn '( sport = :13002 )')"
-          if [ -n "$listeners" ]; then
-            echo "::error::expected smoke port 13002 released; listeners [$listeners]"
-            exit 1
-          fi
           if [ "$REBUILD" = "true" ]; then
             bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
           fi
@@ -257,11 +252,6 @@ jobs:
           GEMINI_API_KEY: dummy
         run: |
           set -euo pipefail
-          listeners="$(ss -H -ltn '( sport = :13002 )')"
-          if [ -n "$listeners" ]; then
-            echo "::error::expected smoke port 13002 released; listeners [$listeners]"
-            exit 1
-          fi
           if [ "$REBUILD" = "true" ]; then
             bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
           fi

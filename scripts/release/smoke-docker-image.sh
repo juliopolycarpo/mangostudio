@@ -24,6 +24,16 @@ trap cleanup EXIT
 
 cleanup
 
+# Checked after the removal above: a same-named container a killed run left up
+# is cleared rather than reported, so only a foreign listener fails here.
+if command -v ss >/dev/null 2>&1; then
+  listeners="$(ss -H -ltn "( sport = :${port} )")"
+  if [ -n "$listeners" ]; then
+    echo "::error::expected smoke port ${port} released; listeners [$listeners]" >&2
+    exit 1
+  fi
+fi
+
 docker run -d \
   --name "$container_name" \
   --platform "$platform" \
