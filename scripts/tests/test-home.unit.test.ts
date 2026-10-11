@@ -330,7 +330,7 @@ describe('runWithTestHome', () => {
     async (signal, expected) => {
       const child = new FakeSignaledChild(signal);
       const code = await runWithTestHome(['bun', 'fixture.ts'], process.env, child);
-      expect(code).toBe(expected);
+      expect(code, `expected exit code: ${expected} | received: ${code}`).toBe(expected);
       expect(child.command).toEqual([process.execPath, 'fixture.ts']);
       expect(child.home).toContain(TEST_HOME_PREFIX);
       expect(existsSync(child.home)).toBe(false);

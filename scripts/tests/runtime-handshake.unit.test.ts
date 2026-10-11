@@ -43,7 +43,7 @@ class FakeHandshakeProcess implements RuntimeHandshakeChild {
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   readonly exited: Promise<number>;
-  readonly signalCode = null;
+  readonly signalCode: string | number | null;
   readonly stdin = {
     end: () => {
       this.stdinEnded = true;
@@ -61,8 +61,14 @@ class FakeHandshakeProcess implements RuntimeHandshakeChild {
   private stdoutController!: ReadableStreamDefaultController<Uint8Array>;
   private resolveExit!: (code: number) => void;
 
-  constructor(kind: 'closed' | 'held', stderr: string, exitCode: number | null = null) {
+  constructor(
+    kind: 'closed' | 'held',
+    stderr: string,
+    exitCode: number | null = null,
+    signalCode: string | number | null = null
+  ) {
     this.exitCode = exitCode;
+    this.signalCode = signalCode;
     this.stdout = new ReadableStream({
       start: (controller) => {
         this.stdoutController = controller;
@@ -81,7 +87,7 @@ class FakeHandshakeProcess implements RuntimeHandshakeChild {
     });
     this.exited = new Promise((resolve) => {
       this.resolveExit = resolve;
-      if (exitCode !== null) resolve(exitCode);
+      if (exitCode !== null || signalCode !== null) resolve(exitCode ?? 1);
     });
   }
 
@@ -316,6 +322,22 @@ describe('scripts/lib/runtime-handshake', () => {
       // The success path is guarded too: the smoke greps this stderr.
       expect(probe.hello).toBe(HELLO_FRAME);
       expect(findModuleResolutionFailure(probe.stderr)).toBe('Cannot find module');
+    });
+
+    // A real-time signal has no name, so the host reports its number.
+    test('names a signal the host reports as a number', async () => {
+      const child = new FakeHandshakeProcess('closed', '', null, 34);
+      const probe = await probeRuntimeHandshake({
+        command: ['fixture-runtime', '--stdio'],
+        spawn: child.spawn,
+        timeoutMs: 100,
+        exitGraceMs: 50,
+      });
+
+      expect(probe.failure).toBe('closed stdout without a handshake frame; killed by 34');
+      expect(probe.signal).toBe(34);
+      expect(probe.exitCode).toBeNull();
+      expect(child.kills).toBe(0);
     });
 
     test('kills a child that closed stdout but never exits, without claiming its status', async () => {
