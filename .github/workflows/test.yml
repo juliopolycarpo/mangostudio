@@ -31,7 +31,7 @@ permissions:
 # partition. What has to stay stable is the file all shards of one run read, and
 # that is what resolve-timings pins.
 env:
-  SHARD_COUNT: 8
+  SHARD_COUNT: 4
   # Names every child a run spawns, and every one that never exits, in the shard
   # log. The failure this exists for (#922) reproduces only in CI, and Bun's own
   # `killed N dangling process` says nothing about which child it killed.
@@ -102,7 +102,7 @@ jobs:
     # failed jobs reuses resolve-timings' output and therefore the exact file
     # partition that hung; "re-run all jobs" re-resolves the baseline, which
     # is why it has looked more reliable.
-    name: Tests (shard ${{ matrix.shard }}/8)
+    name: Tests (shard ${{ matrix.shard }}/4)
     needs: [resolve-timings]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -111,7 +111,7 @@ jobs:
       # for the QA report instead of a run that stopped mid-fan-out.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
       # Bounds the snapshot this job restores and saves back. Each save carries
