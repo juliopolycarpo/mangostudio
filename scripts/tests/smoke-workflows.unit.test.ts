@@ -2,11 +2,17 @@ import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
 import {
+  assertSmokeDeadlineBudget,
   assertSmokeInventory,
   parseSmokeWorkflow,
+  type SmokeJob,
+  type SmokeLeg,
   smokeAssertions,
+  smokeJobLegs,
   smokeMatrixCases,
   smokeStepEnv,
+  smokeStepLabel,
+  smokeStepRuns,
   smokeStepTimeout,
 } from './support/smoke-workflows';
 
@@ -124,29 +130,131 @@ describe('smoke workflow assertion inventory', () => {
     }
   });
 
-  test('sequential assertion timeouts in one job fit inside its job deadline', () => {
+  test('every step a smoke leg can run has a deadline and they total below its job deadline', () => {
     // A job timeout cancels the job, which skips every later !cancelled()
     // assertion and teardown check. A step timeout only fails that step, so
-    // the steps one runner executes in sequence must not add up to the job's.
-    const workflows = readWorkflows();
-    const sequences = new Map<string, { job: string; minutes: number[] }>();
-    for (const { job, matrix, step } of smokeAssertions(workflows)) {
-      const key = matrix.platform ? `${job} (${matrix.platform})` : job;
-      const sequence = sequences.get(key) ?? { job, minutes: [] };
-      sequence.minutes.push(smokeStepTimeout(step, matrix) ?? Number.POSITIVE_INFINITY);
-      sequences.set(key, sequence);
-    }
-    for (const [key, { job, minutes }] of sequences) {
-      const [workflowName, jobName] = job.split('/');
-      const workflow = workflows[workflowName as keyof typeof workflows];
-      const jobTimeout = workflow.jobs[jobName]['timeout-minutes'];
-      const total = minutes.reduce((sum, value) => sum + value, 0);
-      if (jobTimeout === undefined || total >= jobTimeout) {
-        throw new Error(
-          `expected ${key} assertion timeout-minutes to total below its job's ${jobTimeout} | received: ${minutes.join('+')}=${total}`
-        );
+    // everything one runner executes in sequence, setup and teardown included,
+    // must carry a deadline and must not add up to the job's.
+    const budgeted: string[] = [];
+    for (const [workflowName, workflow] of Object.entries(readWorkflows())) {
+      for (const [jobName, job] of Object.entries(workflow.jobs)) {
+        // A reusable-workflow caller has no steps and cannot set a timeout.
+        if (!job.steps) continue;
+        assertSmokeDeadlineBudget(`${workflowName}/${jobName}`, job);
+        budgeted.push(`${workflowName}/${jobName}`);
       }
     }
+    expect(budgeted).toEqual(['binary/binary', 'container/container']);
+  });
+
+  test('a step without a deadline fails the budget by leg and step name', () => {
+    const job = (steps: string): SmokeJob =>
+      parseSmokeWorkflow(`jobs:
+  smoke:
+    timeout-minutes: 10
+    steps:
+${steps}`).jobs.smoke;
+    expect(() =>
+      assertSmokeDeadlineBudget(
+        'binary/smoke',
+        job('      - uses: actions/checkout@v7\n      - name: Smoke\n        timeout-minutes: 4')
+      )
+    ).toThrow(
+      'expected binary/smoke step "actions/checkout@v7" to declare timeout-minutes: <number> | received: undefined'
+    );
+    // A marker step is still a step the runner executes before the deadline.
+    expect(() =>
+      assertSmokeDeadlineBudget(
+        'binary/smoke',
+        job(
+          '      - name: Smoke\n        timeout-minutes: 4\n      - id: ready\n        run: "true"'
+        )
+      )
+    ).toThrow(
+      'expected binary/smoke step "ready" to declare timeout-minutes: <number> | received: undefined'
+    );
+    expect(() => assertSmokeDeadlineBudget('binary/smoke', { steps: [] })).toThrow(
+      'expected binary/smoke to declare a numeric job timeout-minutes | received: undefined'
+    );
+  });
+
+  test('a leg whose deadlines reach the job deadline fails, counting only steps it can run', () => {
+    const job = (jobTimeout: number): SmokeJob => ({
+      'timeout-minutes': jobTimeout,
+      strategy: { matrix: { include: [{ platform: 'linux-x64', docker_arch: 'amd64' }] } },
+      steps: [
+        { uses: 'actions/checkout@v7', 'timeout-minutes': 2 },
+        { name: 'Toolchain', if: '$' + '{{ inputs.rebuild }}', 'timeout-minutes': 5 },
+        { name: 'Download', if: '$' + '{{ !inputs.rebuild }}', 'timeout-minutes': 3 },
+        {
+          name: 'Docker',
+          if: '$' + '{{ !cancelled() && matrix.docker_arch }}',
+          'timeout-minutes': 4,
+        },
+      ],
+    });
+    // Rebuild and prebuilt setup never share a leg: 2+5+4, not 2+5+3+4.
+    expect(() => assertSmokeDeadlineBudget('binary/smoke', job(12))).not.toThrow();
+    expect(() => assertSmokeDeadlineBudget('binary/smoke', job(11))).toThrow(
+      "expected binary/smoke (linux-x64, rebuild) step deadlines to total below the job's timeout-minutes: 11 | received: 11 (actions/checkout@v7=2 + Toolchain=5 + Docker=4)"
+    );
+  });
+
+  test('a job expands into one leg per matrix case and rebuild mode it branches on', () => {
+    const matrix = { include: [{ platform: 'linux-x64' }, { platform: 'windows-x64' }] };
+    const legs = smokeJobLegs('binary/binary', {
+      strategy: { matrix },
+      steps: [{ name: 'Toolchain', if: '$' + '{{ inputs.rebuild }}' }],
+    });
+    expect(legs.map(({ name }) => name)).toEqual([
+      'binary/binary (linux-x64, prebuilt)',
+      'binary/binary (linux-x64, rebuild)',
+      'binary/binary (windows-x64, prebuilt)',
+      'binary/binary (windows-x64, rebuild)',
+    ]);
+    expect(legs[1]).toEqual({
+      name: 'binary/binary (linux-x64, rebuild)',
+      matrix: { platform: 'linux-x64' },
+      inputs: { rebuild: true },
+    });
+    expect(smokeJobLegs('container/container', { steps: [{ name: 'Suite' }] })).toEqual([
+      { name: 'container/container', matrix: {}, inputs: {} },
+    ]);
+  });
+
+  test('a leg skips only the steps its matrix or rebuild mode proves cannot run', () => {
+    const linuxRebuild = {
+      name: 'linux',
+      matrix: { docker_arch: 'amd64' },
+      inputs: { rebuild: true },
+    };
+    const macPrebuilt = { name: 'mac', matrix: {}, inputs: { rebuild: false } };
+    const runs = (condition: string, leg: SmokeLeg) =>
+      smokeStepRuns({ if: `${'$'}{{ ${condition} }}` }, leg);
+
+    expect(smokeStepRuns({}, macPrebuilt)).toBe(true);
+    expect(runs('!cancelled()', macPrebuilt)).toBe(true);
+    expect(runs('inputs.rebuild', linuxRebuild)).toBe(true);
+    expect(runs('inputs.rebuild', macPrebuilt)).toBe(false);
+    expect(runs('!inputs.rebuild', linuxRebuild)).toBe(false);
+    expect(runs('!inputs.rebuild', macPrebuilt)).toBe(true);
+    expect(runs('!cancelled() && matrix.docker_arch', linuxRebuild)).toBe(true);
+    expect(runs('!cancelled() && matrix.docker_arch', macPrebuilt)).toBe(false);
+    expect(runs('!cancelled() && matrix.docker_arch && !inputs.rebuild', linuxRebuild)).toBe(false);
+    // Without the wrapper GitHub still evaluates `if:` as an expression.
+    expect(smokeStepRuns({ if: 'matrix.docker_arch' }, macPrebuilt)).toBe(false);
+    // Unproven shapes count toward the budget rather than silently leaving it.
+    expect(runs('matrix.docker_arch || inputs.rebuild', macPrebuilt)).toBe(true);
+    expect(runs('!(matrix.docker_arch && inputs.rebuild)', linuxRebuild)).toBe(true);
+    expect(runs("steps.ready.outcome == 'success'", macPrebuilt)).toBe(true);
+    expect(runs('inputs.channel', macPrebuilt)).toBe(true);
+  });
+
+  test('a step is cited by its name, then its id, then its action', () => {
+    expect(smokeStepLabel({ name: 'Smoke', id: 'smoke', uses: 'a/b@v1' }, 0)).toBe('Smoke');
+    expect(smokeStepLabel({ id: 'ready', run: 'true' }, 0)).toBe('ready');
+    expect(smokeStepLabel({ uses: 'actions/checkout@v7' }, 0)).toBe('actions/checkout@v7');
+    expect(smokeStepLabel({ run: 'true' }, 2)).toBe('#3');
   });
 
   test('a binary leg with no folded assertion after it keeps rebuild headroom', () => {
@@ -176,18 +284,6 @@ describe('smoke workflow assertion inventory', () => {
     expect(() => smokeStepTimeout(step, {})).toThrow(
       'expected step "smoke" timeout-minutes to be a number or a matrix field holding one | received: $' +
         '{{ matrix.smoke_timeout }}'
-    );
-  });
-
-  test('a hung container suite leaves the remaining pairings inside the job deadline', () => {
-    const job = readWorkflows().container.jobs.container;
-    const suiteMinutes = (job.steps ?? [])
-      .filter(({ run }) => run?.includes('connect-container-runtime.integration.test.ts'))
-      .map((step) => smokeStepTimeout(step, {}) ?? Number.POSITIVE_INFINITY);
-    expect(suiteMinutes).toHaveLength(4);
-    const total = suiteMinutes.reduce((sum, minutes) => sum + minutes, 0);
-    expect(total, `container suite step timeouts ${suiteMinutes.join('+')}`).toBeLessThan(
-      job['timeout-minutes'] ?? 0
     );
   });
 

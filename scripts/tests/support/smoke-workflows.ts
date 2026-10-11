@@ -4,6 +4,7 @@
 type MatrixEntry = Record<string, string>;
 
 export interface SmokeStep {
+  readonly id?: string;
   readonly name?: string;
   readonly run?: string;
   readonly uses?: string;
@@ -26,6 +27,13 @@ export interface SmokeJob {
 
 export interface SmokeWorkflow {
   readonly jobs: Record<string, SmokeJob>;
+}
+
+/** One sequence of steps a single runner can execute: a matrix case under one set of workflow inputs. */
+export interface SmokeLeg {
+  readonly name: string;
+  readonly matrix: MatrixEntry;
+  readonly inputs: Record<string, boolean>;
 }
 
 export interface SmokeAssertion {
@@ -89,6 +97,76 @@ export function smokeStepTimeout(step: SmokeStep, matrix: MatrixEntry): number |
     );
   }
   return minutes;
+}
+
+/** Expand a job into its legs: each matrix case under every `inputs.rebuild` value its steps branch on. // Usage: smokeJobLegs('binary/binary', job) */
+export function smokeJobLegs(jobName: string, job: SmokeJob): SmokeLeg[] {
+  const branchesOnRebuild = (job.steps ?? []).some((step) => step.if?.includes('inputs.rebuild'));
+  const modes = branchesOnRebuild ? [false, true] : [undefined];
+  return smokeMatrixCases(job).flatMap((matrix) =>
+    modes.map((rebuild): SmokeLeg => {
+      const mode = rebuild === undefined ? undefined : rebuild ? 'rebuild' : 'prebuilt';
+      const labels = [matrix.platform, mode].filter((label) => label !== undefined);
+      return {
+        name: labels.length ? `${jobName} (${labels.join(', ')})` : jobName,
+        matrix,
+        inputs: rebuild === undefined ? {} : { rebuild },
+      };
+    })
+  );
+}
+
+/** Decide whether a leg can run a step; only a condition proven false on that leg excludes it. // Usage: smokeStepRuns(step, leg) */
+export function smokeStepRuns(step: SmokeStep, leg: SmokeLeg): boolean {
+  const declared = String(step.if ?? '').trim();
+  const condition = /^\$\{\{(.*)\}\}$/s.exec(declared)?.[1] ?? declared;
+  // An `||` or a parenthesis can make a false term irrelevant, so count the step.
+  if (/\|\||[()]/.test(condition.replaceAll('cancelled()', ''))) return true;
+  return condition.split('&&').every((term) => {
+    const [, negated, scope, field] = /^\s*(!?)\s*(matrix|inputs)\.(\w+)\s*$/.exec(term) ?? [];
+    if (!scope || !field) return true;
+    if (scope === 'inputs' && !(field in leg.inputs)) return true;
+    const value = scope === 'matrix' ? Boolean(leg.matrix[field]) : leg.inputs[field];
+    return negated ? !value : value;
+  });
+}
+
+/** Name a step the way a failure should cite it, falling back for unnamed `uses:` and marker steps. // Usage: smokeStepLabel(step, 0) */
+export function smokeStepLabel(step: SmokeStep, index: number): string {
+  return step.name ?? step.id ?? step.uses ?? `#${index + 1}`;
+}
+
+/** Fail unless every step a leg can run has a deadline and they total below the job's. // Usage: assertSmokeDeadlineBudget('binary/binary', job) */
+export function assertSmokeDeadlineBudget(jobName: string, job: SmokeJob): void {
+  const jobTimeout = job['timeout-minutes'];
+  if (typeof jobTimeout !== 'number') {
+    throw new Error(
+      `expected ${jobName} to declare a numeric job timeout-minutes | received: ${String(jobTimeout)}`
+    );
+  }
+  for (const leg of smokeJobLegs(jobName, job)) {
+    const budget = legDeadlines(job, leg);
+    const total = budget.reduce((sum, { minutes }) => sum + minutes, 0);
+    if (total < jobTimeout) continue;
+    const terms = budget.map(({ label, minutes }) => `${label}=${minutes}`).join(' + ');
+    throw new Error(
+      `expected ${leg.name} step deadlines to total below the job's timeout-minutes: ${jobTimeout} | received: ${total} (${terms})`
+    );
+  }
+}
+
+function legDeadlines(job: SmokeJob, leg: SmokeLeg): { label: string; minutes: number }[] {
+  return (job.steps ?? []).flatMap((step, index) => {
+    if (!smokeStepRuns(step, leg)) return [];
+    const label = smokeStepLabel(step, index);
+    const minutes = smokeStepTimeout(step, leg.matrix);
+    if (minutes === undefined) {
+      throw new Error(
+        `expected ${leg.name} step "${label}" to declare timeout-minutes: <number> | received: undefined`
+      );
+    }
+    return [{ label, minutes }];
+  });
 }
 
 /** Identify every binary, Docker image and container pairing assertion. // Usage: smokeAssertions({ binary: parsed }) */
