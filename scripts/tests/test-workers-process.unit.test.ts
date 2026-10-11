@@ -10,7 +10,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
+import { CANCEL_GRACE_MS } from '../lib/process-tree';
 import {
+  EXIT_ABANDON_MS,
   pumpLines,
   type SpawnWorker,
   spawnWorkerChild,
@@ -18,8 +20,13 @@ import {
   type WorkerChild,
   workerEnvironment,
 } from '../lib/test-worker-process';
-import { WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
-import { runWorkerLane, type WorkerLaneSpec, type WorkerPlan } from '../lib/test-workers';
+import { SETTLE_GRACE_MS, WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
+import {
+  GROUP_KILL_AFTER_MS,
+  runWorkerLane,
+  type WorkerLaneSpec,
+  type WorkerPlan,
+} from '../lib/test-workers';
 import { fixtureChildEnvironment } from './support/child-supervision';
 import { FAKE_BUN_TEST, FAKE_CASES_PER_FILE } from './support/fake-bun-test';
 import { fakeLane } from './support/test-worker-fakes';
@@ -354,6 +361,18 @@ describe('cancelling real worker processes', () => {
     expect(alive, `expected live workers: 0 | received: ${alive.length} (pids ${alive})`).toEqual(
       []
     );
+  });
+});
+
+describe('the cancellation budget of a settling worker', () => {
+  it('ends its slowest teardown before the outer supervisor kills the lane', () => {
+    const slowest = GROUP_KILL_AFTER_MS + EXIT_ABANDON_MS + SETTLE_GRACE_MS;
+    const margin = CANCEL_GRACE_MS - slowest;
+
+    expect(
+      margin,
+      `expected escalation + abandoned exit wait + settlement grace at least 500 ms inside CANCEL_GRACE_MS (${CANCEL_GRACE_MS} ms) | received: ${GROUP_KILL_AFTER_MS} + ${EXIT_ABANDON_MS} + ${SETTLE_GRACE_MS} = ${slowest} ms`
+    ).toBeGreaterThanOrEqual(500);
   });
 });
 

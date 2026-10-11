@@ -285,9 +285,12 @@ const errorText = (caught: unknown): string =>
 /**
  * A worker that leads its own group is signalled by the runner of the runner
  * above, which gives its own children `CANCEL_GRACE_MS` (5 s) before it SIGKILLs
- * them: ours must be gone, or killed, before that.
+ * them: ours must be gone, or killed, before that. What follows the kill also
+ * has to fit: the abandoned exit wait (`EXIT_ABANDON_MS`) and then the whole
+ * settlement grace (`SETTLE_GRACE_MS`), so the lane writes its verdict even when
+ * a descendant outlives its SIGKILL.
  */
-const GROUP_KILL_AFTER_MS = 3_000;
+export const GROUP_KILL_AFTER_MS = 2_000;
 
 async function runWorker(
   plan: WorkerPlan,

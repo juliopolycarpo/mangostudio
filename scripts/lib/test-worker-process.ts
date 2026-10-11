@@ -43,11 +43,10 @@ const DRAIN_GRACE_MS = 2_000;
  * is already gone, so an unbounded wait here stalls the whole lane to its outer
  * deadline. It is spent after the escalation (`GROUP_KILL_AFTER_MS` in
  * ./test-workers.ts), out of what the outer supervisor's `CANCEL_GRACE_MS` leaves
- * for settlement, so it is kept short: a group that is gone by then settles on
- * the first poll, and only one that outlives its SIGKILL for most of the
- * settlement grace overruns the supervisor.
+ * for settlement, so it is kept short enough that the full settlement grace
+ * (`SETTLE_GRACE_MS`) still ends before the supervisor's deadline.
  */
-const EXIT_ABANDON_MS = 500;
+export const EXIT_ABANDON_MS = 500;
 
 /** What the lane reads from a started worker: the part of a `Bun.spawn` subprocess it depends on. */
 export interface WorkerChild {

@@ -20,7 +20,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 export const WORKER_TOKEN_ENV = 'MANGO_TEST_WORKER_TOKEN';
 
 /** How long a worker's descendants get to exit after the worker has, before one counts as left behind. */
-const SETTLE_GRACE_MS = 2_000;
+export const SETTLE_GRACE_MS = 2_000;
 
 /** A process that outlived its worker. */
 export interface Leftover {
