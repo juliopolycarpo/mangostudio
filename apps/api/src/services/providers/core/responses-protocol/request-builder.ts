@@ -417,6 +417,8 @@ function buildStatelessResponsesReplay(
       textContent = '';
     };
 
+    // An allowlist: only these four part kinds are replayed. Every other kind, a display-only
+    // `external_notice` or `system_event` among them, is deliberately left out of the model's input.
     for (const part of turn.parts) {
       if (part.type === 'text') {
         textContent += part.text;
