@@ -627,7 +627,6 @@ ${steps}`).jobs.smoke;
       for (const suite of suites) expect(steps.indexOf(suite)).toBeLessThan(leakIndex);
     }
     const leakCheck = readText(LEAK_SCRIPT);
-    expect(leakCheck).toContain('seq 1 20');
     expect(leakCheck).toContain('name=mango-rt-');
   });
 

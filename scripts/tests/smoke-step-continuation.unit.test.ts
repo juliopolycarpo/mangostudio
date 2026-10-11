@@ -348,12 +348,20 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
 
 // The container job's steps are one line each; these run the scripts behind
 // them directly, for the inputs a correct workflow never produces.
+const FAILING_SEQ_FAKE = `#!/usr/bin/env bash
+printf '%s\\n' '{"command":"seq","args":[]}' >> "$FAKE_SMOKE_WORKFLOW_EVENTS"
+printf '%s\\n' 'Deliberately failed seq' >&2
+exit 1
+`;
+
 async function runContainerScript(
   script: string,
   env: (root: string) => Record<string, string>,
-  leftovers: string[] = []
+  leftovers: string[] = [],
+  failingSeq = false
 ) {
   const fixture = stageWorkflowRun();
+  if (failingSeq) writeFileSync(join(fixture.fakeBin, 'seq'), FAILING_SEQ_FAKE, { mode: 0o755 });
   for (const name of leftovers) writeFileSync(join(fixture.stateDir, name), 'running');
   const child = Bun.spawn([join(ROOT_DIR, 'scripts', 'release', script)], {
     cwd: join(fixture.root, 'apps', 'api'),
@@ -522,6 +530,25 @@ describe.skipIf(process.platform === 'win32')('container smoke scripts', () => {
     );
     expect(code).toBe(0);
     expect(commands).toEqual(['podman ps -a --format {{.Names}} --filter name=mango-rt-']);
+  });
+
+  test('the leak check still polls the engine when seq cannot run', async () => {
+    const { code, commands, stdout } = await runContainerScript(
+      'assert-no-leftover-containers.sh',
+      () => ({ CONTAINER_CLI: 'podman' }),
+      ['mango-rt-one'],
+      true
+    );
+    expect(
+      commands.filter((command) => command.startsWith('podman ps')),
+      'the leak check must poll the engine even when seq cannot run'
+    ).toHaveLength(20);
+    expect(commands.filter((command) => command === 'sleep 1')).toHaveLength(20);
+    expect(commands.filter((command) => command === 'seq')).toEqual([]);
+    expect(code).toBe(1);
+    expect(stdout).toContain(
+      '::error::expected no mango-rt-* container left in podman | received: mango-rt-one'
+    );
   });
 
   test('the leak check rejects an engine it cannot ask', async () => {

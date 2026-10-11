@@ -21,7 +21,7 @@ case "$container_cli" in
 esac
 
 leftover=""
-for _ in $(seq 1 20); do
+for ((poll = 0; poll < 20; poll++)); do
   leftover="$("$container_cli" ps -a --format '{{.Names}}' --filter 'name=mango-rt-')"
   if [ -z "$leftover" ]; then
     break
