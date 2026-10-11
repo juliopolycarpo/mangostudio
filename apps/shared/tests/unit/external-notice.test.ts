@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   canAddExternalNotice,
@@ -57,5 +59,19 @@ describe('lastContentIndex', () => {
       lastContentIndex([]),
     ];
     expect(received).toEqual([0, 2, -1, -1]);
+  });
+});
+
+describe('the runtime relay cap', () => {
+  it('forwards exactly as many notices as the hub keeps', () => {
+    const relay = readFileSync(
+      join(import.meta.dir, '../../../../crates/mangostudio-runtime/src/external_agents/turns.rs'),
+      'utf8'
+    );
+    const declared = /const NOTICES_PER_TURN: usize = (\d+);/.exec(relay)?.[1];
+    expect(
+      declared,
+      `expected turns.rs to declare NOTICES_PER_TURN = ${MAX_EXTERNAL_NOTICES_PER_TURN} | received ${declared}`
+    ).toBe(String(MAX_EXTERNAL_NOTICES_PER_TURN));
   });
 });

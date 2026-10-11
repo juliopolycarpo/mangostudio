@@ -653,3 +653,45 @@ async fn an_unbounded_backend_budget_saturates_the_close_bound_instead_of_panick
         "expected a saturated close bound for a Duration::MAX backend budget | received {bound:?}"
     );
 }
+
+fn maximal_notice() -> TurnEvent {
+    event(wire::Event::Notice {
+        severity: wire::NoticeSeverity::Info,
+        title: "t".repeat(256),
+        description: Some("d".repeat(4_096)),
+    })
+}
+
+#[tokio::test]
+async fn a_flood_of_notices_reaches_the_hub_capped_and_does_not_end_the_turn() {
+    // 600 maximal notices are about 2.6 MiB, more than the turn's 2 MiB payload budget: without
+    // the cap the relay would end the turn with its own payload-limit error.
+    let mut script: VecDeque<TurnEvent> = (0..600).map(|_| maximal_notice()).collect();
+    script.push_back(event(wire::Event::Completed));
+    let log = Arc::new(OwnedLifecycle {
+        script: Mutex::new(script),
+        ..Default::default()
+    });
+    let mut rig = Rig::new(Arc::clone(&log)).await;
+    rig.turn(&CancellationToken::new()).await;
+
+    let events = rig.terminal("completed").await;
+
+    let kinds: Vec<&str> = events
+        .iter()
+        .filter_map(|envelope| envelope["event"]["type"].as_str())
+        .filter(|kind| *kind != "commands_available")
+        .collect();
+    let notices = kinds.iter().filter(|kind| **kind == "notice").count();
+    assert_eq!(
+        (notices, kinds.last().copied(), kinds.contains(&"error")),
+        (8, Some("completed"), false),
+        "expected exactly 8 notices then completed, with no error | received {} events: {:?}",
+        kinds.len(),
+        &kinds[..kinds.len().min(12)]
+    );
+    assert!(
+        log.cancels.lock().unwrap().is_empty(),
+        "the turn must not be cancelled"
+    );
+}
