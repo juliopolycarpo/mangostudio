@@ -586,8 +586,19 @@ ${steps}`).jobs.smoke;
     const leakSteps = (job.steps ?? []).filter(({ run }) => run?.includes(LEAK_SCRIPT));
     expect(leakSteps).toHaveLength(2);
     expect(leakSteps.map(({ env }) => env?.CONTAINER_CLI).sort()).toEqual(['docker', 'podman']);
+    // The leak check is a checked-out script, and without a checkout no suite
+    // ran to leak anything. Any later setup failure still gets the check.
+    const checkout = (job.steps ?? []).find(({ uses }) => uses?.startsWith('actions/checkout@'));
+    const leakCondition = '$' + "{{ !cancelled() && steps.checkout.outcome == 'success' }}";
+    if (checkout?.id !== 'checkout') {
+      throw new Error(
+        `expected the container checkout step to declare id: checkout | received: ${checkout?.id}`
+      );
+    }
     for (const step of leakSteps) {
-      expect(step.if).toBe('$' + '{{ !cancelled() }}');
+      if (step.if !== leakCondition) {
+        throw new Error(`expected "${step.name}" if: ${leakCondition} | received: ${step.if}`);
+      }
       expect(step.run?.trim()).toBe(LEAK_SCRIPT);
       const steps = [...(job.steps ?? [])];
       const leakIndex = steps.indexOf(step);

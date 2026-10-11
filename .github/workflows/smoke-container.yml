@@ -48,7 +48,8 @@ jobs:
       # The mounted runtime and source-checkout hub must report the same release.
       VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         timeout-minutes: 2
         with:
           persist-credentials: false
@@ -126,7 +127,7 @@ jobs:
         run: ../../scripts/release/smoke-container-pairing.sh
 
       - name: Assert no docker container outlived the suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         timeout-minutes: 1
         env:
           CONTAINER_CLI: docker
@@ -165,7 +166,7 @@ jobs:
         run: ../../scripts/release/smoke-container-pairing.sh
 
       - name: Assert no podman container outlived the suite
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         timeout-minutes: 1
         env:
           CONTAINER_CLI: podman
