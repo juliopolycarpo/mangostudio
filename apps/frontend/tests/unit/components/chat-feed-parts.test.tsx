@@ -303,6 +303,50 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     expect(screen.queryByText('No response')).not.toBeInTheDocument();
   });
 
+  it('renders a vendor notice as plain text with its severity, and keeps a settled turn empty', async () => {
+    // A notice is the vendor's aside to the person: shown with its severity and words, but it is
+    // not a response, so a turn that only warned is still "No response". Its text renders as
+    // text, never as markup.
+    const parts: MessagePart[] = [
+      {
+        type: 'external_turn',
+        version: 1,
+        targetId: 'cursor',
+        sessionId: 'session-1',
+        status: 'terminal',
+        terminalReason: 'completed',
+        startedAt: 0,
+        updatedAt: 0,
+        lastSequence: 1,
+        eventCount: 1,
+        persistedBytes: 10,
+      },
+      {
+        type: 'external_notice',
+        severity: 'warning',
+        title: 'Rate limit close <b>now</b>',
+        description: 'Resets in four minutes.',
+      },
+    ];
+
+    render(<ChatFeed chatId="chat-1" messages={[makeMessage({ parts })]} />);
+
+    await flushAsyncRender();
+
+    const notice = screen.getByRole('status');
+    expect({
+      severity: notice.getAttribute('data-severity'),
+      text: notice.textContent,
+      markup: notice.querySelector('b'),
+      noResponse: screen.queryByText('No response') !== null,
+    }).toEqual({
+      severity: 'warning',
+      text: 'WarningRate limit close <b>now</b>Resets in four minutes.',
+      markup: null,
+      noResponse: true,
+    });
+  });
+
   it('uses a neutral fallback label when assistant model name is missing', async () => {
     const msg = makeMessage({
       parts: undefined,

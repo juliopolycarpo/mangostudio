@@ -14,9 +14,10 @@
 
 import { describe, expect, it } from 'bun:test';
 import { ExternalTurnTranscript } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
-import type {
-  ExternalAgentEvent,
-  ExternalTurnTerminalReason,
+import {
+  type ExternalAgentEvent,
+  type ExternalTurnTerminalReason,
+  MAX_EXTERNAL_NOTICES_PER_TURN,
 } from '@mangostudio/shared/external-agents';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
@@ -513,6 +514,88 @@ describe('external turn: live stream vs reloaded transcript', () => {
     expect(storedParts(interrupted).find((part) => part.type === 'external_turn')).toMatchObject({
       status: 'terminal',
       terminalReason: 'interrupted',
+    });
+  });
+
+  /**
+   * A vendor notice is display only. It lands as its own part where it happened, on both paths,
+   * and never as message text, so nothing that replays the text can hand it to a model.
+   */
+  describe('a vendor notice', () => {
+    const NOTICE: ExternalAgentEvent = {
+      type: 'notice',
+      severity: 'warning',
+      title: 'Rate limit close',
+      description: 'Resets in four minutes.',
+    };
+    const WITH_NOTICE: readonly ExternalAgentEvent[] = [
+      { type: 'text_delta', text: 'before ' },
+      NOTICE,
+      { type: 'text_delta', text: 'after' },
+      { type: 'completed' },
+    ];
+
+    it('keeps it as a part between the prose on both paths', () => {
+      const expected: unknown[] = [
+        { type: 'text', text: 'before ' },
+        {
+          type: 'external_notice',
+          severity: 'warning',
+          title: 'Rate limit close',
+          description: 'Resets in four minutes.',
+        },
+        { type: 'text', text: 'after' },
+      ];
+      for (const parts of [streamedParts(WITH_NOTICE), storedParts(WITH_NOTICE)]) {
+        const received: unknown[] = parts.filter((part) => part.type !== 'external_turn');
+        expect(received).toEqual(expected);
+      }
+      expect(comparable(streamedParts(WITH_NOTICE))).toEqual(comparable(storedParts(WITH_NOTICE)));
+    });
+
+    it('never puts its words in the message text', () => {
+      const transcript = new ExternalTurnTranscript({
+        targetId: 'codex',
+        sessionId: 'hub-session-1',
+        startedAt: 0,
+      });
+      WITH_NOTICE.forEach((event, index) => {
+        transcript.apply(event, { sequence: index + 1, at: 0 });
+      });
+      expect(transcript.text).toBe('before after');
+    });
+
+    it('marks the prose a cut-off turn stopped inside even when a notice came last', () => {
+      const cutOff: readonly ExternalAgentEvent[] = [
+        { type: 'text_delta', text: 'half a sentence' },
+        { type: 'notice', severity: 'info', title: 'Retrying' },
+      ];
+      for (const parts of [
+        streamedParts(cutOff, 'cancelled-by-user'),
+        storedParts(cutOff, 'cancelled-by-user'),
+      ]) {
+        const marked = parts.find((part) => part.type === 'text');
+        expect(marked).toEqual({ type: 'text', text: 'half a sentence', incomplete: true });
+      }
+      expect(comparable(streamedParts(cutOff, 'cancelled-by-user'))).toEqual(
+        comparable(storedParts(cutOff, 'cancelled-by-user'))
+      );
+    });
+
+    it('keeps the same first notices on both paths when a vendor repeats itself', () => {
+      const flood = Array.from({ length: MAX_EXTERNAL_NOTICES_PER_TURN + 5 }, (_, index) => ({
+        type: 'notice' as const,
+        severity: 'info' as const,
+        title: `Retrying (${index + 1})`,
+      }));
+      const events: readonly ExternalAgentEvent[] = [...flood, { type: 'completed' }];
+      for (const parts of [streamedParts(events), storedParts(events)]) {
+        const titles = parts.flatMap((part) =>
+          part.type === 'external_notice' ? [part.title] : []
+        );
+        expect(titles).toEqual(flood.slice(0, MAX_EXTERNAL_NOTICES_PER_TURN).map((n) => n.title));
+      }
+      expect(comparable(streamedParts(events))).toEqual(comparable(storedParts(events)));
     });
   });
 

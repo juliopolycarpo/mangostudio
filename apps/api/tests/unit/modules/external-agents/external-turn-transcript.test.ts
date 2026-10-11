@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import type {
-  ExternalAgentEvent,
-  ExternalTurnTerminalReason,
+import {
+  type ExternalAgentEvent,
+  type ExternalTurnTerminalReason,
+  MAX_EXTERNAL_NOTICES_PER_TURN,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalActivityPart, ExternalApprovalPart } from '@mangostudio/shared/types';
 import { ExternalTurnTranscript } from '../../../../src/modules/external-agents/domain/external-turn-transcript';
@@ -436,6 +437,47 @@ describe('ExternalTurnTranscript', () => {
     expect(target.turnPart.status).toBe('terminal');
     expect(target.turnPart.eventCount).toBe(2);
     expect(target.terminated).toBe(true);
+  });
+
+  it('keeps a vendor notice as its own part and never as message text', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'text_delta', text: 'answer' },
+      { type: 'notice', severity: 'warning', title: 'Rate limit close', description: 'Soon.' },
+    ]);
+
+    expect(target.text).toBe('answer');
+    expect(target.parts.filter((part) => part.type === 'external_notice')).toEqual([
+      {
+        type: 'external_notice',
+        severity: 'warning',
+        title: 'Rate limit close',
+        description: 'Soon.',
+      },
+    ]);
+  });
+
+  it('drops notices past the cap without spending the budget that could end the turn', () => {
+    const target = transcript({ maxEvents: MAX_EXTERNAL_NOTICES_PER_TURN + 1 });
+    const applications = feed(target, [
+      ...Array.from({ length: MAX_EXTERNAL_NOTICES_PER_TURN + 30 }, () => ({
+        type: 'notice' as const,
+        severity: 'info' as const,
+        title: 'Retrying',
+      })),
+      { type: 'completed' as const },
+    ]);
+
+    const kept = target.parts.filter((part) => part.type === 'external_notice').length;
+    expect({
+      kept,
+      terminal: applications.at(-1)?.terminal,
+      eventCount: target.turnPart.eventCount,
+    }).toEqual({
+      kept: MAX_EXTERNAL_NOTICES_PER_TURN,
+      terminal: 'completed',
+      eventCount: MAX_EXTERNAL_NOTICES_PER_TURN + 1,
+    });
   });
 
   it('reports the reason it recorded when a terminal event also crosses the budget', () => {

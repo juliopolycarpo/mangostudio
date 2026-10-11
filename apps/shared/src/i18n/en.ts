@@ -3952,6 +3952,13 @@ export const messages: Messages = {
         'session-lost': "That machine no longer has this turn's session.",
       },
     },
+    // Labels for a vendor's own notice. The notice text is the vendor's and is not translated;
+    // only the severity word, which is the product's, is.
+    notice: {
+      info: 'Notice',
+      warning: 'Warning',
+      error: 'Problem reported',
+    },
     steer: {
       button: 'Steer',
       buttonHint: 'Send this into the running turn instead of waiting for it to finish.',

@@ -459,6 +459,8 @@ describe('the neutral event contract', () => {
       // alone, so both halves of that disagreement are represented here.
       commands: [{ name: 'review', description: 'Read a diff' }, { name: 'compact' }],
     },
+    { type: 'notice', severity: 'warning', title: 'Rate limit close', description: 'Resets soon.' },
+    { type: 'notice', severity: 'info', title: 'Retrying' },
     // Emitted immediately before `completed`, never instead of it, so a hub
     // that predates it still ends the turn on the terminal it already knows.
     { type: 'cancelled' },
@@ -470,6 +472,16 @@ describe('the neutral event contract', () => {
     for (const event of valid) {
       expect(Value.Check(ExternalAgentEventSchema, event)).toBe(true);
     }
+  });
+
+  it('refuses a notice that names a severity this contract does not, or says nothing', () => {
+    const received = [
+      { type: 'notice', severity: 'fatal', title: 'x' },
+      { type: 'notice', severity: 'info', title: '' },
+      { type: 'notice', severity: 'info', title: 'x', description: '' },
+      { type: 'notice', severity: 'info', title: 'x', turnFailed: true },
+    ].map((event) => Value.Check(ExternalAgentEventSchema, event));
+    expect(received).toEqual([false, false, false, false]);
   });
 
   it('covers every declared event type exactly once', () => {

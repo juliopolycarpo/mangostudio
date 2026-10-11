@@ -798,6 +798,16 @@ pub(crate) struct Command {
     pub description: Option<String>,
 }
 
+/// `ExternalNoticeSeverity`: how prominent a vendor suggests a notice is, a hint and not a state.
+/// A severity the SDK has no arm for is `info`, the least prominent, rather than a vendor spelling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum NoticeSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
 /// `ExternalAgentEvent`: one event on the `external-agent.event` topic.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -845,6 +855,14 @@ pub(crate) enum Event {
     },
     AccountLimits {
         limits: AccountLimits,
+    },
+    /// Something the vendor wants the person to see outside the answer: display only, never a
+    /// failure of the turn and never model input.
+    Notice {
+        severity: NoticeSeverity,
+        title: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
     },
     Cancelled,
     Completed,
