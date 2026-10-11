@@ -246,8 +246,12 @@ whose import graph stays inside the checkout (no `node_modules`).
 | Workflow           | Job(s)                          | Setup                          |
 | ------------------ | ------------------------------- | ------------------------------ |
 | `ci.yml`           | `gate`, `distribution-identity` | `oven-sh/setup-bun` only       |
-| `smoke-binary.yml` | `binary`, `docker` (default)    | `oven-sh/setup-bun` only       |
-| `smoke-binary.yml` | `binary`, `docker` (`rebuild`)  | `setup-mango` (full toolchain) |
+| `smoke-binary.yml` | `binary` (default)              | `oven-sh/setup-bun` only       |
+| `smoke-binary.yml` | `binary` (`rebuild`)            | `setup-mango` (full toolchain) |
+
+The Linux `binary` jobs also stage and test the Bookworm and Alpine Docker
+images. `smoke-container.yml` runs all four Docker/Podman and glibc/musl
+transport pairings in one job with one `setup-mango` dependency install.
 
 Smoke scripts run as `bun --no-install …` so a stray package import fails
 instead of silently auto-installing. `scripts/tests/smoke-dependencies.unit.test.ts`

@@ -96,9 +96,28 @@ function pass(msg: string): void {
   console.log(`  ✅ ${msg}`);
 }
 
+/** A smoke assertion's verdict, as opposed to an error nobody expected. */
+class SmokeFailure extends Error {}
+
 function fail(msg: string): never {
+  // Print the verdict now: the unwind below awaits the hub's exit, and a step
+  // deadline that fires during a wedged cleanup would otherwise lose it.
   console.error(`  ❌ ${msg}`);
-  process.exit(1);
+  // Unwind foreground smoke cleanup before the CLI boundary exits. Calling
+  // process.exit here bypasses finally and can leave the hub listening.
+  throw new SmokeFailure(msg);
+}
+
+/**
+ * Renders an unexpected error that reached the CLI boundary. It keeps its
+ * stack, the only thing saying which smoke stage threw; verdicts never get
+ * here because `fail()` already printed them.
+ *
+ * @example describeFailure(new Error('spawn EACCES')) // 'Error: spawn EACCES\n    at smokeTest …'
+ */
+function describeFailure(caught: unknown): string {
+  if (caught instanceof Error) return caught.stack ?? caught.message;
+  return String(caught);
 }
 
 function resolvePlatform(platform: string | undefined): BinaryTarget {
@@ -365,11 +384,11 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
 }
 
 /**
- * Prints everything the probe collected, then exits.
+ * Prints everything the probe collected, then fails the smoke.
  *
  * Two undiagnosable Windows flakes came from a single-line report, so the
  * partial frame, the exit status and the child's stderr all reach the log
- * before `fail()` takes the process down. Details lead and the verdict lands
+ * before `fail()` ends the smoke. Details lead and the verdict lands
  * last, which is where a CI log gets read from; the module-resolution assert
  * runs just before it so a pattern hit becomes the final, more specific ❌.
  * The cause is on the header line too, because that assert is a `never` and
@@ -584,42 +603,46 @@ async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
   const tmpHome = makeTempDir();
-  const dbPath = join(tmpHome, 'smoke.sqlite');
-  const authBaseUrl = `http://127.0.0.1:${PORT}`;
-  const chatGptSmokeEnabled = canBindChatGptCallbackPort();
-  const fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
-
-  // The binary is a CLI; bare invocation prints help, so start the server
-  // explicitly in the foreground (API_PORT is honored by `serve`).
-  const proc = Bun.spawn({
-    cmd: [BINARY_PATH, 'serve'],
-    cwd: PLATFORM_DIR,
-    env: {
-      ...process.env,
-      NODE_ENV: 'production',
-      HOME: tmpHome,
-      DATABASE_PATH: dbPath,
-      API_HOST: '127.0.0.1',
-      API_PORT: String(PORT),
-      BETTER_AUTH_URL: authBaseUrl,
-      ...(fakeChatGpt
-        ? {
-            MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
-            MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
-            MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
-          }
-        : {}),
-      // Required since the auth-secret startup guard landed; a 32+ char
-      // random value satisfies the runtime check without exposing a real key.
-      BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
-    },
-    stdout: 'ignore',
-    stderr: 'pipe',
-  });
-
-  const serverStderr = pumpStream(proc.stderr);
+  let fakeChatGpt: ReturnType<typeof startFakeChatGptServer> | null = null;
+  let proc: Bun.Subprocess<'ignore', 'ignore', 'pipe'> | null = null;
+  let serverStderr: ReturnType<typeof pumpStream> | null = null;
 
   try {
+    const dbPath = join(tmpHome, 'smoke.sqlite');
+    const authBaseUrl = `http://127.0.0.1:${PORT}`;
+    const chatGptSmokeEnabled = canBindChatGptCallbackPort();
+    fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
+
+    // The binary is a CLI; bare invocation prints help, so start the server
+    // explicitly in the foreground (API_PORT is honored by `serve`).
+    proc = Bun.spawn({
+      cmd: [BINARY_PATH, 'serve'],
+      cwd: PLATFORM_DIR,
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        HOME: tmpHome,
+        DATABASE_PATH: dbPath,
+        API_HOST: '127.0.0.1',
+        API_PORT: String(PORT),
+        BETTER_AUTH_URL: authBaseUrl,
+        ...(fakeChatGpt
+          ? {
+              MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
+              MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
+              MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
+            }
+          : {}),
+        // Required since the auth-secret startup guard landed; a 32+ char
+        // random value satisfies the runtime check without exposing a real key.
+        BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
+      },
+      stdout: 'ignore',
+      stderr: 'pipe',
+    });
+
+    serverStderr = pumpStream(proc.stderr);
+
     console.log('   Waiting for server to be ready...');
     try {
       await waitForServerReady(`http://127.0.0.1:${PORT}/api/health`);
@@ -883,9 +906,9 @@ async function smokeTest(): Promise<void> {
       }
     }
   } finally {
-    proc.kill();
-    await proc.exited.catch(() => undefined as undefined);
-    await serverStderr.done.catch(() => undefined as undefined);
+    proc?.kill();
+    await proc?.exited.catch(() => undefined as undefined);
+    await serverStderr?.done.catch(() => undefined as undefined);
     fakeChatGpt?.stop();
     removeTempDir(tmpHome);
   }
@@ -898,24 +921,29 @@ async function smokeTest(): Promise<void> {
 console.log(`\n🧪 Binary smoke test — platform: ${PLATFORM.arch}`);
 console.log(`   Can execute on this host: ${CAN_EXECUTE}`);
 
-if (!SKIP_BUILD) {
-  await buildBinary();
-  await archiveAssets();
-} else {
-  validatePrebuiltDistribution();
-}
-
-validateLayout();
-await validateReleaseArchive();
-await smokeLocalInstaller();
-
-if (CAN_EXECUTE) {
-  await smokeRuntimeBinary();
-  if (PLATFORM.arch === 'linux-x64' && existsSync(RAW_RUNTIME_ASSET_PATH)) {
-    await smokeRuntimeBinary(RAW_RUNTIME_ASSET_PATH);
+try {
+  if (!SKIP_BUILD) {
+    await buildBinary();
+    await archiveAssets();
+  } else {
+    validatePrebuiltDistribution();
   }
-  await smokeTest();
-  console.log('\n✅ All runtime assertions passed.');
-} else {
-  console.log('\n✅ Packaging validation passed (runtime test skipped — cross-platform).');
+
+  validateLayout();
+  await validateReleaseArchive();
+  await smokeLocalInstaller();
+
+  if (CAN_EXECUTE) {
+    await smokeRuntimeBinary();
+    if (PLATFORM.arch === 'linux-x64' && existsSync(RAW_RUNTIME_ASSET_PATH)) {
+      await smokeRuntimeBinary(RAW_RUNTIME_ASSET_PATH);
+    }
+    await smokeTest();
+    console.log('\n✅ All runtime assertions passed.');
+  } else {
+    console.log('\n✅ Packaging validation passed (runtime test skipped — cross-platform).');
+  }
+} catch (caught) {
+  if (!(caught instanceof SmokeFailure)) console.error(`  ❌ ${describeFailure(caught)}`);
+  process.exitCode = 1;
 }
