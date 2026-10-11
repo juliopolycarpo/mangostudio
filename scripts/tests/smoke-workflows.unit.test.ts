@@ -123,18 +123,26 @@ describe('smoke workflow assertion inventory', () => {
     }
   });
 
-  test('every folded assertion times out as a failed step before its job is cancelled', () => {
+  test('sequential assertion timeouts in one job fit inside its job deadline', () => {
     // A job timeout cancels the job, which skips every later !cancelled()
-    // assertion and teardown check. A step timeout only fails that step.
+    // assertion and teardown check. A step timeout only fails that step, so
+    // the steps one runner executes in sequence must not add up to the job's.
     const workflows = readWorkflows();
-    for (const { id, job, step } of smokeAssertions(workflows)) {
+    const sequences = new Map<string, { job: string; minutes: number[] }>();
+    for (const { job, matrix, step } of smokeAssertions(workflows)) {
+      const key = matrix.platform ? `${job} (${matrix.platform})` : job;
+      const sequence = sequences.get(key) ?? { job, minutes: [] };
+      sequence.minutes.push(step['timeout-minutes'] ?? Number.POSITIVE_INFINITY);
+      sequences.set(key, sequence);
+    }
+    for (const [key, { job, minutes }] of sequences) {
       const [workflowName, jobName] = job.split('/');
       const workflow = workflows[workflowName as keyof typeof workflows];
       const jobTimeout = workflow.jobs[jobName]['timeout-minutes'];
-      const stepTimeout = step['timeout-minutes'];
-      if (jobTimeout === undefined || stepTimeout === undefined || stepTimeout >= jobTimeout) {
+      const total = minutes.reduce((sum, value) => sum + value, 0);
+      if (jobTimeout === undefined || total >= jobTimeout) {
         throw new Error(
-          `expected ${id} step timeout-minutes below its job's ${jobTimeout} | received: ${stepTimeout}`
+          `expected ${key} assertion timeout-minutes to total below its job's ${jobTimeout} | received: ${minutes.join('+')}=${total}`
         );
       }
     }

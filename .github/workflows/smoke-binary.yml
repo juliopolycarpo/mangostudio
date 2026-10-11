@@ -127,9 +127,10 @@ jobs:
       # Linux also proves both Docker variants on its native runner below.
       # The step deadline fails a hung smoke before the job deadline cancels
       # the job, which would skip the Docker assertions and teardown checks.
+      # The three Linux deadlines total 12 minutes so they stay inside it.
       - name: Run binary smoke test
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 4
         run: bun --no-install run scripts/test-build.ts
         env:
           # Read by the rebuild's `build:binary`; inert when SKIP_BUILD=1.
@@ -152,7 +153,7 @@ jobs:
 
       - name: Run Bookworm Docker smoke test
         if: ${{ !cancelled() && matrix.docker_arch }}
-        timeout-minutes: 10
+        timeout-minutes: 4
         env:
           REBUILD: ${{ inputs.rebuild }}
           BINARY_PLATFORM: ${{ matrix.platform }}
@@ -224,7 +225,7 @@ jobs:
 
       - name: Run Alpine Docker smoke test
         if: ${{ !cancelled() && matrix.docker_arch }}
-        timeout-minutes: 10
+        timeout-minutes: 4
         env:
           REBUILD: ${{ inputs.rebuild }}
           BINARY_PLATFORM: ${{ matrix.musl_platform }}
