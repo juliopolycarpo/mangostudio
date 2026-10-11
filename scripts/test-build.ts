@@ -96,10 +96,26 @@ function pass(msg: string): void {
   console.log(`  ✅ ${msg}`);
 }
 
+/** A smoke assertion's verdict, as opposed to an error nobody expected. */
+class SmokeFailure extends Error {}
+
 function fail(msg: string): never {
   // Unwind foreground smoke cleanup before the CLI boundary exits. Calling
   // process.exit here bypasses finally and can leave the hub listening.
-  throw new Error(msg);
+  throw new SmokeFailure(msg);
+}
+
+/**
+ * Renders what reached the CLI boundary. A verdict already names its
+ * assertion; anything else keeps its stack, the only thing saying which smoke
+ * stage threw.
+ *
+ * @example describeFailure(new SmokeFailure('/ returned 500')) // '/ returned 500'
+ */
+function describeFailure(caught: unknown): string {
+  if (caught instanceof SmokeFailure) return caught.message;
+  if (caught instanceof Error) return caught.stack ?? caught.message;
+  return String(caught);
 }
 
 function resolvePlatform(platform: string | undefined): BinaryTarget {
@@ -926,6 +942,6 @@ try {
     console.log('\n✅ Packaging validation passed (runtime test skipped — cross-platform).');
   }
 } catch (caught) {
-  console.error(`  ❌ ${caught instanceof Error ? caught.message : String(caught)}`);
+  console.error(`  ❌ ${describeFailure(caught)}`);
   process.exitCode = 1;
 }

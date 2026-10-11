@@ -128,6 +128,8 @@ describe('test-build foreground server cleanup', () => {
       spawnedServers.add(startup.pid);
       expect(code, `${stdout}${stderr}`).toBe(1);
       expect(stderr).toContain('/api/health content-type is not JSON');
+      // An assertion verdict names itself; a stack would bury it in the CI log.
+      expect(stderr, 'assertion verdicts print without a stack').not.toMatch(/\n\s+at /);
       expect(isAlive(startup.pid), 'failed binary smoke left its foreground hub running').toBe(
         false
       );
@@ -163,6 +165,13 @@ describe('test-build foreground server cleanup', () => {
       ]);
       expect(stdout).toContain('Starting binary on port');
       expect(stderr).toContain('EACCES: permission denied');
+      // Unexpected errors carry no assertion text, so the stack is the only
+      // thing naming the smoke stage that threw.
+      const frame = /\n\s+at smokeTest /.exec(stderr)?.[0].trim() ?? 'no stack frame';
+      expect(
+        frame,
+        `expected unexpected-error stack frame: at smokeTest | received: ${frame}`
+      ).toBe('at smokeTest');
       expect(
         code,
         `CLI exited ${code} (${smoke.signalCode}) after EACCES; expected exit 1 after listener cleanup. Output:\n${stdout}${stderr}`
