@@ -944,10 +944,17 @@ These product facts come from SDK operations inside the adapter:
   the chat update) for at most that long, about the order of the runtime's old 9 s bound. The
   runtime carries no cancel token into `close_session`, so it finishes the close and frees its
   own slot when the SDK is done. Until then that slot still counts against the runtime's cap of
-  four sessions: an open that arrives in that window can be refused with "session capacity is 4";
-  the hub does not retry it, so a later send succeeds. Nothing is counted twice. Cancel is
+  four sessions, so an open that follows the reap can be refused with `external_agent_capacity`.
+  The hub retries only that refusal, once a second for up to 45 s (`CAPACITY_RETRY_MS`, the longest
+  close the runtime allows), and a reap of the chat ends the wait. Nothing is counted twice. A
+  close the hub stopped waiting for is logged as `session_close_unconfirmed` at info level; any
+  other failure of the call stays `session_close_failed` at warn. Cancel is
   unchanged: the hub terminates the turn first and does not wait for the cancel call, which the
   runtime does not bound itself.
+- **Revocation and abandoned closes.** The consent watcher runs the revocation close on its own
+  task, so a slow close does not hold the next consent poll or the shutdown that follows the hub
+  session ending. A close dropped mid-flight because the hub session ended removes the session's
+  scratch leaf when its owner is dropped.
 - **Shutdown.** Runtime shutdown does not wait for those bounds. Every launched child has an owner
   registered with `Release`; at 2 s after shutdown begins the owner stops serving interrupts and
   force-kills the process group, and it stops waiting for the empty-tree proof at 2.75 s, inside
@@ -957,6 +964,9 @@ These product facts come from SDK operations inside the adapter:
   update) is vendor text for the person, not part of the answer. It maps to the `notice` event
   with `info`, `warning` or `error` (a severity the SDK has no arm for is `info`; the vendor's
   spelling never crosses), a title of at most 256 and a description of at most 4,096 code points.
+  The relay forwards the first eight notices of a turn and drops the rest before they are charged to
+  the turn's payload budget (`NOTICES_PER_TURN` in `turns.rs`, tied by a test to the hub's
+  `MAX_EXTERNAL_NOTICES_PER_TURN`), so a vendor that repeats itself cannot end the turn with asides.
   The hub projects it to the `external_notice` chunk and both the live reducer and
   `ExternalTurnTranscript` keep it as an `external_notice` part, at most eight per turn, rendered
   as plain text with the severity as tone. It is never message text, so no replay hands it to a
