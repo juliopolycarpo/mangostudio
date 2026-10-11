@@ -33,8 +33,10 @@ Tests replace the TypeScript host in one of two ways:
   `target/debug/mangostudio-runtime` (or `MANGOSTUDIO_RUNTIME_BINARY`) over stdio or `serve`, and
   is guarded with `it.skipIf(skipWithoutRustBinary(binary, suite))`
   (`tests/support/rust-runtime-binary.ts`), which prints the skipped suite and how to build the
-  binary when it is missing. The ordinary lane has no binary; `cargo-shim.yml`'s
-  `real-binary-qualification` job runs these cases on Linux, macOS and Windows.
+  binary when it is missing. Ubuntu's ordinary CI shards receive the debug runtime and
+  `fake_cursor_agent` from `local-runtime.yml` before their tests. `cargo-shim.yml`'s
+  `real-binary-qualification` job builds its own binaries and runs these cases on macOS and
+  Windows.
 
 | File                                                                                                          | Strategy                                                                | Why                                                                                                           |
 | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -57,8 +59,10 @@ Tests replace the TypeScript host in one of two ways:
 
 ### Cases that run only against the binary
 
-These run in `real-binary-qualification` and skip, loudly, everywhere else. Where the assertion
-is the hub's own logic, a fake-host twin in the same file keeps the ordinary lane covering it.
+These run in Ubuntu's ordinary CI shards against the debug runtime and in
+`real-binary-qualification` on macOS and Windows. The missing-binary guards still report skips
+when the runtime is unavailable. Where the assertion is the hub's own logic, a fake-host twin
+in the same file also covers it in the ordinary lane.
 
 | File                                                                          | Binary-only case                                                                                         | Fake-host twin in the ordinary lane                                                    |
 | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
