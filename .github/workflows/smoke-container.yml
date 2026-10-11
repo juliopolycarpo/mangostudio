@@ -92,6 +92,7 @@ jobs:
       # every missing target; no suite then starts against half the bytes.
       - name: Mark container smoke inputs ready
         id: ready
+        timeout-minutes: 1
         run: echo "Both runtime targets are in place."
 
       # Each suite carries its own deadline. A hung suite then fails its step
