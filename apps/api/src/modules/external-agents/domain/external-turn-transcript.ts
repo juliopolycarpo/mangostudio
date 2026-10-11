@@ -22,9 +22,12 @@ import type {
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
 import {
+  canAddExternalNotice,
   EXTERNAL_TURN_MAX_EVENTS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
   externalActivityStatusForTerminal,
+  externalNoticePart,
+  lastContentIndex,
 } from '@mangostudio/shared/external-agents';
 import type {
   ExternalActivityPart,
@@ -162,6 +165,10 @@ export class ExternalTurnTranscript {
       return { durable: false };
     }
 
+    // A notice past the per-turn cap is dropped, as the live reducer drops it, and an uncounted
+    // notice must not spend the budget a repeating vendor could use to end the turn.
+    if (event.type === 'notice' && !canAddExternalNotice(this.#parts)) return { durable: false };
+
     this.#turnPart.lastSequence = context.sequence;
     this.#turnPart.updatedAt = context.at;
     this.#turnPart.eventCount += 1;
@@ -206,11 +213,13 @@ export class ExternalTurnTranscript {
     // shape a runtime too old to send `reasoning_ended` always produces. The
     // turn stopped in whatever is trailing there, which is the rule that
     // predates any of this.
+    // A notice is an aside, so the part the turn stopped in is the last one that is not a notice.
+    const trailing = (): MessagePart | undefined => this.#parts[lastContentIndex(this.#parts)];
     const stoppedInReasoning =
-      this.#openThinking !== undefined && this.#openThinking === this.#parts.at(-1);
+      this.#openThinking !== undefined && this.#openThinking === trailing();
     const openPhase = this.#closeThinking();
     if (reason !== 'completed') {
-      this.#markIncomplete(stoppedInReasoning ? openPhase : this.#parts.at(-1));
+      this.#markIncomplete(stoppedInReasoning ? openPhase : trailing());
     }
     const activityStatus = externalActivityStatusForTerminal(reason);
     // Vendors may exhaust their event budget before emitting activity closes.
@@ -473,6 +482,12 @@ export class ExternalTurnTranscript {
 
       case 'account_limits':
         // Account quota is cached vendor state, not transcript.
+        return { durable: false };
+
+      case 'notice':
+        // Display only: kept as its own part, never as text, so it is not the message's
+        // `text` column and no model ever reads it back. The cap was applied above.
+        this.#parts.push(externalNoticePart(event));
         return { durable: false };
 
       case 'cancelled':

@@ -1,3 +1,4 @@
+import { lastContentIndex } from '@mangostudio/shared/external-agents';
 import type { MessagePart } from '@mangostudio/shared/types';
 
 /**
@@ -16,6 +17,16 @@ export interface TurnStatus {
   readonly livePartIndex: number | null;
   /** The step-level filler row, with its three exclusions intact. */
   readonly showWorkingRow: boolean;
+}
+
+/**
+ * The turn's last part that is not a vendor notice.
+ *
+ * A notice is an aside appended where it happened; the rules below ask what the turn itself was
+ * doing last, which an aside after an approval or a running activity must not hide.
+ */
+function trailingContentPart(parts: readonly MessagePart[]): MessagePart | undefined {
+  return parts[lastContentIndex(parts)];
 }
 
 /** The two part kinds a turn streams tokens into, one character at a time. */
@@ -73,7 +84,7 @@ function streamedIntoKind(
  * cannot mask one another.
  */
 function awaitsUserDecision(parts: readonly MessagePart[]): boolean {
-  const trailingPart = parts.at(-1);
+  const trailingPart = trailingContentPart(parts);
   if (trailingPart?.type === 'external_approval' && trailingPart.decisionSource === undefined) {
     return true;
   }
@@ -116,7 +127,7 @@ function derivePhase({ running, awaitsDecision, streamedInto }: PhaseInputs): Tu
 export function deriveTurnStatus(parts: readonly MessagePart[], isStreaming: boolean): TurnStatus {
   const running = isRunning(parts, isStreaming);
   const streamedInto = streamedIntoKind(parts, isStreaming);
-  const trailingPart = parts.at(-1);
+  const trailingPart = trailingContentPart(parts);
   const trailingIsRunningActivity =
     trailingPart?.type === 'external_activity' && trailingPart.status === 'running';
   // A `generate_image` tool call on a text turn leaves `[tool_call,

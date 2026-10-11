@@ -707,6 +707,15 @@ export type ExternalAgentCommandCatalogResponse = Static<
   typeof ExternalAgentCommandCatalogResponseSchema
 >;
 
+/** How prominent a vendor suggests a notice is. A presentation hint, not a state. */
+export const ExternalNoticeSeveritySchema = Type.Union([
+  Type.Literal('info'),
+  Type.Literal('warning'),
+  Type.Literal('error'),
+]);
+
+export type ExternalNoticeSeverity = Static<typeof ExternalNoticeSeveritySchema>;
+
 /**
  * The neutral event contract every adapter normalizes onto.
  *
@@ -819,6 +828,25 @@ export const ExternalAgentEventSchema = Type.Union([
   ),
   Type.Object(
     { type: Type.Literal('account_limits'), limits: ExternalAccountLimitsSchema },
+    { additionalProperties: false }
+  ),
+  /**
+   * Something the vendor wants the person to see outside the answer: a
+   * rate-limit warning, a retry it is about to make, a degraded mode.
+   *
+   * **Display only.** It is not part of the transcript the vendor keeps, asks
+   * nothing, authorises nothing, and never ends or fails the turn whatever its
+   * severity says. It must not reach a model's context as an instruction, so the
+   * hub files it as a marker, never as text. `severity` is a hint: a vendor
+   * severity this build has no arm for arrives as `info`.
+   */
+  Type.Object(
+    {
+      type: Type.Literal('notice'),
+      severity: ExternalNoticeSeveritySchema,
+      title: VendorText('title', { minLength: 1 }),
+      description: Type.Optional(VendorText('detail', { minLength: 1 })),
+    },
     { additionalProperties: false }
   ),
   /**

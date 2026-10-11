@@ -37,6 +37,13 @@ export {
   withWorkspaceTrust,
 } from './disclosure';
 export {
+  canAddExternalNotice,
+  type ExternalNoticeFields,
+  externalNoticePart,
+  lastContentIndex,
+  MAX_EXTERNAL_NOTICES_PER_TURN,
+} from './notice';
+export {
   type NormalizedPermissionValue,
   normalizeApprovalRouting,
   normalizePermissionLevel,
@@ -178,6 +185,8 @@ export {
   type ExternalNativeSessionListResponse,
   ExternalNativeSessionListResponseSchema,
   ExternalNativeSessionSchema,
+  type ExternalNoticeSeverity,
+  ExternalNoticeSeveritySchema,
   type ExternalPermissionLevel,
   ExternalPermissionLevelSchema,
   type ExternalRateLimitBucket,

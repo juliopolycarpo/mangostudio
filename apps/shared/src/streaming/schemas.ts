@@ -11,6 +11,7 @@ import {
   ExternalAgentTargetIdSchema,
   ExternalApprovalDecisionSchema,
   ExternalApprovalOptionSchema,
+  ExternalNoticeSeveritySchema,
   ExternalSteerRejectionReasonSchema,
   ExternalThreadUsageSchema,
   ExternalTurnTerminalReasonSchema,
@@ -550,6 +551,22 @@ const SSEExternalErrorEventSchema = Type.Object({
 });
 
 /**
+ * Something the vendor wants the person to see, outside the answer.
+ *
+ * Display only: it rides the stream so the live view and the durable transcript
+ * can both keep it as an `external_notice` part, and it never becomes message
+ * text. `severity` is the vendor's hint about prominence, not a verdict on the
+ * turn, which ends through its own terminal path whatever a notice says.
+ */
+const SSEExternalNoticeEventSchema = Type.Object({
+  type: Type.Literal('external_notice'),
+  severity: ExternalNoticeSeveritySchema,
+  title: Type.String({ minLength: 1 }),
+  description: Type.Optional(Type.String({ minLength: 1 })),
+  done: Type.Literal(false),
+});
+
+/**
  * How the turn ended, as data rather than as prose.
  *
  * The vendor's own `completed` and `error` are only two of nine ways a turn
@@ -617,6 +634,7 @@ export const StreamChunkSchema = Type.Union([
   SSEExternalCommandsEventSchema,
   SSEExternalSteerEventSchema,
   SSEExternalErrorEventSchema,
+  SSEExternalNoticeEventSchema,
   SSEExternalTurnCompletedEventSchema,
   SSEDoneEventSchema,
   SSEErrorEventSchema,

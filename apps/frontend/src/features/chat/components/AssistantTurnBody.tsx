@@ -49,6 +49,8 @@ function NoResponseNotice() {
  * and a thought, which is reasoning rather than a response. */
 const NON_RESPONSE_PART_TYPES: ReadonlySet<MessagePart['type']> = new Set([
   'external_turn',
+  // A vendor's aside to the person is not a response: a turn that only warned has said nothing.
+  'external_notice',
   'turn_checkpoint',
   'tool_result',
   'thinking',

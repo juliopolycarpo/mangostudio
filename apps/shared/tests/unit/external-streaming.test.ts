@@ -43,6 +43,7 @@ const EVERY_EVENT: readonly ExternalAgentEvent[] = [
   },
   { type: 'usage', usage: { inputTokens: 12, outputTokens: 3 } },
   { type: 'completed' },
+  { type: 'notice', severity: 'warning', title: 'Rate limit close', description: 'Resets soon.' },
   { type: 'error', error: { code: 'vendor_failed', message: 'boom' } },
   // Appended rather than placed in union order: the option-set case below
   // indexes into this array. One vendor sends help text with each name and the
@@ -68,6 +69,21 @@ describe('external stream chunks', () => {
     // `session_started` is re-announced with the hub's own id; `completed` is the
     // turn's ordinary `done`. Anything else here is an event nobody renders.
     expect(unmapped.sort()).toEqual(['completed', 'session_started']);
+  });
+
+  it('projects a notice with its severity and words, and never as text', () => {
+    const chunk = externalAgentEventToStreamChunk({
+      type: 'notice',
+      severity: 'error',
+      title: 'Retrying',
+    });
+    expect(chunk).toEqual({
+      type: 'external_notice',
+      severity: 'error',
+      title: 'Retrying',
+      done: false,
+    });
+    expect(Value.Check(StreamChunkSchema, chunk)).toBe(true);
   });
 
   it('never puts the vendor session handle on the wire', () => {

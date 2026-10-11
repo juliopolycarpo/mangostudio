@@ -154,6 +154,11 @@ pub(crate) fn map_event(target: TargetId, event: &sdk::AgentEvent) -> MappedEven
         Kind::AccountLimits { limits } => MappedEvent::wire(wire::Event::AccountLimits {
             limits: map::account_limits(target, limits, limits.observed_at),
         }),
+        Kind::Notice {
+            severity,
+            title,
+            description,
+        } => notice(severity, title, description.as_deref()),
         // A marker: the terminal `Completed` behind it ends the turn.
         Kind::Cancelled { .. } => MappedEvent::wire(wire::Event::Cancelled),
         Kind::Completed => MappedEvent::wire(wire::Event::Completed),
@@ -217,6 +222,29 @@ mod benchmarks;
 #[cfg(test)]
 pub(super) fn answer(pending: &PendingInteraction, option_id: &str) -> Result<Answer, RemoteError> {
     super::super::interactions::answer(pending, option_id).map(super::session::sdk_answer)
+}
+
+/// A vendor notice as its display-only wire event, bounded again at this boundary.
+///
+/// A title with nothing left to show maps to nothing, and an unknown severity is `info`. The text is
+/// the vendor's and stays out of every log: the hub renders it, nothing here reads it.
+fn notice(severity: &sdk::NoticeSeverity, title: &str, description: Option<&str>) -> MappedEvent {
+    let title = bound(title, TextLimit::Title).text;
+    if title.trim().is_empty() {
+        return MappedEvent::default();
+    }
+    let description = description
+        .map(|description| bound(description, TextLimit::Detail).text)
+        .filter(|description| !description.trim().is_empty());
+    MappedEvent::wire(wire::Event::Notice {
+        severity: match severity {
+            sdk::NoticeSeverity::Warning => wire::NoticeSeverity::Warning,
+            sdk::NoticeSeverity::Error => wire::NoticeSeverity::Error,
+            _ => wire::NoticeSeverity::Info,
+        },
+        title,
+        description,
+    })
 }
 
 fn activity_started(call_id: &str, activity: &sdk::Activity) -> wire::Event {

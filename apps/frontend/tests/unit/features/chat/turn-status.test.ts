@@ -190,6 +190,23 @@ const PHASE_CASES: readonly PhaseCase[] = [
   },
 ];
 
+describe("deriveTurnStatus: a vendor notice is an aside, not the turn's last act", () => {
+  const NOTICE: MessagePart = { type: 'external_notice', severity: 'warning', title: 'Retrying' };
+
+  it('keeps an unanswered approval awaiting the user when a notice follows it', () => {
+    const status = deriveTurnStatus([turnPart(), approvalPart(), NOTICE], true);
+    expect({ phase: status.phase, showWorkingRow: status.showWorkingRow }).toEqual({
+      phase: 'awaiting-user',
+      showWorkingRow: false,
+    });
+  });
+
+  it('keeps a running activity the one cue when a notice follows it', () => {
+    const parts = [turnPart(), activityPart({ status: 'running' }), NOTICE];
+    expect(deriveTurnStatus(parts, true).showWorkingRow).toBe(false);
+  });
+});
+
 describe('deriveTurnStatus: phase, first match wins', () => {
   for (const { reason, parts, isStreaming, phase } of PHASE_CASES) {
     it(`reports ${phase} when ${reason}`, () => {

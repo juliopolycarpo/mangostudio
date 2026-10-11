@@ -11483,6 +11483,47 @@
               {
                 "type": "object",
                 "required": [
+                  "type",
+                  "severity",
+                  "title"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "notice"
+                  },
+                  "severity": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "info"
+                      },
+                      {
+                        "type": "string",
+                        "const": "warning"
+                      },
+                      {
+                        "type": "string",
+                        "const": "error"
+                      }
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
                   "type"
                 ],
                 "properties": {

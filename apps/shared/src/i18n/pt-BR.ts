@@ -3940,6 +3940,13 @@ export const messages = {
         'session-lost': 'A máquina não tem mais a sessão deste turno.',
       },
     },
+    // Rótulos de um aviso do próprio fornecedor. O texto do aviso é dele e não é traduzido;
+    // só a palavra de severidade, que é do produto, é.
+    notice: {
+      info: 'Aviso',
+      warning: 'Atenção',
+      error: 'Problema informado',
+    },
     steer: {
       button: 'Direcionar',
       buttonHint: 'Envie isto para o turno em andamento em vez de esperar ele terminar.',
