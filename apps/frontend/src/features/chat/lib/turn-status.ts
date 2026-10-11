@@ -62,7 +62,7 @@ function streamedIntoKind(
   isStreaming: boolean
 ): LiveTextKind | null {
   if (!isStreaming) return null;
-  const trailingPart = parts.at(-1);
+  const trailingPart = trailingContentPart(parts);
   if (trailingPart?.type === 'text' || trailingPart?.type === 'thinking') return trailingPart.type;
   return null;
 }
@@ -140,7 +140,7 @@ export function deriveTurnStatus(parts: readonly MessagePart[], isStreaming: boo
   const phase = derivePhase({ running, awaitsDecision, streamedInto });
   return {
     phase,
-    livePartIndex: streamedInto === null ? null : parts.length - 1,
+    livePartIndex: streamedInto === null ? null : lastContentIndex(parts),
     // `phase === 'working'` is exactly `running && !awaitsDecision &&
     // streamedInto === null` — the remaining exclusions are the running
     // activity and the generating image card, which `derivePhase` does not
