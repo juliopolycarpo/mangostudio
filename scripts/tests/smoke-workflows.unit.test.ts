@@ -49,6 +49,11 @@ const INVALID_SMOKE_DEADLINES = [
   ["'abc'", '"abc"'],
 ] as const;
 
+// The container job's suite and leak-check bodies live in these scripts. A
+// step is recognized by the script it runs; the script holds what it does.
+const PAIRING_SCRIPT = 'scripts/release/smoke-container-pairing.sh';
+const LEAK_SCRIPT = 'scripts/release/assert-no-leftover-containers.sh';
+
 function readWorkflows() {
   return {
     binary: parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')),
@@ -70,7 +75,7 @@ function expectedAssertionCondition(id: string): string {
     const staged = id.startsWith('docker/alpine/') ? `${READY} && ${MUSL_DOWNLOADED}` : READY;
     return `${DOLLAR}{{ !cancelled() && ${staged} && matrix.docker_arch }}`;
   }
-  if (id.startsWith('container/')) return '$' + '{{ !cancelled() }}';
+  if (id.startsWith('container/')) return `${DOLLAR}{{ !cancelled() && ${READY} }}`;
   throw new Error(`expected a binary/, docker/ or container/ assertion id | received: ${id}`);
 }
 
@@ -78,6 +83,23 @@ describe('smoke workflow assertion inventory', () => {
   test('preserves all fourteen original platform, Docker variant and engine/libc assertions', () => {
     assertSmokeInventory(smokeAssertions(readWorkflows()), ORIGINAL_SMOKE_ASSERTIONS);
   });
+
+  test.each(['', 'docker'])(
+    'identifies the prepared engine when the inherited suite engine is %j',
+    (inheritedEngine) => {
+      const workflow = parseSmokeWorkflow(`jobs:
+  container:
+    steps:
+      - run: ../../scripts/release/smoke-container-pairing.sh
+        env:
+          CONTAINER_CLI: podman
+          MANGO_CONTAINER_E2E_ENGINE: "${inheritedEngine}"
+          MANGO_CONTAINER_E2E_RUNTIME: /workspace/.mango/out/linux-x64/mangostudio-runtime`);
+      expect(smokeAssertions({ container: workflow }).map(({ id }) => id)).toEqual([
+        'container/podman/linux-x64',
+      ]);
+    }
+  );
 
   test.each(['binary/windows-arm64', 'docker/alpine/arm64', 'container/podman/linux-x64-musl'])(
     'names missing coverage for %s',
@@ -142,10 +164,16 @@ describe('smoke workflow assertion inventory', () => {
         const musl = id.endsWith('-musl');
         expect(env.BASE_IMAGE, id).toBe(musl ? 'alpine:3' : 'debian:bookworm-slim');
         expect(env.PACKAGES, id).toBe(musl ? 'bash libstdc++' : '');
-        expect(step.run, id).toContain('image inspect "$MANGO_CONTAINER_E2E_IMAGE"');
-        expect(step.run, id).toContain('[ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]');
+        expect(step.run?.trim(), id).toBe(`../../${PAIRING_SCRIPT}`);
+        expect(step['working-directory'], id).toBe('apps/api');
       }
     }
+    const pairing = readText(PAIRING_SCRIPT);
+    expect(pairing).toContain('image inspect "$MANGO_CONTAINER_E2E_IMAGE"');
+    expect(pairing).toContain('[ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]');
+    expect(pairing).toContain(
+      'bun test tests/integration/services/connect-container-runtime.integration.test.ts'
+    );
   });
 
   test('every folded assertion runs after failure and retains its failure result', () => {
@@ -159,6 +187,33 @@ describe('smoke workflow assertion inventory', () => {
       const [workflowName, jobName] = job.split('/');
       const workflow = workflows[workflowName as keyof typeof workflows];
       expect(workflow.jobs[jobName]['continue-on-error'], id).toBeUndefined();
+    }
+  });
+
+  test('container suites wait on one readiness marker that follows every setup step', () => {
+    // A suite that starts after a failed checkout, setup or download only
+    // reports the missing bytes again. The marker runs under the default
+    // condition, so it succeeds only when every step before it did.
+    const steps = readWorkflows().container.jobs.container.steps ?? [];
+    const markers = steps.filter(({ id }) => id === 'ready');
+    const [ready] = markers;
+    if (markers.length !== 1 || !ready) {
+      throw new Error(
+        `expected exactly one container step with id: ready | received: ${markers.length}`
+      );
+    }
+    if (ready.if !== undefined || ready['continue-on-error'] !== undefined) {
+      throw new Error(
+        `expected the ready step to keep the default condition and result | received: if=${ready.if} continue-on-error=${ready['continue-on-error']}`
+      );
+    }
+    const readyIndex = steps.indexOf(ready);
+    const lastSetup = steps.map(({ uses }) => uses !== undefined).lastIndexOf(true);
+    const firstSuite = steps.findIndex(({ run }) => run?.includes(PAIRING_SCRIPT));
+    if (readyIndex !== lastSetup + 1 || readyIndex >= firstSuite) {
+      throw new Error(
+        `expected the ready step right after the last setup step (${lastSetup}) and before the first suite (${firstSuite}) | received: step ${readyIndex}`
+      );
     }
   });
 
@@ -545,22 +600,34 @@ ${steps}`).jobs.smoke;
   test('checks each container engine for leaks once after both libc assertions', () => {
     const job = readWorkflows().container.jobs.container;
     expect(smokeMatrixCases(job)).toEqual([{}]);
-    const leakSteps = (job.steps ?? []).filter(({ run }) => run?.includes('name=mango-rt-'));
+    const leakSteps = (job.steps ?? []).filter(({ run }) => run?.includes(LEAK_SCRIPT));
     expect(leakSteps).toHaveLength(2);
     expect(leakSteps.map(({ env }) => env?.CONTAINER_CLI).sort()).toEqual(['docker', 'podman']);
+    // The leak check is a checked-out script, and without a checkout no suite
+    // ran to leak anything. Any later setup failure still gets the check.
+    const checkout = (job.steps ?? []).find(({ uses }) => uses?.startsWith('actions/checkout@'));
+    const leakCondition = '$' + "{{ !cancelled() && steps.checkout.outcome == 'success' }}";
+    if (checkout?.id !== 'checkout') {
+      throw new Error(
+        `expected the container checkout step to declare id: checkout | received: ${checkout?.id}`
+      );
+    }
     for (const step of leakSteps) {
-      expect(step.if).toBe('$' + '{{ !cancelled() }}');
-      expect(step.run).toContain('seq 1 20');
+      if (step.if !== leakCondition) {
+        throw new Error(`expected "${step.name}" if: ${leakCondition} | received: ${step.if}`);
+      }
+      expect(step.run?.trim()).toBe(LEAK_SCRIPT);
       const steps = [...(job.steps ?? [])];
       const leakIndex = steps.indexOf(step);
       const suites = steps.filter(
         ({ env, run }) =>
-          env?.MANGO_CONTAINER_E2E_ENGINE === step.env?.CONTAINER_CLI &&
-          run?.includes('connect-container-runtime.integration.test.ts')
+          env?.CONTAINER_CLI === step.env?.CONTAINER_CLI && run?.includes(PAIRING_SCRIPT)
       );
       expect(suites).toHaveLength(2);
       for (const suite of suites) expect(steps.indexOf(suite)).toBeLessThan(leakIndex);
     }
+    const leakCheck = readText(LEAK_SCRIPT);
+    expect(leakCheck).toContain('name=mango-rt-');
   });
 
   test('expands Cartesian engine/libc cells and include-only platform matrices', () => {
