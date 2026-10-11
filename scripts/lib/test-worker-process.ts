@@ -36,6 +36,17 @@ export function workerEnvironment(
 const DRAIN_GRACE_MS = 2_000;
 
 /**
+ * After the escalation SIGKILL, how long to wait on `child.exited` before
+ * abandoning it. The real teardown is the group signal plus `settle()`'s
+ * process-table reap, neither of which needs `child.exited`; under Bun 1.4.3 a
+ * SIGKILLed, detached child's `.exited` can stay pending even though the process
+ * is already gone, so an unbounded wait here stalls the whole lane to its outer
+ * deadline. Kept short so it stays well inside the runner's group-kill budget
+ * (`GROUP_KILL_AFTER_MS` in ./test-workers.ts) and the drain grace above.
+ */
+const EXIT_ABANDON_MS = 500;
+
+/**
  * Reads `stream` and hands over each complete line (without its newline). A
  * last line with no newline is delivered when the stream ends, or when `stop`
  * aborts: that cancels the reader, so a pipe nobody closes cannot keep it open.
@@ -131,8 +142,31 @@ export function startWorkerProcess(
     pumpLines(child.stderr, (line) => sinks.err(prefix + line), stopReading.signal),
   ];
 
+  // After the escalation SIGKILL (see `kill` below) the worker's whole tree is
+  // being torn down by the group signal and, for a settling worker, by the
+  // token reap in `settle()`. Neither needs `child.exited`, so once that kill
+  // has had a brief grace the lane abandons the exit wait rather than depend on
+  // a `child.exited` that Bun 1.4.3 can leave pending for a dead detached child.
+  let abandonExit: (() => void) | undefined;
+  const abandoned = new Promise<'abandoned'>((resolve) => {
+    abandonExit = () => resolve('abandoned');
+  });
+  let abandonTimer: ReturnType<typeof setTimeout> | undefined;
+
   const exited = (async (): Promise<WorkerExit> => {
-    await child.exited;
+    const outcome = await Promise.race([
+      // A late rejection on an abandoned child is swallowed here so it cannot
+      // surface as an unhandled rejection after the race has moved on.
+      child.exited.then(
+        () => 'exited' as const,
+        () => 'exited' as const
+      ),
+      abandoned,
+    ]);
+    clearTimeout(abandonTimer);
+    // Abandoned: the pipes may still be held by a detached grandchild the reap
+    // is clearing, so stop reading now instead of waiting out the drain grace.
+    if (outcome === 'abandoned') stopReading.abort();
     const grace = setTimeout(() => stopReading.abort(), drainGraceMs);
     await Promise.all(pumps);
     clearTimeout(grace);
@@ -146,14 +180,22 @@ export function startWorkerProcess(
     kill: (signal) => {
       if (!leadsGroup) {
         child.kill(signal);
-        return;
+      } else {
+        try {
+          signalWorker({ pgid: child.pid, token: token ?? '' }, signal);
+        } catch (caught) {
+          // Keep the escalation timer alive. Settlement retries the table and
+          // reports the signaling failure after cleaning up what it can find.
+          signalError ??= { cause: caught };
+        }
       }
-      try {
-        signalWorker({ pgid: child.pid, token: token ?? '' }, signal);
-      } catch (caught) {
-        // Keep the escalation timer alive. Settlement retries the table and
-        // reports the signaling failure after cleaning up what it can find.
-        signalError ??= { cause: caught };
+      // The escalation SIGKILL has reached the whole group (and the token
+      // children of a settling worker); `settle()`'s reap, not `child.exited`,
+      // is what proves them gone. Give the reported exit a short grace and then
+      // abandon the wait so a wedged `child.exited` cannot hold the runner past
+      // its outer deadline.
+      if (signal === 'SIGKILL') {
+        abandonTimer ??= setTimeout(() => abandonExit?.(), EXIT_ABANDON_MS);
       }
     },
     settle:
