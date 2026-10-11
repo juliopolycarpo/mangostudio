@@ -154,23 +154,41 @@ export function startWorkerProcess(
   let abandonTimer: ReturnType<typeof setTimeout> | undefined;
 
   const exited = (async (): Promise<WorkerExit> => {
-    const outcome = await Promise.race([
-      // A late rejection on an abandoned child is swallowed here so it cannot
-      // surface as an unhandled rejection after the race has moved on.
-      child.exited.then(
-        () => 'exited' as const,
-        () => 'exited' as const
-      ),
-      abandoned,
-    ]);
+    let outcome: 'exited' | 'abandoned';
+    try {
+      outcome = await Promise.race([child.exited.then(() => 'exited' as const), abandoned]);
+    } catch (caught) {
+      // A genuine `child.exited` rejection (a spawn or stdio failure) on the
+      // non-abandoned path is the worker's own failure: let it propagate so
+      // `runWorker` records it as `startError`, exactly as before the abandon
+      // wait existed. Clean up first so the throw leaves no timer or pump
+      // reading behind.
+      clearTimeout(abandonTimer);
+      stopReading.abort();
+      await Promise.all(pumps);
+      throw caught;
+    }
     clearTimeout(abandonTimer);
-    // Abandoned: the pipes may still be held by a detached grandchild the reap
-    // is clearing, so stop reading now instead of waiting out the drain grace.
-    if (outcome === 'abandoned') stopReading.abort();
+    if (outcome === 'abandoned') {
+      // A `child.exited` rejection can now only arrive after we abandoned (and
+      // SIGKILLed): Bun 1.4.3 can reject a dead detached child's `.exited`, so
+      // contain just that late reject here, where no race is left to surface it.
+      child.exited.catch(() => undefined);
+      // The pipes may still be held by a detached grandchild the reap is
+      // clearing, so stop reading now instead of waiting out the drain grace.
+      stopReading.abort();
+    }
     const grace = setTimeout(() => stopReading.abort(), drainGraceMs);
     await Promise.all(pumps);
     clearTimeout(grace);
-    return { exitCode: child.exitCode, signal: child.signalCode };
+    // On the abandon path Bun may never have populated exitCode/signalCode; we
+    // have already sent SIGKILL, so report that when the handle reported
+    // neither — keeping WorkerExit's "exactly one set" contract without
+    // pretending the handle itself observed an exit. The normal path is
+    // unchanged: it reports whatever the handle recorded.
+    const synthesizeKill =
+      outcome === 'abandoned' && child.exitCode === null && child.signalCode === null;
+    return { exitCode: child.exitCode, signal: synthesizeKill ? 'SIGKILL' : child.signalCode };
   })();
 
   const token = plan.env[WORKER_TOKEN_ENV];
