@@ -100,20 +100,22 @@ function pass(msg: string): void {
 class SmokeFailure extends Error {}
 
 function fail(msg: string): never {
+  // Print the verdict now: the unwind below awaits the hub's exit, and a step
+  // deadline that fires during a wedged cleanup would otherwise lose it.
+  console.error(`  ❌ ${msg}`);
   // Unwind foreground smoke cleanup before the CLI boundary exits. Calling
   // process.exit here bypasses finally and can leave the hub listening.
   throw new SmokeFailure(msg);
 }
 
 /**
- * Renders what reached the CLI boundary. A verdict already names its
- * assertion; anything else keeps its stack, the only thing saying which smoke
- * stage threw.
+ * Renders an unexpected error that reached the CLI boundary. It keeps its
+ * stack, the only thing saying which smoke stage threw; verdicts never get
+ * here because `fail()` already printed them.
  *
- * @example describeFailure(new SmokeFailure('/ returned 500')) // '/ returned 500'
+ * @example describeFailure(new Error('spawn EACCES')) // 'Error: spawn EACCES\n    at smokeTest …'
  */
 function describeFailure(caught: unknown): string {
-  if (caught instanceof SmokeFailure) return caught.message;
   if (caught instanceof Error) return caught.stack ?? caught.message;
   return String(caught);
 }
@@ -382,11 +384,11 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
 }
 
 /**
- * Prints everything the probe collected, then exits.
+ * Prints everything the probe collected, then fails the smoke.
  *
  * Two undiagnosable Windows flakes came from a single-line report, so the
  * partial frame, the exit status and the child's stderr all reach the log
- * before `fail()` takes the process down. Details lead and the verdict lands
+ * before `fail()` ends the smoke. Details lead and the verdict lands
  * last, which is where a CI log gets read from; the module-resolution assert
  * runs just before it so a pattern hit becomes the final, more specific ❌.
  * The cause is on the header line too, because that assert is a `never` and
@@ -942,6 +944,6 @@ try {
     console.log('\n✅ Packaging validation passed (runtime test skipped — cross-platform).');
   }
 } catch (caught) {
-  console.error(`  ❌ ${describeFailure(caught)}`);
+  if (!(caught instanceof SmokeFailure)) console.error(`  ❌ ${describeFailure(caught)}`);
   process.exitCode = 1;
 }
