@@ -215,9 +215,9 @@ export async function runWithTestHome(
  * killer) apart from a hang, so an unforwarded signal must not read as 143.
  * Signal numbers pass through; an unknown name reports plain failure.
  */
-function signalNumber(name: string | number): number | null {
-  if (typeof name === 'number') return name;
-  const number = (constants.signals as Record<string, number | undefined>)[name];
+function signalNumber(signal: string | number): number | null {
+  if (typeof signal === 'number') return signal;
+  const number = (constants.signals as Record<string, number | undefined>)[signal];
   return typeof number === 'number' ? number : null;
 }
 
