@@ -961,9 +961,10 @@ authorizes, launches and drives it exactly as it would the real CLI.
   the transport's own `hub.workspace.authorize` binding admits the chat's workdir and an answered
   turn completes.
 
-`cargo-shim.yml`'s real-binary job runs these on Linux, macOS and Windows. It builds the stand-in
-in its own `cargo build --example` invocation, so the SDK's `testing` feature never reaches the
-binary under qualification.
+`cargo-shim.yml`'s real-binary job runs these on macOS and Windows. Ubuntu runs them in the
+ordinary CI shards against the debug runtime and `fake_cursor_agent` built by
+`local-runtime.yml`. Both lanes build the stand-in in a separate `cargo build --example`
+invocation, so the SDK's `testing` feature never reaches the binary under qualification.
 
 `rust-runtime-external-agents-live-smoke.integration.test.ts` is the separate, authenticated
 evidence: opt-in through `MANGOSTUDIO_LIVE_AGENT_SMOKE=claude,codex,cursor`, it runs a one-word
