@@ -682,7 +682,7 @@ impl Supervisor {
                         CloseCause::Requested
                     });
                     let closed =
-                        tokio::time::timeout(self.close_bound(), session.close(cause)).await;
+                        tokio::time::timeout(self.close_bound(target), session.close(cause)).await;
                     remove_scratch(&scratch);
                     opening.record_cleanup(match closed {
                         Ok(Ok(())) => Ok(()),
@@ -863,23 +863,28 @@ impl Supervisor {
 
     /// The vendor close, bounded, then the scratch leaf. Both always run.
     async fn finish_close(&self, live: &LiveSession, cause: CloseCause) -> Result<(), String> {
-        let vendor = tokio::time::timeout(self.close_bound(), live.session.close(cause)).await;
+        let bound = self.close_bound(live.target);
+        let vendor = tokio::time::timeout(bound, live.session.close(cause)).await;
         remove_scratch(&live.scratch);
         match vendor {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => Err(error.to_string()),
             Err(_) => Err(format!(
                 "the vendor close did not finish within {} ms",
-                self.close_bound().as_millis()
+                bound.as_millis()
             )),
         }
     }
 
-    /// How long one vendor close may take: the SDK's own close budget (its
-    /// kill grace plus its shutdown timeout) with the cleanup bound on top,
-    /// so a vendor that uses its whole grace is not reported as failed.
-    fn close_bound(&self) -> Duration {
-        self.ports.harnesses.close_budget() + self.ports.cleanup_timeout
+    /// How long one vendor close of a `target` session may take: the SDK's
+    /// documented worst case for that harness at the limits the backend runs
+    /// with, with the cleanup bound on top, so a close that uses its whole
+    /// documented budget is not reported as failed while the SDK still reaps.
+    fn close_bound(&self, target: TargetId) -> Duration {
+        self.ports
+            .harnesses
+            .close_budget(target)
+            .saturating_add(self.ports.cleanup_timeout)
     }
 
     /// `external-agent.list-sessions`: the vendor's own history for one target.
