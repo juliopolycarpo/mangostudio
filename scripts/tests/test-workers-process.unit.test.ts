@@ -458,7 +458,12 @@ describe('a worker whose exit is never reported', () => {
       try {
         const { handle, within } = startWedged(true, lateExit.promise);
         handle.kill('SIGKILL');
-        await within(3_000);
+        // Without this the reject below could land while the wait is still
+        // pending, where the lane's own catch handles it.
+        expect(
+          await within(3_000),
+          'expected worker exit: { exitCode: null, signal: SIGKILL } before the exit fails'
+        ).toEqual({ exitCode: null, signal: 'SIGKILL' });
 
         lateExit.reject(new Error('late pipe failure'));
         // Unhandled rejections are reported a turn of the event loop later.
