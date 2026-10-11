@@ -388,23 +388,25 @@ describe('a worker whose exit is never reported', () => {
    * and no exit code or signal is recorded, as Bun 1.4.3 can leave a SIGKILLed
    * detached child.
    */
-  const spawnWedgedExitChild: SpawnWorker = (options) => {
-    const real = spawnWorkerChild(options);
-    started.push(real);
-    return {
-      pid: real.pid,
-      stdout: real.stdout,
-      stderr: real.stderr,
-      exited: new Promise<never>(() => undefined),
-      exitCode: null,
-      signalCode: null,
-      kill: (signal) => real.kill(signal),
+  const spawnWedgedExitChild =
+    (exited: Promise<never>): SpawnWorker =>
+    (options) => {
+      const real = spawnWorkerChild(options);
+      started.push(real);
+      return {
+        pid: real.pid,
+        stdout: real.stdout,
+        stderr: real.stderr,
+        exited,
+        exitCode: null,
+        signalCode: null,
+        kill: (signal) => real.kill(signal),
+      };
     };
-  };
 
   const STILL_WAITING = 'still waiting on child.exited';
 
-  function startWedged(settle: boolean) {
+  function startWedged(settle: boolean, exited = new Promise<never>(() => undefined)) {
     const plan: WorkerPlan = {
       index: 1,
       count: 1,
@@ -422,7 +424,7 @@ describe('a worker whose exit is never reported', () => {
       { out: ignore, err: ignore },
       100,
       fixtureChildEnvironment(),
-      spawnWedgedExitChild
+      spawnWedgedExitChild(exited)
     );
     const within = (ms: number) =>
       Promise.race([handle.exited, Bun.sleep(ms).then(() => STILL_WAITING)]);
@@ -443,6 +445,32 @@ describe('a worker whose exit is never reported', () => {
       expect(await handle.settle?.(), 'expected the killed group to leave nothing behind').toEqual(
         []
       );
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'handles an exit that fails only after the wait was abandoned',
+    async () => {
+      const lateExit = Promise.withResolvers<never>();
+      const unhandled: unknown[] = [];
+      const record = (reason: unknown): void => void unhandled.push(reason);
+      process.on('unhandledRejection', record);
+      try {
+        const { handle, within } = startWedged(true, lateExit.promise);
+        handle.kill('SIGKILL');
+        await within(3_000);
+
+        lateExit.reject(new Error('late pipe failure'));
+        // Unhandled rejections are reported a turn of the event loop later.
+        await Bun.sleep(50);
+
+        expect(
+          unhandled.map(String),
+          'expected unhandled rejections after the abandoned exit wait: none'
+        ).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', record);
+      }
     }
   );
 
