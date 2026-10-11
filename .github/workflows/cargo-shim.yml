@@ -470,8 +470,10 @@ jobs:
   real-binary-qualification:
     # Proves the hub's own real code actually talks to the real compiled
     # mangostudio-runtime binary over its three transports (stdio, direct-URL
-    # serve, paired connect), on every OS. Runs every api test file that
-    # reaches tests/support/rust-runtime-binary.ts, discovered by
+    # serve, paired connect), on macOS and Windows. Ubuntu runs the same files
+    # against the same debug runtime in CI's test shards;
+    # the qualification shard guard checks file coverage and artifact wiring.
+    # Runs every api test file that reaches tests/support/rust-runtime-binary.ts, discovered by
     # scripts/lib/rust-lanes.ts, rather than the whole apps/api suite.
     name: Real-binary qualification (${{ matrix.os }})
     needs: [changes]
@@ -479,11 +481,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
         include:
-          - os: ubuntu-latest
-            runtime-binary: target/debug/mangostudio-runtime
-            fake-cursor-agent: target/debug/examples/fake_cursor_agent
           - os: macos-latest
             runtime-binary: target/debug/mangostudio-runtime
             fake-cursor-agent: target/debug/examples/fake_cursor_agent

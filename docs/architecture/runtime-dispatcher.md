@@ -201,8 +201,9 @@ Hub clients against the TypeScript answers recorded before that runtime was dele
 and error types. `rust-runtime-qualification.integration.test.ts` exercises all eleven filesystem
 methods and snapshot capture/hash/revert against the compiled binary over stdio and direct URL
 serve. Its paired-connect sibling runs the same assertions through the Hub connection manager.
-The qualification job runs these suites on Linux, macOS, and Windows. Windows-only junction tests and Unix non-UTF-8 identity tests live in
-`filesystem::policy::tests`.
+`cargo-shim.yml`'s real-binary qualification job runs these suites on macOS and Windows.
+Ubuntu runs them in the ordinary CI shards against the debug runtime from `local-runtime.yml`.
+Windows-only junction tests and Unix non-UTF-8 identity tests live in `filesystem::policy::tests`.
 
 ### Snapshot behavior
 
@@ -224,7 +225,8 @@ against the recorded TypeScript answers: binary capture, missing files, size err
 retry conflicts, permissive base64 decoding, move collisions, and symlink or junction containment.
 It also exercises cross-device moves on Linux when the test filesystem provides two devices,
 including long filenames and retrying after source-removal permissions are restored.
-The runtime qualification job includes this suite on Linux, macOS, and Windows.
+`cargo-shim.yml`'s real-binary qualification job includes this suite on macOS and Windows.
+Ubuntu runs it in the ordinary CI shards against the debug runtime from `local-runtime.yml`.
 
 ### Command behavior
 
