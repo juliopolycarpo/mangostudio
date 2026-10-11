@@ -69,6 +69,7 @@ const TURBO_KEY_GLOBS = [
 
 interface RustCacheStep {
   readonly file: string;
+  readonly job?: string;
   readonly block: string;
 }
 
@@ -94,8 +95,8 @@ function permissions(source: string, indent: number): Record<string, string> | s
 function rustCacheSteps(): RustCacheStep[] {
   const isRustCache = (block: string) => /^\s*(?:-\s+)?uses: Swatinem\/rust-cache@/m.test(block);
   const workflowSteps = workflowFiles().flatMap((file) =>
-    extractJobBlocks(readText(file)).flatMap(({ block }) =>
-      extractStepBlocksAtIndent(block, 6).map((step) => ({ file, block: step }))
+    extractJobBlocks(readText(file)).flatMap(({ job, block }) =>
+      extractStepBlocksAtIndent(block, 6).map((step) => ({ file, job, block: step }))
     )
   );
   const actionSteps = compositeActionFiles().flatMap((file) =>
@@ -177,6 +178,7 @@ describe('CI cache policy', () => {
 
   test('registers exact Rust family identities and keeps the pinned key grammar', () => {
     const families = new Set<string>(RUST_CACHE_FAMILIES);
+    const observed = new Set<string>();
     for (const step of rustCacheSteps()) {
       if (RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file)) continue;
       expect(step.block, step.file).toContain(
@@ -185,14 +187,7 @@ describe('CI cache policy', () => {
       expect(step.block, step.file).not.toMatch(/add-(?:job-id|rust-environment-hash)-key:.*false/);
       const shared = /^\s+shared-key: (.+)$/m.exec(step.block)?.[1];
       const inputKey = /^\s+key: (.+)$/m.exec(step.block)?.[1];
-      const job = extractJobBlocks(readText(step.file)).find(({ block }) =>
-        block.includes(step.block)
-      )?.job;
-      const family = shared ?? [inputKey, job].filter(Boolean).join('-');
-      if (step.file === '.github/actions/local-runtime/action.yml') {
-        expect(families.has('local-runtime')).toBe(true);
-        continue;
-      }
+      const family = shared ?? [inputKey, step.job].filter(Boolean).join('-');
       if (shared?.includes('matrix.platform')) {
         const platforms = JSON.parse(
           (
@@ -201,12 +196,20 @@ describe('CI cache policy', () => {
             }
           ).on.workflow_call.inputs.platforms.default
         ) as string[];
-        for (const platform of platforms)
-          expect(families.has(`runtime-build-${platform}`), platform).toBe(true);
+        for (const platform of platforms) {
+          const platformFamily = shared.replace(`${EXPRESSION_START} matrix.platform }}`, platform);
+          observed.add(platformFamily);
+          expect(families.has(platformFamily), `${step.file}:${platformFamily}`).toBe(true);
+        }
         continue;
       }
+      observed.add(family);
       expect(families.has(family), `${step.file}:${family}`).toBe(true);
     }
+    expect(
+      [...observed].sort(),
+      'expected every registered family to have a cache producer'
+    ).toEqual([...families].sort());
   });
 
   test('keeps every cache family behind one composite and one immutable pin', () => {
