@@ -138,7 +138,8 @@ jobs:
       # Linux also proves both Docker variants on its native runner below.
       # The step deadline fails a hung smoke before the job deadline cancels
       # the job, which would skip the Docker assertions and teardown checks.
-      # The three Linux deadlines total 12 minutes so they stay inside it.
+      # Every step carries a deadline and each leg's total stays below the
+      # job's; the three Linux assertions take 12 minutes of it.
       # macOS and Windows run nothing after this step, so `smoke_timeout`
       # gives them the whole 12: a manual rebuild compiles inside it.
       - name: Run binary smoke test
