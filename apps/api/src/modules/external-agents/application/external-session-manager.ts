@@ -72,6 +72,21 @@ const logger = createDiagnosticLogger('external-session-manager');
 const OPEN_TIMEOUT_MS = 60_000;
 /** The turn call only registers the turn; the events that follow are unbounded by it. */
 const CALL_TIMEOUT_MS = 30_000;
+/**
+ * How long a reap waits for the runtime's `close`, not how long the close may take.
+ *
+ * The runtime bounds a vendor close by the SDK's documented worst case for the harness, up to
+ * 43 s at the default limits, and finishes it even after the hub stopped waiting, so this only
+ * decides how long a send or a chat update that reaps first is held. An uncooperative vendor
+ * held them for the runtime's old 9 s bound; this keeps that order of wait.
+ */
+const CLOSE_WAIT_MS = 10_000;
+/**
+ * The same wait while the hub is stopping. `requestShutdown` gives the whole stop 12 s and the
+ * runtime reaps its children on its own when the hub's connection ends, so a close the hub
+ * cannot confirm in this time is left to it.
+ */
+const SHUTDOWN_CLOSE_WAIT_MS = 5_000;
 
 /**
  * The chat's session was reaped while it was being opened — its consent, its
@@ -286,6 +301,10 @@ export interface ExternalSessionManagerOptions {
   readonly newSessionId?: () => string;
   readonly openTimeoutMs?: number;
   readonly callTimeoutMs?: number;
+  /** How long a reap waits for the runtime's close. Defaults to {@link CLOSE_WAIT_MS}. */
+  readonly closeWaitMs?: number;
+  /** The same wait during hub shutdown. Defaults to {@link SHUTDOWN_CLOSE_WAIT_MS}. */
+  readonly shutdownCloseWaitMs?: number;
 }
 
 interface OpenedSession {
@@ -332,6 +351,8 @@ export function createExternalSessionManager(
   const newSessionId = options.newSessionId ?? generateId;
   const openTimeoutMs = options.openTimeoutMs ?? OPEN_TIMEOUT_MS;
   const callTimeoutMs = options.callTimeoutMs ?? CALL_TIMEOUT_MS;
+  const closeWaitMs = options.closeWaitMs ?? CLOSE_WAIT_MS;
+  const shutdownCloseWaitMs = options.shutdownCloseWaitMs ?? SHUTDOWN_CLOSE_WAIT_MS;
 
   const sessions = new Map<string, SessionRecord>();
   const holds = new Map<
@@ -472,11 +493,11 @@ export function createExternalSessionManager(
     return record;
   }
 
-  async function closeRemote(record: SessionRecord): Promise<void> {
+  async function closeRemote(record: SessionRecord, waitMs: number): Promise<void> {
     try {
       await record.client.externalAgents.close(
         { sessionId: record.sessionId },
-        { timeoutMs: callTimeoutMs }
+        { timeoutMs: waitMs }
       );
     } catch (error) {
       // A runtime that is already gone cannot be asked to close anything, and
@@ -492,7 +513,8 @@ export function createExternalSessionManager(
     chatId: string,
     reason: ExternalTurnTerminalReason,
     keepContinuation: boolean,
-    explicit = false
+    explicit = false,
+    waitMs = closeWaitMs
   ): Promise<void> {
     reapGenerations.set(chatId, (reapGenerations.get(chatId) ?? 0) + 1);
     const record = teardown(chatId, reason);
@@ -504,7 +526,7 @@ export function createExternalSessionManager(
       await deleteContinuation(chatId, resolveDb());
       await releaseAdoptionLease(chatId, resolveDb());
     }
-    if (record) await closeRemote(record);
+    if (record) await closeRemote(record, waitMs);
   }
 
   async function openSession(input: EnsureExternalSessionInput): Promise<ExternalSessionHandle> {
@@ -620,7 +642,7 @@ export function createExternalSessionManager(
       record.unsubscribe();
       await deleteContinuation(input.chatId, db);
       await client.externalAgents
-        .close({ sessionId }, { timeoutMs: callTimeoutMs })
+        .close({ sessionId }, { timeoutMs: closeWaitMs })
         .catch(() => undefined);
       throw new ExternalSessionReapedError(input.chatId);
     }
@@ -731,7 +753,7 @@ export function createExternalSessionManager(
         // Shutdown keeps continuation: the vendor conversation is still the one
         // this chat resumes when the hub comes back.
         [...new Set([...sessions.keys(), ...holds.keys()])].map((chatId) =>
-          reap(chatId, reason, true)
+          reap(chatId, reason, true, false, shutdownCloseWaitMs)
         )
       );
     },
