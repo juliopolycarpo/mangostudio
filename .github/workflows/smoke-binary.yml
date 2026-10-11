@@ -190,11 +190,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$REBUILD" = "true" ]; then
-            # The binary smoke step built the glibc target moments ago. A build
-            # is complete only once the hub and its runtime both exist, so a
-            # failed native build is still rebuilt here.
+            # The binary smoke step built the glibc target moments ago. Reuse
+            # requires its successful-build marker and both executables;
+            # rejected runtime verification can leave both files behind.
             out=".mango/out/$BINARY_PLATFORM"
-            if [ ! -x "$out/mangostudio" ] || [ ! -x "$out/mangostudio-runtime" ]; then
+            if [ ! -f .mango/out/README.md ] || [ ! -x "$out/mangostudio" ] || [ ! -x "$out/mangostudio-runtime" ]; then
               bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
             fi
           fi
@@ -271,7 +271,7 @@ jobs:
           set -euo pipefail
           if [ "$REBUILD" = "true" ]; then
             out=".mango/out/$BINARY_PLATFORM"
-            if [ ! -x "$out/mangostudio" ] || [ ! -x "$out/mangostudio-runtime" ]; then
+            if [ ! -f .mango/out/README.md ] || [ ! -x "$out/mangostudio" ] || [ ! -x "$out/mangostudio-runtime" ]; then
               bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
             fi
           fi

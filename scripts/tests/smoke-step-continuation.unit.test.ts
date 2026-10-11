@@ -59,7 +59,14 @@ function stageWorkflowRun() {
 async function runWorkflowSteps(
   job: SmokeJob,
   matrix: Record<string, string>,
-  failure: 'binary' | 'container' | 'ports' | 'native-port' | 'slow-port' | 'none',
+  failure:
+    | 'binary'
+    | 'rejected-native-build'
+    | 'container'
+    | 'ports'
+    | 'native-port'
+    | 'slow-port'
+    | 'none',
   rebuild = false,
   leftoverContainers: readonly string[] = []
 ) {
@@ -266,26 +273,37 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     expect(containers).toEqual([]);
   });
 
-  test('the manual fallback rebuilds the glibc target for its image after a failed native build', async () => {
-    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
-    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
-    if (!matrix)
-      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
-    // The fixture's linux-x64 output holds a runtime but no hub: a half
-    // build, which the output directory existing must not pass for.
-    const { outcomes, events } = await runWorkflowSteps(job, matrix, 'binary', true);
-    const builds = events
-      .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
-      .map(({ args }) => args[args.indexOf('--platform') + 1])
-      .join(', ');
-    const images = outcomes
-      .filter(({ name }) => name.includes('Docker smoke test'))
-      .map(({ code }) => code)
-      .join(', ');
-    if (builds !== 'linux-x64, linux-x64-musl' || images !== '0, 0') {
-      throw new Error(
-        `expected both image targets built (linux-x64, linux-x64-musl) and both images passing (0, 0) | received: builds [${builds}], images [${images}]`
-      );
+  test.each([
+    ['incomplete', 'binary'],
+    ['rejected', 'rejected-native-build'],
+  ] as const)(
+    'the manual fallback rebuilds the glibc target for its image after the %s native build fails',
+    async (_state, failure) => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+      if (!matrix)
+        throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+      // Incomplete builds leave only a runtime. Rejected builds leave both
+      // executables but no successful-build README marker.
+      const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, failure, true);
+      const builds = events
+        .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+        .map(({ args }) => args[args.indexOf('--platform') + 1])
+        .join(', ');
+      const images = outcomes
+        .filter(({ name }) => name.includes('Docker smoke test'))
+        .map(({ code }) => code)
+        .join(', ');
+      if (builds !== 'linux-x64, linux-x64-musl' || images !== '0, 0') {
+        throw new Error(
+          `expected both image targets built (linux-x64, linux-x64-musl) and both images passing (0, 0) | received: builds [${builds}], images [${images}]`
+        );
+      }
+      expect(outcomes.find(({ name }) => name === 'Run binary smoke test')?.code).toBe(9);
+      expect(
+        outcomes.filter(({ name }) => name.includes('teardown')).map(({ code }) => code)
+      ).toEqual([0, 0, 0]);
+      expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
     }
-  });
+  );
 });

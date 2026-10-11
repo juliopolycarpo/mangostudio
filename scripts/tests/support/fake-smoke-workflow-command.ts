@@ -45,18 +45,25 @@ if (command === 'bun') {
     console.error('Deliberately failed first smoke assertion');
     process.exit(9);
   }
-  // A finished build leaves the hub and its runtime side by side.
+  // A rejected runtime can leave both executables before verification fails.
+  // Only a finished build writes the shared completion marker.
   const built = args.includes('build:binary')
     ? args[args.indexOf('--platform') + 1]
     : firstBinary && process.env.SKIP_BUILD === '0'
       ? process.env.PLATFORM
       : undefined;
   if (built) {
+    rmSync(join('.mango', 'out', 'README.md'), { force: true });
     const target = join('.mango', 'out', built);
     mkdirSync(target, { recursive: true });
     for (const name of ['mangostudio', 'mangostudio-runtime']) {
       writeFileSync(join(target, name), '#!/usr/bin/env true\n', { mode: 0o755 });
     }
+    if (fail === 'rejected-native-build' && firstBinary) {
+      console.error('Deliberately rejected native build after staging both executables');
+      process.exit(9);
+    }
+    writeFileSync(join('.mango', 'out', 'README.md'), 'Successfully built and verified.\n');
   }
   process.exit(0);
 }
