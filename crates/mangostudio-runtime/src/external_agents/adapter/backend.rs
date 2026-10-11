@@ -32,9 +32,15 @@ mod prompt_budget_tests;
 #[path = "close_budget_tests.rs"]
 mod close_budget_tests;
 
-/// The longest a `target` session's `close` can legitimately take under `limits`, from the
-/// worst cases each harness documents in its "Deadlines" table (`docs/harness-<vendor>.md`
-/// of the SDK). With `kg` for `kill_grace` and `st` for `shutdown_timeout`:
+/// The longest a `target` session's `close` can legitimately take under `limits`.
+///
+/// This is the one place these formulas are encoded by hand. They mirror, in the SDK's docs at
+/// 0.6.0: `docs/harness-acp.md` "Deadlines" (the worst-case table: `close` 29 s, agent exit to
+/// `Closed` 34 s), `docs/harness-codex.md` (the stop-a-turn table: teardown `T` 36 s, and the
+/// overflow paragraph below it), and `docs/harness-claude.md` "Deadlines" (the "any launcher"
+/// column: `close` with a turn active 19 s, `close` while the launch is pending 24 s). A change to
+/// any of those tables, or an SDK accessor for them, replaces this function. With `kg` for
+/// `kill_grace` and `st` for `shutdown_timeout`:
 ///
 /// | Target | Worst case | Documented path (defaults 2 s / 5 s) |
 /// | ------ | ---------- | ------------------------------------ |
