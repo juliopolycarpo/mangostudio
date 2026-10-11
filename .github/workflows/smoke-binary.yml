@@ -140,6 +140,7 @@ jobs:
       # instead of once more per assertion run against missing bytes.
       - name: Mark smoke inputs ready
         id: ready
+        timeout-minutes: 1
         run: echo "Smoke inputs are staged."
 
       # Linux also proves both Docker variants on its native runner below.
