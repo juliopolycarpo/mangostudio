@@ -28,7 +28,7 @@ class FakeSignaledChild implements TestHomeChild, TestHomeDependencies {
   command: readonly string[] = [];
   home = '';
   signals: number[] = [];
-  constructor(readonly signalCode: string) {}
+  constructor(readonly signalCode: string | number) {}
   kill(signal: number): void {
     this.signals.push(signal);
   }
@@ -322,6 +322,8 @@ describe('runWithTestHome', () => {
   test.each([
     ['SIGTERM', 143],
     ['SIGKILL', 137],
+    [15, 143],
+    [34, 162],
     ['unknown-signal', 1],
   ] as const)(
     'maps injected %s status and removes its real temporary home',

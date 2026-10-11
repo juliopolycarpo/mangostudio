@@ -239,7 +239,7 @@ export function planWorkers(
 /** How a worker process ended. Exactly one of the two is set once it has. */
 export interface WorkerExit {
   readonly exitCode: number | null;
-  readonly signal: string | null;
+  readonly signal: string | number | null;
 }
 
 /** A started worker. `kill` asks it to stop (its whole group, where it leads one); `exited` settles once it has. */

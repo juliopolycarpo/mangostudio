@@ -119,7 +119,7 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) 1.4.2 or newer (`bun upgrade`, or
+- [Bun](https://bun.sh/) 1.4.3 or newer (`bun upgrade`, or
   `curl -fsSL https://bun.sh/install | bash` for a first install)
 - A Rust toolchain via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). The hub launches
   Local as the cargo-built `mangostudio-runtime`, and `rust-toolchain.toml` pins the version

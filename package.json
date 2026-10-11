@@ -15,7 +15,7 @@
   },
   "type": "module",
   "workspaces": ["apps/*", "packages/*"],
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.3",
   "scripts": {
     "dev": "bun ./scripts/dev.ts",
     "build": "bun ./scripts/build.ts",
@@ -71,7 +71,8 @@
     "typescript": "7.0.2"
   },
   "overrides": {
-    "bun": "file:./scripts/bun-host-peer"
+    "bun": "file:./scripts/bun-host-peer",
+    "bun-types": "1.4.3"
   },
   "patchedDependencies": {
     "@elysia/openapi@2.0.0-beta.4": "patches/@elysia%2Fopenapi@2.0.0-beta.4.patch"
