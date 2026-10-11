@@ -2,7 +2,14 @@
 // containers are represented by files so the real smoke helper's EXIT trap
 // can be checked, including its name reuse between Bookworm and Alpine.
 // Usage: materialize this executable as bun/docker/podman/curl/ss in a fake PATH.
-import { appendFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, join } from 'node:path';
 
 const eventsPath = process.env.FAKE_SMOKE_WORKFLOW_EVENTS;
@@ -38,6 +45,26 @@ if (command === 'bun') {
     console.error('Deliberately failed first smoke assertion');
     process.exit(9);
   }
+  // A rejected runtime can leave both executables before verification fails.
+  // Only a finished build writes the shared completion marker.
+  const built = args.includes('build:binary')
+    ? args[args.indexOf('--platform') + 1]
+    : firstBinary && process.env.SKIP_BUILD === '0'
+      ? process.env.PLATFORM
+      : undefined;
+  if (built) {
+    rmSync(join('.mango', 'out', 'README.md'), { force: true });
+    const target = join('.mango', 'out', built);
+    mkdirSync(target, { recursive: true });
+    for (const name of ['mangostudio', 'mangostudio-runtime']) {
+      writeFileSync(join(target, name), '#!/usr/bin/env true\n', { mode: 0o755 });
+    }
+    if (fail === 'rejected-native-build' && firstBinary) {
+      console.error('Deliberately rejected native build after staging both executables');
+      process.exit(9);
+    }
+    writeFileSync(join('.mango', 'out', 'README.md'), 'Successfully built and verified.\n');
+  }
   process.exit(0);
 }
 
@@ -64,11 +91,23 @@ if (command === 'curl') {
   process.exit(0);
 }
 if (command === 'ss') {
-  if (
-    process.env.FAKE_SMOKE_WORKFLOW_FAILURE === 'ports' &&
-    args.some((arg) => arg.includes('13002'))
-  ) {
+  const fail = process.env.FAKE_SMOKE_WORKFLOW_FAILURE;
+  // A container that is still up holds its published port, like docker-proxy.
+  const published = readdirSync(stateDir).some((name) => name.endsWith('-13002'));
+  if ((fail === 'ports' || published) && args.some((arg) => arg.includes('13002'))) {
     console.log('LISTEN 0 128 127.0.0.1:13002 0.0.0.0:*');
+  }
+  // docker-proxy can hold the port for a moment after `docker rm -f` returns:
+  // the first two probes of 13002 still see it, every later one finds it free.
+  if (fail === 'slow-port' && args.some((arg) => arg.includes('13002'))) {
+    const probes = readFileSync(eventsPath, 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"command":"ss"') && line.includes('13002'));
+    if (probes.length <= 2) console.log('LISTEN 0 128 127.0.0.1:13002 0.0.0.0:*');
+  }
+  // A native hub that outlived its smoke: only a filter naming 13001 sees it.
+  if (fail === 'native-port' && args.some((arg) => arg.includes('13001'))) {
+    console.log('LISTEN 0 128 127.0.0.1:13001 0.0.0.0:*');
   }
   process.exit(0);
 }

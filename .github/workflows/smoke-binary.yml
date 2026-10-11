@@ -135,6 +135,14 @@ jobs:
           channel: ${{ inputs.channel }}
           target: ${{ matrix.platform }}
 
+      # Default condition on purpose: this succeeds only when every setup step
+      # above did. The assertions below read it, so failed setup fails once
+      # instead of once more per assertion run against missing bytes.
+      - name: Mark smoke inputs ready
+        id: ready
+        timeout-minutes: 1
+        run: echo "Smoke inputs are staged."
+
       # Linux also proves both Docker variants on its native runner below.
       # The step deadline fails a hung smoke before the job deadline cancels
       # the job, which would skip the Docker assertions and teardown checks.
@@ -143,7 +151,7 @@ jobs:
       # macOS and Windows run nothing after this step, so `smoke_timeout`
       # gives them the whole 12: a manual rebuild compiles inside it.
       - name: Run binary smoke test
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
         timeout-minutes: ${{ matrix.smoke_timeout }}
         run: bun --no-install run scripts/test-build.ts
         env:
@@ -168,7 +176,7 @@ jobs:
           fi
 
       - name: Run Bookworm Docker smoke test
-        if: ${{ !cancelled() && matrix.docker_arch }}
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' && matrix.docker_arch }}
         timeout-minutes: 4
         env:
           REBUILD: ${{ inputs.rebuild }}
@@ -181,13 +189,14 @@ jobs:
           GEMINI_API_KEY: dummy
         run: |
           set -euo pipefail
-          listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
-          if [ -n "$listeners" ]; then
-            echo "::error::expected smoke ports 13001 and 13002 released; listeners [$listeners]"
-            exit 1
-          fi
           if [ "$REBUILD" = "true" ]; then
-            bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+            # The binary smoke step built the glibc target moments ago. Reuse
+            # requires its successful-build marker and both executables;
+            # rejected runtime verification can leave both files behind.
+            out=".mango/out/$BINARY_PLATFORM"
+            if [ ! -f .mango/out/README.md ] || [ ! -x "$out/mangostudio" ] || [ ! -x "$out/mangostudio-runtime" ]; then
+              bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+            fi
           fi
           bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
           docker build \
@@ -208,7 +217,7 @@ jobs:
           listeners=""
           for _ in $(seq 1 20); do
             leftover="$(docker ps -a --format '{{.Names}}' --filter "name=mangostudio-smoke-linux-${DOCKER_ARCH}-13002")"
-            listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+            listeners="$(ss -H -ltn '( sport = :13002 )')"
             if [ -z "$leftover$listeners" ]; then
               break
             fi
@@ -220,7 +229,8 @@ jobs:
           fi
 
       - name: Download musl cargo runtime (manual rebuild)
-        if: ${{ !cancelled() && matrix.docker_arch && inputs.rebuild }}
+        id: musl_runtime
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' && matrix.docker_arch && inputs.rebuild }}
         timeout-minutes: 2
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -233,7 +243,8 @@ jobs:
         run: rm -rf "$RUNNER_TEMP/mango-distribution"
 
       - name: Download prebuilt musl Docker target
-        if: ${{ !cancelled() && matrix.docker_arch && !inputs.rebuild }}
+        id: musl_target
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' && matrix.docker_arch && !inputs.rebuild }}
         timeout-minutes: 3
         uses: ./.github/actions/download-distribution
         with:
@@ -243,8 +254,9 @@ jobs:
           channel: ${{ inputs.channel }}
           target: ${{ matrix.musl_platform }}
 
+      # Exactly one of the two musl downloads runs; Alpine needs that one.
       - name: Run Alpine Docker smoke test
-        if: ${{ !cancelled() && matrix.docker_arch }}
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' && (steps.musl_runtime.outcome == 'success' || steps.musl_target.outcome == 'success') && matrix.docker_arch }}
         timeout-minutes: 4
         env:
           REBUILD: ${{ inputs.rebuild }}
@@ -257,12 +269,8 @@ jobs:
           GEMINI_API_KEY: dummy
         run: |
           set -euo pipefail
-          listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
-          if [ -n "$listeners" ]; then
-            echo "::error::expected smoke ports 13001 and 13002 released; listeners [$listeners]"
-            exit 1
-          fi
           if [ "$REBUILD" = "true" ]; then
+            # The native glibc build's shared marker cannot verify musl output.
             bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
           fi
           bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
@@ -284,7 +292,7 @@ jobs:
           listeners=""
           for _ in $(seq 1 20); do
             leftover="$(docker ps -a --format '{{.Names}}' --filter "name=mangostudio-smoke-linux-${DOCKER_ARCH}-13002")"
-            listeners="$(ss -H -ltn '( sport = :13001 or sport = :13002 )')"
+            listeners="$(ss -H -ltn '( sport = :13002 )')"
             if [ -z "$leftover$listeners" ]; then
               break
             fi

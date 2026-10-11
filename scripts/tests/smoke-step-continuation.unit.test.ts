@@ -34,7 +34,7 @@ interface CommandEvent {
   readonly skipBuild?: string;
 }
 
-function stageWorkflowRun() {
+function stageWorkflowRun(seededOutputPlatforms: readonly string[] = []) {
   const root = mkdtempSync(join(tmpdir(), 'mango-smoke-workflow-'));
   scratchRoots.push(root);
   const fakeBin = join(root, 'fake-bin');
@@ -53,16 +53,34 @@ function stageWorkflowRun() {
     mkdirSync(target, { recursive: true });
     writeFileSync(join(target, 'mangostudio-runtime'), '#!/usr/bin/env true\n', { mode: 0o755 });
   }
+  // Both executables can remain from an unverified build of another target.
+  for (const platform of seededOutputPlatforms) {
+    const target = join(root, '.mango', 'out', platform);
+    mkdirSync(target, { recursive: true });
+    for (const name of ['mangostudio', 'mangostudio-runtime']) {
+      writeFileSync(join(target, name), '#!/usr/bin/env true\n', { mode: 0o755 });
+    }
+  }
   return { root, fakeBin, stateDir, eventsPath: join(root, 'commands.jsonl') };
 }
 
 async function runWorkflowSteps(
   job: SmokeJob,
   matrix: Record<string, string>,
-  failure: 'binary' | 'container' | 'ports' | 'none',
-  rebuild = false
+  failure:
+    | 'binary'
+    | 'rejected-native-build'
+    | 'container'
+    | 'ports'
+    | 'native-port'
+    | 'slow-port'
+    | 'none',
+  rebuild = false,
+  leftoverContainers: readonly string[] = [],
+  seededOutputPlatforms: readonly string[] = []
 ) {
-  const fixture = stageWorkflowRun();
+  const fixture = stageWorkflowRun(seededOutputPlatforms);
+  for (const name of leftoverContainers) writeFileSync(join(fixture.stateDir, name), 'running');
   const outcomes: Array<{ name: string; code: number }> = [];
   const resolveValue = (value: string) =>
     value
@@ -127,6 +145,75 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     expect(containers).toEqual([]);
   });
 
+  test('a container left up by a killed image step is removed before the port precheck', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+    if (!matrix)
+      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+    // A step killed at its deadline never runs its EXIT trap, so the next
+    // image step meets the same-named container still publishing 13002.
+    const { outcomes, containers } = await runWorkflowSteps(job, matrix, 'none', false, [
+      'mangostudio-smoke-linux-amd64-13002',
+    ]);
+    const received = outcomes
+      .filter(({ name }) => name.includes('Docker smoke test'))
+      .map(({ name, code }) => `${name}=${code}`)
+      .join(', ');
+    const expected = 'Run Bookworm Docker smoke test=0, Run Alpine Docker smoke test=0';
+    if (received !== expected || containers.length) {
+      throw new Error(
+        `expected the leftover container removed and both images tested (${expected}; containers []) | received: ${received}; containers [${containers.join(', ')}]`
+      );
+    }
+  }, 15_000);
+
+  test('a port docker-proxy releases a moment late does not fail the image assertion', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+    if (!matrix)
+      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+    const { outcomes } = await runWorkflowSteps(job, matrix, 'slow-port');
+    const received = outcomes
+      .filter(({ name }) => name.includes('Docker smoke test'))
+      .map(({ name, code }) => `${name}=${code}`)
+      .join(', ');
+    const expected = 'Run Bookworm Docker smoke test=0, Run Alpine Docker smoke test=0';
+    if (received !== expected) {
+      throw new Error(
+        `expected the precheck to wait out a port released on its third probe (${expected}) | received: ${received}`
+      );
+    }
+  }, 15_000);
+
+  test('a leaked native hub fails only the native teardown check, not the image assertions', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+    if (!matrix)
+      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+    const { outcomes, events } = await runWorkflowSteps(job, matrix, 'native-port');
+    // The images bind 13002 only, so a listener on 13001 is the native
+    // step's finding alone; repeating it would leave both images untested.
+    const received = outcomes
+      .filter(({ name }) => name.includes('Docker') || name.includes('teardown'))
+      .map(({ name, code }) => `${name}=${code}`)
+      .join(', ');
+    const expected = [
+      'Assert native binary teardown=1',
+      'Run Bookworm Docker smoke test=0',
+      'Assert Bookworm Docker teardown=0',
+      'Run Alpine Docker smoke test=0',
+      'Assert Alpine Docker teardown=0',
+    ].join(', ');
+    if (received !== expected) {
+      throw new Error(
+        `expected a port 13001 listener to fail only the native teardown check (${expected}) | received: ${received}`
+      );
+    }
+    expect(
+      events.filter(({ command, args }) => command === 'docker' && args[0] === 'run')
+    ).toHaveLength(2);
+  });
+
   test('a broken first container assertion still reports the other three and both leak checks', async () => {
     const job = parseSmokeWorkflow(readText('.github/workflows/smoke-container.yml')).jobs
       .container;
@@ -170,7 +257,7 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     }
   );
 
-  test('the manual fallback rebuilds both image targets and runs every assertion', async () => {
+  test('the manual fallback builds each image target once and runs every assertion', async () => {
     const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
     const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-arm64');
     if (!matrix)
@@ -180,10 +267,13 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     const builds = events.filter(
       ({ command, args }) => command === 'bun' && args.includes('build:binary')
     );
-    expect(builds.map(({ args }) => args[args.indexOf('--platform') + 1])).toEqual([
-      'linux-arm64',
-      'linux-arm64-musl',
-    ]);
+    // The binary smoke step already built the glibc target; only musl is new.
+    const received = builds.map(({ args }) => args[args.indexOf('--platform') + 1]).join(', ');
+    if (received !== 'linux-arm64-musl') {
+      throw new Error(
+        `expected the image steps to build only the target the binary smoke did not (linux-arm64-musl) | received: ${received}`
+      );
+    }
     expect(
       events.find(
         ({ command, args }) => command === 'bun' && args.includes('scripts/test-build.ts')
@@ -191,4 +281,66 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     ).toBe('0');
     expect(containers).toEqual([]);
   });
+
+  test('the manual fallback rebuilds existing musl executables after the native glibc build succeeds', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-arm64');
+    if (!matrix)
+      throw new Error('Missing linux-arm64 matrix case; expected a native Linux smoke leg');
+    const { outcomes, events, containers } = await runWorkflowSteps(
+      job,
+      matrix,
+      'none',
+      true,
+      [],
+      [matrix.musl_platform]
+    );
+    const builds = events
+      .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+      .map(({ args }) => args[args.indexOf('--platform') + 1]);
+    expect(builds, 'the native glibc completion marker cannot verify existing musl output').toEqual(
+      [matrix.musl_platform]
+    );
+    expect(outcomes.every(({ code }) => code === 0)).toBe(true);
+    expect(
+      events.find(
+        ({ command, args }) => command === 'bun' && args.includes('scripts/test-build.ts')
+      )?.skipBuild
+    ).toBe('0');
+    expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
+  });
+
+  test.each([
+    ['incomplete', 'binary'],
+    ['rejected', 'rejected-native-build'],
+  ] as const)(
+    'the manual fallback rebuilds the glibc target for its image after the %s native build fails',
+    async (_state, failure) => {
+      const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+      const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+      if (!matrix)
+        throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+      // Incomplete builds leave only a runtime. Rejected builds leave both
+      // executables but no successful-build README marker.
+      const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, failure, true);
+      const builds = events
+        .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+        .map(({ args }) => args[args.indexOf('--platform') + 1])
+        .join(', ');
+      const images = outcomes
+        .filter(({ name }) => name.includes('Docker smoke test'))
+        .map(({ code }) => code)
+        .join(', ');
+      if (builds !== 'linux-x64, linux-x64-musl' || images !== '0, 0') {
+        throw new Error(
+          `expected both image targets built (linux-x64, linux-x64-musl) and both images passing (0, 0) | received: builds [${builds}], images [${images}]`
+        );
+      }
+      expect(outcomes.find(({ name }) => name === 'Run binary smoke test')?.code).toBe(9);
+      expect(
+        outcomes.filter(({ name }) => name.includes('teardown')).map(({ code }) => code)
+      ).toEqual([0, 0, 0]);
+      expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
+    }
+  );
 });
