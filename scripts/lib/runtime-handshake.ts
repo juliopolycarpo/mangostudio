@@ -78,7 +78,7 @@ export interface RuntimeHandshakeChild {
   readonly stdin: { end(): unknown };
   readonly exited: Promise<number>;
   readonly exitCode: number | null;
-  readonly signalCode: string | null;
+  readonly signalCode: string | number | null;
   kill(): unknown;
 }
 
@@ -95,7 +95,7 @@ export interface RuntimeHandshakeProbe {
   /** The child's own exit code, or `null` when our kill got there first. */
   readonly exitCode: number | null;
   /** The signal the child died on, when it died on one of its own. */
-  readonly signal: string | null;
+  readonly signal: string | number | null;
   /**
    * How long the probe waited, in milliseconds. Reported on success too: what
    * headroom a passing handshake actually leaves is the measurement every
@@ -231,7 +231,7 @@ function spawnRuntime(command: readonly string[], env?: NodeJS.ProcessEnv): Runt
   return Bun.spawn({ cmd: [...command], env, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
 }
 
-function describeExit(exitCode: number | null, signal: string | null): string {
+function describeExit(exitCode: number | null, signal: string | number | null): string {
   if (signal) return `killed by ${signal}`;
   if (exitCode === null) return 'exit status unavailable';
   return `exited with code ${exitCode}`;

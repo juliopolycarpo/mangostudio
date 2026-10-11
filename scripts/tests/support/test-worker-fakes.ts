@@ -146,7 +146,7 @@ export const silentWorker: StartWorker = () => settled({ exitCode: 0, signal: nu
 
 /** Is ended by `signal` (the OOM killer's SIGKILL, say) without a report. */
 export const killedWorker =
-  (signal: string): StartWorker =>
+  (signal: string | number): StartWorker =>
   () =>
     settled({ exitCode: null, signal });
 

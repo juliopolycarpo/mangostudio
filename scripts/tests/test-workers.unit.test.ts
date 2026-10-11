@@ -389,6 +389,22 @@ describe('a worker that does not finish cleanly fails the lane, naming its index
     expect(verdict.mergedXml).toBeNull();
   });
 
+  // A real-time signal has no name, so the host reports its number.
+  it('fails for a worker that was killed by a signal reported as a number', async () => {
+    const disk = new FakeReportDisk();
+    const verdict = await judgeFakeLane(
+      lane,
+      4,
+      withWorker(1, killedWorker(34), healthyWorker(lane, disk)),
+      disk
+    );
+    expect(verdict.failures[0]).toBe(
+      'api-unit worker 1/4 was killed by 34 | expected: exit code 0 | received: signal 34'
+    );
+    expect(verdict.workers[0]?.ended).toBe('killed by 34');
+    expect(verdict.mergedXml).toBeNull();
+  });
+
   it('reads the launcher’s 128-plus-signal exit code as a kill', async () => {
     const disk = new FakeReportDisk();
     const verdict = await judgeFakeLane(

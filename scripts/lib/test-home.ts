@@ -135,7 +135,7 @@ const FORWARDED = Object.keys(SIGNAL_NUMBERS) as (keyof typeof SIGNAL_NUMBERS)[]
 /** The child status and signal operations the temporary-home launcher owns. */
 export interface TestHomeChild {
   readonly exited: Promise<number>;
-  readonly signalCode: string | null;
+  readonly signalCode: string | number | null;
   kill(signal: number): unknown;
 }
 
@@ -213,10 +213,11 @@ export async function runWithTestHome(
  * The number of the signal that ended the child, whichever it was: the watchdog
  * keys its crash retry on 134 (SIGABRT) and triages 137 (SIGKILL, the OOM
  * killer) apart from a hang, so an unforwarded signal must not read as 143.
- * An unknown name reports plain failure.
+ * Signal numbers pass through; an unknown name reports plain failure.
  */
-function signalNumber(name: string): number | null {
-  const number = (constants.signals as Record<string, number | undefined>)[name];
+function signalNumber(signal: string | number): number | null {
+  if (typeof signal === 'number') return signal;
+  const number = (constants.signals as Record<string, number | undefined>)[signal];
   return typeof number === 'number' ? number : null;
 }
 

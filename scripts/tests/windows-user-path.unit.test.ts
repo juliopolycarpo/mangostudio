@@ -197,4 +197,10 @@ describe('PowerShell cleanup outcome check', () => {
       'expected PowerShell exit 0 with no signal | received: exit 0, signal SIGKILL, stderr: '
     );
   });
+
+  test('rejects a signal reported as a number', () => {
+    expect(() => assertPruneSucceeded(outcome({ signalCode: 34 }))).toThrow(
+      'expected PowerShell exit 0 with no signal | received: exit 0, signal 34, stderr: '
+    );
+  });
 });

@@ -28,7 +28,7 @@ class FakeSignaledChild implements TestHomeChild, TestHomeDependencies {
   command: readonly string[] = [];
   home = '';
   signals: number[] = [];
-  constructor(readonly signalCode: string) {}
+  constructor(readonly signalCode: string | number) {}
   kill(signal: number): void {
     this.signals.push(signal);
   }
@@ -322,13 +322,15 @@ describe('runWithTestHome', () => {
   test.each([
     ['SIGTERM', 143],
     ['SIGKILL', 137],
+    [15, 143],
+    [34, 162],
     ['unknown-signal', 1],
   ] as const)(
     'maps injected %s status and removes its real temporary home',
     async (signal, expected) => {
       const child = new FakeSignaledChild(signal);
       const code = await runWithTestHome(['bun', 'fixture.ts'], process.env, child);
-      expect(code).toBe(expected);
+      expect(code, `expected exit code: ${expected} | received: ${code}`).toBe(expected);
       expect(child.command).toEqual([process.execPath, 'fixture.ts']);
       expect(child.home).toContain(TEST_HOME_PREFIX);
       expect(existsSync(child.home)).toBe(false);

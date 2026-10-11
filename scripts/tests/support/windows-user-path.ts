@@ -29,7 +29,7 @@ const REAL_USER_PATH: UserPathAccess = {
 /** What a finished PowerShell child reported. `signalCode` is absent when the runtime reports none. */
 export interface PowerShellOutcome {
   readonly exitCode: number;
-  readonly signalCode?: string | null;
+  readonly signalCode?: string | number | null;
   readonly stdout: string;
   readonly stderr: string;
 }
@@ -65,7 +65,7 @@ function buildUserPathPruneScript(
 /**
  * Throws unless the cleanup child exited 0 and was not killed by a signal.
  * Bun leaves `signalCode` off a child that exited normally, so absence is the
- * success shape; only an actual signal name counts against the child.
+ * success shape; only an actual signal name or number counts against the child.
  *
  * @example
  * assertPruneSucceeded({ exitCode: 1, stdout: '', stderr: 'denied' }); // throws
