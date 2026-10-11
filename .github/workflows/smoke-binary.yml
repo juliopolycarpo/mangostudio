@@ -270,10 +270,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$REBUILD" = "true" ]; then
-            out=".mango/out/$BINARY_PLATFORM"
-            if [ ! -f .mango/out/README.md ] || [ ! -x "$out/mangostudio" ] || [ ! -x "$out/mangostudio-runtime" ]; then
-              bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
-            fi
+            # The native glibc build's shared marker cannot verify musl output.
+            bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
           fi
           bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
           docker build \

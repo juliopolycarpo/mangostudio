@@ -34,7 +34,7 @@ interface CommandEvent {
   readonly skipBuild?: string;
 }
 
-function stageWorkflowRun() {
+function stageWorkflowRun(seededOutputPlatforms: readonly string[] = []) {
   const root = mkdtempSync(join(tmpdir(), 'mango-smoke-workflow-'));
   scratchRoots.push(root);
   const fakeBin = join(root, 'fake-bin');
@@ -53,6 +53,14 @@ function stageWorkflowRun() {
     mkdirSync(target, { recursive: true });
     writeFileSync(join(target, 'mangostudio-runtime'), '#!/usr/bin/env true\n', { mode: 0o755 });
   }
+  // Both executables can remain from an unverified build of another target.
+  for (const platform of seededOutputPlatforms) {
+    const target = join(root, '.mango', 'out', platform);
+    mkdirSync(target, { recursive: true });
+    for (const name of ['mangostudio', 'mangostudio-runtime']) {
+      writeFileSync(join(target, name), '#!/usr/bin/env true\n', { mode: 0o755 });
+    }
+  }
   return { root, fakeBin, stateDir, eventsPath: join(root, 'commands.jsonl') };
 }
 
@@ -68,9 +76,10 @@ async function runWorkflowSteps(
     | 'slow-port'
     | 'none',
   rebuild = false,
-  leftoverContainers: readonly string[] = []
+  leftoverContainers: readonly string[] = [],
+  seededOutputPlatforms: readonly string[] = []
 ) {
-  const fixture = stageWorkflowRun();
+  const fixture = stageWorkflowRun(seededOutputPlatforms);
   for (const name of leftoverContainers) writeFileSync(join(fixture.stateDir, name), 'running');
   const outcomes: Array<{ name: string; code: number }> = [];
   const resolveValue = (value: string) =>
@@ -271,6 +280,34 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       )?.skipBuild
     ).toBe('0');
     expect(containers).toEqual([]);
+  });
+
+  test('the manual fallback rebuilds existing musl executables after the native glibc build succeeds', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-arm64');
+    if (!matrix)
+      throw new Error('Missing linux-arm64 matrix case; expected a native Linux smoke leg');
+    const { outcomes, events, containers } = await runWorkflowSteps(
+      job,
+      matrix,
+      'none',
+      true,
+      [],
+      [matrix.musl_platform]
+    );
+    const builds = events
+      .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+      .map(({ args }) => args[args.indexOf('--platform') + 1]);
+    expect(builds, 'the native glibc completion marker cannot verify existing musl output').toEqual(
+      [matrix.musl_platform]
+    );
+    expect(outcomes.every(({ code }) => code === 0)).toBe(true);
+    expect(
+      events.find(
+        ({ command, args }) => command === 'bun' && args.includes('scripts/test-build.ts')
+      )?.skipBuild
+    ).toBe('0');
+    expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
   });
 
   test.each([
