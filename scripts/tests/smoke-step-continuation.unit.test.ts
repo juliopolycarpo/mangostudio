@@ -59,7 +59,7 @@ function stageWorkflowRun() {
 async function runWorkflowSteps(
   job: SmokeJob,
   matrix: Record<string, string>,
-  failure: 'binary' | 'container' | 'ports' | 'native-port' | 'none',
+  failure: 'binary' | 'container' | 'ports' | 'native-port' | 'slow-port' | 'none',
   rebuild = false,
   leftoverContainers: readonly string[] = []
 ) {
@@ -147,6 +147,24 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     if (received !== expected || containers.length) {
       throw new Error(
         `expected the leftover container removed and both images tested (${expected}; containers []) | received: ${received}; containers [${containers.join(', ')}]`
+      );
+    }
+  }, 15_000);
+
+  test('a port docker-proxy releases a moment late does not fail the image assertion', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+    if (!matrix)
+      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+    const { outcomes } = await runWorkflowSteps(job, matrix, 'slow-port');
+    const received = outcomes
+      .filter(({ name }) => name.includes('Docker smoke test'))
+      .map(({ name, code }) => `${name}=${code}`)
+      .join(', ');
+    const expected = 'Run Bookworm Docker smoke test=0, Run Alpine Docker smoke test=0';
+    if (received !== expected) {
+      throw new Error(
+        `expected the precheck to wait out a port released on its third probe (${expected}) | received: ${received}`
       );
     }
   }, 15_000);

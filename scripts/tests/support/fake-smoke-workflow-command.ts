@@ -2,7 +2,14 @@
 // containers are represented by files so the real smoke helper's EXIT trap
 // can be checked, including its name reuse between Bookworm and Alpine.
 // Usage: materialize this executable as bun/docker/podman/curl/ss in a fake PATH.
-import { appendFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, join } from 'node:path';
 
 const eventsPath = process.env.FAKE_SMOKE_WORKFLOW_EVENTS;
@@ -82,6 +89,14 @@ if (command === 'ss') {
   const published = readdirSync(stateDir).some((name) => name.endsWith('-13002'));
   if ((fail === 'ports' || published) && args.some((arg) => arg.includes('13002'))) {
     console.log('LISTEN 0 128 127.0.0.1:13002 0.0.0.0:*');
+  }
+  // docker-proxy can hold the port for a moment after `docker rm -f` returns:
+  // the first two probes of 13002 still see it, every later one finds it free.
+  if (fail === 'slow-port' && args.some((arg) => arg.includes('13002'))) {
+    const probes = readFileSync(eventsPath, 'utf8')
+      .split('\n')
+      .filter((line) => line.includes('"command":"ss"') && line.includes('13002'));
+    if (probes.length <= 2) console.log('LISTEN 0 128 127.0.0.1:13002 0.0.0.0:*');
   }
   // A native hub that outlived its smoke: only a filter naming 13001 sees it.
   if (fail === 'native-port' && args.some((arg) => arg.includes('13001'))) {

@@ -26,8 +26,16 @@ cleanup
 
 # Checked after the removal above: a same-named container a killed run left up
 # is cleared rather than reported, so only a foreign listener fails here.
+# docker-proxy can hold the port briefly after the removal returns, so poll.
 if command -v ss >/dev/null 2>&1; then
-  listeners="$(ss -H -ltn "( sport = :${port} )")"
+  listeners=""
+  for _ in $(seq 1 5); do
+    listeners="$(ss -H -ltn "( sport = :${port} )")"
+    if [ -z "$listeners" ]; then
+      break
+    fi
+    sleep 1
+  done
   if [ -n "$listeners" ]; then
     echo "::error::expected smoke port ${port} released; listeners [$listeners]"
     exit 1
