@@ -1659,12 +1659,12 @@ a `validity` string (toolchain versions plus content hashes). `setup-mango`
 wraps the Bun install family; every other family is invoked from the workflow
 that produces or consumes it.
 
-| Family              | Producer / consumer           | Path                      | Invalidators                                             | Restore behavior                  |
-| ------------------- | ----------------------------- | ------------------------- | -------------------------------------------------------- | --------------------------------- |
-| Bun install         | every job using `setup-mango` | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
-| Turbo task output   | check, test, build            | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix |
-| Workflow lint tools | check                         | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only        |
-| Playwright browser  | browser smoke                 | `~/.cache/ms-playwright`  | OS, arch, Playwright version                             | exact trusted restore only        |
+| Family              | Producer / consumer            | Path                      | Invalidators                                             | Restore behavior                  |
+| ------------------- | ------------------------------ | ------------------------- | -------------------------------------------------------- | --------------------------------- |
+| Bun install         | every job using `setup-mango`  | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
+| Turbo task output   | check, test, build, QA metrics | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix |
+| Workflow lint tools | check                          | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only        |
+| Playwright browser  | browser smoke                  | `~/.cache/ms-playwright`  | OS, arch, Playwright version                             | exact trusted restore only        |
 
 Inside the Turbo task output family each task is keyed by Turbo's own hash. The cached
 API unit task includes the SHA-256 of the runtime binary in it (see [API](#api)); without
@@ -1763,8 +1763,11 @@ variable unset and set to `0`. Local builds stay incremental, because nothing in
 The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
 only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches
 still use `setup-mango` because they compile inside the job. The QA metrics job
-consumes the frontend dist artifact and restores no family beyond the Bun
-install cache that `setup-mango` brings with it.
+consumes the frontend dist artifact and restores Check's Turbo snapshot in
+restore-only mode, alongside the Bun install cache that `setup-mango` brings
+with it. It uses Check's key inputs and 16 MB bound, never saves a Turbo
+snapshot, and does not wait for the same run's Check job. A cache miss runs the
+normal checks; a hit reuses typecheck results while quick checks still execute.
 
 `CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
 Actions repository variable with a documented `v1` fallback, passed explicitly

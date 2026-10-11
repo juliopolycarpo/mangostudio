@@ -171,6 +171,10 @@ Current task definitions:
 Turborepo writes its local task-output cache to `.turbo/cache` at the repository
 root. This directory is gitignored and should never be committed.
 
+Linked worktrees share the main checkout's cache by default. Set
+`TURBO_CACHE_DIR=.turbo/cache` when a worktree needs its own cache, including
+when comparing cached and uncached QA collection.
+
 CI persists the local Turbo cache through the shared `cache-scoped` composite.
 Check, test and build keep separate lane validity and write scopes. Successful
 runs save a rotated snapshot only when Turbo writes new `*.tar.zst` payloads;
