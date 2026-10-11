@@ -10,8 +10,16 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
-import { pumpLines, startWorkerProcess, workerEnvironment } from '../lib/test-worker-process';
-import { runWorkerLane, type WorkerLaneSpec } from '../lib/test-workers';
+import {
+  pumpLines,
+  type SpawnWorker,
+  spawnWorkerChild,
+  startWorkerProcess,
+  type WorkerChild,
+  workerEnvironment,
+} from '../lib/test-worker-process';
+import { WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
+import { runWorkerLane, type WorkerLaneSpec, type WorkerPlan } from '../lib/test-workers';
 import { fixtureChildEnvironment } from './support/child-supervision';
 import { FAKE_BUN_TEST, FAKE_CASES_PER_FILE } from './support/fake-bun-test';
 import { fakeLane } from './support/test-worker-fakes';
@@ -345,6 +353,87 @@ describe('cancelling real worker processes', () => {
     const alive = pids.filter(isAlive);
     expect(alive, `expected live workers: 0 | received: ${alive.length} (pids ${alive})`).toEqual(
       []
+    );
+  });
+});
+
+describe('a worker whose exit is never reported', () => {
+  const started: WorkerChild[] = [];
+
+  afterEach(() => {
+    for (const child of started.splice(0)) child.kill('SIGKILL');
+  });
+
+  /**
+   * A real child whose handle never reports the exit: `exited` stays pending
+   * and no exit code or signal is recorded, as Bun 1.4.3 can leave a SIGKILLed
+   * detached child.
+   */
+  const spawnWedgedExitChild: SpawnWorker = (options) => {
+    const real = spawnWorkerChild(options);
+    started.push(real);
+    return {
+      pid: real.pid,
+      stdout: real.stdout,
+      stderr: real.stderr,
+      exited: new Promise<never>(() => undefined),
+      exitCode: null,
+      signalCode: null,
+      kill: (signal) => real.kill(signal),
+    };
+  };
+
+  const STILL_WAITING = 'still waiting on child.exited';
+
+  function startWedged(settle: boolean) {
+    const plan: WorkerPlan = {
+      index: 1,
+      count: 1,
+      laneId: 'wedged',
+      cwd: tmpdir(),
+      argv: [process.execPath, '-e', 'await Bun.sleep(30_000)'],
+      reportPath: '',
+      settle,
+      env: settle ? { [WORKER_TOKEN_ENV]: `wedged-${process.pid}-${Date.now()}` } : {},
+    };
+    const ignore = (): void => undefined;
+    const handle = startWorkerProcess(
+      plan,
+      '',
+      { out: ignore, err: ignore },
+      100,
+      fixtureChildEnvironment(),
+      spawnWedgedExitChild
+    );
+    const within = (ms: number) =>
+      Promise.race([handle.exited, Bun.sleep(ms).then(() => STILL_WAITING)]);
+    return { handle, within };
+  }
+
+  it.skipIf(process.platform === 'win32')(
+    'reports a killed group leader as SIGKILLed instead of waiting on it',
+    async () => {
+      const { handle, within } = startWedged(true);
+
+      handle.kill('SIGKILL');
+
+      expect(
+        await within(3_000),
+        'expected worker exit: { exitCode: null, signal: SIGKILL } once the exit wait is abandoned'
+      ).toEqual({ exitCode: null, signal: 'SIGKILL' });
+      expect(await handle.settle?.(), 'expected the killed group to leave nothing behind').toEqual(
+        []
+      );
+    }
+  );
+
+  it('keeps waiting on a plain child, whose kill nothing else confirms', async () => {
+    const { handle, within } = startWedged(false);
+
+    handle.kill('SIGKILL');
+
+    expect(await within(1_000), 'expected no synthesized exit for a worker without a group').toBe(
+      STILL_WAITING
     );
   });
 });
