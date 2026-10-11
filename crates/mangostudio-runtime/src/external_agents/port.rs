@@ -60,8 +60,13 @@ pub(crate) struct SessionQuery {
 /// ```
 #[async_trait::async_trait]
 pub(crate) trait AgentBackend: Send + Sync {
-    /// Native close budget, to which the supervisor adds its own cleanup grace.
-    fn close_budget(&self) -> std::time::Duration;
+    /// The longest a `target` session's native close can legitimately take, to which the
+    /// supervisor adds its own cleanup grace before it reports the close as failed.
+    ///
+    /// ```ignore
+    /// let bound = backend.close_budget(wire::TargetId::Cursor) + cleanup_timeout;
+    /// ```
+    fn close_budget(&self, target: wire::TargetId) -> std::time::Duration;
     /// Discovers product-facing target and account facts under the supplied host key.
     async fn discover(
         &self,

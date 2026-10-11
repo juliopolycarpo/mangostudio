@@ -30,6 +30,12 @@ struct OwnedLifecycle {
     starts: AtomicUsize,
     reviews: AtomicUsize,
     native_review: bool,
+    /// How long the fake vendor takes to close, on the (paused) test clock.
+    close_delay: Duration,
+    /// The close budget the fake backend reports for every target.
+    close_budget: Duration,
+    /// The targets the supervisor asked for a close budget.
+    budget_targets: Mutex<Vec<wire::TargetId>>,
 }
 struct OwnedLifecycleBackend(Arc<OwnedLifecycle>);
 struct OwnedLifecycleSession(Arc<OwnedLifecycle>);
@@ -150,6 +156,7 @@ impl AgentSession for OwnedLifecycleSession {
         Ok(())
     }
     async fn close(&self, reason: CloseCause) -> AgentResult<()> {
+        tokio::time::sleep(self.0.close_delay).await;
         self.0.closes.lock().unwrap().push(reason);
         self.0.cancel.cancel();
         if !self.0.stopped.swap(true, Ordering::SeqCst) {
@@ -178,8 +185,9 @@ impl OwnedLifecycleSession {
 }
 #[async_trait::async_trait]
 impl AgentBackend for OwnedLifecycleBackend {
-    fn close_budget(&self) -> Duration {
-        Duration::ZERO
+    fn close_budget(&self, target: wire::TargetId) -> Duration {
+        self.0.budget_targets.lock().unwrap().push(target);
+        self.0.close_budget
     }
     async fn discover(
         &self,
@@ -571,4 +579,77 @@ async fn each_product_close_owner_settles_active_work_once_and_preserves_its_rea
             "close reasons remain distinct from turn cancellation"
         );
     }
+}
+
+const CLOSE_BUDGET: Duration = Duration::from_secs(30);
+const CLEANUP_BOUND: Duration = Duration::from_secs(2);
+
+async fn close_after(
+    delay: Duration,
+) -> (
+    Result<wire::AckResult, mango_protocol::error::RemoteError>,
+    Arc<OwnedLifecycle>,
+) {
+    let log = Arc::new(OwnedLifecycle {
+        close_delay: delay,
+        close_budget: CLOSE_BUDGET,
+        ..Default::default()
+    });
+    let rig = Rig::new(Arc::clone(&log)).await;
+    let close = wire::CloseParams {
+        session_id: "owned".into(),
+    };
+    let result = rig
+        .supervisor
+        .close_session(close, CloseCause::Requested)
+        .await;
+    (result, log)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_close_inside_the_backends_budget_plus_cleanup_is_not_reported_as_failed() {
+    let (result, log) = close_after(CLOSE_BUDGET + CLEANUP_BOUND - Duration::from_millis(1)).await;
+    assert_eq!(
+        result.as_ref().map(|_| ()),
+        Ok(()),
+        "expected a close finishing 1 ms inside {CLOSE_BUDGET:?} + {CLEANUP_BOUND:?} to succeed | received {result:?}"
+    );
+    assert_eq!(
+        *log.budget_targets.lock().unwrap(),
+        [wire::TargetId::Claude]
+    );
+    assert_eq!(log.stops.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_close_past_the_backends_budget_plus_cleanup_names_the_bound_it_exceeded() {
+    let (result, log) = close_after(CLOSE_BUDGET + CLEANUP_BOUND + Duration::from_millis(1)).await;
+    let error = result.expect_err("a close 1 ms past its bound must fail");
+    assert!(
+        error.message.contains("did not finish within 32000 ms"),
+        "expected the failure to name the 32000 ms bound | received {:?}",
+        error.message
+    );
+    assert_eq!(
+        log.stops.load(Ordering::SeqCst),
+        0,
+        "the fake never finished closing"
+    );
+}
+
+#[tokio::test]
+async fn an_unbounded_backend_budget_saturates_the_close_bound_instead_of_panicking() {
+    let log = Arc::new(OwnedLifecycle {
+        close_budget: Duration::MAX,
+        ..Default::default()
+    });
+    let rig = Rig::new(Arc::clone(&log)).await;
+
+    let bound = rig.supervisor.close_bound(wire::TargetId::Claude);
+
+    assert_eq!(
+        bound,
+        Duration::MAX,
+        "expected a saturated close bound for a Duration::MAX backend budget | received {bound:?}"
+    );
 }

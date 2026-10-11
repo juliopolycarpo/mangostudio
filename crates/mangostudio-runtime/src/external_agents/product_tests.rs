@@ -47,7 +47,7 @@ struct OwnedBackend {
 }
 #[async_trait::async_trait]
 impl AgentBackend for OwnedBackend {
-    fn close_budget(&self) -> std::time::Duration {
+    fn close_budget(&self, _target: wire::TargetId) -> std::time::Duration {
         std::time::Duration::ZERO
     }
     async fn discover(
@@ -420,7 +420,7 @@ impl AgentSession for OwnedSession {
 struct OwnedSessions(Arc<OwnedSessionLog>);
 #[async_trait::async_trait]
 impl AgentBackend for OwnedSessions {
-    fn close_budget(&self) -> std::time::Duration {
+    fn close_budget(&self, _target: wire::TargetId) -> std::time::Duration {
         std::time::Duration::ZERO
     }
     async fn discover(
