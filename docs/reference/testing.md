@@ -1744,9 +1744,14 @@ version, including distinct shipping and light-profile environment hashes.
 Only the root-manifest prefix and dependency hash rotate. Sole entries, unknown
 families, fuzz and other cache kinds remain untouched. Before each deletion the
 script audits active main writers and fetches the complete listing again; a
-concurrent save or lost replacement defers cleanup until a later writer's
-completion. It verifies the retained replacement after each deletion and fails
-on malformed or incomplete API responses. Preview a captured listing without
+detected writer, changed generation or lost replacement defers cleanup until a
+later writer's completion. The audit checks pre-start statuses before running
+and rejects duplicate run IDs within each paginated status listing. Separate
+status queries and cache deletion are not atomic: a newly starting or moving
+writer can still escape the audit, and external eviction can remove a keeper.
+The script verifies the retained replacement after each deletion and stops
+further cleanup if it disappears. It fails on malformed or incomplete API
+responses. Preview a captured listing without
 network or deletion with `bun ./scripts/ci/rust-cache-cleanup.ts --fixture
 <listing.json>`. Verify the total and older-base fallback after the first
 post-merge lockfile change before adding more Rust cache consumers.

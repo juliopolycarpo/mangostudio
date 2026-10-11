@@ -291,6 +291,20 @@ class FakeGithubHttp {
   }
 }
 
+// Advance a pending writer just after the running-status query. Scanning that
+// status too early loses the writer from both snapshots.
+class FakeStartingWriterHttp extends FakeGithubHttp {
+  writer: CacheWriterRun = { ...MAIN_RUN, id: 43, status: 'pending' };
+
+  override request(url: string, init: RequestInit): Promise<Response> {
+    const status = new URL(url).searchParams.get('status');
+    const runs = this.writer.status === status ? [{ ...this.writer }] : [];
+    if (status === 'in_progress') this.writer = { ...this.writer, status: 'in_progress' };
+    this.replies.push({ status: 200, body: { total_count: runs.length, workflow_runs: runs } });
+    return super.request(url, init);
+  }
+}
+
 describe('GitHub cache adapter', () => {
   test('follows every cache page with main-ref and Rust-prefix scope', async () => {
     const http = new FakeGithubHttp();
@@ -346,7 +360,11 @@ describe('GitHub cache adapter', () => {
       path: '.github/workflows/pr-qa-report.yml',
       event: 'workflow_run',
     };
-    const run = { ...MAIN_RUN, status: 'queued', path: '.github/workflows/ci.yml@refs/heads/main' };
+    const run = {
+      ...MAIN_RUN,
+      status: 'requested',
+      path: '.github/workflows/ci.yml@refs/heads/main',
+    };
     http.replies = [
       {
         status: 200,
@@ -367,14 +385,74 @@ describe('GitHub cache adapter', () => {
     ];
     expect(await http.api().activeWriters()).toEqual([run]);
     expect(http.calls.map(({ url }) => url.searchParams.get('status'))).toEqual([
+      'requested',
+      'pending',
+      'waiting',
       'queued',
       'in_progress',
-      'waiting',
-      'pending',
-      'requested',
     ]);
     expect(isMainCacheWriter(run, REPOSITORY)).toBe(true);
     expect(isMainCacheWriter(unrelated, REPOSITORY)).toBe(false);
+  });
+
+  test('detects a pending writer that starts during the status audit', async () => {
+    const http = new FakeStartingWriterHttp();
+    expect((await http.api().activeWriters()).map((run) => run.id)).toEqual([43]);
+    expect(http.writer.status).toBe('in_progress');
+  });
+
+  test('rejects duplicate workflow run IDs across pages of one status', async () => {
+    const http = new FakeGithubHttp();
+    const first = Array.from({ length: 100 }, (_, index) => ({
+      ...MAIN_RUN,
+      id: index + 1000,
+      status: 'requested',
+      path: '.github/workflows/pr-qa-report.yml',
+    }));
+    http.replies = [
+      { status: 200, body: { total_count: 101, workflow_runs: first } },
+      { status: 200, body: { total_count: 101, workflow_runs: [first[99]] } },
+      ...Array.from({ length: 4 }, () => ({
+        status: 200,
+        body: { total_count: 0, workflow_runs: [] },
+      })),
+    ];
+    await expect(http.api().activeWriters()).rejects.toThrow('Duplicate workflow run IDs');
+  });
+
+  test('allows the same writer to appear in separate status snapshots', async () => {
+    const http = new FakeGithubHttp();
+    http.replies = [
+      {
+        status: 200,
+        body: { total_count: 1, workflow_runs: [{ ...MAIN_RUN, status: 'requested' }] },
+      },
+      {
+        status: 200,
+        body: { total_count: 1, workflow_runs: [{ ...MAIN_RUN, status: 'pending' }] },
+      },
+      ...Array.from({ length: 3 }, () => ({
+        status: 200,
+        body: { total_count: 0, workflow_runs: [] },
+      })),
+    ];
+    expect((await http.api().activeWriters()).map((run) => run.id)).toEqual([MAIN_RUN.id]);
+  });
+
+  test('bounds an oversized cache listing without accepting a partial page set', async () => {
+    const http = new FakeGithubHttp();
+    http.replies = Array.from({ length: 100 }, (_, page) => ({
+      status: 200,
+      body: {
+        total_count: 10001,
+        actions_caches: Array.from({ length: 100 }, (_, index) => ({
+          ...OLD,
+          id: page * 100 + index + 1,
+        })),
+      },
+    }));
+    await expect(http.api().listCaches()).rejects.toThrow('Exceeded 100 actions_caches pages');
+    expect(http.calls).toHaveLength(100);
   });
 
   test('independently reads the trigger run and rejects invalid run payloads', async () => {

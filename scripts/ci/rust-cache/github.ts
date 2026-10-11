@@ -21,7 +21,9 @@ type GithubFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 const WRITER_PATHS = new Set<string>(RUST_CACHE_WRITERS.map((writer) => writer.path));
 const WRITER_EVENTS = new Set<string>(MAIN_WRITER_EVENTS);
-const ACTIVE_STATUSES = ['queued', 'in_progress', 'waiting', 'pending', 'requested'];
+// Check pre-start states before running, so a pending writer that starts
+// during the audit remains visible. These separate reads are not atomic.
+const ACTIVE_STATUSES = ['requested', 'pending', 'waiting', 'queued', 'in_progress'];
 const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
 
@@ -198,6 +200,11 @@ export class GithubRustCacheApi implements RustCacheApi {
     for (const status of ACTIVE_STATUSES) {
       const query = new URLSearchParams({ branch: 'main', status, exclude_pull_requests: 'true' });
       const entries = await this.pages(`/runs?${query}`, 'workflow_runs', parseRun);
+      if (new Set(entries.map((run) => run.id)).size !== entries.length) {
+        throw new Error(
+          `Duplicate workflow run IDs for ${status}; expected a stable complete listing`
+        );
+      }
       for (const run of entries.filter((run) => isMainCacheWriter(run, this.repository)))
         runs.set(run.id, run);
     }
