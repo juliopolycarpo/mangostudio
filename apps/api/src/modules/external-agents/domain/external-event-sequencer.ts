@@ -34,6 +34,21 @@ export type ExternalEnvelopeVerdict =
   | { readonly kind: 'foreign-turn'; readonly nativeTurnId: string | undefined };
 
 /**
+ * Whether an event arriving for a turn the hub already ended is the vendor's ordinary tail.
+ *
+ * A user cancel, a budget or a consent change ends the turn at the hub at once, before the vendor
+ * has finished stopping. The vendor then says so in its own order: a `cancelled` marker and the
+ * `completed` terminal behind it. Both carry nothing the sealed transcript lacks, so they are not
+ * a fault. Anything else after the end, such as text, activity or usage, is loss and stays loud.
+ *
+ * @example
+ * isExpectedTailOfEndedTurn('completed'); // true
+ */
+export function isExpectedTailOfEndedTurn(eventType: string | undefined): boolean {
+  return eventType === 'cancelled' || eventType === 'completed';
+}
+
+/**
  * How many recent idempotency keys to remember.
  *
  * Nothing produces one yet — the envelope reserves the field for a producer

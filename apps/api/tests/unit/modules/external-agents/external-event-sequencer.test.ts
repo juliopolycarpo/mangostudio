@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { ExternalAgentEventEnvelope } from '@mangostudio/shared/external-agents';
-import { ExternalEventSequencer } from '../../../../src/modules/external-agents/domain/external-event-sequencer';
+import {
+  ExternalEventSequencer,
+  isExpectedTailOfEndedTurn,
+} from '../../../../src/modules/external-agents/domain/external-event-sequencer';
 
 function envelope(
   sequence: number,
@@ -106,5 +109,28 @@ describe('ExternalEventSequencer', () => {
     const sequencer = new ExternalEventSequencer();
 
     expect(sequencer.admit(envelope(1)).kind).toBe('apply');
+  });
+});
+
+describe('isExpectedTailOfEndedTurn', () => {
+  it('excuses only the vendor stop marker and its terminal, never content lost after the end', () => {
+    const received = [
+      'cancelled',
+      'completed',
+      'usage',
+      'text_delta',
+      'activity_completed',
+      'error',
+      undefined,
+    ].map((type) => [type, isExpectedTailOfEndedTurn(type)]);
+    expect(received).toEqual([
+      ['cancelled', true],
+      ['completed', true],
+      ['usage', false],
+      ['text_delta', false],
+      ['activity_completed', false],
+      ['error', false],
+      [undefined, false],
+    ]);
   });
 });
