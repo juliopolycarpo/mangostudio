@@ -33,6 +33,13 @@ async function runFixture(pattern: string, file: string) {
   const recordLine = (line: string): void => {
     lines.push(line);
   };
+  // No outer tripwire here: the nested process's lifetime also covers the inner
+  // test's pidfile wait (up to 30_000ms), so any outer deadline that fits a
+  // healthy teardown could false-fire on a slow-but-healthy pidfile wait under a
+  // loaded CI shard. The teardown stall is bounded where it happens instead —
+  // at the source in scripts/lib/test-worker-process.ts, by the inner
+  // beforeTeardownDeadline tripwire in test-workers-cancel.unit.test.ts, and
+  // ultimately by this fixture's own `bun test --timeout 15000`.
   const exit = await startWorkerProcess(plan, '', { out: recordLine, err: recordLine }).exited;
   expect(
     exit,

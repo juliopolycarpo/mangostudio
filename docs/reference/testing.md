@@ -601,7 +601,7 @@ is omitted on this path so Bun cannot kill the evidence before the check.
 
 Cancellation sends SIGTERM to the whole worker group and, on Linux, to
 token-bearing children that left the group. It escalates both to SIGKILL
-after at most three seconds, before the outer runner's five-second deadline.
+after at most two seconds, which leaves settlement its full grace before the outer runner's five-second deadline.
 Output readers have a bounded drain grace so an inherited pipe cannot hold the
 lane open forever. The worker, settlement and cancellation regression tests use
 real fake processes as well as named process-table fakes.

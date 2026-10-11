@@ -10,8 +10,23 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
-import { pumpLines, startWorkerProcess, workerEnvironment } from '../lib/test-worker-process';
-import { runWorkerLane, type WorkerLaneSpec } from '../lib/test-workers';
+import { CANCEL_GRACE_MS } from '../lib/process-tree';
+import {
+  EXIT_ABANDON_MS,
+  pumpLines,
+  type SpawnWorker,
+  spawnWorkerChild,
+  startWorkerProcess,
+  type WorkerChild,
+  workerEnvironment,
+} from '../lib/test-worker-process';
+import { SETTLE_GRACE_MS, WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
+import {
+  GROUP_KILL_AFTER_MS,
+  runWorkerLane,
+  type WorkerLaneSpec,
+  type WorkerPlan,
+} from '../lib/test-workers';
 import { fixtureChildEnvironment } from './support/child-supervision';
 import { FAKE_BUN_TEST, FAKE_CASES_PER_FILE } from './support/fake-bun-test';
 import { fakeLane } from './support/test-worker-fakes';
@@ -345,6 +360,132 @@ describe('cancelling real worker processes', () => {
     const alive = pids.filter(isAlive);
     expect(alive, `expected live workers: 0 | received: ${alive.length} (pids ${alive})`).toEqual(
       []
+    );
+  });
+});
+
+describe('the cancellation budget of a settling worker', () => {
+  it('ends its slowest teardown before the outer supervisor kills the lane', () => {
+    const slowest = GROUP_KILL_AFTER_MS + EXIT_ABANDON_MS + SETTLE_GRACE_MS;
+    const margin = CANCEL_GRACE_MS - slowest;
+
+    expect(
+      margin,
+      `expected escalation + abandoned exit wait + settlement grace at least 500 ms inside CANCEL_GRACE_MS (${CANCEL_GRACE_MS} ms) | received: ${GROUP_KILL_AFTER_MS} + ${EXIT_ABANDON_MS} + ${SETTLE_GRACE_MS} = ${slowest} ms`
+    ).toBeGreaterThanOrEqual(500);
+  });
+});
+
+describe('a worker whose exit is never reported', () => {
+  const started: WorkerChild[] = [];
+
+  afterEach(() => {
+    for (const child of started.splice(0)) child.kill('SIGKILL');
+  });
+
+  /**
+   * A real child whose handle never reports the exit: `exited` stays pending
+   * and no exit code or signal is recorded, as Bun 1.4.3 can leave a SIGKILLed
+   * detached child.
+   */
+  const spawnWedgedExitChild =
+    (exited: Promise<never>): SpawnWorker =>
+    (options) => {
+      const real = spawnWorkerChild(options);
+      started.push(real);
+      return {
+        pid: real.pid,
+        stdout: real.stdout,
+        stderr: real.stderr,
+        exited,
+        exitCode: null,
+        signalCode: null,
+        kill: (signal) => real.kill(signal),
+      };
+    };
+
+  const STILL_WAITING = 'still waiting on child.exited';
+
+  function startWedged(settle: boolean, exited = new Promise<never>(() => undefined)) {
+    const plan: WorkerPlan = {
+      index: 1,
+      count: 1,
+      laneId: 'wedged',
+      cwd: tmpdir(),
+      argv: [process.execPath, '-e', 'await Bun.sleep(30_000)'],
+      reportPath: '',
+      settle,
+      env: settle ? { [WORKER_TOKEN_ENV]: `wedged-${process.pid}-${Date.now()}` } : {},
+    };
+    const ignore = (): void => undefined;
+    const handle = startWorkerProcess(
+      plan,
+      '',
+      { out: ignore, err: ignore },
+      100,
+      fixtureChildEnvironment(),
+      spawnWedgedExitChild(exited)
+    );
+    const within = (ms: number) =>
+      Promise.race([handle.exited, Bun.sleep(ms).then(() => STILL_WAITING)]);
+    return { handle, within };
+  }
+
+  it.skipIf(process.platform === 'win32')(
+    'reports a killed group leader as SIGKILLed instead of waiting on it',
+    async () => {
+      const { handle, within } = startWedged(true);
+
+      handle.kill('SIGKILL');
+
+      expect(
+        await within(3_000),
+        'expected worker exit: { exitCode: null, signal: SIGKILL } once the exit wait is abandoned'
+      ).toEqual({ exitCode: null, signal: 'SIGKILL' });
+      expect(await handle.settle?.(), 'expected the killed group to leave nothing behind').toEqual(
+        []
+      );
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'handles an exit that fails only after the wait was abandoned',
+    async () => {
+      const lateExit = Promise.withResolvers<never>();
+      const unhandled: unknown[] = [];
+      const record = (reason: unknown): void => void unhandled.push(reason);
+      process.on('unhandledRejection', record);
+      try {
+        const { handle, within } = startWedged(true, lateExit.promise);
+        handle.kill('SIGKILL');
+        // Without this the reject below could land while the wait is still
+        // pending, where the lane's own catch handles it.
+        expect(
+          await within(3_000),
+          'expected worker exit: { exitCode: null, signal: SIGKILL } before the exit fails'
+        ).toEqual({ exitCode: null, signal: 'SIGKILL' });
+
+        lateExit.reject(new Error('late pipe failure'));
+        // Unhandled rejections are reported a turn of the event loop later.
+        await Bun.sleep(50);
+
+        expect(
+          unhandled.map(String),
+          'expected unhandled rejections after the abandoned exit wait: none'
+        ).toEqual([]);
+      } finally {
+        process.off('unhandledRejection', record);
+      }
+    }
+  );
+
+  it('keeps waiting on a plain child, whose kill nothing else confirms', async () => {
+    const { handle, within } = startWedged(false);
+
+    handle.kill('SIGKILL');
+
+    expect(await within(1_000), 'expected no synthesized exit for a worker without a group').toBe(
+      STILL_WAITING
     );
   });
 });

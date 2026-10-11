@@ -47,6 +47,28 @@ async function until(ready: () => boolean, timeoutMs: number): Promise<boolean> 
   return ready();
 }
 
+/**
+ * Safety net, NOT the fix: a future teardown regression should fail fast and
+ * loud here instead of hanging silently to bun test's 15000ms outer timeout.
+ * The real cancellation teardown is bounded in scripts/lib/test-worker-process.ts
+ * (the post-SIGKILL exit-wait abandon); this only trips when that stops working.
+ */
+const TEARDOWN_DEADLINE_MS = 8_000;
+async function beforeTeardownDeadline<T>(work: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const tripwire = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`teardown stalled: ${what} within ${TEARDOWN_DEADLINE_MS}ms`)),
+      TEARDOWN_DEADLINE_MS
+    );
+  });
+  try {
+    return await Promise.race([work, tripwire]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Starts `command` with the fake lane environment: three hanging workers, each with a child. */
 function startLane(
   command: readonly string[],
@@ -155,7 +177,10 @@ describe.skipIf(process.platform !== 'linux')(
       ).toHaveLength(6);
       const began = performance.now();
       lane.child.kill('SIGTERM');
-      expect(await lane.child.exited, 'expected root cancellation exit 143').toBe(143);
+      expect(
+        await beforeTeardownDeadline(lane.child.exited, 'worker lane did not settle'),
+        'expected root cancellation exit 143'
+      ).toBe(143);
       const survivors = pids.filter(isAlive);
       expect(
         survivors,
