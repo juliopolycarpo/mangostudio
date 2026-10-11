@@ -85,15 +85,20 @@ export function smokeStepEnv(
   );
 }
 
-/** Resolve a step deadline, following a matrix field to the leg's own value. // Usage: smokeStepTimeout(step, { smoke_timeout: '12' }) */
+/** Resolve a positive integer step deadline, following a matrix field to the leg's own value. // Usage: smokeStepTimeout(step, { smoke_timeout: '12' }) */
 export function smokeStepTimeout(step: SmokeStep, matrix: MatrixEntry): number | undefined {
   const declared = step['timeout-minutes'];
   if (declared === undefined) return undefined;
-  const field = /^\$\{\{ matrix\.(\w+) \}\}$/.exec(String(declared))?.[1];
-  const minutes = Number(field ? matrix[field] : declared);
-  if (!Number.isFinite(minutes)) {
+  const field = /^\$\{\{ matrix\.(\w+) \}\}$/i.exec(String(declared))?.[1];
+  const resolved = field ? contextValue(matrix, field) : declared;
+  const minutes = typeof resolved === 'string' && resolved.trim() ? Number(resolved) : resolved;
+  if (typeof minutes !== 'number' || !Number.isInteger(minutes) || minutes <= 0) {
+    const received = typeof declared === 'string' ? JSON.stringify(declared) : String(declared);
+    const resolvedValue =
+      typeof resolved === 'string' ? JSON.stringify(resolved) : String(resolved);
+    const detail = field ? ` | resolved matrix.${field}: ${resolvedValue}` : '';
     throw new Error(
-      `expected step "${step.name}" timeout-minutes to be a number or a matrix field holding one | received: ${String(declared)}`
+      `expected step "${step.name}" timeout-minutes to be a positive integer or a matrix field holding one | received: ${received}${detail}`
     );
   }
   return minutes;
@@ -101,7 +106,11 @@ export function smokeStepTimeout(step: SmokeStep, matrix: MatrixEntry): number |
 
 /** Expand a job into its legs: each matrix case under every `inputs.rebuild` value its steps branch on. // Usage: smokeJobLegs('binary/binary', job) */
 export function smokeJobLegs(jobName: string, job: SmokeJob): SmokeLeg[] {
-  const branchesOnRebuild = (job.steps ?? []).some((step) => step.if?.includes('inputs.rebuild'));
+  const branchesOnRebuild = (job.steps ?? []).some((step) =>
+    String(step.if ?? '')
+      .toLowerCase()
+      .includes('inputs.rebuild')
+  );
   const modes = branchesOnRebuild ? [false, true] : [undefined];
   return smokeMatrixCases(job).flatMap((matrix) =>
     modes.map((rebuild): SmokeLeg => {
@@ -121,29 +130,48 @@ export function smokeStepRuns(step: SmokeStep, leg: SmokeLeg): boolean {
   const declared = String(step.if ?? '').trim();
   const condition = /^\$\{\{(.*)\}\}$/s.exec(declared)?.[1] ?? declared;
   const terms = topLevelConjuncts(condition);
-  // A top-level `||` can make a false term irrelevant, so count the step.
+  // A top-level `||` or unmatched quote/parenthesis cannot exclude a step.
   if (!terms) return true;
   // One false top-level term decides a conjunction whatever the others are; a
   // parenthesized group or a `steps.*` read is an unknown term and proves nothing.
   return terms.every((term) => {
-    const [, negated, scope, field] = /^\s*(!?)\s*(matrix|inputs)\.(\w+)\s*$/.exec(term) ?? [];
+    const [, negated, scope, field] = /^\s*(!?)\s*(matrix|inputs)\.(\w+)\s*$/i.exec(term) ?? [];
     if (!scope || !field) return true;
-    if (scope === 'inputs' && !(field in leg.inputs)) return true;
-    const value = scope === 'matrix' ? Boolean(leg.matrix[field]) : leg.inputs[field];
+    const input = scope.toLowerCase() === 'inputs';
+    const resolved = input ? contextValue(leg.inputs, field) : contextValue(leg.matrix, field);
+    if (input && resolved === undefined) return true;
+    const value = Boolean(resolved);
     return negated ? !value : value;
   });
 }
 
-// Split a condition on the `&&` outside every parenthesis; undefined when an
-// `||` sits out there too, since the condition is then not a conjunction.
+// Actions context names resolve without case, including matrix and input fields.
+function contextValue<T>(context: Record<string, T>, field: string): T | undefined {
+  const key = Object.keys(context).find((name) => name.toLowerCase() === field.toLowerCase());
+  return key === undefined ? undefined : context[key];
+}
+
+// Split on `&&` outside parentheses and single-quoted Actions strings. A
+// top-level `||` or unmatched quote/parenthesis leaves the condition unknown.
 function topLevelConjuncts(condition: string): string[] | undefined {
   const terms: string[] = [];
   let depth = 0;
+  let quoted = false;
   let start = 0;
   for (let index = 0; index < condition.length; index += 1) {
     const char = condition[index];
+    if (quoted && char === "'" && condition[index + 1] === "'") {
+      index += 1;
+      continue;
+    }
+    if (char === "'") {
+      quoted = !quoted;
+      continue;
+    }
+    if (quoted) continue;
     if (char === '(') depth += 1;
     if (char === ')') depth -= 1;
+    if (depth < 0) return undefined;
     if (depth !== 0) continue;
     const operator = condition.slice(index, index + 2);
     if (operator === '||') return undefined;
@@ -151,6 +179,7 @@ function topLevelConjuncts(condition: string): string[] | undefined {
     terms.push(condition.slice(start, index));
     start = index + 2;
   }
+  if (quoted || depth !== 0) return undefined;
   terms.push(condition.slice(start));
   return terms;
 }
@@ -163,9 +192,11 @@ export function smokeStepLabel(step: SmokeStep, index: number): string {
 /** Fail unless every step a leg can run has a deadline and they total below the job's. // Usage: assertSmokeDeadlineBudget('binary/binary', job) */
 export function assertSmokeDeadlineBudget(jobName: string, job: SmokeJob): void {
   const jobTimeout = job['timeout-minutes'];
-  if (typeof jobTimeout !== 'number') {
+  if (typeof jobTimeout !== 'number' || !Number.isInteger(jobTimeout) || jobTimeout <= 0) {
+    const received =
+      typeof jobTimeout === 'string' ? JSON.stringify(jobTimeout) : String(jobTimeout);
     throw new Error(
-      `expected ${jobName} to declare a numeric job timeout-minutes | received: ${String(jobTimeout)}`
+      `expected ${jobName} to declare job timeout-minutes: <positive integer> | received: ${received}`
     );
   }
   for (const leg of smokeJobLegs(jobName, job)) {
@@ -186,7 +217,7 @@ function legDeadlines(job: SmokeJob, leg: SmokeLeg): { label: string; minutes: n
     const minutes = smokeStepTimeout(step, leg.matrix);
     if (minutes === undefined) {
       throw new Error(
-        `expected ${leg.name} step "${label}" to declare timeout-minutes: <number> | received: undefined`
+        `expected ${leg.name} step "${label}" to declare timeout-minutes: <positive integer> | received: undefined`
       );
     }
     return [{ label, minutes }];
