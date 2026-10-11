@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -343,4 +344,162 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
     }
   );
+});
+
+// The container job's steps are one line each; these run the scripts behind
+// them directly, for the inputs a correct workflow never produces.
+async function runContainerScript(
+  script: string,
+  env: (root: string) => Record<string, string>,
+  leftovers: string[] = []
+) {
+  const fixture = stageWorkflowRun();
+  for (const name of leftovers) writeFileSync(join(fixture.stateDir, name), 'running');
+  const child = Bun.spawn([join(ROOT_DIR, 'scripts', 'release', script)], {
+    cwd: join(fixture.root, 'apps', 'api'),
+    env: {
+      PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      FAKE_SMOKE_WORKFLOW_EVENTS: fixture.eventsPath,
+      FAKE_SMOKE_WORKFLOW_STATE: fixture.stateDir,
+      FAKE_SMOKE_WORKFLOW_FAILURE: 'none',
+      ...env(fixture.root),
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: 10_000,
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  const events = existsSync(fixture.eventsPath) ? readFileSync(fixture.eventsPath, 'utf8') : '';
+  const commands = events
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as CommandEvent)
+    .map(({ command, args }) => [command, ...args].join(' '));
+  return { stdout, stderr, code, commands };
+}
+
+describe.skipIf(process.platform === 'win32')('container smoke scripts', () => {
+  const pairing = {
+    CONTAINER_CLI: 'podman',
+    BASE_IMAGE: 'alpine:3',
+    PACKAGES: 'bash libstdc++',
+    MANGO_CONTAINER_E2E_IMAGE: 'mango-container-smoke:musl',
+    MANGO_CONTAINER_E2E_ENGINE: 'podman',
+  };
+
+  test('a pairing with packages builds its image, then inspects it and runs the suite', async () => {
+    const { code, commands, stdout, stderr } = await runContainerScript(
+      'smoke-container-pairing.sh',
+      (root) => ({
+        ...pairing,
+        MANGO_CONTAINER_E2E_RUNTIME: join(root, '.mango/out/linux-x64-musl/mangostudio-runtime'),
+      })
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+    expect(commands).toEqual([
+      'podman build -t mango-container-smoke:musl -',
+      'podman image inspect mango-container-smoke:musl',
+      'bun test tests/integration/services/connect-container-runtime.integration.test.ts',
+    ]);
+  });
+
+  test('a pairing without packages tags the pulled base image unchanged', async () => {
+    const { code, commands, stdout, stderr } = await runContainerScript(
+      'smoke-container-pairing.sh',
+      (root) => ({
+        ...pairing,
+        BASE_IMAGE: 'debian:bookworm-slim',
+        PACKAGES: '',
+        MANGO_CONTAINER_E2E_IMAGE: 'mango-container-smoke:glibc',
+        MANGO_CONTAINER_E2E_RUNTIME: join(root, '.mango/out/linux-x64/mangostudio-runtime'),
+      })
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+    expect(commands.slice(0, 2)).toEqual([
+      'podman pull debian:bookworm-slim',
+      'podman tag debian:bookworm-slim mango-container-smoke:glibc',
+    ]);
+  });
+
+  test('a pairing names the runtime path it could not execute and skips the suite', async () => {
+    const { code, commands, stdout } = await runContainerScript(
+      'smoke-container-pairing.sh',
+      () => ({
+        ...pairing,
+        MANGO_CONTAINER_E2E_RUNTIME: '/nonexistent/mangostudio-runtime',
+      })
+    );
+    expect(code).toBe(1);
+    expect(stdout).toContain(
+      "::error::expected MANGO_CONTAINER_E2E_RUNTIME: path of an executable runtime binary | received: '/nonexistent/mangostudio-runtime'"
+    );
+    expect(commands.filter((command) => command.startsWith('bun '))).toEqual([]);
+  });
+
+  test.each([
+    ['CONTAINER_CLI', 'nerdctl', "expected CONTAINER_CLI: docker | podman | received: 'nerdctl'"],
+    [
+      'BASE_IMAGE',
+      '',
+      "expected BASE_IMAGE: an image reference such as debian:bookworm-slim | received: ''",
+    ],
+    [
+      'MANGO_CONTAINER_E2E_IMAGE',
+      '',
+      "expected MANGO_CONTAINER_E2E_IMAGE: a tag such as mango-container-smoke:glibc | received: ''",
+    ],
+  ])('a pairing rejects %s=%p before it reaches the engine', async (name, value, message) => {
+    const { code, commands, stdout } = await runContainerScript(
+      'smoke-container-pairing.sh',
+      () => ({
+        ...pairing,
+        MANGO_CONTAINER_E2E_RUNTIME: '/nonexistent/mangostudio-runtime',
+        [name]: value,
+      })
+    );
+    expect(code).toBe(1);
+    expect(stdout).toContain(`::error::${message}`);
+    expect(commands).toEqual([]);
+  });
+
+  test('the leak check names every container that outlived the grace period', async () => {
+    const { code, commands, stdout } = await runContainerScript(
+      'assert-no-leftover-containers.sh',
+      () => ({ CONTAINER_CLI: 'docker' }),
+      ['mango-rt-one', 'mango-rt-two', 'unrelated']
+    );
+    expect(code).toBe(1);
+    // The engine lists them in its own order; one annotation carries both.
+    const prefix = '::error::expected no mango-rt-* container left in docker | received: ';
+    expect(stdout).toStartWith(prefix);
+    expect(stdout.slice(prefix.length).trim().split(' ').sort()).toEqual([
+      'mango-rt-one',
+      'mango-rt-two',
+    ]);
+    expect(commands.filter((command) => command.startsWith('docker ps'))).toHaveLength(20);
+  });
+
+  test('the leak check passes on the first poll that finds no container', async () => {
+    const { code, commands } = await runContainerScript(
+      'assert-no-leftover-containers.sh',
+      () => ({ CONTAINER_CLI: 'podman' }),
+      ['unrelated']
+    );
+    expect(code).toBe(0);
+    expect(commands).toEqual(['podman ps -a --format {{.Names}} --filter name=mango-rt-']);
+  });
+
+  test('the leak check rejects an engine it cannot ask', async () => {
+    const { code, commands, stdout } = await runContainerScript(
+      'assert-no-leftover-containers.sh',
+      () => ({ CONTAINER_CLI: '' })
+    );
+    expect(code).toBe(1);
+    expect(stdout).toContain("::error::expected CONTAINER_CLI: docker | podman | received: ''");
+    expect(commands).toEqual([]);
+  });
 });

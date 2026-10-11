@@ -101,21 +101,7 @@ jobs:
           MANGO_CONTAINER_E2E_ENGINE: docker
         # Build before the suite, so registry failures cannot look like skipped
         # transport coverage. Bookworm already provides the required shell.
-        run: |
-          set -euo pipefail
-          if [ -z "$PACKAGES" ]; then
-            "$CONTAINER_CLI" pull "$BASE_IMAGE"
-            "$CONTAINER_CLI" tag "$BASE_IMAGE" "$MANGO_CONTAINER_E2E_IMAGE"
-          else
-            printf 'FROM %s\nRUN apk add --no-cache %s\n' "$BASE_IMAGE" "$PACKAGES" \
-              | "$CONTAINER_CLI" build -t "$MANGO_CONTAINER_E2E_IMAGE" -
-          fi
-          if [ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]; then
-            echo "::error::no runtime binary at $MANGO_CONTAINER_E2E_RUNTIME"
-            exit 1
-          fi
-          "$CONTAINER_CLI" image inspect "$MANGO_CONTAINER_E2E_IMAGE" >/dev/null
-          bun test tests/integration/services/connect-container-runtime.integration.test.ts
+        run: ../../scripts/release/smoke-container-pairing.sh
 
       - name: Run docker musl container transport smoke
         if: ${{ !cancelled() }}
@@ -130,21 +116,7 @@ jobs:
           MANGO_CONTAINER_E2E_ENGINE: docker
         # Build before the suite, so registry failures cannot look like skipped
         # transport coverage. Alpine needs bash and libstdc++ for this pairing.
-        run: |
-          set -euo pipefail
-          if [ -z "$PACKAGES" ]; then
-            "$CONTAINER_CLI" pull "$BASE_IMAGE"
-            "$CONTAINER_CLI" tag "$BASE_IMAGE" "$MANGO_CONTAINER_E2E_IMAGE"
-          else
-            printf 'FROM %s\nRUN apk add --no-cache %s\n' "$BASE_IMAGE" "$PACKAGES" \
-              | "$CONTAINER_CLI" build -t "$MANGO_CONTAINER_E2E_IMAGE" -
-          fi
-          if [ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]; then
-            echo "::error::no runtime binary at $MANGO_CONTAINER_E2E_RUNTIME"
-            exit 1
-          fi
-          "$CONTAINER_CLI" image inspect "$MANGO_CONTAINER_E2E_IMAGE" >/dev/null
-          bun test tests/integration/services/connect-container-runtime.integration.test.ts
+        run: ../../scripts/release/smoke-container-pairing.sh
 
       - name: Assert no docker container outlived the suite
         if: ${{ !cancelled() }}
@@ -153,20 +125,7 @@ jobs:
           CONTAINER_CLI: docker
         # --rm reaping is asynchronous. Poll the engine once after both libc
         # assertions, including when an earlier assertion failed.
-        run: |
-          set -euo pipefail
-          leftover=""
-          for _ in $(seq 1 20); do
-            leftover="$("$CONTAINER_CLI" ps -a --format '{{.Names}}' --filter 'name=mango-rt-')"
-            if [ -z "$leftover" ]; then
-              break
-            fi
-            sleep 1
-          done
-          if [ -n "$leftover" ]; then
-            echo "::error::containers left behind: $leftover"
-            exit 1
-          fi
+        run: scripts/release/assert-no-leftover-containers.sh
 
       - name: Run podman glibc container transport smoke
         if: ${{ !cancelled() }}
@@ -181,21 +140,7 @@ jobs:
           MANGO_CONTAINER_E2E_ENGINE: podman
         # Build before the suite, so registry failures cannot look like skipped
         # transport coverage. Bookworm already provides the required shell.
-        run: |
-          set -euo pipefail
-          if [ -z "$PACKAGES" ]; then
-            "$CONTAINER_CLI" pull "$BASE_IMAGE"
-            "$CONTAINER_CLI" tag "$BASE_IMAGE" "$MANGO_CONTAINER_E2E_IMAGE"
-          else
-            printf 'FROM %s\nRUN apk add --no-cache %s\n' "$BASE_IMAGE" "$PACKAGES" \
-              | "$CONTAINER_CLI" build -t "$MANGO_CONTAINER_E2E_IMAGE" -
-          fi
-          if [ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]; then
-            echo "::error::no runtime binary at $MANGO_CONTAINER_E2E_RUNTIME"
-            exit 1
-          fi
-          "$CONTAINER_CLI" image inspect "$MANGO_CONTAINER_E2E_IMAGE" >/dev/null
-          bun test tests/integration/services/connect-container-runtime.integration.test.ts
+        run: ../../scripts/release/smoke-container-pairing.sh
 
       - name: Run podman musl container transport smoke
         if: ${{ !cancelled() }}
@@ -210,21 +155,7 @@ jobs:
           MANGO_CONTAINER_E2E_ENGINE: podman
         # Build before the suite, so registry failures cannot look like skipped
         # transport coverage. Alpine needs bash and libstdc++ for this pairing.
-        run: |
-          set -euo pipefail
-          if [ -z "$PACKAGES" ]; then
-            "$CONTAINER_CLI" pull "$BASE_IMAGE"
-            "$CONTAINER_CLI" tag "$BASE_IMAGE" "$MANGO_CONTAINER_E2E_IMAGE"
-          else
-            printf 'FROM %s\nRUN apk add --no-cache %s\n' "$BASE_IMAGE" "$PACKAGES" \
-              | "$CONTAINER_CLI" build -t "$MANGO_CONTAINER_E2E_IMAGE" -
-          fi
-          if [ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]; then
-            echo "::error::no runtime binary at $MANGO_CONTAINER_E2E_RUNTIME"
-            exit 1
-          fi
-          "$CONTAINER_CLI" image inspect "$MANGO_CONTAINER_E2E_IMAGE" >/dev/null
-          bun test tests/integration/services/connect-container-runtime.integration.test.ts
+        run: ../../scripts/release/smoke-container-pairing.sh
 
       - name: Assert no podman container outlived the suite
         if: ${{ !cancelled() }}
@@ -233,17 +164,4 @@ jobs:
           CONTAINER_CLI: podman
         # --rm reaping is asynchronous. Poll the engine once after both libc
         # assertions, including when an earlier assertion failed.
-        run: |
-          set -euo pipefail
-          leftover=""
-          for _ in $(seq 1 20); do
-            leftover="$("$CONTAINER_CLI" ps -a --format '{{.Names}}' --filter 'name=mango-rt-')"
-            if [ -z "$leftover" ]; then
-              break
-            fi
-            sleep 1
-          done
-          if [ -n "$leftover" ]; then
-            echo "::error::containers left behind: $leftover"
-            exit 1
-          fi
+        run: scripts/release/assert-no-leftover-containers.sh

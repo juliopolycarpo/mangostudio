@@ -49,6 +49,11 @@ const INVALID_SMOKE_DEADLINES = [
   ["'abc'", '"abc"'],
 ] as const;
 
+// The container job's suite and leak-check bodies live in these scripts. A
+// step is recognized by the script it runs; the script holds what it does.
+const PAIRING_SCRIPT = 'scripts/release/smoke-container-pairing.sh';
+const LEAK_SCRIPT = 'scripts/release/assert-no-leftover-containers.sh';
+
 function readWorkflows() {
   return {
     binary: parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')),
@@ -142,10 +147,16 @@ describe('smoke workflow assertion inventory', () => {
         const musl = id.endsWith('-musl');
         expect(env.BASE_IMAGE, id).toBe(musl ? 'alpine:3' : 'debian:bookworm-slim');
         expect(env.PACKAGES, id).toBe(musl ? 'bash libstdc++' : '');
-        expect(step.run, id).toContain('image inspect "$MANGO_CONTAINER_E2E_IMAGE"');
-        expect(step.run, id).toContain('[ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]');
+        expect(step.run?.trim(), id).toBe(`../../${PAIRING_SCRIPT}`);
+        expect(step['working-directory'], id).toBe('apps/api');
       }
     }
+    const pairing = readText(PAIRING_SCRIPT);
+    expect(pairing).toContain('image inspect "$MANGO_CONTAINER_E2E_IMAGE"');
+    expect(pairing).toContain('[ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]');
+    expect(pairing).toContain(
+      'bun test tests/integration/services/connect-container-runtime.integration.test.ts'
+    );
   });
 
   test('every folded assertion runs after failure and retains its failure result', () => {
@@ -545,22 +556,25 @@ ${steps}`).jobs.smoke;
   test('checks each container engine for leaks once after both libc assertions', () => {
     const job = readWorkflows().container.jobs.container;
     expect(smokeMatrixCases(job)).toEqual([{}]);
-    const leakSteps = (job.steps ?? []).filter(({ run }) => run?.includes('name=mango-rt-'));
+    const leakSteps = (job.steps ?? []).filter(({ run }) => run?.includes(LEAK_SCRIPT));
     expect(leakSteps).toHaveLength(2);
     expect(leakSteps.map(({ env }) => env?.CONTAINER_CLI).sort()).toEqual(['docker', 'podman']);
     for (const step of leakSteps) {
       expect(step.if).toBe('$' + '{{ !cancelled() }}');
-      expect(step.run).toContain('seq 1 20');
+      expect(step.run?.trim()).toBe(LEAK_SCRIPT);
       const steps = [...(job.steps ?? [])];
       const leakIndex = steps.indexOf(step);
       const suites = steps.filter(
         ({ env, run }) =>
           env?.MANGO_CONTAINER_E2E_ENGINE === step.env?.CONTAINER_CLI &&
-          run?.includes('connect-container-runtime.integration.test.ts')
+          run?.includes(PAIRING_SCRIPT)
       );
       expect(suites).toHaveLength(2);
       for (const suite of suites) expect(steps.indexOf(suite)).toBeLessThan(leakIndex);
     }
+    const leakCheck = readText(LEAK_SCRIPT);
+    expect(leakCheck).toContain('seq 1 20');
+    expect(leakCheck).toContain('name=mango-rt-');
   });
 
   test('expands Cartesian engine/libc cells and include-only platform matrices', () => {
