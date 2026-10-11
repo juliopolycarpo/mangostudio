@@ -41,7 +41,7 @@ jobs:
   container:
     name: Container transport
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       DATABASE_PATH: /tmp/mangostudio-container-smoke.sqlite
       MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
@@ -49,14 +49,17 @@ jobs:
       VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 2
         with:
           persist-credentials: false
 
       - uses: ./.github/actions/setup-mango
+        timeout-minutes: 5
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Download glibc runtime target
+        timeout-minutes: 3
         uses: ./.github/actions/download-distribution
         with:
           artifact-name: ${{ fromJSON(inputs.target_artifacts)['linux-x64'] }}
@@ -69,10 +72,12 @@ jobs:
       # Materialized target directories stay available under .mango/out.
       - name: Clear previous distribution download
         if: ${{ !cancelled() }}
+        timeout-minutes: 1
         run: rm -rf "$RUNNER_TEMP/mango-distribution"
 
       - name: Download musl runtime target
         if: ${{ !cancelled() }}
+        timeout-minutes: 3
         uses: ./.github/actions/download-distribution
         with:
           artifact-name: ${{ fromJSON(inputs.target_artifacts)['linux-x64-musl'] }}
@@ -143,6 +148,7 @@ jobs:
 
       - name: Assert no docker container outlived the suite
         if: ${{ !cancelled() }}
+        timeout-minutes: 1
         env:
           CONTAINER_CLI: docker
         # --rm reaping is asynchronous. Poll the engine once after both libc
@@ -222,6 +228,7 @@ jobs:
 
       - name: Assert no podman container outlived the suite
         if: ${{ !cancelled() }}
+        timeout-minutes: 1
         env:
           CONTAINER_CLI: podman
         # --rm reaping is asynchronous. Poll the engine once after both libc

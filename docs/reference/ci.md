@@ -253,6 +253,20 @@ The Linux `binary` jobs also stage and test the Bookworm and Alpine Docker
 images. `smoke-container.yml` runs all four Docker/Podman and glibc/musl
 transport pairings in one job with one `setup-mango` dependency install.
 
+Every step in both smoke jobs declares its own `timeout-minutes`, setup,
+downloads and teardown checks included. A step deadline fails only that step; the
+job deadline cancels the job and skips the later `!cancelled()` assertions and
+teardown checks. `scripts/tests/smoke-workflows.unit.test.ts` therefore fails
+when a step has no positive integer deadline, or when the deadlines one leg can run in sequence
+(a matrix platform in rebuild or prebuilt mode) total the job's 30 minutes or
+more. Runner provisioning and post-action cleanup take no step deadline and sit
+outside that sum.
+
+The budget omits a step only when a top-level condition term proves it cannot
+run on that leg. Operators inside quoted Actions strings do not split terms;
+unknown terms stay budgeted unless another top-level term proves the step cannot
+run. Unmatched quotes or parentheses keep the whole condition unknown.
+
 Smoke scripts run as `bun --no-install …` so a stray package import fails
 instead of silently auto-installing. `scripts/tests/smoke-dependencies.unit.test.ts`
 walks the smoke script entrypoints declared in the workflow and download
