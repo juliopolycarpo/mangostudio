@@ -120,15 +120,39 @@ export function smokeJobLegs(jobName: string, job: SmokeJob): SmokeLeg[] {
 export function smokeStepRuns(step: SmokeStep, leg: SmokeLeg): boolean {
   const declared = String(step.if ?? '').trim();
   const condition = /^\$\{\{(.*)\}\}$/s.exec(declared)?.[1] ?? declared;
-  // An `||` or a parenthesis can make a false term irrelevant, so count the step.
-  if (/\|\||[()]/.test(condition.replaceAll('cancelled()', ''))) return true;
-  return condition.split('&&').every((term) => {
+  const terms = topLevelConjuncts(condition);
+  // A top-level `||` can make a false term irrelevant, so count the step.
+  if (!terms) return true;
+  // One false top-level term decides a conjunction whatever the others are; a
+  // parenthesized group or a `steps.*` read is an unknown term and proves nothing.
+  return terms.every((term) => {
     const [, negated, scope, field] = /^\s*(!?)\s*(matrix|inputs)\.(\w+)\s*$/.exec(term) ?? [];
     if (!scope || !field) return true;
     if (scope === 'inputs' && !(field in leg.inputs)) return true;
     const value = scope === 'matrix' ? Boolean(leg.matrix[field]) : leg.inputs[field];
     return negated ? !value : value;
   });
+}
+
+// Split a condition on the `&&` outside every parenthesis; undefined when an
+// `||` sits out there too, since the condition is then not a conjunction.
+function topLevelConjuncts(condition: string): string[] | undefined {
+  const terms: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < condition.length; index += 1) {
+    const char = condition[index];
+    if (char === '(') depth += 1;
+    if (char === ')') depth -= 1;
+    if (depth !== 0) continue;
+    const operator = condition.slice(index, index + 2);
+    if (operator === '||') return undefined;
+    if (operator !== '&&') continue;
+    terms.push(condition.slice(start, index));
+    start = index + 2;
+  }
+  terms.push(condition.slice(start));
+  return terms;
 }
 
 /** Name a step the way a failure should cite it, falling back for unnamed `uses:` and marker steps. // Usage: smokeStepLabel(step, 0) */

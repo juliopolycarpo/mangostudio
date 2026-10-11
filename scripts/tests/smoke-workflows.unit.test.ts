@@ -248,6 +248,19 @@ ${steps}`).jobs.smoke;
     expect(runs('!(matrix.docker_arch && inputs.rebuild)', linuxRebuild)).toBe(true);
     expect(runs("steps.ready.outcome == 'success'", macPrebuilt)).toBe(true);
     expect(runs('inputs.channel', macPrebuilt)).toBe(true);
+    // A parenthesized `||` group is one unknown term: it cannot rescue a
+    // conjunction whose own matrix term is false on this leg.
+    const gated =
+      "!cancelled() && steps.ready.outcome == 'success' && (steps.a.outcome == 'success' || steps.b.outcome == 'success') && matrix.docker_arch";
+    if (runs(gated, macPrebuilt)) {
+      throw new Error(
+        `expected a leg without docker_arch to skip a step whose top-level && names matrix.docker_arch | received: counted for "${gated}"`
+      );
+    }
+    expect(runs(gated, linuxRebuild)).toBe(true);
+    expect(runs('(matrix.docker_arch && inputs.rebuild) || inputs.rebuild', macPrebuilt)).toBe(
+      true
+    );
   });
 
   test('a step is cited by its name, then its id, then its action', () => {
