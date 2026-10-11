@@ -146,8 +146,9 @@ jobs:
         if: ${{ !cancelled() && matrix.docker_arch }}
         run: |
           set -euo pipefail
-          if [ -n "$(ss -H -ltn '( sport = :13001 )')" ]; then
-            echo "::error::binary smoke left port 13001 listening"
+          listeners="$(ss -H -ltn '( sport = :13001 )')"
+          if [ -n "$listeners" ]; then
+            echo "::error::expected smoke port 13001 released; listeners [$listeners]"
             exit 1
           fi
 
