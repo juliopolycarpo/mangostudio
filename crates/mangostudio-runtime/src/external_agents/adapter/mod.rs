@@ -5,6 +5,8 @@ mod map;
 mod map_events;
 mod session;
 
+#[cfg(test)]
+mod acp_turn_tests;
 mod backend;
 #[cfg(test)]
 mod lifecycle_tests;
