@@ -60,9 +60,14 @@ async function stageBuildSmoke(executable = true): Promise<{
   });
   const callbackPort = callbackReservation.port;
   await callbackReservation.stop(true);
-  const source = readText('scripts/test-build.ts').replace(
+  const original = readText('scripts/test-build.ts');
+  const source = original.replace(
     'const CHATGPT_CALLBACK_PORT = 1455;',
     `const CHATGPT_CALLBACK_PORT = ${callbackPort};`
+  );
+  // An unmatched replace would leave the smoke probing the real callback port.
+  expect(source, 'expected test-build.ts to declare CHATGPT_CALLBACK_PORT = 1455').not.toBe(
+    original
   );
   const mainOffset = source.indexOf('// Main\n');
   expect(mainOffset).toBeGreaterThan(0);
