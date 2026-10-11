@@ -254,6 +254,8 @@ images. `smoke-container.yml` runs all four Docker/Podman and glibc/musl
 transport pairings in one job with one `setup-mango` dependency install.
 Its suites start only once checkout, setup and both runtime downloads have
 succeeded; after that, one failed pairing does not stop the others.
+The pairing script derives the suite engine from `CONTAINER_CLI`, so preparation
+and the transport tests always use the same engine.
 
 Every step in both smoke jobs declares its own `timeout-minutes`, setup,
 downloads and teardown checks included. A step deadline fails only that step; the

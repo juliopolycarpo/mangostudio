@@ -84,6 +84,23 @@ describe('smoke workflow assertion inventory', () => {
     assertSmokeInventory(smokeAssertions(readWorkflows()), ORIGINAL_SMOKE_ASSERTIONS);
   });
 
+  test.each(['', 'docker'])(
+    'identifies the prepared engine when the inherited suite engine is %j',
+    (inheritedEngine) => {
+      const workflow = parseSmokeWorkflow(`jobs:
+  container:
+    steps:
+      - run: ../../scripts/release/smoke-container-pairing.sh
+        env:
+          CONTAINER_CLI: podman
+          MANGO_CONTAINER_E2E_ENGINE: "${inheritedEngine}"
+          MANGO_CONTAINER_E2E_RUNTIME: /workspace/.mango/out/linux-x64/mangostudio-runtime`);
+      expect(smokeAssertions({ container: workflow }).map(({ id }) => id)).toEqual([
+        'container/podman/linux-x64',
+      ]);
+    }
+  );
+
   test.each(['binary/windows-arm64', 'docker/alpine/arm64', 'container/podman/linux-x64-musl'])(
     'names missing coverage for %s',
     (missing) => {
@@ -604,8 +621,7 @@ ${steps}`).jobs.smoke;
       const leakIndex = steps.indexOf(step);
       const suites = steps.filter(
         ({ env, run }) =>
-          env?.MANGO_CONTAINER_E2E_ENGINE === step.env?.CONTAINER_CLI &&
-          run?.includes(PAIRING_SCRIPT)
+          env?.CONTAINER_CLI === step.env?.CONTAINER_CLI && run?.includes(PAIRING_SCRIPT)
       );
       expect(suites).toHaveLength(2);
       for (const suite of suites) expect(steps.indexOf(suite)).toBeLessThan(leakIndex);

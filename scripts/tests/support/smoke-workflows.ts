@@ -256,7 +256,7 @@ function assertionId(command: string, env: Record<string, string>): string | und
   }
   if (command.includes('scripts/release/smoke-container-pairing.sh')) {
     const platform = /\.mango\/out\/([^/]+)\//.exec(env.MANGO_CONTAINER_E2E_RUNTIME ?? '')?.[1];
-    return `container/${env.MANGO_CONTAINER_E2E_ENGINE}/${platform}`;
+    return `container/${env.CONTAINER_CLI}/${platform}`;
   }
   return undefined;
 }

@@ -10,19 +10,18 @@
 #   PACKAGES="bash libstdc++" \
 #   MANGO_CONTAINER_E2E_IMAGE=mango-container-smoke:musl \
 #   MANGO_CONTAINER_E2E_RUNTIME=/abs/.mango/out/linux-x64-musl/mangostudio-runtime \
-#   MANGO_CONTAINER_E2E_ENGINE=docker \
 #     ../../scripts/release/smoke-container-pairing.sh
 #
 # Environment:
-#   CONTAINER_CLI                Engine that prepares the image: docker or podman.
+#   CONTAINER_CLI                Engine for image preparation and suite: docker or podman.
 #   BASE_IMAGE                   Image an ordinary user would pick for this libc.
 #   PACKAGES                     apk packages the base image lacks. Empty tags
 #                                the base image unchanged.
 #   MANGO_CONTAINER_E2E_IMAGE    Tag the suite starts its containers from.
 #   MANGO_CONTAINER_E2E_RUNTIME  Absolute path of the runtime binary to mount.
 #
-# The suite itself reads the MANGO_CONTAINER_E2E_* variables, including
-# MANGO_CONTAINER_E2E_ENGINE, from the same environment.
+# The helper exports MANGO_CONTAINER_E2E_ENGINE from validated CONTAINER_CLI so
+# image preparation and the suite use the same engine.
 set -euo pipefail
 
 container_cli="${CONTAINER_CLI:-}"
@@ -42,6 +41,7 @@ case "$container_cli" in
   docker | podman) ;;
   *) fail "expected CONTAINER_CLI: docker | podman | received: '${container_cli}'" ;;
 esac
+export MANGO_CONTAINER_E2E_ENGINE="$container_cli"
 if [ -z "$base_image" ]; then
   fail "expected BASE_IMAGE: an image reference such as debian:bookworm-slim | received: '${base_image}'"
 fi

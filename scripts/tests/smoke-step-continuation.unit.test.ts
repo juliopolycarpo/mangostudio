@@ -373,13 +373,13 @@ async function runContainerScript(
     new Response(child.stderr).text(),
     child.exited,
   ]);
-  const events = existsSync(fixture.eventsPath) ? readFileSync(fixture.eventsPath, 'utf8') : '';
-  const commands = events
+  const eventText = existsSync(fixture.eventsPath) ? readFileSync(fixture.eventsPath, 'utf8') : '';
+  const events = eventText
     .split('\n')
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as CommandEvent)
-    .map(({ command, args }) => [command, ...args].join(' '));
-  return { stdout, stderr, code, commands };
+    .map((line) => JSON.parse(line) as CommandEvent);
+  const commands = events.map(({ command, args }) => [command, ...args].join(' '));
+  return { stdout, stderr, code, commands, events };
 }
 
 describe.skipIf(process.platform === 'win32')('container smoke scripts', () => {
@@ -388,8 +388,39 @@ describe.skipIf(process.platform === 'win32')('container smoke scripts', () => {
     BASE_IMAGE: 'alpine:3',
     PACKAGES: 'bash libstdc++',
     MANGO_CONTAINER_E2E_IMAGE: 'mango-container-smoke:musl',
-    MANGO_CONTAINER_E2E_ENGINE: 'podman',
   };
+
+  test.each([
+    ['podman', 'absent', undefined],
+    ['podman', 'mismatched Docker', 'docker'],
+    ['podman', 'invalid', 'nerdctl'],
+    ['docker', 'absent', undefined],
+    ['docker', 'mismatched Podman', 'podman'],
+    ['docker', 'invalid', 'nerdctl'],
+  ] as const)(
+    'a %s pairing derives the engine from CONTAINER_CLI with %s suite input',
+    async (containerCli, _state, suiteEngine) => {
+      const { code, commands, events, stdout, stderr } = await runContainerScript(
+        'smoke-container-pairing.sh',
+        (root) => ({
+          ...pairing,
+          CONTAINER_CLI: containerCli,
+          ...(suiteEngine === undefined ? {} : { MANGO_CONTAINER_E2E_ENGINE: suiteEngine }),
+          MANGO_CONTAINER_E2E_RUNTIME: join(root, '.mango/out/linux-x64-musl/mangostudio-runtime'),
+        })
+      );
+      expect(code, `${stdout}${stderr}`).toBe(0);
+      expect(commands).toEqual([
+        `${containerCli} build -t mango-container-smoke:musl -`,
+        `${containerCli} image inspect mango-container-smoke:musl`,
+        'bun test tests/integration/services/connect-container-runtime.integration.test.ts',
+      ]);
+      expect(
+        events.map(({ engine }) => engine),
+        'validated CONTAINER_CLI must reach every image command and the suite'
+      ).toEqual([containerCli, containerCli, containerCli]);
+    }
+  );
 
   test('a pairing with packages builds its image, then inspects it and runs the suite', async () => {
     const { code, commands, stdout, stderr } = await runContainerScript(
