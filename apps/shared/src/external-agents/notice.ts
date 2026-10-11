@@ -12,7 +12,7 @@
  */
 
 import type { ExternalNoticePart, MessagePart } from '../types/agent-events';
-import type { ExternalNoticeSeverity } from './schemas';
+import type { ExternalAgentEvent } from './schemas';
 
 /**
  * How many notices one turn keeps. A vendor that announces a retry every second would otherwise
@@ -21,12 +21,8 @@ import type { ExternalNoticeSeverity } from './schemas';
  */
 export const MAX_EXTERNAL_NOTICES_PER_TURN = 8;
 
-/** What a notice carries on the wire, as the event and the SSE chunk both spell it. */
-export interface ExternalNoticeFields {
-  readonly severity: ExternalNoticeSeverity;
-  readonly title: string;
-  readonly description?: string | undefined;
-}
+/** What a notice carries, as the `notice` event schema and the SSE chunk both spell it. */
+export type ExternalNoticeFields = Omit<Extract<ExternalAgentEvent, { type: 'notice' }>, 'type'>;
 
 /**
  * The part one notice becomes.
