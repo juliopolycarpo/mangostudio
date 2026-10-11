@@ -11,7 +11,7 @@ describe('Bun peer lockfile policy', () => {
     expect(() => assertNoRegistryBunPackages(lock)).not.toThrow();
   });
 
-  test('pins the only allowed override and its metadata-only package contents', () => {
+  test('pins the host-peer override and its metadata-only package contents', () => {
     const root = JSON.parse(readText('package.json'));
     const marker = JSON.parse(readText('scripts/bun-host-peer/package.json'));
     const lock = Bun.JSON5.parse(readText('bun.lock')) as BunDependencyLock;
@@ -37,6 +37,29 @@ describe('Bun peer lockfile policy', () => {
       'README.md',
       'package.json',
     ]);
+  });
+
+  test('a bun-types override, while one exists, names the pinned Bun', () => {
+    // The override is a stopgap for the days `@types/bun` trails a Bun release.
+    // Left behind by a later bump it would force older types under a newer
+    // wrapper, and nothing else in the repository would notice.
+    const root = JSON.parse(readText('package.json')) as {
+      overrides?: Record<string, string>;
+    };
+    const lock = Bun.JSON5.parse(readText('bun.lock')) as BunDependencyLock;
+    const pinned = readText('.bun-version').trim();
+    const override = root.overrides?.['bun-types'];
+    const locked = lock.overrides?.['bun-types'];
+
+    expect(
+      locked,
+      `expected bun.lock overrides["bun-types"]: ${override} | received: ${locked}`
+    ).toBe(override);
+    if (override === undefined) return;
+    expect(
+      override,
+      `expected overrides["bun-types"]: ${pinned} (.bun-version) | received: ${override}`
+    ).toBe(pinned);
   });
 
   test('runtime imports still resolve to the host Bun builtin', async () => {
