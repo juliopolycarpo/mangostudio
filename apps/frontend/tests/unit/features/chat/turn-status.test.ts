@@ -201,6 +201,15 @@ describe("deriveTurnStatus: a vendor notice is an aside, not the turn's last act
     });
   });
 
+  it('keeps the caret on the prose a notice follows while it is still streaming', () => {
+    const parts = [turnPart(), TEXT, NOTICE];
+    const status = deriveTurnStatus(parts, true);
+    expect({ phase: status.phase, livePartIndex: status.livePartIndex }).toEqual({
+      phase: 'responding',
+      livePartIndex: 1,
+    });
+  });
+
   it('keeps a running activity the one cue when a notice follows it', () => {
     const parts = [turnPart(), activityPart({ status: 'running' }), NOTICE];
     expect(deriveTurnStatus(parts, true).showWorkingRow).toBe(false);
