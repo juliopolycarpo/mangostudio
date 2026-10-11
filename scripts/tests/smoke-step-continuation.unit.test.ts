@@ -223,7 +223,7 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     }
   );
 
-  test('the manual fallback rebuilds both image targets and runs every assertion', async () => {
+  test('the manual fallback builds each image target once and runs every assertion', async () => {
     const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
     const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-arm64');
     if (!matrix)
@@ -233,15 +233,41 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     const builds = events.filter(
       ({ command, args }) => command === 'bun' && args.includes('build:binary')
     );
-    expect(builds.map(({ args }) => args[args.indexOf('--platform') + 1])).toEqual([
-      'linux-arm64',
-      'linux-arm64-musl',
-    ]);
+    // The binary smoke step already built the glibc target; only musl is new.
+    const received = builds.map(({ args }) => args[args.indexOf('--platform') + 1]).join(', ');
+    if (received !== 'linux-arm64-musl') {
+      throw new Error(
+        `expected the image steps to build only the target the binary smoke did not (linux-arm64-musl) | received: ${received}`
+      );
+    }
     expect(
       events.find(
         ({ command, args }) => command === 'bun' && args.includes('scripts/test-build.ts')
       )?.skipBuild
     ).toBe('0');
     expect(containers).toEqual([]);
+  });
+
+  test('the manual fallback rebuilds the glibc target for its image after a failed native build', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+    if (!matrix)
+      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+    // The fixture's linux-x64 output holds a runtime but no hub: a half
+    // build, which the output directory existing must not pass for.
+    const { outcomes, events } = await runWorkflowSteps(job, matrix, 'binary', true);
+    const builds = events
+      .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+      .map(({ args }) => args[args.indexOf('--platform') + 1])
+      .join(', ');
+    const images = outcomes
+      .filter(({ name }) => name.includes('Docker smoke test'))
+      .map(({ code }) => code)
+      .join(', ');
+    if (builds !== 'linux-x64, linux-x64-musl' || images !== '0, 0') {
+      throw new Error(
+        `expected both image targets built (linux-x64, linux-x64-musl) and both images passing (0, 0) | received: builds [${builds}], images [${images}]`
+      );
+    }
   });
 });

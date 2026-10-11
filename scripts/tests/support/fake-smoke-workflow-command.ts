@@ -38,6 +38,19 @@ if (command === 'bun') {
     console.error('Deliberately failed first smoke assertion');
     process.exit(9);
   }
+  // A finished build leaves the hub and its runtime side by side.
+  const built = args.includes('build:binary')
+    ? args[args.indexOf('--platform') + 1]
+    : firstBinary && process.env.SKIP_BUILD === '0'
+      ? process.env.PLATFORM
+      : undefined;
+  if (built) {
+    const target = join('.mango', 'out', built);
+    mkdirSync(target, { recursive: true });
+    for (const name of ['mangostudio', 'mangostudio-runtime']) {
+      writeFileSync(join(target, name), '#!/usr/bin/env true\n', { mode: 0o755 });
+    }
+  }
   process.exit(0);
 }
 

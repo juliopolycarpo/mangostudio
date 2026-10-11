@@ -182,7 +182,13 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$REBUILD" = "true" ]; then
-            bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+            # The binary smoke step built the glibc target moments ago. A build
+            # is complete only once the hub and its runtime both exist, so a
+            # failed native build is still rebuilt here.
+            out=".mango/out/$BINARY_PLATFORM"
+            if [ ! -x "$out/mangostudio" ] || [ ! -x "$out/mangostudio-runtime" ]; then
+              bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+            fi
           fi
           bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
           docker build \
@@ -253,7 +259,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$REBUILD" = "true" ]; then
-            bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+            out=".mango/out/$BINARY_PLATFORM"
+            if [ ! -x "$out/mangostudio" ] || [ ! -x "$out/mangostudio-runtime" ]; then
+              bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+            fi
           fi
           bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
           docker build \
