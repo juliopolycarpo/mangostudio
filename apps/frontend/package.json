@@ -43,7 +43,7 @@
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
-    "@happy-dom/global-registrator": "^20.14.5",
+    "@happy-dom/global-registrator": "^20.14.6",
     "@mangostudio/api": "workspace:*",
     "@tanstack/router-generator": "1.167.40",
     "@testing-library/jest-dom": "^7.0.1",
