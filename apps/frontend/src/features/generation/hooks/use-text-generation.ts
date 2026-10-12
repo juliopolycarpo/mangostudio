@@ -737,7 +737,11 @@ export function useTextGeneration({
         // the user's message. The server's timestamp is the one that counts, so
         // this re-reads rather than bumping the cached row by hand.
         void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
-        if (streamThrew) {
+        // Not for a refusal the hub made before it stored anything: a review reports one by
+        // throwing, and the re-read the next activity signal would run replaces the refusal
+        // card with rows that hold nothing of it.
+        const refusalIsOnlyCopy = refusedBeforeStart && !streamState.receivedServerUserMessageId;
+        if (streamThrew && !refusalIsOnlyCopy) {
           pendingTranscriptReconciles.current.add(activeChatId);
         }
         // Reconciles an earlier turn armed must not wait forever on a signal
@@ -762,7 +766,7 @@ export function useTextGeneration({
         // provisional and the persisted user message is worth having even
         // mid-unwind.
         if (
-          !(refusedBeforeStart && !streamState.receivedServerUserMessageId) &&
+          !refusalIsOnlyCopy &&
           (recovery ||
             !streamState.receivedServerUserMessageId ||
             !streamState.receivedServerAiMessageId ||

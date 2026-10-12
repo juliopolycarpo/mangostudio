@@ -18,6 +18,7 @@ import { act, renderHook, waitFor } from '../../support/harness/render';
 // No Bun equivalent for `vi.mocked` — the `jest.fn()` handles created here are
 // what the factories below hand back, so keep them instead.
 const mockStream = jest.fn();
+const mockReviewStream = jest.fn();
 const mockCancelInterruptedTurn = jest.fn();
 const mockDismissInterruptedTurn = jest.fn();
 const mockGenerateChatTitle = jest.fn();
@@ -25,7 +26,7 @@ const mockInvalidateGitState = jest.fn().mockResolvedValue(undefined);
 
 mock.module('../../../src/services/generation-service', () => ({
   respondTextStream: mockStream,
-  startExternalReviewStream: jest.fn(),
+  startExternalReviewStream: mockReviewStream,
   cancelInterruptedTurn: mockCancelInterruptedTurn,
   dismissInterruptedTurn: mockDismissInterruptedTurn,
 }));
@@ -1652,6 +1653,40 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
 
     await act(async () => {
       await result.current.generation.handleRespond('hello');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
+  // A review reports its refusal by throwing after the chunk, which would arm the reconcile that
+  // re-reads on the next activity signal and replace the refusal card with rows that hold nothing.
+  it('does not arm a transcript re-read for a review the agent could not start', async () => {
+    const props = makeProps();
+    mockReviewStream.mockImplementation(
+      (
+        _chatId: string,
+        _request: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({
+          type: 'error',
+          error: 'The external agent turn could not be started.',
+          unavailableReason: 'not-installed',
+          remedy: { kind: 'install' },
+          done: true,
+        });
+        return Promise.reject(new Error('The external agent turn could not be started.'));
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleReviewChanges().catch(() => undefined);
+    });
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
     });
 
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
