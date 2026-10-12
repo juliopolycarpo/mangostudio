@@ -195,6 +195,12 @@ struct CloseOwner<'a> {
 
 impl Drop for CloseOwner<'_> {
     fn drop(&mut self) {
+        // A close dropped before it finished (the hub went away mid-request) never reached the
+        // scratch removal after the vendor close. The session is closing and takes no more work,
+        // and nothing else sweeps the leaf, so it goes here; removing a leaf twice is harmless.
+        if matches!(self.outcome, Some(Err(CloseFailure::Interrupted))) {
+            remove_scratch(&self.live.scratch);
+        }
         {
             let mut slots = self.supervisor.slots();
             if matches!(slots.get(&self.live.session_id), Some(Slot::Live(current)) if Arc::ptr_eq(current, self.live))
@@ -306,6 +312,8 @@ pub(crate) struct Supervisor {
     shutdown: CancellationToken,
     pub(super) tasks: TaskTracker,
     watcher_started: AtomicBool,
+    /// Whether a consent-revocation close is already running, so the watcher starts one at a time.
+    revoking: Arc<AtomicBool>,
     consent_reader: ConsentReader,
 }
 
@@ -325,6 +333,7 @@ impl Supervisor {
             shutdown: CancellationToken::new(),
             tasks: TaskTracker::new(),
             watcher_started: AtomicBool::new(false),
+            revoking: Arc::new(AtomicBool::new(false)),
             consent_reader: ConsentReader::new("externalAgents"),
         })
     }
@@ -1154,13 +1163,30 @@ impl Supervisor {
                             continue;
                         }
                         if this.consent_read().await.revokes() {
-                            this.close_all(CloseCause::ConsentRevoked).await;
+                            this.revoke_consent();
                         }
                     }
                 }
             }
             this.shutdown.cancel();
             this.close_all(CloseCause::Shutdown).await;
+        });
+    }
+
+    /// Closes every session for a withdrawn consent without holding the watcher.
+    ///
+    /// A close can take as long as the SDK documents (up to 43 s for Codex at the default limits),
+    /// and the watcher also owns shutdown when the hub session ends, so the close runs on its own
+    /// task, one at a time. Every session is told to stop at once either way; only the watcher's
+    /// next poll and its shutdown arm are no longer waiting behind the slowest close.
+    fn revoke_consent(self: &Arc<Self>) {
+        if self.revoking.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let this = Arc::clone(self);
+        self.tasks.spawn(async move {
+            this.close_all(CloseCause::ConsentRevoked).await;
+            this.revoking.store(false, Ordering::Release);
         });
     }
 

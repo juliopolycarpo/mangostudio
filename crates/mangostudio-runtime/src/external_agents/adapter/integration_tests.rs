@@ -1523,6 +1523,81 @@ async fn a_hung_consent_read_does_not_hold_up_hub_shutdown() {
     assert_eq!(rig.log.closes(), vec![CloseReason::Shutdown]);
 }
 
+/// A close the hub abandons mid-flight (its request is dropped) still removes the session's scratch
+/// leaf; nothing else would, and a stalled vendor close never reaches the removal after it.
+#[tokio::test]
+async fn an_abandoned_close_still_removes_the_scratch_leaf() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::CloseStalls,
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    let leaves = || {
+        std::fs::read_dir(rig.private_root.join("scratch"))
+            .map(|entries| entries.count())
+            .unwrap_or(0)
+    };
+    assert_eq!(
+        leaves(),
+        1,
+        "expected one scratch leaf for the live session"
+    );
+    let supervisor = Arc::clone(&rig.supervisor);
+    let closing = tokio::spawn(async move {
+        supervisor
+            .close_session(
+                CloseParams {
+                    session_id: "one".into(),
+                },
+                CloseCause::Requested,
+            )
+            .await
+    });
+    eventually(
+        "the vendor close started",
+        || rig.log.closes(),
+        |closes| !closes.is_empty(),
+    )
+    .await;
+
+    closing.abort();
+
+    eventually(
+        "the abandoned close removed the scratch leaf",
+        leaves,
+        |count| *count == 0,
+    )
+    .await;
+}
+
+/// A revocation whose close is slow must not pin the watcher: the hub session ending still shuts
+/// the supervisor down while that close is running.
+#[tokio::test]
+async fn a_slow_revocation_close_does_not_hold_up_hub_shutdown() {
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::CloseStalls,
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+    rig.consent.revoke();
+    eventually(
+        "the revocation close started",
+        || rig.log.closes(),
+        |closes| closes == &[CloseReason::ConsentRevoked],
+    )
+    .await;
+
+    rig.hub.close_now(4000, None);
+    eventually(
+        "the supervisor refused opens after the hub session ended, while the close was still running",
+        || rig.supervisor.shutdown.is_cancelled(),
+        |shut_down| *shut_down,
+    )
+    .await;
+}
+
 #[tokio::test]
 async fn the_hub_session_ending_shuts_every_session_down() {
     let rig = rig(RigOptions::default()).await;
