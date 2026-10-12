@@ -965,6 +965,17 @@ export function createExternalTurnController(
         // teardown was deferred to the submission and is now the turn's.
         if (!handle.isLive()) terminate('runtime-disconnected');
       };
+      /**
+       * Stores the error a start ended with and sends the same one to the live stream, so a reload
+       * shows what the person watched.
+       */
+      const recordStartError = (
+        stored: ExternalAgentError,
+        refusal?: OpenRefusalPresentation
+      ): void => {
+        transcript.recordError(stored, refusal);
+        input.observer?.onEvent?.({ type: 'error', error: stored }, refusal);
+      };
       const failStart = (error: unknown, code: string): void => {
         // A reopen after a dropped connection can find what a first open finds: the agent signed
         // out, gone, outdated or denied. Present it as the first open does, and tell the cache.
@@ -976,10 +987,7 @@ export function createExternalTurnController(
           error,
           reopenFailures.has(error as object) ? (openFailureCodeFor(error) ?? code) : code
         );
-        transcript.recordError(stored, refusal);
-        // The live stream gets the same error the stored turn keeps, so a reload shows what the
-        // person watched. Before this a refused start was visible only after a reload.
-        input.observer?.onEvent?.({ type: 'error', error: stored }, refusal);
+        recordStartError(stored, refusal);
         if (refusal) {
           notifyDiscoveryStale({
             userId: input.userId,
@@ -1070,11 +1078,11 @@ export function createExternalTurnController(
             // A local lost reply has no error part; preserve a committed
             // review error alongside its localized uncertainty notice.
             if (input.review && outcome.error)
-              transcript.recordError(vendorErrorFrom(outcome.error, 'review-start'));
+              recordStartError(vendorErrorFrom(outcome.error, 'review-start'));
             terminate('acceptance-unknown');
             return;
           case 'receipt-failed':
-            transcript.recordError(
+            recordStartError(
               vendorErrorFrom(outcome.error, input.review ? 'review-receipt' : 'turn-receipt')
             );
             terminate('vendor-error');

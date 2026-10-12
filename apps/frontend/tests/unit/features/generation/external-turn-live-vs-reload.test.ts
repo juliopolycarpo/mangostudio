@@ -639,6 +639,49 @@ describe('external turn: live stream vs reloaded transcript', () => {
   });
 
   /**
+   * The endings where the hub records an error of its own (a receipt it could not write, a review
+   * whose acceptance it could not confirm) send it to the live stream as well as storing it.
+   */
+  describe('an error the hub recorded for a start that did not complete', () => {
+    const CASES: ReadonlyArray<readonly [string, ExternalTurnTerminalReason, string]> = [
+      ['a turn receipt that could not be written', 'vendor-error', 'turn-receipt'],
+      ['a review receipt that could not be written', 'vendor-error', 'review-receipt'],
+      ['a review whose acceptance is unknown', 'acceptance-unknown', 'review-start'],
+    ];
+
+    for (const [label, terminal, code] of CASES) {
+      it(`shows the same error live and after a reload for ${label}`, () => {
+        const error = { code, message: 'raw runtime text' };
+        const transcript = new ExternalTurnTranscript({
+          targetId: 'codex',
+          sessionId: 'hub-session-1',
+          startedAt: 0,
+        });
+        transcript.recordError(error);
+        transcript.finalize(terminal, 0);
+        const chunks: StreamChunk[] = [
+          externalSessionStartedChunk({
+            sessionId: 'hub-session-1',
+            targetId: 'codex',
+            resumed: false,
+          }),
+          externalAgentEventToStreamChunk({ type: 'error', error }) as StreamChunk,
+          externalTurnCompletedChunk(terminal),
+          { type: 'done', done: true, messageId: 'ai-1' },
+        ];
+        const live = chunks.reduce(
+          (current, next) => reduceTextGenerationStreamChunk(current, next, REDUCER_OPTIONS),
+          createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+        ).parts;
+
+        expect(comparable(live)).toEqual(comparable(transcript.parts));
+        const turn = live.find((part) => part.type === 'external_turn');
+        expect(turn?.error, 'the live turn carries the error').toEqual(error);
+      });
+    }
+  });
+
+  /**
    * A vendor notice is display only. It lands as its own part where it happened, on both paths,
    * and never as message text, so nothing that replays the text can hand it to a model.
    */

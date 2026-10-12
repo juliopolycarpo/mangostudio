@@ -205,6 +205,19 @@ function start(
   );
 }
 
+/** Collects what the live stream would be told, so a test can compare it with what is stored. */
+function liveErrors() {
+  const errors: unknown[] = [];
+  return {
+    errors,
+    observer: {
+      onEvent: (event: { type: string; error?: unknown }) => {
+        if (event.type === 'error') errors.push(event.error);
+      },
+    },
+  };
+}
+
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
   for (let attempt = 0; attempt < 2_000; attempt += 1) {
     if (predicate()) return;
@@ -474,6 +487,52 @@ describe('never-written submissions', () => {
     const result = await start(controller);
     expect(result.reason).toBe('vendor-error');
     expect(runtime.rpcCount()).toBe(0);
+  });
+});
+
+describe('a start error that is stored is also sent to the live stream', () => {
+  async function refuseReceipts(review: boolean) {
+    const { runtime, controller } = harness();
+    const live = liveErrors();
+    await sql`CREATE TRIGGER refuse_attempts BEFORE INSERT ON external_turn_attempts BEGIN SELECT RAISE(ABORT, 'receipt refused'); END`.execute(
+      getDb()
+    );
+    try {
+      const result = await start(controller, review, live.observer);
+      return { result, live: live.errors, stored: (await turnPart()).part.error, runtime };
+    } finally {
+      await sql`DROP TRIGGER IF EXISTS refuse_attempts`.execute(getDb());
+    }
+  }
+
+  it('tells the stream a turn whose receipt could not be written, as it is stored', async () => {
+    const { result, live, stored, runtime } = await refuseReceipts(false);
+
+    expect({ code: result.error?.code, live }).toEqual({ code: 'turn-receipt', live: [stored] });
+    await runtime.close();
+  });
+
+  it('tells the stream a review whose receipt could not be written, as it is stored', async () => {
+    const { result, live, stored, runtime } = await refuseReceipts(true);
+
+    expect({ code: result.error?.code, live }).toEqual({ code: 'review-receipt', live: [stored] });
+    await runtime.close();
+  });
+
+  it('tells the stream any error a review left unresolved, as it is stored', async () => {
+    const { runtime, controller } = harness();
+    const live = liveErrors();
+    runtime.script.push('refuse-acceptance-unknown');
+
+    const result = await start(controller, true, live.observer);
+    const { part } = await turnPart();
+
+    expect(part.error?.code, 'the stored review keeps the runtime answer').toBe('review-start');
+    expect({ reason: result.reason, live: live.errors }).toEqual({
+      reason: 'acceptance-unknown',
+      live: [part.error],
+    });
+    await runtime.close();
   });
 });
 
