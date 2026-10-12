@@ -11,12 +11,12 @@ results through `scripts/ci/evaluate-gate.ts`. Branch protection and Canary
 depend on these stable names instead of tracking internal job names, matrix
 shapes, or path filters.
 
-| Workflow check name      | Workflow                                | Role                                                                                                                                                                                                                                                             |
-| ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, `rust-coverage` when no Rust-relevant path changed, and `qa-metrics` on `workflow_dispatch`                            |
-| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs the locked build on Linux, macOS and Windows, the plain test run on macOS and Windows (Linux's is `Rust Coverage` in `CI / Gate`), the minimum-Rust checks (see below), and fuzz-workspace resolution |
-| `Protocol CI / Gate`     | `.github/workflows/protocol-ci.yml`     | Always reports; accepts every protocol lane skip when no protocol path changed                                                                                                                                                                                   |
-| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                                                                                                   |
+| Workflow check name      | Workflow                                | Role                                                                                                                                                                                                                                                 |
+| ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, `rust-coverage` when no Rust-relevant path changed, and `qa-metrics` on `workflow_dispatch`                |
+| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs locked checks and builds at the Rust 1.99.0 minimum on Linux, macOS and Windows, native tests on macOS and Windows, Windows ARM64 checks and runtime tests, and fuzz-workspace resolution |
+| `Protocol CI / Gate`     | `.github/workflows/protocol-ci.yml`     | Always reports; accepts every protocol lane skip when no protocol path changed                                                                                                                                                                       |
+| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                                                                                       |
 
 Repository rules match required checks by the name `Gate`, and all four workflows
 above emit a check with that name, so each must keep reporting on every pull
@@ -30,40 +30,54 @@ the gate fails the test.
 
 ## Minimum supported Rust
 
-The minimum-Rust checks live in Cargo Shim, on the same Rust change signal
-(`RUST_WORKSPACE_PATHS` in `scripts/lib/rust-lanes.ts`) as every other Rust lane,
-so a runtime-only change runs them and a docs-only change skips them with the
-`Gate` still reporting. Protocol CI does not repeat them: its signal covers
-protocol paths only, and every path the protocol crate compiles from is a Rust
-path too. Each lane selects its toolchain with a job-level `RUSTUP_TOOLCHAIN`,
-which outranks `rust-toolchain.toml` (1.99.0) for every step.
+All stable Rust crates share the intentional Rust 1.99.0 minimum. This replaces the workspace's
+stable-minus-two floor of 1.97.0 and the published launcher's 1.96.0 exception. Every stable member
+inherits `[workspace.package].rust-version` from the root `Cargo.toml`, and `rust-toolchain.toml`
+pins the same compiler. Policy tests enforce that equality. Application and protocol package
+versions still move independently. See [Rust support and releases](./releasing.md#rust-support-and-releases)
+for the consumer migration.
 
-| Lane             | Toolchain | Runs                                                                                                                                                                                                                                                                                 |
-| ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `workspace-msrv` | 1.97.0    | Linux: `cargo check --workspace --locked`, then `--workspace --all-targets --all-features --locked`                                                                                                                                                                                  |
-| `target-msrv`    | 1.97.0    | `cargo check --workspace --all-targets --all-features --locked --target <t>` for `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`: native on the macOS arm64 and Windows x64 runners, ARM64 Windows cross-checked from the x64 `windows-latest` runner |
-| `launcher-msrv`  | 1.96.0    | `cargo check`, `clippy` and `test` of the `mangostudio` launcher, whose published floor is lower                                                                                                                                                                                     |
+Cargo Shim checks the minimum through its native workspace jobs. The table maps every check from
+the removed jobs to its replacement at 1.99.0. Default-feature checks stay separate from
+all-feature checks, and launcher-only commands keep the launcher's own dependency feature graph.
 
-The workspace floor is `rust-version` in the root `Cargo.toml`;
-`scripts/tests/ci-gate.unit.test.ts` fails when a lane's toolchain drifts from it.
-`target-msrv` exists because `cfg(windows)` and `cfg(target_os = "macos")` code is
-not compiled on Linux, and the native tests of `workspace` run on 1.99.0, so they
-say nothing about the floor. It only checks: compiling every target kind is the
-whole minimum-version claim, and running them would repeat `workspace`. Each `target-msrv` leg also checks the launcher alone (`cargo check -p mangostudio
---all-targets --locked --target <t>`) on 1.96.0, its own declared floor, because
-its Windows-only and target-specific code is compiled by no Linux lane. The
-Windows ARM64 leg is cross-checked from the x64 runner, not run natively; the
-native ARM64 runner only runs the tests below. Neither lane uses rust-cache:
-the cold checks take minutes and the repository's Actions cache is already over
-its quota. Linux musl keeps its own 1.99.0 clippy lane and is not a minimum-Rust
-target.
+| Before                   | Command and package/feature scope                                                                                                                                                                              | Target and runner before                                                                            | Replacement at 1.99.0                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `workspace-msrv`, 1.97.0 | `cargo check --workspace --locked`: workspace libraries/binaries, default features                                                                                                                             | Linux x64, `ubuntu-latest`                                                                          | `workspace` on Linux x64, macOS arm64 and Windows x64, same command                                       |
+| `workspace-msrv`, 1.97.0 | `cargo check --workspace --all-targets --all-features --locked`: workspace, every target kind and feature                                                                                                      | Linux x64, `ubuntu-latest`                                                                          | `workspace` on Linux x64, macOS arm64 and Windows x64, same command                                       |
+| `target-msrv`, 1.97.0    | `cargo check --workspace --all-targets --all-features --locked --target <t>`: full workspace                                                                                                                   | `aarch64-apple-darwin` on `macos-latest`; `x86_64-pc-windows-msvc` on `windows-latest`, both native | `workspace` on each native runner, same scope/features through its host target                            |
+| `target-msrv`, 1.97.0    | Same full-workspace check, `--target aarch64-pc-windows-msvc`                                                                                                                                                  | Windows ARM64 cross-check from x64 `windows-latest`                                                 | `workspace-windows-arm64` on native `windows-11-arm`, same command and explicit target                    |
+| `target-msrv`, 1.96.0    | `cargo check -p mangostudio --all-targets --locked --target <t>`: launcher alone, default features                                                                                                             | Native macOS arm64 and Windows x64                                                                  | `workspace` on those runners, `cargo check -p mangostudio --all-targets --locked`; also runs on Linux x64 |
+| `target-msrv`, 1.96.0    | Same launcher-only check, `--target aarch64-pc-windows-msvc`                                                                                                                                                   | Windows ARM64 cross-check from x64 `windows-latest`                                                 | `workspace-windows-arm64` on native `windows-11-arm`, same command and explicit target                    |
+| `launcher-msrv`, 1.96.0  | `cargo check -p mangostudio --all-targets --locked`, `cargo clippy -p mangostudio --all-targets --locked -- -D warnings`, `cargo test -p mangostudio --all-targets --locked`: launcher alone, default features | Linux x64, `ubuntu-latest`                                                                          | Ubuntu `workspace` retains all three commands; launcher checks also run on macOS arm64 and Windows x64    |
 
-Windows ARM64 also gets native tests (not a minimum-Rust check; they run on the 1.99.0 development toolchain): `workspace-windows-arm64` runs
-`cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0` on
-`windows-11-arm` behind the same Rust signal, because distribution only
-cross-compiles that target and smoke only boots the built binary. It is scoped to
-the runtime package (the protocol and contract crates are architecture-neutral
-and already tested on x64) and feeds the one `Cargo Shim / Gate`.
+Every row uses the same `RUST_WORKSPACE_PATHS` signal in `scripts/lib/rust-lanes.ts` before and
+after the move, and feeds `Cargo Shim / Gate`. `crates/**` selects runtime-only changes, and
+`spec/**` and the other inputs the crates read select protocol changes. Pull requests without a
+matching Rust path skip the Rust jobs under the gate's relevance proof; the gate still reports.
+Pushes selected by the workflow filter and manual dispatches run the Rust jobs. Protocol CI keeps
+its own protocol path signal and does not repeat these baseline checks.
+
+This removes five Rust job instances: one `workspace-msrv`, three `target-msrv` matrix legs and
+one `launcher-msrv`. It retires the old compiler promises while retaining their command, feature
+and platform coverage at the new minimum. No timing or cache-size reduction is claimed here.
+
+The existing checks remain:
+
+| Lane and aggregate gate                        | Command and package/feature scope                                                                                                                 | Runner coverage                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `workspace`, `Cargo Shim / Gate`               | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`; `cargo build --workspace --locked` | Native Linux x64, macOS arm64 and Windows x64                                                              |
+| `workspace`, `Cargo Shim / Gate`               | `cargo nextest run --workspace --all-targets --all-features --locked --retries 0`; nextest/libtest inventory parity                               | Native macOS arm64 and Windows x64; inventory parity also runs on Linux x64                                |
+| `rust-coverage`, `CI / Gate`                   | `cargo llvm-cov --no-report --workspace --all-targets --all-features --locked`, instrumented libtest                                              | Native Linux x64, same Rust path signal                                                                    |
+| `workspace`, `Cargo Shim / Gate`               | `cargo test --doc --workspace --all-features --locked`; `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features --locked`      | Linux x64; protocol-specific macOS/Windows doctests and docs remain in Protocol CI                         |
+| `workspace-windows-arm64`, `Cargo Shim / Gate` | `cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0`                                                      | Native Windows ARM64, `windows-11-arm`, same Rust path signal                                              |
+| `musl-clippy`, `Cargo Shim / Gate`             | `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target <t> -- -D warnings`: runtime, default features                      | Linux cross-checks for `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, same Rust path signal |
+| Protocol CI, `Protocol CI / Gate`              | Protocol feature powerset, interop, schema equality, semver and published-package checks                                                          | Existing protocol path signal and Linux/macOS/Windows coverage                                             |
+
+Windows ARM64 now compiles the full workspace as well as the launcher alone at 1.99.0. Its native
+test command remains scoped to the runtime; full-workspace compilation does not claim native
+execution of every crate's tests there. Fuzz-workspace resolution, ignored fixture regeneration
+and real-binary qualification retain their commands and relevance predicates.
 
 ## Fresh Rust dependencies
 
@@ -90,9 +104,9 @@ only when its artifact was retained (a lock that was produced but not uploaded
 keeps its hash in the receipt, labelled not retained, without a link). The `fresh` result covers the three operating
 systems together. The graph is built and tested with the pinned development
 toolchain (1.99.0) and workspace-wide feature unification
-(`--workspace --all-features`): it says nothing about the 1.97 floor or about a
-single crate's own feature set, which the minimum-Rust lanes check only on the
-committed lock.
+(`--workspace --all-features`). It checks the new graph at the shared minimum, but does not
+replace default-feature or launcher-only checks against the committed lock. A higher minimum
+does not resolve a duplicate-crate dependency-policy failure.
 
 ## Rust coverage
 

@@ -4,7 +4,7 @@ Use este guia quando quiser o caminho mais curto entre o clone do repositório e
 
 ## 1. Configuração
 
-Você precisa do [Bun](https://bun.sh/) e de um toolchain Rust instalado pelo
+Você precisa do [Bun](https://bun.sh/) e do Rust 1.99.0 ou mais recente instalado pelo
 [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
 O hub inicia o Local como o binário `mangostudio-runtime` compilado pelo cargo, e o
 `rust-toolchain.toml` fixa a versão que o rustup instala no primeiro build.

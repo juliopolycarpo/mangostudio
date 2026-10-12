@@ -10,7 +10,7 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 - [Bun](https://bun.sh/) 1.4.3 or newer — `bun upgrade`, or
   `curl -fsSL https://bun.sh/install | bash` for a first install
-- A Rust toolchain via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. The hub launches
+- Rust 1.99.0 or newer via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. The hub launches
   Local as the cargo-built `mangostudio-runtime`; `bun run dev` builds it first, and
   `rust-toolchain.toml` pins the version
 - Git with GPG signing configured (see [Commit Guidelines](#commit-guidelines))

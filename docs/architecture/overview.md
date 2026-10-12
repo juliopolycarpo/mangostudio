@@ -16,12 +16,12 @@ The repository also hosts the **Mango Protocol** — the wire contract the hub a
 speak — on its own version line and its own `protocol-v*` release train. It is not one of the
 three application workspaces and does not follow their lifecycle.
 
-| Path                           | Ships as                                  | Stack                                          |
-| ------------------------------ | ----------------------------------------- | ---------------------------------------------- |
-| `spec/`                        | The normative spec, schemas and fixtures  | Markdown, JSON Schema 2020-12                  |
-| `packages/protocol/`           | `@mangostudio/protocol` on npm            | TypeScript, TypeBox                            |
-| `crates/mango-protocol/`       | `mango-protocol` on crates.io             | Rust, serde, tokio                             |
-| `crates/mangostudio-launcher/` | `mangostudio` on crates.io (the launcher) | Rust, independent application version and MSRV |
+| Path                           | Ships as                                  | Stack                                               |
+| ------------------------------ | ----------------------------------------- | --------------------------------------------------- |
+| `spec/`                        | The normative spec, schemas and fixtures  | Markdown, JSON Schema 2020-12                       |
+| `packages/protocol/`           | `@mangostudio/protocol` on npm            | TypeScript, TypeBox                                 |
+| `crates/mango-protocol/`       | `mango-protocol` on crates.io             | Rust, serde, tokio                                  |
+| `crates/mangostudio-launcher/` | `mangostudio` on crates.io (the launcher) | Rust, application version and shared workspace MSRV |
 
 Both stable Rust crates belong to the root Cargo workspace and share its lockfile, edition,
 development toolchain, and lint policy. The protocol and application versions remain independent.

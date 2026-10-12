@@ -33,6 +33,12 @@ downloads contra `SHA256SUMS` quando aplicável.
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                       |
 | Manual                 | Baixe em [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest) e verifique com `SHA256SUMS` |
 
+O app pré-compilado não precisa de um compilador Rust local. `cargo install mangostudio` compila
+o launcher e exige Rust 1.99.0 ou mais recente. `cargo binstall` usa um arquivo pré-compilado
+quando disponível; a compilação de fallback exige a mesma versão do Rust. Veja a
+[política de suporte e releases Rust](reference/releasing.md#suporte-rust-e-releases) ao migrar
+do Rust 1.96 ou 1.97.
+
 Início rápido com o instalador shell:
 
 ```bash
@@ -119,7 +125,7 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 
 - [Bun](https://bun.sh/) 1.4.3 ou mais recente (`bun upgrade` ou
   `curl -fsSL https://bun.sh/install | bash` na primeira instalação)
-- Um toolchain Rust via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). O hub inicia o
+- Rust 1.99.0 ou mais recente via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). O hub inicia o
   Local como o `mangostudio-runtime` construído com cargo, e o `rust-toolchain.toml` fixa a
   versão que o rustup instala no primeiro build.
 - Uma ou mais chaves de API ou contas com login para provedores suportados
