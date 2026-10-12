@@ -378,7 +378,7 @@ describe('external session manager', () => {
 
   it('does not fail the reap, or keep the session counted, when the runtime close outlasts the hub wait', async () => {
     // The runtime's own close can legitimately take longer than the hub waits for it (up to
-    // 43 s for Codex at the SDK's default limits). The hub drops its record before it asks, and
+    // 38 s for Codex at the SDK's default limits). The hub drops its record before it asks, and
     // a timed-out ask abandons only the wait: the runtime finishes the close and frees its own slot.
     const runtime = createFakeExternalRuntime({
       closeFailure: () => new Error('Request "external-agent.close" timed out after 10000 ms'),
@@ -402,7 +402,7 @@ describe('external session manager', () => {
   });
 
   it('waits a bounded, shorter time for the runtime close than the runtime may take, and a shorter one still at shutdown', async () => {
-    // The runtime finishes a close that takes up to 43 s after the hub stopped waiting, so what the
+    // The runtime finishes a close that takes up to 38 s after the hub stopped waiting, so what the
     // hub waits only decides how long a send, a chat update or a stop is held. The stop has 12 s in all.
     const runtime = createFakeExternalRuntime();
     const manager = managerFor(runtime, ['session-a', 'session-b']);

@@ -1,8 +1,11 @@
-//! The close bound each target gets, derived from the SDK's documented deadlines and the
-//! `Limits` the backend actually runs with.
+//! The close bound each target gets: the SDK's own `close_worst_case` for the harness, computed
+//! from the `Limits` the backend actually runs with.
 use std::sync::Arc;
 use std::time::Duration;
 
+use mango_agent_acp::deadlines::Deadlines as AcpDeadlines;
+use mango_agent_claude::deadlines::Deadlines as ClaudeDeadlines;
+use mango_agent_codex::deadlines::Deadlines as CodexDeadlines;
 use mango_external_agents::Limits;
 
 use super::super::launcher::GuardedProcessLauncher;
@@ -11,58 +14,73 @@ use crate::external_agents::port::AgentBackend;
 use crate::external_agents::wire::TargetId;
 use crate::subprocess::AlwaysAllow;
 
-fn seconds(target: TargetId, limits: &Limits) -> u64 {
-    close_budget(limits, target).as_secs()
+/// The SDK's answer for `target`, asked of its harness crate again here rather than through
+/// `close_budget`: it catches an arm pointing at another harness's `Deadlines`, or a margin added
+/// to one target, not a change in what the SDK computes (the default-seconds test pins that).
+fn sdk_close_worst_case(target: TargetId, limits: &Limits) -> Duration {
+    match target {
+        TargetId::Cursor => AcpDeadlines::from_limits(limits).close_worst_case(),
+        TargetId::Codex => CodexDeadlines::from_limits(limits).close_worst_case(),
+        TargetId::Claude => ClaudeDeadlines::from_limits(limits).close_worst_case(),
+    }
+}
+
+fn custom_limits() -> Limits {
+    Limits {
+        kill_grace: Duration::from_millis(10),
+        shutdown_timeout: Duration::from_millis(100),
+        ..Limits::default()
+    }
 }
 
 #[test]
-fn default_limits_give_each_target_its_documented_worst_close() {
+fn default_limits_give_each_target_the_sdks_worst_case_close() {
     let limits = Limits::default();
-    let received = TargetId::ALL.map(|target| (target.as_str(), seconds(target, &limits)));
+    let received = TargetId::ALL.map(|target| (target.as_str(), close_budget(&limits, target)));
+    let expected = [
+        ("codex", Duration::from_secs(36)),
+        ("cursor", Duration::from_secs(29)),
+        ("claude", Duration::from_secs(24)),
+    ];
     assert_eq!(
-        received,
-        [("codex", 41), ("cursor", 34), ("claude", 24)],
-        "expected worst close seconds per target at 2 s kill_grace and 5 s shutdown_timeout | received {received:?}"
+        received, expected,
+        "expected the close_worst_case seconds per target at the SDK's default limits | received {received:?}"
     );
 }
 
 #[test]
-fn every_default_bound_covers_the_documented_close_paths() {
-    let limits = Limits::default();
-    let documented = [
-        (TargetId::Cursor, 29, "ACP close"),
-        (TargetId::Cursor, 34, "ACP agent exit to Closed"),
-        (TargetId::Codex, 36, "Codex teardown"),
-        (TargetId::Claude, 19, "Claude close with a turn active"),
-        (TargetId::Claude, 24, "Claude close over a pending launch"),
-    ];
-    for (target, path_seconds, path) in documented {
-        let bound = seconds(target, &limits);
-        assert!(
-            bound >= path_seconds,
-            "expected a {} bound of at least {path_seconds} s for {path} | received {bound} s",
-            target.as_str()
-        );
+fn every_target_gets_exactly_the_sdks_worst_case_close_for_the_same_limits() {
+    for limits in [Limits::default(), custom_limits()] {
+        for target in TargetId::ALL {
+            let received = close_budget(&limits, target);
+            let expected = sdk_close_worst_case(target, &limits);
+            assert_eq!(
+                received,
+                expected,
+                "expected the {} bound to equal the SDK's close_worst_case | received {received:?} for kill_grace {:?}, shutdown_timeout {:?}",
+                target.as_str(),
+                limits.kill_grace,
+                limits.shutdown_timeout
+            );
+        }
     }
 }
 
 #[test]
 fn the_bound_moves_with_the_limits_it_is_derived_from() {
-    let limits = Limits {
-        kill_grace: Duration::from_millis(10),
-        shutdown_timeout: Duration::from_millis(100),
-        ..Limits::default()
-    };
-    let received = TargetId::ALL.map(|target| close_budget(&limits, target));
-    assert_eq!(
-        received,
-        [
-            Duration::from_millis(730),
-            Duration::from_millis(620),
-            Duration::from_millis(420),
-        ],
-        "expected 3 kg + 7 st, 2 kg + 6 st and 2 kg + 4 st for codex, cursor, claude | received {received:?}"
-    );
+    let defaults = Limits::default();
+    let custom = custom_limits();
+    for target in TargetId::ALL {
+        let (before, after) = (
+            close_budget(&defaults, target),
+            close_budget(&custom, target),
+        );
+        assert!(
+            after < before && after > Duration::ZERO,
+            "expected a shorter nonzero {} bound under kill_grace 10 ms and shutdown_timeout 100 ms | received {before:?} at the defaults, {after:?} under the custom limits",
+            target.as_str()
+        );
+    }
 }
 
 #[test]
@@ -95,7 +113,7 @@ fn the_backend_answers_with_its_own_limits_per_target() {
         Duration::from_secs(2),
     );
     let received = TargetId::ALL.map(|target| backend.close_budget(target));
-    let expected = TargetId::ALL.map(|target| close_budget(&limits, target));
+    let expected = TargetId::ALL.map(|target| sdk_close_worst_case(target, &limits));
     assert_eq!(
         received, expected,
         "expected the Backend to apply its Limits per target | received {received:?}"

@@ -851,7 +851,7 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.6.0). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.6.1). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
@@ -924,20 +924,24 @@ These product facts come from SDK operations inside the adapter:
   whose code is `vendor-turn-incomplete` and whose `vendorCode` is the stop reason. The turn
   footer shows the code and the message.
 
-- **Close bound.** A session's vendor close is bounded by the SDK's documented worst case for its
-  harness, computed from the `Limits` the backend runs with (`close_budget` in
-  `adapter/backend.rs`), plus the supervisor's 2 s cleanup bound. At the default 2 s `kill_grace`
-  and 5 s `shutdown_timeout` that is 36 s for Cursor (ACP: `2 kg + 6 st`, the agent-exit path to
-  `Closed`; a plain `close` is 29 s), 43 s for Codex and 26 s for Claude (`2 kg + 4 st`: a close
-  over a launch still pending; 19 s with a turn active). The Codex figure is `3 kg + 7 st`: the
-  36 s teardown the SDK documents (`3 kg + 6 st`) plus one `shutdown_timeout` the SDK describes
-  separately, the wait before the teardown that follows an inbound overflow. That extra term is a
-  conservative margin read from the overflow paragraph, not a row of the Deadlines table. The
-  bound was 9 s for every target under 0.5.0. A close that exceeds its bound is reported as
-  failed and frees the slot while the SDK may still be reaping, so the bound has to cover the
-  documented path.
+- **Close bound.** A session's vendor close is bounded by the SDK's own worst case for its
+  harness, plus the supervisor's 2 s cleanup bound. `close_budget` in `adapter/backend.rs` asks each
+  harness crate for `Deadlines::from_limits(&limits).close_worst_case()` with the `Limits` the
+  backend runs with, so the runtime keeps no copy of the SDK's tables and a change to what a close
+  waits on moves the bound with the SDK. The supervisor's timer starts at the call to the SDK's
+  `close` (for a requested close or a revocation, the cleanup of an open that finished late, and
+  a registration refused after the open finished, alike) and nothing waits for a turn first, so the number that fits is the one the SDK measures
+  from that call: 29 s for Cursor (ACP), 36 s for Codex and 24 s for Claude at the default 2 s
+  `kill_grace` and 5 s `shutdown_timeout`, or 31 s, 38 s and 26 s with the cleanup bound. The
+  figures the old formulas used, 34 s for an ACP agent's exit to `Closed` and 41 s for a Codex
+  inbound overflow to `Closed`, are measured from that event, not from a close; a `close` called
+  inside those windows is still bounded from its own call. The bound was 36 s, 43 s and 26 s under hand-written copies of
+  the guides' tables, and 9 s for every target under 0.5.0. A close that exceeds its bound is
+  reported as failed and frees the slot while the SDK may still be reaping, so the bound has to
+  cover the documented path. The cleanup bound stays because the adapter settles a failed
+  close's cleanup handle inside the same timed span.
 - **What the hub waits for.** The runtime's close can take longer than the hub's 30 s
-  `CALL_TIMEOUT_MS` (up to 43 s), so the hub does not tie its own wait to it. `teardown` drops the
+  `CALL_TIMEOUT_MS` (up to 38 s), so the hub does not tie its own wait to it. `teardown` drops the
   hub's record and tells the turn before it asks, and `closeRemote` waits 10 s (`CLOSE_WAIT_MS`), or
   5 s while the hub stops (`SHUTDOWN_CLOSE_WAIT_MS`, inside the 12 s stop budget). A close the hub
   stopped waiting for is logged as `session_close_unconfirmed` at info level and swallowed, never
@@ -947,9 +951,16 @@ These product facts come from SDK operations inside the adapter:
   cancel token into `close_session`, so it finishes the close and frees its own slot when the SDK is
   done. Until then that slot still counts against the runtime's cap of four sessions, so an open
   that follows the reap can be refused with `external_agent_capacity`. The hub retries only that
-  refusal, once a second for up to 45 s (`CAPACITY_RETRY_MS`, the longest close the runtime
-  allows), and a reap of the chat ends the wait. Nothing is counted twice. Cancel is unchanged: the
-  hub terminates the turn first and does not wait for the cancel call, which the runtime does not
+  refusal, once a second for up to 42 s (`CAPACITY_RETRY_MS`: the longest close bound the runtime
+  enforces, 38 s, plus the 2 s a cancelled open can still hold its slot while it settles, plus a
+  2 s margin), and a reap of the chat ends the wait. Nothing is counted twice. The hub cannot
+  read the runtime's limits, so that number is a literal in `external-session-manager.ts`; a
+  runtime test (`adapter/hub_retry_window_tests.rs`) reads it back and fails when it differs from
+  the longest per-target close bound at the limits production passes plus those two terms, so an
+  SDK deadline change or an edit on either side cannot drift silently. No handshake or capability
+  carries the bound: the session cap is not advertised either, and a new field would be a wire
+  change for a value the open path does not otherwise need. Cancel is unchanged: the hub
+  terminates the turn first and does not wait for the cancel call, which the runtime does not
   bound itself.
 - **Revocation and abandoned closes.** The consent watcher runs the revocation close on its own
   task, so a slow close does not hold the next consent poll or the shutdown that follows the hub
@@ -963,7 +974,12 @@ These product facts come from SDK operations inside the adapter:
 
 - **ACP turn errors and names.** An agent that answers `session/prompt` with a JSON-RPC error ends
   that turn with `acp-request-failed` and the session stays usable: the runtime never closes a
-  session on a turn error, so the next turn runs on the same child. An ACP tool call is named by
+  session on a turn error, so the next turn runs on the same child. The one exception is ACP's
+  authentication-required code (`-32000`): since SDK 0.6.1 it ends the turn with
+  `acp-auth-required`, the message `authentication required; to sign in:` followed by the
+  profile's login command (`cursor-agent login` for Cursor) and none of the agent's own text,
+  and `vendorCode` `-32000`; the session still stays usable. The hub and the client treat the
+  code as free text, so the turn footer shows that code and message as they are. An ACP tool call is named by
   the agent's own `name` when it sends one and by its title otherwise, so the activity label of a
   call that now carries a name changes from its title to that name.
 - **ACP outbound allowance.** `ACP_OUTBOUND_BUFFER_BYTES` (55 MiB) bounds one outgoing ACP frame.
@@ -1142,12 +1158,12 @@ protocols to the SDK and are not repeated here.
 | resolves the toolchain open carried and reuses it; leaves `PATH` untouched without one                             | `commands/toolchain.rs` tests; `open_resolves_its_toolchain_into_the_session_host_and_turns_reuse_it`                                                                                                                                                                                                                                           | covered                                                               |
 | streams ordered semantic events and coalesces a retried client message id                                          | `a_turn_streams_ordered_events_and_an_approval_round_trips`, `a_repeated_client_message_id_answers_without_a_second_turn`                                                                                                                                                                                                                       | covered                                                               |
 | steer: forwards, passes a rejection through, answers not-supported, refuses a closed session                       | `steering_is_answered_not_thrown_when_it_cannot_land`, `a_duplicate_steer_waiting_on_one_that_fails_in_transit_receives_its_failure`, `steering_a_session_that_is_not_open_is_refused_before_the_vendor`, `a_steer_naming_another_turn_is_refused_without_reaching_the_vendor`, `an_unstructured_steer_failure_is_returned_as_its_mapped_error` | covered                                                               |
-| bounds a vendor close by the SDK's documented worst case for its harness, not by one number                        | `default_limits_give_each_target_its_documented_worst_close`, `every_default_bound_covers_the_documented_close_paths`, `the_bound_moves_with_the_limits_it_is_derived_from`, `a_close_inside_the_backends_budget_plus_cleanup_is_not_reported_as_failed`                                                                                        | covered                                                               |
+| bounds a vendor close by the SDK's own worst case for its harness, not by one number                               | `default_limits_give_each_target_the_sdks_worst_case_close`, `every_target_gets_exactly_the_sdks_worst_case_close_for_the_same_limits`, `the_bound_moves_with_the_limits_it_is_derived_from`, `a_close_inside_the_backends_budget_plus_cleanup_is_not_reported_as_failed`                                                                       | covered                                                               |
 | reports a close past its bound with the bound named; saturates an unbounded budget                                 | `a_close_past_the_backends_budget_plus_cleanup_names_the_bound_it_exceeded`, `an_unbounded_backend_budget_saturates_the_close_bound_instead_of_panicking`                                                                                                                                                                                       | covered                                                               |
 | waits the hub a bounded time for the runtime close; a close it gave up on neither fails the reap nor stays counted | hub: `waits a bounded, shorter time for the runtime close than the runtime may take, and a shorter one still at shutdown`, `does not fail the reap, or keep the session counted, when the runtime close outlasts the hub wait`, `isUnconfirmedClose`                                                                                            | covered                                                               |
-| retries an open refused at the runtime's session cap, and nothing else                                             | hub: `retries the refusal until the slot frees, then opens`, `gives up with the runtime's own refusal once the wait has passed`, `does not retry any other refusal`; runtime: `the_session_cap_counts_opening_sessions`                                                                                                                         | covered                                                               |
+| retries an open refused at the runtime's session cap, and nothing else                                             | hub: `retries the refusal until the slot frees, then opens`, `gives up with the runtime's own refusal once the wait has passed`, `does not retry any other refusal`; runtime: `the_session_cap_counts_opening_sessions`, `the_hub_retry_window_is_the_longest_runtime_close_bound_plus_its_margins`                                             | covered                                                               |
 | keeps a slow revocation close off the watcher; removes the scratch leaf of an abandoned close                      | `a_slow_revocation_close_does_not_hold_up_hub_shutdown`, `an_abandoned_close_still_removes_the_scratch_leaf`                                                                                                                                                                                                                                    | covered                                                               |
-| keeps an ACP session after the agent's own prompt error; refuses before queueing is resendable                     | `an_agents_prompt_error_ends_one_turn_and_the_next_turn_runs_on_the_same_session`, `a_turn_on_a_closed_session_was_not_submitted_and_the_hub_may_resend_it`                                                                                                                                                                                     | covered                                                               |
+| keeps an ACP session after the agent's own prompt error; refuses before queueing is resendable                     | `an_agents_prompt_error_ends_one_turn_and_the_next_turn_runs_on_the_same_session`, `a_prompt_refused_for_authentication_ends_the_turn_with_the_sign_in_hint_and_keeps_the_session`, `a_turn_on_a_closed_session_was_not_submitted_and_the_hub_may_resend_it`                                                                                    | covered                                                               |
 | shows a vendor notice with its severity as display only; never as text or model input                              | `a_notice_keeps_its_severity_and_words_as_a_display_only_event`, `a_severity_the_sdk_has_no_arm_for_is_info_and_its_spelling_stays_off_the_wire`; `external-turn-live-vs-reload.test.ts` (a vendor notice); `replay-builder.test.ts` (an external_notice part)                                                                                  | covered                                                               |
 | caps a vendor's notices at eight a turn in the relay and the hub without spending the turn's budget                | `a_flood_of_notices_reaches_the_hub_capped_and_does_not_end_the_turn`; hub: `drops notices past the cap without spending the budget that could end the turn`; shared: `forwards exactly as many notices as the hub keeps`                                                                                                                       | covered                                                               |
 | bounds concurrent sessions and recovers capacity after close                                                       | `the_session_cap_counts_opening_sessions`, `closing_a_session_returns_its_capacity_to_the_next_open`                                                                                                                                                                                                                                            | covered                                                               |

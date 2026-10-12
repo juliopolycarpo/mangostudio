@@ -1181,9 +1181,9 @@ impl Supervisor {
 
     /// Closes every session for a withdrawn consent without holding the watcher.
     ///
-    /// A close can take as long as the SDK documents (up to 43 s for Codex at the default limits),
-    /// and the watcher also owns shutdown when the hub session ends, so the close runs on its own
-    /// task, one at a time. Every session is told to stop at once either way; only the watcher's
+    /// A close can take as long as the SDK documents (up to 38 s for Codex at the default limits,
+    /// cleanup allowance included), and the watcher also owns shutdown when the hub session ends,
+    /// so the close runs on its own task, one at a time. Every session is told to stop at once either way; only the watcher's
     /// next poll and its shutdown arm are no longer waiting behind the slowest close.
     fn revoke_consent(self: &Arc<Self>) {
         if self.revoking.swap(true, Ordering::AcqRel) {
