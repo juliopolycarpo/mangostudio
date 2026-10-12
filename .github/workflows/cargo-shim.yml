@@ -3,11 +3,10 @@ name: Cargo Shim
 # The workflow name stays stable because repository rules require its Gate
 # check. The implementation now owns the complete root Cargo workspace: all
 # workspace members build and test on the three supported runner OSes, and the
-# minimum supported Rust is enforced here for every Rust path: the workspace
-# floor (`workspace-msrv`, plus `target-msrv` for the Windows and macOS code
-# Linux never compiles) and the published launcher's lower, explicit floor
-# (`launcher-msrv`). The fuzz crate remains excluded from stable workspace
-# builds and is resolved through its own lock.
+# minimum supported Rust matches the development pin for every stable crate.
+# Native jobs retain the default-feature and all-feature workspace checks,
+# isolated launcher checks and Windows ARM64 compilation formerly split across
+# minimum-version jobs. The fuzz crate stays excluded and uses its own lock.
 #
 # Pull requests always start the workflow so the Gate check reports even when
 # the Rust lanes are irrelevant. Pushes to main keep a path filter.
@@ -141,12 +140,35 @@ jobs:
 
       - run: cargo fmt --all -- --check
 
+      # The development pin is also the shared minimum. Keep both dependency
+      # graphs: default library/binary features and every target/feature.
+      - run: cargo check --workspace --locked
+        if: ${{ !cancelled() }}
+
+      - run: cargo check --workspace --all-targets --all-features --locked
+        if: ${{ !cancelled() }}
+
+      # Package selection prevents other members from enabling dependency
+      # features that could hide a launcher-only compilation or lint failure.
+      - run: cargo check -p mangostudio --all-targets --locked
+        if: ${{ !cancelled() }}
+
+      - name: Check launcher lints
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        run: cargo clippy -p mangostudio --all-targets --locked -- -D warnings
+
+      - name: Test launcher
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        run: cargo test -p mangostudio --all-targets --locked
+
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        if: ${{ !cancelled() }}
 
       # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
+        if: ${{ !cancelled() }}
 
       # Version-pinned here and hash-pinned through the action, which verifies
       # the release checksum from its own manifest. nextest runs each test in
@@ -155,6 +177,7 @@ jobs:
       - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cargo-nextest@0.9.144
+        if: ${{ !cancelled() }}
 
       # Ubuntu's copy of this run is `cargo llvm-cov` in rust-coverage.yml,
       # called from ci.yml: same flags, same libtest runner, same test set,
@@ -165,7 +188,7 @@ jobs:
       # --all-targets --all-features --locked`. `--retries 0` keeps a flaky
       # test a failure instead of a second attempt that passes.
       - name: Run tests
-        if: matrix.os != 'ubuntu-latest'
+        if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
         run: cargo nextest run --workspace --all-targets --all-features --locked --retries 0
 
       # What the runner swap must preserve is the test set, not the timing: the
@@ -173,6 +196,7 @@ jobs:
       # every OS, Ubuntu included, whose own run is the instrumented libtest
       # one above. A mismatch prints each differing case and fails the job.
       - name: Check nextest runs the libtest test set
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           bun scripts/bench/rust-test-inventory.ts capture "$RUNNER_TEMP/libtest.json"
@@ -187,16 +211,17 @@ jobs:
       # macOS and Windows, where that crate's `cfg`-gated transports have
       # doctests and intra-doc links of their own.
       - name: Run doctests
-        if: matrix.os == 'ubuntu-latest'
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
         run: cargo test --doc --workspace --all-features --locked
 
       - name: Build API docs (deny warnings)
-        if: matrix.os == 'ubuntu-latest'
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
         run: cargo doc --no-deps --workspace --all-features --locked
         env:
           RUSTDOCFLAGS: -D warnings
 
       - run: cargo build --workspace --locked
+        if: ${{ !cancelled() }}
 
   workspace-windows-arm64:
     # Nothing else runs `cargo test` on Windows ARM64: distribution only
@@ -222,146 +247,31 @@ jobs:
 
       - run: rustup show active-toolchain
 
+      # The former target-msrv job checked every workspace member and target
+      # kind. Runtime-only native tests below cannot replace that coverage.
+      - run: rustup target add aarch64-pc-windows-msvc
+
+      - run: cargo check --workspace --all-targets --all-features --locked --target aarch64-pc-windows-msvc
+        if: ${{ !cancelled() }}
+
+      - run: cargo check -p mangostudio --all-targets --locked --target aarch64-pc-windows-msvc
+        if: ${{ !cancelled() }}
+
       # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
+        if: ${{ !cancelled() }}
 
       # Pinned like the workspace job's install: the exact version through the
       # SHA-pinned action, which verifies the release checksum.
       - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cargo-nextest@0.9.144
+        if: ${{ !cancelled() }}
 
       - run: cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0
-
-  workspace-msrv:
-    # The workspace floor is `rust-version` in the root Cargo.toml (stable minus
-    # two minors), which every member but the launcher inherits. It lives here,
-    # on the shared Rust signal, rather than in Protocol CI: that workflow's
-    # signal is protocol paths only, so a runtime-only change skipped the floor
-    # entirely. Every path that can change what this compiles is already in
-    # RUST_WORKSPACE_PATHS, so a protocol-crate edit still reaches this lane.
-    #
-    # `RUSTUP_TOOLCHAIN` outranks the root rust-toolchain.toml (1.99.0) for every
-    # step, including rust-cache's compiler fingerprint and the build scripts'
-    # `rustc`, so no later command can silently be checked against 1.99.0.
-    # cargo-shim.yml's test pins this value to the manifest's rust-version.
-    #
-    # Two commands, because the shipped artefacts and the test tree differ:
-    # the first is what `cargo build --workspace` ships (default features, lib
-    # and bin targets); the second adds tests, examples and benches with every
-    # feature on, so a floor-breaking API used only there fails too.
-    #
-    # No rust-cache step, on purpose: a `cargo check` of the workspace is a few
-    # minutes cold, the repository's Actions cache is already over its quota, and
-    # an entry per floor lane would only evict the entries the longer lanes need.
-    name: Workspace MSRV (1.97.0)
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      RUSTUP_TOOLCHAIN: 1.97.0
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - run: rustup toolchain install 1.97.0 --profile minimal
-
-      - run: cargo check --workspace --locked
-
-      - run: cargo check --workspace --all-targets --all-features --locked
-
-  target-msrv:
-    # `cfg(windows)` and `cfg(target_os = "macos")` code (named pipes, handle
-    # based file I/O, the guardian and probing backends) is not compiled by the
-    # Linux lane above, and the native 1.99.0 tests in `workspace` prove nothing
-    # about the floor. A `cargo check` on the floor toolchain closes that, one
-    # runner per target: native on the macOS arm64 and Windows x64 runners, and
-    # Windows ARM64 cross-checked from the x64 `windows-latest` runner, whose
-    # image carries the ARM64 MSVC tools (runtime-build.yml builds the same
-    # target there). The native ARM64 tests are `workspace-windows-arm64`
-    # below, on the 1.99.0 toolchain. Check only: it compiles every target kind
-    # without linking or running, which is all a minimum-version claim needs.
-    # musl keeps its own 1.99.0 clippy lane and is not repeated here. No
-    # rust-cache step, for the same reason as `workspace-msrv`.
-    name: Target MSRV (${{ matrix.target }})
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
-    env:
-      RUSTUP_TOOLCHAIN: 1.97.0
-      # Through the environment, never interpolated into a script (zizmor's
-      # template-injection rule); bash on every runner so `$TARGET` expands.
-      TARGET: ${{ matrix.target }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - run: rustup toolchain install 1.97.0 --profile minimal --target "$TARGET"
-
-      - run: cargo check --workspace --all-targets --all-features --locked --target "$TARGET"
-
-      # The launcher declares a lower floor than the workspace, and its Windows
-      # and target-specific code is compiled by no Linux lane, so the 1.97 check
-      # above says nothing about 1.96 there. The step's own RUSTUP_TOOLCHAIN
-      # outranks the job's; cargo-shim.yml's test pins it to the launcher's
-      # rust-version.
-      - run: rustup toolchain install 1.96.0 --profile minimal --target "$TARGET"
-        env:
-          RUSTUP_TOOLCHAIN: 1.96.0
-
-      - run: cargo check -p mangostudio --all-targets --locked --target "$TARGET"
-        env:
-          RUSTUP_TOOLCHAIN: 1.96.0
-
-  launcher-msrv:
-    name: Launcher MSRV
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      # This outranks the root rust-toolchain.toml, so the launcher cannot
-      # silently drift from the floor declared in its Cargo.toml.
-      RUSTUP_TOOLCHAIN: 1.96.0
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-        with:
-          toolchain: 1.96.0
-          components: clippy
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - run: cargo check -p mangostudio --all-targets --locked
-
-      - run: cargo clippy -p mangostudio --all-targets --locked -- -D warnings
-
-      - run: cargo test -p mangostudio --all-targets --locked
+        if: ${{ !cancelled() }}
 
   musl-clippy:
     # The shipped Alpine runtimes compile against musl's libc bindings, whose
@@ -544,9 +454,6 @@ jobs:
       changes,
       workspace,
       workspace-windows-arm64,
-      workspace-msrv,
-      target-msrv,
-      launcher-msrv,
       musl-clippy,
       fuzz-workspace,
       runtime-home-fixture-freshness,
@@ -569,6 +476,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 workspace-msrv target-msrv launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

@@ -217,7 +217,6 @@ describe('CARGO_INCREMENTAL in CI', () => {
       .map(({ file, name }) => `${file.split('/').pop()}:${name}`);
     for (const expected of [
       'cargo-shim.yml:workspace',
-      'cargo-shim.yml:workspace-msrv',
       'cargo-shim.yml:workspace-windows-arm64',
       'protocol-ci.yml:rust',
       'rust-coverage.yml:coverage',

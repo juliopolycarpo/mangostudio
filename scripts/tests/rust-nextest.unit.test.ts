@@ -52,7 +52,7 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
     expect(
       step,
       'expected the step to skip ubuntu-latest: it runs under rust-coverage.yml'
-    ).toContain("if: matrix.os != 'ubuntu-latest'");
+    ).toContain("!cancelled() && matrix.os != 'ubuntu-latest'");
   });
 
   test('installs cargo-nextest at an exact version through the SHA-pinned install action, before first use', () => {
@@ -74,8 +74,9 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
     ).toBeLessThan(firstUse);
     expect(
       install,
-      'expected an unconditional install: the parity step runs on every OS'
-    ).not.toContain('if:');
+      'expected the install on every OS, even after another validation fails'
+    ).toContain('!cancelled()');
+    expect(install).not.toContain('matrix.os');
   });
 
   test('keeps the doctests on cargo test --doc, on Ubuntu', () => {
@@ -83,7 +84,7 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
 
     expect(step, `expected doctest command: ${DOCTESTS} | received: none`).toBeDefined();
     expect(step).toContain(`run: ${DOCTESTS}`);
-    expect(step).toContain("if: matrix.os == 'ubuntu-latest'");
+    expect(step).toContain("!cancelled() && matrix.os == 'ubuntu-latest'");
   });
 
   test('compares libtest and nextest test identities on every OS and fails on a mismatch', () => {
@@ -96,7 +97,10 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
         `expected inventory command: ${INVENTORY} ${command} | received: ${received}`
       ).toContain(`${INVENTORY} ${command}`);
     }
-    expect(step, 'expected the comparison to run on every OS').not.toContain('if:');
+    expect(step, 'expected the comparison to run on every OS').not.toContain('matrix.os');
+    expect(step, 'expected the comparison after another validation fails').toContain(
+      '!cancelled()'
+    );
     expect(step, 'expected a comparison whose failure fails the job').not.toContain(
       'continue-on-error'
     );
@@ -109,7 +113,7 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
 
     expect(
       received,
-      'expected libtest --all-targets steps in cargo-shim.yml: only the launcher floor'
+      'expected libtest --all-targets steps in cargo-shim.yml: only the isolated launcher tests'
     ).toEqual(['cargo test -p mangostudio --all-targets --locked']);
   });
 

@@ -65,6 +65,10 @@ Isso remove cinco instâncias de jobs Rust: um `workspace-msrv`, três pernas da
 cobertura de comandos, features e plataformas no novo mínimo. Esta mudança não apresenta
 medição de redução de tempo ou de tamanho do cache.
 
+As validações independentes e a preparação de Bun/nextest usam `!cancelled()` para que um check
+com falha não impeça os outros checks ou os testes nativos. Cada falha ainda reprova o job e o
+gate agregado.
+
 Os checks existentes continuam:
 
 | Lane e gate agregado                           | Comando e escopo de pacote/features                                                                                                               | Cobertura de runners                                                                                                   |

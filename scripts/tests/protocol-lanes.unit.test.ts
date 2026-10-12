@@ -314,7 +314,7 @@ describe('protocol lane selection', () => {
     ).toBeDefined();
     if (shimNonUbuntu.has(label)) {
       expect(shimStep, `${label}: expected cargo-shim to leave Ubuntu to rust-coverage`).toContain(
-        "if: matrix.os != 'ubuntu-latest'"
+        "!cancelled() && matrix.os != 'ubuntu-latest'"
       );
       expect(
         readText('.github/workflows/rust-coverage.yml'),
@@ -329,14 +329,16 @@ describe('protocol lane selection', () => {
       return;
     }
     if (!shimUbuntuOnly.has(label)) {
-      expect(shimStep, `${label}: expected cargo-shim to run it on every OS`).not.toContain('if:');
+      expect(shimStep, `${label}: expected cargo-shim to run it on every OS`).not.toContain(
+        'matrix.os'
+      );
       expect(
         protocolStep,
         `${label}: "${scoped}" duplicates cargo-shim; expected it only in cargo-shim`
       ).toBeUndefined();
       return;
     }
-    expect(shimStep).toContain("if: matrix.os == 'ubuntu-latest'");
+    expect(shimStep).toContain("!cancelled() && matrix.os == 'ubuntu-latest'");
     expect(protocolStep, `${label}: expected protocol-ci to keep macOS and Windows`).toContain(
       "if: matrix.os != 'ubuntu-latest'"
     );
@@ -356,13 +358,13 @@ describe('protocol lane selection', () => {
     // path (the protocol crate's included) rather than only for protocol paths.
     expect(
       extractJobBlock(protocol, 'msrv'),
-      'protocol-ci must not own a second minimum-Rust job; cargo-shim workspace-msrv covers the crate'
+      'protocol-ci must not own a second minimum-Rust job; cargo-shim workspace covers the crate'
     ).toBe('');
     const gate = extractJobBlock(protocol, 'gate');
     expect(gate, 'protocol-ci Gate still waits on the removed msrv job').not.toMatch(/\bmsrv\b/);
-    expect(
-      extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace-msrv')
-    ).toContain('cargo check --workspace --all-targets --all-features --locked');
+    expect(extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace')).toContain(
+      'cargo check --workspace --all-targets --all-features --locked'
+    );
     expect(extractJobBlock(protocol, 'interop')).toContain(
       'cargo build --locked --example conformance_peer --features testing,websocket,spawn'
     );
@@ -374,18 +376,24 @@ describe('protocol lane selection', () => {
 });
 
 describe('the protocol tree at the repository root', () => {
-  test('the launcher MSRV lane pins its toolchain past the root rust-toolchain.toml', () => {
-    // rustup resolves `rust-toolchain.toml` by walking up from the working
-    // directory, so the protocol workspace's file at the root overrides the one
-    // `dtolnay/rust-toolchain` installs the launcher's declared MSRV. The root
-    // toolchain file would otherwise win when Cargo runs from the workspace.
-    // Without the environment variable the crate silently stops being built
-    // against its declared MSRV and the lane still reports green.
-    const workflow = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'launcher-msrv');
-    const pinned = /toolchain: (\S+)/.exec(workflow)?.[1];
-    expect(pinned).toBeDefined();
-    expect(workflow).toContain(`RUSTUP_TOOLCHAIN: ${pinned}`);
-    expect(readText('rust-toolchain.toml')).not.toContain(`channel = "${pinned}"`);
+  test('every stable crate inherits the baseline selected by the development toolchain', () => {
+    const { workspace } = Bun.TOML.parse(readText('Cargo.toml')) as {
+      workspace: { members: string[]; package: { 'rust-version': string } };
+    };
+    const { toolchain } = Bun.TOML.parse(readText('rust-toolchain.toml')) as {
+      toolchain: { channel: string };
+    };
+    const floor = workspace.package['rust-version'];
+    expect(floor, 'intentional Rust support baseline').toBe('1.99.0');
+    expect(toolchain.channel, 'development compiler must prove the declared minimum').toBe(floor);
+    for (const member of workspace.members) {
+      const { package: metadata } = Bun.TOML.parse(readText(`${member}/Cargo.toml`)) as {
+        package: { 'rust-version': { workspace?: boolean } };
+      };
+      expect(metadata['rust-version'], `${member} must inherit the shared Rust minimum`).toEqual({
+        workspace: true,
+      });
+    }
   });
 
   test('no workspace member opts the release profile into panic = "abort"', () => {
@@ -428,13 +436,13 @@ describe('the protocol tree at the repository root', () => {
     expect(manifest).not.toContain('packages/cargo-shim');
   });
 
-  test('the launcher shares build policy without inheriting the protocol version or MSRV', () => {
+  test('the launcher shares Rust build policy while keeping the application version', () => {
     const manifest = readText('crates/mangostudio-launcher/Cargo.toml');
 
     expect(manifest).toContain('version = "0.1.1"');
-    expect(manifest).not.toContain('version.workspace = true');
+    expect(manifest).not.toMatch(/^version\.workspace = true$/m);
     expect(manifest).toContain('edition.workspace = true');
-    expect(manifest).toContain('rust-version = "1.96.0"');
+    expect(manifest).toContain('rust-version.workspace = true');
     expect(manifest).toContain('[lints]\nworkspace = true');
   });
 

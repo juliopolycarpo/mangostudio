@@ -62,6 +62,9 @@ This removes five Rust job instances: one `workspace-msrv`, three `target-msrv` 
 one `launcher-msrv`. It retires the old compiler promises while retaining their command, feature
 and platform coverage at the new minimum. No timing or cache-size reduction is claimed here.
 
+Independent validations and their Bun/nextest setup use `!cancelled()` so a failed check does not
+suppress the remaining checks or native tests. Each failure still fails the job and aggregate gate.
+
 The existing checks remain:
 
 | Lane and aggregate gate                        | Command and package/feature scope                                                                                                                 | Runner coverage                                                                                            |
