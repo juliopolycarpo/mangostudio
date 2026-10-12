@@ -40,7 +40,7 @@
 // night's findings, the attempt log a crash would otherwise clobber is kept
 // alongside the retry's instead of overwritten.
 //
-// Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/4
+// Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/3
 
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -381,7 +381,7 @@ const snapshotTimings = async (timingsDir: string): Promise<string | null> => {
  * null when there was no baseline — a cold timings cache — and "absent" is
  * then the state to restore, not a no-op: the killed attempt's
  * `--update-timings` leaves this shard's partial slices behind, and a retry
- * that balances against them derives a different partition than the seven
+ * that balances against them derives a different partition than the other
  * shards still falling back to the round-robin split.
  */
 const restoreTimings = async (timingsDir: string, backup: string | null): Promise<void> => {

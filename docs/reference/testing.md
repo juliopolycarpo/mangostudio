@@ -447,7 +447,7 @@ cannot even receive `$MANGOSTUDIO_BUN_TEST_ARGS`.
 > accumulation across workers, so serial `--isolate` concentrates rather than
 > avoids it.
 
-CI runs four shards, the frontend job, and one merge job
+CI runs three shards, the frontend job, and one merge job
 (`.github/workflows/test.yml`). Where the sharded run's time went when the
 split was designed, measured on run 32331139863 (four-core runner, Turbo
 running the lanes concurrently, the frontend then still on Vitest at 189.4s):
@@ -462,8 +462,8 @@ running the lanes concurrently, the frontend then still on Vitest at 189.4s):
 The shard boundary is a slice of *every* sharded lane rather than one job per
 workspace: a per-workspace split leaves `apps/api` alone at 278s.
 
-The current count comes from five first-attempt hosted CI runs each at 4, 6
-and 8 shards on 2026-10-11/12 UTC. The runs were interleaved sequentially on
+The count before the current one came from five first-attempt hosted CI runs
+each at 4, 6 and 8 shards on 2026-10-11/12 UTC. The runs were interleaved sequentially on
 frozen source [`683f69a`](https://github.com/juliopolycarpo/mangostudio/commit/683f69a57b798ea85f4fa93184e17acf3de3ce41),
 with Bun 1.4.3 and the shipping native runtime profile. The variants changed
 only the count, matrix and job name. The latency rule fixed before testing ranked
@@ -483,7 +483,7 @@ the frontend, timings resolver and merge. Summed shard queue measures each
 numbered shard's `created_at` to `started_at`; it is aggregate waiting, not
 the workflow's critical path.
 
-Four is the deployed count to reduce runner demand. Its observed median Test
+Four was the count that comparison deployed, to reduce runner demand. Its observed median Test
 end was 51 seconds lower than eight, with 171 fewer Test runner-seconds.
 Six ranked first under the latency rule, but its three-second lead over four
 is small relative to the observed variation. Four used 90 fewer Test
@@ -515,9 +515,64 @@ main. The chosen configuration is validated on updated source separately;
 these timings do not compare the new workload across counts. Re-measure after
 a runtime profile or CI concurrency/topology change.
 
+The current configuration uses three shards with the api unit lane at
+`--parallel=4`. The comparison above ran that lane at one worker per shard, so
+it does not rank three. The initial three-shard estimate used per-lane times
+from one four-shard run on main
+([38202725009](https://github.com/juliopolycarpo/mangostudio/actions/runs/38202725009)),
+where the api lane runs unit then integration back to back and root scripts
+runs beside it:
+
+| Shard | api unit | api integration | root scripts | Test step |
+| ----- | -------- | --------------- | ------------ | --------- |
+| 1     | 50s      | 32s             | 58s          | 82s       |
+| 2     | 55s      | 30s             | 65s          | 86s       |
+| 3     | 39s      | 29s             | 30s          | 68s       |
+| 4     | 46s      | 73s             | 25s          | 119s      |
+
+The initial estimate assumed the unit lane would get about 2.5x from four
+workers on a runner shared with root scripts, against 3.4x on four idle local
+cores. Redistributing those totals over three shards gave roughly 25s of unit,
+55s of integration and 60s of root scripts per shard, a step near 80s.
+
+The parent's first hosted run at four unit workers, still at four shards,
+was [38208603805](https://github.com/juliopolycarpo/mangostudio/actions/runs/38208603805),
+on source [`74f557a5`](https://github.com/juliopolycarpo/mangostudio/commit/74f557a5a6843ffcf1e60f6bf428e5428105efc4):
+
+| Shard | api unit | api integration | root scripts | Test step |
+| ----- | -------- | --------------- | ------------ | --------- |
+| 1     | 21.0s    | 38.1s           | 62.7s        | 62.8s     |
+| 2     | 25.4s    | 31.2s           | 72.9s        | 73.0s     |
+| 3     | 27.7s    | 29.8s           | 43.3s        | 57.8s     |
+| 4     | 19.2s    | 73.6s           | 28.3s        | 93.2s     |
+
+The unit lane improved about 2.0x between these observations, and root scripts
+bounded two of the four shards. Redistributing the newer totals over three
+shards gives about 31s of unit, 58s of integration and 69s of root scripts
+per shard. Unit and integration run back to back, so this projects to a step
+near 90s. A shard drawing both slow integration files and a long root slice
+could exceed 110s. These runs are on different source revisions and do not
+establish a paired speedup or a distribution for three shards.
+
+One fewer shard removes a runner job and its roughly 30s of fixed setup.
+Total runner time and Test completion still need a hosted three-versus-four
+comparison with the same source, worker width and timing baseline. Four shards
+already waited a median 8s in aggregate in the earlier cohort; that queue
+figure is historical, not a saving predicted for this configuration. Reject
+three shards if any shard test step reaches 147s or Test completion is clearly
+worse than four shards over several first-attempt runs. Keep the 240s watchdog
+bound while collecting that evidence.
+
+Two shards remains a later candidate. The newer totals project to about 133s
+of unit plus integration per shard before imbalance, close to the 147s
+rejection limit. Integration parallelism would need separate qualification;
+the lane stays unisolated while oven-sh/bun#39709 remains open. The unit
+lane's hosted soak does not change that gate. Root scripts could then become
+the bound, so widening integration alone would not establish a two-shard win.
+
 Changing the count requires three matching edits: `SHARD_COUNT`, the matrix
 list, and the shard job's `name`. `env` is unavailable in `jobs.<id>.name`, so
-the `/4` there cannot interpolate the value.
+the `/3` there cannot interpolate the value.
 
 #### Root scripts workers
 
