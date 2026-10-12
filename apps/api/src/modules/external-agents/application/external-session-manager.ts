@@ -77,21 +77,28 @@ const CALL_TIMEOUT_MS = 30_000;
 /**
  * How long a reap waits for the runtime's `close`, not how long the close may take.
  *
- * The runtime bounds a vendor close by the SDK's documented worst case for the harness, up to
- * 43 s at the default limits, and finishes it even after the hub stopped waiting, so this only
- * decides how long a send or a chat update that reaps first is held. An uncooperative vendor
- * held them for the runtime's old 9 s bound; this keeps that order of wait.
+ * The runtime bounds a vendor close by the SDK's worst case for the harness plus its own cleanup
+ * allowance, up to 38 s at the default limits, and finishes it even after the hub stopped
+ * waiting, so this only decides how long a send or a chat update that reaps first is held. An
+ * uncooperative vendor held them for the runtime's old 9 s bound; this keeps that order of wait.
  */
 const CLOSE_WAIT_MS = 10_000;
 /**
  * How long an open keeps retrying a runtime that is at its session cap.
  *
- * The runtime frees a closing session's slot only when the SDK finishes the close, up to 43 s at
- * its default limits, and the hub stops waiting for that close after {@link CLOSE_WAIT_MS}. A send
- * that reaps one session and then opens another therefore waits here, on the runtime's own
- * signal, rather than failing on a slot that is about to free.
+ * The runtime frees a closing session's slot only when the SDK finishes the close, and the hub
+ * stops waiting for that close after {@link CLOSE_WAIT_MS}. A send that reaps one session and
+ * then opens another therefore waits here, on the runtime's own signal, rather than failing on a
+ * slot that is about to free.
+ *
+ * The hub cannot read the runtime's limits, so this is a literal: the longest close bound the
+ * runtime enforces (the SDK's `close_worst_case` for the slowest harness, Codex's 36 s, plus the
+ * supervisor's 2 s cleanup allowance, 38 s), plus the 2 s a cancelled open can hold its slot while
+ * it settles, plus a 2 s margin. A Rust test in the runtime
+ * (`hub_retry_window_tests.rs`) reads this declaration and fails when it and the runtime's bound
+ * disagree, so change the two together.
  */
-const CAPACITY_RETRY_MS = 45_000;
+const CAPACITY_RETRY_MS = 42_000;
 const CAPACITY_RETRY_INTERVAL_MS = 1_000;
 /**
  * The same wait while the hub is stopping. `requestShutdown` gives the whole stop 12 s and the

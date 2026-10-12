@@ -941,7 +941,7 @@ These product facts come from SDK operations inside the adapter:
   cover the documented path. The cleanup bound stays because the adapter settles a failed
   close's cleanup handle inside the same timed span.
 - **What the hub waits for.** The runtime's close can take longer than the hub's 30 s
-  `CALL_TIMEOUT_MS` (up to 43 s), so the hub does not tie its own wait to it. `teardown` drops the
+  `CALL_TIMEOUT_MS` (up to 38 s), so the hub does not tie its own wait to it. `teardown` drops the
   hub's record and tells the turn before it asks, and `closeRemote` waits 10 s (`CLOSE_WAIT_MS`), or
   5 s while the hub stops (`SHUTDOWN_CLOSE_WAIT_MS`, inside the 12 s stop budget). A close the hub
   stopped waiting for is logged as `session_close_unconfirmed` at info level and swallowed, never
@@ -951,9 +951,16 @@ These product facts come from SDK operations inside the adapter:
   cancel token into `close_session`, so it finishes the close and frees its own slot when the SDK is
   done. Until then that slot still counts against the runtime's cap of four sessions, so an open
   that follows the reap can be refused with `external_agent_capacity`. The hub retries only that
-  refusal, once a second for up to 45 s (`CAPACITY_RETRY_MS`, the longest close the runtime
-  allows), and a reap of the chat ends the wait. Nothing is counted twice. Cancel is unchanged: the
-  hub terminates the turn first and does not wait for the cancel call, which the runtime does not
+  refusal, once a second for up to 42 s (`CAPACITY_RETRY_MS`: the longest close bound the runtime
+  enforces, 38 s, plus the 2 s a cancelled open can still hold its slot while it settles, plus a
+  2 s margin), and a reap of the chat ends the wait. Nothing is counted twice. The hub cannot
+  read the runtime's limits, so that number is a literal in `external-session-manager.ts`; a
+  runtime test (`adapter/hub_retry_window_tests.rs`) reads it back and fails when it differs from
+  the longest per-target close bound at the limits production passes plus those two terms, so an
+  SDK deadline change or an edit on either side cannot drift silently. No handshake or capability
+  carries the bound: the session cap is not advertised either, and a new field would be a wire
+  change for a value the open path does not otherwise need. Cancel is unchanged: the hub
+  terminates the turn first and does not wait for the cancel call, which the runtime does not
   bound itself.
 - **Revocation and abandoned closes.** The consent watcher runs the revocation close on its own
   task, so a slow close does not hold the next consent poll or the shutdown that follows the hub
@@ -1149,7 +1156,7 @@ protocols to the SDK and are not repeated here.
 | bounds a vendor close by the SDK's own worst case for its harness, not by one number                               | `default_limits_give_each_target_the_sdks_worst_case_close`, `every_target_gets_exactly_the_sdks_worst_case_close_for_the_same_limits`, `the_bound_moves_with_the_limits_it_is_derived_from`, `a_close_inside_the_backends_budget_plus_cleanup_is_not_reported_as_failed`                                                                       | covered                                                               |
 | reports a close past its bound with the bound named; saturates an unbounded budget                                 | `a_close_past_the_backends_budget_plus_cleanup_names_the_bound_it_exceeded`, `an_unbounded_backend_budget_saturates_the_close_bound_instead_of_panicking`                                                                                                                                                                                       | covered                                                               |
 | waits the hub a bounded time for the runtime close; a close it gave up on neither fails the reap nor stays counted | hub: `waits a bounded, shorter time for the runtime close than the runtime may take, and a shorter one still at shutdown`, `does not fail the reap, or keep the session counted, when the runtime close outlasts the hub wait`, `isUnconfirmedClose`                                                                                            | covered                                                               |
-| retries an open refused at the runtime's session cap, and nothing else                                             | hub: `retries the refusal until the slot frees, then opens`, `gives up with the runtime's own refusal once the wait has passed`, `does not retry any other refusal`; runtime: `the_session_cap_counts_opening_sessions`                                                                                                                         | covered                                                               |
+| retries an open refused at the runtime's session cap, and nothing else                                             | hub: `retries the refusal until the slot frees, then opens`, `gives up with the runtime's own refusal once the wait has passed`, `does not retry any other refusal`; runtime: `the_session_cap_counts_opening_sessions`, `the_hub_retry_window_is_the_longest_runtime_close_bound_plus_its_margins`                                             | covered                                                               |
 | keeps a slow revocation close off the watcher; removes the scratch leaf of an abandoned close                      | `a_slow_revocation_close_does_not_hold_up_hub_shutdown`, `an_abandoned_close_still_removes_the_scratch_leaf`                                                                                                                                                                                                                                    | covered                                                               |
 | keeps an ACP session after the agent's own prompt error; refuses before queueing is resendable                     | `an_agents_prompt_error_ends_one_turn_and_the_next_turn_runs_on_the_same_session`, `a_turn_on_a_closed_session_was_not_submitted_and_the_hub_may_resend_it`                                                                                                                                                                                     | covered                                                               |
 | shows a vendor notice with its severity as display only; never as text or model input                              | `a_notice_keeps_its_severity_and_words_as_a_display_only_event`, `a_severity_the_sdk_has_no_arm_for_is_info_and_its_spelling_stays_off_the_wire`; `external-turn-live-vs-reload.test.ts` (a vendor notice); `replay-builder.test.ts` (an external_notice part)                                                                                  | covered                                                               |

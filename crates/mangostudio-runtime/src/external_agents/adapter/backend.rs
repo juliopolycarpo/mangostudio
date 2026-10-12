@@ -35,6 +35,10 @@ mod prompt_budget_tests;
 #[path = "close_budget_tests.rs"]
 mod close_budget_tests;
 
+#[cfg(test)]
+#[path = "hub_retry_window_tests.rs"]
+mod hub_retry_window_tests;
+
 /// The longest a `target` session's `close` can take under `limits`, counted from the call to
 /// `close`.
 ///

@@ -32,6 +32,7 @@ on:
       - "apps/shared/src/environments/toolchain-schemas.ts"
       - "apps/shared/src/library/**"
       - "apps/shared/src/markdown/**"
+      - "apps/api/src/modules/external-agents/application/external-session-manager.ts"
       - "spec/**"
       - "scripts/tests/support/SHA256SUMS.sample"
       - "packages/protocol/src/testing/conformance.ts"
