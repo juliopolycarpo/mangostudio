@@ -195,7 +195,7 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 
 - `collect-test-metrics.ts` — emit the test fragment (suite outcome, duration,
   failure counts and error headlines, coverage summaries) in the Test workflow's
-  merge job, from the JUnit reports and coverage the eight shards produced.
+  merge job, from the JUnit reports and coverage all shards produced.
 - `junit-results.ts` — parse `<testcase>` outcomes out of a JUnit report and say
   whether the report is demonstrably whole. Replaced 269 lines of runner-log
   regex.

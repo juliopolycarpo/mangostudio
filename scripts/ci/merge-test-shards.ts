@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Reassemble the artifacts a fanned-out Test run leaves behind, so the merge
 // job can hand the QA collector the same shapes a single-machine run produced.
-// The fan-out is the 8 numbered shards plus the unsharded frontend job, which
+// The fan-out is the numbered shards plus the unsharded frontend job, which
 // uploads the same artifact shape under `test-shard-frontend`.
 //
 // Two kinds of state come back and each needs a different merge:

@@ -14,10 +14,10 @@ on:
 permissions:
   contents: read
 
-# Shard count. Eight is where the curve flattens: each job pays ~21s of fixed
-# setup and the merge job adds a fixed ~30s, so measured per-shard test time
-# falling 70s -> 35s -> 23s at N=4 -> 8 -> 12 buys less wall clock each time.
-# Raising it is a three-line change: this value, the matrix list, and the shard
+# Four shards used fewer runner-seconds and had less aggregate queue waiting
+# in the hosted 4/6/8 comparison, with a Test completion median close to six.
+# The measurements and their limits are recorded in docs/reference/testing.md.
+# Changing it is a three-line change: this value, the matrix list, and the shard
 # job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
 # so that last one cannot interpolate this value.
 #
@@ -31,7 +31,7 @@ permissions:
 # partition. What has to stay stable is the file all shards of one run read, and
 # that is what resolve-timings pins.
 env:
-  SHARD_COUNT: 8
+  SHARD_COUNT: 4
   # Names every child a run spawns, and every one that never exits, in the shard
   # log. The failure this exists for (#922) reproduces only in CI, and Bun's own
   # `killed N dangling process` says nothing about which child it killed.
@@ -39,24 +39,23 @@ env:
   # Measured on a full local run: 1662 lines, all of them from the api lane —
   # only that workspace's preload installs the wrappers. 726 spawns against 726
   # exits (a mismatch is the signal) plus 210 synchronous ones, four fifths of
-  # them git. Sharded eight ways that is roughly 200 lines in a shard log, which
-  # is what the cost of this is. See
+  # them git. Each shard logs its own slice of these diagnostics. See
   # apps/api/tests/support/setup/spawn-diagnostics.ts.
   MANGOSTUDIO_SPAWN_DIAGNOSTICS: "1"
 
 jobs:
   resolve-timings:
-    # A restore inside the matrix asks each of the eight shard jobs to resolve
+    # A restore inside the matrix asks each shard job to resolve
     # "the most recent cache matching this prefix" independently. That is fine
     # while the prefix only ever resolves to one immutable, long-lived entry,
     # but it stops being fine the moment saves rotate every run (see "Save
     # test timings" below): a save from a *different*, concurrent run can land
-    # in the minute-wide window while this run's eight shards are each
+    # in the minute-wide window while this run's shards are each
     # resolving it, and shards that ask before versus after see different
     # bytes — which is exactly the disagreement `merge-timings-shards.ts`
     # exists to catch. Resolving the key once here and having every shard
     # restore that literal key instead of a live prefix query removes the
-    # window entirely: whatever this job resolves is what all eight get,
+    # window entirely: whatever this job resolves is what all shards get,
     # regardless of what any other run saves in the meantime.
     #
     # `lookup-only` makes this a metadata call, not a download — the shard
@@ -102,16 +101,16 @@ jobs:
     # failed jobs reuses resolve-timings' output and therefore the exact file
     # partition that hung; "re-run all jobs" re-resolves the baseline, which
     # is why it has looked more reliable.
-    name: Tests (shard ${{ matrix.shard }}/8)
+    name: Tests (shard ${{ matrix.shard }}/4)
     needs: [resolve-timings]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
-      # Every shard reports, so one red shard still leaves seven sets of counts
+      # Every shard reports, so one red shard still leaves the other counts
       # for the QA report instead of a run that stopped mid-fan-out.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
       # Bounds the snapshot this job restores and saves back. Each save carries
@@ -145,8 +144,8 @@ jobs:
           echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
 
       # Every shard restores; only the first one saves, after its tests. All
-      # eight would save under keys that differ only by the run, so the extra
-      # seven would upload copies of one snapshot.
+      # shards would save under keys that differ only by the run, uploading
+      # duplicate copies of one snapshot.
       - id: turbo-cache
         uses: ./.github/actions/cache-scoped
         with:
@@ -164,9 +163,9 @@ jobs:
       #
       # Restores the exact key `resolve-timings` resolved rather than asking
       # `cache-scoped` to resolve its own "most recent matching prefix" here —
-      # eight independent live resolutions can each pick a different entry if
+      # independent live resolutions can each pick a different entry if
       # a save from a concurrent run lands mid-fan-out. One key, resolved
-      # once, is what keeps all eight shards reading the same bytes, which is
+      # once, is what keeps all shards reading the same bytes, which is
       # a correctness requirement and not just a tidiness one: see
       # scripts/ci/merge-timings-shards.ts. Only the merge job saves, and only
       # after every shard has read, so nothing this run writes can be what a
@@ -191,7 +190,7 @@ jobs:
 
       # Local is the Rust runtime the hub spawns, so every shard needs the
       # binary. Built once for the run by local-runtime.yml rather than here:
-      # eight cargo builds of one binary would cost more than the shards.
+      # building it in every shard would duplicate that work.
       - uses: ./.github/actions/local-runtime
         with:
           artifact: ${{ inputs.runtime_artifact }}
@@ -202,14 +201,19 @@ jobs:
       #
       # The watchdog owns the log file, the shard-meta.json the merge job
       # reads, and the exit code; a hung Bun isolate runner (oven-sh/bun#39709)
-      # is killed after 210s — ~4x a healthy shard's test step — and retried
-      # once with the restored timings baseline put back first.
+      # is killed after 240s and retried once with the restored timings
+      # baseline put back first. The bound is twice the slowest healthy test
+      # step measured at this shard count (120s; see
+      # docs/reference/testing.md), so a loaded runner that doubles the step
+      # is not read as a hung one. Both attempts have to fit this job's
+      # `timeout-minutes` or the retry is cut short: 2 x 240s leaves 120s for
+      # the other steps, which took at most 45s in those runs.
       - name: Run tests with coverage
         id: coverage
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=210 \
+          bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=240 \
             -- bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}"
 
       # Saves only when this shard's run wrote cache entries the restored
@@ -383,7 +387,7 @@ jobs:
         # from the test-lane registry itself.
         run: bun ./scripts/ci/merge-test-shards.ts shards "$SHARD_COUNT" > shard-summary.json
 
-      # Reassembles next run's timings, and fails this run if the eight shards
+      # Reassembles next run's timings, and fails this run if the shards
       # claimed the same file — which means they read different timings and did
       # not cover the suite between them. Every shard exits 0 in that case, so
       # this step is the only thing standing between a broken split and a green
