@@ -4,7 +4,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mango_agent_acp::deadlines::Deadlines as AcpDeadlines;
+use mango_agent_claude::deadlines::Deadlines as ClaudeDeadlines;
 use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
+use mango_agent_codex::deadlines::Deadlines as CodexDeadlines;
 use mango_external_agents::{
     CancelToken, EnvSource, Harness, HostContext, Limits, ProcessLauncher,
 };
@@ -32,39 +35,36 @@ mod prompt_budget_tests;
 #[path = "close_budget_tests.rs"]
 mod close_budget_tests;
 
-/// The longest a `target` session's `close` can legitimately take under `limits`.
+/// The longest a `target` session's `close` can take under `limits`, counted from the call to
+/// `close`.
 ///
-/// This is the one place these formulas are encoded by hand. They mirror, in the SDK's docs at
-/// 0.6.0: `docs/harness-acp.md` "Deadlines" (the worst-case table: `close` 29 s, agent exit to
-/// `Closed` 34 s), `docs/harness-codex.md` (the stop-a-turn table: teardown `T` 36 s, and the
-/// overflow paragraph below it), and `docs/harness-claude.md` "Deadlines" (the "any launcher"
-/// column: `close` with a turn active 19 s, `close` while the launch is pending 24 s). A change to
-/// any of those tables, or an SDK accessor for them, replaces this function. With `kg` for
-/// `kill_grace` and `st` for `shutdown_timeout`:
+/// Each harness crate computes its own figure from the same `Limits` the harness runs with
+/// (`Deadlines::from_limits(limits).close_worst_case()`), so a change to what a close waits on
+/// moves this bound with the SDK instead of leaving a hand-copied formula behind. At the default
+/// limits that is 29 s for Cursor (ACP), 36 s for Codex and 24 s for Claude.
 ///
-/// | Target | Worst case | Documented path (defaults 2 s / 5 s) |
-/// | ------ | ---------- | ------------------------------------ |
-/// | Cursor (ACP) | `2 kg + 6 st` | agent exit to `Closed`, 34 s; a plain `close` is `2 kg + 5 st`, 29 s |
-/// | Codex | `3 kg + 7 st` | the `3 kg + 6 st` teardown, 36 s, plus one `st` a close joining it after an inbound overflow can wait first, 41 s; that last `st` is a margin read from the SDK's overflow paragraph, not a Deadlines row |
-/// | Claude | `2 kg + 4 st` | a close over a launch still pending, 24 s; with a turn active it is `2 kg + 3 st`, 19 s |
+/// It is the right number for the supervisor's timer because that timer starts at the call:
+/// `finish_close` (a requested or revoked close, and a registration refused after the open
+/// finished) and the late-open cleanup both wrap `session.close(..)` directly, and nothing awaits
+/// a turn before it. It is not the longer figures the old hand formulas used (34 s for an ACP
+/// agent's exit, 41 s for a Codex inbound overflow): those are measured from the event, and a
+/// `close` called inside that window is still bounded by this number from its own call. The
+/// cleanup allowance (`cleanup_timeout`, added by the supervisor) stays on top because the adapter
+/// settles a failed close's cleanup handle inside the same timed span.
 ///
-/// The launcher is the runtime's own, not the SDK's `TokioLauncher`, so the Claude figure is the
-/// one the SDK documents for any launcher. Sums saturate, so a limit near `Duration::MAX` stays
-/// a bound rather than a panic.
+/// The launcher is the runtime's own, not the SDK's `TokioLauncher`, and the SDK's Claude figure
+/// holds for any launcher. Sums saturate in the SDK, so a limit near `Duration::MAX` stays a bound
+/// rather than a panic.
 ///
 /// ```ignore
-/// let bound = close_budget(&Limits::default(), TargetId::Cursor); // 34 s
+/// let bound = close_budget(&Limits::default(), TargetId::Cursor); // 29 s
 /// ```
 pub(super) fn close_budget(limits: &Limits, target: TargetId) -> Duration {
-    let (graces, timeouts) = match target {
-        TargetId::Cursor => (2, 6),
-        TargetId::Codex => (3, 7),
-        TargetId::Claude => (2, 4),
-    };
-    limits
-        .kill_grace
-        .saturating_mul(graces)
-        .saturating_add(limits.shutdown_timeout.saturating_mul(timeouts))
+    match target {
+        TargetId::Cursor => AcpDeadlines::from_limits(limits).close_worst_case(),
+        TargetId::Codex => CodexDeadlines::from_limits(limits).close_worst_case(),
+        TargetId::Claude => ClaudeDeadlines::from_limits(limits).close_worst_case(),
+    }
 }
 
 pub(crate) struct TargetDiscovery {
