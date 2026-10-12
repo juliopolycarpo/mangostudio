@@ -160,7 +160,7 @@ React hook managing stream lifecycle:
 ## Error Handling
 
 - **Pre-flight errors** — Return standard HTTP error responses (JSON) with typed error codes.
-- **Stream errors** — `SSEErrorEvent` with `done: true`: `{ type: 'error', error: string, done: true }`. An external agent that could not start may add `unavailableReason`, `remedy` and, for an outdated agent, `requiredVersion`, and `code` for a runtime at its session cap (see "A send refused while the session opens" in `docs/architecture/external-agents.md`); `error` stays the English fallback.
+- **Stream errors** — `SSEErrorEvent` with `done: true`: `{ type: 'error', error: string, done: true }`. An external agent that could not start may add `unavailableReason`, `remedy` and, for an outdated agent, `requiredVersion`, and `code` for a failed open, which is the runtime's `external_agent_*` kind (the session cap has its own copy on the client; the others show the kind as plain text beside the sentence) (see "A send refused while the session opens" in `docs/architecture/external-agents.md`); `error` stays the English fallback.
 - **Connection loss** — The frontend detects `reader.read()` returning `done: true` without a prior `done` event and surfaces a fallback error.
 - **Abort** — User-triggered stop sends `AbortSignal`, server cleans up via the `AbortController` passed to the generator.
 

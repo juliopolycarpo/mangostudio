@@ -168,6 +168,31 @@ describe('an external error chunk with a remedy', () => {
     expect(chunk).toEqual({ type: 'external_error', error, done: false });
   });
 
+  it('carries the reason and build the hub recorded beside a refused start, and validates', () => {
+    const chunk = externalAgentEventToStreamChunk(
+      { type: 'error', error },
+      undefined,
+      { kind: 'update' },
+      { unavailableReason: 'version-unsupported', requiredVersion: '0.153.4' }
+    );
+
+    expect(chunk).toEqual({
+      type: 'external_error',
+      error,
+      remedy: { kind: 'update' },
+      unavailableReason: 'version-unsupported',
+      requiredVersion: '0.153.4',
+      done: false,
+    });
+    expect(Value.Check(StreamChunkSchema, chunk), 'the chunk validates').toBe(true);
+  });
+
+  it('refuses a reason that is not one of the closed set', () => {
+    const chunk = { type: 'external_error', error, unavailableReason: 'on-fire', done: false };
+
+    expect(Value.Check(StreamChunkSchema, chunk)).toBe(false);
+  });
+
   it('refuses a remedy that is not one of the closed kinds', () => {
     const chunk = { type: 'external_error', error, remedy: { kind: 'run-it-for-me' }, done: false };
 

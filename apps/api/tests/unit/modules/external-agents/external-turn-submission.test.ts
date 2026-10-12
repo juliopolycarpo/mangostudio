@@ -44,7 +44,9 @@ beforeEach(async () => {
 function submit(
   handle = createScriptedSessionHandle(),
   clock = createFakeBackoffClock({ auto: true }),
-  lateAcceptances: string[] = []
+  lateAcceptances: string[] = [],
+  reacquire: () => Promise<ReturnType<typeof createScriptedSessionHandle>> = () =>
+    Promise.resolve(handle)
 ) {
   const signal = new AbortController().signal;
   let clockMs = 1_000;
@@ -63,7 +65,7 @@ function submit(
         configuration: { level: 'default', routing: 'user', workspaceRoots: ['/w'] },
       },
       handle,
-      reacquire: () => Promise.resolve(handle),
+      reacquire,
       isTerminalConnectFailure: () => false,
       signal,
       policy: DEFAULT_RETRY_POLICY,
@@ -80,6 +82,79 @@ function submit(
     }),
   };
 }
+
+describe('a resubmission whose session reopen the runtime answers', () => {
+  const deadHandle = () => ({ ...createScriptedSessionHandle(), isLive: () => false });
+
+  /** What the runtime sends for an open it refuses; none of these are a connection that is not there. */
+  const REFUSALS: ReadonlyArray<readonly [string, () => RemoteError]> = [
+    [
+      'signed out',
+      () => new RemoteError('UNAVAILABLE', 'signed out', { kind: 'external_agent_signed_out' }),
+    ],
+    [
+      'outdated',
+      () =>
+        new RemoteError('UNAVAILABLE', 'too old', {
+          kind: 'external_agent_version_unsupported',
+          requiredVersion: '1.2.3',
+        }),
+    ],
+    [
+      'not installed',
+      () => new RemoteError('INTERNAL', 'gone', { kind: 'external_agent_not_installed' }),
+    ],
+    [
+      'failed to launch',
+      () => new RemoteError('UNAVAILABLE', 'no start', { kind: 'external_agent_launch_failed' }),
+    ],
+  ];
+
+  for (const [label, refusal] of REFUSALS) {
+    it(`ends the turn after one reopen when the agent is ${label}, instead of waiting`, async () => {
+      const handle = deadHandle();
+      let reopens = 0;
+      const error = refusal();
+      const { clock, outcome } = submit(handle, undefined, [], () => {
+        reopens += 1;
+        return Promise.reject(error);
+      });
+
+      const result = await outcome;
+
+      expect({
+        kind: result.kind,
+        error: result.kind === 'refused' ? result.error : undefined,
+      }).toEqual({
+        kind: 'refused',
+        error,
+      });
+      expect({ reopens, waits: clock.waits.length, sent: handle.sent.length }).toEqual({
+        reopens: 1,
+        waits: 0,
+        sent: 0,
+      });
+    });
+  }
+
+  it('still waits for a connection that is not there, which carries no runtime kind', async () => {
+    const handle = deadHandle();
+    let reopens = 0;
+    const { clock, outcome } = submit(handle, undefined, [], () => {
+      reopens += 1;
+      if (reopens <= 3) return Promise.reject(new RemoteError('UNAVAILABLE', 'runtime offline'));
+      return Promise.resolve({ ...handle, isLive: () => true });
+    });
+
+    const result = await outcome;
+
+    expect({ kind: result.kind, reopens, waits: clock.waits.length }).toEqual({
+      kind: 'accepted',
+      reopens: 4,
+      waits: 3,
+    });
+  });
+});
 
 describe('submitExternalTurn', () => {
   it('(d) replays a never-written request past five failures with no count cap and submits once', async () => {

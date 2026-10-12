@@ -412,6 +412,42 @@ describe('ExternalTurnTranscript', () => {
     });
   });
 
+  it('keeps the selector reason, remedy and build beside an error recorded with a refusal', () => {
+    const target = transcript();
+
+    target.recordError(
+      { code: 'turn-start', message: 'too old' },
+      {
+        unavailableReason: 'version-unsupported',
+        remedy: { kind: 'update' },
+        requiredVersion: '0.153.4',
+      }
+    );
+
+    expect({
+      code: target.turnPart.error?.code,
+      reason: target.turnPart.unavailableReason,
+      remedy: target.turnPart.remedy,
+      version: target.turnPart.requiredVersion,
+    }).toEqual({
+      code: 'turn-start',
+      reason: 'version-unsupported',
+      remedy: { kind: 'update' },
+      version: '0.153.4',
+    });
+  });
+
+  it('keeps no reason beside an error recorded without a refusal', () => {
+    const target = transcript();
+
+    target.recordError({ code: 'turn-start', message: 'launch failed' });
+
+    expect([target.turnPart.unavailableReason, target.turnPart.requiredVersion]).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('keeps no remedy beside any other vendor error', () => {
     const target = transcript();
     feed(target, [{ type: 'error', error: { code: 'adapter-stream', message: 'boom' } }]);

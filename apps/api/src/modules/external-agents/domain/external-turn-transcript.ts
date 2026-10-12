@@ -36,6 +36,7 @@ import type {
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
+import type { OpenRefusalPresentation } from './external-open-refusal';
 import { turnErrorRemedyFor } from './external-turn-error-remedy';
 
 /** The reasoning block of the message-part union, which has no name of its own. */
@@ -299,10 +300,25 @@ export class ExternalTurnTranscript {
       .map((part) => part.requestId);
   }
 
-  recordError(error: ExternalAgentError): void {
+  /**
+   * Records the error the turn ended with.
+   *
+   * `refusal` is the presentation of a session reopen the runtime refused for a state of the agent
+   * (see `openRefusalFor`): its reason and remedy are stored beside the error, so a reload says
+   * what the live stream said. Without one the remedy is derived from the error and the target, so
+   * the stored turn and the live chunk (see `external-turn-stream.ts`) carry the same one.
+   *
+   * @example
+   * transcript.recordError({ code: 'turn-start', message: 'signed out' }, openRefusalFor('cursor', error));
+   */
+  recordError(error: ExternalAgentError, refusal?: OpenRefusalPresentation): void {
     this.#turnPart.error = error;
-    // The remedy is derived from the error and the target, so the stored turn and the live chunk
-    // (see `external-turn-stream.ts`) carry the same one.
+    if (refusal) {
+      this.#turnPart.unavailableReason = refusal.unavailableReason;
+      this.#turnPart.remedy = refusal.remedy;
+      if (refusal.requiredVersion) this.#turnPart.requiredVersion = refusal.requiredVersion;
+      return;
+    }
     const remedy = turnErrorRemedyFor(this.#turnPart.targetId, error);
     if (remedy) this.#turnPart.remedy = remedy;
   }

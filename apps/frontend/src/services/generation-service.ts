@@ -9,6 +9,7 @@ import type {
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getApiBaseUrl } from '../lib/api-base-url';
 import { client } from '../lib/api-client';
+import { ExternalRefusalError, type ExternalRefusalFields } from '../lib/external-refusal-error';
 import { ApiError } from '../lib/utils';
 
 export type GenerateImageRequest = Omit<GenerateImageBody, 'model'> & { model: string };
@@ -94,7 +95,7 @@ export async function startExternalReviewStream(
   onChunk: (chunk: StreamChunk) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  let terminalError: { readonly error: string; readonly code?: string } | undefined;
+  let terminalError: ExternalRefusalFields | undefined;
   await postStream(
     `/api/chats/${encodeURIComponent(chatId)}/external-agent/review`,
     request,
@@ -103,6 +104,9 @@ export async function startExternalReviewStream(
         terminalError = {
           error: chunk.error,
           ...(chunk.code ? { code: chunk.code } : {}),
+          ...(chunk.unavailableReason ? { unavailableReason: chunk.unavailableReason } : {}),
+          ...(chunk.remedy ? { remedy: chunk.remedy } : {}),
+          ...(chunk.requiredVersion ? { requiredVersion: chunk.requiredVersion } : {}),
         };
       }
       onChunk(chunk);
@@ -112,7 +116,16 @@ export async function startExternalReviewStream(
   // Setup refusals after HTTP 200 — a session that cannot review, for example —
   // arrive as a terminal error chunk. Resolving here would tell the repository
   // panel the click succeeded.
-  if (terminalError) throw new ApiError(terminalError);
+  // A refusal for a state of the agent keeps its reason and remedy, so the review button's toast
+  // says what the transcript's card says.
+  if (!terminalError) return;
+  if (terminalError.unavailableReason) {
+    throw new ExternalRefusalError({
+      ...terminalError,
+      unavailableReason: terminalError.unavailableReason,
+    });
+  }
+  throw new ApiError(terminalError);
 }
 
 async function postStream(

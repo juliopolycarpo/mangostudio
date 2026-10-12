@@ -14,6 +14,10 @@
  */
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import {
+  EXTERNAL_AGENT_CAPACITY_CODE,
+  isExternalAgentKindCode,
+} from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { ScanSearch } from 'lucide-react';
 import { useState } from 'react';
@@ -21,7 +25,9 @@ import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
+import { ExternalRefusalError } from '@/lib/external-refusal-error';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
+import { externalRefusalLine } from './external-unavailable-text';
 import { useExternalAgents } from './useExternalAgents';
 
 interface ExternalReviewActionProps {
@@ -51,7 +57,7 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
     try {
       await app.handleReviewChanges();
     } catch (error) {
-      toast(reviewFailureMessage(error, labels), 'error');
+      toast(reviewFailureMessage(error, t), 'error');
     } finally {
       setPending(false);
     }
@@ -88,15 +94,20 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
  * decided rather than one this component guessed. Anything else falls back to
  * the server's message, and only then to a neutral failure.
  */
-function reviewFailureMessage(
-  error: unknown,
-  labels: Messages['externalAgents']['review']
-): string {
+function reviewFailureMessage(error: unknown, t: Messages): string {
+  const labels = t.externalAgents.review;
+  // A refusal for a state of the agent says what the transcript's card says: the selector's words
+  // and what to do about it, not the hub's generic sentence.
+  if (error instanceof ExternalRefusalError) return externalRefusalLine(error, t);
   const code = error instanceof ApiError ? error.code : undefined;
+  if (code === EXTERNAL_AGENT_CAPACITY_CODE) return t.externalAgents.openFailure.capacity;
   if (code === ERROR_CODES.EXTERNAL_REVIEW_REQUIRES_GIT) return labels.requiresGit;
   if (code === ERROR_CODES.UNSUPPORTED) return labels.unsupported;
   // The stream's only other validation refusal for a chat this action rendered
   // for: it is external by construction, so what is missing is the folder.
   if (code === ERROR_CODES.VALIDATION) return labels.requiresWorkdir;
-  return resolveApiErrorMessage(error, labels.failed);
+  const message = resolveApiErrorMessage(error, labels.failed);
+  // A failed open the hub has no copy for keeps its sentence and adds the runtime's kind, which
+  // is what the person can quote to support.
+  return isExternalAgentKindCode(code) ? `${message} (${code})` : message;
 }

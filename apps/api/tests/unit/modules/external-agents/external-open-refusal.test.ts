@@ -173,18 +173,39 @@ describe('openFailureCodeFor', () => {
     ]);
   });
 
-  it('has nothing for any other failure, or for a kind that is only a property name', () => {
+  it('names the kind of a failed open that has no presentation, so support can be quoted one', () => {
+    const kinds = ['launch_failed', 'link_lost', 'closed', 'protocol', 'vendor', 'failure'];
+
+    expect(
+      kinds.map((kind) =>
+        openFailureCodeFor(new RemoteError('UNAVAILABLE', 'x', { kind: `external_agent_${kind}` }))
+      )
+    ).toEqual(kinds.map((kind) => `external_agent_${kind}`));
+  });
+
+  it('has nothing for a kind of another shape, or for a kind that is only a property name', () => {
     const received = [
-      openFailureCodeFor(
-        new RemoteError('INTERNAL', 'x', { kind: 'external_agent_launch_failed' })
-      ),
       openFailureCodeFor(new RemoteError('INTERNAL', 'x', { kind: 'tool_argument' })),
       openFailureCodeFor(new RemoteError('INTERNAL', 'x', { kind: '__proto__' })),
+      openFailureCodeFor(
+        new RemoteError('INTERNAL', 'x', { kind: 'external_agent_<img src=x onerror=alert(1)>' })
+      ),
+      openFailureCodeFor(
+        new RemoteError('INTERNAL', 'x', { kind: `external_agent_${'a'.repeat(80)}` })
+      ),
       openFailureCodeFor(new RemoteError('INTERNAL', 'no kind')),
       openFailureCodeFor(new Error('plain')),
       openFailureCodeFor('not even an error'),
     ];
 
-    expect(received).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+    expect(received).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });

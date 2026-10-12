@@ -334,6 +334,81 @@ describe('external turn: signed out', () => {
   });
 });
 
+describe('external turn: a resubmission the runtime refused for a state of the agent', () => {
+  const START_ERROR = { code: 'turn-start', message: 'raw runtime text for the refused reopen' };
+  const refusedTurn = (overrides: Partial<MessagePart & { type: 'external_turn' }>) =>
+    turnPart({ terminalReason: 'vendor-error', error: START_ERROR, ...overrides });
+
+  it('says the selector words and links the install recipes, not the runtime message', () => {
+    renderParts([refusedTurn({ unavailableReason: 'not-installed', remedy: { kind: 'install' } })]);
+
+    expect({
+      words: screen.queryByText(en.externalAgents.unavailable['not-installed']) !== null,
+      link: screen
+        .getByRole('link', { name: en.externalAgents.remedy.install })
+        .getAttribute('href'),
+      rawCode: screen.queryByText('turn-start'),
+      rawMessage: screen.queryByText(/raw runtime text/),
+    }).toEqual({ words: true, link: '/environments/agents', rawCode: null, rawMessage: null });
+  });
+
+  it('names the build an outdated agent needs', () => {
+    renderParts([
+      refusedTurn({
+        unavailableReason: 'version-unsupported',
+        remedy: { kind: 'update' },
+        requiredVersion: '0.153.4',
+      }),
+    ]);
+
+    expect({
+      words: screen.queryByText(/0\.153\.4/) !== null,
+      link: screen.queryByRole('link', { name: en.externalAgents.remedy.update }) !== null,
+    }).toEqual({ words: true, link: true });
+  });
+
+  it('says signed out with the command, never running it', () => {
+    renderParts([
+      refusedTurn({
+        targetId: 'cursor',
+        unavailableReason: 'signed-out',
+        remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+      }),
+    ]);
+
+    expect({
+      words: screen.queryByText(en.externalAgents.unavailable['signed-out']) !== null,
+      copy: screen.queryByRole('button', { name: 'Copy login command' }) !== null,
+      link: screen.queryByRole('link'),
+    }).toEqual({ words: true, copy: true, link: null });
+  });
+
+  it('keeps hostile runtime text and a hostile version inert', () => {
+    const hostile = '<img src=x onerror=alert(1)> [x](javascript:alert(1)) $&';
+    const { container } = renderParts([
+      refusedTurn({
+        error: { code: 'turn-start', message: hostile },
+        unavailableReason: 'version-unsupported',
+        remedy: { kind: 'update' },
+        requiredVersion: hostile,
+      }),
+    ]);
+
+    expect({
+      images: container.querySelectorAll('img').length,
+      showsVersionAsText: container.textContent?.includes(hostile),
+      links: container.querySelectorAll('a').length,
+    }).toEqual({ images: 0, showsVersionAsText: true, links: 1 });
+  });
+
+  it('shows the raw code and message when an older hub stored no reason', () => {
+    renderParts([refusedTurn({})]);
+
+    expect(screen.getByText('turn-start')).toBeInTheDocument();
+    expect(screen.getByText(/raw runtime text/)).toBeInTheDocument();
+  });
+});
+
 describe('an external agent that could not start', () => {
   const FALLBACK = 'The external agent turn could not be started.';
   const DENIED_TEXT = "This machine's owner has not allowed external agents";
@@ -478,6 +553,33 @@ describe('an external agent that could not start', () => {
       commands: container.querySelectorAll('code').length,
       links: container.querySelectorAll('a').length,
     }).toEqual({ fallback: null, cap: true, commands: 0, links: 0 });
+  });
+
+  it('keeps the sentence for a failed open and shows its kind as plain text to quote to support', () => {
+    const { container } = renderParts([
+      { type: 'error', text: FALLBACK, code: 'external_agent_launch_failed' },
+    ]);
+
+    expect({
+      sentence: screen.queryByText(FALLBACK) !== null,
+      kind: screen.queryByText('external_agent_launch_failed')?.tagName,
+      commands: container.querySelectorAll('code').length,
+      links: container.querySelectorAll('a').length,
+    }).toEqual({ sentence: true, kind: 'SPAN', commands: 0, links: 0 });
+  });
+
+  it('does not show a kind beside a reason it already says in the selector words', () => {
+    renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        code: 'external_agent_not_installed',
+        unavailableReason: 'not-installed',
+        remedy: { kind: 'install' },
+      },
+    ]);
+
+    expect(screen.queryByText('external_agent_not_installed')).toBeNull();
   });
 
   it('shows the plain text for a code it has no copy for, and never the code itself', () => {

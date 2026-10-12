@@ -559,7 +559,7 @@ function openStream(
                   done: false,
                 });
               },
-              onEvent(event) {
+              onEvent(event, refusal) {
                 // The same binding the hub caches an account-limits snapshot
                 // under, so the client's cache key and the hub's row agree by
                 // construction rather than by both guessing from discovery. The remedy is the one the stored turn carries (`recordError`), so a reload
@@ -568,8 +568,10 @@ function openStream(
                   event,
                   { vendorAccountFingerprint: resolution.vendorAccountFingerprint },
                   event.type === 'error'
-                    ? turnErrorRemedyFor(resolution.descriptor.targetId, event.error)
-                    : undefined
+                    ? (refusal?.remedy ??
+                        turnErrorRemedyFor(resolution.descriptor.targetId, event.error))
+                    : undefined,
+                  refusal
                 );
                 if (chunk) send(chunk);
               },

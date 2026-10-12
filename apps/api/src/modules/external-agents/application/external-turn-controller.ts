@@ -71,7 +71,11 @@ import {
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
 import { isExpectedTailOfEndedTurn } from '../domain/external-event-sequencer';
-import { openRefusalFor } from '../domain/external-open-refusal';
+import {
+  type OpenRefusalPresentation,
+  openFailureCodeFor,
+  openRefusalFor,
+} from '../domain/external-open-refusal';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import {
   classifySubmissionFailure,
@@ -91,15 +95,15 @@ import {
   externalCommandCatalogCache,
 } from './external-command-catalog-cache';
 import {
+  invalidateStaleDiscovery,
+  type StaleDiscoveryScope,
+} from './external-discovery-invalidation';
+import {
   type ExternalSessionConsumer,
   type ExternalSessionHandle,
   type ExternalSessionManager,
   externalSessionManager,
 } from './external-session-manager';
-import {
-  invalidateDiscoveryAfterSignedOut,
-  type SignedOutScope,
-} from './external-signed-out-invalidation';
 import { ExternalTranscriptWriter } from './external-transcript-writer';
 import {
   type CancellableSleep,
@@ -191,7 +195,11 @@ interface ExternalTurnObserver {
     readonly userMessageId: string;
     readonly assistantMessageId: string;
   }): void;
-  onEvent?(event: ExternalAgentEvent): void;
+  /**
+   * `refusal` accompanies an `error` the hub synthesised for a session reopen the runtime refused
+   * for a state of the agent; the vendor's own events never carry one.
+   */
+  onEvent?(event: ExternalAgentEvent, refusal?: OpenRefusalPresentation): void;
   /**
    * Reported once per steer, with the resolved outcome only — never the
    * optimistic intermediate state the durable record briefly holds while the
@@ -281,11 +289,12 @@ export interface ExternalTurnControllerDependencies {
    */
   readonly observeSubmission?: (messageId: string, outcome: Promise<SubmissionOutcome>) => void;
   /**
-   * Told when a turn ended because the vendor account is signed out. Defaults to dropping the
-   * cached discovery answer for the environment and asking the owner's clients to refetch it, so
-   * what the app says about the agent is read again rather than served from before the turn.
+   * Told when a refusal shows the cached discovery answer is stale: a turn that ended signed out,
+   * or an open the runtime refused as signed out, gone, outdated or denied. Defaults to dropping
+   * the cached discovery answer for the environment and asking the owner's clients to refetch it,
+   * so what the app says about the agent is read again rather than served from before the refusal.
    */
-  readonly onSignedOutObserved?: (scope: SignedOutScope) => void;
+  readonly onDiscoveryStale?: (scope: StaleDiscoveryScope) => void;
   /** A connect failure that waiting cannot fix. Defaults to a recorded protocol mismatch. */
   readonly isTerminalConnectFailure?: (
     error: unknown,
@@ -503,15 +512,15 @@ export function createExternalTurnController(
   const random = dependencies.random ?? Math.random;
   const isTerminalConnectFailure =
     dependencies.isTerminalConnectFailure ?? defaultIsTerminalConnectFailure;
-  const onSignedOutObserved = dependencies.onSignedOutObserved ?? invalidateDiscoveryAfterSignedOut;
+  const onDiscoveryStale = dependencies.onDiscoveryStale ?? invalidateStaleDiscovery;
   const liveTurns = new Map<string, LiveExternalTurn>();
 
   /** Discardable bookkeeping: a failure here must never disturb the turn's ending. */
-  function notifySignedOut(scope: SignedOutScope): void {
+  function notifyDiscoveryStale(scope: StaleDiscoveryScope): void {
     try {
-      onSignedOutObserved(scope);
+      onDiscoveryStale(scope);
     } catch (error) {
-      logger.warn('signed_out_invalidation_failed', {
+      logger.warn('discovery_invalidation_failed', {
         targetId: scope.targetId,
         error: String(error),
       });
@@ -548,10 +557,15 @@ export function createExternalTurnController(
         configuration: input.configuration,
       })
       .catch((error: unknown) => {
-        // The open found the account signed out: tell the cache the same way a turn that ended
-        // signed out does. The refusal itself still reaches the caller, which presents it.
-        if (openRefusalFor(targetId, error)?.remedy.kind === 'sign-in') {
-          notifySignedOut({ userId: input.userId, environmentId: chat.environmentId, targetId });
+        // The open found the agent signed out, gone, outdated or denied: the cached descriptor is
+        // stale, so tell the cache the way a turn that ended signed out does. The refusal itself
+        // still reaches the caller, which presents it.
+        if (openRefusalFor(targetId, error)) {
+          notifyDiscoveryStale({
+            userId: input.userId,
+            environmentId: chat.environmentId,
+            targetId,
+          });
         }
         throw error;
       });
@@ -827,7 +841,7 @@ export function createExternalTurnController(
           envelope.event.type === 'error' &&
           turnErrorRemedyFor(targetId, envelope.event.error)?.kind === 'sign-in'
         ) {
-          notifySignedOut({
+          notifyDiscoveryStale({
             userId: input.userId,
             environmentId: context.chat.environmentId,
             targetId,
@@ -872,11 +886,19 @@ export function createExternalTurnController(
         )
       : () => undefined;
 
+    /** Errors that came out of {@link reacquire}, so `failStart` can tell a reopen from a turn call. */
+    const reopenFailures = new WeakSet<object>();
+
     async function reacquire(): Promise<ExternalSessionHandle> {
-      const next = await sessions.ensureSession({
-        ...sessionInputFor(input, context.chat.environmentId, targetId),
-        existingConnectionOnly: true,
-      });
+      const next = await sessions
+        .ensureSession({
+          ...sessionInputFor(input, context.chat.environmentId, targetId),
+          existingConnectionOnly: true,
+        })
+        .catch((error: unknown) => {
+          if (typeof error === 'object' && error !== null) reopenFailures.add(error);
+          throw error;
+        });
       // A stop that landed during the open must not re-point a turn that ended.
       if (stop.signal.aborted) return next;
       if (next === handle || next.sessionId === handle.sessionId) return next;
@@ -943,8 +965,36 @@ export function createExternalTurnController(
         // teardown was deferred to the submission and is now the turn's.
         if (!handle.isLive()) terminate('runtime-disconnected');
       };
+      /**
+       * Stores the error a start ended with and sends the same one to the live stream, so a reload
+       * shows what the person watched.
+       */
+      const recordStartError = (
+        stored: ExternalAgentError,
+        refusal?: OpenRefusalPresentation
+      ): void => {
+        transcript.recordError(stored, refusal);
+        input.observer?.onEvent?.({ type: 'error', error: stored }, refusal);
+      };
       const failStart = (error: unknown, code: string): void => {
-        transcript.recordError(vendorErrorFrom(error, code));
+        // A reopen after a dropped connection can find what a first open finds: the agent signed
+        // out, gone, outdated or denied. Present it as the first open does, and tell the cache.
+        const refusal = openRefusalFor(targetId, error);
+        // A refused reopen stores the runtime's own kind, which the person can quote to support;
+        // the hub's label for where the start failed is the fallback, and what every other start
+        // failure (the turn call itself) stores.
+        const stored = vendorErrorFrom(
+          error,
+          reopenFailures.has(error as object) ? (openFailureCodeFor(error) ?? code) : code
+        );
+        recordStartError(stored, refusal);
+        if (refusal) {
+          notifyDiscoveryStale({
+            userId: input.userId,
+            environmentId: context.chat.environmentId,
+            targetId,
+          });
+        }
         const reason = terminalReasonForCallFailure(error);
         terminate(reason);
         // The runtime no longer has this session, but the manager still caches
@@ -1028,11 +1078,11 @@ export function createExternalTurnController(
             // A local lost reply has no error part; preserve a committed
             // review error alongside its localized uncertainty notice.
             if (input.review && outcome.error)
-              transcript.recordError(vendorErrorFrom(outcome.error, 'review-start'));
+              recordStartError(vendorErrorFrom(outcome.error, 'review-start'));
             terminate('acceptance-unknown');
             return;
           case 'receipt-failed':
-            transcript.recordError(
+            recordStartError(
               vendorErrorFrom(outcome.error, input.review ? 'review-receipt' : 'turn-receipt')
             );
             terminate('vendor-error');

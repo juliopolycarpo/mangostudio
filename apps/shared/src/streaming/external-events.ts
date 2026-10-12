@@ -20,6 +20,7 @@ import type {
   ExternalAgentEvent,
   ExternalAgentRemedy,
   ExternalAgentTargetId,
+  ExternalAgentUnavailableReason,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
 } from '../external-agents/schemas';
@@ -130,7 +131,12 @@ export function externalAgentEventToStreamChunk(
   event: ExternalAgentEvent,
   binding?: ExternalTurnAccountBinding,
   /** What the hub offers beside an `error` event (see `externalRemedyForError`); ignored otherwise. */
-  errorRemedy?: ExternalAgentRemedy
+  errorRemedy?: ExternalAgentRemedy,
+  /** The unavailable reason the hub recorded beside that `error` event; ignored otherwise. */
+  errorReason?: {
+    readonly unavailableReason: ExternalAgentUnavailableReason;
+    readonly requiredVersion?: string;
+  }
 ): StreamChunk | null {
   switch (event.type) {
     case 'session_started':
@@ -240,6 +246,8 @@ export function externalAgentEventToStreamChunk(
         type: 'external_error',
         error: event.error,
         ...(errorRemedy ? { remedy: errorRemedy } : {}),
+        ...(errorReason ? { unavailableReason: errorReason.unavailableReason } : {}),
+        ...(errorReason?.requiredVersion ? { requiredVersion: errorReason.requiredVersion } : {}),
         done: false,
       };
   }

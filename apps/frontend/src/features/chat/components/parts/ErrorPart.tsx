@@ -2,6 +2,7 @@ import {
   EXTERNAL_AGENT_CAPACITY_CODE,
   type ExternalAgentRemedy,
   type ExternalAgentUnavailableReason,
+  isExternalAgentKindCode,
 } from '@mangostudio/shared/external-agents';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
@@ -16,7 +17,10 @@ interface ErrorPartProps {
   remedy?: ExternalAgentRemedy;
   /** The build `version-unsupported` asks for; absent when the hub did not name one. */
   requiredVersion?: string;
-  /** The runtime's kind for a failed open with no reason; only the session cap has copy today. */
+  /**
+   * The runtime's kind for a failed open with no reason. The session cap has copy of its own; any
+   * other kind keeps `text` and is shown as plain text, so the person has something to quote.
+   */
   code?: string;
 }
 
@@ -42,6 +46,8 @@ export function ErrorPart({
   const command = remedy?.kind === 'sign-in' ? remedy.command : undefined;
   // A reason describes the agent; the session cap describes the runtime, so it is keyed by code.
   const capacity = !unavailableReason && code === EXTERNAL_AGENT_CAPACITY_CODE;
+  // Only a kind of the runtime's shape, and only where no other copy already says what happened.
+  const kind = !unavailableReason && !capacity && isExternalAgentKindCode(code) ? code : undefined;
   const sentence = unavailableReason
     ? externalUnavailableText(unavailableReason, t, requiredVersion)
     : capacity
@@ -50,6 +56,7 @@ export function ErrorPart({
   return (
     <div className="max-w-2xl space-y-1.5 rounded-xl border border-error/20 bg-error/10 p-4 font-body text-sm text-error">
       <p>{sentence}</p>
+      {kind ? <span className="block font-mono text-[10px] opacity-70">{kind}</span> : null}
       {command ? <SignInCommand command={command} /> : null}
       {unavailableReason && remedy ? <ExternalRemedyLink remedy={remedy} /> : null}
     </div>

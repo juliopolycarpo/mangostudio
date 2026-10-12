@@ -17,3 +17,28 @@
  * `crates/mangostudio-runtime/src/external_agents/supervisor.rs`; its tests pin that spelling.
  */
 export const EXTERNAL_AGENT_CAPACITY_CODE = 'external_agent_capacity';
+
+/** The runtime's kinds for external-agent failures are `external_agent_` and snake_case words. */
+const EXTERNAL_AGENT_KIND_PATTERN = /^external_agent_[a-z]+(?:_[a-z]+)*$/;
+
+/** Longest kind the hub forwards or the client shows; the runtime's longest is under 40. */
+const EXTERNAL_AGENT_KIND_MAX_LENGTH = 64;
+
+/**
+ * Whether `value` has the shape of a runtime external-agent kind.
+ *
+ * The hub forwards a failed open's kind in the `error` chunk's `code` so the person has something
+ * to quote to support, and the client shows it as plain text. Checking the shape on both sides
+ * keeps anything else, such as vendor text or markup, out of that field.
+ *
+ * @example
+ * isExternalAgentKindCode('external_agent_launch_failed'); // true
+ * isExternalAgentKindCode('<img src=x>'); // false
+ */
+export function isExternalAgentKindCode(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= EXTERNAL_AGENT_KIND_MAX_LENGTH &&
+    EXTERNAL_AGENT_KIND_PATTERN.test(value)
+  );
+}

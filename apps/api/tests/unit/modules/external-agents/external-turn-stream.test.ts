@@ -20,7 +20,10 @@ import { getChatMessagesUseCase } from '../../../../src/modules/chats/applicatio
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
 import { acknowledgeExternalDisclosure } from '../../../../src/modules/external-agents/application/external-disclosure-gate';
-import { createExternalSessionManager } from '../../../../src/modules/external-agents/application/external-session-manager';
+import {
+  createExternalSessionManager,
+  type ExternalSessionManager,
+} from '../../../../src/modules/external-agents/application/external-session-manager';
 import { createExternalTurnConfigurationResolver } from '../../../../src/modules/external-agents/application/external-turn-configuration';
 import {
   createExternalTurnController,
@@ -125,9 +128,14 @@ function harness(
     /** Scripted `external-agent.open` failures, consumed per call. */
     readonly openFailure?: () => Error | undefined;
     /** Replaces the default discovery invalidation after a signed-out ending. */
-    readonly onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved'];
+    readonly onDiscoveryStale?: ExternalTurnControllerDependencies['onDiscoveryStale'];
     /** How long the session manager retries an open the runtime refuses at its session cap. */
     readonly capacityRetryMs?: number;
+    /**
+     * Makes the first session read as dropped and answers the reopen a resubmission then makes
+     * with this error, as a runtime that refuses it would.
+     */
+    readonly reopenRefusal?: () => Error;
   } = {}
 ) {
   const runtime = createFakeExternalRuntime({
@@ -142,12 +150,23 @@ function harness(
       ? {}
       : { capacityRetryMs: options.capacityRetryMs, capacityRetryIntervalMs: 1 }),
   });
+  const refuseReopen = options.reopenRefusal;
+  const sessionsSeenByController: ExternalSessionManager = refuseReopen
+    ? {
+        ...sessions,
+        async ensureSession(input) {
+          if (input.existingConnectionOnly) throw refuseReopen();
+          const handle = await sessions.ensureSession(input);
+          return { ...handle, isLive: () => false };
+        },
+      }
+    : sessions;
   const approvals = createExternalApprovalRegistry();
   const controller = createExternalTurnController({
-    sessions,
+    sessions: sessionsSeenByController,
     approvals,
     ...(options.sleep ? { sleep: options.sleep } : {}),
-    ...(options.onSignedOutObserved ? { onSignedOutObserved: options.onSignedOutObserved } : {}),
+    ...(options.onDiscoveryStale ? { onDiscoveryStale: options.onDiscoveryStale } : {}),
   });
   const resolveConfiguration = createExternalTurnConfigurationResolver({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
@@ -736,7 +755,7 @@ describe('a turn the agent refused because its account is signed out', () => {
   };
 
   async function cursorHarness(
-    onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved']
+    onDiscoveryStale?: ExternalTurnControllerDependencies['onDiscoveryStale']
   ) {
     const cursorChatId = await insertExternalChat(undefined, 'cursor');
     const agent = descriptor({ targetId: 'cursor' });
@@ -751,7 +770,7 @@ describe('a turn the agent refused because its account is signed out', () => {
     );
     const rig = harness({
       agents: [agent],
-      ...(onSignedOutObserved ? { onSignedOutObserved } : {}),
+      ...(onDiscoveryStale ? { onDiscoveryStale } : {}),
     });
     const send = async (prompt: string) => {
       const result = await rig.stream(
@@ -866,8 +885,9 @@ describe('a send the runtime refuses while the session opens', () => {
     targetId: (typeof OPEN_TARGETS)[number],
     options: {
       readonly openFailure?: () => Error | undefined;
-      readonly onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved'];
+      readonly onDiscoveryStale?: ExternalTurnControllerDependencies['onDiscoveryStale'];
       readonly capacityRetryMs?: number;
+      readonly reopenRefusal?: () => Error;
     }
   ) {
     const targetChatId = await insertExternalChat(undefined, targetId);
@@ -950,7 +970,7 @@ describe('a send the runtime refuses while the session opens', () => {
     const told: unknown[] = [];
     const { send } = await openRig('codex', {
       openFailure: signedOutRefusal,
-      onSignedOutObserved: (scope) => told.push(scope),
+      onDiscoveryStale: (scope) => told.push(scope),
     });
 
     await send('hello');
@@ -959,10 +979,8 @@ describe('a send the runtime refuses while the session opens', () => {
   });
 
   it('presents a consent the machine owner withdrew as the existing denied reason', async () => {
-    const told: unknown[] = [];
     const { send } = await openRig('cursor', {
       openFailure: () => new RuntimeConsentDeniedError('external agents are not allowed here'),
-      onSignedOutObserved: (scope) => told.push(scope),
     });
 
     const chunk = errorChunkOf(await send('hello'));
@@ -970,8 +988,53 @@ describe('a send the runtime refuses while the session opens', () => {
     expect({
       reason: chunk && 'unavailableReason' in chunk ? chunk.unavailableReason : undefined,
       remedy: chunk && 'remedy' in chunk ? chunk.remedy : undefined,
-      toldSignedOut: told.length,
-    }).toEqual({ reason: 'runtime-denied', remedy: { kind: 'contact-admin' }, toldSignedOut: 0 });
+    }).toEqual({ reason: 'runtime-denied', remedy: { kind: 'contact-admin' } });
+  });
+
+  // The cached descriptor still says the agent is fine, so one more send would hit the same
+  // refusal until the cache expires. Every refusal that names the agent's state drops it once.
+  const STALE_DISCOVERY_REFUSALS: ReadonlyArray<readonly [string, () => Error]> = [
+    ['consent was withdrawn', () => new RuntimeConsentDeniedError('not allowed here')],
+    [
+      'the executable is gone',
+      () => new RemoteError('INTERNAL', 'not installed', { kind: 'external_agent_not_installed' }),
+    ],
+    [
+      'the version is unsupported',
+      () =>
+        new RemoteError('UNAVAILABLE', 'too old', {
+          kind: 'external_agent_version_unsupported',
+          requiredVersion: '1.2.3',
+        }),
+    ],
+  ];
+  for (const [label, failure] of STALE_DISCOVERY_REFUSALS) {
+    it(`tells the discovery cache once when ${label}`, async () => {
+      const told: unknown[] = [];
+      const { send } = await openRig('cursor', {
+        openFailure: failure,
+        onDiscoveryStale: (scope) => told.push(scope),
+      });
+
+      await send('hello');
+
+      expect(told).toEqual([{ userId, environmentId: 'local', targetId: 'cursor' }]);
+    });
+  }
+
+  it('leaves the discovery cache alone for a failure that says nothing about the agent', async () => {
+    const told: unknown[] = [];
+    const { send } = await openRig('cursor', {
+      openFailure: () =>
+        new RemoteError('UNAVAILABLE', 'the agent did not start', {
+          kind: 'external_agent_launch_failed',
+        }),
+      onDiscoveryStale: (scope) => told.push(scope),
+    });
+
+    await send('hello');
+
+    expect(told).toEqual([]);
   });
 
   for (const targetId of OPEN_TARGETS) {
@@ -997,6 +1060,53 @@ describe('a send the runtime refuses while the session opens', () => {
       });
     });
   }
+
+  it('tells the live stream what the stored turn keeps when a resubmission reopen is refused', async () => {
+    const { send } = await openRig('codex', {
+      reopenRefusal: () =>
+        new RemoteError('UNAVAILABLE', 'codex 0.1 is older than 0.153.4', {
+          kind: 'external_agent_version_unsupported',
+          requiredVersion: '0.153.4',
+        }),
+    });
+
+    const chunks = await send('hello');
+    const live = chunks.find(
+      (chunk): chunk is Extract<StreamChunk, { type: 'external_error' }> =>
+        chunk.type === 'external_error'
+    );
+    const assistant = chunks.find((chunk) => chunk.type === 'assistant_message_id');
+    if (assistant?.type !== 'assistant_message_id') {
+      throw new Error(
+        `expected an assistant_message_id chunk | received: ${JSON.stringify(chunks)}`
+      );
+    }
+    const stored = await getDb()
+      .selectFrom('messages')
+      .select('parts')
+      .where('id', '=', assistant.messageId)
+      .executeTakeFirstOrThrow();
+    const turn = (JSON.parse(stored.parts ?? '[]') as Array<Record<string, unknown>>).find(
+      (part) => part.type === 'external_turn'
+    );
+
+    // The same four fields, read off the chunk and off the stored part.
+    const presentation = (
+      source: Record<string, unknown> | undefined
+    ): Record<string, unknown> => ({
+      error: source?.error,
+      remedy: source?.remedy,
+      unavailableReason: source?.unavailableReason,
+      requiredVersion: source?.requiredVersion,
+    });
+    const order = chunks
+      .map((chunk) => chunk.type)
+      .filter((type) => ['external_error', 'external_turn_completed', 'done'].includes(type));
+
+    expect(order).toEqual(['external_error', 'external_turn_completed', 'done']);
+    expect(presentation(live)).toEqual(presentation(turn));
+    expect(turn?.unavailableReason, 'the stored turn names the reason').toBe('version-unsupported');
+  });
 
   it('presents an outdated agent with the update remedy and the build it needs', async () => {
     const { send } = await openRig('codex', {
@@ -1075,12 +1185,27 @@ describe('a send the runtime refuses while the session opens', () => {
     });
   });
 
-  it('keeps the generic message for an open failure that has no existing presentation', async () => {
+  it('keeps the generic message for an open failure that has no presentation, and names its kind', async () => {
     const { send } = await openRig('cursor', {
       openFailure: () =>
         new RemoteError('UNAVAILABLE', 'the agent did not start', {
           kind: 'external_agent_launch_failed',
         }),
+    });
+
+    const chunk = errorChunkOf(await send('hello'));
+
+    expect(chunk).toEqual({
+      type: 'error',
+      error: GENERIC,
+      code: 'external_agent_launch_failed',
+      done: true,
+    });
+  });
+
+  it('names no kind for an open failure the runtime gave none, such as a timeout', async () => {
+    const { send } = await openRig('cursor', {
+      openFailure: () => new RemoteError('TIMEOUT', 'no answer from the runtime'),
     });
 
     const chunk = errorChunkOf(await send('hello'));

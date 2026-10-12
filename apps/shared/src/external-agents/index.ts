@@ -43,7 +43,7 @@ export {
   lastContentIndex,
   MAX_EXTERNAL_NOTICES_PER_TURN,
 } from './notice';
-export { EXTERNAL_AGENT_CAPACITY_CODE } from './open-failures';
+export { EXTERNAL_AGENT_CAPACITY_CODE, isExternalAgentKindCode } from './open-failures';
 export {
   type NormalizedPermissionValue,
   normalizeApprovalRouting,

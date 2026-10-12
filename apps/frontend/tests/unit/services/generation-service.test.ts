@@ -10,6 +10,8 @@ import type { GenerateImageResponse, RespondStreamBody } from '@mangostudio/shar
 import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type * as ApiClient from '../../../src/lib/api-client';
+import { ExternalRefusalError } from '../../../src/lib/external-refusal-error';
+import { ApiError } from '../../../src/lib/utils';
 import type { GenerateImageRequest } from '../../../src/services/generation-service';
 
 // Eden Treaty's generic types are too strict for jest.fn() mocks, so the factory is cast via unknown.
@@ -265,6 +267,76 @@ describe('startExternalReviewStream', () => {
         done: true,
       },
     ]);
+  });
+});
+
+describe('startExternalReviewStream: a review the hub refused for a state of the agent', () => {
+  let fetchMock: ReturnType<typeof jest.fn>;
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    fetchMock = jest.fn();
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  async function rejection(chunk: Record<string, unknown>): Promise<unknown> {
+    fetchMock.mockResolvedValue(
+      streamingResponse([`data: ${JSON.stringify({ type: 'error', done: true, ...chunk })}\n`])
+    );
+    return await startExternalReviewStream(
+      'chat-1',
+      { target: { type: 'uncommittedChanges' } },
+      () => undefined
+    ).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+  }
+
+  it('keeps the reason, remedy and build on the error it throws, still an ApiError', async () => {
+    const error = await rejection({
+      error: 'The external agent turn could not be started.',
+      unavailableReason: 'version-unsupported',
+      remedy: { kind: 'update' },
+      requiredVersion: '0.153.4',
+    });
+
+    expect({
+      isApiError: error instanceof ApiError,
+      message: (error as ApiError).message,
+      reason: (error as ExternalRefusalError).unavailableReason,
+      remedy: (error as ExternalRefusalError).remedy,
+      version: (error as ExternalRefusalError).requiredVersion,
+    }).toEqual({
+      isApiError: true,
+      message: 'The external agent turn could not be started.',
+      reason: 'version-unsupported',
+      remedy: { kind: 'update' },
+      version: '0.153.4',
+    });
+  });
+
+  it('keeps the code a refusal without a reason carries', async () => {
+    const error = await rejection({
+      error: 'The external agent turn could not be started.',
+      code: 'external_agent_capacity',
+    });
+
+    expect((error as ApiError).code).toBe('external_agent_capacity');
+  });
+
+  it('throws a plain ApiError for a refusal that names no reason, as an older hub sends it', async () => {
+    const error = await rejection({ error: 'This agent does not offer a review.' });
+
+    expect({
+      isRefusal: error instanceof ExternalRefusalError,
+      isApiError: error instanceof ApiError,
+    }).toEqual({ isRefusal: false, isApiError: true });
   });
 });
 

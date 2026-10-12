@@ -11,6 +11,7 @@ import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
 } from '../../../src/hooks/use-global-settings';
+import { ExternalRefusalError } from '../../../src/lib/external-refusal-error';
 import { ApiError } from '../../../src/lib/utils';
 import type { respondTextStream } from '../../../src/services/generation-service';
 import { act, renderHook, waitFor } from '../../support/harness/render';
@@ -18,6 +19,7 @@ import { act, renderHook, waitFor } from '../../support/harness/render';
 // No Bun equivalent for `vi.mocked` — the `jest.fn()` handles created here are
 // what the factories below hand back, so keep them instead.
 const mockStream = jest.fn();
+const mockReviewStream = jest.fn();
 const mockCancelInterruptedTurn = jest.fn();
 const mockDismissInterruptedTurn = jest.fn();
 const mockGenerateChatTitle = jest.fn();
@@ -25,7 +27,7 @@ const mockInvalidateGitState = jest.fn().mockResolvedValue(undefined);
 
 mock.module('../../../src/services/generation-service', () => ({
   respondTextStream: mockStream,
-  startExternalReviewStream: jest.fn(),
+  startExternalReviewStream: mockReviewStream,
   cancelInterruptedTurn: mockCancelInterruptedTurn,
   dismissInterruptedTurn: mockDismissInterruptedTurn,
 }));
@@ -1655,6 +1657,171 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     });
 
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
+  // A review reports its refusal by throwing after the chunk, which would arm the reconcile that
+  // re-reads on the next activity signal and replace the refusal card with rows that hold nothing.
+  it('does not arm a transcript re-read for a review the agent could not start', async () => {
+    const props = makeProps();
+    const refusal = new ExternalRefusalError({
+      error: 'The external agent turn could not be started.',
+      unavailableReason: 'not-installed',
+      remedy: { kind: 'install' },
+    });
+    mockReviewStream.mockImplementation(
+      (
+        _chatId: string,
+        _request: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        onChunk({
+          type: 'error',
+          error: 'The external agent turn could not be started.',
+          unavailableReason: 'not-installed',
+          remedy: { kind: 'install' },
+          done: true,
+        });
+        return Promise.reject(refusal);
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    let rejection: unknown;
+    await act(async () => {
+      await result.current.generation.handleReviewChanges().catch((error: unknown) => {
+        rejection = error;
+      });
+    });
+    // The toast reads the reason off the error, so it has to arrive as thrown, not wrapped.
+    expect(rejection, 'expected the refusal the stream threw | received a different error').toBe(
+      refusal
+    );
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
+  it('keeps the optimistic rows after an open that failed with a runtime kind and nothing stored', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        {
+          type: 'error',
+          error: 'The external agent turn could not be started.',
+          code: 'external_agent_launch_failed',
+          done: true,
+        },
+      ])
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('hello');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
+  // The refusal is stored nowhere, so the re-read an earlier dropped stream armed would replace the
+  // optimistic rows that hold it with the server's rows, which hold none of it.
+  it('keeps a refusal card through the re-read an earlier dropped stream armed', async () => {
+    const props = makeProps();
+    let call = 0;
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        call += 1;
+        if (call === 1) {
+          onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+          onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+          return Promise.reject(new Error('network error'));
+        }
+        onChunk({
+          type: 'error',
+          error: 'The external agent turn could not be started.',
+          unavailableReason: 'not-installed',
+          remedy: { kind: 'install' },
+          done: true,
+        });
+        return Promise.resolve();
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const queryClient = result.current.queryClient;
+    // The optimistic writes land in the real cache, as the app's do.
+    type Rows = {
+      pages: Array<{ messages: Array<Record<string, unknown>>; nextCursor: null }>;
+      pageParams: unknown[];
+    };
+    const cacheRows = (chatId: string) => ['messages', chatId] as const;
+    (props.optimistic.appendOptimisticMessages as ReturnType<typeof jest.fn>).mockImplementation(
+      (chatId: string, added: Array<Record<string, unknown>>) => {
+        queryClient.setQueryData<Rows>(cacheRows(chatId), (old) => ({
+          pages: [{ messages: [...(old?.pages[0]?.messages ?? []), ...added], nextCursor: null }],
+          pageParams: [null],
+        }));
+      }
+    );
+    (props.optimistic.updateOptimisticMessage as ReturnType<typeof jest.fn>).mockImplementation(
+      (chatId: string, id: string, updates: Record<string, unknown>) => {
+        queryClient.setQueryData<Rows>(cacheRows(chatId), (old) =>
+          old
+            ? {
+                ...old,
+                pages: old.pages.map((page) => ({
+                  ...page,
+                  messages: page.messages.map((row) =>
+                    row.id === id ? { ...row, ...updates } : row
+                  ),
+                })),
+              }
+            : old
+        );
+      }
+    );
+    // A re-read replaces the cache with what the server stores: the first turn's rows only.
+    const serverRows = [
+      { id: 'server-user', chatId: 'chat-1', role: 'user', text: 'first', timestamp: 1 },
+      { id: 'server-ai', chatId: 'chat-1', role: 'ai', text: 'done', timestamp: 2 },
+    ];
+    spyOn(queryClient, 'invalidateQueries').mockImplementation((filters) => {
+      const key = filters?.queryKey;
+      if (Array.isArray(key) && key[0] === 'messages') {
+        queryClient.setQueryData<Rows>(key, {
+          pages: [{ messages: serverRows, nextCursor: null }],
+          pageParams: [null],
+        });
+      }
+      return Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.generation.handleRespond('first');
+    });
+    await act(async () => {
+      await result.current.generation.handleRespond('second');
+    });
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+
+    const cached = queryClient.getQueryData<{
+      pages: Array<{ messages: Array<{ id: string; parts?: Array<{ type: string }> }> }>;
+    }>(['messages', 'chat-1']);
+    const messages = cached?.pages.flatMap((page) => page.messages) ?? [];
+    expect({
+      persistedKept: messages.some((message) => message.id === 'server-ai'),
+      refusalKept: messages.some((message) => message.parts?.some((part) => part.type === 'error')),
+    }).toEqual({ persistedKept: true, refusalKept: true });
   });
 
   it('still re-reads after a terminal error chunk that names no reason', async () => {

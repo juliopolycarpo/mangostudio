@@ -10,6 +10,7 @@ import {
   ExternalAgentErrorSchema,
   ExternalAgentRemedySchema,
   ExternalAgentTargetIdSchema,
+  ExternalAgentUnavailableReasonSchema,
   ExternalApprovalDecisionSchema,
   ExternalApprovalOptionSchema,
   ExternalNoticeSeveritySchema,
@@ -553,6 +554,14 @@ const SSEExternalErrorEventSchema = Type.Object({
    * Added by the hub, never by the vendor. A client that does not know it shows `error` as before.
    */
   remedy: Type.Optional(ExternalAgentRemedySchema),
+  /**
+   * Why the agent could not be reached, when the hub refused the turn's session reopen for a state
+   * of the agent (signed out, gone, outdated, consent withdrawn). The stored turn keeps the same
+   * reason, so a reload says what the stream said. Added by the hub, never by the vendor.
+   */
+  unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
+  /** The build that would clear `version-unsupported`; present only beside that reason. */
+  requiredVersion: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   done: Type.Literal(false),
 });
 

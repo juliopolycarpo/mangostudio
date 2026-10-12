@@ -826,7 +826,7 @@ the prompt with ACP's authentication-required error, and the SDK ends the turn w
   loops. Whether the vendor's long-lived process picks up a new login without being restarted is
   the vendor's behaviour; it was not exercised against a signed-out Cursor.
 - **Cached state.** The hub drops its cached discovery answer for that environment and tells the
-  owner's clients to refetch it (`createSignedOutInvalidation`), once per such turn. It keeps no
+  owner's clients to refetch it (`createDiscoveryInvalidation`), once per such turn. It keeps no
   signed-out flag of its own: the next probe's verdict is what the app shows, and Cursor's
   probe often answers `unknown` rather than `signed-out`.
 - **Drift.** Runtime tests compare the hub's code literal with the SDK's `AUTH_REQUIRED_CODE` and
@@ -862,10 +862,11 @@ client says "a newer version". Nothing in the runtime's message is parsed or sho
 executable has its own kind because the runtime's `tool_argument` is shared with workspace and
 configuration refusals, which keep it and keep the generic sentence. Its code stays `INTERNAL`,
 so the hub's wait for a lost connection, which keys on `UNAVAILABLE`, does not take it for one. The open is not retried, and the
-next send opens again. A signed-out open also drops the cached discovery answer and refreshes the
-owner's clients, as a turn that ends signed out does; the other refusals do not, so the cached
-descriptor can send one more send to the same refusal until it expires. Nothing was persisted for the
-refused send, so there is nothing to reload.
+next send opens again. Each of these four refusals shows the cached descriptor is stale, so the hub
+also drops the cached discovery answer and refreshes the owner's clients, once, as a turn that ends
+signed out does; without it one more send could reach the same refusal for up to 30 s. A failure
+that names no state of the agent (the cap below, a launch failure) leaves the cache alone. Nothing
+was persisted for the refused send, so there is nothing to reload.
 
 A runtime still at its session cap after the hub's retry window (`external_agent_capacity`) says
 nothing about the agent, so it has no unavailable reason and no remedy, and a reason added for it
@@ -875,16 +876,43 @@ test), and the client says, in its own words, that the maximum number of externa
 in use and that the person can close one or try again. A client that does not know the code shows
 the English sentence. Like the other open refusals it is not stored, and the client keeps the
 refusal on screen instead of re-reading the transcript. Every other open failure keeps the generic
-sentence:
+sentence, and the stream's `error` chunk names its kind in `code` (the runtime's `external_agent_*`
+kind, forwarded only when it has that shape, `isExternalAgentKindCode`), which the client shows as
+plain text under the sentence for the person to quote to support. The review button's toast adds it
+in parentheses. A failure the runtime gave no kind, such as an open timeout, shows the sentence alone.
 
-| Open failure                                                                                                 | What the user sees today | Existing presentation |
-| ------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------- |
-| `external_agent_launch_failed`, `_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`, an open timeout | the generic sentence     | none                  |
+| Open failure                                                                                        | What the user sees                                                                         |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `external_agent_launch_failed` (also an executable that vanished between the resolve and the spawn) | the generic sentence and the kind; the failure is the launch itself, not a state to remedy |
+| `external_agent_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`                           | the generic sentence and the kind; nothing the product already presents describes them     |
+| an open timeout (no runtime kind)                                                                   | the generic sentence alone                                                                 |
 
-Two surfaces keep the generic wording: the review button's toast, because the review stream's thrown
-error drops the reason, and a resubmission after a dropped connection, which opens again inside the
-controller and records the runtime's own message on the turn. Both need a connection to be lost or a
-different button, and neither was changed here.
+#### The review toast and a resubmission
+
+The review stream turns its terminal `error` chunk into a thrown error so the repository panel does
+not report a click as a success. A chunk that names an unavailable reason is thrown as an
+`ExternalRefusalError` (an `ApiError` that also keeps the reason, the remedy and the build), and the
+toast composes one line from the selector's words: the reason, then the sign-in command or the name
+of the install or update action. A runtime at its session cap says its plain-words sentence. The
+client also stops arming the deferred transcript re-read for such a refusal, which would have
+replaced the card with rows that hold nothing of it. A re-read an earlier dropped stream already
+armed for the same chat does run, and puts the refused send's rows back after the rows it read
+(the hook remembers them per chat until the chat's next send starts); a row the server does hold
+wins.
+
+A resubmission after a dropped connection opens the session again (`reacquire`). Its refusal goes
+through the same mapping as a first open. The turn is stored with the unavailable reason, the remedy
+and, beside `version-unsupported`, the build (`ExternalTurnPart.unavailableReason`,
+`requiredVersion`), the live stream carries them on the `external_error` chunk, so a reload shows
+what the stream showed, and the footer renders them as the error card does. The error's `code` is
+the runtime's kind instead of the hub's `turn-start` label. A refusal the runtime made itself (an
+`UNAVAILABLE` carrying an `external_agent_*` kind) ends the submission after that one reopen; only
+an `UNAVAILABLE` without a kind, which is how the connection manager says nobody is connected,
+makes the loop wait for a connection. The other errors the hub records for a start that did not complete
+(`turn-receipt` and `review-receipt`, and a review whose acceptance is unknown) are sent live as
+the same `external_error` chunk, so they no longer appear only after a reload. Older peers: an
+older client ignores the new fields and shows the code and message it always showed; a newer
+client against an older hub receives none.
 
 ## Vendor pinning and drift
 
