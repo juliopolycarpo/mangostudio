@@ -457,6 +457,26 @@ describe('ExternalTurnTranscript', () => {
     ]);
   });
 
+  it('keeps a reasoning phase one block when a notice arrives inside it', () => {
+    const target = transcript();
+    feed(target, [
+      { type: 'reasoning_started' },
+      { type: 'reasoning_delta', text: 'first ' },
+      { type: 'notice', severity: 'info', title: 'Retrying' },
+      { type: 'reasoning_delta', text: 'second' },
+      { type: 'reasoning_ended' },
+    ]);
+
+    const received = target.parts.filter((part) => part.type !== 'external_turn');
+    expect(
+      received,
+      `expected one thinking part "first second" then the notice | received ${JSON.stringify(received)}`
+    ).toEqual([
+      { type: 'thinking', text: 'first second' },
+      { type: 'external_notice', severity: 'info', title: 'Retrying' },
+    ]);
+  });
+
   it('drops notices past the cap without spending the budget that could end the turn', () => {
     const target = transcript({ maxEvents: MAX_EXTERNAL_NOTICES_PER_TURN + 1 });
     const applications = feed(target, [

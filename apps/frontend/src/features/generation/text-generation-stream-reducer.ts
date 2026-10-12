@@ -727,7 +727,23 @@ function reduceExternalText(state: TextGenerationStreamState, textDelta: string)
   return withAiMessageUpdate({ ...state, text, parts }, { text, parts });
 }
 
+/**
+ * Appends reasoning to the phase the vendor has open, even when a notice was appended after it.
+ *
+ * Mirrors `ExternalTurnTranscript#appendReasoning`: a notice is an aside, so it must not split
+ * one phase into two blocks, one of which `openExternalThinkingIndex` would no longer name.
+ */
 function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: string) {
+  const open = state.openExternalThinkingIndex;
+  const phase = open === null ? undefined : state.parts[open];
+  if (open !== null && phase?.type === 'thinking' && open === lastContentIndex(state.parts)) {
+    const parts = [
+      ...state.parts.slice(0, open),
+      { ...phase, text: `${phase.text}${textDelta}` },
+      ...state.parts.slice(open + 1),
+    ];
+    return withAiMessageUpdate({ ...state, parts }, { parts });
+  }
   const parts = appendTrailingText(state.parts, 'thinking', textDelta);
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }

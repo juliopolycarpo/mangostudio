@@ -381,7 +381,7 @@ export class ExternalTurnTranscript {
         return { durable: false };
 
       case 'reasoning_delta':
-        this.#appendText('thinking', event.text);
+        this.#appendReasoning(event.text);
         return { durable: false };
 
       case 'reasoning_started':
@@ -526,6 +526,21 @@ export class ExternalTurnTranscript {
       return;
     }
     this.#parts.push(kind === 'text' ? { type: 'text', text } : { type: 'thinking', text });
+  }
+
+  /**
+   * Appends reasoning to the phase the vendor has open, even when a notice was appended after it.
+   *
+   * A notice is an aside, so it must not split one phase into two blocks, one of which
+   * `#openThinking` would no longer name. With no open phase this is `#appendText`.
+   */
+  #appendReasoning(text: string): void {
+    const open = this.#openThinking;
+    if (open !== undefined && this.#parts[lastContentIndex(this.#parts)] === open) {
+      open.text += text;
+      return;
+    }
+    this.#appendText('thinking', text);
   }
 }
 
