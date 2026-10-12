@@ -1180,6 +1180,12 @@ async fn the_session_cap_counts_opening_sessions() {
         "expected a capacity refusal | received: {}",
         error.message
     );
+    assert_eq!(
+        error.details.as_ref().map(|details| &details["kind"]),
+        Some(&serde_json::json!("external_agent_capacity")),
+        "expected the refusal to carry the kind the hub retries on | received {:?}",
+        error.details
+    );
     release.send_replace(true);
     held.await.unwrap().unwrap();
     rig.close("one").await;

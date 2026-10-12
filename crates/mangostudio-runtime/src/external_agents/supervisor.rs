@@ -590,10 +590,16 @@ impl Supervisor {
             ));
         }
         if slots.len() >= self.ports.session_cap {
-            return Err(tool_argument(format!(
-                "External-agent session capacity is {}; close a session before opening another.",
-                self.ports.session_cap
-            )));
+            // Its own kind, not `tool_argument`: the cap frees when a session's close ends, which
+            // can take longer than the hub waited for it, so the hub may retry this refusal.
+            return Err(RemoteError::new(
+                codes::INTERNAL,
+                format!(
+                    "External-agent session capacity is {}; close a session before opening another.",
+                    self.ports.session_cap
+                ),
+            )
+            .with_detail("kind", "external_agent_capacity"));
         }
         let opening = Arc::new(Opening {
             target: params.target_id,
