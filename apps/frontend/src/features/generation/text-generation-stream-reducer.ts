@@ -6,7 +6,12 @@ import type {
   ExternalTurnTerminalReason,
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
-import { externalActivityStatusForTerminal } from '@mangostudio/shared/external-agents';
+import {
+  canAddExternalNotice,
+  externalActivityStatusForTerminal,
+  externalNoticePart,
+  lastContentIndex,
+} from '@mangostudio/shared/external-agents';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type {
   ExternalActivityPart,
@@ -248,6 +253,8 @@ export function reduceTextGenerationStreamChunk(
       return reduceExternalThreadUsage(nextState, chunk.usage);
     case 'external_steer':
       return reduceExternalSteer(nextState, chunk);
+    case 'external_notice':
+      return reduceExternalNotice(nextState, chunk);
     case 'external_error':
       return reduceExternalError(nextState, chunk.error);
     case 'external_turn_completed':
@@ -720,7 +727,23 @@ function reduceExternalText(state: TextGenerationStreamState, textDelta: string)
   return withAiMessageUpdate({ ...state, text, parts }, { text, parts });
 }
 
+/**
+ * Appends reasoning to the phase the vendor has open, even when a notice was appended after it.
+ *
+ * Mirrors `ExternalTurnTranscript#appendReasoning`: a notice is an aside, so it must not split
+ * one phase into two blocks, one of which `openExternalThinkingIndex` would no longer name.
+ */
 function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: string) {
+  const open = state.openExternalThinkingIndex;
+  const phase = open === null ? undefined : state.parts[open];
+  if (open !== null && phase?.type === 'thinking' && open === lastContentIndex(state.parts)) {
+    const parts = [
+      ...state.parts.slice(0, open),
+      { ...phase, text: `${phase.text}${textDelta}` },
+      ...state.parts.slice(open + 1),
+    ];
+    return withAiMessageUpdate({ ...state, parts }, { parts });
+  }
   const parts = appendTrailingText(state.parts, 'thinking', textDelta);
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
@@ -919,6 +942,21 @@ function reduceExternalSteer(
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
+/**
+ * Keeps a vendor notice where it happened, as its own part and never as text.
+ *
+ * `ExternalTurnTranscript` builds the same part from the same event under the same cap, so a
+ * reload shows what the stream showed. A notice past the cap is dropped by both.
+ */
+function reduceExternalNotice(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'external_notice' }>
+) {
+  if (!canAddExternalNotice(state.parts)) return state;
+  const parts = [...state.parts, externalNoticePart(chunk)];
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
 function reduceExternalError(state: TextGenerationStreamState, error: ExternalAgentError) {
   const parts = updateExternalTurn(state.parts, (part) => ({ ...part, error }));
   return withAiMessageUpdate({ ...state, parts }, { parts });
@@ -967,16 +1005,18 @@ function closeThinkingAt(
   parts: MessagePart[],
   open: number | null
 ): { readonly parts: MessagePart[]; readonly stoppedInside: number } {
-  if (open === null) return { parts, stoppedInside: parts.length - 1 };
+  if (open === null) return { parts, stoppedInside: lastContentIndex(parts) };
   const phase = parts[open];
-  if (phase?.type !== 'thinking') return { parts, stoppedInside: parts.length - 1 };
+  if (phase?.type !== 'thinking') return { parts, stoppedInside: lastContentIndex(parts) };
   // Displaced by output the vendor produced after it — closed in fact if not
   // in word, which is what a runtime too old to send `reasoning_ended` always
   // produces. An empty one still goes; the marker belongs on the trailing part.
-  const displaced = open !== parts.length - 1;
-  if (phase.text.length > 0) return { parts, stoppedInside: displaced ? parts.length - 1 : open };
+  const displaced = open !== lastContentIndex(parts);
+  if (phase.text.length > 0) {
+    return { parts, stoppedInside: displaced ? lastContentIndex(parts) : open };
+  }
   const kept = [...parts.slice(0, open), ...parts.slice(open + 1)];
-  return { parts: kept, stoppedInside: displaced ? kept.length - 1 : -1 };
+  return { parts: kept, stoppedInside: displaced ? lastContentIndex(kept) : -1 };
 }
 
 /**

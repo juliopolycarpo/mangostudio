@@ -22,9 +22,12 @@ import type {
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
 import {
+  canAddExternalNotice,
   EXTERNAL_TURN_MAX_EVENTS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
   externalActivityStatusForTerminal,
+  externalNoticePart,
+  lastContentIndex,
 } from '@mangostudio/shared/external-agents';
 import type {
   ExternalActivityPart,
@@ -162,6 +165,10 @@ export class ExternalTurnTranscript {
       return { durable: false };
     }
 
+    // A notice past the per-turn cap is dropped, as the live reducer drops it, and an uncounted
+    // notice must not spend the budget a repeating vendor could use to end the turn.
+    if (event.type === 'notice' && !canAddExternalNotice(this.#parts)) return { durable: false };
+
     this.#turnPart.lastSequence = context.sequence;
     this.#turnPart.updatedAt = context.at;
     this.#turnPart.eventCount += 1;
@@ -206,11 +213,13 @@ export class ExternalTurnTranscript {
     // shape a runtime too old to send `reasoning_ended` always produces. The
     // turn stopped in whatever is trailing there, which is the rule that
     // predates any of this.
+    // A notice is an aside, so the part the turn stopped in is the last one that is not a notice.
+    const trailing = (): MessagePart | undefined => this.#parts[lastContentIndex(this.#parts)];
     const stoppedInReasoning =
-      this.#openThinking !== undefined && this.#openThinking === this.#parts.at(-1);
+      this.#openThinking !== undefined && this.#openThinking === trailing();
     const openPhase = this.#closeThinking();
     if (reason !== 'completed') {
-      this.#markIncomplete(stoppedInReasoning ? openPhase : this.#parts.at(-1));
+      this.#markIncomplete(stoppedInReasoning ? openPhase : trailing());
     }
     const activityStatus = externalActivityStatusForTerminal(reason);
     // Vendors may exhaust their event budget before emitting activity closes.
@@ -372,7 +381,7 @@ export class ExternalTurnTranscript {
         return { durable: false };
 
       case 'reasoning_delta':
-        this.#appendText('thinking', event.text);
+        this.#appendReasoning(event.text);
         return { durable: false };
 
       case 'reasoning_started':
@@ -475,6 +484,12 @@ export class ExternalTurnTranscript {
         // Account quota is cached vendor state, not transcript.
         return { durable: false };
 
+      case 'notice':
+        // Display only: kept as its own part, never as text, so it is not the message's
+        // `text` column and no model ever reads it back. The cap was applied above.
+        this.#parts.push(externalNoticePart(event));
+        return { durable: false };
+
       case 'cancelled':
         // A marker, not a terminal. The `completed` immediately behind it is
         // what ends the turn; this only changes the reason that end is recorded
@@ -511,6 +526,21 @@ export class ExternalTurnTranscript {
       return;
     }
     this.#parts.push(kind === 'text' ? { type: 'text', text } : { type: 'thinking', text });
+  }
+
+  /**
+   * Appends reasoning to the phase the vendor has open, even when a notice was appended after it.
+   *
+   * A notice is an aside, so it must not split one phase into two blocks, one of which
+   * `#openThinking` would no longer name. With no open phase this is `#appendText`.
+   */
+  #appendReasoning(text: string): void {
+    const open = this.#openThinking;
+    if (open !== undefined && this.#parts[lastContentIndex(this.#parts)] === open) {
+      open.text += text;
+      return;
+    }
+    this.#appendText('thinking', text);
   }
 }
 

@@ -223,6 +223,15 @@ export function externalAgentEventToStreamChunk(
         done: false,
       };
 
+    case 'notice':
+      return {
+        type: 'external_notice',
+        severity: event.severity,
+        title: event.title,
+        ...(event.description !== undefined ? { description: event.description } : {}),
+        done: false,
+      };
+
     case 'error':
       return { type: 'external_error', error: event.error, done: false };
   }

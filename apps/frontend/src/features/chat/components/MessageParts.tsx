@@ -8,6 +8,7 @@ import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
 import { ExternalActivityBlock } from './ExternalActivityBlock';
 import { ExternalApprovalCard } from './ExternalApprovalCard';
+import { ExternalNoticeBlock } from './ExternalNoticeBlock';
 import { ExternalSteerPartBlock } from './ExternalSteerPartBlock';
 import { findLatestFileChangeId } from './file-change-preview';
 import { GeneratedImagePart } from './GeneratedImagePart';
@@ -83,6 +84,16 @@ export function MessageParts({
               return (
                 <TimelineItem key={`${part.clientMessageId}-steer`} variant="block">
                   <ExternalSteerPartBlock part={part} />
+                </TimelineItem>
+              );
+            case 'external_notice':
+              return (
+                <TimelineItem
+                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  key={`${messageId}-notice-${idx}`}
+                  variant="block"
+                >
+                  <ExternalNoticeBlock part={part} />
                 </TimelineItem>
               );
             case 'thinking': {

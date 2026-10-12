@@ -194,6 +194,10 @@ describe('external turn boundaries', () => {
       'commands_available',
       'completed',
       'error',
+      // Observational: text the vendor wants the person to read. It carries no
+      // instruction channel, is kept as its own part rather than message text,
+      // and no replay hands it to a model.
+      'notice',
       'reasoning_delta',
       'reasoning_ended',
       'reasoning_started',

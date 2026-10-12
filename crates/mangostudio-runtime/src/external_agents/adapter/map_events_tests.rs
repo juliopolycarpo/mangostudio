@@ -1443,3 +1443,96 @@ fn an_empty_command_catalog_is_an_empty_list_on_the_wire() {
     );
     assert_valid_event(&event);
 }
+
+fn notice(severity: sdk::NoticeSeverity, title: &str, description: Option<&str>) -> sdk::EventKind {
+    sdk::EventKind::Notice {
+        severity,
+        title: title.to_owned(),
+        description: description.map(str::to_owned),
+    }
+}
+
+#[test]
+fn a_notice_keeps_its_severity_and_words_as_a_display_only_event() {
+    let mapped = assert_wire(
+        notice(
+            sdk::NoticeSeverity::Warning,
+            "Rate limit close",
+            Some("Resets in four minutes."),
+        ),
+        &json!({
+            "type": "notice",
+            "severity": "warning",
+            "title": "Rate limit close",
+            "description": "Resets in four minutes.",
+        }),
+    );
+    assert_nothing_else(&mapped);
+}
+
+#[test]
+fn a_notice_without_a_description_sends_none() {
+    assert_wire(
+        notice(sdk::NoticeSeverity::Error, "Retrying", None),
+        &json!({ "type": "notice", "severity": "error", "title": "Retrying" }),
+    );
+}
+
+#[test]
+fn a_severity_the_sdk_has_no_arm_for_is_info_and_its_spelling_stays_off_the_wire() {
+    let mapped = assert_wire(
+        notice(
+            sdk::NoticeSeverity::Other(String::from("_debug")),
+            "Verbose mode",
+            None,
+        ),
+        &json!({ "type": "notice", "severity": "info", "title": "Verbose mode" }),
+    );
+    let sent = serde_json::to_string(&mapped.wire).expect("event serializes");
+    assert!(
+        !sent.contains("_debug"),
+        "expected no vendor severity spelling on the wire | received {sent}"
+    );
+}
+
+#[test]
+fn a_notice_with_nothing_to_show_maps_to_nothing() {
+    let mapped = map(notice(
+        sdk::NoticeSeverity::Info,
+        " \u{1b} ",
+        Some("details"),
+    ));
+    assert_eq!(
+        mapped.wire, None,
+        "expected no wire event for a notice whose title is blank | received {:?}",
+        mapped.wire
+    );
+}
+
+#[test]
+fn a_notice_is_bounded_again_at_this_boundary() {
+    let long = "x".repeat(10_000);
+    let mapped = map(notice(sdk::NoticeSeverity::Info, &long, Some(&long)));
+    let Some(wire::Event::Notice {
+        title, description, ..
+    }) = mapped.wire
+    else {
+        panic!("expected a notice event | received {:?}", mapped.wire);
+    };
+    assert_eq!(
+        (
+            title.chars().count(),
+            description.map(|d| d.chars().count())
+        ),
+        (256, Some(4_096)),
+        "expected a 256 code point title and a 4096 code point description"
+    );
+}
+
+#[test]
+fn a_blank_description_is_dropped() {
+    assert_wire(
+        notice(sdk::NoticeSeverity::Info, "Retrying", Some("  \n ")),
+        &json!({ "type": "notice", "severity": "info", "title": "Retrying" }),
+    );
+}

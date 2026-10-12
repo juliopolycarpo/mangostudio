@@ -4,6 +4,7 @@ import type {
   ExternalAgentError,
   ExternalAgentTargetId,
   ExternalApprovalOption,
+  ExternalNoticeSeverity,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
   ExternalUsage,
@@ -288,6 +289,21 @@ export interface ExternalSteerPart {
   createdAt: number;
 }
 
+/**
+ * Something the vendor wanted the person to see outside its answer, kept where it happened.
+ *
+ * Display only: the vendor's own words (already bounded and stripped of control characters at the
+ * runtime boundary), rendered as plain text. It is not message text, so it never reaches a model's
+ * context; `severity` is the vendor's hint about prominence and nothing else, and an `error`
+ * notice does not mean the turn failed. See `external-agents/notice.ts`.
+ */
+export interface ExternalNoticePart {
+  type: 'external_notice';
+  severity: ExternalNoticeSeverity;
+  title: string;
+  description?: string;
+}
+
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
   | {
@@ -326,6 +342,7 @@ export type MessagePart =
   | ExternalActivityPart
   | ExternalApprovalPart
   | ExternalSteerPart
+  | ExternalNoticePart
   | ExternalTurnPart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }
