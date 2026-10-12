@@ -388,6 +388,37 @@ describe('ExternalTurnTranscript', () => {
     expect(target.turnPart.error).toMatchObject({ vendorCode: 'E_BOOM', retryable: false });
   });
 
+  it('keeps the sign-in remedy beside a turn the agent refused because it is signed out', () => {
+    const target = new ExternalTurnTranscript({
+      targetId: 'cursor',
+      sessionId: 'session-1',
+      startedAt: 1_000,
+    });
+    feed(target, [
+      {
+        type: 'error',
+        error: {
+          code: 'acp-auth-required',
+          message: 'authentication required; to sign in: cursor-agent login',
+          vendorCode: '-32000',
+          retryable: false,
+        },
+      },
+    ]);
+
+    expect({ code: target.turnPart.error?.code, remedy: target.turnPart.remedy }).toEqual({
+      code: 'acp-auth-required',
+      remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+    });
+  });
+
+  it('keeps no remedy beside any other vendor error', () => {
+    const target = transcript();
+    feed(target, [{ type: 'error', error: { code: 'adapter-stream', message: 'boom' } }]);
+
+    expect(target.turnPart.remedy).toBeUndefined();
+  });
+
   it('terminates on the event budget and keeps what it already had', () => {
     const target = transcript({ maxEvents: 2 });
     const applications = feed(target, [

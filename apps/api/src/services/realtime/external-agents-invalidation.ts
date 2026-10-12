@@ -3,7 +3,8 @@ import { getRealtimeBus } from './realtime-bus';
 
 /**
  * Publishes one user-scoped refresh after a background discovery probe produced
- * a better answer than the one already served.
+ * a better answer than the one already served, or after a turn showed the
+ * answer served before it was stale (the agent reported it is signed out).
  *
  * Deliberately not `publishEnvironmentInvalidation`, and deliberately not paired
  * with an in-process hook of its own. That function also runs the environment

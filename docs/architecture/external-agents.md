@@ -801,6 +801,37 @@ added later cannot ship without someone deciding what to do about it. That is wh
 than a `switch` at each render site: three call sites each falling through to "no action" is how a
 new reason silently becomes a dead end.
 
+#### A turn that ends signed out
+
+A turn can also learn the account is signed out after it was sent: an ACP agent (Cursor) answers
+the prompt with ACP's authentication-required error, and the SDK ends the turn with the code
+`acp-auth-required`. The hub treats that exactly like the pre-send `signed-out` reason:
+
+- **Mapping.** `externalRemedyForError` (shared) returns the `sign-in` remedy for that code and
+  nothing for any other. The command is the target's `loginCommand` from the product descriptor,
+  the same source the pre-send remedy reads, never text out of the vendor's error.
+  `ExternalTurnTranscript.recordError` stores it as `remedy` beside `error` on the `external_turn`
+  part, and the `external_error` stream chunk carries it as an optional `remedy`, so the live view
+  and a reload agree.
+- **What the user sees.** The turn footer shows the selector's "Installed, but signed out" words and
+  the command with its copy button, in place of the raw code and message. The command is a text
+  node: nothing the vendor wrote can become markup, a link or the command itself. MangoStudio
+  never runs it, opens a browser or reads a credential.
+- **Older peers.** The chunk field and the part field are optional. An older client ignores them and
+  shows the raw code and message as before; a newer client against an older hub receives no
+  remedy and does the same. No runtime wire message changed.
+- **Same session, no retry.** The SDK keeps the session `Ready` and the hub never resubmits a turn
+  that ended with the vendor's answer, so the user signs in out of band and sends again on the same
+  session. If the agent answers auth-required again, the turn ends the same way again; nothing
+  loops. Whether the vendor's long-lived process picks up a new login without being restarted is
+  the vendor's behaviour; it was not exercised against a signed-out Cursor.
+- **Cached state.** The hub drops its cached discovery answer for that environment and tells the
+  owner's clients to refetch it (`createSignedOutInvalidation`), once per such turn. It keeps no
+  signed-out flag of its own: the next probe's verdict is what the app shows, and Cursor's
+  probe often answers `unknown` rather than `signed-out`.
+- **Drift.** Runtime tests compare the hub's code literal with the SDK's `AUTH_REQUIRED_CODE` and
+  the hub's Cursor command with the SDK profile's login text, so a change on either side fails CI.
+
 The refusal a *send* produces carries the reason as a field rather than interpolated into an English
 sentence. `version-unsupported` is developer vocabulary; the client translates it from the catalog
 it already has, and the English message stays as the fallback an External API consumer sees when it
@@ -978,8 +1009,9 @@ These product facts come from SDK operations inside the adapter:
   authentication-required code (`-32000`): since SDK 0.6.1 it ends the turn with
   `acp-auth-required`, the message `authentication required; to sign in:` followed by the
   profile's login command (`cursor-agent login` for Cursor) and none of the agent's own text,
-  and `vendorCode` `-32000`; the session still stays usable. The hub and the client treat the
-  code as free text, so the turn footer shows that code and message as they are. An ACP tool call is named by
+  and `vendorCode` `-32000`; the session still stays usable. The hub presents that ending as a
+  signed-out agent (see "A turn that ends signed out" above) instead of a raw code and message.
+  An ACP tool call is named by
   the agent's own `name` when it sends one and by its title otherwise, so the activity label of a
   call that now carries a name changes from its title to that name.
 - **ACP outbound allowance.** `ACP_OUTBOUND_BUFFER_BYTES` (55 MiB) bounds one outgoing ACP frame.

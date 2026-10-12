@@ -24,16 +24,16 @@ import type { EnvironmentTransportKind } from '@mangostudio/shared/environments'
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Link } from '@tanstack/react-router';
-import { Check, ChevronDown, Copy, CornerUpRight, History } from 'lucide-react';
+import { Check, ChevronDown, CornerUpRight, History } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
+import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useExternalAccountLimits } from '@/features/external-agents/use-external-account-limits';
 import {
   externalAgentSelectable,
   externalUnavailableText,
 } from '@/features/external-agents/useExternalAgents';
-import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 
 export interface RunnerSelectorProps {
@@ -358,7 +358,6 @@ function ExternalRow({
 }) {
   const { t } = useI18n();
   const labels = t.externalAgents;
-  const { copy, copied } = useClipboard();
 
   const reason = descriptor.unavailableReason;
   const signedOut = descriptor.installed && descriptor.authState === 'signed-out';
@@ -461,19 +460,7 @@ function ExternalRow({
       {/* The vendor's own login command, with a copy button: the user has to run
           it on *that* machine, which MangoStudio cannot do for them. */}
       {signedOut && descriptor.loginCommand ? (
-        <div className="mb-2 flex items-center gap-2 px-2">
-          <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-container-high px-2 py-1 text-[10px] text-on-surface-variant">
-            {descriptor.loginCommand}
-          </code>
-          <button
-            type="button"
-            onClick={() => copy(descriptor.loginCommand ?? '')}
-            aria-label={labels.selector.copyLoginCommand}
-            className="shrink-0 rounded-lg p-1 text-on-surface-variant transition-colors hover:bg-surface-container-high"
-          >
-            {copied ? <Check size={12} /> : <Copy size={12} />}
-          </button>
-        </div>
+        <SignInCommand command={descriptor.loginCommand} className="mb-2 px-2" />
       ) : null}
     </div>
   );

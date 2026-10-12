@@ -18,6 +18,7 @@
 
 import type {
   ExternalAgentEvent,
+  ExternalAgentRemedy,
   ExternalAgentTargetId,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
@@ -127,7 +128,9 @@ export function externalSteerChunk(
  */
 export function externalAgentEventToStreamChunk(
   event: ExternalAgentEvent,
-  binding?: ExternalTurnAccountBinding
+  binding?: ExternalTurnAccountBinding,
+  /** What the hub offers beside an `error` event (see `externalRemedyForError`); ignored otherwise. */
+  errorRemedy?: ExternalAgentRemedy
 ): StreamChunk | null {
   switch (event.type) {
     case 'session_started':
@@ -233,6 +236,11 @@ export function externalAgentEventToStreamChunk(
       };
 
     case 'error':
-      return { type: 'external_error', error: event.error, done: false };
+      return {
+        type: 'external_error',
+        error: event.error,
+        ...(errorRemedy ? { remedy: errorRemedy } : {}),
+        done: false,
+      };
   }
 }

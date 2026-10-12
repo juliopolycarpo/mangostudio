@@ -20,7 +20,10 @@ import { createExternalApprovalRegistry } from '../../../../src/modules/external
 import { acknowledgeExternalDisclosure } from '../../../../src/modules/external-agents/application/external-disclosure-gate';
 import { createExternalSessionManager } from '../../../../src/modules/external-agents/application/external-session-manager';
 import { createExternalTurnConfigurationResolver } from '../../../../src/modules/external-agents/application/external-turn-configuration';
-import { createExternalTurnController } from '../../../../src/modules/external-agents/application/external-turn-controller';
+import {
+  createExternalTurnController,
+  type ExternalTurnControllerDependencies,
+} from '../../../../src/modules/external-agents/application/external-turn-controller';
 import { createExternalTurnStream } from '../../../../src/modules/external-agents/application/external-turn-stream';
 import type { CancellableSleep } from '../../../../src/modules/external-agents/application/external-turn-submission';
 import { grantWorkspaceTrust } from '../../../../src/modules/external-agents/application/external-workspace-trust';
@@ -67,7 +70,8 @@ let userId = '';
 let chatId = '';
 
 async function insertExternalChat(
-  permissions: { level?: string; routing?: string } = { level: 'default', routing: 'user' }
+  permissions: { level?: string; routing?: string } = { level: 'default', routing: 'user' },
+  targetId: 'codex' | 'cursor' = 'codex'
 ): Promise<string> {
   const id = `chat-${crypto.randomUUID()}`;
   await getDb()
@@ -80,7 +84,7 @@ async function insertExternalChat(
       model: null,
       userId,
       runnerKind: 'external',
-      runnerTargetId: 'codex',
+      runnerTargetId: targetId,
       runnerPermissionLevel: permissions.level ?? null,
       runnerApprovalRouting: permissions.routing ?? null,
       workdir: '/work/repo',
@@ -115,6 +119,8 @@ function harness(
     /** Scripted `external-agent.turn` failures, consumed per call. */
     readonly turnFailure?: () => Error | undefined;
     readonly sleep?: CancellableSleep;
+    /** Replaces the default discovery invalidation after a signed-out ending. */
+    readonly onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved'];
   } = {}
 ) {
   const runtime = createFakeExternalRuntime({
@@ -130,6 +136,7 @@ function harness(
     sessions,
     approvals,
     ...(options.sleep ? { sleep: options.sleep } : {}),
+    ...(options.onSignedOutObserved ? { onSignedOutObserved: options.onSignedOutObserved } : {}),
   });
   const resolveConfiguration = createExternalTurnConfigurationResolver({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
@@ -706,6 +713,129 @@ describe('external turn stream', () => {
 
     runtime.emit({ type: 'completed' });
     await reading;
+  });
+});
+
+describe('a turn the agent refused because its account is signed out', () => {
+  const AUTH_REQUIRED = {
+    code: 'acp-auth-required',
+    message: 'authentication required; to sign in: cursor-agent login',
+    vendorCode: '-32000',
+    retryable: false,
+  };
+
+  async function cursorHarness(
+    onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved']
+  ) {
+    const cursorChatId = await insertExternalChat(undefined, 'cursor');
+    const agent = descriptor({ targetId: 'cursor' });
+    await acknowledgeExternalDisclosure(
+      { userId, targetId: 'cursor' },
+      { capabilities: agent.capabilities, supportedConfigurations: EVERY_PAIR },
+      getDb()
+    );
+    await grantWorkspaceTrust(
+      { userId, targetId: 'cursor', environmentId: 'local', workspacePath: '/work/repo' },
+      getDb()
+    );
+    const rig = harness({
+      agents: [agent],
+      ...(onSignedOutObserved ? { onSignedOutObserved } : {}),
+    });
+    const send = async (prompt: string) => {
+      const result = await rig.stream(
+        {
+          userId,
+          chat: chatRecord({ runner: { kind: 'external', targetId: 'cursor' } }),
+          chatId: cursorChatId,
+          prompt,
+          attachmentIds: [],
+          externalTurn: undefined,
+        },
+        getDb()
+      );
+      if (!result.ok)
+        throw new Error(`the send was refused | received ${JSON.stringify(result.failure)}`);
+      return readChunks(result.response);
+    };
+    return { ...rig, chatId: cursorChatId, send };
+  }
+
+  it('reaches the stream with the target sign-in command as its remedy', async () => {
+    const { runtime, send } = await cursorHarness(() => undefined);
+    const reading = send('hello');
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'error', error: AUTH_REQUIRED });
+
+    const chunk = (await reading).find((candidate) => candidate.type === 'external_error');
+    expect(chunk).toMatchObject({
+      error: { code: 'acp-auth-required' },
+      remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+    });
+  });
+
+  it('is stored with the same error and remedy, so a reload shows what the stream showed', async () => {
+    const { runtime, send, chatId: cursorChatId } = await cursorHarness(() => undefined);
+    const reading = send('hello');
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'error', error: AUTH_REQUIRED });
+    const live = (await reading).find((candidate) => candidate.type === 'external_error');
+
+    const { messages } = await getChatMessagesUseCase({ chatId: cursorChatId, userId }, getDb());
+    const stored = messages
+      .find((message) => message.role === 'ai')
+      ?.parts?.find((part) => part.type === 'external_turn');
+    expect({ error: stored?.error, remedy: stored?.remedy }).toEqual({
+      error: live?.type === 'external_error' ? live.error : undefined,
+      remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+    });
+    expect(live?.type === 'external_error' ? live.remedy : undefined).toEqual(stored?.remedy);
+  });
+
+  it('is told to the discovery cache once, with the environment and target that signed out', async () => {
+    const told: unknown[] = [];
+    const { runtime, send } = await cursorHarness((scope) => told.push(scope));
+    const reading = send('hello');
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'error', error: AUTH_REQUIRED });
+    await reading;
+
+    expect(told).toEqual([{ userId, environmentId: 'local', targetId: 'cursor' }]);
+  });
+
+  it('is not resubmitted, and the next send reuses the same session', async () => {
+    const { runtime, send } = await cursorHarness(() => undefined);
+    const first = send('first');
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'error', error: AUTH_REQUIRED });
+    await first;
+    // The hub must not resubmit a turn that ended with the vendor's own answer.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(runtime.calls.turn.length).toBe(1);
+
+    const second = send('second');
+    await waitFor(() => runtime.calls.turn.length === 2, 'the next send to reach the runtime');
+    runtime.emit({ type: 'text_delta', text: 'signed in now' });
+    runtime.emit({ type: 'completed' });
+    await second;
+
+    expect({
+      opens: runtime.calls.open.length,
+      sessions: new Set(runtime.calls.turn.map((call) => call.sessionId)).size,
+    }).toEqual({ opens: 1, sessions: 1 });
+  });
+
+  it('leaves any other vendor error with no remedy', async () => {
+    const { runtime, send } = await cursorHarness(() => undefined);
+    const reading = send('hello');
+    await waitForTurnStart(runtime);
+    runtime.emit({
+      type: 'error',
+      error: { code: 'acp-request-failed', message: 'internal error', vendorCode: '-32603' },
+    });
+
+    const chunk = (await reading).find((candidate) => candidate.type === 'external_error');
+    expect(chunk && 'remedy' in chunk).toBe(false);
   });
 });
 

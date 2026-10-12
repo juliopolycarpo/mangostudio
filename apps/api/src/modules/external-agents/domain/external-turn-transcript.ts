@@ -36,6 +36,7 @@ import type {
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
+import { turnErrorRemedyFor } from './external-turn-error-remedy';
 
 /** The reasoning block of the message-part union, which has no name of its own. */
 type ThinkingPart = Extract<MessagePart, { type: 'thinking' }>;
@@ -300,6 +301,10 @@ export class ExternalTurnTranscript {
 
   recordError(error: ExternalAgentError): void {
     this.#turnPart.error = error;
+    // The remedy is derived from the error and the target, so the stored turn and the live chunk
+    // (see `external-turn-stream.ts`) carry the same one.
+    const remedy = turnErrorRemedyFor(this.#turnPart.targetId, error);
+    if (remedy) this.#turnPart.remedy = remedy;
   }
 
   /**

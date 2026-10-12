@@ -1,4 +1,5 @@
 import type { ExternalTurnPart } from '@mangostudio/shared/types';
+import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatTokensCompact } from '@/lib/format-tokens';
 
@@ -40,6 +41,11 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
 
   if (fields.length === 0 && !terminalNotice && !part.error) return null;
 
+  // A turn the agent refused because its account is signed out is shown the way the selector
+  // shows a signed-out agent: the same words, and the vendor's sign-in command to run and copy.
+  // The command is the hub's (`remedy.command`), never text out of the vendor's error.
+  const signIn = part.remedy?.kind === 'sign-in' ? part.remedy : undefined;
+
   return (
     <div className="mt-2 max-w-2xl space-y-1.5 pl-4">
       {fields.length > 0 ? (
@@ -54,7 +60,12 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
           ))}
         </div>
       ) : null}
-      {part.error ? (
+      {part.error && signIn ? (
+        <div className="space-y-1.5 rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">
+          <p>{t.externalAgents.unavailable['signed-out']}</p>
+          {signIn.command ? <SignInCommand command={signIn.command} /> : null}
+        </div>
+      ) : part.error ? (
         <p className="rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">
           {/* The vendor's own code and message, inert and unflattened. */}
           <span className="font-mono">{part.error.code}</span>

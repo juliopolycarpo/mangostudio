@@ -8,6 +8,7 @@ import {
   ExternalActivityUpdateSchema,
   ExternalAgentCommandSchema,
   ExternalAgentErrorSchema,
+  ExternalAgentRemedySchema,
   ExternalAgentTargetIdSchema,
   ExternalApprovalDecisionSchema,
   ExternalApprovalOptionSchema,
@@ -547,6 +548,11 @@ const SSEExternalSteerEventSchema = Type.Union([
 const SSEExternalErrorEventSchema = Type.Object({
   type: Type.Literal('external_error'),
   error: ExternalAgentErrorSchema,
+  /**
+   * What the person can do about it, when the hub knows (a signed-out agent: its sign-in command).
+   * Added by the hub, never by the vendor. A client that does not know it shows `error` as before.
+   */
+  remedy: Type.Optional(ExternalAgentRemedySchema),
   done: Type.Literal(false),
 });
 
