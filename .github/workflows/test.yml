@@ -14,9 +14,11 @@ on:
 permissions:
   contents: read
 
-# Four shards used fewer runner-seconds and had less aggregate queue waiting
-# in the hosted 4/6/8 comparison, with a Test completion median close to six.
-# The measurements and their limits are recorded in docs/reference/testing.md.
+# Three shards. The hosted 4/6/8 comparison picked four while the api unit lane
+# ran one worker per shard; at `--parallel=4` that lane no longer bounds the
+# test step, so one shard fewer costs little wall clock and saves a runner and
+# a job's fixed setup. The measurements, the projection and their limits are
+# recorded in docs/reference/testing.md.
 # Changing it is a three-line change: this value, the matrix list, and the shard
 # job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
 # so that last one cannot interpolate this value.
@@ -31,7 +33,7 @@ permissions:
 # partition. What has to stay stable is the file all shards of one run read, and
 # that is what resolve-timings pins.
 env:
-  SHARD_COUNT: 4
+  SHARD_COUNT: 3
   # Names every child a run spawns, and every one that never exits, in the shard
   # log. The failure this exists for (#922) reproduces only in CI, and Bun's own
   # `killed N dangling process` says nothing about which child it killed.
@@ -100,7 +102,7 @@ jobs:
     # failed jobs reuses resolve-timings' output and therefore the exact file
     # partition that hung; "re-run all jobs" re-resolves the baseline, which
     # is why it has looked more reliable.
-    name: Tests (shard ${{ matrix.shard }}/4)
+    name: Tests (shard ${{ matrix.shard }}/3)
     needs: [resolve-timings]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -109,7 +111,7 @@ jobs:
       # for the QA report instead of a run that stopped mid-fan-out.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3]
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
       # Bounds the snapshot this job restores and saves back. Each save carries
@@ -202,9 +204,10 @@ jobs:
       # reads, and the exit code; a hung Bun isolate runner (oven-sh/bun#39709)
       # is killed after 240s and retried once with the restored timings
       # baseline put back first. The bound is twice the slowest healthy test
-      # step measured at this shard count (120s; see
-      # docs/reference/testing.md), so a loaded runner that doubles the step
-      # is not read as a hung one. Both attempts have to fit this job's
+      # step measured at four shards with the unit lane on one worker (120s;
+      # see docs/reference/testing.md), so a loaded runner that doubles the
+      # step is not read as a hung one. Three shards at four unit workers
+      # project to a shorter step than that, so the bound is kept. Both attempts have to fit this job's
       # `timeout-minutes` or the retry is cut short: 2 x 240s leaves 120s for
       # the other steps, which took at most 45s in those runs.
       - name: Run tests with coverage

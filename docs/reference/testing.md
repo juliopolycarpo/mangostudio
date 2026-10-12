@@ -447,7 +447,7 @@ cannot even receive `$MANGOSTUDIO_BUN_TEST_ARGS`.
 > accumulation across workers, so serial `--isolate` concentrates rather than
 > avoids it.
 
-CI runs four shards, the frontend job, and one merge job
+CI runs three shards, the frontend job, and one merge job
 (`.github/workflows/test.yml`). Where the sharded run's time went when the
 split was designed, measured on run 32331139863 (four-core runner, Turbo
 running the lanes concurrently, the frontend then still on Vitest at 189.4s):
@@ -462,8 +462,8 @@ running the lanes concurrently, the frontend then still on Vitest at 189.4s):
 The shard boundary is a slice of *every* sharded lane rather than one job per
 workspace: a per-workspace split leaves `apps/api` alone at 278s.
 
-The current count comes from five first-attempt hosted CI runs each at 4, 6
-and 8 shards on 2026-10-11/12 UTC. The runs were interleaved sequentially on
+The count before the current one came from five first-attempt hosted CI runs
+each at 4, 6 and 8 shards on 2026-10-11/12 UTC. The runs were interleaved sequentially on
 frozen source [`683f69a`](https://github.com/juliopolycarpo/mangostudio/commit/683f69a57b798ea85f4fa93184e17acf3de3ce41),
 with Bun 1.4.3 and the shipping native runtime profile. The variants changed
 only the count, matrix and job name. The latency rule fixed before testing ranked
@@ -483,7 +483,7 @@ the frontend, timings resolver and merge. Summed shard queue measures each
 numbered shard's `created_at` to `started_at`; it is aggregate waiting, not
 the workflow's critical path.
 
-Four is the deployed count to reduce runner demand. Its observed median Test
+Four was the count that comparison deployed, to reduce runner demand. Its observed median Test
 end was 51 seconds lower than eight, with 171 fewer Test runner-seconds.
 Six ranked first under the latency rule, but its three-second lead over four
 is small relative to the observed variation. Four used 90 fewer Test
@@ -515,9 +515,39 @@ main. The chosen configuration is validated on updated source separately;
 these timings do not compare the new workload across counts. Re-measure after
 a runtime profile or CI concurrency/topology change.
 
+**Three is the deployed count**, adopted when the api unit lane moved to
+`--parallel=4`. The comparison above ran that lane at one worker per shard, so
+it does not rank three. What it does not cover is projected from the per-lane
+times of one four-shard run on main
+([38202725009](https://github.com/juliopolycarpo/mangostudio/actions/runs/38202725009)),
+where the api lane runs unit then integration back to back and root scripts
+runs beside it:
+
+| Shard | api unit | api integration | root scripts | Test step |
+| ----- | -------- | --------------- | ------------ | --------- |
+| 1     | 50s      | 32s             | 58s          | 82s       |
+| 2     | 55s      | 30s             | 65s          | 86s       |
+| 3     | 39s      | 29s             | 30s          | 68s       |
+| 4     | 46s      | 73s             | 25s          | 119s      |
+
+The step is unit plus integration. Once unit runs four workers, integration —
+serial and unisolated — is what bounds it, and root scripts is next. At three
+shards that projects to roughly 25s of unit, 55s of integration and 60s of
+root scripts per shard: a step near 80s, about where four shards stood, for
+one runner and one ~30s job setup fewer. Queue time is not the gain: four
+shards already waited a median 8s in aggregate. The projection assumes the unit
+lane gets about 2.5x from four workers on a runner that root scripts shares; it
+got 3.4x pinned to four idle cores.
+
+Two shards is not the next step. With only unit parallel the step projects to
+about 120s, slower than four shards were and close to the 147-second rejection
+limit once one shard draws the slow integration files. It needs the integration
+lane on `--parallel=4` first, and then root scripts, one process, becomes the
+bound.
+
 Changing the count requires three matching edits: `SHARD_COUNT`, the matrix
 list, and the shard job's `name`. `env` is unavailable in `jobs.<id>.name`, so
-the `/4` there cannot interpolate the value.
+the `/3` there cannot interpolate the value.
 
 #### Root scripts workers
 

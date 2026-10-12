@@ -40,7 +40,7 @@
 // night's findings, the attempt log a crash would otherwise clobber is kept
 // alongside the retry's instead of overwritten.
 //
-// Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/4
+// Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/3
 
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
