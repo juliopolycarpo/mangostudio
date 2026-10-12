@@ -895,7 +895,10 @@ not report a click as a success. A chunk that names an unavailable reason is thr
 toast composes one line from the selector's words: the reason, then the sign-in command or the name
 of the install or update action. A runtime at its session cap says its plain-words sentence. The
 client also stops arming the deferred transcript re-read for such a refusal, which would have
-replaced the card with rows that hold nothing of it.
+replaced the card with rows that hold nothing of it. A re-read an earlier dropped stream already
+armed for the same chat does run, and puts the refused send's rows back after the rows it read
+(the hook remembers them per chat until the chat's next send starts); a row the server does hold
+wins.
 
 A resubmission after a dropped connection opens the session again (`reacquire`). Its refusal goes
 through the same mapping as a first open. The turn is stored with the unavailable reason, the remedy
@@ -905,8 +908,11 @@ what the stream showed, and the footer renders them as the error card does. The 
 the runtime's kind instead of the hub's `turn-start` label. A refusal the runtime made itself (an
 `UNAVAILABLE` carrying an `external_agent_*` kind) ends the submission after that one reopen; only
 an `UNAVAILABLE` without a kind, which is how the connection manager says nobody is connected,
-makes the loop wait for a connection. Older peers: an older client ignores the new fields and shows
-the code and message it always showed; a newer client against an older hub receives none.
+makes the loop wait for a connection. The other errors the hub records for a start that did not complete
+(`turn-receipt` and `review-receipt`, and a review whose acceptance is unknown) are sent live as
+the same `external_error` chunk, so they no longer appear only after a reload. Older peers: an
+older client ignores the new fields and shows the code and message it always showed; a newer
+client against an older hub receives none.
 
 ## Vendor pinning and drift
 
