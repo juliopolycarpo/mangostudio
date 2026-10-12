@@ -1,4 +1,8 @@
 import Type, { type Static } from 'typebox';
+import {
+  ExternalAgentRemedySchema,
+  ExternalAgentUnavailableReasonSchema,
+} from '../external-agents/schemas';
 
 /** Generic API error response returned by all HTTP error paths. */
 export const ApiErrorResponseSchema = Type.Object({
@@ -14,6 +18,14 @@ export const SSEErrorEventSchema = Type.Object({
   type: Type.Literal('error'),
   error: Type.String(),
   code: Type.Optional(Type.String()),
+  /**
+   * Why an external agent could not start, when the hub knows (a signed-out agent, a withdrawn
+   * consent). The same reason a descriptor carries, so the client says it in its own words.
+   * `error` stays the English fallback an older client shows.
+   */
+  unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
+  /** What the person can do about `unavailableReason`; a signed-out agent carries its sign-in command. */
+  remedy: Type.Optional(ExternalAgentRemedySchema),
   done: Type.Literal(true),
 });
 

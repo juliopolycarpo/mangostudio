@@ -233,7 +233,11 @@ export function MessageParts({
                   variant="block"
                   tone="error"
                 >
-                  <ErrorPart text={part.text} />
+                  <ErrorPart
+                    text={part.text}
+                    unavailableReason={part.unavailableReason}
+                    remedy={part.remedy}
+                  />
                 </TimelineItem>
               );
             default: {

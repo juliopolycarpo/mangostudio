@@ -4,6 +4,7 @@ import type {
   ExternalAgentError,
   ExternalAgentRemedy,
   ExternalAgentTargetId,
+  ExternalAgentUnavailableReason,
   ExternalApprovalOption,
   ExternalNoticeSeverity,
   ExternalSteerRejectionReason,
@@ -347,7 +348,13 @@ export type MessagePart =
   | ExternalSteerPart
   | ExternalNoticePart
   | ExternalTurnPart
-  | { type: 'error'; text: string }
+  | {
+      type: 'error';
+      text: string;
+      /** Set when an external agent could not start for a reason the client presents itself. */
+      unavailableReason?: ExternalAgentUnavailableReason;
+      remedy?: ExternalAgentRemedy;
+    }
   | { type: 'system_event'; event: string; detail?: string }
   | {
       type: 'continuation_transition';

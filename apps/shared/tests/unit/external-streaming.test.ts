@@ -174,3 +174,31 @@ describe('an external error chunk with a remedy', () => {
     expect(Value.Check(StreamChunkSchema, chunk)).toBe(false);
   });
 });
+
+describe('an SSE error chunk that says why an agent could not start', () => {
+  const base = {
+    type: 'error',
+    error: 'The external agent turn could not be started.',
+    done: true,
+  };
+
+  it('validates with the reason and remedy, and without them as an older hub sends it', () => {
+    const withReason = {
+      ...base,
+      unavailableReason: 'signed-out',
+      remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+    };
+
+    expect([
+      Value.Check(StreamChunkSchema, withReason),
+      Value.Check(StreamChunkSchema, base),
+    ]).toEqual([true, true]);
+  });
+
+  it('refuses a reason or a remedy kind outside the closed sets', () => {
+    expect([
+      Value.Check(StreamChunkSchema, { ...base, unavailableReason: 'on-fire' }),
+      Value.Check(StreamChunkSchema, { ...base, remedy: { kind: 'run-it-for-me' } }),
+    ]).toEqual([false, false]);
+  });
+});
