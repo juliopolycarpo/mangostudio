@@ -25,6 +25,45 @@ const ACP_OUTBOUND_BUFFER_BYTES: usize = 55 * 1024 * 1024;
 #[path = "prompt_budget_tests.rs"]
 mod prompt_budget_tests;
 
+#[cfg(test)]
+#[path = "close_budget_tests.rs"]
+mod close_budget_tests;
+
+/// The longest a `target` session's `close` can legitimately take under `limits`.
+///
+/// This is the one place these formulas are encoded by hand. They mirror, in the SDK's docs at
+/// 0.6.0: `docs/harness-acp.md` "Deadlines" (the worst-case table: `close` 29 s, agent exit to
+/// `Closed` 34 s), `docs/harness-codex.md` (the stop-a-turn table: teardown `T` 36 s, and the
+/// overflow paragraph below it), and `docs/harness-claude.md` "Deadlines" (the "any launcher"
+/// column: `close` with a turn active 19 s, `close` while the launch is pending 24 s). A change to
+/// any of those tables, or an SDK accessor for them, replaces this function. With `kg` for
+/// `kill_grace` and `st` for `shutdown_timeout`:
+///
+/// | Target | Worst case | Documented path (defaults 2 s / 5 s) |
+/// | ------ | ---------- | ------------------------------------ |
+/// | Cursor (ACP) | `2 kg + 6 st` | agent exit to `Closed`, 34 s; a plain `close` is `2 kg + 5 st`, 29 s |
+/// | Codex | `3 kg + 7 st` | the `3 kg + 6 st` teardown, 36 s, plus one `st` a close joining it after an inbound overflow can wait first, 41 s; that last `st` is a margin read from the SDK's overflow paragraph, not a Deadlines row |
+/// | Claude | `2 kg + 4 st` | a close over a launch still pending, 24 s; with a turn active it is `2 kg + 3 st`, 19 s |
+///
+/// The launcher is the runtime's own, not the SDK's `TokioLauncher`, so the Claude figure is the
+/// one the SDK documents for any launcher. Sums saturate, so a limit near `Duration::MAX` stays
+/// a bound rather than a panic.
+///
+/// ```ignore
+/// let bound = close_budget(&Limits::default(), TargetId::Cursor); // 34 s
+/// ```
+pub(super) fn close_budget(limits: &Limits, target: TargetId) -> Duration {
+    let (graces, timeouts) = match target {
+        TargetId::Cursor => (2, 6),
+        TargetId::Codex => (3, 7),
+        TargetId::Claude => (2, 4),
+    };
+    limits
+        .kill_grace
+        .saturating_mul(graces)
+        .saturating_add(limits.shutdown_timeout.saturating_mul(timeouts))
+}
+
 pub(crate) struct TargetDiscovery {
     pub(crate) discovery: mango_external_agents::Discovery,
     pub(crate) account: Option<CodexAccount>,
@@ -143,8 +182,8 @@ async fn cancellable<T>(
 
 #[async_trait::async_trait]
 impl AgentBackend for Backend {
-    fn close_budget(&self) -> Duration {
-        self.limits.kill_grace + self.limits.shutdown_timeout
+    fn close_budget(&self, target: TargetId) -> Duration {
+        close_budget(&self.limits, target)
     }
     async fn discover(
         &self,

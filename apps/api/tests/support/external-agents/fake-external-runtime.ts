@@ -40,7 +40,7 @@ export interface FakeExternalRuntimeOptions {
   /** Resolves the vendor's `resumeRef` to whether the resume actually worked. */
   readonly resumeSucceeds?: boolean;
   readonly onOpen?: (params: ExternalAgentOpenParams) => void;
-  readonly openFailure?: () => Error;
+  readonly openFailure?: () => Error | undefined;
   readonly turnFailure?: () => Error | undefined;
   readonly capabilities?: ExternalAgentCapabilities;
   /**
@@ -63,6 +63,8 @@ export interface FakeExternalRuntimeOptions {
    */
   readonly reviewThreadId?: string;
   readonly reviewFailure?: () => Error | undefined;
+  /** Makes `external-agent.close` fail, as a close the hub gave up waiting for does. */
+  readonly closeFailure?: () => Error | undefined;
 }
 
 export interface FakeExternalRuntime {
@@ -76,6 +78,8 @@ export interface FakeExternalRuntime {
     readonly listSessions: ExternalAgentListSessionsParams[];
     readonly cancel: { sessionId: string; nativeTurnId?: string }[];
     readonly close: { sessionId: string }[];
+    /** The wait the hub gave each `close`, in the order they were asked. */
+    readonly closeTimeoutMs: (number | undefined)[];
   };
   /** Emits with the next session sequence and the live native turn id. */
   emit(event: ExternalAgentEvent): void;
@@ -100,6 +104,7 @@ export function createFakeExternalRuntime(
     listSessions: [],
     cancel: [],
     close: [],
+    closeTimeoutMs: [],
   };
   const listeners = new Map<string, Set<(envelope: ExternalAgentEventEnvelope) => void>>();
   const closeListeners = new Set<() => void>();
@@ -162,8 +167,11 @@ export function createFakeExternalRuntime(
         calls.cancel.push(params);
         return Promise.resolve({ ok: true as const });
       },
-      close(params: { sessionId: string }) {
+      close(params: { sessionId: string }, callOptions?: { timeoutMs?: number }) {
         calls.close.push(params);
+        calls.closeTimeoutMs.push(callOptions?.timeoutMs);
+        const failure = options.closeFailure?.();
+        if (failure) return Promise.reject(failure);
         return Promise.resolve({ ok: true as const });
       },
       onEvent(sessionId: string, listener: (envelope: ExternalAgentEventEnvelope) => void) {

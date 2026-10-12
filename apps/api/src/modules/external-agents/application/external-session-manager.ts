@@ -23,6 +23,7 @@
  *   running for a conversation that is gone.
  */
 
+import { RemoteError } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type {
   ExternalAgentAttachment,
@@ -45,6 +46,7 @@ import {
   getRuntimeClient,
   type RuntimeClient,
 } from '../../../services/runtime-client';
+import { noReplyOf } from '../../../services/runtime-client/request-not-sent';
 import { generateId } from '../../../utils/id';
 import {
   resolveToolchainParams,
@@ -72,6 +74,31 @@ const logger = createDiagnosticLogger('external-session-manager');
 const OPEN_TIMEOUT_MS = 60_000;
 /** The turn call only registers the turn; the events that follow are unbounded by it. */
 const CALL_TIMEOUT_MS = 30_000;
+/**
+ * How long a reap waits for the runtime's `close`, not how long the close may take.
+ *
+ * The runtime bounds a vendor close by the SDK's documented worst case for the harness, up to
+ * 43 s at the default limits, and finishes it even after the hub stopped waiting, so this only
+ * decides how long a send or a chat update that reaps first is held. An uncooperative vendor
+ * held them for the runtime's old 9 s bound; this keeps that order of wait.
+ */
+const CLOSE_WAIT_MS = 10_000;
+/**
+ * How long an open keeps retrying a runtime that is at its session cap.
+ *
+ * The runtime frees a closing session's slot only when the SDK finishes the close, up to 43 s at
+ * its default limits, and the hub stops waiting for that close after {@link CLOSE_WAIT_MS}. A send
+ * that reaps one session and then opens another therefore waits here, on the runtime's own
+ * signal, rather than failing on a slot that is about to free.
+ */
+const CAPACITY_RETRY_MS = 45_000;
+const CAPACITY_RETRY_INTERVAL_MS = 1_000;
+/**
+ * The same wait while the hub is stopping. `requestShutdown` gives the whole stop 12 s and the
+ * runtime reaps its children on its own when the hub's connection ends, so a close the hub
+ * cannot confirm in this time is left to it.
+ */
+const SHUTDOWN_CLOSE_WAIT_MS = 5_000;
 
 /**
  * The chat's session was reaped while it was being opened — its consent, its
@@ -83,6 +110,19 @@ export class ExternalSessionReapedError extends Error {
     super(`The external session for chat "${chatId}" was closed while it was opening.`);
     this.name = 'ExternalSessionReapedError';
   }
+}
+
+/**
+ * Whether a failed `external-agent.close` is only the hub giving up its wait.
+ *
+ * The runtime has no cancel token on a close, so a close the hub timed out on is still running
+ * there and finishes on its own; any other failure means the close was never asked or was refused.
+ *
+ * @example
+ * isUnconfirmedClose(hubDeadlineError); // true
+ */
+export function isUnconfirmedClose(error: unknown): boolean {
+  return noReplyOf(error)?.reason === 'deadline';
 }
 
 /** Everything a stored continuation is only valid for. */
@@ -286,6 +326,14 @@ export interface ExternalSessionManagerOptions {
   readonly newSessionId?: () => string;
   readonly openTimeoutMs?: number;
   readonly callTimeoutMs?: number;
+  /** How long a reap waits for the runtime's close. Defaults to {@link CLOSE_WAIT_MS}. */
+  readonly closeWaitMs?: number;
+  /** The same wait during hub shutdown. Defaults to {@link SHUTDOWN_CLOSE_WAIT_MS}. */
+  readonly shutdownCloseWaitMs?: number;
+  /** How long an open retries a runtime at its session cap. Defaults to {@link CAPACITY_RETRY_MS}. */
+  readonly capacityRetryMs?: number;
+  /** Pause between those retries. Defaults to one second. */
+  readonly capacityRetryIntervalMs?: number;
 }
 
 interface OpenedSession {
@@ -332,6 +380,10 @@ export function createExternalSessionManager(
   const newSessionId = options.newSessionId ?? generateId;
   const openTimeoutMs = options.openTimeoutMs ?? OPEN_TIMEOUT_MS;
   const callTimeoutMs = options.callTimeoutMs ?? CALL_TIMEOUT_MS;
+  const closeWaitMs = options.closeWaitMs ?? CLOSE_WAIT_MS;
+  const shutdownCloseWaitMs = options.shutdownCloseWaitMs ?? SHUTDOWN_CLOSE_WAIT_MS;
+  const capacityRetryMs = options.capacityRetryMs ?? CAPACITY_RETRY_MS;
+  const capacityRetryIntervalMs = options.capacityRetryIntervalMs ?? CAPACITY_RETRY_INTERVAL_MS;
 
   const sessions = new Map<string, SessionRecord>();
   const holds = new Map<
@@ -472,16 +524,44 @@ export function createExternalSessionManager(
     return record;
   }
 
-  async function closeRemote(record: SessionRecord): Promise<void> {
+  /**
+   * Opens, retrying while the runtime is at its session cap.
+   *
+   * A runtime frees a closing session's slot only when the SDK has finished the close, which the
+   * hub stopped waiting for after {@link CLOSE_WAIT_MS}. The refusal is the runtime's own kind, so
+   * nothing else is retried; a reap of this chat during the wait ends it.
+   */
+  async function openRetryingAtCapacity(
+    open: () => Promise<OpenedSession>,
+    reaped: () => boolean,
+    chatId: string
+  ): Promise<OpenedSession> {
+    const deadline = Date.now() + capacityRetryMs;
+    for (;;) {
+      try {
+        return await open();
+      } catch (error) {
+        const atCapacity =
+          error instanceof RemoteError && error.details?.kind === 'external_agent_capacity';
+        if (!atCapacity || Date.now() >= deadline) throw error;
+        if (reaped()) throw new ExternalSessionReapedError(chatId);
+        await new Promise((resolve) => setTimeout(resolve, capacityRetryIntervalMs));
+      }
+    }
+  }
+
+  async function closeRemote(record: SessionRecord, waitMs: number): Promise<void> {
     try {
       await record.client.externalAgents.close(
         { sessionId: record.sessionId },
-        { timeoutMs: callTimeoutMs }
+        { timeoutMs: waitMs }
       );
     } catch (error) {
       // A runtime that is already gone cannot be asked to close anything, and
-      // reaping must not fail because of it.
-      logger.warn('session_close_failed', {
+      // reaping must not fail because of it. A close the hub merely stopped waiting for is a
+      // different event: the runtime is still closing it and frees its slot when it ends.
+      const report = isUnconfirmedClose(error) ? logger.info : logger.warn;
+      report(isUnconfirmedClose(error) ? 'session_close_unconfirmed' : 'session_close_failed', {
         sessionId: record.sessionId,
         error: error instanceof Error ? error.message : 'unknown error',
       });
@@ -492,7 +572,8 @@ export function createExternalSessionManager(
     chatId: string,
     reason: ExternalTurnTerminalReason,
     keepContinuation: boolean,
-    explicit = false
+    explicit = false,
+    waitMs = closeWaitMs
   ): Promise<void> {
     reapGenerations.set(chatId, (reapGenerations.get(chatId) ?? 0) + 1);
     const record = teardown(chatId, reason);
@@ -504,7 +585,7 @@ export function createExternalSessionManager(
       await deleteContinuation(chatId, resolveDb());
       await releaseAdoptionLease(chatId, resolveDb());
     }
-    if (record) await closeRemote(record);
+    if (record) await closeRemote(record, waitMs);
   }
 
   async function openSession(input: EnsureExternalSessionInput): Promise<ExternalSessionHandle> {
@@ -537,23 +618,25 @@ export function createExternalSessionManager(
       resolveToolchain(input.userId, input.environmentId)
     );
     const sessionId = newSessionId();
-    const opened = await client.externalAgents.open(
-      {
-        sessionId,
-        targetId: input.targetId,
-        workspacePath: input.canonicalWorkspacePath,
-        configuration: input.configuration,
-        ...(resumable ? { resumeRef: resumable.nativeSessionId } : {}),
-        // The ordinary turn path wants a conversation, not a failure, when the
-        // vendor has forgotten the session — but an adopted one is the opposite
-        // case. The user picked *that* conversation by name, so its first open
-        // fails rather than silently handing back an empty one; every open
-        // after the vendor confirms the resume is an ordinary turn again.
-        resumeMode: resumable?.pendingAdoption ? 'strict' : 'fallback',
-        timeoutMs: openTimeoutMs,
-        ...toolchain,
-      },
-      { timeoutMs: openTimeoutMs }
+    const openParams = {
+      sessionId,
+      targetId: input.targetId,
+      workspacePath: input.canonicalWorkspacePath,
+      configuration: input.configuration,
+      ...(resumable ? { resumeRef: resumable.nativeSessionId } : {}),
+      // The ordinary turn path wants a conversation, not a failure, when the
+      // vendor has forgotten the session — but an adopted one is the opposite
+      // case. The user picked *that* conversation by name, so its first open
+      // fails rather than silently handing back an empty one; every open
+      // after the vendor confirms the resume is an ordinary turn again.
+      resumeMode: resumable?.pendingAdoption ? 'strict' : 'fallback',
+      timeoutMs: openTimeoutMs,
+      ...toolchain,
+    } satisfies Parameters<typeof client.externalAgents.open>[0];
+    const opened = await openRetryingAtCapacity(
+      () => client.externalAgents.open(openParams, { timeoutMs: openTimeoutMs }),
+      () => (reapGenerations.get(input.chatId) ?? 0) !== generation,
+      input.chatId
     );
 
     const sequencer = new ExternalEventSequencer();
@@ -620,7 +703,7 @@ export function createExternalSessionManager(
       record.unsubscribe();
       await deleteContinuation(input.chatId, db);
       await client.externalAgents
-        .close({ sessionId }, { timeoutMs: callTimeoutMs })
+        .close({ sessionId }, { timeoutMs: closeWaitMs })
         .catch(() => undefined);
       throw new ExternalSessionReapedError(input.chatId);
     }
@@ -731,7 +814,7 @@ export function createExternalSessionManager(
         // Shutdown keeps continuation: the vendor conversation is still the one
         // this chat resumes when the hub comes back.
         [...new Set([...sessions.keys(), ...holds.keys()])].map((chatId) =>
-          reap(chatId, reason, true)
+          reap(chatId, reason, true, false, shutdownCloseWaitMs)
         )
       );
     },

@@ -195,6 +195,12 @@ struct CloseOwner<'a> {
 
 impl Drop for CloseOwner<'_> {
     fn drop(&mut self) {
+        // A close dropped before it finished (the hub went away mid-request) never reached the
+        // scratch removal after the vendor close. The session is closing and takes no more work,
+        // and nothing else sweeps the leaf, so it goes here; removing a leaf twice is harmless.
+        if matches!(self.outcome, Some(Err(CloseFailure::Interrupted))) {
+            remove_scratch(&self.live.scratch);
+        }
         {
             let mut slots = self.supervisor.slots();
             if matches!(slots.get(&self.live.session_id), Some(Slot::Live(current)) if Arc::ptr_eq(current, self.live))
@@ -306,6 +312,8 @@ pub(crate) struct Supervisor {
     shutdown: CancellationToken,
     pub(super) tasks: TaskTracker,
     watcher_started: AtomicBool,
+    /// Whether a consent-revocation close is already running, so the watcher starts one at a time.
+    revoking: Arc<AtomicBool>,
     consent_reader: ConsentReader,
 }
 
@@ -325,6 +333,7 @@ impl Supervisor {
             shutdown: CancellationToken::new(),
             tasks: TaskTracker::new(),
             watcher_started: AtomicBool::new(false),
+            revoking: Arc::new(AtomicBool::new(false)),
             consent_reader: ConsentReader::new("externalAgents"),
         })
     }
@@ -581,10 +590,16 @@ impl Supervisor {
             ));
         }
         if slots.len() >= self.ports.session_cap {
-            return Err(tool_argument(format!(
-                "External-agent session capacity is {}; close a session before opening another.",
-                self.ports.session_cap
-            )));
+            // Its own kind, not `tool_argument`: the cap frees when a session's close ends, which
+            // can take longer than the hub waited for it, so the hub may retry this refusal.
+            return Err(RemoteError::new(
+                codes::INTERNAL,
+                format!(
+                    "External-agent session capacity is {}; close a session before opening another.",
+                    self.ports.session_cap
+                ),
+            )
+            .with_detail("kind", "external_agent_capacity"));
         }
         let opening = Arc::new(Opening {
             target: params.target_id,
@@ -682,7 +697,7 @@ impl Supervisor {
                         CloseCause::Requested
                     });
                     let closed =
-                        tokio::time::timeout(self.close_bound(), session.close(cause)).await;
+                        tokio::time::timeout(self.close_bound(target), session.close(cause)).await;
                     remove_scratch(&scratch);
                     opening.record_cleanup(match closed {
                         Ok(Ok(())) => Ok(()),
@@ -863,23 +878,28 @@ impl Supervisor {
 
     /// The vendor close, bounded, then the scratch leaf. Both always run.
     async fn finish_close(&self, live: &LiveSession, cause: CloseCause) -> Result<(), String> {
-        let vendor = tokio::time::timeout(self.close_bound(), live.session.close(cause)).await;
+        let bound = self.close_bound(live.target);
+        let vendor = tokio::time::timeout(bound, live.session.close(cause)).await;
         remove_scratch(&live.scratch);
         match vendor {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => Err(error.to_string()),
             Err(_) => Err(format!(
                 "the vendor close did not finish within {} ms",
-                self.close_bound().as_millis()
+                bound.as_millis()
             )),
         }
     }
 
-    /// How long one vendor close may take: the SDK's own close budget (its
-    /// kill grace plus its shutdown timeout) with the cleanup bound on top,
-    /// so a vendor that uses its whole grace is not reported as failed.
-    fn close_bound(&self) -> Duration {
-        self.ports.harnesses.close_budget() + self.ports.cleanup_timeout
+    /// How long one vendor close of a `target` session may take: the SDK's
+    /// documented worst case for that harness at the limits the backend runs
+    /// with, with the cleanup bound on top, so a close that uses its whole
+    /// documented budget is not reported as failed while the SDK still reaps.
+    fn close_bound(&self, target: TargetId) -> Duration {
+        self.ports
+            .harnesses
+            .close_budget(target)
+            .saturating_add(self.ports.cleanup_timeout)
     }
 
     /// `external-agent.list-sessions`: the vendor's own history for one target.
@@ -1149,13 +1169,30 @@ impl Supervisor {
                             continue;
                         }
                         if this.consent_read().await.revokes() {
-                            this.close_all(CloseCause::ConsentRevoked).await;
+                            this.revoke_consent();
                         }
                     }
                 }
             }
             this.shutdown.cancel();
             this.close_all(CloseCause::Shutdown).await;
+        });
+    }
+
+    /// Closes every session for a withdrawn consent without holding the watcher.
+    ///
+    /// A close can take as long as the SDK documents (up to 43 s for Codex at the default limits),
+    /// and the watcher also owns shutdown when the hub session ends, so the close runs on its own
+    /// task, one at a time. Every session is told to stop at once either way; only the watcher's
+    /// next poll and its shutdown arm are no longer waiting behind the slowest close.
+    fn revoke_consent(self: &Arc<Self>) {
+        if self.revoking.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let this = Arc::clone(self);
+        self.tasks.spawn(async move {
+            this.close_all(CloseCause::ConsentRevoked).await;
+            this.revoking.store(false, Ordering::Release);
         });
     }
 

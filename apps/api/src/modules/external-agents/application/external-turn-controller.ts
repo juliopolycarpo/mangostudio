@@ -70,6 +70,7 @@ import {
   persistTextTurnStart,
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
+import { isExpectedTailOfEndedTurn } from '../domain/external-event-sequencer';
 import {
   classifySubmissionFailure,
   DEFAULT_RETRY_POLICY,
@@ -712,12 +713,18 @@ export function createExternalTurnController(
             terminate('sequence-gap');
             cancelVendorAfter('sequence-gap');
             return;
-          case 'after-terminal':
-            logger.warn('event_after_terminal', {
+          case 'after-terminal': {
+            const type = readEventType(envelope.event);
+            // The vendor's `cancelled` and `completed` after a turn the hub ended itself are the
+            // ordinary tail; anything else is an event the sealed transcript never saw.
+            const report = isExpectedTailOfEndedTurn(type) ? logger.debug : logger.warn;
+            report('event_after_terminal', {
               sessionId: handle.sessionId,
               nativeTurnId: verdict.nativeTurnId,
+              type,
             });
             return;
+          }
           case 'foreign-turn':
             logger.warn('event_for_foreign_turn', {
               sessionId: handle.sessionId,
