@@ -1,6 +1,7 @@
-//! ACP turn outcomes that 0.6.0 of the SDK changed, observed through the product seams: an
-//! agent's own prompt error keeps the session, a refusal before queueing is safe to resend, and a
-//! tool call is named by what the agent called it.
+//! ACP turn outcomes that 0.6.0 and 0.6.1 of the SDK changed, observed through the product seams:
+//! an agent's own prompt error keeps the session, a prompt refused for authentication ends the
+//! turn with the sign-in hint, a refusal before queueing is safe to resend, and a tool call is
+//! named by what the agent called it.
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -147,6 +148,75 @@ async fn an_agents_prompt_error_ends_one_turn_and_the_next_turn_runs_on_the_same
         (RefusingFirstPromptAgent::REPLY, 1),
         "expected the reply on the original child, with no relaunch | received {:?}",
         fixtures::shape(&events)
+    );
+    rig.close().await;
+    fixtures::reaped(&launcher).await;
+}
+
+/// What the Cursor profile tells a person to run when the agent wants a sign-in.
+const CURSOR_SIGN_IN_HINT: &str = "cursor-agent login";
+
+/// A credential-shaped string the refusing agent puts in its own message: it must not reach any
+/// event of the turn.
+const AGENT_SECRET: &str = "sk-synthetic-agent-secret";
+
+#[tokio::test]
+async fn a_prompt_refused_for_authentication_ends_the_turn_with_the_sign_in_hint_and_keeps_the_session()
+ {
+    let launcher = Arc::new(FakeLauncher::new());
+    launcher.push(
+        FakeAcpAgent::new()
+            .refusing_prompt(-32_000, format!("token expired: {AGENT_SECRET}"))
+            .process(),
+    );
+    let mut rig = Rig::new(launcher.clone(), wire::TargetId::Cursor, fixtures::limits()).await;
+    rig.open().await;
+
+    rig.turn("signed-out").await.expect("the turn starts");
+    let events = rig.through("error").await;
+    let error = &events
+        .iter()
+        .find(|event| event["event"]["type"] == "error")
+        .unwrap_or_else(|| {
+            panic!(
+                "expected an error event from the authentication refusal | received {:?}",
+                fixtures::shape(&events)
+            )
+        })["event"]["error"];
+    let received = (
+        error["code"].as_str(),
+        error["message"].as_str(),
+        error["vendorCode"].as_str(),
+        error["retryable"].as_bool(),
+    );
+    let expected_message = format!("authentication required; to sign in: {CURSOR_SIGN_IN_HINT}");
+    assert_eq!(
+        received,
+        (
+            Some("acp-auth-required"),
+            Some(expected_message.as_str()),
+            Some("-32000"),
+            Some(false),
+        ),
+        "expected (code, message, vendorCode, retryable) of an authentication refusal, with none of the agent's own text | received {error}"
+    );
+
+    let serialized = serde_json::to_string(&events).expect("the events serialize");
+    assert!(
+        !serialized.contains(AGENT_SECRET),
+        "expected none of the agent's own text in any event of the turn | received {:?}",
+        fixtures::shape(&events)
+    );
+
+    let next = start_when_released(&rig, "after-sign-in-hint").await;
+    assert!(
+        next.is_ok(),
+        "expected the session to stay usable after an authentication refusal | received {next:?}"
+    );
+    assert_eq!(
+        (launcher.live_children(), launcher.launches().len()),
+        (1, 1),
+        "expected the same agent child, alive and not relaunched, after the refusal"
     );
     rig.close().await;
     fixtures::reaped(&launcher).await;
