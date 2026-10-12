@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
-import { EXTERNAL_AGENT_TARGET_IDS } from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_AGENT_CAPACITY_CODE,
+  EXTERNAL_AGENT_TARGET_IDS,
+} from '@mangostudio/shared/external-agents';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import { productDescriptorFor } from '../../../../src/modules/external-agents/domain/adapter-descriptors';
-import { openRefusalFor } from '../../../../src/modules/external-agents/domain/external-open-refusal';
+import {
+  openFailureCodeFor,
+  openRefusalFor,
+} from '../../../../src/modules/external-agents/domain/external-open-refusal';
 import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 
 const signedOut = (message = 'signed out') =>
@@ -134,5 +140,51 @@ describe('openRefusalFor, an agent that is missing or outdated', () => {
     const wrapped = new Error('open failed', { cause: outdated({ requiredVersion: '0.153.4' }) });
 
     expect(openRefusalFor('codex', wrapped)?.requiredVersion).toBe('0.153.4');
+  });
+});
+
+describe('openFailureCodeFor', () => {
+  const capacity = () =>
+    new RemoteError('INTERNAL', 'External-agent session capacity is 4; close a session.', {
+      kind: 'external_agent_capacity',
+    });
+
+  it('names a runtime at its session cap, which has no unavailable reason', () => {
+    expect(openFailureCodeFor(capacity())).toBe(EXTERNAL_AGENT_CAPACITY_CODE);
+    expect(openRefusalFor('codex', capacity())).toBeUndefined();
+  });
+
+  it('finds the refusal behind the hub wrappers', () => {
+    expect(openFailureCodeFor(new Error('open failed', { cause: capacity() }))).toBe(
+      EXTERNAL_AGENT_CAPACITY_CODE
+    );
+  });
+
+  it('follows the cause chain a few links and no further', () => {
+    const nested = (links: number): Error => {
+      let error: Error = capacity();
+      for (let depth = 0; depth < links; depth += 1) error = new Error('wrapped', { cause: error });
+      return error;
+    };
+
+    expect([3, 4].map((links) => openFailureCodeFor(nested(links)))).toEqual([
+      EXTERNAL_AGENT_CAPACITY_CODE,
+      undefined,
+    ]);
+  });
+
+  it('has nothing for any other failure, or for a kind that is only a property name', () => {
+    const received = [
+      openFailureCodeFor(
+        new RemoteError('INTERNAL', 'x', { kind: 'external_agent_launch_failed' })
+      ),
+      openFailureCodeFor(new RemoteError('INTERNAL', 'x', { kind: 'tool_argument' })),
+      openFailureCodeFor(new RemoteError('INTERNAL', 'x', { kind: '__proto__' })),
+      openFailureCodeFor(new RemoteError('INTERNAL', 'no kind')),
+      openFailureCodeFor(new Error('plain')),
+      openFailureCodeFor('not even an error'),
+    ];
+
+    expect(received).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
   });
 });

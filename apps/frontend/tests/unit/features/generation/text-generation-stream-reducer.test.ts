@@ -668,6 +668,27 @@ describe('an error chunk that names the build an outdated agent needs', () => {
   });
 });
 
+describe('an error chunk that names a runtime at its session cap', () => {
+  it('keeps the code on the error part, with the English text as fallback', () => {
+    const state = reduceChunks([
+      {
+        type: 'error',
+        error: 'The external agent turn could not be started.',
+        code: 'external_agent_capacity',
+        done: true,
+      },
+    ]);
+
+    expect(state.aiMessageUpdate?.patch.parts).toEqual([
+      {
+        type: 'error',
+        text: 'The external agent turn could not be started.',
+        code: 'external_agent_capacity',
+      },
+    ]);
+  });
+});
+
 describe('settleUnfinishedImageParts', () => {
   const pendingImage: MessagePart = {
     type: 'generated_image',

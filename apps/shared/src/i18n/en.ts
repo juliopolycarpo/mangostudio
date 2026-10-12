@@ -3650,6 +3650,11 @@ export const messages: Messages = {
       unavailableHere: 'This agent cannot run here right now — pick another.',
       forkFailed: 'The new chat could not be created.',
     },
+    /** Why a send could not open, when the answer is not about the agent itself. */
+    openFailure: {
+      capacity:
+        'The maximum number of external agent sessions is in use. Close one, or try again in a moment.',
+    },
     sessions: {
       /** The selector entry that opens the picker. */
       entry: 'Continue a session from your terminal',

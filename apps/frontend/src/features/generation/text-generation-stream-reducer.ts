@@ -298,6 +298,7 @@ function reduceStreamError(
       ...(chunk.unavailableReason ? { unavailableReason: chunk.unavailableReason } : {}),
       ...(chunk.remedy ? { remedy: chunk.remedy } : {}),
       ...(chunk.requiredVersion ? { requiredVersion: chunk.requiredVersion } : {}),
+      ...(chunk.code ? { code: chunk.code } : {}),
     } satisfies MessagePart,
   ];
   return withAiMessageUpdate(

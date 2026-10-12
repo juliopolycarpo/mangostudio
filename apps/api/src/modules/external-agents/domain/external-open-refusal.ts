@@ -14,6 +14,7 @@
 
 import { RemoteError } from '@mangostudio/protocol';
 import {
+  EXTERNAL_AGENT_CAPACITY_CODE,
   type ExternalAgentRemedy,
   type ExternalAgentTargetId,
   type ExternalAgentUnavailableReason,
@@ -98,4 +99,31 @@ function boundedVersion(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim().slice(0, MAX_REQUIRED_VERSION_LENGTH);
   return trimmed || undefined;
+}
+
+/** The runtime kinds the stream names in the `error` chunk's `code` when they have no reason. */
+const OPEN_FAILURE_CODES: ReadonlySet<string> = new Set([EXTERNAL_AGENT_CAPACITY_CODE]);
+
+/**
+ * The `code` the stream's `error` chunk carries for a failed open that has no unavailable reason,
+ * or `undefined` for every other failure.
+ *
+ * Today that is a runtime at its session cap after the hub's retry window: it says nothing about
+ * the agent, so it has no reason and no remedy, and the client keeps the sentence for the code.
+ * The code is the runtime's kind, read from its structured details, never from its message.
+ *
+ * @example
+ * openFailureCodeFor(new RemoteError('INTERNAL', 'at capacity', { kind: 'external_agent_capacity' }));
+ * // 'external_agent_capacity'
+ */
+export function openFailureCodeFor(error: unknown): string | undefined {
+  let current = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    if (current instanceof RemoteError) {
+      const kind = current.details?.kind;
+      if (typeof kind === 'string' && OPEN_FAILURE_CODES.has(kind)) return kind;
+    }
+    current = current.cause;
+  }
+  return undefined;
 }

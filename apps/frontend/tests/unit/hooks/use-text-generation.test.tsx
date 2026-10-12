@@ -1634,6 +1634,29 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
   });
 
+  it('keeps the optimistic rows after a runtime refused the open at its session cap', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        {
+          type: 'error',
+          error: 'The external agent turn could not be started.',
+          code: 'external_agent_capacity',
+          done: true,
+        },
+      ])
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('hello');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
   it('still re-reads after a terminal error chunk that names no reason', async () => {
     const props = makeProps();
     mockStream.mockImplementation(

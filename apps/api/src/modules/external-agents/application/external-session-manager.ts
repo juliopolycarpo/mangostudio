@@ -25,17 +25,18 @@
 
 import { RemoteError } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
-import type {
-  ExternalAgentAttachment,
-  ExternalAgentCapabilities,
-  ExternalAgentConfiguration,
-  ExternalAgentEventEnvelope,
-  ExternalAgentStartReviewParams,
-  ExternalAgentStartReviewResult,
-  ExternalAgentSteerResult,
-  ExternalAgentTargetId,
-  ExternalAgentTurnParams,
-  ExternalTurnTerminalReason,
+import {
+  EXTERNAL_AGENT_CAPACITY_CODE,
+  type ExternalAgentAttachment,
+  type ExternalAgentCapabilities,
+  type ExternalAgentConfiguration,
+  type ExternalAgentEventEnvelope,
+  type ExternalAgentStartReviewParams,
+  type ExternalAgentStartReviewResult,
+  type ExternalAgentSteerResult,
+  type ExternalAgentTargetId,
+  type ExternalAgentTurnParams,
+  type ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
 import { getDb } from '../../../db/database';
@@ -549,7 +550,7 @@ export function createExternalSessionManager(
         return await open();
       } catch (error) {
         const atCapacity =
-          error instanceof RemoteError && error.details?.kind === 'external_agent_capacity';
+          error instanceof RemoteError && error.details?.kind === EXTERNAL_AGENT_CAPACITY_CODE;
         if (!atCapacity || Date.now() >= deadline) throw error;
         if (reaped()) throw new ExternalSessionReapedError(chatId);
         await new Promise((resolve) => setTimeout(resolve, capacityRetryIntervalMs));

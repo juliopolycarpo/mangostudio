@@ -1,6 +1,7 @@
-import type {
-  ExternalAgentRemedy,
-  ExternalAgentUnavailableReason,
+import {
+  EXTERNAL_AGENT_CAPACITY_CODE,
+  type ExternalAgentRemedy,
+  type ExternalAgentUnavailableReason,
 } from '@mangostudio/shared/external-agents';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
@@ -15,6 +16,8 @@ interface ErrorPartProps {
   remedy?: ExternalAgentRemedy;
   /** The build `version-unsupported` asks for; absent when the hub did not name one. */
   requiredVersion?: string;
+  /** The runtime's kind for a failed open with no reason; only the session cap has copy today. */
+  code?: string;
 }
 
 /**
@@ -23,18 +26,30 @@ interface ErrorPartProps {
  * The one exception is an external agent that could not start for a reason the product already
  * presents (signed out, not installed, outdated, consent withdrawn): it says that reason with the
  * selector's words, a sign-in remedy carries the command to run, and an install or update remedy
- * links to where the recipes live. `text` stays the fallback for everything else.
+ * links to where the recipes live. A runtime at its session cap has no reason, so the hub names it
+ * by `code` and the client says it in plain words. `text` stays the fallback for everything else.
  *
  * // Usage: <ErrorPart text={part.text} unavailableReason={part.unavailableReason} />
  */
-export function ErrorPart({ text, unavailableReason, remedy, requiredVersion }: ErrorPartProps) {
+export function ErrorPart({
+  text,
+  unavailableReason,
+  remedy,
+  requiredVersion,
+  code,
+}: ErrorPartProps) {
   const { t } = useI18n();
   const command = remedy?.kind === 'sign-in' ? remedy.command : undefined;
+  // A reason describes the agent; the session cap describes the runtime, so it is keyed by code.
+  const capacity = !unavailableReason && code === EXTERNAL_AGENT_CAPACITY_CODE;
+  const sentence = unavailableReason
+    ? externalUnavailableText(unavailableReason, t, requiredVersion)
+    : capacity
+      ? t.externalAgents.openFailure.capacity
+      : text;
   return (
     <div className="max-w-2xl space-y-1.5 rounded-xl border border-error/20 bg-error/10 p-4 font-body text-sm text-error">
-      <p>
-        {unavailableReason ? externalUnavailableText(unavailableReason, t, requiredVersion) : text}
-      </p>
+      <p>{sentence}</p>
       {command ? <SignInCommand command={command} /> : null}
       {unavailableReason && remedy ? <ExternalRemedyLink remedy={remedy} /> : null}
     </div>

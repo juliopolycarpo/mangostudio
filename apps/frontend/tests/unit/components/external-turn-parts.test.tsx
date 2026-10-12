@@ -467,6 +467,30 @@ describe('an external agent that could not start', () => {
     }).toEqual({ shown: true, images: 0 });
   });
 
+  it('says the session cap in plain words, with no command and no link', () => {
+    const { container } = renderParts([
+      { type: 'error', text: FALLBACK, code: 'external_agent_capacity' },
+    ]);
+
+    expect({
+      fallback: screen.queryByText(FALLBACK),
+      cap: screen.queryByText(en.externalAgents.openFailure.capacity) !== null,
+      commands: container.querySelectorAll('code').length,
+      links: container.querySelectorAll('a').length,
+    }).toEqual({ fallback: null, cap: true, commands: 0, links: 0 });
+  });
+
+  it('shows the plain text for a code it has no copy for, and never the code itself', () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const { container } = renderParts([{ type: 'error', text: FALLBACK, code: hostile }]);
+
+    expect({
+      text: screen.queryByText(FALLBACK) !== null,
+      shownCode: container.textContent?.includes(hostile),
+      images: container.querySelectorAll('img').length,
+    }).toEqual({ text: true, shownCode: false, images: 0 });
+  });
+
   it('shows the plain text when the hub sent no reason, as an older hub does', () => {
     renderParts([{ type: 'error', text: FALLBACK }]);
 
