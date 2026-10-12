@@ -39,6 +39,12 @@ describe('Test workflow shard matrix', () => {
     expect(listed).toEqual(Array.from({ length: shardCount() }, (_, index) => index + 1));
   });
 
+  test('the job name reports the declared shard count', () => {
+    expect(extractJobBlock(workflow, 'shard')).toContain(
+      `name: Tests (shard ${EXPR} matrix.shard }}/${shardCount()})`
+    );
+  });
+
   test('each shard runs its own slice of the coverage lane', () => {
     expect(extractJobBlock(workflow, 'shard')).toContain(
       `bun run test --coverage --shard="${SHELL}SHARD}/${SHELL}SHARD_COUNT}"`
