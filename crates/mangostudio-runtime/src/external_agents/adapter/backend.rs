@@ -19,6 +19,9 @@ use super::{failure, map, session};
 // prompt allows another 6MiB when every unit needs six-byte escaping. 55MiB also
 // covers bounded metadata/native IDs and leaves more than 512KiB for small controls.
 // Incoming messages/events, line limits, attachment caps and deadlines stay in Limits.
+// The SDK reads this number as the bound of ONE outgoing ACP frame and lets the queue
+// (the frame being written included) hold twice it, so one ACP session can hold up to
+// 110MiB of outgoing frames, not 55MiB.
 const ACP_OUTBOUND_BUFFER_BYTES: usize = 55 * 1024 * 1024;
 
 #[cfg(test)]

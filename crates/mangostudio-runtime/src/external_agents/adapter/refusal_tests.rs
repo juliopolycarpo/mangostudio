@@ -15,7 +15,7 @@ impl Refusal {
     fn error(self) -> SdkError {
         match self {
             Self::Limit => SdkError::LimitExceeded {
-                subject: "bytes of ACP session/prompt frame",
+                subject: "bytes in one frame to the ACP agent",
                 limit: 8_388_608,
                 received: 8_388_940,
             },

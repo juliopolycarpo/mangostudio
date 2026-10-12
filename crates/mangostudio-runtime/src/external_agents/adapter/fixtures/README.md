@@ -1,6 +1,8 @@
 # ACP outbound prompt budget
 
-The private adapter supplies a 55 MiB outbound allowance per ACP session. The SDK keeps incoming
+The private adapter supplies a 55 MiB outbound allowance that the SDK applies to one outgoing ACP
+frame; the queue, the frame being written included, may hold twice it, so one ACP session holds up
+to 110 MiB of outgoing frames. The SDK keeps incoming
 messages and turn events at 8 MiB, lines at 1 MiB, four attachments per turn and 2 MiB per file.
 Mango Protocol still caps a Hub-to-runtime frame at 16 MiB. Deadlines and cleanup policy are unchanged.
 
@@ -37,7 +39,8 @@ The headroom covers small cancellation and approval controls. A test holds the m
 prompt's physical write, requests cancellation, then verifies the real cancellation frame and
 settlement. This does not promise room for every arbitrary vendor callback ID or unlimited controls.
 The SDK's count and byte ceilings still refuse queue overflow. Four admitted sessions can each hold
-the allowance. An encoded-byte ceiling is not a hard heap-memory cap.
+twice the allowance (110 MiB, 440 MiB in all). An encoded-byte ceiling is not a hard heap-memory
+cap.
 
 ## Linux memory receipts
 

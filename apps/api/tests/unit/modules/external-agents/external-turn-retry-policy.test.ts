@@ -43,6 +43,19 @@ describe('classifySubmissionFailure', () => {
     ).toBe('not-submitted');
   });
 
+  it('replays the exact refusal the runtime sends for a turn on a session already closed', () => {
+    // The shape `acp_turn_tests` pins on the runtime side: the SDK refused the start before it
+    // queued anything, so the vendor cannot have run the turn.
+    expect(
+      classifySubmissionFailure(
+        new RemoteError('UNAVAILABLE', 'expected an open session, received a closed one', {
+          kind: 'external_agent_closed',
+          dispatch: 'not-submitted',
+        })
+      )
+    ).toBe('not-submitted');
+  });
+
   it('treats only a hub-observed deadline or close as sent without a reply', () => {
     expect(classifySubmissionFailure(localDeadline())).toBe('no-reply');
     expect(classifySubmissionFailure(localClose())).toBe('no-reply');
