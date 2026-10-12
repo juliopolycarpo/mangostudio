@@ -162,12 +162,13 @@ export const TEST_LANES: readonly TestLane[] = [
   // in-process workers, which Bun 1.4.3 made safe (oven-sh/bun#44581). It stays
   // one invocation because a union of per-process LCOV carried 3,501 extra
   // zero-hit line keys on two strict comparisons and nobody has explained why;
-  // in-process workers write a single LCOV. Integration runs with no `--parallel` at all —
-  // it passes without isolation by design, and Bun's isolate machinery is what
-  // intermittently wedged the whole invocation in CI (oven-sh/bun#39709 — the
-  // runner never exits, or `spawnSync` stalls inside isolate workers), so the
-  // spawn-heavy integration files stay out of it until the unit lane has
-  // soaked at four workers on hosted runners. Each lane writes its own LCOV slice, and the api `test:coverage`
+  // in-process workers write a single LCOV. Integration runs with no
+  // `--parallel` at all — it passes without isolation by design, and Bun's
+  // isolate machinery is what intermittently wedges the whole invocation in CI
+  // (oven-sh/bun#39709 — the runner never exits, or `spawnSync` stalls inside
+  // isolate workers), so the spawn-heavy integration files stay out of it while
+  // that issue is open; the unit lane's worker width does not change that. Each
+  // lane writes its own LCOV slice, and the api `test:coverage`
   // script delegates to scripts/ci/run-workspace-coverage.ts, which runs both
   // lanes whatever the earlier one did and merges the slices into the single
   // `coverage/api/lcov.info` the coverage readers expect. That is one more merge hop than the other
