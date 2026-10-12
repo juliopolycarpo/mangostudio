@@ -83,17 +83,16 @@ jobs:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
   shard:
-    # Sharding is what gets the suite off `--parallel=1` without waiting for
-    # oven-sh/bun#38008. That bug is a collision between concurrent isolates
-    # inside one Bun process; `--shard=i/N` splits files across processes that
-    # never share one, so the precondition never exists. In-job `--parallel`
-    # composes with this the day the fix ships — see
-    # docs/reference/testing.md.
+    # Sharding got the suite off one serial process while a collision between
+    # concurrent isolates inside one Bun process (oven-sh/bun#37968) blocked
+    # in-job `--parallel`: `--shard=i/N` splits files across processes that
+    # never share one. Bun 1.4.3 removed that collision (oven-sh/bun#44581), so
+    # the two now compose: each shard runs the api unit lane at `--parallel=4`
+    # — see docs/reference/testing.md.
     #
-    # What sharding does NOT dodge is the isolate-runner hang
-    # (oven-sh/bun#39709): even at `--parallel=1`, the api lane's isolate-mode
-    # invocation intermittently never exits and the job burns this whole
-    # `timeout-minutes`. Two defenses below: the api coverage lane keeps only
+    # What neither dodges is the isolate-runner hang (oven-sh/bun#39709, still
+    # open): the api lane's isolate-mode invocation can never exit and burn
+    # this whole `timeout-minutes`. Two defenses below: the api coverage lane keeps only
     # its unit suite in isolate mode (integration runs unisolated — see
     # scripts/lib/test-lanes.ts), and the test step runs under
     # scripts/ci/run-tests-watchdog.ts, which kills a wedged invocation after

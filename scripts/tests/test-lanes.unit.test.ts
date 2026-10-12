@@ -169,11 +169,13 @@ describe('api lanes', () => {
   // (measured on 1.4.0; 351 on the current tree on 1.4.2); integration inside
   // Bun's isolate machinery is the intermittent runner hang (oven-sh/bun#39709)
   // that burned CI's timeout-minutes. Pin both directions so neither flag
-  // drifts onto the other lane.
+  // drifts onto the other lane. The unit coverage run is four in-process
+  // workers (`--parallel=N` implies `--isolate`), which Bun 1.4.3 made safe:
+  // see "Known upstream blocker on the unit lane" in docs/reference/testing.md.
   it('keeps the unit lane isolated and never --no-isolate', async () => {
     const scripts = await readScripts(laneById('api-unit').manifest);
     const script = scripts[laneById('api-unit').coverageScript];
-    expect(script).toContain('--parallel=1');
+    expect(script).toContain('--parallel=4');
     expect(script).not.toContain('--no-isolate');
     expect(script).toContain('tests/unit');
     expect(script).not.toContain('tests/integration');
@@ -214,17 +216,19 @@ describe('api lanes', () => {
     }
   );
 
-  // The coverage script of the same lane is one process: partitioned LCOV
-  // failed strict comparison twice (3,501 extra zero-hit line keys), so the
-  // fan-out stays out of the lane that produces it.
+  // The coverage script of the same lane is one `bun test` invocation:
+  // partitioned LCOV failed strict comparison twice (3,501 extra zero-hit line
+  // keys), so the worker-process fan-out stays out of the lane that produces
+  // it. Bun's own `--parallel` workers are a different thing: one invocation
+  // writes one LCOV, so there is nothing to union.
   it.each(TEST_LANES.filter((lane) => lane.workers))(
-    'keeps the $id coverage script a single bun test process',
+    'keeps the $id coverage script a single bun test invocation',
     async (lane) => {
       const scripts = await readScripts(lane.manifest);
       expect(scripts[lane.coverageScript]).not.toContain('run-test-workers');
       expect(scripts[lane.coverageScript]).toContain('bun test');
       // The api-unit lane isolates its files; the root lane never did.
-      if (lane.id === 'api-unit') expect(scripts[lane.coverageScript]).toContain('--parallel=1');
+      if (lane.id === 'api-unit') expect(scripts[lane.coverageScript]).toContain('--parallel=4');
     }
   );
 
