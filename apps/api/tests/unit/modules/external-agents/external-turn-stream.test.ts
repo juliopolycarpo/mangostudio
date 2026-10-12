@@ -968,6 +968,66 @@ describe('a send the runtime refuses while the session opens', () => {
     }).toEqual({ reason: 'runtime-denied', remedy: { kind: 'contact-admin' }, toldSignedOut: 0 });
   });
 
+  for (const targetId of OPEN_TARGETS) {
+    it(`presents a ${targetId} whose executable is gone as not installed, with the install remedy`, async () => {
+      const { send, runtime } = await openRig(targetId, {
+        openFailure: () =>
+          new RemoteError('INTERNAL', 'executable is not installed; expected an installed target', {
+            kind: 'external_agent_not_installed',
+          }),
+      });
+
+      const chunk = errorChunkOf(await send('hello'));
+
+      expect({ chunk, turnsSubmitted: runtime.calls.turn.length }).toEqual({
+        chunk: {
+          type: 'error',
+          error: GENERIC,
+          unavailableReason: 'not-installed',
+          remedy: { kind: 'install' },
+          done: true,
+        },
+        turnsSubmitted: 0,
+      });
+    });
+  }
+
+  it('presents an outdated agent with the update remedy and the build it needs', async () => {
+    const { send } = await openRig('codex', {
+      openFailure: () =>
+        new RemoteError('UNAVAILABLE', 'codex 0.1 is older than 0.153.4', {
+          kind: 'external_agent_version_unsupported',
+          requiredVersion: '0.153.4',
+        }),
+    });
+
+    const chunk = errorChunkOf(await send('hello'));
+
+    expect(chunk).toEqual({
+      type: 'error',
+      error: GENERIC,
+      unavailableReason: 'version-unsupported',
+      remedy: { kind: 'update' },
+      requiredVersion: '0.153.4',
+      done: true,
+    });
+  });
+
+  it('keeps the generic message for a tool_argument refusal, which is not a missing CLI', async () => {
+    const { send } = await openRig('cursor', {
+      openFailure: () =>
+        new RemoteError('INTERNAL', 'External-agent workspace "/x" is not authorized', {
+          kind: 'tool_argument',
+        }),
+    });
+
+    expect(errorChunkOf(await send('hello'))).toEqual({
+      type: 'error',
+      error: GENERIC,
+      done: true,
+    });
+  });
+
   it('keeps the generic message for an open failure that has no existing presentation', async () => {
     const { send } = await openRig('cursor', {
       openFailure: () =>

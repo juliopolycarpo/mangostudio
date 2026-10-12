@@ -18,8 +18,7 @@ export function externalUnavailableText(
   t: Messages,
   requiredVersion?: string
 ): string {
-  return t.externalAgents.unavailable[reason].replace(
-    '{version}',
-    requiredVersion ?? t.externalAgents.selector.unknownVersion
-  );
+  const version = requiredVersion ?? t.externalAgents.selector.unknownVersion;
+  // A function, not the string: a version is data, and `String.replace` reads `$&` in a string.
+  return t.externalAgents.unavailable[reason].replace('{version}', () => version);
 }

@@ -27,4 +27,12 @@ describe('externalUnavailableText', () => {
       en.externalAgents.unavailable['signed-out']
     );
   });
+
+  it('prints a version containing replacement patterns literally', () => {
+    // `String.replace` reads `$&` and `$1` in a replacement string; a version is data, not a pattern.
+    const text = externalUnavailableText('version-unsupported', en, '$& $1 $$');
+    expect(text).toBe(
+      en.externalAgents.unavailable['version-unsupported'].replace('{version}', () => '$& $1 $$')
+    );
+  });
 });

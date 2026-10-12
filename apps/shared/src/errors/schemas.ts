@@ -26,6 +26,12 @@ export const SSEErrorEventSchema = Type.Object({
   unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
   /** What the person can do about `unavailableReason`; a signed-out agent carries its sign-in command. */
   remedy: Type.Optional(ExternalAgentRemedySchema),
+  /**
+   * The build that would clear a `version-unsupported` refusal: the same value, from the same
+   * source, as the descriptor's `requiredVersion`. Present only beside that reason; without it
+   * the client says "a newer version".
+   */
+  requiredVersion: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   done: Type.Literal(true),
 });
 

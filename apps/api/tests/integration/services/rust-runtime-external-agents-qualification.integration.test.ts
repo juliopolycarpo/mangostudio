@@ -30,6 +30,7 @@ import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import { createEnvironmentRepository } from '../../../src/modules/environments/infrastructure/environment-repository';
 import { createExternalIdentityIsolationRegistry } from '../../../src/modules/external-agents/application/external-identity-isolation';
+import { openRefusalFor } from '../../../src/modules/external-agents/domain/external-open-refusal';
 import { cancelActiveTurn } from '../../../src/modules/generation/application/active-turn-registry';
 import { connectHttpRuntime } from '../../../src/services/runtime-client/connect-http-runtime';
 import { openHubSession } from '../../../src/services/runtime-client/hub-session';
@@ -297,13 +298,23 @@ describe('Real Rust runtime external-agent admission', () => {
           timeoutMs: 10_000,
         });
 
-      // Past the authority: the only thing missing is the vendor CLI.
-      expect(await rejectionOf(open('qualification-authorized', authorized))).toMatchObject({
+      // Past the authority: the only thing missing is the vendor CLI. It has its own kind, so the
+      // hub presents it as not installed; the workspace refusal beside it keeps `tool_argument`.
+      const missing = await rejectionOf(open('qualification-authorized', authorized));
+      expect(missing).toMatchObject({
         message: expect.stringMatching(/is not installed/),
+        details: { kind: 'external_agent_not_installed' },
       });
-      expect(await rejectionOf(open('qualification-unauthorized', unauthorized))).toMatchObject({
+      expect(openRefusalFor('codex', missing)).toEqual({
+        unavailableReason: 'not-installed',
+        remedy: { kind: 'install' },
+      });
+      const refused = await rejectionOf(open('qualification-unauthorized', unauthorized));
+      expect(refused).toMatchObject({
+        name: 'ToolArgumentError',
         message: expect.stringMatching(/is not authorized/),
       });
+      expect(openRefusalFor('codex', refused)).toBeUndefined();
       const health = await rust.health();
       expect(health.externalAgents?.liveSessionCount).toBe(0);
     },

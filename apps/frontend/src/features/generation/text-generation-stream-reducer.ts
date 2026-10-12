@@ -297,6 +297,7 @@ function reduceStreamError(
       // and remedy itself, and `text` is the English fallback.
       ...(chunk.unavailableReason ? { unavailableReason: chunk.unavailableReason } : {}),
       ...(chunk.remedy ? { remedy: chunk.remedy } : {}),
+      ...(chunk.requiredVersion ? { requiredVersion: chunk.requiredVersion } : {}),
     } satisfies MessagePart,
   ];
   return withAiMessageUpdate(

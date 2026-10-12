@@ -354,6 +354,8 @@ export type MessagePart =
       /** Set when an external agent could not start for a reason the client presents itself. */
       unavailableReason?: ExternalAgentUnavailableReason;
       remedy?: ExternalAgentRemedy;
+      /** The build `version-unsupported` asks for, when the hub named it. */
+      requiredVersion?: string;
     }
   | { type: 'system_event'; event: string; detail?: string }
   | {

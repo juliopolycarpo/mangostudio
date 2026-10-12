@@ -1779,6 +1779,28 @@ fn vendor_launch_and_timeout_failures_get_their_own_codes() {
     assert_eq!(details(&cancelled)["reason"], "consent-revoked");
 }
 
+/// The hub names the build an outdated agent needs from this detail, never from the message, so
+/// the detail is pinned to the SDK's own minimum.
+#[test]
+fn a_version_gate_carries_the_sdks_minimum_as_a_structured_detail() {
+    let remote = remote_error(&sdk::Error::VersionGate {
+        found: String::from("0.1"),
+        minimum: String::from("0.153.4"),
+    });
+    assert_eq!(
+        (
+            details(&remote)["kind"].clone(),
+            details(&remote)["requiredVersion"].clone()
+        ),
+        (
+            serde_json::json!("external_agent_version_unsupported"),
+            serde_json::json!("0.153.4")
+        ),
+        "expected (kind, requiredVersion) | received {:?}",
+        remote.details
+    );
+}
+
 #[test]
 fn vendor_errors_never_copy_the_vendor_message() {
     let secret = "sk-live-0123456789 token=abc";

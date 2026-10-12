@@ -5,6 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import { en } from '@mangostudio/shared/i18n';
 import type {
   ExternalActivityPart,
   ExternalApprovalPart,
@@ -14,7 +15,12 @@ import { fireEvent, screen } from '@testing-library/react';
 import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
 import { stubClipboard } from '../../support/harness/clipboard';
 import { render, waitFor } from '../../support/harness/render';
+import { routerWithLinkStub } from '../../support/mocks/router';
 import { ToolIdentitiesProbe } from '../../support/mocks/tool-identities';
+
+// The install and update remedies link into the environments surface, so the parts render a router
+// `Link`. Stubbed here, not in a preload: a module mock in a shared graph leaks into other files.
+mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 const answerExternalApproval =
   jest.fn<(chatId: string, body: { requestId: string; optionId: string }) => Promise<unknown>>();
@@ -382,6 +388,83 @@ describe('an external agent that could not start', () => {
       reason: screen.queryByText(DENIED_TEXT)?.textContent,
       commands: container.querySelectorAll('code').length,
     }).toEqual({ fallback: null, reason: DENIED_TEXT, commands: 0 });
+  });
+
+  it('says a missing executable as not installed, with the install link and no command', () => {
+    const { container } = renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        unavailableReason: 'not-installed',
+        remedy: { kind: 'install' },
+      },
+    ]);
+
+    expect({
+      fallback: screen.queryByText(FALLBACK),
+      reason: screen.queryByText(en.externalAgents.unavailable['not-installed']) !== null,
+      link: container.querySelector('a')?.getAttribute('href'),
+      linkText: container.querySelector('a')?.textContent,
+      commands: container.querySelectorAll('code').length,
+    }).toEqual({
+      fallback: null,
+      reason: true,
+      link: '/environments/agents',
+      linkText: en.externalAgents.remedy.install,
+      commands: 0,
+    });
+  });
+
+  it('says an outdated agent with the build it needs and the update link', () => {
+    const { container } = renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        unavailableReason: 'version-unsupported',
+        remedy: { kind: 'update' },
+        requiredVersion: '0.153.4',
+      },
+    ]);
+
+    expect({
+      fallback: screen.queryByText(FALLBACK),
+      reason: screen.queryByText(/Update this agent to 0\.153\.4 or later/) !== null,
+      linkText: container.querySelector('a')?.textContent,
+    }).toEqual({ fallback: null, reason: true, linkText: en.externalAgents.remedy.update });
+  });
+
+  it('names no build when an older runtime sent none, without printing the placeholder', () => {
+    const { container } = renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        unavailableReason: 'version-unsupported',
+        remedy: { kind: 'update' },
+      },
+    ]);
+
+    expect({
+      placeholder: container.textContent?.includes('{version}'),
+      generic: container.textContent?.includes(en.externalAgents.selector.unknownVersion),
+    }).toEqual({ placeholder: false, generic: true });
+  });
+
+  it('keeps a hostile required version inert text', () => {
+    const hostile = '<img src=x onerror=alert(1)> $& `rm -rf ~`';
+    const { container } = renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        unavailableReason: 'version-unsupported',
+        remedy: { kind: 'update' },
+        requiredVersion: hostile,
+      },
+    ]);
+
+    expect({
+      shown: container.textContent?.includes(hostile),
+      images: container.querySelectorAll('img').length,
+    }).toEqual({ shown: true, images: 0 });
   });
 
   it('shows the plain text when the hub sent no reason, as an older hub does', () => {
