@@ -23,11 +23,11 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { Link } from '@tanstack/react-router';
 import { Check, ChevronDown, CornerUpRight, History } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
+import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useExternalAccountLimits } from '@/features/external-agents/use-external-account-limits';
 import {
@@ -446,15 +446,8 @@ function ExternalRow({
           their Codex and Cursor equivalents live there, keyed by the same
           target id. Every other remedy either has its own control below
           (sign-in), its own panel above (isolation), or nothing to offer. */}
-      {descriptor.remedy?.kind === 'install' || descriptor.remedy?.kind === 'update' ? (
-        <div className="mb-2 px-2">
-          <Link
-            to="/environments/agents"
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-primary transition-colors hover:bg-surface-container-high"
-          >
-            {labels.remedy[descriptor.remedy.kind]}
-          </Link>
-        </div>
+      {descriptor.remedy ? (
+        <ExternalRemedyLink remedy={descriptor.remedy} className="mb-2 px-2" />
       ) : null}
 
       {/* The vendor's own login command, with a copy button: the user has to run

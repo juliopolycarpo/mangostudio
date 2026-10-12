@@ -202,3 +202,27 @@ describe('an SSE error chunk that says why an agent could not start', () => {
     ]).toEqual([false, false]);
   });
 });
+
+describe('an SSE error chunk that names the build an outdated agent needs', () => {
+  const base = {
+    type: 'error',
+    error: 'The external agent turn could not be started.',
+    unavailableReason: 'version-unsupported',
+    remedy: { kind: 'update' },
+    done: true,
+  };
+
+  it('validates with the required version, and without it as an older hub sends it', () => {
+    expect([
+      Value.Check(StreamChunkSchema, { ...base, requiredVersion: '0.153.4' }),
+      Value.Check(StreamChunkSchema, base),
+    ]).toEqual([true, true]);
+  });
+
+  it('refuses an empty or oversized required version', () => {
+    expect([
+      Value.Check(StreamChunkSchema, { ...base, requiredVersion: '' }),
+      Value.Check(StreamChunkSchema, { ...base, requiredVersion: '9'.repeat(65) }),
+    ]).toEqual([false, false]);
+  });
+});

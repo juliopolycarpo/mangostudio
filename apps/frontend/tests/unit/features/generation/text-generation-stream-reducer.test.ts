@@ -643,6 +643,31 @@ describe('an error chunk that says why an external agent could not start', () =>
   });
 });
 
+describe('an error chunk that names the build an outdated agent needs', () => {
+  it('keeps the required version on the error part beside the reason and remedy', () => {
+    const state = reduceChunks([
+      {
+        type: 'error',
+        error: 'The external agent turn could not be started.',
+        unavailableReason: 'version-unsupported',
+        remedy: { kind: 'update' },
+        requiredVersion: '0.153.4',
+        done: true,
+      },
+    ]);
+
+    expect(state.aiMessageUpdate?.patch.parts).toEqual([
+      {
+        type: 'error',
+        text: 'The external agent turn could not be started.',
+        unavailableReason: 'version-unsupported',
+        remedy: { kind: 'update' },
+        requiredVersion: '0.153.4',
+      },
+    ]);
+  });
+});
+
 describe('settleUnfinishedImageParts', () => {
   const pendingImage: MessagePart = {
     type: 'generated_image',

@@ -237,6 +237,7 @@ export function MessageParts({
                     text={part.text}
                     unavailableReason={part.unavailableReason}
                     remedy={part.remedy}
+                    requiredVersion={part.requiredVersion}
                   />
                 </TimelineItem>
               );

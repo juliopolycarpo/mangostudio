@@ -4,6 +4,7 @@ import { EXTERNAL_AGENT_TARGET_IDS } from '@mangostudio/shared/external-agents';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import { productDescriptorFor } from '../../../../src/modules/external-agents/domain/adapter-descriptors';
 import { openRefusalFor } from '../../../../src/modules/external-agents/domain/external-open-refusal';
+import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 
 const signedOut = (message = 'signed out') =>
   new RemoteError('UNAVAILABLE', message, { kind: 'external_agent_signed_out' });
@@ -56,15 +57,82 @@ describe('openRefusalFor', () => {
         'cursor',
         new RemoteError('UNAVAILABLE', 'x', { kind: 'external_agent_launch_failed' })
       ),
+      openRefusalFor('cursor', new RemoteError('INTERNAL', 'no kind at all')),
       openRefusalFor(
         'cursor',
-        new RemoteError('UNAVAILABLE', 'x', { kind: 'external_agent_version_unsupported' })
+        new RemoteError('INTERNAL', 'workspace is not a directory', { kind: 'tool_argument' })
       ),
-      openRefusalFor('cursor', new RemoteError('INTERNAL', 'no kind at all')),
       openRefusalFor('cursor', new Error('plain')),
       openRefusalFor('cursor', 'not even an error'),
     ];
 
     expect(received).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  });
+});
+
+describe('openRefusalFor, an agent that is missing or outdated', () => {
+  const notInstalled = () =>
+    new RemoteError('INTERNAL', 'executable is not installed', {
+      kind: 'external_agent_not_installed',
+    });
+  const outdated = (details: Record<string, unknown> = {}) =>
+    new RemoteError('UNAVAILABLE', 'too old', {
+      kind: 'external_agent_version_unsupported',
+      ...details,
+    });
+
+  it('presents a missing executable as not installed, with the install remedy', () => {
+    for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
+      expect({ targetId, refusal: openRefusalFor(targetId, notInstalled()) }).toEqual({
+        targetId,
+        refusal: { unavailableReason: 'not-installed', remedy: { kind: 'install' } },
+      });
+    }
+  });
+
+  it('keeps a tool_argument refusal generic, so a bad workspace is not blamed on the CLI', () => {
+    // The runtime client turns that kind into a `ToolArgumentError`; the raw `RemoteError` is the
+    // shape an older client path or a test double would still hand over.
+    const refusals = [
+      new ToolArgumentError('External-agent executable is not installed; expected a target.'),
+      new RemoteError('INTERNAL', 'External-agent executable is not installed', {
+        kind: 'tool_argument',
+      }),
+    ];
+
+    expect(refusals.map((refusal) => openRefusalFor('codex', refusal))).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it('presents an unsupported version with the update remedy and the required version', () => {
+    expect(openRefusalFor('claude', outdated({ requiredVersion: '2.1.211' }))).toEqual({
+      unavailableReason: 'version-unsupported',
+      remedy: { kind: 'update' },
+      requiredVersion: '2.1.211',
+    });
+  });
+
+  it('omits a required version the runtime did not name as a usable string', () => {
+    const received = [undefined, '', '   ', 7, { version: '1' }, null].map(
+      (requiredVersion) => openRefusalFor('codex', outdated({ requiredVersion }))?.requiredVersion
+    );
+
+    expect(received).toEqual([undefined, undefined, undefined, undefined, undefined, undefined]);
+  });
+
+  it('bounds the required version to what the stream schema accepts', () => {
+    const long = '9'.repeat(200);
+
+    expect(openRefusalFor('codex', outdated({ requiredVersion: long }))?.requiredVersion).toBe(
+      long.slice(0, 64)
+    );
+  });
+
+  it('finds the version behind the hub wrappers', () => {
+    const wrapped = new Error('open failed', { cause: outdated({ requiredVersion: '0.153.4' }) });
+
+    expect(openRefusalFor('codex', wrapped)?.requiredVersion).toBe('0.153.4');
   });
 });

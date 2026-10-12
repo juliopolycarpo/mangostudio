@@ -8,6 +8,8 @@
  * an unavailable reason (said in the client's words) and its remedy, from the same tables.
  *
  * Only open-time failures with an existing presentation are here. Every other one stays generic.
+ * A missing executable is told apart from a workspace or configuration refusal by its own runtime
+ * kind (`external_agent_not_installed`), never by the message.
  */
 
 import { RemoteError } from '@mangostudio/protocol';
@@ -23,11 +25,18 @@ import { productDescriptorFor } from './adapter-descriptors';
 /** The runtime's open-time error kinds that name an existing unavailable reason. */
 const OPEN_REFUSAL_REASONS = {
   external_agent_signed_out: 'signed-out',
+  external_agent_not_installed: 'not-installed',
+  external_agent_version_unsupported: 'version-unsupported',
 } as const satisfies Record<string, ExternalAgentUnavailableReason>;
+
+/** Matches `ExternalAgentDescriptorSchema.requiredVersion`, which the stream chunk repeats. */
+const MAX_REQUIRED_VERSION_LENGTH = 64;
 
 export interface OpenRefusalPresentation {
   readonly unavailableReason: ExternalAgentUnavailableReason;
   readonly remedy: ExternalAgentRemedy;
+  /** The build that would clear `version-unsupported`, as the runtime's structured detail names it. */
+  readonly requiredVersion?: string;
 }
 
 /**
@@ -35,7 +44,9 @@ export interface OpenRefusalPresentation {
  *
  * Walks `cause` a few links, as the submission policy does, because the hub's own wrappers keep
  * the runtime's answer there. The sign-in command is the target's, from the product descriptor;
- * nothing in the runtime's message is used.
+ * the required version is the runtime's structured `requiredVersion` detail (the SDK's own
+ * minimum, the value discovery reports on the descriptor), bounded and trimmed. Nothing in the
+ * runtime's message is used.
  *
  * @example
  * openRefusalFor('cursor', new RemoteError('UNAVAILABLE', 'signed out', { kind: 'external_agent_signed_out' }));
@@ -45,24 +56,46 @@ export function openRefusalFor(
   targetId: ExternalAgentTargetId,
   error: unknown
 ): OpenRefusalPresentation | undefined {
-  const reason = reasonOf(error);
-  if (!reason) return undefined;
+  const found = refusalOf(error);
+  if (!found) return undefined;
+  const { reason, requiredVersion } = found;
   const loginCommand = productDescriptorFor(targetId)?.loginCommand;
   const remedy = externalRemedyFor(reason, loginCommand ? { loginCommand } : {});
-  return remedy ? { unavailableReason: reason, remedy } : undefined;
+  if (!remedy) return undefined;
+  return {
+    unavailableReason: reason,
+    remedy,
+    ...(reason === 'version-unsupported' && requiredVersion ? { requiredVersion } : {}),
+  };
 }
 
-function reasonOf(error: unknown): ExternalAgentUnavailableReason | undefined {
+interface FoundRefusal {
+  readonly reason: ExternalAgentUnavailableReason;
+  readonly requiredVersion: string | undefined;
+}
+
+function refusalOf(error: unknown): FoundRefusal | undefined {
   let current = error;
   for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
-    if (current instanceof RuntimeConsentDeniedError) return 'runtime-denied';
+    if (current instanceof RuntimeConsentDeniedError) {
+      return { reason: 'runtime-denied', requiredVersion: undefined };
+    }
     if (current instanceof RemoteError) {
       const kind = current.details?.kind;
       if (typeof kind === 'string' && Object.hasOwn(OPEN_REFUSAL_REASONS, kind)) {
-        return OPEN_REFUSAL_REASONS[kind as keyof typeof OPEN_REFUSAL_REASONS];
+        return {
+          reason: OPEN_REFUSAL_REASONS[kind as keyof typeof OPEN_REFUSAL_REASONS],
+          requiredVersion: boundedVersion(current.details?.requiredVersion),
+        };
       }
     }
     current = current.cause;
   }
   return undefined;
+}
+
+function boundedVersion(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().slice(0, MAX_REQUIRED_VERSION_LENGTH);
+  return trimmed || undefined;
 }

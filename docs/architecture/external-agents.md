@@ -844,25 +844,32 @@ login that lapsed, or a consent that was withdrawn, in between reaches the strea
 after the 200 is committed. `openRefusalFor` (hub) maps the failures that already have a
 presentation onto an unavailable reason and its remedy, from the same tables as the selector:
 
-| Open failure                                                                                                                         | Reason           | Remedy                                   |
-| ------------------------------------------------------------------------------------------------------------------------------------ | ---------------- | ---------------------------------------- |
-| `external_agent_signed_out` (the SDK's Claude and Codex harnesses return `Error::AuthRequired` at open, Cursor's from `session/new`) | `signed-out`     | `sign-in`, with the target's own command |
-| `RuntimeConsentDeniedError` (the machine owner withdrew consent)                                                                     | `runtime-denied` | `contact-admin`                          |
+| Open failure                                                                                                                             | Reason                | Remedy                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ---------------------------------------- |
+| `external_agent_signed_out` (the SDK's Claude and Codex harnesses return `Error::AuthRequired` at open, Cursor's from `session/new`)     | `signed-out`          | `sign-in`, with the target's own command |
+| `external_agent_not_installed` (the runtime resolves the executable at every open, so this also covers an agent removed since discovery) | `not-installed`       | `install`                                |
+| `external_agent_version_unsupported` (the SDK's version gate, with the SDK's minimum as the structured `requiredVersion` detail)         | `version-unsupported` | `update`                                 |
+| `RuntimeConsentDeniedError` (the machine owner withdrew consent)                                                                         | `runtime-denied`      | `contact-admin`                          |
 
 The SSE `error` chunk keeps its English `error` sentence, which an older client still shows, and
-gains the optional `unavailableReason` and `remedy`. The client says the reason in its own words
-(`externalUnavailableText`) and a `sign-in` remedy shows the command with the copy button. The open
-is not retried, and the next send opens again. A signed-out open also drops the cached discovery
-answer and refreshes the owner's clients, as a turn that ends signed out does; a withdrawn consent
-does not, so the cached descriptor can send one more send to the same refusal until it expires. Nothing was persisted for the refused send, so there is nothing to
-reload. Every other open failure keeps the generic sentence:
+gains the optional `unavailableReason`, `remedy` and, beside `version-unsupported`,
+`requiredVersion`. The client says the reason in its own words (`externalUnavailableText`), a
+`sign-in` remedy shows the command with the copy button, and `install` and `update` show the link
+into the environments surface that owns the recipes, the same link the selector shows. The hub takes
+`requiredVersion` from the runtime's structured detail of the same name (the SDK's own minimum, the
+value discovery reports on the descriptor), trimmed and cut to 64 characters; when it is absent the
+client says "a newer version". Nothing in the runtime's message is parsed or shown. The missing
+executable has its own kind because the runtime's `tool_argument` is shared with workspace and
+configuration refusals, which keep it and keep the generic sentence. The open is not retried, and the
+next send opens again. A signed-out open also drops the cached discovery answer and refreshes the
+owner's clients, as a turn that ends signed out does; the other refusals do not, so the cached
+descriptor can send one more send to the same refusal until it expires. Nothing was persisted for the
+refused send, so there is nothing to reload. Every other open failure keeps the generic sentence:
 
-| Open failure                                                                                                      | What the user sees today | Existing presentation                                                                                 |
-| ----------------------------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `external_agent_version_unsupported`                                                                              | the generic sentence     | `version-unsupported` / `update`, but it needs `requiredVersion` carried and an install link rendered |
-| executable not installed (the runtime's `tool_argument`, a kind shared with workspace and configuration refusals) | the generic sentence     | `not-installed` / `install`, but no kind tells it apart from the other `tool_argument` refusals       |
-| `external_agent_capacity` (after the hub's retry window)                                                          | the generic sentence     | none                                                                                                  |
-| `external_agent_launch_failed`, `_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`, an open timeout      | the generic sentence     | none                                                                                                  |
+| Open failure                                                                                                 | What the user sees today | Existing presentation |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------- |
+| `external_agent_capacity` (after the hub's retry window)                                                     | the generic sentence     | none                  |
+| `external_agent_launch_failed`, `_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`, an open timeout | the generic sentence     | none                  |
 
 Two surfaces keep the generic wording: the review button's toast, because the review stream's thrown
 error drops the reason, and a resubmission after a dropped connection, which opens again inside the
