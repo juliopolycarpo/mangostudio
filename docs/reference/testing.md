@@ -143,18 +143,20 @@ and reach for a real filesystem only when the test is about the filesystem.
 
 ### Parallelism
 
-`test:unit` and `test:coverage:unit` in `apps/api` pass `--parallel=1`. Read
-that as "one worker, isolated" rather than "no parallelism": Bun's
-`--parallel=N` runs files in N worker processes and **implies `--isolate`**,
-which gives each file a fresh global object. Isolation is the load-bearing
-half. (`test:unit` then runs that one isolated worker several times, as
-separate processes: see [API unit workers](#api-unit-workers).) Bun's default — no `--parallel` at all — runs every file in one process
+`test:unit` in `apps/api` passes `--parallel=1` and `test:coverage:unit` passes
+`--parallel=4`. Read the first as "one worker, isolated" rather than "no
+parallelism": Bun's `--parallel=N` runs files in N worker processes and
+**implies `--isolate`**, which gives each file a fresh global object. Isolation
+is the load-bearing half. (`test:unit` then runs that one isolated worker
+several times, as separate processes: see [API unit workers](#api-unit-workers).
+The coverage lane goes wide inside one invocation instead, which
+[Bun 1.4.3 made safe](#known-upstream-blocker-on-the-unit-lane).) Bun's default — no `--parallel` at all — runs every file in one process
 off a single module graph, where the in-memory database from
 `setupTestEnvironment()` and any `mock.module` registration outlive the file
 that made them.
 
 The api coverage lane is **two invocations, with opposite settings**:
-`test:coverage:unit` keeps `--parallel=1`, `test:coverage:integration` takes no
+`test:coverage:unit` runs `--parallel=4`, `test:coverage:integration` takes no
 flag at all, and `test:coverage` delegates to
 `scripts/ci/run-workspace-coverage.ts`, which runs both lanes and merges their
 LCOV slices into the one staged `coverage/api/lcov.info`. The orchestrator is
@@ -232,9 +234,12 @@ run under the Bun test runner).
 
 #### Known upstream blocker on the unit lane
 
-`tests/unit` aborts whole files intermittently under worker parallelism, losing
-every remaining case in the file it hits. It is not a property of one machine —
-it reproduces on GitHub's runners:
+**Lifted on Bun 1.4.3.** The coverage lane runs `--parallel=4`; what follows is
+the record of what blocked it and of what the release did and did not fix.
+
+Before 1.4.3, `tests/unit` aborted whole files intermittently under worker
+parallelism, losing every remaining case in the file it hit. It was not a
+property of one machine — it reproduced on GitHub's runners:
 
 | Host                                  | Invocation                  | Runs affected |
 | ------------------------------------- | --------------------------- | ------------- |
@@ -243,8 +248,36 @@ it reproduces on GitHub's runners:
 | WSL2, pinned to 4 cores               | `--parallel=8`, to a file   | 4 of 12       |
 | WSL2, pinned to 4 cores               | `--parallel=8`, into a pipe | 2 of 8        |
 
-A runner run takes ~58s at four workers against 232–248s at one, so the prize is
-real and this is what stands in front of it.
+A runner run took ~58s at four workers against 232–248s at one.
+
+Re-measured on `1.4.3+c6da4a4d3` (2026-10-12, WSL2 pinned to four cores, 437
+files, output to a file):
+
+| Invocation                                             | Runs clean | Wall time |
+| ------------------------------------------------------ | ---------- | --------- |
+| `--parallel=4 tests/unit`                              | 12 of 12   | 75–82s    |
+| `--coverage --parallel=1 tests/unit`                   | 2 of 2     | 270–271s  |
+| `--coverage --parallel=4 tests/unit`                   | 3 of 3     | 79–80s    |
+| coverage lane flags, `--parallel=1`, per `--shard=i/4` | 4 of 4     | 65–69s    |
+| coverage lane flags, `--parallel=4`, per `--shard=i/4` | 4 of 4     | 19–20s    |
+
+Every run passed the same 5,380 cases with no `epoll_ctl`, no crashed worker and
+no hang. At either width the four shards claimed the same 437 files once each,
+split identically. Covered lines are the same at one worker and at four
+(61,807). Coverable lines are not: the merged four-shard LCOV reports 77,116 at
+one worker and 77,065 at four, and two source files moved by a line or two
+between otherwise identical four-worker runs. That is the run-dependent `LF:`
+of [Merging is not concatenation](#merging-is-not-concatenation), and it puts
+the lane's line coverage 0.05pp higher at four workers — inside the QA
+verdict's 0.1pp epsilon, and worth knowing when a coverage delta that small
+shows up.
+
+The pinned soak is strong evidence against the 4-of-10 rate it replaces and weak
+evidence against the hosted 2-of-36 one: twelve clean runs happen about half the
+time at that rate. CI is the soak that settles it. If the abort returns there,
+it is this section's error below, and the lane goes back to `--parallel=1`.
+
+What blocked it:
 
 The error is always
 
@@ -260,22 +293,37 @@ in the test that reports it, and it is not fixable from this repository.
 
 It is [oven-sh/bun#37968](https://github.com/oven-sh/bun/issues/37968), reproduced
 and root-caused upstream — a leaked epoll registration on a reused stdio
-descriptor at the isolate global swap — with a fix open at
-[oven-sh/bun#38008](https://github.com/oven-sh/bun/pull/38008). Check whether that
-has shipped before re-investigating any of this. Note that the issue recommends
+descriptor at the isolate global swap. Note that the issue recommends
 redirecting to regular files as a workaround; that made it *worse* here, not
 better, so measure before adopting it.
 
-> **A green canary run is not evidence the bug is gone.** The abort stopped
-> firing on the post-rewrite builds this repo now tracks, but the leak that
-> causes it did not go away. Counting how many of an isolate's fds point at the
-> same pipe as fd 2 — PR #38008's own regression test — gives `4 6 8 10 12 14 16
-> 18` across eight files on `1.4.0-canary.1+32e87032b`, unchanged on
-> `1.4.2+744846f84`: two leaked per file,
-> still climbing. Only #38008 flattens it to a constant `4`. So the collision
-> merely stopped being *observable* on this suite; whether it reappears is a
-> question of fd-number timing on some future runner. Wait for that patch
-> specifically, not for "a newer Bun".
+Two patches address it from opposite ends, and only one has shipped:
+
+- [oven-sh/bun#44581](https://github.com/oven-sh/bun/pull/44581), **in 1.4.3**,
+  closed the issue. A finished file's `process.stderr` sink is released by a
+  garbage collection; when that ran inside a `Bun.spawnSync` call, the VM was
+  pointed at `spawnSync`'s own event loop, so the sink's `EPOLL_CTL_DEL` went
+  to the wrong epoll and the entry stayed in the main one. The next dup of the
+  stdio fd to get that number failed with `EEXIST`. The patch stops repointing
+  the VM, so the release reaches the right epoll. The same swap was behind the
+  `spawnSync` spin described under
+  [The isolate runner can hang](#the-isolate-runner-can-hang).
+- [oven-sh/bun#38008](https://github.com/oven-sh/bun/pull/38008), **still
+  open**, ends the outgoing file's stdio sinks at the global swap so nothing
+  leaks in the first place.
+
+> **The leak is still there; the collision is what went away.** Counting how
+> many of an isolate's fds point at the same pipe as fd 2 — PR #38008's own
+> regression test — gives `4 6 8 10 12 14 16 18` across eight files on
+> `1.4.0-canary.1+32e87032b`, on `1.4.2+744846f84` and on `1.4.3+c6da4a4d3`
+> alike: two leaked per file, still climbing, under `--isolate` and
+> `--parallel=1` (a flat `4` without isolation). Only #38008 flattens it. So
+> 1.4.3 removes the one known path from that leak to a failure, not the leak; a
+> suite with thousands of files per worker still accumulates descriptors.
+>
+> A release note is not proof a patch shipped. Check the tag:
+> `gh api repos/oven-sh/bun/compare/<merge-sha>...bun-v<version> --jq .status`
+> answers `ahead` when the tag contains the merge commit.
 
 Do not read the stack frames below `new WriteStream` as the cause. They usually
 point at `google-logging-utils` inside `google-auth-library`'s module init
@@ -287,11 +335,11 @@ is the messenger.
 Redirecting the run to a file makes it likelier but is not the cause; it happens
 through a pipe too, which is what CI gives it.
 
-So the unit lane cannot take Bun's *in-process* worker parallelism yet (the
-integration lane can: 12 of 12 clean at four workers on a runner, 50.6s against
-71–75s unflagged). It does take separate processes, each of them a one-worker
-`bun test` that never shares an isolate with another: see
-[API unit workers](#api-unit-workers).
+So before 1.4.3 the unit lane could not take Bun's *in-process* worker
+parallelism (the integration lane could: 12 of 12 clean at four workers on a
+runner, 50.6s against 71–75s unflagged). Its plain run took separate processes
+instead, each of them a one-worker `bun test` that never shares an isolate with
+another, and still does: see [API unit workers](#api-unit-workers).
 
 #### The isolate runner can hang
 
@@ -329,7 +377,19 @@ is adjacent and easy to mistake for the unblock:
 
 Re-check the merge state of #38008 before reading a quiet lane as a fix.
 
-Two mitigations are in place until it ships:
+**Re-checked on the 1.4.3 pin (2026-10-12).** #39709 is still open with no fix
+in flight, and #38008 is still unmerged. What 1.4.3 did ship is
+[oven-sh/bun#44581](https://github.com/oven-sh/bun/pull/44581), which removes
+the `spawnSync` spin — the milder form above, where a finalizer run inside
+`spawnSync` drifted that loop's poll count until a later call spun at 100% CPU
+to its timeout — along with the isolate realm fencing in #41831, #42110 and
+#44279 and the crashed-worker cleanup in #41467. In the first 65 CI runs on the
+pin, 460 shard test steps had a median of 48s and a maximum of 120s; none
+reached the watchdog's bound, so it killed nothing. The watchdog stays until
+#39709 closes: the runner-never-exits form has no fix, and a quiet week was
+also what the lane looked like before it first hung.
+
+Two mitigations are in place until it closes:
 
 - The api **integration** suite runs outside isolate mode (see
   [Parallelism](#parallelism)).
@@ -350,12 +410,13 @@ trigger files.
 
 ### Sharding
 
-`--parallel=N` is blocked; `--shard=i/N` is not, and it reaches the same prize
-from the other side. Workers put concurrent isolates inside **one** Bun process,
-which is the precondition for the abort above. A shard is a subset of files run
-by a process that never shares itself with another shard, so that precondition
-never exists. The two compose: in-job `--parallel` still applies the day
-oven-sh/bun#38008 ships.
+Sharding came first because `--parallel=N` was blocked and `--shard=i/N` was
+not. Workers put concurrent isolates inside **one** Bun process, which was the
+precondition for the abort above. A shard is a subset of files run by a process
+that never shares itself with another shard, so that precondition never exists.
+The two compose, and since Bun 1.4.3 they do: each shard runs the api unit lane
+at `--parallel=4`, and `--timings` balances both the shard split and the
+workers inside it.
 
 What sharding does *not* sidestep is [the isolate runner hang](#the-isolate-runner-can-hang): that needs no concurrency, only isolate
 mode, so it rode along into the shard jobs until the api integration suite
@@ -378,9 +439,10 @@ baseline. The lane registry (`scripts/lib/test-lanes.ts`) carries the
 `sharded` flag, and `test-lanes.unit.test.ts` pins that the frontend's script
 cannot even receive `$MANGOSTUDIO_BUN_TEST_ARGS`.
 
-> The soak matters because oven-sh/bun#37968 (the fd-leak/`epoll_ctl` abort) is
-> still open upstream; a green run means the collision is not manifesting at
-> this scale, not that the defect is gone. If CI later reproduces it, drop to
+> The soak mattered because oven-sh/bun#37968 (the fd-leak/`epoll_ctl` abort)
+> was open upstream when the lane was adopted. Bun 1.4.3 closed it by removing
+> the collision, not the leak (see
+> [Known upstream blocker on the unit lane](#known-upstream-blocker-on-the-unit-lane)). If CI ever reproduces it, drop to
 > `--parallel=2` first — parallelism *divides* the stale-registration
 > accumulation across workers, so serial `--isolate` concentrates rather than
 > avoids it.
@@ -577,11 +639,13 @@ missing or extra case when it does not).
 
 Things this deliberately does not do:
 
-- **Coverage stays one process.** `test:coverage:unit` keeps a single
-  `--parallel=1` worker: a union of per-process LCOV carried 3,501 extra zero-hit
-  line keys across 249 sources on two strict comparisons, with identical cases and
-  covered lines, and nobody has found the cause. CI's Test job is coverage with
-  shards, so it does not change.
+- **Coverage stays one invocation.** `test:coverage:unit` never goes through
+  this runner: a union of per-process LCOV carried 3,501 extra zero-hit line
+  keys across 249 sources on two strict comparisons, with identical cases and
+  covered lines, and nobody has found the cause. It goes wide with Bun's own
+  `--parallel=4` instead, where one invocation writes one LCOV and there is
+  nothing to union. CI's Test job is coverage with shards, so this runner does
+  not change it.
 - **No timings file.** The split would then depend on an untracked file that every
   coverage run refreshes, and rotate between runs (see
   [Why the unisolated lane opts out too](#why-the-unisolated-lane-opts-out-too)
@@ -632,7 +696,7 @@ half the available cores. `MANGO_TEST_WORKERS=<1-8>` overrides the width. Each
 worker runs the unchanged unisolated command, `bun test --timeout 15000
 tests/integration`, over its deterministic `--shard=i/N` slice. It does not use
 Bun's in-process `--parallel` or a timings file. Coverage keeps its existing
-single-process command and CI shard matrix.
+single-process, unisolated command and CI shard matrix.
 
 The integration workers own their temporary homes and managed config paths,
 in-memory databases, OS-assigned ports and separate reports, as the unit workers

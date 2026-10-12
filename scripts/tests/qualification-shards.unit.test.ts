@@ -34,7 +34,7 @@ function isUnfilteredCoverageCommand(command: string, directory: string): boolea
       continue;
     }
     if (
-      !/^(--coverage|--update-timings|--parallel=1|--reporter=junit|--(timings|coverage-dir|reporter-outfile)=[\w./-]+)$/.test(
+      !/^(--coverage|--update-timings|--parallel=[1-9]\d*|--reporter=junit|--(timings|coverage-dir|reporter-outfile)=[\w./-]+)$/.test(
         flags[index]
       )
     )

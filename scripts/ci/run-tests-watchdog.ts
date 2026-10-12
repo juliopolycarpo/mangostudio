@@ -6,10 +6,11 @@
 // never exits — the log freezes and the job burns its whole `timeout-minutes`
 // before the runner kills it. `--timeout` bounds a *test*, not the runner
 // process, so nothing inside Bun ends the wait. Observed on this repo's shard
-// jobs at `--parallel=1` on stock Bun 1.4.0; the upstream fix
-// (oven-sh/bun#38008) is still unmerged as of 1.4.2 (oven-sh/bun#39709 open),
-// so until a release carries it this watchdog turns a 10-minute stall plus a
-// manual rerun into a bounded retry.
+// jobs at `--parallel=1` on stock Bun 1.4.0. Bun 1.4.3 removed the `spawnSync`
+// spin behind the milder form (oven-sh/bun#44581), and no shard step reached
+// the bound in the first 460 hosted steps on it, but oven-sh/bun#39709 is
+// still open, so this watchdog keeps turning a 10-minute stall plus a manual
+// rerun into a bounded retry.
 //
 // Two details are load-bearing:
 //
