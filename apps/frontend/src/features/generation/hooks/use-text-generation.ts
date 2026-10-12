@@ -511,6 +511,11 @@ export function useTextGeneration({
       // re-read for the checkpoint the wire never carries.
       let sawDoneChunk = false;
       let streamThrew = false;
+      // An external agent that could not start (signed out, consent withdrawn) is refused before
+      // the hub persists anything for this send, so the optimistic rows are the only place the
+      // refusal and its sign-in command exist. A re-read would replace them with the server's
+      // rows, which hold neither.
+      let refusedBeforeStart = false;
 
       try {
         // Late on purpose. The turn is dispatched on the runner the hub has
@@ -523,6 +528,7 @@ export function useTextGeneration({
         await sendWithExternalConsent(activeChatId, () => {
           const onChunk = (chunk: StreamChunk) => {
             if (chunk.type === 'done') sawDoneChunk = true;
+            if (chunk.type === 'error' && chunk.unavailableReason) refusedBeforeStart = true;
             streamState = reduceTextGenerationStreamChunk(streamState, chunk, {
               pendingSubagentName,
             });
@@ -749,10 +755,11 @@ export function useTextGeneration({
         // provisional and the persisted user message is worth having even
         // mid-unwind.
         if (
-          recovery ||
-          !streamState.receivedServerUserMessageId ||
-          !streamState.receivedServerAiMessageId ||
-          (!streamThrew && !sawDoneChunk)
+          !(refusedBeforeStart && !streamState.receivedServerUserMessageId) &&
+          (recovery ||
+            !streamState.receivedServerUserMessageId ||
+            !streamState.receivedServerAiMessageId ||
+            (!streamThrew && !sawDoneChunk))
         ) {
           void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
         }

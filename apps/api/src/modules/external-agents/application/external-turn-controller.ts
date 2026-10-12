@@ -71,6 +71,7 @@ import {
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
 import { isExpectedTailOfEndedTurn } from '../domain/external-event-sequencer';
+import { openRefusalFor } from '../domain/external-open-refusal';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import {
   classifySubmissionFailure,
@@ -505,6 +506,18 @@ export function createExternalTurnController(
   const onSignedOutObserved = dependencies.onSignedOutObserved ?? invalidateDiscoveryAfterSignedOut;
   const liveTurns = new Map<string, LiveExternalTurn>();
 
+  /** Discardable bookkeeping: a failure here must never disturb the turn's ending. */
+  function notifySignedOut(scope: SignedOutScope): void {
+    try {
+      onSignedOutObserved(scope);
+    } catch (error) {
+      logger.warn('signed_out_invalidation_failed', {
+        targetId: scope.targetId,
+        error: String(error),
+      });
+    }
+  }
+
   async function start(
     input: StartExternalTurnInput,
     db: Kysely<Database>
@@ -523,16 +536,25 @@ export function createExternalTurnController(
     if (findActiveTurnByChat(input.chatId)) throw new ExternalTurnConflictError(input.chatId);
 
     const targetId = chat.runner.targetId;
-    const handle = await sessions.ensureSession({
-      userId: input.userId,
-      chatId: input.chatId,
-      environmentId: chat.environmentId,
-      targetId,
-      canonicalWorkspacePath: input.canonicalWorkspacePath,
-      vendorAccountFingerprint: input.vendorAccountFingerprint ?? null,
-      credentialHomeFingerprint: input.credentialHomeFingerprint,
-      configuration: input.configuration,
-    });
+    const handle = await sessions
+      .ensureSession({
+        userId: input.userId,
+        chatId: input.chatId,
+        environmentId: chat.environmentId,
+        targetId,
+        canonicalWorkspacePath: input.canonicalWorkspacePath,
+        vendorAccountFingerprint: input.vendorAccountFingerprint ?? null,
+        credentialHomeFingerprint: input.credentialHomeFingerprint,
+        configuration: input.configuration,
+      })
+      .catch((error: unknown) => {
+        // The open found the account signed out: tell the cache the same way a turn that ended
+        // signed out does. The refusal itself still reaches the caller, which presents it.
+        if (openRefusalFor(targetId, error)?.remedy.kind === 'sign-in') {
+          notifySignedOut({ userId: input.userId, environmentId: chat.environmentId, targetId });
+        }
+        throw error;
+      });
     // After the session is open, because only the adapter that answered `open`
     // can say what this machine's build supports — the descriptor the caller
     // preflighted against is cached, and this is not.
@@ -805,16 +827,11 @@ export function createExternalTurnController(
           envelope.event.type === 'error' &&
           turnErrorRemedyFor(targetId, envelope.event.error)?.kind === 'sign-in'
         ) {
-          // Discardable bookkeeping: a failure here must never disturb the turn's ending.
-          try {
-            onSignedOutObserved({
-              userId: input.userId,
-              environmentId: context.chat.environmentId,
-              targetId,
-            });
-          } catch (error) {
-            logger.warn('signed_out_invalidation_failed', { targetId, error: String(error) });
-          }
+          notifySignedOut({
+            userId: input.userId,
+            environmentId: context.chat.environmentId,
+            targetId,
+          });
         }
 
         if (envelope.event.type === 'commands_available') {

@@ -1608,6 +1608,50 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     ]);
   });
 
+  // The hub persists nothing for a send an external agent refuses before it starts, so a re-read
+  // would replace the only copy of the refusal (and its sign-in command) with rows that hold neither.
+  it('keeps the optimistic rows after an external agent that could not start', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        {
+          type: 'error',
+          error: 'The external agent turn could not be started.',
+          unavailableReason: 'signed-out',
+          remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+          done: true,
+        },
+      ])
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('hello');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
+  it('still re-reads after a terminal error chunk that names no reason', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'error', error: 'provider exploded', done: true }])
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('hello');
+    });
+
+    expect(messagesInvalidations(invalidateSpy)).toContainEqual([
+      { queryKey: ['messages', 'chat-1'] },
+    ]);
+  });
+
   it('does not re-read after a turn that ended in done with known ids', async () => {
     const props = makeProps();
     mockStream.mockImplementation(

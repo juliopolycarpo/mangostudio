@@ -837,6 +837,38 @@ sentence. `version-unsupported` is developer vocabulary; the client translates i
 it already has, and the English message stays as the fallback an External API consumer sees when it
 renders nothing itself.
 
+#### A send refused while the session opens
+
+The preflight reads a cached descriptor; the runtime's `open` reads the machine as it is now, so a
+login that lapsed, or a consent that was withdrawn, in between reaches the stream as a failed open
+after the 200 is committed. `openRefusalFor` (hub) maps the failures that already have a
+presentation onto an unavailable reason and its remedy, from the same tables as the selector:
+
+| Open failure                                                                                                                         | Reason           | Remedy                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ---------------- | ---------------------------------------- |
+| `external_agent_signed_out` (the SDK's Claude and Codex harnesses return `Error::AuthRequired` at open, Cursor's from `session/new`) | `signed-out`     | `sign-in`, with the target's own command |
+| `RuntimeConsentDeniedError` (the machine owner withdrew consent)                                                                     | `runtime-denied` | `contact-admin`                          |
+
+The SSE `error` chunk keeps its English `error` sentence, which an older client still shows, and
+gains the optional `unavailableReason` and `remedy`. The client says the reason in its own words
+(`externalUnavailableText`) and a `sign-in` remedy shows the command with the copy button. The open
+is not retried, and the next send opens again. A signed-out open also drops the cached discovery
+answer and refreshes the owner's clients, as a turn that ends signed out does; a withdrawn consent
+does not, so the cached descriptor can send one more send to the same refusal until it expires. Nothing was persisted for the refused send, so there is nothing to
+reload. Every other open failure keeps the generic sentence:
+
+| Open failure                                                                                                      | What the user sees today | Existing presentation                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `external_agent_version_unsupported`                                                                              | the generic sentence     | `version-unsupported` / `update`, but it needs `requiredVersion` carried and an install link rendered |
+| executable not installed (the runtime's `tool_argument`, a kind shared with workspace and configuration refusals) | the generic sentence     | `not-installed` / `install`, but no kind tells it apart from the other `tool_argument` refusals       |
+| `external_agent_capacity` (after the hub's retry window)                                                          | the generic sentence     | none                                                                                                  |
+| `external_agent_launch_failed`, `_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`, an open timeout      | the generic sentence     | none                                                                                                  |
+
+Two surfaces keep the generic wording: the review button's toast, because the review stream's thrown
+error drops the reason, and a resubmission after a dropped connection, which opens again inside the
+controller and records the runtime's own message on the turn. Both need a connection to be lost or a
+different button, and neither was changed here.
+
 ## Vendor pinning and drift
 
 Every vendor surface an adapter depends on is **pinned, committed and diffed**, so a vendor upgrade

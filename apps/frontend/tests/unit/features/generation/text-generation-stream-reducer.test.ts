@@ -620,6 +620,29 @@ describe('text generation stream reducer', () => {
   });
 });
 
+describe('an error chunk that says why an external agent could not start', () => {
+  it('keeps the reason and the remedy on the error part, with the English text as fallback', () => {
+    const state = reduceChunks([
+      {
+        type: 'error',
+        error: 'The external agent turn could not be started.',
+        unavailableReason: 'signed-out',
+        remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+        done: true,
+      },
+    ]);
+
+    expect(state.aiMessageUpdate?.patch.parts).toEqual([
+      {
+        type: 'error',
+        text: 'The external agent turn could not be started.',
+        unavailableReason: 'signed-out',
+        remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+      },
+    ]);
+  });
+});
+
 describe('settleUnfinishedImageParts', () => {
   const pendingImage: MessagePart = {
     type: 'generated_image',

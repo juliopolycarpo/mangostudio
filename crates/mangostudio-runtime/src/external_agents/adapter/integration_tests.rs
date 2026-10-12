@@ -16,7 +16,7 @@ use mango_protocol::error::codes;
 use mango_protocol::frame::PeerInfo;
 use mango_protocol::port::port_pair;
 use mango_protocol::session::{Session as HubSession, SessionOptions};
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
@@ -95,6 +95,8 @@ enum OpenBehaviour {
     FinishWhenCancelled,
     /// Fails, handing back a child whose cleanup the host must finish.
     FailNeedingCleanup(Arc<CountingControl>),
+    /// Refuses the open the way a signed-out CLI does (`Error::AuthRequired`).
+    SignedOut,
     /// Opens a session whose every turn asks one single-choice question.
     AskingOneChoice,
     /// Opens a session whose turn streams text past the persisted budget.
@@ -188,6 +190,11 @@ impl Harness for CountingHarness {
             | OpenBehaviour::SteerFailingOnGate(_)
             | OpenBehaviour::CloseStalls
             | OpenBehaviour::Scripted(_) => {}
+            OpenBehaviour::SignedOut => {
+                return Err(SdkError::AuthRequired {
+                    login_hint: String::from("vendor login"),
+                });
+            }
             OpenBehaviour::FailNeedingCleanup(control) => {
                 return Err(SdkError::CleanupRequired {
                     control: Arc::clone(control) as Arc<dyn ProcessControl>,
@@ -858,9 +865,13 @@ async fn rig(options: RigOptions) -> Rig {
 
 impl Rig {
     fn open_params(&self, session_id: &str) -> OpenParams {
+        self.open_params_for(TargetId::Claude, session_id)
+    }
+
+    fn open_params_for(&self, target_id: TargetId, session_id: &str) -> OpenParams {
         OpenParams {
             session_id: session_id.into(),
-            target_id: TargetId::Claude,
+            target_id,
             workspace_path: self.workspace.clone(),
             configuration: Configuration {
                 model: None,
@@ -874,6 +885,20 @@ impl Rig {
             timeout_ms: 5_000,
             toolchain: None,
         }
+    }
+
+    async fn open_target(
+        &self,
+        target: TargetId,
+        session_id: &str,
+    ) -> Result<crate::external_agents::wire::OpenResult, mango_protocol::error::RemoteError> {
+        self.supervisor
+            .open(
+                self.open_params_for(target, session_id),
+                &self.hub,
+                &CancellationToken::new(),
+            )
+            .await
     }
 
     async fn open(
@@ -1461,6 +1486,46 @@ async fn a_child_the_sdk_could_not_clean_up_is_reaped_before_the_failure_returns
         0,
         "expected the failed open's scratch leaf removed"
     );
+}
+
+/// An open the harness refuses with `Error::AuthRequired` reaches the hub as the signed-out kind
+/// for every target, leaves no session behind and is not retried. That the Claude and Codex
+/// harnesses return it at open (from their account reads) is read from the SDK; the SDK's fake
+/// harness stands in for them here, and the Cursor harness is driven for real in `acp_turn_tests`.
+#[tokio::test]
+async fn a_signed_out_open_is_refused_with_the_signed_out_kind_for_every_target() {
+    for target in TargetId::ALL {
+        let rig = rig(RigOptions {
+            open: OpenBehaviour::SignedOut,
+            ..RigOptions::default()
+        })
+        .await;
+        let error = rig
+            .open_target(target, "one")
+            .await
+            .expect_err("a signed-out open must fail");
+        let received = (
+            error.code.clone(),
+            error
+                .details
+                .as_ref()
+                .and_then(|details| details.get("kind"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            rig.log.opens.load(Ordering::SeqCst),
+            rig.live_count(),
+        );
+        assert_eq!(
+            received,
+            (
+                "UNAVAILABLE".to_owned(),
+                Some("external_agent_signed_out".to_owned()),
+                1,
+                0
+            ),
+            "expected (code, kind, opens, live sessions) for a signed-out {target:?} | received {received:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

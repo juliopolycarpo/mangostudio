@@ -328,6 +328,69 @@ describe('external turn: signed out', () => {
   });
 });
 
+describe('an external agent that could not start', () => {
+  const FALLBACK = 'The external agent turn could not be started.';
+  const DENIED_TEXT = "This machine's owner has not allowed external agents";
+
+  it('says signed out in the selector words, with the command to run and copy', () => {
+    const { container } = renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        unavailableReason: 'signed-out',
+        remedy: { kind: 'sign-in', command: 'codex login' },
+      },
+    ]);
+
+    expect({
+      words: screen.queryByText('Installed, but signed out') !== null,
+      fallback: screen.queryByText(FALLBACK),
+      command: container.querySelector('code')?.textContent,
+      copy: screen.queryByRole('button', { name: 'Copy login command' }) !== null,
+    }).toEqual({ words: true, fallback: null, command: 'codex login', copy: true });
+  });
+
+  it('keeps a hostile command inert', () => {
+    const hostile = '<img src=x onerror=alert(1)> `rm -rf ~`';
+    const { container } = renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        unavailableReason: 'signed-out',
+        remedy: { kind: 'sign-in', command: hostile },
+      },
+    ]);
+
+    expect({
+      text: container.querySelector('code')?.textContent,
+      images: container.querySelectorAll('img').length,
+    }).toEqual({ text: hostile, images: 0 });
+  });
+
+  it('says a withdrawn consent in its own words, with no command', () => {
+    const { container } = renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        unavailableReason: 'runtime-denied',
+        remedy: { kind: 'contact-admin' },
+      },
+    ]);
+
+    expect({
+      fallback: screen.queryByText(FALLBACK),
+      reason: screen.queryByText(DENIED_TEXT)?.textContent,
+      commands: container.querySelectorAll('code').length,
+    }).toEqual({ fallback: null, reason: DENIED_TEXT, commands: 0 });
+  });
+
+  it('shows the plain text when the hub sent no reason, as an older hub does', () => {
+    renderParts([{ type: 'error', text: FALLBACK }]);
+
+    expect(screen.getByText(FALLBACK)).toBeInTheDocument();
+  });
+});
+
 describe('external turn: still working', () => {
   it('shows a working row while the turn is active and has produced nothing yet', () => {
     renderParts([turnPart({ status: 'active' })]);

@@ -48,6 +48,7 @@ import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/c
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
 import { KEEPALIVE_INTERVAL_MS } from '../../generation/application/sse-keepalive';
 import { getRepoRoot } from '../../git/application/git-status-service';
+import { openRefusalFor } from '../domain/external-open-refusal';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import { requiresExternalDisclosure } from './external-disclosure-gate';
 import {
@@ -603,12 +604,16 @@ function openStream(
           chatId: input.chatId,
           error: error instanceof Error ? error.message : 'unknown error',
         });
+        // The English sentence stays as the fallback an older client shows. A refusal with an
+        // existing presentation also carries its reason and remedy, so a newer one says it itself.
+        const refusal = openRefusalFor(resolution.descriptor.targetId, error);
         send({
           type: 'error',
           error:
             error instanceof ExternalTurnConflictError
               ? error.message
               : 'The external agent turn could not be started.',
+          ...(refusal ?? {}),
           done: true,
         });
       } finally {

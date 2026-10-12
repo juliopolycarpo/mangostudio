@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { RemoteError } from '@mangostudio/protocol';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
 import type {
   ExternalAgentCapabilities,
@@ -10,6 +11,7 @@ import {
   EXTERNAL_TURN_MAX_ATTACHMENTS,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
+import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { Kysely } from 'kysely';
 import { getDb } from '../../../../src/db/database';
@@ -27,6 +29,7 @@ import {
 import { createExternalTurnStream } from '../../../../src/modules/external-agents/application/external-turn-stream';
 import type { CancellableSleep } from '../../../../src/modules/external-agents/application/external-turn-submission';
 import { grantWorkspaceTrust } from '../../../../src/modules/external-agents/application/external-workspace-trust';
+import { productDescriptorFor } from '../../../../src/modules/external-agents/domain/adapter-descriptors';
 import {
   cancelActiveTurn,
   findActiveTurnByChat,
@@ -71,7 +74,7 @@ let chatId = '';
 
 async function insertExternalChat(
   permissions: { level?: string; routing?: string } = { level: 'default', routing: 'user' },
-  targetId: 'codex' | 'cursor' = 'codex'
+  targetId: 'codex' | 'cursor' | 'claude' = 'codex'
 ): Promise<string> {
   const id = `chat-${crypto.randomUUID()}`;
   await getDb()
@@ -119,6 +122,8 @@ function harness(
     /** Scripted `external-agent.turn` failures, consumed per call. */
     readonly turnFailure?: () => Error | undefined;
     readonly sleep?: CancellableSleep;
+    /** Scripted `external-agent.open` failures, consumed per call. */
+    readonly openFailure?: () => Error | undefined;
     /** Replaces the default discovery invalidation after a signed-out ending. */
     readonly onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved'];
   } = {}
@@ -126,6 +131,7 @@ function harness(
   const runtime = createFakeExternalRuntime({
     ...(options.sessionCapabilities ? { capabilities: options.sessionCapabilities } : {}),
     ...(options.turnFailure ? { turnFailure: options.turnFailure } : {}),
+    ...(options.openFailure ? { openFailure: options.openFailure } : {}),
   });
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
@@ -836,6 +842,143 @@ describe('a turn the agent refused because its account is signed out', () => {
 
     const chunk = (await reading).find((candidate) => candidate.type === 'external_error');
     expect(chunk && 'remedy' in chunk).toBe(false);
+  });
+});
+
+describe('a send the runtime refuses while the session opens', () => {
+  const GENERIC = 'The external agent turn could not be started.';
+  const OPEN_TARGETS = ['cursor', 'codex', 'claude'] as const;
+
+  function signedOutRefusal(): RemoteError {
+    return new RemoteError(
+      'UNAVAILABLE',
+      'expected a signed-in CLI, received a signed-out one; inspect the typed login hint',
+      { kind: 'external_agent_signed_out' }
+    );
+  }
+
+  async function openRig(
+    targetId: (typeof OPEN_TARGETS)[number],
+    options: {
+      readonly openFailure?: () => Error | undefined;
+      readonly onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved'];
+    }
+  ) {
+    const targetChatId = await insertExternalChat(undefined, targetId);
+    const agent = descriptor({ targetId });
+    await acknowledgeExternalDisclosure(
+      { userId, targetId },
+      { capabilities: agent.capabilities, supportedConfigurations: EVERY_PAIR },
+      getDb()
+    );
+    await grantWorkspaceTrust(
+      { userId, targetId, environmentId: 'local', workspacePath: '/work/repo' },
+      getDb()
+    );
+    const rig = harness({ agents: [agent], ...options });
+    const send = async (prompt: string) => {
+      const result = await rig.stream(
+        {
+          userId,
+          chat: chatRecord({ runner: { kind: 'external', targetId } }),
+          chatId: targetChatId,
+          prompt,
+          attachmentIds: [],
+          externalTurn: undefined,
+        },
+        getDb()
+      );
+      if (!result.ok)
+        throw new Error(`the send was refused | received ${JSON.stringify(result.failure)}`);
+      return readChunks(result.response);
+    };
+    return { ...rig, send };
+  }
+
+  const errorChunkOf = (chunks: readonly StreamChunk[]) =>
+    chunks.find((chunk) => chunk.type === 'error');
+
+  for (const targetId of OPEN_TARGETS) {
+    it(`presents a signed-out ${targetId} as signed out, with that target's sign-in command`, async () => {
+      const { send, runtime } = await openRig(targetId, { openFailure: signedOutRefusal });
+
+      const chunk = errorChunkOf(await send('hello'));
+
+      expect({
+        error: chunk && 'error' in chunk ? chunk.error : undefined,
+        unavailableReason:
+          chunk && 'unavailableReason' in chunk ? chunk.unavailableReason : undefined,
+        remedy: chunk && 'remedy' in chunk ? chunk.remedy : undefined,
+        turnsSubmitted: runtime.calls.turn.length,
+      }).toEqual({
+        error: GENERIC,
+        unavailableReason: 'signed-out',
+        remedy: { kind: 'sign-in', command: productDescriptorFor(targetId)?.loginCommand },
+        turnsSubmitted: 0,
+      });
+    });
+  }
+
+  it('is not resubmitted, and the next send opens again and runs once the user has signed in', async () => {
+    let refusals = 1;
+    const { send, runtime } = await openRig('cursor', {
+      openFailure: () => (refusals-- > 0 ? signedOutRefusal() : undefined),
+    });
+
+    await send('first');
+    expect(runtime.calls.open.length).toBe(1);
+
+    const second = send('second');
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'text_delta', text: 'signed in now' });
+    runtime.emit({ type: 'completed' });
+    await second;
+
+    expect({ opens: runtime.calls.open.length, turns: runtime.calls.turn.length }).toEqual({
+      opens: 2,
+      turns: 1,
+    });
+  });
+
+  it('is told to the discovery cache once, with the environment and target that signed out', async () => {
+    const told: unknown[] = [];
+    const { send } = await openRig('codex', {
+      openFailure: signedOutRefusal,
+      onSignedOutObserved: (scope) => told.push(scope),
+    });
+
+    await send('hello');
+
+    expect(told).toEqual([{ userId, environmentId: 'local', targetId: 'codex' }]);
+  });
+
+  it('presents a consent the machine owner withdrew as the existing denied reason', async () => {
+    const told: unknown[] = [];
+    const { send } = await openRig('cursor', {
+      openFailure: () => new RuntimeConsentDeniedError('external agents are not allowed here'),
+      onSignedOutObserved: (scope) => told.push(scope),
+    });
+
+    const chunk = errorChunkOf(await send('hello'));
+
+    expect({
+      reason: chunk && 'unavailableReason' in chunk ? chunk.unavailableReason : undefined,
+      remedy: chunk && 'remedy' in chunk ? chunk.remedy : undefined,
+      toldSignedOut: told.length,
+    }).toEqual({ reason: 'runtime-denied', remedy: { kind: 'contact-admin' }, toldSignedOut: 0 });
+  });
+
+  it('keeps the generic message for an open failure that has no existing presentation', async () => {
+    const { send } = await openRig('cursor', {
+      openFailure: () =>
+        new RemoteError('UNAVAILABLE', 'the agent did not start', {
+          kind: 'external_agent_launch_failed',
+        }),
+    });
+
+    const chunk = errorChunkOf(await send('hello'));
+
+    expect(chunk).toEqual({ type: 'error', error: GENERIC, done: true });
   });
 });
 

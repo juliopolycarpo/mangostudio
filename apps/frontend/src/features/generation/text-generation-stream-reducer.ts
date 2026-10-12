@@ -179,7 +179,7 @@ export function reduceTextGenerationStreamChunk(
     case 'assistant_message_id':
       return withAiMessageUpdate(nextState, { id: chunk.messageId }, chunk.messageId, true);
     case 'error':
-      return reduceStreamError(nextState, chunk.error);
+      return reduceStreamError(nextState, chunk);
     case 'thinking_start':
       return reduceThinkingStart(nextState);
     case 'thinking':
@@ -284,11 +284,24 @@ function clearChunkUpdates(state: TextGenerationStreamState): TextGenerationStre
   return { ...state, userMessageUpdate: null, aiMessageUpdate: null };
 }
 
-function reduceStreamError(state: TextGenerationStreamState, errorText: string) {
-  const parts = [...state.parts, { type: 'error', text: errorText } satisfies MessagePart];
+function reduceStreamError(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'error' }>
+) {
+  const parts = [
+    ...state.parts,
+    {
+      type: 'error',
+      text: chunk.error,
+      // Only an external agent that could not start sets these: the client presents the reason
+      // and remedy itself, and `text` is the English fallback.
+      ...(chunk.unavailableReason ? { unavailableReason: chunk.unavailableReason } : {}),
+      ...(chunk.remedy ? { remedy: chunk.remedy } : {}),
+    } satisfies MessagePart,
+  ];
   return withAiMessageUpdate(
     { ...state, parts },
-    { isGenerating: false, text: state.text || errorText, parts }
+    { isGenerating: false, text: state.text || chunk.error, parts }
   );
 }
 

@@ -223,6 +223,61 @@ async fn a_prompt_refused_for_authentication_ends_the_turn_with_the_sign_in_hint
 }
 
 #[tokio::test]
+async fn a_cursor_agent_that_wants_a_sign_in_at_open_is_refused_with_the_signed_out_kind() {
+    let launcher = Arc::new(FakeLauncher::new());
+    launcher.push(
+        FakeAcpAgent::new()
+            .refusing_new_session(-32_000, "token expired")
+            .process(),
+    );
+    let backend = Backend::new(
+        launcher.clone(),
+        Arc::new(ProductHarnesses),
+        fixtures::limits(),
+        Duration::from_secs(2),
+    );
+    let workspace = ScratchDir::created("acp-signed-out-open-workspace");
+    let params = wire::OpenParams {
+        session_id: "signed-out-open".into(),
+        target_id: wire::TargetId::Cursor,
+        workspace_path: workspace.path().to_string_lossy().into_owned(),
+        configuration: fixtures::configuration(),
+        resume_ref: None,
+        resume_mode: wire::ResumeMode::Fallback,
+        timeout_ms: 5_000,
+        toolchain: None,
+    };
+    let Err(failure) = backend
+        .open(
+            wire::TargetId::Cursor,
+            "/synthetic/cursor".into(),
+            fixtures::host(workspace.path().to_path_buf()),
+            &params,
+        )
+        .await
+    else {
+        panic!("expected an open the agent answers with authentication required to be refused");
+    };
+
+    let received = (
+        failure.remote.code.clone(),
+        failure
+            .remote
+            .details
+            .as_ref()
+            .and_then(|details| details.get("kind").cloned()),
+    );
+    assert_eq!(
+        received,
+        (
+            "UNAVAILABLE".to_owned(),
+            Some(json!("external_agent_signed_out"))
+        ),
+        "expected (code, kind) of a signed-out Cursor open | received {received:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_turn_on_a_closed_session_was_not_submitted_and_the_hub_may_resend_it() {
     let launcher = Arc::new(FakeLauncher::new());
     launcher.push(FakeAcpAgent::new().process());
