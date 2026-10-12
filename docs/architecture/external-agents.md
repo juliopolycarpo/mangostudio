@@ -860,7 +860,8 @@ into the environments surface that owns the recipes, the same link the selector 
 value discovery reports on the descriptor), trimmed and cut to 64 characters; when it is absent the
 client says "a newer version". Nothing in the runtime's message is parsed or shown. The missing
 executable has its own kind because the runtime's `tool_argument` is shared with workspace and
-configuration refusals, which keep it and keep the generic sentence. The open is not retried, and the
+configuration refusals, which keep it and keep the generic sentence. Its code stays `INTERNAL`,
+so the hub's wait for a lost connection, which keys on `UNAVAILABLE`, does not take it for one. The open is not retried, and the
 next send opens again. A signed-out open also drops the cached discovery answer and refreshes the
 owner's clients, as a turn that ends signed out does; the other refusals do not, so the cached
 descriptor can send one more send to the same refusal until it expires. Nothing was persisted for the

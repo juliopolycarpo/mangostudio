@@ -1280,8 +1280,11 @@ pub(super) fn refuse_unoffered_configuration(
 /// Its own `kind`, not `tool_argument`: workspace and configuration refusals share that one, and
 /// the hub must tell "install the CLI" from "fix the request" without reading the message. The
 /// executable is resolved at every open, so this also answers an agent that discovery found
-/// earlier and that has been removed since. `INTERNAL` is the code the refusal always had, so a
-/// hub that does not know the kind treats it exactly as before.
+/// earlier and that has been removed since. `INTERNAL` is the code the refusal always had, so the
+/// hub's wait for a lost connection (which keys on `UNAVAILABLE`) does not take it for one. A hub
+/// that does not know the kind shows the generic sentence on a first open, as before; its runtime
+/// client no longer turns this into a `ToolArgumentError`, so a resubmission that reopens ends the
+/// turn as a vendor error rather than as a lost session.
 ///
 /// # Example
 ///
