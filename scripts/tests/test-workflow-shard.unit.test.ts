@@ -68,7 +68,7 @@ describe('Test workflow shard matrix', () => {
   });
 
   test('only the first shard writes the shared turbo cache', () => {
-    // Every shard restores, so a save in each would upload eight copies of one
+    // Every shard restores, so a save in each would upload duplicate copies of one
     // snapshot, keyed apart only by the run.
     const turboSteps = extractStepBlocks(extractJobBlock(workflow, 'shard')).filter((step) =>
       step.includes('family: turbo')

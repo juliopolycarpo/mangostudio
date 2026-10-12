@@ -336,7 +336,7 @@ Two mitigations are in place until it ships:
 - Every CI test invocation runs under `scripts/ci/run-tests-watchdog.ts`,
   which kills the invocation's process group after a per-attempt bound and
   retries once, restoring the timings baseline first so the retry computes the
-  same shard partition as the other seven jobs. Test failures or unhandled
+  same shard partition as the other shard jobs. Test failures or unhandled
   errors reported before the hang still fail the invocation after a clean
   retry, even when crash retries are disabled.
 
@@ -385,7 +385,7 @@ cannot even receive `$MANGOSTUDIO_BUN_TEST_ARGS`.
 > accumulation across workers, so serial `--isolate` concentrates rather than
 > avoids it.
 
-CI runs eight shards, the frontend job, and one merge job
+CI runs four shards, the frontend job, and one merge job
 (`.github/workflows/test.yml`). Where the sharded run's time went when the
 split was designed, measured on run 32331139863 (four-core runner, Turbo
 running the lanes concurrently, the frontend then still on Vitest at 189.4s):
@@ -400,12 +400,57 @@ running the lanes concurrently, the frontend then still on Vitest at 189.4s):
 The shard boundary is a slice of *every* sharded lane rather than one job per
 workspace: a per-workspace split leaves `apps/api` alone at 278s.
 
-Eight is where the curve flattens. What bites is the ~21s of fixed setup each
-job pays and the merge job's fixed cost, so measured per-shard test time of 70s
-→ 35s → 23s at N=4 → 8 → 12 turns into diminishing wall clock. Raising it is a
-three-line change: `SHARD_COUNT`, the matrix list, and the shard job's `name`
-(`env` is not one of the contexts available to `jobs.<id>.name`, so the `/8`
-there cannot interpolate the value).
+The current count comes from five first-attempt hosted CI runs each at 4, 6
+and 8 shards on 2026-10-11/12 UTC. The runs were interleaved sequentially on
+frozen source [`683f69a`](https://github.com/juliopolycarpo/mangostudio/commit/683f69a57b798ea85f4fa93184e17acf3de3ce41),
+with Bun 1.4.3 and the shipping native runtime profile. The variants changed
+only the count, matrix and job name. The latency rule fixed before testing ranked
+counts by median from workflow `run_started_at` to completion of `Test / Merge
+shard results`, with Test job runner-seconds breaking a tie. A shard test step at or
+above 147 seconds would reject that count, preserving 30% headroom under the
+existing 210-second watchdog.
+
+| Shards | Median Test end | Observed range | Median Test runner-seconds | Median summed shard queue | Worst shard test step |
+| ------ | --------------- | -------------- | -------------------------- | ------------------------- | --------------------- |
+| 4      | 291s            | 246s to 902s   | 588s                       | 8s                        | 120s                  |
+| 6      | 288s            | 225s to 306s   | 678s                       | 121s                      | 78s                   |
+| 8      | 342s            | 277s to 1248s  | 759s                       | 433s                      | 62s                   |
+
+Test runner-seconds sum the elapsed execution of every `Test /` job, including
+the frontend, timings resolver and merge. Summed shard queue measures each
+numbered shard's `created_at` to `started_at`; it is aggregate waiting, not
+the workflow's critical path.
+
+Four is the deployed count to reduce runner demand. Its observed median Test
+end was 51 seconds lower than eight, with 171 fewer Test runner-seconds.
+Six ranked first under the latency rule, but its three-second lead over four
+is small relative to the observed variation. Four used 90 fewer Test
+runner-seconds than six and had less aggregate queue waiting. Its worst shard
+test step stayed below the 147-second rejection limit. This cohort does not
+establish a universal optimum or isolate shard count from ambient account
+load. Timing baseline keys varied, and each eight-shard run restored one root
+Turbo task while the four- and six-shard runs missed all root tasks. Manual
+dispatch skipped QA Metrics, which requires normal PR CI separately.
+
+Every run retained the same case identities and outcomes: 13,981 passed and
+82 skipped. Coverage source-file inventories matched, and every four- and
+six-shard run retained the initial control's positive-hit lines. The final
+[eight-shard control](https://github.com/juliopolycarpo/mangostudio/actions/runs/38193748435)
+had 28 fewer positive-hit lines in `shared`'s `instance-reader.ts` after its
+timings baseline split related test files across processes. Cases and outcomes
+still matched. Source and raw-report inspection support a within-control LCOV
+attribution variation; Bun's precise internal mechanism was not reproduced.
+The sample remains in the comparison with that reviewed limitation. This audit
+does not establish full branch or function coverage equivalence.
+
+The comparison predates the subsequent SDK and external-notice changes on
+main. The chosen configuration is validated on updated source separately;
+these timings do not compare the new workload across counts. Re-measure after
+a runtime profile or CI concurrency/topology change.
+
+Changing the count requires three matching edits: `SHARD_COUNT`, the matrix
+list, and the shard job's `name`. `env` is unavailable in `jobs.<id>.name`, so
+the `/4` there cannot interpolate the value.
 
 #### Root scripts workers
 
@@ -652,7 +697,7 @@ shards reading different bytes will not cover the file set between them — some
 files run twice, others not at all, and every shard still exits 0. Three things
 hold that down:
 
-- Only the merge job writes the cache, and only after all eight shards have read
+- Only the merge job writes the cache, and only after all shards have read
   it, so nothing changes underneath a fan-out in progress.
 - `scripts/ci/merge-timings-shards.ts` fails the run if two shards claim the
   same file, which is the observable symptom of a disagreement.

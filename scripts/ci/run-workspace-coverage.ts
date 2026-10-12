@@ -10,7 +10,7 @@
 // failing unit test skips the integration lane *and* the merge. The shard then
 // uploads no `api-integration.xml` and no `coverage/api/lcov.info`, on exactly
 // the red run someone is triaging; and when the failure is shared across all
-// eight shards, merge-test-shards.ts dies on a missing-input error instead of
+// shards, merge-test-shards.ts dies on a missing-input error instead of
 // reporting the test failures. The workflow's "Uploaded even when the shard
 // fails" step is written against artifacts that exist on a red run.
 //
