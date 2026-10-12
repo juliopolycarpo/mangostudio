@@ -21,6 +21,10 @@ const EXPR = `$${'{{'}`;
 const SHELL = `$${'{'}`;
 const NOT_CANCELLED = `if: ${EXPR} !cancelled() }}`;
 
+// Allowance for everything in the shard job except the test step. Hosted
+// four-shard runs measured at most 45s; see docs/reference/testing.md.
+const OTHER_STEPS_SECONDS = 60;
+
 const shardCount = (): number => {
   const declared = /^ {2}SHARD_COUNT: (\d+)$/m.exec(workflow)?.[1];
   expect(declared).toBeDefined();
@@ -51,6 +55,21 @@ describe('Test workflow shard matrix', () => {
     expect(extractJobBlock(workflow, 'shard')).toContain(
       `bun run test --coverage --shard="${SHELL}SHARD}/${SHELL}SHARD_COUNT}"`
     );
+  });
+
+  test('both watchdog attempts fit inside the shard job timeout', () => {
+    // The watchdog retries a hung attempt once. If two full attempts plus the
+    // job's other steps overrun `timeout-minutes`, the runner kills the retry
+    // and the job goes red for a hang the retry would have absorbed.
+    const job = extractJobBlock(workflow, 'shard');
+    const jobSeconds = Number(/^ {4}timeout-minutes: (\d+)$/m.exec(job)?.[1]) * 60;
+    const attemptSeconds = Number(/--timeout-seconds=(\d+)/.exec(job)?.[1]);
+    const required = attemptSeconds * 2 + OTHER_STEPS_SECONDS;
+
+    expect(
+      jobSeconds,
+      `expected shard job timeout: at least ${required}s (2 x ${attemptSeconds}s watchdog attempts + ${OTHER_STEPS_SECONDS}s other steps) | received: ${jobSeconds}s`
+    ).toBeGreaterThanOrEqual(required);
   });
 
   test('a failing shard does not cancel the others', () => {

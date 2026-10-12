@@ -201,16 +201,19 @@ jobs:
       #
       # The watchdog owns the log file, the shard-meta.json the merge job
       # reads, and the exit code; a hung Bun isolate runner (oven-sh/bun#39709)
-      # is killed after 210s and retried once with the restored timings
-      # baseline put back first. The shard count is sized against that bound:
-      # a healthy shard's test step has to stay under 147s (30% headroom; see
-      # docs/reference/testing.md), or a slow shard reads as a hung one.
+      # is killed after 240s and retried once with the restored timings
+      # baseline put back first. The bound is twice the slowest healthy test
+      # step measured at this shard count (120s; see
+      # docs/reference/testing.md), so a loaded runner that doubles the step
+      # is not read as a hung one. Both attempts have to fit this job's
+      # `timeout-minutes` or the retry is cut short: 2 x 240s leaves 120s for
+      # the other steps, which took at most 45s in those runs.
       - name: Run tests with coverage
         id: coverage
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=210 \
+          bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=240 \
             -- bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}"
 
       # Saves only when this shard's run wrote cache entries the restored

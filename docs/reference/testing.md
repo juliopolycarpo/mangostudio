@@ -426,7 +426,12 @@ end was 51 seconds lower than eight, with 171 fewer Test runner-seconds.
 Six ranked first under the latency rule, but its three-second lead over four
 is small relative to the observed variation. Four used 90 fewer Test
 runner-seconds than six and had less aggregate queue waiting. Its worst shard
-test step stayed below the 147-second rejection limit. This cohort does not
+test step stayed below the 147-second rejection limit. The shard watchdog was
+then raised from 210 to 240 seconds, twice that 120-second worst step, so a
+loaded runner has more room before a slow shard is killed as a hung one. Two
+240-second attempts still fit the job's 10-minute timeout: the other steps took
+at most 45 seconds in these runs. The cohort ran under the 210-second bound and
+did not exercise the new one. This cohort does not
 establish a universal optimum or isolate shard count from ambient account
 load. Timing baseline keys varied, and each eight-shard run restored one root
 Turbo task while the four- and six-shard runs missed all root tasks. Manual
