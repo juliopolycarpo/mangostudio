@@ -143,9 +143,20 @@ export type SubmitExternalTurnInput = SubmissionContext &
     | { readonly review: ExternalReviewInput; readonly turn?: never }
   );
 
-/** A session open that failed because the connection is not there yet, not because it was refused. */
+/**
+ * A session open that failed because the connection is not there yet, not because it was refused.
+ *
+ * The runtime answers some refusals with `UNAVAILABLE` as well (signed out, outdated, a launch that
+ * failed), always with its own `external_agent_*` kind. That is the runtime speaking, so waiting
+ * for it would loop on an answer that will not change; only an `UNAVAILABLE` without such a kind
+ * is the transport saying nobody is there.
+ */
 function isConnectionUnavailable(error: unknown): boolean {
-  return error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE;
+  if (!(error instanceof RemoteError) || error.code !== RESERVED_ERROR_CODES.UNAVAILABLE) {
+    return false;
+  }
+  const kind = error.details?.kind;
+  return !(typeof kind === 'string' && kind.startsWith('external_agent_'));
 }
 
 /**
