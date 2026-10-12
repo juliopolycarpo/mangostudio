@@ -13,6 +13,8 @@ mod claude_stop_tests;
 #[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]
+mod redaction_tests;
+#[cfg(test)]
 mod relay_tests;
 #[cfg(test)]
 mod test_support;

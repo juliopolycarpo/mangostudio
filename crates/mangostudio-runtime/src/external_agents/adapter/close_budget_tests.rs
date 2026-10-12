@@ -119,3 +119,21 @@ fn the_backend_answers_with_its_own_limits_per_target() {
         "expected the Backend to apply its Limits per target | received {received:?}"
     );
 }
+
+/// A Claude `close` that finds an earlier one which gave up on a pending launch waits for the late
+/// child's stop. The supervisor never asks twice (`close_live` claims the close once per session),
+/// so this figure is not a term of the supervisor's bound; it must still fit inside it, so a host
+/// that did close twice could not outlast the timer.
+#[test]
+fn a_later_claude_close_over_a_late_childs_stop_fits_inside_the_close_bound() {
+    for limits in [Limits::default(), custom_limits()] {
+        let later = ClaudeDeadlines::from_limits(&limits).close_after_pending_launch();
+        let bound = close_budget(&limits, TargetId::Claude);
+        assert!(
+            later <= bound,
+            "expected close_after_pending_launch to fit inside the Claude close bound | received {later:?} against {bound:?} for kill_grace {:?}, shutdown_timeout {:?}",
+            limits.kill_grace,
+            limits.shutdown_timeout
+        );
+    }
+}
