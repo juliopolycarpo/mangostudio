@@ -647,12 +647,7 @@ impl Supervisor {
                 .executables
                 .resolve(target, &cancel)
                 .await
-                .ok_or_else(|| {
-                    tool_argument(format!(
-                        "External-agent executable for {:?} is not installed; expected an installed target.",
-                        target.as_str()
-                    ))
-                })?;
+                .ok_or_else(|| not_installed(target))?;
             let scratch = self.session_scratch(&params.session_id)?;
             let host = self.host_context(
                 &workspace,
@@ -1278,6 +1273,31 @@ pub(super) fn refuse_unoffered_configuration(
         ));
     }
     Ok(())
+}
+
+/// The refusal for a target whose executable the runtime cannot find on this machine.
+///
+/// Its own `kind`, not `tool_argument`: workspace and configuration refusals share that one, and
+/// the hub must tell "install the CLI" from "fix the request" without reading the message. The
+/// executable is resolved at every open, so this also answers an agent that discovery found
+/// earlier and that has been removed since. `INTERNAL` is the code the refusal always had, so a
+/// hub that does not know the kind treats it exactly as before.
+///
+/// # Example
+///
+/// ```ignore
+/// let error = not_installed(TargetId::Codex);
+/// assert_eq!(error.details.unwrap()["kind"], "external_agent_not_installed");
+/// ```
+fn not_installed(target: TargetId) -> RemoteError {
+    RemoteError::new(
+        codes::INTERNAL,
+        format!(
+            "External-agent executable for {:?} is not installed; expected an installed target.",
+            target.as_str()
+        ),
+    )
+    .with_detail("kind", "external_agent_not_installed")
 }
 
 /// Refuses to start anything new once an operation has been told to stop.

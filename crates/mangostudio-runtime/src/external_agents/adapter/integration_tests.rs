@@ -639,7 +639,7 @@ impl WorkspaceAuthority for AllowListedWorkspaces {
 
 /// Resolves every target to a fixed path, or to nothing, and counts lookups.
 struct FixedExecutables {
-    installed: bool,
+    installed: AtomicBool,
     lookups: AtomicUsize,
 }
 
@@ -652,6 +652,7 @@ impl ExecutableResolver for FixedExecutables {
         self.lookups.fetch_add(1, Ordering::SeqCst);
         let path = self
             .installed
+            .load(Ordering::SeqCst)
             .then(|| PathBuf::from(format!("/fake/bin/{}", target.as_str())));
         Box::pin(async move { path })
     }
@@ -803,7 +804,7 @@ async fn rig(options: RigOptions) -> Rig {
         gate: options.authority_gate,
     });
     let executables = Arc::new(FixedExecutables {
-        installed: options.installed,
+        installed: AtomicBool::new(options.installed),
         lookups: AtomicUsize::new(0),
     });
     let consent = StallableConsent::granted();
@@ -1082,6 +1083,57 @@ async fn a_target_that_is_not_installed_is_refused_without_a_launch() {
         error.message
     );
     assert_eq!(rig.log.opens(), 0);
+    assert_eq!(
+        error.details.as_ref().map(|details| &details["kind"]),
+        Some(&serde_json::json!("external_agent_not_installed")),
+        "expected the refusal to carry the kind the hub maps to not-installed | received {:?}",
+        error.details
+    );
+}
+
+/// The executable is resolved at every open, so an agent that was there for an earlier session and
+/// has been removed since is refused with the same kind as one that was never installed.
+#[tokio::test]
+async fn a_target_removed_since_an_earlier_open_is_refused_as_not_installed() {
+    let rig = rig(RigOptions::default()).await;
+    rig.open("one").await.expect("the first open must succeed");
+    rig.executables.installed.store(false, Ordering::SeqCst);
+
+    let error = rig
+        .open("two")
+        .await
+        .expect_err("a removed target must be refused");
+
+    assert_eq!(
+        error.details.as_ref().map(|details| &details["kind"]),
+        Some(&serde_json::json!("external_agent_not_installed")),
+        "expected the kind the hub maps to not-installed | received {:?} ({})",
+        error.details,
+        error.message
+    );
+    rig.close("one").await;
+}
+
+/// The kind that names a missing executable must not swallow the other caller-mistake refusals an
+/// open can return: they keep `tool_argument`, so the hub does not tell the user to install a CLI
+/// that is there.
+#[tokio::test]
+async fn a_workspace_that_is_not_a_directory_keeps_the_tool_argument_kind() {
+    let rig = rig(RigOptions::default()).await;
+    let mut params = rig.open_params("one");
+    params.workspace_path = String::from("/definitely/not/a/directory");
+    let error = rig
+        .supervisor
+        .open(params, &rig.hub, &CancellationToken::new())
+        .await
+        .expect_err("a workspace that is not a directory must be refused");
+    assert_eq!(
+        error.details.as_ref().map(|details| &details["kind"]),
+        Some(&serde_json::json!("tool_argument")),
+        "expected tool_argument for a workspace refusal | received {:?} ({})",
+        error.details,
+        error.message
+    );
 }
 
 // ---------------------------------------------------------------------------
