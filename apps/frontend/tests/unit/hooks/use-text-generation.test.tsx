@@ -1728,6 +1728,102 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
   });
 
+  // The refusal is stored nowhere, so the re-read an earlier dropped stream armed would replace the
+  // optimistic rows that hold it with the server's rows, which hold none of it.
+  it('keeps a refusal card through the re-read an earlier dropped stream armed', async () => {
+    const props = makeProps();
+    let call = 0;
+    mockStream.mockImplementation(
+      (
+        _req: unknown,
+        onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+      ) => {
+        call += 1;
+        if (call === 1) {
+          onChunk({ type: 'user_message_id', messageId: 'server-user', done: false });
+          onChunk({ type: 'assistant_message_id', messageId: 'server-ai', done: false });
+          return Promise.reject(new Error('network error'));
+        }
+        onChunk({
+          type: 'error',
+          error: 'The external agent turn could not be started.',
+          unavailableReason: 'not-installed',
+          remedy: { kind: 'install' },
+          done: true,
+        });
+        return Promise.resolve();
+      }
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const queryClient = result.current.queryClient;
+    // The optimistic writes land in the real cache, as the app's do.
+    type Rows = {
+      pages: Array<{ messages: Array<Record<string, unknown>>; nextCursor: null }>;
+      pageParams: unknown[];
+    };
+    const cacheRows = (chatId: string) => ['messages', chatId] as const;
+    (props.optimistic.appendOptimisticMessages as ReturnType<typeof jest.fn>).mockImplementation(
+      (chatId: string, added: Array<Record<string, unknown>>) => {
+        queryClient.setQueryData<Rows>(cacheRows(chatId), (old) => ({
+          pages: [{ messages: [...(old?.pages[0]?.messages ?? []), ...added], nextCursor: null }],
+          pageParams: [null],
+        }));
+      }
+    );
+    (props.optimistic.updateOptimisticMessage as ReturnType<typeof jest.fn>).mockImplementation(
+      (chatId: string, id: string, updates: Record<string, unknown>) => {
+        queryClient.setQueryData<Rows>(cacheRows(chatId), (old) =>
+          old
+            ? {
+                ...old,
+                pages: old.pages.map((page) => ({
+                  ...page,
+                  messages: page.messages.map((row) =>
+                    row.id === id ? { ...row, ...updates } : row
+                  ),
+                })),
+              }
+            : old
+        );
+      }
+    );
+    // A re-read replaces the cache with what the server stores: the first turn's rows only.
+    const serverRows = [
+      { id: 'server-user', chatId: 'chat-1', role: 'user', text: 'first', timestamp: 1 },
+      { id: 'server-ai', chatId: 'chat-1', role: 'ai', text: 'done', timestamp: 2 },
+    ];
+    spyOn(queryClient, 'invalidateQueries').mockImplementation((filters) => {
+      const key = filters?.queryKey;
+      if (Array.isArray(key) && key[0] === 'messages') {
+        queryClient.setQueryData<Rows>(key, {
+          pages: [{ messages: serverRows, nextCursor: null }],
+          pageParams: [null],
+        });
+      }
+      return Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.generation.handleRespond('first');
+    });
+    await act(async () => {
+      await result.current.generation.handleRespond('second');
+    });
+    await act(async () => {
+      await fakeRealtime.emit(ACTIVITY_TOPIC);
+    });
+
+    const cached = queryClient.getQueryData<{
+      pages: Array<{ messages: Array<{ id: string; parts?: Array<{ type: string }> }> }>;
+    }>(['messages', 'chat-1']);
+    const messages = cached?.pages.flatMap((page) => page.messages) ?? [];
+    expect({
+      persistedKept: messages.some((message) => message.id === 'server-ai'),
+      refusalKept: messages.some((message) => message.parts?.some((part) => part.type === 'error')),
+    }).toEqual({ persistedKept: true, refusalKept: true });
+  });
+
   it('still re-reads after a terminal error chunk that names no reason', async () => {
     const props = makeProps();
     mockStream.mockImplementation(

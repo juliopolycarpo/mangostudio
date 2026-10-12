@@ -29,7 +29,7 @@ import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { MessagePart, ReasoningEffort } from '@mangostudio/shared/types';
-import { useQueryClient } from '@tanstack/react-query';
+import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-file-checkpoints';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
@@ -167,8 +167,38 @@ interface UseTextGenerationOptions {
 type RecoveryRequest = NonNullable<RespondStreamBody['recovery']>;
 
 type TranscriptListQueryData = {
-  pages: Array<{ messages: Array<{ isGenerating?: boolean }> }>;
+  pages: Array<{ messages: Message[] }>;
 };
+
+/**
+ * Puts back the rows of a refused send that a re-read replaced, at the end of the newest page.
+ *
+ * A row the re-read already holds is left alone, so a server that does store one wins.
+ *
+ * @example
+ * restoreRefusalRows(queryClient, ['messages', 'chat-1'], rowsOfTheRefusedSend);
+ */
+function restoreRefusalRows(
+  queryClient: QueryClient,
+  queryKey: readonly unknown[],
+  rows: Message[] | undefined
+): void {
+  if (!rows?.length) return;
+  queryClient.setQueryData<TranscriptListQueryData>(queryKey, (data) => {
+    const firstPage = data?.pages[0];
+    if (!data || !firstPage) return data;
+    const held = new Set(data.pages.flatMap((page) => page.messages.map((row) => row.id)));
+    const missing = rows.filter((row) => !held.has(row.id));
+    if (missing.length === 0) return data;
+    return {
+      ...data,
+      pages: [
+        { ...firstPage, messages: [...firstPage.messages, ...missing] },
+        ...data.pages.slice(1),
+      ],
+    };
+  });
+}
 
 /**
  * One turn, however it was started.
@@ -320,6 +350,15 @@ export function useTextGeneration({
    * never leaks into a later turn's decision.
    */
   const signalDuringReadRef = useRef(false);
+  /**
+   * The rows of a send the hub refused before it stored anything, by chat.
+   *
+   * The refusal card exists only in those optimistic rows, and a re-read an earlier dropped stream
+   * armed would replace them with rows that hold none of it. The re-read puts back the ones the
+   * server does not have, after the rows it needs from the earlier turn. Forgotten when the chat's
+   * next send starts, so a card never outlives the turn that follows it.
+   */
+  const refusalRows = useRef<Map<string, Message[]>>(new Map());
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
     null
   );
@@ -361,6 +400,7 @@ export function useTextGeneration({
         const queryKey = messageKeys.list(chatId);
         const snapshot = queryClient.getQueryData<TranscriptListQueryData>(queryKey);
         await queryClient.invalidateQueries({ queryKey });
+        restoreRefusalRows(queryClient, queryKey, refusalRows.current.get(chatId));
         const data = queryClient.getQueryData<TranscriptListQueryData>(queryKey);
         const settled =
           data === undefined ||
@@ -500,6 +540,7 @@ export function useTextGeneration({
         agentName: agentSelection.agentName,
       };
 
+      refusalRows.current.delete(activeChatId);
       appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
 
       const controller = new AbortController();
@@ -741,6 +782,13 @@ export function useTextGeneration({
         // throwing, and the re-read the next activity signal would run replaces the refusal
         // card with rows that hold nothing of it.
         const refusalIsOnlyCopy = refusedBeforeStart && !streamState.receivedServerUserMessageId;
+        if (refusalIsOnlyCopy) {
+          const rows = queryClient
+            .getQueryData<TranscriptListQueryData>(messageKeys.list(activeChatId))
+            ?.pages.flatMap((page) => page.messages)
+            .filter((row) => row.id === optimisticUserMsgId || row.id === optimisticAiMsgId);
+          if (rows?.length) refusalRows.current.set(activeChatId, rows);
+        }
         if (streamThrew && !refusalIsOnlyCopy) {
           pendingTranscriptReconciles.current.add(activeChatId);
         }
