@@ -826,7 +826,7 @@ the prompt with ACP's authentication-required error, and the SDK ends the turn w
   loops. Whether the vendor's long-lived process picks up a new login without being restarted is
   the vendor's behaviour; it was not exercised against a signed-out Cursor.
 - **Cached state.** The hub drops its cached discovery answer for that environment and tells the
-  owner's clients to refetch it (`createSignedOutInvalidation`), once per such turn. It keeps no
+  owner's clients to refetch it (`createDiscoveryInvalidation`), once per such turn. It keeps no
   signed-out flag of its own: the next probe's verdict is what the app shows, and Cursor's
   probe often answers `unknown` rather than `signed-out`.
 - **Drift.** Runtime tests compare the hub's code literal with the SDK's `AUTH_REQUIRED_CODE` and
@@ -862,10 +862,11 @@ client says "a newer version". Nothing in the runtime's message is parsed or sho
 executable has its own kind because the runtime's `tool_argument` is shared with workspace and
 configuration refusals, which keep it and keep the generic sentence. Its code stays `INTERNAL`,
 so the hub's wait for a lost connection, which keys on `UNAVAILABLE`, does not take it for one. The open is not retried, and the
-next send opens again. A signed-out open also drops the cached discovery answer and refreshes the
-owner's clients, as a turn that ends signed out does; the other refusals do not, so the cached
-descriptor can send one more send to the same refusal until it expires. Nothing was persisted for the
-refused send, so there is nothing to reload.
+next send opens again. Each of these four refusals shows the cached descriptor is stale, so the hub
+also drops the cached discovery answer and refreshes the owner's clients, once, as a turn that ends
+signed out does; without it one more send could reach the same refusal for up to 30 s. A failure
+that names no state of the agent (the cap below, a launch failure) leaves the cache alone. Nothing
+was persisted for the refused send, so there is nothing to reload.
 
 A runtime still at its session cap after the hub's retry window (`external_agent_capacity`) says
 nothing about the agent, so it has no unavailable reason and no remedy, and a reason added for it

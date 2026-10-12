@@ -91,15 +91,15 @@ import {
   externalCommandCatalogCache,
 } from './external-command-catalog-cache';
 import {
+  invalidateStaleDiscovery,
+  type StaleDiscoveryScope,
+} from './external-discovery-invalidation';
+import {
   type ExternalSessionConsumer,
   type ExternalSessionHandle,
   type ExternalSessionManager,
   externalSessionManager,
 } from './external-session-manager';
-import {
-  invalidateDiscoveryAfterSignedOut,
-  type SignedOutScope,
-} from './external-signed-out-invalidation';
 import { ExternalTranscriptWriter } from './external-transcript-writer';
 import {
   type CancellableSleep,
@@ -281,11 +281,12 @@ export interface ExternalTurnControllerDependencies {
    */
   readonly observeSubmission?: (messageId: string, outcome: Promise<SubmissionOutcome>) => void;
   /**
-   * Told when a turn ended because the vendor account is signed out. Defaults to dropping the
-   * cached discovery answer for the environment and asking the owner's clients to refetch it, so
-   * what the app says about the agent is read again rather than served from before the turn.
+   * Told when a refusal shows the cached discovery answer is stale: a turn that ended signed out,
+   * or an open the runtime refused as signed out, gone, outdated or denied. Defaults to dropping
+   * the cached discovery answer for the environment and asking the owner's clients to refetch it,
+   * so what the app says about the agent is read again rather than served from before the refusal.
    */
-  readonly onSignedOutObserved?: (scope: SignedOutScope) => void;
+  readonly onDiscoveryStale?: (scope: StaleDiscoveryScope) => void;
   /** A connect failure that waiting cannot fix. Defaults to a recorded protocol mismatch. */
   readonly isTerminalConnectFailure?: (
     error: unknown,
@@ -503,15 +504,15 @@ export function createExternalTurnController(
   const random = dependencies.random ?? Math.random;
   const isTerminalConnectFailure =
     dependencies.isTerminalConnectFailure ?? defaultIsTerminalConnectFailure;
-  const onSignedOutObserved = dependencies.onSignedOutObserved ?? invalidateDiscoveryAfterSignedOut;
+  const onDiscoveryStale = dependencies.onDiscoveryStale ?? invalidateStaleDiscovery;
   const liveTurns = new Map<string, LiveExternalTurn>();
 
   /** Discardable bookkeeping: a failure here must never disturb the turn's ending. */
-  function notifySignedOut(scope: SignedOutScope): void {
+  function notifyDiscoveryStale(scope: StaleDiscoveryScope): void {
     try {
-      onSignedOutObserved(scope);
+      onDiscoveryStale(scope);
     } catch (error) {
-      logger.warn('signed_out_invalidation_failed', {
+      logger.warn('discovery_invalidation_failed', {
         targetId: scope.targetId,
         error: String(error),
       });
@@ -548,10 +549,15 @@ export function createExternalTurnController(
         configuration: input.configuration,
       })
       .catch((error: unknown) => {
-        // The open found the account signed out: tell the cache the same way a turn that ended
-        // signed out does. The refusal itself still reaches the caller, which presents it.
-        if (openRefusalFor(targetId, error)?.remedy.kind === 'sign-in') {
-          notifySignedOut({ userId: input.userId, environmentId: chat.environmentId, targetId });
+        // The open found the agent signed out, gone, outdated or denied: the cached descriptor is
+        // stale, so tell the cache the way a turn that ended signed out does. The refusal itself
+        // still reaches the caller, which presents it.
+        if (openRefusalFor(targetId, error)) {
+          notifyDiscoveryStale({
+            userId: input.userId,
+            environmentId: chat.environmentId,
+            targetId,
+          });
         }
         throw error;
       });
@@ -827,7 +833,7 @@ export function createExternalTurnController(
           envelope.event.type === 'error' &&
           turnErrorRemedyFor(targetId, envelope.event.error)?.kind === 'sign-in'
         ) {
-          notifySignedOut({
+          notifyDiscoveryStale({
             userId: input.userId,
             environmentId: context.chat.environmentId,
             targetId,

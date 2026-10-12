@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { createSignedOutInvalidation } from '../../../../src/modules/external-agents/application/external-signed-out-invalidation';
+import { createDiscoveryInvalidation } from '../../../../src/modules/external-agents/application/external-discovery-invalidation';
 
-describe('createSignedOutInvalidation', () => {
+describe('createDiscoveryInvalidation', () => {
   it('drops the environment cache of the owner, then tells the owner to refetch', () => {
     const calls: unknown[] = [];
-    const invalidate = createSignedOutInvalidation(
+    const invalidate = createDiscoveryInvalidation(
       { resetCache: (environmentId, userId) => calls.push(['reset', environmentId, userId]) },
       (userId) => calls.push(['publish', userId])
     );
