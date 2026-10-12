@@ -11,6 +11,7 @@ import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
 } from '../../../src/hooks/use-global-settings';
+import { ExternalRefusalError } from '../../../src/lib/external-refusal-error';
 import { ApiError } from '../../../src/lib/utils';
 import type { respondTextStream } from '../../../src/services/generation-service';
 import { act, renderHook, waitFor } from '../../support/harness/render';
@@ -1662,6 +1663,11 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
   // re-reads on the next activity signal and replace the refusal card with rows that hold nothing.
   it('does not arm a transcript re-read for a review the agent could not start', async () => {
     const props = makeProps();
+    const refusal = new ExternalRefusalError({
+      error: 'The external agent turn could not be started.',
+      unavailableReason: 'not-installed',
+      remedy: { kind: 'install' },
+    });
     mockReviewStream.mockImplementation(
       (
         _chatId: string,
@@ -1675,16 +1681,23 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
           remedy: { kind: 'install' },
           done: true,
         });
-        return Promise.reject(new Error('The external agent turn could not be started.'));
+        return Promise.reject(refusal);
       }
     );
 
     const { result } = renderWithQueryClient(props);
     const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
 
+    let rejection: unknown;
     await act(async () => {
-      await result.current.generation.handleReviewChanges().catch(() => undefined);
+      await result.current.generation.handleReviewChanges().catch((error: unknown) => {
+        rejection = error;
+      });
     });
+    // The toast reads the reason off the error, so it has to arrive as thrown, not wrapped.
+    expect(rejection, 'expected the refusal the stream threw | received a different error').toBe(
+      refusal
+    );
     await act(async () => {
       await fakeRealtime.emit(ACTIVITY_TOPIC);
     });

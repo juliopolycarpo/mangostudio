@@ -20,7 +20,10 @@ import { getChatMessagesUseCase } from '../../../../src/modules/chats/applicatio
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
 import { acknowledgeExternalDisclosure } from '../../../../src/modules/external-agents/application/external-disclosure-gate';
-import { createExternalSessionManager } from '../../../../src/modules/external-agents/application/external-session-manager';
+import {
+  createExternalSessionManager,
+  type ExternalSessionManager,
+} from '../../../../src/modules/external-agents/application/external-session-manager';
 import { createExternalTurnConfigurationResolver } from '../../../../src/modules/external-agents/application/external-turn-configuration';
 import {
   createExternalTurnController,
@@ -128,6 +131,11 @@ function harness(
     readonly onDiscoveryStale?: ExternalTurnControllerDependencies['onDiscoveryStale'];
     /** How long the session manager retries an open the runtime refuses at its session cap. */
     readonly capacityRetryMs?: number;
+    /**
+     * Makes the first session read as dropped and answers the reopen a resubmission then makes
+     * with this error, as a runtime that refuses it would.
+     */
+    readonly reopenRefusal?: () => Error;
   } = {}
 ) {
   const runtime = createFakeExternalRuntime({
@@ -142,9 +150,20 @@ function harness(
       ? {}
       : { capacityRetryMs: options.capacityRetryMs, capacityRetryIntervalMs: 1 }),
   });
+  const refuseReopen = options.reopenRefusal;
+  const sessionsSeenByController: ExternalSessionManager = refuseReopen
+    ? {
+        ...sessions,
+        async ensureSession(input) {
+          if (input.existingConnectionOnly) throw refuseReopen();
+          const handle = await sessions.ensureSession(input);
+          return { ...handle, isLive: () => false };
+        },
+      }
+    : sessions;
   const approvals = createExternalApprovalRegistry();
   const controller = createExternalTurnController({
-    sessions,
+    sessions: sessionsSeenByController,
     approvals,
     ...(options.sleep ? { sleep: options.sleep } : {}),
     ...(options.onDiscoveryStale ? { onDiscoveryStale: options.onDiscoveryStale } : {}),
@@ -868,6 +887,7 @@ describe('a send the runtime refuses while the session opens', () => {
       readonly openFailure?: () => Error | undefined;
       readonly onDiscoveryStale?: ExternalTurnControllerDependencies['onDiscoveryStale'];
       readonly capacityRetryMs?: number;
+      readonly reopenRefusal?: () => Error;
     }
   ) {
     const targetChatId = await insertExternalChat(undefined, targetId);
@@ -1040,6 +1060,53 @@ describe('a send the runtime refuses while the session opens', () => {
       });
     });
   }
+
+  it('tells the live stream what the stored turn keeps when a resubmission reopen is refused', async () => {
+    const { send } = await openRig('codex', {
+      reopenRefusal: () =>
+        new RemoteError('UNAVAILABLE', 'codex 0.1 is older than 0.153.4', {
+          kind: 'external_agent_version_unsupported',
+          requiredVersion: '0.153.4',
+        }),
+    });
+
+    const chunks = await send('hello');
+    const live = chunks.find(
+      (chunk): chunk is Extract<StreamChunk, { type: 'external_error' }> =>
+        chunk.type === 'external_error'
+    );
+    const assistant = chunks.find((chunk) => chunk.type === 'assistant_message_id');
+    if (assistant?.type !== 'assistant_message_id') {
+      throw new Error(
+        `expected an assistant_message_id chunk | received: ${JSON.stringify(chunks)}`
+      );
+    }
+    const stored = await getDb()
+      .selectFrom('messages')
+      .select('parts')
+      .where('id', '=', assistant.messageId)
+      .executeTakeFirstOrThrow();
+    const turn = (JSON.parse(stored.parts ?? '[]') as Array<Record<string, unknown>>).find(
+      (part) => part.type === 'external_turn'
+    );
+
+    // The same four fields, read off the chunk and off the stored part.
+    const presentation = (
+      source: Record<string, unknown> | undefined
+    ): Record<string, unknown> => ({
+      error: source?.error,
+      remedy: source?.remedy,
+      unavailableReason: source?.unavailableReason,
+      requiredVersion: source?.requiredVersion,
+    });
+    const order = chunks
+      .map((chunk) => chunk.type)
+      .filter((type) => ['external_error', 'external_turn_completed', 'done'].includes(type));
+
+    expect(order).toEqual(['external_error', 'external_turn_completed', 'done']);
+    expect(presentation(live)).toEqual(presentation(turn));
+    expect(turn?.unavailableReason, 'the stored turn names the reason').toBe('version-unsupported');
+  });
 
   it('presents an outdated agent with the update remedy and the build it needs', async () => {
     const { send } = await openRig('codex', {
