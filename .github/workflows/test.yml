@@ -201,8 +201,10 @@ jobs:
       #
       # The watchdog owns the log file, the shard-meta.json the merge job
       # reads, and the exit code; a hung Bun isolate runner (oven-sh/bun#39709)
-      # is killed after 210s — ~4x a healthy shard's test step — and retried
-      # once with the restored timings baseline put back first.
+      # is killed after 210s and retried once with the restored timings
+      # baseline put back first. The shard count is sized against that bound:
+      # a healthy shard's test step has to stay under 147s (30% headroom; see
+      # docs/reference/testing.md), or a slow shard reads as a hung one.
       - name: Run tests with coverage
         id: coverage
         env:

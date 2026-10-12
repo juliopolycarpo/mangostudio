@@ -21,7 +21,7 @@
 //   - The restored `.mango/artifacts/timings` baseline is snapshotted before
 //     the first attempt and put back before the retry. `--update-timings` may
 //     have rewritten a lane's file to this shard's slice before the hang, and
-//     a retry that balances against different bytes than the other seven
+//     a retry that balances against different bytes than the other
 //     shards computes a different partition — files silently run twice or not
 //     at all (the disagreement scripts/ci/merge-timings-shards.ts exists to
 //     catch).
@@ -39,7 +39,7 @@
 // night's findings, the attempt log a crash would otherwise clobber is kept
 // alongside the retry's instead of overwritten.
 //
-// Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/8
+// Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/4
 
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';

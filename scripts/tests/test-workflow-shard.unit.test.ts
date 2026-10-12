@@ -40,9 +40,11 @@ describe('Test workflow shard matrix', () => {
   });
 
   test('the job name reports the declared shard count', () => {
-    expect(extractJobBlock(workflow, 'shard')).toContain(
-      `name: Tests (shard ${EXPR} matrix.shard }}/${shardCount()})`
-    );
+    // Compared as one line, so a drifted denominator fails on the name alone
+    // instead of printing the whole job block.
+    const name = /^ {4}name: (.+)$/m.exec(extractJobBlock(workflow, 'shard'))?.[1];
+    const expected = `Tests (shard ${EXPR} matrix.shard }}/${shardCount()})`;
+    expect(name, `expected shard job name: ${expected} | received: ${name}`).toBe(expected);
   });
 
   test('each shard runs its own slice of the coverage lane', () => {
