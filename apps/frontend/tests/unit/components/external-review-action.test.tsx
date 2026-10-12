@@ -202,6 +202,14 @@ describe('ExternalReviewAction', () => {
       expect(text).toBe(en.externalAgents.openFailure.capacity);
     });
 
+    it('keeps the sentence for a failed open and adds the runtime kind to quote to support', async () => {
+      const text = await toastAfter(
+        () => new ApiError({ error: SENTENCE, code: 'external_agent_launch_failed' })
+      );
+
+      expect(text).toBe(`${SENTENCE} (external_agent_launch_failed)`);
+    });
+
     it('falls back to the server sentence for a refusal that names nothing, as an older hub sends it', async () => {
       const text = await toastAfter(() => new ApiError({ error: SENTENCE }));
 

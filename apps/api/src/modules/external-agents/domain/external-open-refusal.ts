@@ -14,11 +14,11 @@
 
 import { RemoteError } from '@mangostudio/protocol';
 import {
-  EXTERNAL_AGENT_CAPACITY_CODE,
   type ExternalAgentRemedy,
   type ExternalAgentTargetId,
   type ExternalAgentUnavailableReason,
   externalRemedyFor,
+  isExternalAgentKindCode,
 } from '@mangostudio/shared/external-agents';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import { productDescriptorFor } from './adapter-descriptors';
@@ -101,16 +101,15 @@ function boundedVersion(value: unknown): string | undefined {
   return trimmed || undefined;
 }
 
-/** The runtime kinds the stream names in the `error` chunk's `code` when they have no reason. */
-const OPEN_FAILURE_CODES: ReadonlySet<string> = new Set([EXTERNAL_AGENT_CAPACITY_CODE]);
-
 /**
  * The `code` the stream's `error` chunk carries for a failed open that has no unavailable reason,
- * or `undefined` for every other failure.
+ * or `undefined` when the runtime named no kind.
  *
- * Today that is a runtime at its session cap after the hub's retry window: it says nothing about
- * the agent, so it has no reason and no remedy, and the client keeps the sentence for the code.
- * The code is the runtime's kind, read from its structured details, never from its message.
+ * It is the runtime's own kind, read from its structured details and never from its message, and
+ * only when it has the shape of an external-agent kind. A runtime at its session cap
+ * (`external_agent_capacity`) has copy of its own on the client; every other kind (a launch that
+ * failed, a lost link, a protocol or vendor failure) keeps the generic sentence, and the kind is
+ * what the person can quote to support.
  *
  * @example
  * openFailureCodeFor(new RemoteError('INTERNAL', 'at capacity', { kind: 'external_agent_capacity' }));
@@ -121,7 +120,7 @@ export function openFailureCodeFor(error: unknown): string | undefined {
   for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
     if (current instanceof RemoteError) {
       const kind = current.details?.kind;
-      if (typeof kind === 'string' && OPEN_FAILURE_CODES.has(kind)) return kind;
+      if (isExternalAgentKindCode(kind)) return kind;
     }
     current = current.cause;
   }

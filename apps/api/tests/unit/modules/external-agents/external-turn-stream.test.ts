@@ -1118,12 +1118,27 @@ describe('a send the runtime refuses while the session opens', () => {
     });
   });
 
-  it('keeps the generic message for an open failure that has no existing presentation', async () => {
+  it('keeps the generic message for an open failure that has no presentation, and names its kind', async () => {
     const { send } = await openRig('cursor', {
       openFailure: () =>
         new RemoteError('UNAVAILABLE', 'the agent did not start', {
           kind: 'external_agent_launch_failed',
         }),
+    });
+
+    const chunk = errorChunkOf(await send('hello'));
+
+    expect(chunk).toEqual({
+      type: 'error',
+      error: GENERIC,
+      code: 'external_agent_launch_failed',
+      done: true,
+    });
+  });
+
+  it('names no kind for an open failure the runtime gave none, such as a timeout', async () => {
+    const { send } = await openRig('cursor', {
+      openFailure: () => new RemoteError('TIMEOUT', 'no answer from the runtime'),
     });
 
     const chunk = errorChunkOf(await send('hello'));

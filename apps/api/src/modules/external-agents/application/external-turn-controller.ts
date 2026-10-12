@@ -71,7 +71,11 @@ import {
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
 import { isExpectedTailOfEndedTurn } from '../domain/external-event-sequencer';
-import { type OpenRefusalPresentation, openRefusalFor } from '../domain/external-open-refusal';
+import {
+  type OpenRefusalPresentation,
+  openFailureCodeFor,
+  openRefusalFor,
+} from '../domain/external-open-refusal';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import {
   classifySubmissionFailure,
@@ -882,11 +886,19 @@ export function createExternalTurnController(
         )
       : () => undefined;
 
+    /** Errors that came out of {@link reacquire}, so `failStart` can tell a reopen from a turn call. */
+    const reopenFailures = new WeakSet<object>();
+
     async function reacquire(): Promise<ExternalSessionHandle> {
-      const next = await sessions.ensureSession({
-        ...sessionInputFor(input, context.chat.environmentId, targetId),
-        existingConnectionOnly: true,
-      });
+      const next = await sessions
+        .ensureSession({
+          ...sessionInputFor(input, context.chat.environmentId, targetId),
+          existingConnectionOnly: true,
+        })
+        .catch((error: unknown) => {
+          if (typeof error === 'object' && error !== null) reopenFailures.add(error);
+          throw error;
+        });
       // A stop that landed during the open must not re-point a turn that ended.
       if (stop.signal.aborted) return next;
       if (next === handle || next.sessionId === handle.sessionId) return next;
@@ -957,7 +969,13 @@ export function createExternalTurnController(
         // A reopen after a dropped connection can find what a first open finds: the agent signed
         // out, gone, outdated or denied. Present it as the first open does, and tell the cache.
         const refusal = openRefusalFor(targetId, error);
-        const stored = vendorErrorFrom(error, code);
+        // A refused reopen stores the runtime's own kind, which the person can quote to support;
+        // the hub's label for where the start failed is the fallback, and what every other start
+        // failure (the turn call itself) stores.
+        const stored = vendorErrorFrom(
+          error,
+          reopenFailures.has(error as object) ? (openFailureCodeFor(error) ?? code) : code
+        );
         transcript.recordError(stored, refusal);
         // The live stream gets the same error the stored turn keeps, so a reload shows what the
         // person watched. Before this a refused start was visible only after a reload.

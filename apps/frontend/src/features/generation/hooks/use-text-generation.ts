@@ -16,8 +16,8 @@ import type {
   ExternalReviewTarget,
 } from '@mangostudio/shared/external-agents';
 import {
-  EXTERNAL_AGENT_CAPACITY_CODE,
   EXTERNAL_AGENT_UNAVAILABLE_REASONS,
+  isExternalAgentKindCode,
 } from '@mangostudio/shared/external-agents';
 import type {
   ExternalTurnRequest,
@@ -533,7 +533,7 @@ export function useTextGeneration({
             if (chunk.type === 'done') sawDoneChunk = true;
             if (
               chunk.type === 'error' &&
-              (chunk.unavailableReason || chunk.code === EXTERNAL_AGENT_CAPACITY_CODE)
+              (chunk.unavailableReason || isExternalAgentKindCode(chunk.code))
             )
               refusedBeforeStart = true;
             streamState = reduceTextGenerationStreamChunk(streamState, chunk, {

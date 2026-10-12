@@ -14,7 +14,10 @@
  */
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import { EXTERNAL_AGENT_CAPACITY_CODE } from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_AGENT_CAPACITY_CODE,
+  isExternalAgentKindCode,
+} from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { ScanSearch } from 'lucide-react';
 import { useState } from 'react';
@@ -103,5 +106,8 @@ function reviewFailureMessage(error: unknown, t: Messages): string {
   // The stream's only other validation refusal for a chat this action rendered
   // for: it is external by construction, so what is missing is the folder.
   if (code === ERROR_CODES.VALIDATION) return labels.requiresWorkdir;
-  return resolveApiErrorMessage(error, labels.failed);
+  const message = resolveApiErrorMessage(error, labels.failed);
+  // A failed open the hub has no copy for keeps its sentence and adds the runtime's kind, which
+  // is what the person can quote to support.
+  return isExternalAgentKindCode(code) ? `${message} (${code})` : message;
 }

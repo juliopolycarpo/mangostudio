@@ -555,6 +555,33 @@ describe('an external agent that could not start', () => {
     }).toEqual({ fallback: null, cap: true, commands: 0, links: 0 });
   });
 
+  it('keeps the sentence for a failed open and shows its kind as plain text to quote to support', () => {
+    const { container } = renderParts([
+      { type: 'error', text: FALLBACK, code: 'external_agent_launch_failed' },
+    ]);
+
+    expect({
+      sentence: screen.queryByText(FALLBACK) !== null,
+      kind: screen.queryByText('external_agent_launch_failed')?.tagName,
+      commands: container.querySelectorAll('code').length,
+      links: container.querySelectorAll('a').length,
+    }).toEqual({ sentence: true, kind: 'SPAN', commands: 0, links: 0 });
+  });
+
+  it('does not show a kind beside a reason it already says in the selector words', () => {
+    renderParts([
+      {
+        type: 'error',
+        text: FALLBACK,
+        code: 'external_agent_not_installed',
+        unavailableReason: 'not-installed',
+        remedy: { kind: 'install' },
+      },
+    ]);
+
+    expect(screen.queryByText('external_agent_not_installed')).toBeNull();
+  });
+
   it('shows the plain text for a code it has no copy for, and never the code itself', () => {
     const hostile = '<img src=x onerror=alert(1)>';
     const { container } = renderParts([{ type: 'error', text: FALLBACK, code: hostile }]);

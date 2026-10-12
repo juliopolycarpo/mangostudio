@@ -521,7 +521,7 @@ describe('a resubmission whose session reopen the runtime refuses', () => {
       stored: {
         reason: 'signed-out',
         remedy: { kind: 'sign-in', command: 'codex login' },
-        code: 'turn-start',
+        code: 'external_agent_signed_out',
       },
       waits: 0,
       rpcs: 0,
@@ -587,10 +587,17 @@ describe('a resubmission whose session reopen the runtime refuses', () => {
         })
     );
 
-    expect({ reason: part.unavailableReason, remedy: part.remedy, told: told.length }).toEqual({
+    // The runtime's kind is what the footer can show for support; the hub's label is the fallback.
+    expect({
+      reason: part.unavailableReason,
+      remedy: part.remedy,
+      told: told.length,
+      code: part.error?.code,
+    }).toEqual({
       reason: undefined,
       remedy: undefined,
       told: 0,
+      code: 'external_agent_launch_failed',
     });
     await runtime.close();
   });
