@@ -147,7 +147,7 @@ jobs:
       # pull request that produced it. The version is protocol-ci.yml's, so both
       # run the same powerset; scripts/tests/protocol-package.unit.test.ts holds
       # the two pins together.
-      - uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cargo-hack@0.6.45
       - run: bun install --frozen-lockfile
