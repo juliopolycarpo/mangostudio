@@ -12,6 +12,7 @@ import type {
 } from '@mangostudio/shared/types';
 import { fireEvent, screen } from '@testing-library/react';
 import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
+import { stubClipboard } from '../../support/harness/clipboard';
 import { render, waitFor } from '../../support/harness/render';
 import { ToolIdentitiesProbe } from '../../support/mocks/tool-identities';
 
@@ -243,6 +244,87 @@ describe('external turn summary', () => {
     ]);
     expect(screen.getByText('sandbox_denied')).toBeInTheDocument();
     expect(screen.getByText(/workspace-write refused/)).toBeInTheDocument();
+  });
+});
+
+describe('external turn: signed out', () => {
+  const SIGNED_OUT_ERROR = {
+    code: 'acp-auth-required',
+    message: 'authentication required; to sign in: cursor-agent login',
+    vendorCode: '-32000',
+  };
+
+  it("shows the selector's signed-out words and the sign-in command instead of the raw error", () => {
+    const { container } = renderParts([
+      turnPart({
+        targetId: 'cursor',
+        terminalReason: 'vendor-error',
+        error: SIGNED_OUT_ERROR,
+        remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+      }),
+    ]);
+
+    expect({
+      words: screen.queryByText('Installed, but signed out') !== null,
+      command: container.querySelector('code')?.textContent,
+      rawCode: screen.queryByText('acp-auth-required'),
+      rawMessage: screen.queryByText(/authentication required; to sign in/),
+      copy: screen.queryByRole('button', { name: 'Copy login command' }) !== null,
+    }).toEqual({
+      words: true,
+      command: 'cursor-agent login',
+      rawCode: null,
+      rawMessage: null,
+      copy: true,
+    });
+  });
+
+  it('copies the command and offers nothing that signs in for the user', async () => {
+    const writes: string[] = [];
+    stubClipboard((text) => {
+      writes.push(text);
+      return Promise.resolve();
+    });
+    renderParts([
+      turnPart({
+        targetId: 'cursor',
+        terminalReason: 'vendor-error',
+        error: SIGNED_OUT_ERROR,
+        remedy: { kind: 'sign-in', command: 'cursor-agent login' },
+      }),
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy login command' }));
+
+    await waitFor(() => expect(writes).toEqual(['cursor-agent login']));
+    expect(screen.queryByRole('link')).toBeNull();
+  });
+
+  it('keeps a hostile command inert: it is text, not markup', () => {
+    const hostile = '<img src=x onerror=alert(1)> `rm -rf ~` [x](javascript:alert(1))';
+    const { container } = renderParts([
+      turnPart({
+        targetId: 'cursor',
+        terminalReason: 'vendor-error',
+        error: SIGNED_OUT_ERROR,
+        remedy: { kind: 'sign-in', command: hostile },
+      }),
+    ]);
+
+    expect({
+      text: container.querySelector('code')?.textContent,
+      images: container.querySelectorAll('img').length,
+      links: container.querySelectorAll('a').length,
+    }).toEqual({ text: hostile, images: 0, links: 0 });
+  });
+
+  it('shows the raw code and message when the hub sent no remedy, as an older hub does', () => {
+    renderParts([
+      turnPart({ targetId: 'cursor', terminalReason: 'vendor-error', error: SIGNED_OUT_ERROR }),
+    ]);
+
+    expect(screen.getByText('acp-auth-required')).toBeInTheDocument();
+    expect(screen.getByText(/authentication required; to sign in/)).toBeInTheDocument();
   });
 });
 

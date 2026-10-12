@@ -150,3 +150,27 @@ describe('external stream chunks', () => {
     ).not.toHaveProperty('isError');
   });
 });
+
+describe('an external error chunk with a remedy', () => {
+  const error = { code: 'acp-auth-required', message: 'authentication required' };
+  const remedy = { kind: 'sign-in', command: 'cursor-agent login' } as const;
+
+  it('carries the remedy beside the vendor error, which stays untouched', () => {
+    const chunk = externalAgentEventToStreamChunk({ type: 'error', error }, undefined, remedy);
+
+    expect(chunk).toEqual({ type: 'external_error', error, remedy, done: false });
+    expect(Value.Check(StreamChunkSchema, chunk), 'the chunk validates').toBe(true);
+  });
+
+  it('has no remedy key when none is offered, as a hub without the feature sends it', () => {
+    const chunk = externalAgentEventToStreamChunk({ type: 'error', error });
+
+    expect(chunk).toEqual({ type: 'external_error', error, done: false });
+  });
+
+  it('refuses a remedy that is not one of the closed kinds', () => {
+    const chunk = { type: 'external_error', error, remedy: { kind: 'run-it-for-me' }, done: false };
+
+    expect(Value.Check(StreamChunkSchema, chunk)).toBe(false);
+  });
+});

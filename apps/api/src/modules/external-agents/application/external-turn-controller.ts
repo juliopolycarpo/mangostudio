@@ -71,6 +71,7 @@ import {
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
 import { isExpectedTailOfEndedTurn } from '../domain/external-event-sequencer';
+import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import {
   classifySubmissionFailure,
   DEFAULT_RETRY_POLICY,
@@ -94,6 +95,10 @@ import {
   type ExternalSessionManager,
   externalSessionManager,
 } from './external-session-manager';
+import {
+  invalidateDiscoveryAfterSignedOut,
+  type SignedOutScope,
+} from './external-signed-out-invalidation';
 import { ExternalTranscriptWriter } from './external-transcript-writer';
 import {
   type CancellableSleep,
@@ -274,6 +279,12 @@ export interface ExternalTurnControllerDependencies {
    * loop's own outcome instead of for time to pass.
    */
   readonly observeSubmission?: (messageId: string, outcome: Promise<SubmissionOutcome>) => void;
+  /**
+   * Told when a turn ended because the vendor account is signed out. Defaults to dropping the
+   * cached discovery answer for the environment and asking the owner's clients to refetch it, so
+   * what the app says about the agent is read again rather than served from before the turn.
+   */
+  readonly onSignedOutObserved?: (scope: SignedOutScope) => void;
   /** A connect failure that waiting cannot fix. Defaults to a recorded protocol mismatch. */
   readonly isTerminalConnectFailure?: (
     error: unknown,
@@ -491,6 +502,7 @@ export function createExternalTurnController(
   const random = dependencies.random ?? Math.random;
   const isTerminalConnectFailure =
     dependencies.isTerminalConnectFailure ?? defaultIsTerminalConnectFailure;
+  const onSignedOutObserved = dependencies.onSignedOutObserved ?? invalidateDiscoveryAfterSignedOut;
   const liveTurns = new Map<string, LiveExternalTurn>();
 
   async function start(
@@ -787,6 +799,22 @@ export function createExternalTurnController(
             envelope.event.limits,
             { sessionId: handle.sessionId }
           );
+        }
+
+        if (
+          envelope.event.type === 'error' &&
+          turnErrorRemedyFor(targetId, envelope.event.error)?.kind === 'sign-in'
+        ) {
+          // Discardable bookkeeping: a failure here must never disturb the turn's ending.
+          try {
+            onSignedOutObserved({
+              userId: input.userId,
+              environmentId: context.chat.environmentId,
+              targetId,
+            });
+          } catch (error) {
+            logger.warn('signed_out_invalidation_failed', { targetId, error: String(error) });
+          }
         }
 
         if (envelope.event.type === 'commands_available') {

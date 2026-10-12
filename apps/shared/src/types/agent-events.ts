@@ -2,6 +2,7 @@ import type {
   ExternalActivityKind,
   ExternalActivityStatus,
   ExternalAgentError,
+  ExternalAgentRemedy,
   ExternalAgentTargetId,
   ExternalApprovalOption,
   ExternalNoticeSeverity,
@@ -264,6 +265,8 @@ export interface ExternalTurnPart {
   /** Accumulated as it arrives: the vendor reports usage before it reports completion. */
   usage?: ExternalUsage;
   error?: ExternalAgentError;
+  /** What the person can do about `error`, when the hub knows; today only a sign-in command. */
+  remedy?: ExternalAgentRemedy;
 }
 
 /**

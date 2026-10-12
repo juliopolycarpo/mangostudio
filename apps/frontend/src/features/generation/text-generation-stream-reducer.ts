@@ -1,6 +1,7 @@
 import type { Message } from '@mangostudio/shared/chat';
 import type {
   ExternalAgentError,
+  ExternalAgentRemedy,
   ExternalAgentTargetId,
   ExternalThreadUsage,
   ExternalTurnTerminalReason,
@@ -256,7 +257,7 @@ export function reduceTextGenerationStreamChunk(
     case 'external_notice':
       return reduceExternalNotice(nextState, chunk);
     case 'external_error':
-      return reduceExternalError(nextState, chunk.error);
+      return reduceExternalError(nextState, chunk.error, chunk.remedy);
     case 'external_turn_completed':
       return reduceExternalTurnCompleted(nextState, chunk.reason);
     case 'done':
@@ -957,8 +958,17 @@ function reduceExternalNotice(
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
-function reduceExternalError(state: TextGenerationStreamState, error: ExternalAgentError) {
-  const parts = updateExternalTurn(state.parts, (part) => ({ ...part, error }));
+function reduceExternalError(
+  state: TextGenerationStreamState,
+  error: ExternalAgentError,
+  remedy?: ExternalAgentRemedy
+) {
+  // `ExternalTurnTranscript.recordError` keeps the same pair, so a reload shows what the stream showed.
+  const parts = updateExternalTurn(state.parts, (part) => ({
+    ...part,
+    error,
+    ...(remedy ? { remedy } : {}),
+  }));
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 

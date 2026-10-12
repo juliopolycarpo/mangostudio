@@ -36,6 +36,7 @@ import {
   ExternalIdentityIsolationSchema,
   ExternalSteerRejectionReasonSchema,
   externalRemedyFor,
+  externalRemedyForError,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,
@@ -703,6 +704,17 @@ describe('what would fix an unavailable agent', () => {
     expect(externalRemedyFor('not-installed', { loginCommand: 'claude auth login' })).toEqual({
       kind: 'install',
     });
+  });
+
+  it('offers the sign-in remedy for a turn that ended signed out, and for nothing else', () => {
+    const signedOut = { code: 'acp-auth-required', message: 'authentication required' };
+    expect(externalRemedyForError(signedOut, { loginCommand: 'cursor-agent login' })).toEqual(
+      externalRemedyFor('signed-out', { loginCommand: 'cursor-agent login' })
+    );
+    expect(externalRemedyForError(signedOut)).toEqual({ kind: 'sign-in' });
+    expect(
+      externalRemedyForError({ code: 'acp-request-failed' }, { loginCommand: 'cursor-agent login' })
+    ).toBeUndefined();
   });
 
   it('sends a machine-level problem to whoever administers the machine', () => {

@@ -33,6 +33,7 @@ on:
       - "apps/shared/src/library/**"
       - "apps/shared/src/markdown/**"
       - "apps/api/src/modules/external-agents/application/external-session-manager.ts"
+      - "apps/api/src/modules/external-agents/domain/adapter-descriptors.ts"
       - "spec/**"
       - "scripts/tests/support/SHA256SUMS.sample"
       - "packages/protocol/src/testing/conformance.ts"

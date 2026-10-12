@@ -36,6 +36,8 @@ export const RUST_WORKSPACE_PATHS = [
   'apps/shared/src/markdown/**',
   // The runtime's close-bound test reads the hub's capacity-retry window from this file.
   'apps/api/src/modules/external-agents/application/external-session-manager.ts',
+  // ... and the per-target sign-in command it compares with the SDK's profile.
+  'apps/api/src/modules/external-agents/domain/adapter-descriptors.ts',
   'spec/**',
   'scripts/tests/support/SHA256SUMS.sample',
   'packages/protocol/src/testing/conformance.ts',

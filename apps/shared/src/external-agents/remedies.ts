@@ -30,6 +30,15 @@ import type {
 } from './schemas';
 
 /**
+ * The code a turn ends with when the agent refused a prompt because the vendor account is signed
+ * out (the External Agents SDK's `mango_agent_acp::error::AUTH_REQUIRED_CODE`).
+ *
+ * A Rust test in the runtime compares this literal with the SDK's constant, so an SDK rename fails
+ * CI instead of silently turning a sign-in prompt back into a raw vendor error.
+ */
+export const EXTERNAL_AUTH_REQUIRED_ERROR_CODE = 'acp-auth-required';
+
+/**
  * The reason → remedy table.
  *
  * `environment-unreachable` and `isolation-unproven` are `contact-admin`
@@ -51,6 +60,25 @@ export const EXTERNAL_AGENT_REMEDIES = {
   'disclosure-required': 'accept-disclosure',
   'installed-but-unusable': 'contact-admin',
 } as const satisfies Record<ExternalAgentUnavailableReason, ExternalAgentRemedyKind>;
+
+/**
+ * What to offer for a turn that ended in `error`, or `undefined` when no remedy is known.
+ *
+ * Only the signed-out ending has one, and it is the same remedy the pre-send check offers for
+ * `signed-out` ({@link externalRemedyFor}), with the same command: the caller passes the target's
+ * own login command, never text taken from the vendor's error.
+ *
+ * @example
+ * externalRemedyForError({ code: 'acp-auth-required' }, { loginCommand: 'cursor-agent login' });
+ * // { kind: 'sign-in', command: 'cursor-agent login' }
+ */
+export function externalRemedyForError(
+  error: { readonly code: string },
+  options: { readonly loginCommand?: string } = {}
+): ExternalAgentRemedy | undefined {
+  if (error.code !== EXTERNAL_AUTH_REQUIRED_ERROR_CODE) return undefined;
+  return externalRemedyFor('signed-out', options);
+}
 
 /**
  * What to offer for a reason, or `undefined` when the target is fine.

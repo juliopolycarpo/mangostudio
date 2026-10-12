@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { turnErrorRemedyFor } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-error-remedy';
 import { ExternalTurnTranscript } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
 import {
   type ExternalAgentEvent,
@@ -126,7 +127,12 @@ function streamedParts(
   // marker before the `completed` means the vendor stopped early.
   let vendorInterrupted = false;
   for (const event of events) {
-    const chunk = externalAgentEventToStreamChunk(event);
+    // The hub offers the same remedy to the stream and to the transcript; this mirrors the stream's call.
+    const chunk = externalAgentEventToStreamChunk(
+      event,
+      undefined,
+      event.type === 'error' ? turnErrorRemedyFor('codex', event.error) : undefined
+    );
     if (chunk) chunks.push(chunk);
     if (event.type === 'cancelled') vendorInterrupted = true;
     if (event.type === 'completed') {
@@ -514,6 +520,42 @@ describe('external turn: live stream vs reloaded transcript', () => {
     expect(storedParts(interrupted).find((part) => part.type === 'external_turn')).toMatchObject({
       status: 'terminal',
       terminalReason: 'interrupted',
+    });
+  });
+
+  /**
+   * A turn the agent refused because its account is signed out keeps the hub's sign-in remedy
+   * beside the vendor's error, on both paths.
+   */
+  describe('a turn refused because the account is signed out', () => {
+    const SIGNED_OUT: readonly ExternalAgentEvent[] = [
+      { type: 'text_delta', text: 'working on it' },
+      {
+        type: 'error',
+        error: {
+          code: 'acp-auth-required',
+          message: 'authentication required; to sign in: codex login',
+          vendorCode: '-32000',
+          retryable: false,
+        },
+      },
+    ];
+
+    it('shows the same error and remedy live and after a reload', () => {
+      const expected = {
+        error: {
+          code: 'acp-auth-required',
+          message: 'authentication required; to sign in: codex login',
+          vendorCode: '-32000',
+          retryable: false,
+        },
+        remedy: { kind: 'sign-in' as const, command: 'codex login' },
+      };
+      for (const parts of [streamedParts(SIGNED_OUT), storedParts(SIGNED_OUT)]) {
+        const turn = parts.find((part) => part.type === 'external_turn');
+        expect({ error: turn?.error, remedy: turn?.remedy }).toEqual(expected);
+      }
+      expect(comparable(streamedParts(SIGNED_OUT))).toEqual(comparable(storedParts(SIGNED_OUT)));
     });
   });
 

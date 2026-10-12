@@ -48,6 +48,7 @@ import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/c
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
 import { KEEPALIVE_INTERVAL_MS } from '../../generation/application/sse-keepalive';
 import { getRepoRoot } from '../../git/application/git-status-service';
+import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import { requiresExternalDisclosure } from './external-disclosure-gate';
 import {
   type ExternalTurnConfigurationResolution,
@@ -560,10 +561,15 @@ function openStream(
               onEvent(event) {
                 // The same binding the hub caches an account-limits snapshot
                 // under, so the client's cache key and the hub's row agree by
-                // construction rather than by both guessing from discovery.
-                const chunk = externalAgentEventToStreamChunk(event, {
-                  vendorAccountFingerprint: resolution.vendorAccountFingerprint,
-                });
+                // construction rather than by both guessing from discovery. The remedy is the one the stored turn carries (`recordError`), so a reload
+                // shows what the stream showed.
+                const chunk = externalAgentEventToStreamChunk(
+                  event,
+                  { vendorAccountFingerprint: resolution.vendorAccountFingerprint },
+                  event.type === 'error'
+                    ? turnErrorRemedyFor(resolution.descriptor.targetId, event.error)
+                    : undefined
+                );
                 if (chunk) send(chunk);
               },
               onSteer(steer) {

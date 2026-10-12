@@ -60,7 +60,12 @@ export {
   externalPresetFor,
   externalPresetPair,
 } from './presets';
-export { EXTERNAL_AGENT_REMEDIES, externalRemedyFor } from './remedies';
+export {
+  EXTERNAL_AGENT_REMEDIES,
+  EXTERNAL_AUTH_REQUIRED_ERROR_CODE,
+  externalRemedyFor,
+  externalRemedyForError,
+} from './remedies';
 export {
   EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
   EXTERNAL_ACTIVITY_KINDS,
