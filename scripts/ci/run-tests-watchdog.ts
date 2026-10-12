@@ -381,7 +381,7 @@ const snapshotTimings = async (timingsDir: string): Promise<string | null> => {
  * null when there was no baseline — a cold timings cache — and "absent" is
  * then the state to restore, not a no-op: the killed attempt's
  * `--update-timings` leaves this shard's partial slices behind, and a retry
- * that balances against them derives a different partition than the seven
+ * that balances against them derives a different partition than the other
  * shards still falling back to the round-robin split.
  */
 const restoreTimings = async (timingsDir: string, backup: string | null): Promise<void> => {

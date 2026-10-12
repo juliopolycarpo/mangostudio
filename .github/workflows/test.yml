@@ -14,11 +14,12 @@ on:
 permissions:
   contents: read
 
-# Three shards. The hosted 4/6/8 comparison picked four while the api unit lane
-# ran one worker per shard; at `--parallel=4` that lane no longer bounds the
-# test step, so one shard fewer costs little wall clock and saves a runner and
-# a job's fixed setup. The measurements, the projection and their limits are
-# recorded in docs/reference/testing.md.
+# Three shards with the api unit lane at `--parallel=4`. The hosted 4/6/8
+# comparison picked four at one unit worker per shard. One shard fewer removes
+# a job's fixed setup, but its wall-clock cost still needs a hosted comparison:
+# the first four-worker run projects to about 90s at three shards, with root
+# scripts bounding two of its four shards. See docs/reference/testing.md for
+# the measurements, projection, rejection criteria and their limits.
 # Changing it is a three-line change: this value, the matrix list, and the shard
 # job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
 # so that last one cannot interpolate this value.
@@ -207,7 +208,8 @@ jobs:
       # step measured at four shards with the unit lane on one worker (120s;
       # see docs/reference/testing.md), so a loaded runner that doubles the
       # step is not read as a hung one. Three shards at four unit workers
-      # project to a shorter step than that, so the bound is kept. Both attempts have to fit this job's
+      # project to a shorter step than that, so the bound is kept. Both
+      # attempts have to fit this job's
       # `timeout-minutes` or the retry is cut short: 2 x 240s leaves 120s for
       # the other steps, which took at most 45s in those runs.
       - name: Run tests with coverage
