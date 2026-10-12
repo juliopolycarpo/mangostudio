@@ -865,11 +865,20 @@ so the hub's wait for a lost connection, which keys on `UNAVAILABLE`, does not t
 next send opens again. A signed-out open also drops the cached discovery answer and refreshes the
 owner's clients, as a turn that ends signed out does; the other refusals do not, so the cached
 descriptor can send one more send to the same refusal until it expires. Nothing was persisted for the
-refused send, so there is nothing to reload. Every other open failure keeps the generic sentence:
+refused send, so there is nothing to reload.
+
+A runtime still at its session cap after the hub's retry window (`external_agent_capacity`) says
+nothing about the agent, so it has no unavailable reason and no remedy, and a reason added for it
+would be a value an older client cannot present. The stream's `error` chunk names it by `code`
+(`EXTERNAL_AGENT_CAPACITY_CODE`, the runtime's own kind, tied to the supervisor's by a runtime
+test), and the client says, in its own words, that the maximum number of external agent sessions is
+in use and that the person can close one or try again. A client that does not know the code shows
+the English sentence. Like the other open refusals it is not stored, and the client keeps the
+refusal on screen instead of re-reading the transcript. Every other open failure keeps the generic
+sentence:
 
 | Open failure                                                                                                 | What the user sees today | Existing presentation |
 | ------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------- |
-| `external_agent_capacity` (after the hub's retry window)                                                     | the generic sentence     | none                  |
 | `external_agent_launch_failed`, `_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`, an open timeout | the generic sentence     | none                  |
 
 Two surfaces keep the generic wording: the review button's toast, because the review stream's thrown

@@ -61,6 +61,11 @@ pub(crate) const CONSENT_POLL: Duration = Duration::from_millis(250);
 /// How long one vendor close, or one late open's cleanup, may take before it
 /// is reported as failed. Bounds awaited cleanup; never skips it silently.
 pub(crate) const CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The `details.kind` of an open refused at the session cap. The hub retries it for a while and
+/// then names it to the client, which has copy for this spelling; `hub_retry_window_tests` ties it
+/// to `EXTERNAL_AGENT_CAPACITY_CODE` in the shared package.
+pub(crate) const CAPACITY_KIND: &str = "external_agent_capacity";
 /// The longest one turn may run, approvals included, before the runtime ends
 /// it with its own error and asks the vendor to stop — the TypeScript host's
 /// `DEFAULT_HARD_TURN_TIMEOUT_MS`. The SDK's own `idle_timeout` bounds a
@@ -599,7 +604,7 @@ impl Supervisor {
                     self.ports.session_cap
                 ),
             )
-            .with_detail("kind", "external_agent_capacity"));
+            .with_detail("kind", CAPACITY_KIND));
         }
         let opening = Arc::new(Opening {
             target: params.target_id,

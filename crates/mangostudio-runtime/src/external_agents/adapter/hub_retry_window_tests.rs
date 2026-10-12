@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::super::production_backend;
-use crate::external_agents::supervisor::CLEANUP_TIMEOUT;
+use crate::external_agents::supervisor::{CAPACITY_KIND, CLEANUP_TIMEOUT};
 use crate::external_agents::wire::TargetId;
 use crate::subprocess::AlwaysAllow;
 
@@ -37,6 +37,34 @@ fn hub_capacity_retry_window(source: &str) -> Result<Duration, String> {
         .map_err(|error| {
             format!("expected an integer millisecond literal | received {literal:?} ({error})")
         })
+}
+
+const HUB_OPEN_FAILURES: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../apps/shared/src/external-agents/open-failures.ts"
+);
+
+/// The client names a runtime at its session cap by the kind this refusal carries and has copy for
+/// that spelling only, so a rename on either side would silently turn it back into the generic
+/// sentence. This ties the shared constant to the kind the supervisor sends.
+#[test]
+fn the_shared_capacity_code_is_the_kind_the_supervisor_refuses_with() {
+    let source = std::fs::read_to_string(HUB_OPEN_FAILURES).unwrap_or_else(|error| {
+        panic!("expected the shared open failures at {HUB_OPEN_FAILURES} | received {error}")
+    });
+    let marker = "export const EXTERNAL_AGENT_CAPACITY_CODE = '";
+    let start = source
+        .find(marker)
+        .unwrap_or_else(|| panic!("expected `{marker}...'` in {HUB_OPEN_FAILURES}"))
+        + marker.len();
+    let received: String = source[start..]
+        .chars()
+        .take_while(|character| *character != '\'')
+        .collect();
+    assert_eq!(
+        received, CAPACITY_KIND,
+        "expected EXTERNAL_AGENT_CAPACITY_CODE to equal the supervisor's CAPACITY_KIND | received {received:?}"
+    );
 }
 
 #[test]

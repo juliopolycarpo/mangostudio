@@ -356,6 +356,8 @@ export type MessagePart =
       remedy?: ExternalAgentRemedy;
       /** The build `version-unsupported` asks for, when the hub named it. */
       requiredVersion?: string;
+      /** The runtime's kind for a failed open that has no unavailable reason (the session cap). */
+      code?: string;
     }
   | { type: 'system_event'; event: string; detail?: string }
   | {

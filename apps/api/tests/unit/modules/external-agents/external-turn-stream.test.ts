@@ -126,6 +126,8 @@ function harness(
     readonly openFailure?: () => Error | undefined;
     /** Replaces the default discovery invalidation after a signed-out ending. */
     readonly onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved'];
+    /** How long the session manager retries an open the runtime refuses at its session cap. */
+    readonly capacityRetryMs?: number;
   } = {}
 ) {
   const runtime = createFakeExternalRuntime({
@@ -136,6 +138,9 @@ function harness(
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     newSessionId: () => `session-${crypto.randomUUID()}`,
+    ...(options.capacityRetryMs === undefined
+      ? {}
+      : { capacityRetryMs: options.capacityRetryMs, capacityRetryIntervalMs: 1 }),
   });
   const approvals = createExternalApprovalRegistry();
   const controller = createExternalTurnController({
@@ -862,6 +867,7 @@ describe('a send the runtime refuses while the session opens', () => {
     options: {
       readonly openFailure?: () => Error | undefined;
       readonly onSignedOutObserved?: ExternalTurnControllerDependencies['onSignedOutObserved'];
+      readonly capacityRetryMs?: number;
     }
   ) {
     const targetChatId = await insertExternalChat(undefined, targetId);
@@ -1011,6 +1017,47 @@ describe('a send the runtime refuses while the session opens', () => {
       requiredVersion: '0.153.4',
       done: true,
     });
+  });
+
+  it('names a runtime still at its session cap after the retry window, and sends nothing', async () => {
+    const { send, runtime } = await openRig('claude', {
+      capacityRetryMs: 200,
+      openFailure: () =>
+        new RemoteError('INTERNAL', 'External-agent session capacity is 4; close a session.', {
+          kind: 'external_agent_capacity',
+        }),
+    });
+
+    const chunk = errorChunkOf(await send('hello'));
+
+    expect({
+      chunk,
+      retried: runtime.calls.open.length > 1,
+      turns: runtime.calls.turn.length,
+    }).toEqual({
+      chunk: { type: 'error', error: GENERIC, code: 'external_agent_capacity', done: true },
+      retried: true,
+      turns: 0,
+    });
+  });
+
+  it('opens once the cap frees inside the retry window, with no error', async () => {
+    let refusals = 2;
+    const { send, runtime } = await openRig('claude', {
+      capacityRetryMs: 2_000,
+      openFailure: () =>
+        refusals-- > 0
+          ? new RemoteError('INTERNAL', 'External-agent session capacity is 4.', {
+              kind: 'external_agent_capacity',
+            })
+          : undefined,
+    });
+
+    const sending = send('hello');
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'completed' });
+
+    expect(errorChunkOf(await sending)).toBeUndefined();
   });
 
   it('keeps the generic message for a tool_argument refusal, which is not a missing CLI', async () => {

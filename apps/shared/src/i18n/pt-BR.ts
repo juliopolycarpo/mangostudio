@@ -3652,6 +3652,11 @@ export const messages = {
       unavailableHere: 'Este agente não pode rodar aqui agora — escolha outro.',
       forkFailed: 'Não foi possível criar o novo chat.',
     },
+    /** Por que um envio não conseguiu abrir, quando a resposta não é sobre o agente em si. */
+    openFailure: {
+      capacity:
+        'O número máximo de sessões de agentes externos está em uso. Feche uma ou tente novamente em instantes.',
+    },
     sessions: {
       entry: 'Continuar uma sessão do seu terminal',
       title: 'Continuar uma sessão do seu terminal',
