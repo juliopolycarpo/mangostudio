@@ -160,7 +160,7 @@ Hook React que gerencia o ciclo de vida do stream:
 ## Tratamento De Erros
 
 - **Erros pré-stream** — Retornam respostas HTTP JSON padrão com códigos tipados.
-- **Erros do stream** — `SSEErrorEvent` com `done: true`: `{ type: 'error', error: string, done: true }`. Um agente externo que não conseguiu iniciar pode acrescentar `unavailableReason`, `remedy` e, para um agente desatualizado, `requiredVersion`, e `code` para um runtime no limite de sessões (veja "A send refused while the session opens" em `docs/architecture/external-agents.md`); `error` continua sendo o texto em inglês de reserva.
+- **Erros do stream** — `SSEErrorEvent` com `done: true`: `{ type: 'error', error: string, done: true }`. Um agente externo que não conseguiu iniciar pode acrescentar `unavailableReason`, `remedy` e, para um agente desatualizado, `requiredVersion`, e `code` para uma abertura que falhou, que é o `external_agent_*` do runtime (o limite de sessões tem texto próprio no cliente; os demais mostram o tipo como texto simples ao lado da frase) (veja "A send refused while the session opens" em `docs/architecture/external-agents.md`); `error` continua sendo o texto em inglês de reserva.
 - **Perda de conexão** — O frontend detecta `reader.read()` retornando `done: true` sem um evento `done` anterior e exibe um erro de fallback.
 - **Abort** — A interrupção acionada pelo usuário envia `AbortSignal`; o servidor faz a limpeza via `AbortController` passado ao generator.
 

@@ -876,16 +876,37 @@ test), and the client says, in its own words, that the maximum number of externa
 in use and that the person can close one or try again. A client that does not know the code shows
 the English sentence. Like the other open refusals it is not stored, and the client keeps the
 refusal on screen instead of re-reading the transcript. Every other open failure keeps the generic
-sentence:
+sentence, and the stream's `error` chunk names its kind in `code` (the runtime's `external_agent_*`
+kind, forwarded only when it has that shape, `isExternalAgentKindCode`), which the client shows as
+plain text under the sentence for the person to quote to support. The review button's toast adds it
+in parentheses. A failure the runtime gave no kind, such as an open timeout, shows the sentence alone.
 
-| Open failure                                                                                                 | What the user sees today | Existing presentation |
-| ------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------- |
-| `external_agent_launch_failed`, `_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`, an open timeout | the generic sentence     | none                  |
+| Open failure                                                                                        | What the user sees                                                                         |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `external_agent_launch_failed` (also an executable that vanished between the resolve and the spawn) | the generic sentence and the kind; the failure is the launch itself, not a state to remedy |
+| `external_agent_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`                           | the generic sentence and the kind; nothing the product already presents describes them     |
+| an open timeout (no runtime kind)                                                                   | the generic sentence alone                                                                 |
 
-Two surfaces keep the generic wording: the review button's toast, because the review stream's thrown
-error drops the reason, and a resubmission after a dropped connection, which opens again inside the
-controller and records the runtime's own message on the turn. Both need a connection to be lost or a
-different button, and neither was changed here.
+#### The review toast and a resubmission
+
+The review stream turns its terminal `error` chunk into a thrown error so the repository panel does
+not report a click as a success. A chunk that names an unavailable reason is thrown as an
+`ExternalRefusalError` (an `ApiError` that also keeps the reason, the remedy and the build), and the
+toast composes one line from the selector's words: the reason, then the sign-in command or the name
+of the install or update action. A runtime at its session cap says its plain-words sentence. The
+client also stops arming the deferred transcript re-read for such a refusal, which would have
+replaced the card with rows that hold nothing of it.
+
+A resubmission after a dropped connection opens the session again (`reacquire`). Its refusal goes
+through the same mapping as a first open. The turn is stored with the unavailable reason, the remedy
+and, beside `version-unsupported`, the build (`ExternalTurnPart.unavailableReason`,
+`requiredVersion`), the live stream carries them on the `external_error` chunk, so a reload shows
+what the stream showed, and the footer renders them as the error card does. The error's `code` is
+the runtime's kind instead of the hub's `turn-start` label. A refusal the runtime made itself (an
+`UNAVAILABLE` carrying an `external_agent_*` kind) ends the submission after that one reopen; only
+an `UNAVAILABLE` without a kind, which is how the connection manager says nobody is connected,
+makes the loop wait for a connection. Older peers: an older client ignores the new fields and shows
+the code and message it always showed; a newer client against an older hub receives none.
 
 ## Vendor pinning and drift
 
