@@ -7,6 +7,7 @@
  */
 
 import { beforeEach, describe, expect, it, setSystemTime, spyOn } from 'bun:test';
+import { RemoteError } from '@mangostudio/protocol';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnPart, MessagePart } from '@mangostudio/shared/types';
 import { InsertQueryBuilder, sql } from 'kysely';
@@ -107,6 +108,10 @@ function harness(
     readonly terminalConnectFailure?: boolean;
     /** Runs when a resubmitting turn's reopened session is about to be handed back. */
     readonly beforeReacquireReturns?: () => void;
+    /** The runtime's answer to the session reopen a resubmitting turn makes; it never reopens. */
+    readonly reopenRefusal?: () => Error;
+    /** Told when a refusal shows the cached discovery answer is stale. */
+    readonly onDiscoveryStale?: (scope: unknown) => void;
   } = {}
 ) {
   const runtime = createReceiptKeepingRuntime();
@@ -139,16 +144,19 @@ function harness(
   });
   const dropping = options.dropAfterOpen ? droppingAfterOpen(baseSessions, runtime) : baseSessions;
   const hook = options.beforeReacquireReturns;
-  const sessions: ExternalSessionManager = hook
-    ? {
-        ...dropping,
-        async ensureSession(input) {
-          const handle = await dropping.ensureSession(input);
-          if (input.existingConnectionOnly) hook();
-          return handle;
-        },
-      }
-    : dropping;
+  const refuse = options.reopenRefusal;
+  const sessions: ExternalSessionManager =
+    hook || refuse
+      ? {
+          ...dropping,
+          async ensureSession(input) {
+            if (input.existingConnectionOnly && refuse) throw refuse();
+            const handle = await dropping.ensureSession(input);
+            if (input.existingConnectionOnly) hook?.();
+            return handle;
+          },
+        }
+      : dropping;
   const ids = [userMessageId, assistantMessageId];
   const submissions: Promise<SubmissionOutcome>[] = [];
   const controller = createExternalTurnController({
@@ -162,6 +170,7 @@ function harness(
     sleep: clock.sleep,
     random: () => 0.5,
     isTerminalConnectFailure: () => options.terminalConnectFailure === true,
+    ...(options.onDiscoveryStale ? { onDiscoveryStale: options.onDiscoveryStale } : {}),
   });
   /** The loop's own outcome, awaited instead of waiting for time to pass. */
   const submission = async (): Promise<SubmissionOutcome> => {
@@ -175,10 +184,14 @@ function harness(
 
 function start(
   controller: ReturnType<typeof harness>['controller'],
-  review = false
+  review = false,
+  observer?: NonNullable<
+    Parameters<ReturnType<typeof harness>['controller']['start']>[0]['observer']
+  >
 ): Promise<ExternalTurnResult> {
   return controller.start(
     {
+      ...(observer ? { observer } : {}),
       userId,
       chatId,
       prompt: 'refactor the parser',
@@ -461,6 +474,125 @@ describe('never-written submissions', () => {
     const result = await start(controller);
     expect(result.reason).toBe('vendor-error');
     expect(runtime.rpcCount()).toBe(0);
+  });
+});
+
+describe('a resubmission whose session reopen the runtime refuses', () => {
+  const REOPEN_FAILURES = {
+    'signed out': () =>
+      new RemoteError('UNAVAILABLE', 'expected a signed-in CLI', {
+        kind: 'external_agent_signed_out',
+      }),
+    'gone since the connection dropped': () =>
+      new RemoteError('INTERNAL', 'executable is not installed', {
+        kind: 'external_agent_not_installed',
+      }),
+  } as const;
+
+  async function refusedReopen(refusal: () => Error) {
+    const told: unknown[] = [];
+    const rig = harness({
+      dropAfterOpen: true,
+      reopenRefusal: refusal,
+      onDiscoveryStale: (scope) => told.push(scope),
+    });
+    const result = await start(rig.controller);
+    const { part } = await turnPart();
+    return { ...rig, result, part, told };
+  }
+
+  it('ends the turn once with the selector presentation stored on it, instead of the runtime message', async () => {
+    const { result, part, runtime, clock, told } = await refusedReopen(
+      REOPEN_FAILURES['signed out']
+    );
+
+    expect({
+      reason: result.reason,
+      stored: {
+        reason: part.unavailableReason,
+        remedy: part.remedy,
+        code: part.error?.code,
+      },
+      waits: clock.waits.length,
+      rpcs: runtime.rpcCount(),
+      told,
+    }).toEqual({
+      reason: 'vendor-error',
+      stored: {
+        reason: 'signed-out',
+        remedy: { kind: 'sign-in', command: 'codex login' },
+        code: 'turn-start',
+      },
+      waits: 0,
+      rpcs: 0,
+      told: [{ userId, environmentId: 'local', targetId: 'codex' }],
+    });
+    await runtime.close();
+  });
+
+  it('tells the live stream the same error and presentation the stored turn keeps', async () => {
+    const live: unknown[] = [];
+    const rig = harness({
+      dropAfterOpen: true,
+      reopenRefusal: REOPEN_FAILURES['signed out'],
+    });
+    await start(rig.controller, false, {
+      onEvent: (event, refusal) => live.push({ event, refusal }),
+    });
+    const { part } = await turnPart();
+
+    expect(live).toEqual([
+      {
+        event: { type: 'error', error: part.error },
+        refusal: { unavailableReason: part.unavailableReason, remedy: part.remedy },
+      },
+    ]);
+    await rig.runtime.close();
+  });
+
+  it('stores the install remedy for an agent removed since the connection dropped', async () => {
+    const { part, runtime, told } = await refusedReopen(
+      REOPEN_FAILURES['gone since the connection dropped']
+    );
+
+    expect({ reason: part.unavailableReason, remedy: part.remedy, told: told.length }).toEqual({
+      reason: 'not-installed',
+      remedy: { kind: 'install' },
+      told: 1,
+    });
+    await runtime.close();
+  });
+
+  it('stores the build an outdated agent needs, from the structured detail', async () => {
+    const { part, runtime } = await refusedReopen(
+      () =>
+        new RemoteError('UNAVAILABLE', 'codex 0.1 is older than the minimum', {
+          kind: 'external_agent_version_unsupported',
+          requiredVersion: '0.153.4',
+        })
+    );
+
+    expect({ reason: part.unavailableReason, version: part.requiredVersion }).toEqual({
+      reason: 'version-unsupported',
+      version: '0.153.4',
+    });
+    await runtime.close();
+  });
+
+  it('keeps no presentation for a refusal that names no state of the agent', async () => {
+    const { part, runtime, told } = await refusedReopen(
+      () =>
+        new RemoteError('UNAVAILABLE', 'the agent did not start', {
+          kind: 'external_agent_launch_failed',
+        })
+    );
+
+    expect({ reason: part.unavailableReason, remedy: part.remedy, told: told.length }).toEqual({
+      reason: undefined,
+      remedy: undefined,
+      told: 0,
+    });
+    await runtime.close();
   });
 });
 

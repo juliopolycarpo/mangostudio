@@ -13,8 +13,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { openRefusalFor } from '@mangostudio/api/internal/modules/external-agents/domain/external-open-refusal';
 import { turnErrorRemedyFor } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-error-remedy';
 import { ExternalTurnTranscript } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
+import { RemoteError } from '@mangostudio/protocol';
 import {
   type ExternalAgentEvent,
   type ExternalTurnTerminalReason,
@@ -557,6 +559,83 @@ describe('external turn: live stream vs reloaded transcript', () => {
       }
       expect(comparable(streamedParts(SIGNED_OUT))).toEqual(comparable(storedParts(SIGNED_OUT)));
     });
+  });
+
+  /**
+   * A resubmission whose session reopen the runtime refused for a state of the agent: the hub
+   * stores the selector's reason, remedy and build beside its error and tells the live stream the
+   * same, so the footer reads alike before and after a reload.
+   */
+  describe('a reopen the runtime refused for a state of the agent', () => {
+    const REFUSALS = {
+      'signed out': new RemoteError('UNAVAILABLE', 'signed out', {
+        kind: 'external_agent_signed_out',
+      }),
+      'not installed': new RemoteError('INTERNAL', 'gone', {
+        kind: 'external_agent_not_installed',
+      }),
+      outdated: new RemoteError('UNAVAILABLE', 'too old', {
+        kind: 'external_agent_version_unsupported',
+        requiredVersion: '0.153.4',
+      }),
+    } as const;
+    const START_ERROR = { code: 'turn-start', message: 'raw text' };
+
+    function stored(refusal: ReturnType<typeof openRefusalFor>): MessagePart[] {
+      const transcript = new ExternalTurnTranscript({
+        targetId: 'codex',
+        sessionId: 'hub-session-1',
+        startedAt: 0,
+      });
+      transcript.recordError(START_ERROR, refusal);
+      transcript.finalize('vendor-error', 0);
+      return transcript.parts;
+    }
+
+    function streamed(refusal: ReturnType<typeof openRefusalFor>): MessagePart[] {
+      const chunks: StreamChunk[] = [
+        externalSessionStartedChunk({
+          sessionId: 'hub-session-1',
+          targetId: 'codex',
+          resumed: false,
+        }),
+      ];
+      const chunk = externalAgentEventToStreamChunk(
+        { type: 'error', error: START_ERROR },
+        undefined,
+        refusal?.remedy,
+        refusal
+      );
+      if (chunk) chunks.push(chunk);
+      chunks.push(externalTurnCompletedChunk('vendor-error'), {
+        type: 'done',
+        done: true,
+        messageId: 'ai-1',
+      });
+      return chunks.reduce(
+        (current, next) => reduceTextGenerationStreamChunk(current, next, REDUCER_OPTIONS),
+        createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+      ).parts;
+    }
+
+    for (const [label, error] of Object.entries(REFUSALS)) {
+      it(`shows the same reason, remedy and build live and after a reload when ${label}`, () => {
+        const refusal = openRefusalFor('codex', error);
+        const pick = (parts: MessagePart[]) => {
+          const turn = parts.find((part) => part.type === 'external_turn');
+          return {
+            error: turn?.error,
+            reason: turn?.unavailableReason,
+            remedy: turn?.remedy,
+            version: turn?.requiredVersion,
+          };
+        };
+
+        expect(pick(streamed(refusal))).toEqual(pick(stored(refusal)));
+        expect(pick(stored(refusal)).reason, 'the stored turn names the reason').toBeDefined();
+        expect(comparable(streamed(refusal))).toEqual(comparable(stored(refusal)));
+      });
+    }
   });
 
   /**

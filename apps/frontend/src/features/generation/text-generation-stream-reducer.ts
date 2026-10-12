@@ -257,7 +257,10 @@ export function reduceTextGenerationStreamChunk(
     case 'external_notice':
       return reduceExternalNotice(nextState, chunk);
     case 'external_error':
-      return reduceExternalError(nextState, chunk.error, chunk.remedy);
+      return reduceExternalError(nextState, chunk.error, chunk.remedy, {
+        ...(chunk.unavailableReason ? { unavailableReason: chunk.unavailableReason } : {}),
+        ...(chunk.requiredVersion ? { requiredVersion: chunk.requiredVersion } : {}),
+      });
     case 'external_turn_completed':
       return reduceExternalTurnCompleted(nextState, chunk.reason);
     case 'done':
@@ -976,13 +979,15 @@ function reduceExternalNotice(
 function reduceExternalError(
   state: TextGenerationStreamState,
   error: ExternalAgentError,
-  remedy?: ExternalAgentRemedy
+  remedy?: ExternalAgentRemedy,
+  refusal: Pick<ExternalTurnPart, 'unavailableReason' | 'requiredVersion'> = {}
 ) {
-  // `ExternalTurnTranscript.recordError` keeps the same pair, so a reload shows what the stream showed.
+  // `ExternalTurnTranscript.recordError` keeps the same fields, so a reload shows what the stream showed.
   const parts = updateExternalTurn(state.parts, (part) => ({
     ...part,
     error,
     ...(remedy ? { remedy } : {}),
+    ...refusal,
   }));
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }

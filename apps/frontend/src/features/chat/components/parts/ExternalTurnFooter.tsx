@@ -1,4 +1,6 @@
 import type { ExternalTurnPart } from '@mangostudio/shared/types';
+import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
+import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatTokensCompact } from '@/lib/format-tokens';
@@ -41,10 +43,13 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
 
   if (fields.length === 0 && !terminalNotice && !part.error) return null;
 
-  // A turn the agent refused because its account is signed out is shown the way the selector
-  // shows a signed-out agent: the same words, and the vendor's sign-in command to run and copy.
-  // The command is the hub's (`remedy.command`), never text out of the vendor's error.
+  // An error the hub can present is shown the way the selector shows the same state: its words,
+  // the sign-in command to copy, or the install and update link. Two sources name it: the reason
+  // the hub stored for a reopen the runtime refused, and a turn the agent refused because its
+  // account is signed out (a remedy with no reason). The command is the hub's, never text out of
+  // the vendor's error, and nothing here runs it.
   const signIn = part.remedy?.kind === 'sign-in' ? part.remedy : undefined;
+  const presentedReason = part.unavailableReason ?? (signIn ? 'signed-out' : undefined);
 
   return (
     <div className="mt-2 max-w-2xl space-y-1.5 pl-4">
@@ -60,10 +65,11 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
           ))}
         </div>
       ) : null}
-      {part.error && signIn ? (
+      {part.error && presentedReason ? (
         <div className="space-y-1.5 rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">
-          <p>{t.externalAgents.unavailable['signed-out']}</p>
-          {signIn.command ? <SignInCommand command={signIn.command} /> : null}
+          <p>{externalUnavailableText(presentedReason, t, part.requiredVersion)}</p>
+          {signIn?.command ? <SignInCommand command={signIn.command} /> : null}
+          {part.remedy ? <ExternalRemedyLink remedy={part.remedy} /> : null}
         </div>
       ) : part.error ? (
         <p className="rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">

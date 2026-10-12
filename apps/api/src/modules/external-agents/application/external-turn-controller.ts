@@ -71,7 +71,7 @@ import {
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
 import { isExpectedTailOfEndedTurn } from '../domain/external-event-sequencer';
-import { openRefusalFor } from '../domain/external-open-refusal';
+import { type OpenRefusalPresentation, openRefusalFor } from '../domain/external-open-refusal';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import {
   classifySubmissionFailure,
@@ -191,7 +191,11 @@ interface ExternalTurnObserver {
     readonly userMessageId: string;
     readonly assistantMessageId: string;
   }): void;
-  onEvent?(event: ExternalAgentEvent): void;
+  /**
+   * `refusal` accompanies an `error` the hub synthesised for a session reopen the runtime refused
+   * for a state of the agent; the vendor's own events never carry one.
+   */
+  onEvent?(event: ExternalAgentEvent, refusal?: OpenRefusalPresentation): void;
   /**
    * Reported once per steer, with the resolved outcome only — never the
    * optimistic intermediate state the durable record briefly holds while the
@@ -950,7 +954,21 @@ export function createExternalTurnController(
         if (!handle.isLive()) terminate('runtime-disconnected');
       };
       const failStart = (error: unknown, code: string): void => {
-        transcript.recordError(vendorErrorFrom(error, code));
+        // A reopen after a dropped connection can find what a first open finds: the agent signed
+        // out, gone, outdated or denied. Present it as the first open does, and tell the cache.
+        const refusal = openRefusalFor(targetId, error);
+        const stored = vendorErrorFrom(error, code);
+        transcript.recordError(stored, refusal);
+        // The live stream gets the same error the stored turn keeps, so a reload shows what the
+        // person watched. Before this a refused start was visible only after a reload.
+        input.observer?.onEvent?.({ type: 'error', error: stored }, refusal);
+        if (refusal) {
+          notifyDiscoveryStale({
+            userId: input.userId,
+            environmentId: context.chat.environmentId,
+            targetId,
+          });
+        }
         const reason = terminalReasonForCallFailure(error);
         terminate(reason);
         // The runtime no longer has this session, but the manager still caches

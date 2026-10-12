@@ -266,8 +266,15 @@ export interface ExternalTurnPart {
   /** Accumulated as it arrives: the vendor reports usage before it reports completion. */
   usage?: ExternalUsage;
   error?: ExternalAgentError;
-  /** What the person can do about `error`, when the hub knows; today only a sign-in command. */
+  /** What the person can do about `error`, when the hub knows: a sign-in command, an install or update. */
   remedy?: ExternalAgentRemedy;
+  /**
+   * Why the agent could not be reached, when a session reopen for a resubmission was refused for a
+   * state of the agent. The selector's own reason, so the footer says it in the client's words.
+   */
+  unavailableReason?: ExternalAgentUnavailableReason;
+  /** The build that would clear `version-unsupported`; present only beside that reason. */
+  requiredVersion?: string;
 }
 
 /**
