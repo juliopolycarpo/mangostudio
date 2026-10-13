@@ -926,12 +926,7 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
         sdk::Error::UnsupportedTransport { .. }
         | sdk::Error::HostConfiguration { .. }
         | sdk::Error::LimitExceeded { .. } => tool_argument(message),
-        sdk::Error::VersionGate { minimum, .. } => external(
-            codes::UNAVAILABLE,
-            message,
-            "external_agent_version_unsupported",
-        )
-        .with_detail("requiredVersion", minimum.clone()),
+        sdk::Error::VersionGate { minimum, found } => version_gate_error(message, minimum, found),
         sdk::Error::AuthRequired { .. } => {
             external(codes::UNAVAILABLE, message, "external_agent_signed_out")
         }
@@ -961,6 +956,55 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
 /// A session still running a turn: transient, so retryable.
 fn busy(message: String) -> RemoteError {
     external(codes::INTERNAL, message, "external_agent_busy").with_detail("retryable", true)
+}
+
+/// Longest version the refusal will echo: a version token, never a banner.
+const MAX_REPORTED_VERSION_CHARS: usize = 64;
+
+/// The version the CLI reported, when it is safe to put in a message and a detail.
+///
+/// The SDK keeps `found` out of its own message because a harness that cannot parse a version
+/// falls back to the line the CLI printed. A parsed version is a short token of letters, digits
+/// and `.`, `-`, `+` or `_` with at least one digit (`0.150.0`, `2.1.296`, `2026.09.10-fd3934a`);
+/// anything else (spaces, a banner, control characters, an empty or overlong value) is not
+/// echoed, and the refusal keeps the SDK's own wording.
+///
+/// # Example
+///
+/// ```ignore
+/// assert_eq!(reportable_version(" 0.150.0\n").as_deref(), Some("0.150.0"));
+/// assert_eq!(reportable_version("codex-cli 0.150.0 (banner)"), None);
+/// ```
+fn reportable_version(found: &str) -> Option<String> {
+    let token = found.trim();
+    let shaped = !token.is_empty()
+        && token.chars().count() <= MAX_REPORTED_VERSION_CHARS
+        && token.chars().any(|c| c.is_ascii_digit())
+        && token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_'));
+    shaped.then(|| token.to_owned())
+}
+
+/// An outdated agent: the hub reads `requiredVersion` (and, for support, `foundVersion`) from the
+/// structured details and never from the message, which names both builds when the found one is
+/// safe to show.
+fn version_gate_error(sdk_message: String, minimum: &str, found: &str) -> RemoteError {
+    let reported = reportable_version(found);
+    let message = match &reported {
+        Some(version) => format!("expected version {minimum} or newer, received {version}"),
+        None => sdk_message,
+    };
+    let remote = external(
+        codes::UNAVAILABLE,
+        message,
+        "external_agent_version_unsupported",
+    )
+    .with_detail("requiredVersion", minimum.to_owned());
+    match reported {
+        Some(version) => remote.with_detail("foundVersion", version),
+        None => remote,
+    }
 }
 
 fn external(code: &str, message: String, kind: &str) -> RemoteError {

@@ -97,6 +97,8 @@ enum OpenBehaviour {
     FailNeedingCleanup(Arc<CountingControl>),
     /// Refuses the open the way a signed-out CLI does (`Error::AuthRequired`).
     SignedOut,
+    /// Refuses the open the way an outdated CLI does (`Error::VersionGate`), with this found value.
+    VersionTooOld(&'static str),
     /// Opens a session whose every turn asks one single-choice question.
     AskingOneChoice,
     /// Opens a session whose turn streams text past the persisted budget.
@@ -197,6 +199,12 @@ impl Harness for CountingHarness {
             OpenBehaviour::SignedOut => {
                 return Err(SdkError::AuthRequired {
                     login_hint: String::from("vendor login"),
+                });
+            }
+            OpenBehaviour::VersionTooOld(found) => {
+                return Err(SdkError::VersionGate {
+                    found: (*found).to_owned(),
+                    minimum: String::from("0.154.0"),
                 });
             }
             OpenBehaviour::FailNeedingCleanup(control) => {
@@ -1621,6 +1629,53 @@ async fn a_signed_out_open_is_refused_with_the_signed_out_kind_for_every_target(
                 0
             ),
             "expected (code, kind, opens, live sessions) for a signed-out {target:?} | received {received:?}"
+        );
+    }
+}
+
+/// An open the harness refuses with `Error::VersionGate` reaches the hub with both builds named
+/// in the message and in the structured details, leaves no session behind and is not retried.
+#[tokio::test]
+async fn an_outdated_open_names_the_found_and_required_versions_for_every_target() {
+    for target in TargetId::ALL {
+        let rig = rig(RigOptions {
+            open: OpenBehaviour::VersionTooOld("0.150.0"),
+            ..RigOptions::default()
+        })
+        .await;
+        let error = rig
+            .open_target(target, "one")
+            .await
+            .expect_err("an outdated open must fail");
+        let detail = |key: &str| {
+            error
+                .details
+                .as_ref()
+                .and_then(|details| details.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        let received = (
+            error.code.clone(),
+            error.message.clone(),
+            detail("kind"),
+            detail("requiredVersion"),
+            detail("foundVersion"),
+            rig.log.opens.load(Ordering::SeqCst),
+            rig.live_count(),
+        );
+        assert_eq!(
+            received,
+            (
+                "UNAVAILABLE".to_owned(),
+                "expected version 0.154.0 or newer, received 0.150.0".to_owned(),
+                Some("external_agent_version_unsupported".to_owned()),
+                Some("0.154.0".to_owned()),
+                Some("0.150.0".to_owned()),
+                1,
+                0
+            ),
+            "expected (code, message, kind, requiredVersion, foundVersion, opens, live) for an outdated {target:?} | received {received:?}"
         );
     }
 }
