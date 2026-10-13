@@ -544,6 +544,18 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
           kind: refused instanceof RemoteError ? refused.details?.kind : String(refused),
           refusals: stalePass.recording.refusals.length,
         }).toEqual({ kind: EXPECTED_KIND[refusal.reason], refusals: 1 });
+        if (refusal.reason === 'version-unsupported') {
+          // Both builds are named from the SDK's typed fields: the one found and the floor.
+          const found = await outdatedCodexVersion();
+          expect({
+            message: refused instanceof Error ? refused.message : String(refused),
+            foundVersion:
+              refused instanceof RemoteError ? refused.details?.foundVersion : undefined,
+          }).toEqual({
+            message: `expected version ${live.requiredVersion} or newer, received ${found}`,
+            foundVersion: found,
+          });
+        }
         expect(frames.find((frame) => frame.type === 'error')).toEqual({
           type: 'error',
           error: GENERIC_OPEN_FAILURE,

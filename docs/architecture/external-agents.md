@@ -858,7 +858,14 @@ gains the optional `unavailableReason`, `remedy` and, beside `version-unsupporte
 into the environments surface that owns the recipes, the same link the selector shows. The hub takes
 `requiredVersion` from the runtime's structured detail of the same name (the SDK's own minimum, the
 value discovery reports on the descriptor), trimmed and cut to 64 characters; when it is absent the
-client says "a newer version". Nothing in the runtime's message is parsed or shown. The missing
+client says "a newer version". Nothing in the runtime's message is parsed or shown. The runtime's
+own message for this kind names both builds ("expected version 0.154.0 or newer, received 0.150.0")
+and the found one also travels as the optional `foundVersion` detail, for diagnostics only: the SDK
+keeps the found value out of its sentence because it can be a line the CLI printed, so the runtime
+echoes it only when it has the shape of a version token (letters, digits and `.`, `-`, `+`, `_`, up
+to 64 characters, at least one digit) and otherwise keeps the SDK's sentence without the detail. The
+chunk and the stored turn do not carry it; the selector already shows the found version from the
+descriptor. The missing
 executable has its own kind because the runtime's `tool_argument` is shared with workspace and
 configuration refusals, which keep it and keep the generic sentence. Its code stays `INTERNAL`,
 so the hub's wait for a lost connection, which keys on `UNAVAILABLE`, does not take it for one. The open is not retried, and the

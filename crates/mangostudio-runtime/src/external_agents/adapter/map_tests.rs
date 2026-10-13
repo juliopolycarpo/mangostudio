@@ -1801,6 +1801,59 @@ fn a_version_gate_carries_the_sdks_minimum_as_a_structured_detail() {
     );
 }
 
+/// The refusal names both builds when the found one is a version token, from the typed fields and
+/// not from the SDK's redacted sentence.
+#[test]
+fn a_version_gate_names_the_found_version_in_its_message_and_details() {
+    let remote = remote_error(&sdk::Error::VersionGate {
+        found: String::from("0.150.0"),
+        minimum: String::from("0.154.0"),
+    });
+    assert_eq!(
+        (
+            remote.message.clone(),
+            details(&remote).get("foundVersion").cloned()
+        ),
+        (
+            String::from("expected version 0.154.0 or newer, received 0.150.0"),
+            Some(serde_json::json!("0.150.0"))
+        ),
+        "expected (message, foundVersion) | received {:?}",
+        (&remote.message, &remote.details)
+    );
+}
+
+/// What the CLI printed when no version could be parsed is vendor text: it is never echoed, and
+/// the SDK's own redacted sentence stays.
+#[test]
+fn a_version_gate_never_echoes_a_found_value_that_is_not_a_version_token() {
+    let hostile = [
+        "claude-code/9.9.9 (banner-secret)",
+        "token=sk-live-0123456789",
+        "",
+        "   ",
+        "no digits here",
+        "1.0.0\nsecond line",
+        &"9".repeat(65),
+    ];
+    for found in hostile {
+        let remote = remote_error(&sdk::Error::VersionGate {
+            found: found.to_owned(),
+            minimum: String::from("2.1.211"),
+        });
+        let rendered = format!("{} {}", remote.message, details(&remote));
+        assert!(
+            !rendered.contains("banner-secret")
+                && !rendered.contains("sk-live")
+                && details(&remote).get("foundVersion").is_none()
+                && remote.message.starts_with(
+                    "expected version 2.1.211 or newer, received a vendor-reported version"
+                ),
+            "expected the SDK sentence and no foundVersion for {found:?} | received {rendered}"
+        );
+    }
+}
+
 #[test]
 fn vendor_errors_never_copy_the_vendor_message() {
     let secret = "sk-live-0123456789 token=abc";
