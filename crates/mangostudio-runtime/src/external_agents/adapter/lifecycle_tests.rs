@@ -17,17 +17,17 @@ use crate::external_agents::port::{AgentBackend, CloseCause, TurnRequest};
 use crate::external_agents::wire;
 
 #[derive(Default)]
-struct StopLog {
-    kills: Mutex<Vec<CancelReason>>,
+pub(super) struct StopLog {
+    pub(super) kills: Mutex<Vec<CancelReason>>,
     failures: AtomicUsize,
-    controls: Mutex<Vec<Arc<ObservedControl>>>,
+    pub(super) controls: Mutex<Vec<Arc<ObservedControl>>>,
 }
-struct ObservedLauncher {
+pub(super) struct ObservedLauncher {
     fake: FakeLauncher,
     log: Arc<StopLog>,
     missing_stdin: bool,
 }
-struct ObservedControl {
+pub(super) struct ObservedControl {
     inner: Arc<dyn ProcessControl>,
     log: std::sync::Weak<StopLog>,
 }
@@ -85,7 +85,7 @@ impl ProcessLauncher for ObservedLauncher {
         Ok(process)
     }
 }
-fn observed(
+pub(super) fn observed(
     fake: FakeLauncher,
     missing_stdin: bool,
     failures: usize,

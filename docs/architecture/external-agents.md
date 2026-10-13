@@ -959,7 +959,7 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.6.1). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.7.0). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
@@ -991,6 +991,24 @@ SDK cleanup handle while bounded kill/wait runs, reports an unconfirmed cleanup 
 never hands a process control to product services. The guarded launcher still owns an unconfirmed
 process tree and reaps it on drop or runtime shutdown. Product scratch cleanup remains the
 supervisor's obligation.
+
+One rule reconciles a leftover child on all three harnesses: `failure::settle` branches on the
+SDK error's `cleanup_control()`, never on the target. Since SDK 0.7.0 a Claude `cancel`, `close` or
+`start_turn` whose stop cannot prove the child gone returns `Error::CleanupRequired` as Codex and
+ACP do, with the stage that failed (an `Error::Timeout` for one that ran out, or the host control's
+own error) as its `cause()`. Before, Claude returned the bare timeout or control error, so no
+handle reached the adapter and the child was left to the guarded launcher's drop. For `cancel` and
+`start_turn` the wire code still follows the cause (`TIMEOUT` for a stage that ran out), and
+`cleanupRequired` stays on the error only while the adapter's own kill and wait have not settled; a
+failed `close` is reported by the supervisor as `INTERNAL` with `cleanup failed` and the cause's
+message, as for Codex. `claude_stop_tests.rs` pins the Claude rows against the Codex ones. A
+runtime `close` is the only caller of the SDK's `close` per session (`close_live` claims it once),
+so `Deadlines::close_after_pending_launch`, the bound of a later Claude `close` over a late child's
+stop, is not a term of the close bound. The late child's failed stop reaches the `start_turn` that
+owns the launch; if the hub session ends first, that handler is dropped after the protocol
+session's handler grace and the SDK's drop path reaps the child instead (once, through its
+control; a kill the control refuses is left to the guarded launcher, which reaps on drop or
+shutdown). `abandoned_start_tests.rs` proves it over a launcher held at the launch.
 
 A definitely unsubmitted turn or review with a deterministic input/configuration refusal ends that
 message once as `external_agent_turn_refused`. Its receipt is forgotten so a corrected request can
@@ -1047,7 +1065,10 @@ These product facts come from SDK operations inside the adapter:
   the guides' tables, and 9 s for every target under 0.5.0. A close that exceeds its bound is
   reported as failed and frees the slot while the SDK may still be reaping, so the bound has to
   cover the documented path. The cleanup bound stays because the adapter settles a failed
-  close's cleanup handle inside the same timed span.
+  close's cleanup handle inside the same timed span, and the adapter spends only half of it
+  (`failure::close_settle_bound`) so the supervisor's timer always ends strictly after the
+  adapter's: a close that used the whole SDK budget and then met a control that never answers
+  reports the stage and the unconfirmed cleanup, never the timer's "did not finish".
 - **What the hub waits for.** The runtime's close can take longer than the hub's 30 s
   `CALL_TIMEOUT_MS` (up to 38 s), so the hub does not tie its own wait to it. `teardown` drops the
   hub's record and tells the turn before it asks, and `closeRemote` waits 10 s (`CLOSE_WAIT_MS`), or
@@ -1269,6 +1290,10 @@ protocols to the SDK and are not repeated here.
 | steer: forwards, passes a rejection through, answers not-supported, refuses a closed session                       | `steering_is_answered_not_thrown_when_it_cannot_land`, `a_duplicate_steer_waiting_on_one_that_fails_in_transit_receives_its_failure`, `steering_a_session_that_is_not_open_is_refused_before_the_vendor`, `a_steer_naming_another_turn_is_refused_without_reaching_the_vendor`, `an_unstructured_steer_failure_is_returned_as_its_mapped_error` | covered                                                               |
 | bounds a vendor close by the SDK's own worst case for its harness, not by one number                               | `default_limits_give_each_target_the_sdks_worst_case_close`, `every_target_gets_exactly_the_sdks_worst_case_close_for_the_same_limits`, `the_bound_moves_with_the_limits_it_is_derived_from`, `a_close_inside_the_backends_budget_plus_cleanup_is_not_reported_as_failed`                                                                       | covered                                                               |
 | reports a close past its bound with the bound named; saturates an unbounded budget                                 | `a_close_past_the_backends_budget_plus_cleanup_names_the_bound_it_exceeded`, `an_unbounded_backend_budget_saturates_the_close_bound_instead_of_panicking`                                                                                                                                                                                       | covered                                                               |
+| reconciles a Claude stop that could not end its child through the control, as for Codex                            | `a_claude_close_whose_kill_is_refused_is_killed_and_reaped_through_the_control`, `claude_reports_a_refused_close_the_way_codex_does`, `a_claude_stop_that_runs_out_of_time_keeps_its_timeout_cause_and_is_reconciled`, `a_supervisor_close_of_a_claude_session_reconciles_the_child_as_for_codex`                                               | covered                                                               |
+| keeps compared vendor facts intact under the SDK's redaction; a later Claude close fits the bound                  | `the_vendor_facts_the_runtime_compares_pass_the_sdks_redaction_unchanged`, `a_later_claude_close_over_a_late_childs_stop_fits_inside_the_close_bound`                                                                                                                                                                                           | covered                                                               |
+| ends the close timer strictly after the adapter's settle of a failed close                                         | `the_adapters_close_settle_ends_strictly_before_the_supervisors_cleanup_allowance`, `a_failed_close_that_used_the_whole_sdk_budget_reports_its_cleanup_not_the_supervisors_timer`                                                                                                                                                               | covered                                                               |
+| reaps the late child of a start the hub's teardown dropped                                                         | `a_start_dropped_by_hub_teardown_has_its_late_child_reaped_and_leaves_nothing_registered`                                                                                                                                                                                                                                                       | covered                                                               |
 | waits the hub a bounded time for the runtime close; a close it gave up on neither fails the reap nor stays counted | hub: `waits a bounded, shorter time for the runtime close than the runtime may take, and a shorter one still at shutdown`, `does not fail the reap, or keep the session counted, when the runtime close outlasts the hub wait`, `isUnconfirmedClose`                                                                                            | covered                                                               |
 | retries an open refused at the runtime's session cap, and nothing else                                             | hub: `retries the refusal until the slot frees, then opens`, `gives up with the runtime's own refusal once the wait has passed`, `does not retry any other refusal`; runtime: `the_session_cap_counts_opening_sessions`, `the_hub_retry_window_is_the_longest_runtime_close_bound_plus_its_margins`                                             | covered                                                               |
 | keeps a slow revocation close off the watcher; removes the scratch leaf of an abandoned close                      | `a_slow_revocation_close_does_not_hold_up_hub_shutdown`, `an_abandoned_close_still_removes_the_scratch_leaf`                                                                                                                                                                                                                                    | covered                                                               |

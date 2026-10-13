@@ -78,6 +78,24 @@ pub(super) fn facts(error: Error) -> AgentFailure {
     }
 }
 
+/// How long the adapter's own kill and wait may take after a failed `close`, out of the
+/// supervisor's `cleanup_timeout`.
+///
+/// The supervisor bounds a whole `close` at the SDK's worst case plus `cleanup_timeout`. A failed
+/// `close` that used all of that worst case then spends this long settling its cleanup handle. If
+/// this were the whole `cleanup_timeout`, both timers would end at the same instant and the
+/// scheduler would pick which failure the caller sees: the adapter's, with the cause, or the
+/// supervisor's "did not finish". Half leaves the other half as a strict margin for the scheduling
+/// drift between the SDK's last timer and the start of the settle, so the adapter's failure always
+/// wins.
+///
+/// ```ignore
+/// let settled = settled(session.close(reason).await, close_settle_bound(cleanup_timeout)).await;
+/// ```
+pub(super) fn close_settle_bound(cleanup_timeout: Duration) -> Duration {
+    cleanup_timeout / 2
+}
+
 /// Keeps the SDK error and its process lease until kill/wait settles or the bound expires.
 /// The guarded launcher still owns an unconfirmed tree and reaps it on drop/shutdown.
 pub(super) async fn settle(error: Error, timeout: Duration) -> AgentFailure {

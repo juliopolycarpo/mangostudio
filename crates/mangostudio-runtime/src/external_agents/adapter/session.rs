@@ -154,7 +154,11 @@ impl AgentSession for SessionAdapter {
             CloseCause::ConsentRevoked => sdk::CloseReason::ConsentRevoked,
             CloseCause::Shutdown => sdk::CloseReason::Shutdown,
         };
-        self.result(self.inner.close(reason).await).await
+        failure::settled(
+            self.inner.close(reason).await,
+            failure::close_settle_bound(self.cleanup_timeout),
+        )
+        .await
     }
     async fn refresh_account_usage(&self) -> AgentResult<wire::RefreshAccountUsageResult> {
         self.result(self.inner.refresh_account_usage().await)
