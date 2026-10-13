@@ -30,6 +30,24 @@ class SlowSink extends Writable {
   }
 }
 
+/** A sink that needs a few milliseconds per chunk, as a CI stdout pipe under load does. */
+class DelayedSink extends Writable {
+  private readonly chunks: Buffer[] = [];
+
+  constructor(private readonly delayMs: number) {
+    super({ highWaterMark: 1 });
+  }
+
+  override _write(chunk: Buffer, _encoding: BufferEncoding, done: () => void): void {
+    this.chunks.push(Buffer.from(chunk));
+    setTimeout(done, this.delayMs);
+  }
+
+  text(): string {
+    return Buffer.concat(this.chunks).toString();
+  }
+}
+
 /** A plain capturing sink, for tests that only need to read back what was written. */
 class CaptureSink extends Writable {
   private readonly chunks: Buffer[] = [];
@@ -174,6 +192,33 @@ describe('runTestsWithWatchdog', () => {
     expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
     const expected = `${lines.join('\n')}\n`;
     expect(sink.text()).toBe(expected);
+    expect(await Bun.file(join(dir, 'run.log')).text()).toBe(expected);
+  });
+
+  // `exit` can fire while the child's last output is still in the pipe, or queued behind a sink that
+  // takes a moment per chunk. A runner that returns on `exit` hands the caller (and the job log, and
+  // the failure artifact) a truncated tail. The sink here is slower than the child, so the child is
+  // long gone before the last chunk is written.
+  it('delivers the whole output of a child that exits before its sink has taken it', async () => {
+    const dir = await makeTemp();
+    const sink = new DelayedSink(2);
+    const lines = Array.from({ length: 300 }, (_, index) => `line-${index}`);
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: ['bun', '-e', 'for (let i = 0; i < 300; i++) console.log("line-" + i);'],
+        timeoutSeconds: 30,
+        stdout: sink,
+      })
+    );
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
+    const expected = `${lines.join('\n')}\n`;
+    const forwarded = sink.text();
+    expect(
+      forwarded.length,
+      `expected all ${expected.length} bytes forwarded when the runner returned | received ${forwarded.length}`
+    ).toBe(expected.length);
+    expect(forwarded).toBe(expected);
     expect(await Bun.file(join(dir, 'run.log')).text()).toBe(expected);
   });
 
