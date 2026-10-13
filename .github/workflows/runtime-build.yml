@@ -33,12 +33,16 @@ on:
         description: Artifact name prefix; each platform uploads `<prefix>-<platform-id>`.
         type: string
         required: true
+      profile:
+        description: Artifact profile, shipping (fat LTO/1 unit) or light (thin LTO/16 units, PR only).
+        type: string
+        default: shipping
       cache:
         description: >-
-          Restore dependency build state from the cargo cache main writes.
-          Release builds leave it off, and main only looks the entry up, so a
-          published binary (a release, or the canary built from main) never
-          starts from restored state.
+          Restore matching-profile dependency state from the cargo cache main
+          writes. Release builds leave it off, and main only looks the entry
+          up, so a published binary never starts from restored state. Light
+          caches have no seed writer until measured cache admission is proven.
         type: boolean
         default: false
 
@@ -50,11 +54,39 @@ jobs:
     name: Runtime ${{ matrix.platform }}
     runs-on: ${{ startsWith(matrix.platform, 'linux-') && 'ubuntu-latest' || startsWith(matrix.platform, 'darwin-') && 'macos-latest' || 'windows-latest' }}
     timeout-minutes: 30
+    # Job-level CARGO overrides isolate rust-cache's environment hash before
+    # restore and build. A light miss cannot fall back to the shipping key.
+    # Shipping has no overrides, preserving its existing cache environment.
+    env: ${{ inputs.profile == 'light' && fromJSON('{"CARGO_PROFILE_RELEASE_LTO":"thin","CARGO_PROFILE_RELEASE_CODEGEN_UNITS":"16"}') || fromJSON('{}') }}
     strategy:
       fail-fast: false
       matrix:
         platform: ${{ fromJSON(inputs.platforms) }}
     steps:
+      - name: Validate runtime artifact profile
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BUILD_PROFILE: ${{ inputs.profile }}
+        # Before checkout, Cargo setup, or cache access. Every non-PR artifact
+        # remains shipping; future cache-only seeds need a separate path.
+        run: |
+          case "$BUILD_PROFILE" in
+            shipping) ;;
+            light)
+              if [ "$EVENT_NAME" != "pull_request" ]; then
+                echo 'expected profile: shipping | received: light' >&2
+                exit 1
+              fi
+              ;;
+            *)
+              printf 'expected profile: shipping or light | received: %s\n' "$BUILD_PROFILE" >&2
+              exit 1
+              ;;
+          esac
+          printf 'runtime profile: %s (lto=%s, codegen-units=%s)\n' \
+            "$BUILD_PROFILE" "${CARGO_PROFILE_RELEASE_LTO:-fat}" "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-1}"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -71,10 +103,12 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/setup-zigbuild
 
-      # One cache per platform, shared by every caller that opts in. Pull
-      # requests restore main's entry but never save one. Main never restores,
-      # because canary publishes its distribution: `lookup-only` only checks for
-      # the entry, and a miss saves this clean build for pull requests to use.
+      # One cache per platform and profile, shared by callers that opt in.
+      # Pull requests restore only their profile but never save one. Light
+      # starts cold until its separate cache-only seeds are admitted.
+      # Main never restores because canary publishes its distribution:
+      # `lookup-only` checks for the entry, and a miss may save this clean
+      # shipping generation. Light PRs never restore that shipping entry.
       # prefix-key hashes the root manifest because rust-cache's own key
       # ignores [profile.*].
       - name: Restore the cargo cache

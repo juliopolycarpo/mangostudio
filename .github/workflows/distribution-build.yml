@@ -23,6 +23,10 @@ on:
         description: Let the runtime build restore the cargo cache; see runtime-build.yml.
         type: boolean
         default: false
+      runtime_profile:
+        description: Runtime artifact profile; light is accepted only on pull_request.
+        type: string
+        default: shipping
     outputs:
       version:
         description: Version embedded into the distribution.
@@ -59,6 +63,7 @@ jobs:
       version: ${{ inputs.version }}
       source_sha: ${{ inputs.source_sha }}
       artifact_prefix: runtime-${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
       cache: ${{ inputs.cache }}
 
   build:
