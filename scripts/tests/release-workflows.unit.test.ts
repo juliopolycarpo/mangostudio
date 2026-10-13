@@ -436,12 +436,11 @@ describe('release workflow binary gate', () => {
     expect(readText('.github/workflows/release.yml'), 'release.yml cargo cache').not.toMatch(
       /\n\s+cache:/
     );
-    // The dry run publishes nothing, so pull requests may restore; its weekly
-    // schedule and manual runs keep proving a clean build.
+    // PRs reuse distribution bytes; scheduled/manual producers stay clean.
     expect(
       extractJobBlock(readText('.github/workflows/release-dry-run.yml'), 'runtime'),
       'release-dry-run.yml runtime job cargo cache'
-    ).toContain('cache: $' + "{{ github.event_name == 'pull_request' }}");
+    ).toContain('cache: false');
     expect(extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution')).toContain(
       'cache: true'
     );
