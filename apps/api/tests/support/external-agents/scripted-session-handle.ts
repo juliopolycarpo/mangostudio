@@ -35,6 +35,7 @@ export function createScriptedSessionHandle(sessionId = 'session-1'): ScriptedSe
     effectiveConfiguration: { level: 'default', routing: 'user', workspaceRoots: ['/w'] },
     capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
     isLive: () => live,
+    takeConversationReset: () => undefined,
     retire() {
       retired += 1;
       live = false;

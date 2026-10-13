@@ -74,8 +74,11 @@ function fallbackResumeRefusal(): ToolArgumentError {
 export interface FakeExternalRuntimeOptions {
   readonly nativeSessionId?: string;
   readonly nativeTurnId?: string;
-  /** Resolves the vendor's `resumeRef` to whether the resume actually worked. */
-  readonly resumeSucceeds?: boolean;
+  /**
+   * Resolves the vendor's `resumeRef` to whether the resume actually worked. A function decides
+   * per open, counting from 1.
+   */
+  readonly resumeSucceeds?: boolean | ((openNumber: number) => boolean);
   readonly onOpen?: (params: ExternalAgentOpenParams) => void;
   readonly openFailure?: () => Error | undefined;
   /**
@@ -175,11 +178,14 @@ export function createFakeExternalRuntime(
         }
         openSessionId = params.sessionId;
         const lazyResume = options.refuseFallbackResume === true;
+        const resumeWorks =
+          typeof options.resumeSucceeds === 'function'
+            ? options.resumeSucceeds(calls.open.length)
+            : options.resumeSucceeds !== false;
         return Promise.resolve({
           nativeSessionId: options.nativeSessionId ?? 'native-session-1',
-          resumed:
-            params.resumeRef !== undefined && !lazyResume && options.resumeSucceeds !== false,
-          ...(params.resumeRef !== undefined && !lazyResume && options.resumeSucceeds === false
+          resumed: params.resumeRef !== undefined && !lazyResume && resumeWorks,
+          ...(params.resumeRef !== undefined && !lazyResume && !resumeWorks
             ? { fallbackReason: 'no rollout found for thread id native-session-1' }
             : {}),
           effectiveConfiguration: params.configuration,

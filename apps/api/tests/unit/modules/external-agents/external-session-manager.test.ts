@@ -16,6 +16,7 @@ import {
 } from '../../../../src/modules/external-agents/infrastructure/external-session-adoption-lease-repository';
 import {
   readContinuation,
+  setContinuationUnresumable,
   writeContinuation,
 } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
 import { RuntimeRequestNoReplyError } from '../../../../src/services/runtime-client/request-not-sent';
@@ -355,7 +356,7 @@ describe('external session manager', () => {
       const handle = await managerFor(second).ensureSession(baseInput({ targetId: 'claude' }));
 
       // Claude confirms a resume on its first turn, so `resumed: false` here means unconfirmed.
-      expect({ resumed: handle.resumed, reset: handle.conversationReset }).toEqual({
+      expect({ resumed: handle.resumed, reset: handle.takeConversationReset() }).toEqual({
         resumed: false,
         reset: undefined,
       });
@@ -368,16 +369,82 @@ describe('external session manager', () => {
 
       const handle = await managerFor(second).ensureSession(baseInput());
 
-      expect(handle.conversationReset, 'expected conversationReset: unavailable').toBe(
-        'unavailable'
-      );
+      expect(
+        { first: handle.takeConversationReset(), again: handle.takeConversationReset() },
+        'expected conversationReset: unavailable once, then none'
+      ).toEqual({ first: 'unavailable', again: undefined });
+    });
+
+    describe('a stored conversation marked unresumable', () => {
+      async function markedConversation() {
+        const first = createFakeExternalRuntime({ refuseFallbackResume: true });
+        const firstHandle = await managerFor(first).ensureSession(
+          baseInput({ targetId: 'claude' })
+        );
+        await setContinuationUnresumable(chatId, firstHandle.sessionId, true, getDb());
+        return firstHandle;
+      }
+
+      it('opens a new conversation instead of resuming it, and says so once', async () => {
+        await markedConversation();
+        const second = createFakeExternalRuntime({ refuseFallbackResume: true });
+
+        const handle = await managerFor(second).ensureSession(baseInput({ targetId: 'claude' }));
+
+        expect(
+          {
+            resumeRef: second.calls.open[0]?.resumeRef,
+            first: handle.takeConversationReset(),
+            again: handle.takeConversationReset(),
+          },
+          'expected an open without a resume reference that reports nonresumable once'
+        ).toEqual({ resumeRef: undefined, first: 'nonresumable', again: undefined });
+      });
+
+      it('writes the new conversation unmarked, so the open after it resumes', async () => {
+        await markedConversation();
+        const second = createFakeExternalRuntime({ refuseFallbackResume: true });
+        const reopened = await managerFor(second).ensureSession(baseInput({ targetId: 'claude' }));
+
+        const row = await readContinuation(chatId, getDb());
+        const third = createFakeExternalRuntime({ refuseFallbackResume: true });
+        await managerFor(third).ensureSession(baseInput({ targetId: 'claude' }));
+
+        expect(
+          {
+            unresumable: row?.unresumable,
+            runtimeSessionId: row?.runtimeSessionId,
+            thirdResumeRef: third.calls.open[0]?.resumeRef,
+          },
+          'expected the new conversation to be stored unmarked and resumed by the next open'
+        ).toEqual({
+          unresumable: false,
+          runtimeSessionId: reopened.sessionId,
+          thirdResumeRef: row?.nativeSessionId,
+        });
+      });
+
+      it('is not marked by the end of a turn on a session an open has since replaced', async () => {
+        const first = await markedConversation();
+        const second = createFakeExternalRuntime({ refuseFallbackResume: true });
+        await managerFor(second, ['session-replacing']).ensureSession(
+          baseInput({ targetId: 'claude' })
+        );
+
+        const changed = await setContinuationUnresumable(chatId, first.sessionId, true, getDb());
+
+        expect(
+          { changed, unresumable: (await readContinuation(chatId, getDb()))?.unresumable },
+          'expected a stale session id to leave the newer conversation unmarked'
+        ).toEqual({ changed: false, unresumable: false });
+      });
     });
 
     it('reports no reset for a first open', async () => {
       const handle = await managerFor(
         createFakeExternalRuntime({ resumeSucceeds: false })
       ).ensureSession(baseInput());
-      expect(handle.conversationReset).toBeUndefined();
+      expect(handle.takeConversationReset()).toBeUndefined();
     });
   });
 

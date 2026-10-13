@@ -58,7 +58,7 @@ import {
   type ExternalEnvelopeVerdict,
   ExternalEventSequencer,
 } from '../domain/external-event-sequencer';
-import { resumeModeFor } from '../domain/external-resume-mode';
+import { resumeModeFor } from '../domain/external-resume-policy';
 import {
   EXTERNAL_ADOPTION_LEASE_TTL_MS,
   refreshAdoptionLease,
@@ -213,11 +213,16 @@ export interface ExternalSessionHandle {
   readonly resumed: boolean;
   readonly fallbackReason?: string;
   /**
-   * Set when the chat had a stored conversation, this open asked the agent to resume it, and the
-   * agent said it could not and started a new one. Absent for a harness whose resume is
-   * confirmed lazily (Claude): its `resumed: false` at open means unconfirmed, not failed.
+   * What this session's open says about the chat's earlier conversation, once.
+   *
+   * Returns `nonresumable` when the hub deliberately opened a new conversation because the
+   * stored one is not safe to resume, `unavailable` when the open asked the agent to resume and
+   * it said it could not, and nothing otherwise (a harness whose resume is confirmed lazily,
+   * Claude, says nothing at open: its `resumed: false` means unconfirmed, not failed). The first
+   * call takes the answer: the turn that first uses the session reports it, and later turns on
+   * the same session continue the conversation that turn started.
    */
-  readonly conversationReset?: ExternalConversationResetReason;
+  takeConversationReset(): ExternalConversationResetReason | undefined;
   readonly effectiveConfiguration: ExternalAgentConfiguration;
   readonly capabilities: ExternalAgentCapabilities;
   /** Replaces any previous consumer; one turn runs on a session at a time. */
@@ -366,7 +371,8 @@ interface OpenedSession {
   readonly nativeSessionId: string;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
-  readonly conversationReset?: ExternalConversationResetReason;
+  /** Taken by the first turn that uses the session; see `takeConversationReset`. */
+  conversationReset?: ExternalConversationResetReason;
   readonly effectiveConfiguration: ExternalAgentConfiguration;
   readonly capabilities: ExternalAgentCapabilities;
 }
@@ -479,9 +485,11 @@ export function createExternalSessionManager(
       targetId: record.binding.targetId,
       resumed: record.open.resumed,
       ...(record.open.fallbackReason ? { fallbackReason: record.open.fallbackReason } : {}),
-      ...(record.open.conversationReset
-        ? { conversationReset: record.open.conversationReset }
-        : {}),
+      takeConversationReset() {
+        const taken = record.open.conversationReset;
+        record.open.conversationReset = undefined;
+        return taken;
+      },
       effectiveConfiguration: record.open.effectiveConfiguration,
       capabilities: record.open.capabilities,
       subscribe(consumer) {
@@ -626,6 +634,22 @@ export function createExternalSessionManager(
     if (record) await closeRemote(record, waitMs);
   }
 
+  /**
+   * What an open says about the earlier conversation: `nonresumable` when the hub chose a new
+   * one, `unavailable` when it asked the agent to resume and the agent declined by name.
+   */
+  function conversationResetOf(
+    startedFresh: boolean,
+    askedToResume: boolean,
+    opened: { readonly resumed: boolean; readonly fallbackReason?: string }
+  ): { readonly conversationReset?: ExternalConversationResetReason } {
+    if (startedFresh) return { conversationReset: 'nonresumable' };
+    if (askedToResume && !opened.resumed && opened.fallbackReason) {
+      return { conversationReset: 'unavailable' };
+    }
+    return {};
+  }
+
   async function openSession(input: EnsureExternalSessionInput): Promise<ExternalSessionHandle> {
     const db = resolveDb();
     const binding: ExternalSessionBinding = {
@@ -643,11 +667,16 @@ export function createExternalSessionManager(
     // A stale binding is dropped before the open, not after: resuming against
     // another environment's session id would hand one binding's conversation to
     // a different one.
-    const resumable = stored && continuationMatches(stored, binding) ? stored : undefined;
-    if (stored && !resumable) {
+    const matching = stored && continuationMatches(stored, binding) ? stored : undefined;
+    if (stored && !matching) {
       await deleteContinuation(input.chatId, db);
       await releaseAdoptionLease(input.chatId, db);
     }
+    // A conversation marked unsafe to resume is not offered to the vendor: resuming it could
+    // carry on a turn the user stopped. The open starts a new one and the turn says so.
+    const startsFresh = matching?.unresumable === true;
+    if (startsFresh) await releaseAdoptionLease(input.chatId, db);
+    const resumable = startsFresh ? undefined : matching;
 
     const client = await (input.existingConnectionOnly
       ? resolveExistingRuntimeClient
@@ -691,9 +720,7 @@ export function createExternalSessionManager(
         ...(opened.fallbackReason ? { fallbackReason: opened.fallbackReason } : {}),
         // A resume the agent declined on open, by name: only then did a conversation the chat had
         // fail to continue. An unconfirmed lazy resume says nothing yet.
-        ...(resumable && !opened.resumed && opened.fallbackReason
-          ? { conversationReset: 'unavailable' as const }
-          : {}),
+        ...conversationResetOf(startsFresh, resumable !== undefined, opened),
         effectiveConfiguration: opened.effectiveConfiguration,
         capabilities: opened.capabilities,
       },

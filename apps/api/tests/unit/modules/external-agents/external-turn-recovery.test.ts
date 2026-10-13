@@ -11,6 +11,10 @@ import {
   sealOrphanedExternalTurnAttempts,
 } from '../../../../src/modules/external-agents/application/external-turn-recovery';
 import {
+  readContinuation,
+  writeContinuation,
+} from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
+import {
   insertAttempt,
   listAttemptsForMessage,
   transitionAttempt,
@@ -284,6 +288,67 @@ describe('external turn recovery', () => {
       await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
       await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
       expect(await outcome(messageId)).toEqual({ reason: 'hub-restarted', attempts: ['terminal'] });
+    });
+  });
+
+  describe('the stored conversation of a turn the hub stopped watching', () => {
+    async function storeConversation(targetId: 'claude' | 'codex'): Promise<void> {
+      await writeContinuation(
+        {
+          chatId,
+          userId,
+          environmentId: 'local',
+          targetId,
+          canonicalWorkspacePath: '/work/repo',
+          vendorAccountFingerprint: null,
+          credentialHomeFingerprint: null,
+          runtimeSessionId: 'session-1',
+          nativeSessionId: 'native-1',
+          effectiveConfiguration: null,
+          updatedAt: 1_000,
+        },
+        getDb()
+      );
+    }
+
+    it('is marked unresumable for a harness that would carry on the killed turn', async () => {
+      await storeConversation('claude');
+      await insertGeneratingMessage([{ ...ACTIVE_TURN_PART, targetId: 'claude' }]);
+
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+
+      expect(
+        (await readContinuation(chatId, getDb()))?.unresumable,
+        'expected a Claude conversation left mid-turn by a hub restart to be unresumable'
+      ).toBe(true);
+    });
+
+    it('is left alone for a harness that stops a turn by protocol', async () => {
+      await storeConversation('codex');
+      await insertGeneratingMessage([{ ...ACTIVE_TURN_PART }]);
+
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+
+      expect(
+        (await readContinuation(chatId, getDb()))?.unresumable,
+        'expected a Codex conversation to stay resumable'
+      ).toBe(false);
+    });
+
+    it('is not marked by a turn that had already recorded how it ended', async () => {
+      await storeConversation('claude');
+      await insertGeneratingMessage([
+        {
+          ...ACTIVE_TURN_PART,
+          targetId: 'claude',
+          status: 'terminal',
+          terminalReason: 'completed',
+        },
+      ]);
+
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+
+      expect((await readContinuation(chatId, getDb()))?.unresumable).toBe(false);
     });
   });
 });

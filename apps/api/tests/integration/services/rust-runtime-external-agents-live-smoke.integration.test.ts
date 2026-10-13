@@ -404,40 +404,52 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
     let active: RuntimeClient = session.client;
     let armed = false;
     const dropped: number[] = [];
+    async function killFirst(): Promise<void> {
+      const pid = session.peer.pid;
+      if (pid === undefined) throw new Error('expected the first runtime pid | received: none');
+      process.kill(pid, 'SIGKILL');
+      dropped.push(pid);
+      await session.peer.exited;
+    }
+    async function startSecond(): Promise<void> {
+      const second = await connectRuntime(
+        {
+          owner: session.owner,
+          environmentId: session.environmentId,
+          mangoHome: session.mangoHome,
+        },
+        session.secondRuntimeEnvironment
+      );
+      second.client.replaceManifest(
+        capabilityManifestFromHealth(await second.client.health(), second.client.manifest)
+      );
+      active = second.client;
+    }
+    async function restartNow(): Promise<void> {
+      await killFirst();
+      await startSecond();
+    }
     return {
       dropped,
       /** The next send restarts the runtime. */
       arm: () => {
         armed = true;
       },
+      /** Kills the first runtime now and starts the second, which the hub reaches from then on. */
+      restartNow,
       hooks: {
         activeClient: () => active,
         afterEnsure: async (handle: ExternalSessionHandle) => {
           if (!armed) return;
           armed = false;
-          const pid = session.peer.pid;
-          if (pid === undefined) throw new Error('expected the first runtime pid | received: none');
-          process.kill(pid, 'SIGKILL');
-          dropped.push(pid);
-          await session.peer.exited;
+          await killFirst();
           for (let attempt = 0; attempt < 200 && handle.isLive(); attempt += 1) await Bun.sleep(25);
           if (handle.isLive()) {
             throw new Error(
               'expected the hub to see the first runtime connection close | received: the session is still live'
             );
           }
-          const second = await connectRuntime(
-            {
-              owner: session.owner,
-              environmentId: session.environmentId,
-              mangoHome: session.mangoHome,
-            },
-            session.secondRuntimeEnvironment
-          );
-          second.client.replaceManifest(
-            capabilityManifestFromHealth(await second.client.health(), second.client.manifest)
-          );
-          active = second.client;
+          await startSecond();
         },
       },
     };
@@ -836,6 +848,95 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
     );
   }
 
+  for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'killed-turn')) {
+    it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
+      `${refusal.id}: a conversation whose last turn was killed is not resumed`,
+      async () => {
+        const session = await refusedSession(refusal);
+        await acknowledgeExternalDisclosure(
+          { userId: session.owner.id, targetId: refusal.targetId },
+          {
+            capabilities: session.live.capabilities,
+            supportedConfigurations: session.live.supportedConfigurations,
+          },
+          getDb()
+        );
+        await grantWorkspaceTrust(
+          {
+            userId: session.owner.id,
+            targetId: refusal.targetId,
+            environmentId: session.environmentId,
+            workspacePath: session.client.paths.canonical(session.workspace),
+          },
+          getDb()
+        );
+        // Words the model cannot guess. The code word proves whether the third send continued the
+        // first conversation; the closing token exists only in the work the kill cut off.
+        const codeWord = `mango-${crypto.randomUUID().slice(0, 8)}`;
+        const closing = `done-${crypto.randomUUID().slice(0, 8)}`;
+        const prompts = [
+          `Remember the code word ${codeWord}. Reply with exactly the single word noted. Do not use any tools.`,
+          `Write the numbers from 1 to 600, one per line, with no other text, and then a final line reading ${closing}. Do not use any tools.`,
+          'What was the code word I asked you to remember? Reply with exactly the code word, or with exactly the word unknown if you do not have it. Do not use any tools.',
+        ];
+        let sendNumber = 0;
+        const restart = runtimeRestart(session);
+        const pass = sendThrough(session, refusal, session.discovery, {
+          ...restart.hooks,
+          prompt: () => prompts[sendNumber++] ?? prompts[2] ?? '',
+        });
+
+        const first = sseFrames(
+          await okResponse(await within(pass.send(), 'the first live claude turn', 170_000)).text()
+        );
+        expect(first.find((frame) => frame.type === 'external_turn_completed')).toMatchObject({
+          reason: 'completed',
+        });
+
+        // The second send is killed under the vendor: the runtime ends on the first streamed text.
+        const killedFrames: Array<Record<string, unknown>> = [];
+        const killedResponse = okResponse(await within(pass.send(), 'the long turn', 170_000));
+        await readFrames(killedResponse, async (frame) => {
+          killedFrames.push(frame);
+          if (frame.type === 'external_text' && restart.dropped.length === 0) {
+            await restart.restartNow();
+          }
+        });
+        expect(restart.dropped, 'expected the first runtime to be killed mid-turn').toHaveLength(1);
+
+        const third = await within(pass.send(), 'the send after the killed turn', 170_000);
+        const frames = sseFrames(await okResponse(third).text());
+        logger.info('killed-turn-third-send', {
+          droppedRuntimePids: restart.dropped,
+          killedEnd: killedFrames.filter((frame) => frame.type === 'external_turn_completed'),
+          frames,
+        });
+
+        const text = frames
+          .filter((frame) => frame.type === 'external_text')
+          .map((frame) => String(frame.text ?? ''))
+          .join('');
+        const sessions = frames.filter((frame) => frame.type === 'external_session_started');
+        expect({
+          completed: frames.find((frame) => frame.type === 'external_turn_completed'),
+          errors: frames.filter((frame) =>
+            ['error', 'external_error'].includes(String(frame.type))
+          ),
+          noticeOnLastAnnouncement: sessions.at(-1)?.conversationReset,
+          continuedFirstConversation: text.includes(codeWord),
+          continuedKilledWork: text.includes(closing),
+        }).toMatchObject({
+          completed: { reason: 'completed' },
+          errors: [],
+          noticeOnLastAnnouncement: 'nonresumable',
+          continuedFirstConversation: false,
+          continuedKilledWork: false,
+        });
+      },
+      600_000
+    );
+  }
+
   for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'child-killed')) {
     it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
       `${refusal.id}: a vendor process that ended between turns is reopened once and the next send completes`,
@@ -949,6 +1050,32 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
 });
 
 /** The streaming response of an accepted send, or throws with the refusal. */
+/**
+ * Reads an SSE response frame by frame, handing each to `onFrame` as it arrives (and waiting for
+ * it), so a test can act in the middle of a turn.
+ */
+async function readFrames(
+  response: Response,
+  onFrame: (frame: Record<string, unknown>) => Promise<void>
+): Promise<void> {
+  if (!response.body) throw new Error('expected a streaming response body | received: none');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const pieces = buffer.split('\n\n');
+    buffer = pieces.pop() ?? '';
+    for (const piece of pieces) {
+      if (piece.startsWith('data: ')) {
+        await onFrame(JSON.parse(piece.slice('data: '.length)) as Record<string, unknown>);
+      }
+    }
+  }
+}
+
 function okResponse(
   result: Awaited<ReturnType<ReturnType<typeof createExternalTurnStream>>>
 ): Response {

@@ -28,6 +28,7 @@ const LIVE_REFUSAL_CASE_IDS = [
   'codex-outdated-reopen',
   'codex-child-killed-between-turns',
   'claude-reopen-after-connection-drop',
+  'claude-reopen-after-killed-turn',
 ] as const;
 
 type LiveRefusalCaseId = (typeof LIVE_REFUSAL_CASE_IDS)[number];
@@ -52,8 +53,11 @@ export interface LiveRefusalCase {
    * sends again on the signed-in account: the hub reopens once and the turn completes.
    * `connection-dropped` restarts the runtime between two sends on the signed-in account: the
    * hub reopens on the new runtime and the second send must recall the first.
+   * `killed-turn` ends the runtime in the middle of a turn (a kill the vendor does not get to
+   * finish), restarts it, and sends again: the stored conversation holds a turn the vendor left
+   * unfinished, so the hub must open a new conversation and say so.
    */
-  readonly flow: 'open' | 'reopen' | 'child-killed' | 'connection-dropped';
+  readonly flow: 'open' | 'reopen' | 'child-killed' | 'connection-dropped' | 'killed-turn';
 }
 
 export const LIVE_REFUSAL_CASES: readonly LiveRefusalCase[] = [
@@ -103,6 +107,12 @@ export const LIVE_REFUSAL_CASES: readonly LiveRefusalCase[] = [
     targetId: 'claude',
     selectorRefuses: false,
     flow: 'connection-dropped',
+  },
+  {
+    id: 'claude-reopen-after-killed-turn',
+    targetId: 'claude',
+    selectorRefuses: false,
+    flow: 'killed-turn',
   },
 ];
 
@@ -190,6 +200,7 @@ export function refusalEnvironment(
     }
     case 'codex-child-killed-between-turns':
     case 'claude-reopen-after-connection-drop':
+    case 'claude-reopen-after-killed-turn':
       // The signed-in account and the current codex, untouched: only the process is ended.
       return {};
     case 'codex-outdated-reopen':

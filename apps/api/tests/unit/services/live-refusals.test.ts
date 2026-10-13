@@ -38,7 +38,7 @@ describe('requestedRefusalCases', () => {
 
   it('rejects a name it does not know, naming the value and the accepted names', () => {
     expect(() => requestedRefusalCases('codex-signed-out,codex-signedout')).toThrow(
-      'expected MANGOSTUDIO_LIVE_AGENT_REFUSALS to name only codex-signed-out | claude-signed-out | cursor-signed-out | codex-outdated | codex-outdated-reopen | codex-child-killed-between-turns | claude-reopen-after-connection-drop | received: codex-signedout'
+      'expected MANGOSTUDIO_LIVE_AGENT_REFUSALS to name only codex-signed-out | claude-signed-out | cursor-signed-out | codex-outdated | codex-outdated-reopen | codex-child-killed-between-turns | claude-reopen-after-connection-drop | claude-reopen-after-killed-turn | received: codex-signedout'
     );
   });
 });
@@ -224,6 +224,7 @@ describe('LIVE_REFUSAL_CASES', () => {
       'codex-outdated-reopen': false,
       'codex-child-killed-between-turns': false,
       'claude-reopen-after-connection-drop': false,
+      'claude-reopen-after-killed-turn': false,
     });
   });
 });

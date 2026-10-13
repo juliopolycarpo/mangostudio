@@ -51,6 +51,14 @@ export interface ExternalSessionContinuation extends ExternalContinuationBinding
    * as a resume succeeds, after which ordinary turn semantics apply.
    */
   readonly pendingAdoption: boolean;
+  /**
+   * True while the stored conversation must not be resumed.
+   *
+   * Set from the end of a turn that may have killed the vendor's child, on a harness that
+   * continues a killed turn on resume (Claude). The next open starts a new conversation and says
+   * so, and the row that open writes is not marked.
+   */
+  readonly unresumable: boolean;
 }
 
 export async function readContinuation(
@@ -77,6 +85,7 @@ export async function readContinuation(
     effectiveConfiguration: parseEffectiveConfiguration(row.effectiveConfiguration),
     updatedAt: row.updatedAt,
     pendingAdoption: row.pendingAdoption === 1,
+    unresumable: row.unresumable === 1,
   };
 }
 
@@ -114,6 +123,8 @@ export async function writeContinuation(
       : null,
     updatedAt: input.updatedAt,
     pendingAdoption: input.pendingAdoption === true ? 1 : 0,
+    // A row is written by an open, which has just started or resumed a conversation: not marked.
+    unresumable: 0,
   };
 
   await db
@@ -121,6 +132,32 @@ export async function writeContinuation(
     .values(values)
     .onConflict((conflict) => conflict.column('chatId').doUpdateSet(values))
     .execute();
+}
+
+/**
+ * Marks (or unmarks) the stored conversation as unsafe to resume.
+ *
+ * Conditional on `runtimeSessionId`, the session that ran the turn: a stale end of an older turn
+ * must not taint a conversation that a later open has since replaced. Returns whether a row was
+ * changed.
+ *
+ * @example
+ * await setContinuationUnresumable(chatId, 'session-1', true, db);
+ */
+export async function setContinuationUnresumable(
+  chatId: string,
+  runtimeSessionId: string,
+  unresumable: boolean,
+  db: Kysely<Database>
+): Promise<boolean> {
+  const result = await db
+    .updateTable('external_session_continuations')
+    .set({ unresumable: unresumable ? 1 : 0 })
+    .where('chatId', '=', chatId)
+    .where('runtimeSessionId', '=', runtimeSessionId)
+    .where('unresumable', '=', unresumable ? 0 : 1)
+    .executeTakeFirst();
+  return Number(result.numUpdatedRows) > 0;
 }
 
 export async function deleteContinuation(chatId: string, db: Kysely<Database>): Promise<void> {

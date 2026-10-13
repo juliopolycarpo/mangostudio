@@ -23,6 +23,8 @@ import type { ExternalTurnTerminalReason } from '@mangostudio/shared/external-ag
 import type { ExternalTurnPart, MessagePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database, ExternalTurnAttemptSelect } from '../../../db/types';
+import { endLeavesConversationUnresumable } from '../domain/external-resume-policy';
+import { setContinuationUnresumable } from '../infrastructure/external-session-continuation-repository';
 import {
   listAttemptsForMessage,
   sealAttemptsForMessage,
@@ -46,7 +48,7 @@ export async function reconcileExternalTurns(
   const at = (input.now ?? Date.now)();
   let query = db
     .selectFrom('messages')
-    .select(['id', 'parts'])
+    .select(['id', 'chatId', 'parts'])
     .where('role', '=', 'ai')
     .where('isGenerating', '=', 1);
   if (input.chatId) query = query.where('chatId', '=', input.chatId);
@@ -72,6 +74,14 @@ export async function reconcileExternalTurns(
       turnPart.status = 'terminal';
       turnPart.terminalReason = reasonFromAttempts(input.reason, attempts);
       turnPart.updatedAt = at;
+      // A turn the hub stopped watching may have been running when the runtime or the hub went
+      // away, so the child may have been killed under it: its conversation is not safe to resume.
+      // A turn that was already terminal decided this when it ended.
+      if (
+        endLeavesConversationUnresumable(turnPart.targetId, turnPart.terminalReason ?? input.reason)
+      ) {
+        await setContinuationUnresumable(row.chatId, turnPart.sessionId, true, db);
+      }
     }
     sealPendingApprovals(parts, at);
 
