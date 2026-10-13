@@ -22,6 +22,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RemoteError } from '@mangostudio/protocol';
@@ -64,11 +65,14 @@ import {
   LIVE_REFUSAL_CASES,
   type LiveRefusalCase,
   refusalEnvironment,
+  refusedReason,
   requestedRefusalCases,
+  requiredExecutable,
   SingleTargetDiscovery,
   sseFrames,
   versionOf,
 } from '../../support/external-agents/live-refusals';
+import { readProcessSnapshot, vendorProcessesOf } from '../../support/external-agents/process-tree';
 import {
   createRustTurnHarness,
   grantRuntimeConsent,
@@ -326,7 +330,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
 
   /** What the person is told for a refused agent, whatever the surface. */
   function expectedRemedy(refusal: LiveRefusalCase): ExternalAgentRemedy {
-    if (refusal.reason === 'version-unsupported') return { kind: 'update' };
+    if (refusedReason(refusal) === 'version-unsupported') return { kind: 'update' };
     const command = productDescriptorFor(refusal.targetId)?.loginCommand;
     return { kind: 'sign-in', ...(command ? { command } : {}) };
   }
@@ -453,8 +457,9 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
 
   for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'open')) {
     it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
-      `${refusal.id}: the agent is refused as ${refusal.reason}, as the person sees it`,
+      `${refusal.id}: the agent is refused as ${refusedReason(refusal)}, as the person sees it`,
       async () => {
+        const reason = refusedReason(refusal);
         const session = await refusedSession(refusal);
         const { live } = session;
         logger.info('refusal-discovery', { case: refusal.id, descriptor: live });
@@ -467,7 +472,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
             remedy: live.remedy,
           }).toEqual({
             installed: true,
-            unavailableReason: refusal.reason,
+            unavailableReason: reason,
             remedy: expectedRemedy(refusal),
           });
         } else {
@@ -477,10 +482,10 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
             unavailableReason: live.unavailableReason,
           }).toEqual({ installed: true, authState: 'unknown', unavailableReason: undefined });
         }
-        if (refusal.reason === 'signed-out' && refusal.selectorRefuses) {
+        if (reason === 'signed-out' && refusal.selectorRefuses) {
           expect(live.authState).toBe('signed-out');
         }
-        if (refusal.reason === 'version-unsupported') {
+        if (reason === 'version-unsupported') {
           const oldVersion = await outdatedCodexVersion();
           const required = live.requiredVersion ?? '';
           expect({
@@ -494,7 +499,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
           const preflight = await sendThrough(session, refusal, session.discovery).send();
           expect(preflight.ok ? 'sent' : preflight.failure).toMatchObject({
             kind: 'unsupported',
-            unavailableReason: refusal.reason,
+            unavailableReason: reason,
           });
         }
 
@@ -543,8 +548,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         expect({
           kind: refused instanceof RemoteError ? refused.details?.kind : String(refused),
           refusals: stalePass.recording.refusals.length,
-        }).toEqual({ kind: EXPECTED_KIND[refusal.reason], refusals: 1 });
-        if (refusal.reason === 'version-unsupported') {
+        }).toEqual({ kind: EXPECTED_KIND[reason], refusals: 1 });
+        if (reason === 'version-unsupported') {
           // Both builds are named from the SDK's typed fields: the one found and the floor.
           const found = await outdatedCodexVersion();
           expect({
@@ -559,11 +564,9 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         expect(frames.find((frame) => frame.type === 'error')).toEqual({
           type: 'error',
           error: GENERIC_OPEN_FAILURE,
-          unavailableReason: refusal.reason,
+          unavailableReason: reason,
           remedy: expectedRemedy(refusal),
-          ...(refusal.reason === 'version-unsupported'
-            ? { requiredVersion: live.requiredVersion }
-            : {}),
+          ...(reason === 'version-unsupported' ? { requiredVersion: live.requiredVersion } : {}),
           done: true,
         });
         expect(stalePass.stale).toEqual([
@@ -731,6 +734,117 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         expect(elapsedMs).toBeLessThan(30_000);
       },
       360_000
+    );
+  }
+
+  for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'child-killed')) {
+    it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
+      `${refusal.id}: a vendor process that ended between turns is reopened once and the next send completes`,
+      async () => {
+        const session = await refusedSession(refusal);
+        await acknowledgeExternalDisclosure(
+          { userId: session.owner.id, targetId: refusal.targetId },
+          {
+            capabilities: session.live.capabilities,
+            supportedConfigurations: session.live.supportedConfigurations,
+          },
+          getDb()
+        );
+        await grantWorkspaceTrust(
+          {
+            userId: session.owner.id,
+            targetId: refusal.targetId,
+            environmentId: session.environmentId,
+            workspacePath: session.client.paths.canonical(session.workspace),
+          },
+          getDb()
+        );
+        const pass = sendThrough(session, refusal, session.discovery);
+
+        const first = sseFrames(
+          await okResponse(await within(pass.send(), 'the first live codex turn', 170_000)).text()
+        );
+        expect(first.find((frame) => frame.type === 'external_turn_completed')).toMatchObject({
+          reason: 'completed',
+        });
+        expect(first.map((frame) => frame.type)).not.toContain('error');
+
+        // The app-server this runtime started, found below the runtime by its executable; the
+        // developer's own codex sessions are not descendants and are never matched.
+        const runtimePid = session.peer.pid;
+        if (runtimePid === undefined) throw new Error('expected the runtime pid | received: none');
+        const codexPath = await realpath(requiredExecutable('codex', Bun.which('codex')));
+        const started = vendorProcessesOf(runtimePid, codexPath, readProcessSnapshot());
+        if (started.length !== 1) {
+          throw new Error(
+            `expected exactly one codex process under the runtime | received: [${started.join(', ')}]`
+          );
+        }
+        const [victim] = started;
+        if (victim === undefined) throw new Error('expected a codex pid | received: none');
+        process.kill(victim, 'SIGKILL');
+        for (let attempt = 0; attempt < 200 && existsSync(`/proc/${victim}`); attempt += 1)
+          await Bun.sleep(25);
+        // Long enough for the SDK to see its child's pipe close and seal the session.
+        await Bun.sleep(1_500);
+        const callsBefore = pass.recording.calls.length;
+
+        const startedAt = Date.now();
+        const second = await within(
+          pass.send(),
+          'the send after the vendor process ended',
+          150_000
+        );
+        const frames = sseFrames(await okResponse(second).text());
+        const elapsedMs = Date.now() - startedAt;
+        logger.info('child-killed-second-send', {
+          killedPid: victim,
+          elapsedMs,
+          calls: pass.recording.calls.slice(callsBefore),
+          frames,
+        });
+
+        const assistant = frames.find((frame) => frame.type === 'assistant_message_id');
+        const text = frames
+          .filter((frame) => frame.type === 'external_text')
+          .map((frame) => String(frame.text ?? ''))
+          .join('');
+        expect({
+          completed: frames.find((frame) => frame.type === 'external_turn_completed'),
+          errors: frames.filter((frame) =>
+            ['error', 'external_error'].includes(String(frame.type))
+          ),
+          answered: /pong/i.test(text),
+        }).toMatchObject({ completed: { reason: 'completed' }, errors: [], answered: true });
+        // The reopen resumed the vendor conversation: the thread's running total covers both turns.
+        const thread = frames.find((frame) => frame.type === 'external_thread_usage') as
+          | { usage?: { last?: { totalTokens?: number }; total?: { totalTokens?: number } } }
+          | undefined;
+        expect({
+          thread:
+            (thread?.usage?.total?.totalTokens ?? 0) > (thread?.usage?.last?.totalTokens ?? 0),
+        }).toEqual({ thread: true });
+        // One reopen, and a vendor process that is not the one that was ended.
+        const replacements = vendorProcessesOf(runtimePid, codexPath, readProcessSnapshot());
+        expect({
+          reopens: pass.recording.calls.slice(callsBefore).filter((call) => call.reopen).length,
+          replaced: replacements.length === 1 && replacements[0] !== victim,
+        }).toEqual({ reopens: 1, replaced: true });
+        if (!assistant) {
+          throw new Error(
+            `expected an assistant_message_id chunk | received: ${JSON.stringify(frames)}`
+          );
+        }
+        const { messages } = await getChatMessagesUseCase(
+          { chatId: session.chatId, userId: session.owner.id },
+          getDb()
+        );
+        const stored = messages
+          .find((message) => message.id === assistant.messageId)
+          ?.parts?.find((part) => part.type === 'external_turn');
+        expect(stored).toMatchObject({ status: 'terminal', terminalReason: 'completed' });
+      },
+      420_000
     );
   }
 });

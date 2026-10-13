@@ -9,6 +9,7 @@ import {
   LIVE_REFUSAL_CASES,
   type LiveRefusalCase,
   refusalEnvironment,
+  refusedReason,
   requestedRefusalCases,
   requiredExecutable,
   SingleTargetDiscovery,
@@ -37,7 +38,7 @@ describe('requestedRefusalCases', () => {
 
   it('rejects a name it does not know, naming the value and the accepted names', () => {
     expect(() => requestedRefusalCases('codex-signed-out,codex-signedout')).toThrow(
-      'expected MANGOSTUDIO_LIVE_AGENT_REFUSALS to name only codex-signed-out | claude-signed-out | cursor-signed-out | codex-outdated | codex-outdated-reopen | received: codex-signedout'
+      'expected MANGOSTUDIO_LIVE_AGENT_REFUSALS to name only codex-signed-out | claude-signed-out | cursor-signed-out | codex-outdated | codex-outdated-reopen | codex-child-killed-between-turns | received: codex-signedout'
     );
   });
 });
@@ -193,6 +194,24 @@ describe('cachedBeforeRefusal', () => {
   });
 });
 
+describe('the codex-child-killed-between-turns case', () => {
+  it('layers nothing over the runtime environment, so the signed-in account and current codex are used', () => {
+    expect(
+      refusalEnvironment(caseNamed('codex-child-killed-between-turns'), {
+        emptyDirectory: '/scratch/empty',
+        inheritedPath: '/usr/bin',
+      })
+    ).toEqual({});
+  });
+
+  it('names no refusal reason, because nothing is refused', () => {
+    expect(() => refusedReason(caseNamed('codex-child-killed-between-turns'))).toThrow(
+      'expected case codex-child-killed-between-turns to name a refusal reason | received: none'
+    );
+    expect(refusedReason(caseNamed('codex-signed-out'))).toBe('signed-out');
+  });
+});
+
 describe('LIVE_REFUSAL_CASES', () => {
   it('expects every selector to refuse except cursor, whose status surface cannot say signed out', () => {
     expect(
@@ -203,6 +222,7 @@ describe('LIVE_REFUSAL_CASES', () => {
       'cursor-signed-out': false,
       'codex-outdated': true,
       'codex-outdated-reopen': false,
+      'codex-child-killed-between-turns': false,
     });
   });
 });
