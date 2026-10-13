@@ -64,6 +64,24 @@ describe('short-job fold command and failure coverage', () => {
     expect(extractJobBlock(cargo, 'fuzz-workspace')).toBe('');
   });
 
+  test('a fuzz metadata failure cannot suppress formatting or later Rust diagnostics', () => {
+    const steps = extractStepBlocks(extractJobBlock(cargo, 'workspace'));
+    const format = steps.findIndex((step) => step.includes('run: cargo fmt --all -- --check'));
+    const metadata = steps.findIndex((step) => step.includes(`run: ${FUZZ_METADATA}`));
+    expect(format).toBeGreaterThanOrEqual(0);
+    expect(metadata).toBeGreaterThan(format);
+    for (const step of steps
+      .slice(metadata + 1)
+      .filter((entry) =>
+        /run: cargo (?:check|clippy|test|nextest|doc|build)\b|name: Check nextest/.test(entry)
+      )) {
+      expect(step, 'independent diagnostics must survive metadata failure').toContain(
+        '!cancelled()'
+      );
+      expect(step).not.toContain('continue-on-error');
+    }
+  });
+
   test('folded jobs leave the fan-ins and the mandatory surviving owners remain', () => {
     for (const [workflow, removed, required] of [
       [

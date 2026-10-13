@@ -135,14 +135,6 @@ jobs:
       - id: toolchain
         run: rustup show active-toolchain
 
-      # Resolving is the point: `--no-deps` skips the resolve, so a lock left
-      # stale by a shared-dependency bump in the main workspace still passed.
-      # `--locked` makes a stale lock a failure instead of a rewrite;
-      # `--all-features` also names the optional `tokio` feature set.
-      - name: Resolve excluded fuzz workspace
-        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && steps.toolchain.outcome == 'success' }}
-        run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --all-features --format-version 1 > /dev/null
-
       # Every rust-cache step keys on the root manifest and saves only from
       # main; scripts/tests/cache-policy.unit.test.ts explains and pins both.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -151,6 +143,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: cargo fmt --all -- --check
+
+      # Resolving is the point: `--no-deps` skips the resolve, so a lock left
+      # stale by a shared-dependency bump in the main workspace still passed.
+      # `--locked` makes a stale lock a failure instead of a rewrite;
+      # `--all-features` also names the optional `tokio` feature set.
+      - name: Resolve excluded fuzz workspace
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && steps.toolchain.outcome == 'success' }}
+        run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --all-features --format-version 1 > /dev/null
 
       # The development pin is also the shared minimum. Keep both dependency
       # graphs: default library/binary features and every target/feature.
