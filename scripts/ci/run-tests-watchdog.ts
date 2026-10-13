@@ -250,6 +250,29 @@ const killGroup = (pid: number, signal: NodeJS.Signals): void => {
   }
 };
 
+/** Bound on settling a finished child's output; a grandchild holding a pipe must not hold the run. */
+const OUTPUT_SETTLE_MS = 10_000;
+
+/**
+ * Waits until everything a finished child wrote has been handed to the sinks and the sinks have
+ * taken it, so the caller never sees a truncated tail. Bounded by {@link OUTPUT_SETTLE_MS}: a
+ * grandchild that escaped the group keeps the pipes open, and that is not a reason to hang.
+ * // Usage: await settleOutput(outputClosed, [process.stdout, log]);
+ */
+const settleOutput = async (
+  outputClosed: Promise<unknown>,
+  sinks: readonly NodeJS.WritableStream[]
+): Promise<void> => {
+  const settled = (async () => {
+    await outputClosed;
+    // A write's callback runs after every write queued before it, so an empty one marks the end.
+    await Promise.all(
+      sinks.map((sink) => new Promise<void>((resolve) => sink.write('', () => resolve())))
+    );
+  })();
+  await Promise.race([settled, sleep(OUTPUT_SETTLE_MS)]);
+};
+
 const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
   const [executable, ...args] = options.command;
   if (!executable) throw new Error('Watchdog needs a command after --');
@@ -329,6 +352,15 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
     });
   });
 
+  // `exit` says the process ended, not that its output was read: the last chunks can still be in
+  // the pipe, or queued behind a sink that is catching up. Both streams closing means every byte
+  // reached `forward`.
+  const outputClosed = Promise.all(
+    [child.stdout, child.stderr].map(
+      (stream) => new Promise<void>((resolve) => stream.once('close', () => resolve()))
+    )
+  );
+
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timedOut = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), options.timeoutSeconds * 1000);
@@ -336,7 +368,10 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
 
   try {
     const first = await Promise.race([exited, timedOut]);
-    if (first !== 'timeout') return { exitCode: first, hung: false, pid: child.pid };
+    if (first !== 'timeout') {
+      await settleOutput(outputClosed, [mirror, ...(logWritable ? [log] : [])]);
+      return { exitCode: first, hung: false, pid: child.pid };
+    }
 
     const pid = child.pid;
     const graceMs = (options.killGraceSeconds ?? 10) * 1000;
