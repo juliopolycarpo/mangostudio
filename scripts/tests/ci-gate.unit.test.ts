@@ -412,7 +412,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
     );
   });
 

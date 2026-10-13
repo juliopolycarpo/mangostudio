@@ -990,9 +990,9 @@ describe('the fuzz workspace lockfile', () => {
 
   test('cargo-shim resolves the fuzz workspace with --locked, not --no-deps', () => {
     // `--no-deps` skips the resolve, so it passes on a stale lock.
-    const job = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'fuzz-workspace');
+    const job = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
     const command = /run: (cargo metadata .*fuzz\/Cargo\.toml.*)/.exec(job)?.[1];
-    expect(command, 'the fuzz-workspace job has no `cargo metadata` step').toBeDefined();
+    expect(command, 'the Ubuntu workspace job has no `cargo metadata` step').toBeDefined();
     expect(command, '--no-deps skips the resolve, so a stale lock passes').not.toContain(
       '--no-deps'
     );

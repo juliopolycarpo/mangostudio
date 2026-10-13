@@ -132,7 +132,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - run: rustup show active-toolchain
+      - id: toolchain
+        run: rustup show active-toolchain
+
+      # Resolving is the point: `--no-deps` skips the resolve, so a lock left
+      # stale by a shared-dependency bump in the main workspace still passed.
+      # `--locked` makes a stale lock a failure instead of a rewrite;
+      # `--all-features` also names the optional `tokio` feature set.
+      - name: Resolve excluded fuzz workspace
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && steps.toolchain.outcome == 'success' }}
+        run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --all-features --format-version 1 > /dev/null
 
       # Every rust-cache step keys on the root manifest and saves only from
       # main; scripts/tests/cache-policy.unit.test.ts explains and pins both.
@@ -304,23 +313,6 @@ jobs:
 
       - run: cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target aarch64-unknown-linux-musl -- -D warnings
 
-  fuzz-workspace:
-    name: Fuzz workspace metadata
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Resolving is the point: `--no-deps` skips the resolve, so a lock left
-      # stale by a shared-dependency bump in the main workspace still passed.
-      # `--locked` makes a stale lock a failure instead of a rewrite;
-      # `--all-features` also names the optional `tokio` feature set.
-      - run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --all-features --format-version 1 > /dev/null
-
   runtime-home-fixture-freshness:
     # `tests/fixtures/rust-home` is committed output, not built at test time:
     # `generate_rust_fixture.rs`'s own `#[ignore]`d regenerator writes it and
@@ -458,7 +450,6 @@ jobs:
       workspace,
       workspace-windows-arm64,
       musl-clippy,
-      fuzz-workspace,
       runtime-home-fixture-freshness,
       real-binary-qualification,
     ]
@@ -479,6 +470,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
