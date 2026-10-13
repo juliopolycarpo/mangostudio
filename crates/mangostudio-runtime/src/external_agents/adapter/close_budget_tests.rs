@@ -137,3 +137,21 @@ fn a_later_claude_close_over_a_late_childs_stop_fits_inside_the_close_bound() {
         );
     }
 }
+
+/// The supervisor's close timer is the SDK's worst case plus `cleanup_timeout`; a failed close
+/// settles its cleanup handle after the SDK's worst case. The two must not end together, or the
+/// scheduler decides which failure the caller sees.
+#[test]
+fn the_adapters_close_settle_ends_strictly_before_the_supervisors_cleanup_allowance() {
+    for cleanup in [
+        Duration::from_secs(2),
+        Duration::from_millis(500),
+        Duration::from_millis(3),
+    ] {
+        let settle = super::super::failure::close_settle_bound(cleanup);
+        assert!(
+            settle > Duration::ZERO && cleanup - settle >= settle,
+            "expected a nonzero settle bound that leaves at least as much margin as it spends | received settle {settle:?} of cleanup {cleanup:?}"
+        );
+    }
+}

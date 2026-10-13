@@ -58,7 +58,8 @@ mod hub_sign_in_tests;
 /// agent's exit, 41 s for a Codex inbound overflow): those are measured from the event, and a
 /// `close` called inside that window is still bounded by this number from its own call. The
 /// cleanup allowance (`cleanup_timeout`, added by the supervisor) stays on top because the adapter
-/// settles a failed close's cleanup handle inside the same timed span.
+/// settles a failed close's cleanup handle inside the same timed span; it spends only
+/// `failure::close_settle_bound` of it, so the supervisor's timer ends strictly after the adapter's.
 ///
 /// The launcher is the runtime's own, not the SDK's `TokioLauncher`, and the SDK's Claude figure
 /// holds for any launcher. Sums saturate in the SDK, so a limit near `Duration::MAX` stays a bound

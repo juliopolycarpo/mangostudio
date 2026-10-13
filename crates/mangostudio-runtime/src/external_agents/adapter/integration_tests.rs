@@ -106,6 +106,9 @@ enum OpenBehaviour {
     SteerFailingOnGate(watch::Receiver<bool>),
     /// Opens a session whose vendor close records its reason, then never ends.
     CloseStalls,
+    /// Opens a session whose vendor close uses the given time, then fails the way the SDK does
+    /// when a stop ran out: `Error::CleanupRequired` over a control whose kill never answers.
+    CloseOutlasts(Duration, Arc<UnansweredKill>),
     /// Opens a [`ScriptedSession`] whose turns and reviews follow the script.
     Scripted(Script),
 }
@@ -189,6 +192,7 @@ impl Harness for CountingHarness {
             | OpenBehaviour::Flooding
             | OpenBehaviour::SteerFailingOnGate(_)
             | OpenBehaviour::CloseStalls
+            | OpenBehaviour::CloseOutlasts(..)
             | OpenBehaviour::Scripted(_) => {}
             OpenBehaviour::SignedOut => {
                 return Err(SdkError::AuthRequired {
@@ -240,6 +244,10 @@ impl Harness for CountingHarness {
             log: Arc::clone(&self.log),
             steer_gate,
             close_stalls: matches!(self.open, OpenBehaviour::CloseStalls),
+            close_outlasts: match &self.open {
+                OpenBehaviour::CloseOutlasts(after, control) => Some((*after, Arc::clone(control))),
+                _ => None,
+            },
         }))
     }
 
@@ -269,6 +277,7 @@ struct CountingSession {
     log: Arc<HarnessLog>,
     steer_gate: Option<watch::Receiver<bool>>,
     close_stalls: bool,
+    close_outlasts: Option<(Duration, Arc<UnansweredKill>)>,
 }
 
 #[async_trait::async_trait]
@@ -334,6 +343,16 @@ impl Session for CountingSession {
         self.log.closes.lock().unwrap().push(reason);
         if self.close_stalls {
             std::future::pending::<()>().await;
+        }
+        if let Some((after, control)) = &self.close_outlasts {
+            tokio::time::sleep(*after).await;
+            return Err(SdkError::CleanupRequired {
+                source: Box::new(SdkError::Timeout {
+                    operation: String::from("process reaping"),
+                    after: Duration::from_secs(5),
+                }),
+                control: Arc::clone(control) as Arc<dyn ProcessControl>,
+            });
         }
         self.inner.close(reason).await
     }
@@ -514,6 +533,32 @@ impl Session for FloodingSession {
     async fn close(&self, reason: CloseReason) -> mango_external_agents::Result<()> {
         self.log.closes.lock().unwrap().push(reason);
         self.inner.close(reason).await
+    }
+}
+
+/// A child whose control never answers a kill or a wait, and counts the kills it was asked for.
+#[derive(Default)]
+struct UnansweredKill {
+    kills: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl ProcessControl for UnansweredKill {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+
+    fn stderr_tail(&self) -> String {
+        String::new()
+    }
+
+    async fn wait(&self) -> mango_external_agents::Result<ExitStatus> {
+        std::future::pending().await
+    }
+
+    async fn kill(&self, _reason: CancelReason) -> mango_external_agents::Result<()> {
+        self.kills.fetch_add(1, Ordering::SeqCst);
+        std::future::pending().await
     }
 }
 
@@ -1692,6 +1737,51 @@ async fn an_abandoned_close_still_removes_the_scratch_leaf() {
         |count| *count == 0,
     )
     .await;
+}
+
+/// Scheduling drift the SDK's own timers add before a failed close hands its cleanup to the
+/// adapter. Any positive amount is enough to decide a tie the wrong way.
+const SDK_DRIFT: Duration = Duration::from_millis(1);
+
+/// A close that used the SDK's whole worst case and then failed with a control that never
+/// answers a kill ends two timers at once if the adapter's settle may take the supervisor's whole
+/// cleanup allowance. The caller must always see the adapter's failure, which names the stage and
+/// the unconfirmed cleanup, and never the supervisor's "did not finish".
+#[tokio::test(start_paused = true)]
+async fn a_failed_close_that_used_the_whole_sdk_budget_reports_its_cleanup_not_the_supervisors_timer()
+ {
+    let control = Arc::new(UnansweredKill::default());
+    let budget = mango_agent_claude::deadlines::Deadlines::from_limits(&Limits::default())
+        .close_worst_case();
+    let rig = rig(RigOptions {
+        open: OpenBehaviour::CloseOutlasts(budget + SDK_DRIFT, Arc::clone(&control)),
+        ..RigOptions::default()
+    })
+    .await;
+    rig.open("one").await.unwrap();
+
+    let error = rig
+        .supervisor
+        .close_session(
+            CloseParams {
+                session_id: "one".into(),
+            },
+            CloseCause::Requested,
+        )
+        .await
+        .expect_err("expected a close whose control never answers to fail");
+
+    assert!(
+        error.message.contains("process reaping") && !error.message.contains("did not finish"),
+        "expected the failure of the stage the SDK reported (process reaping), not the supervisor's timer | received {:?}",
+        error.message
+    );
+    assert_eq!(
+        control.kills.load(Ordering::SeqCst),
+        1,
+        "expected the adapter to ask the control to kill exactly once | received {} kill(s)",
+        control.kills.load(Ordering::SeqCst)
+    );
 }
 
 /// A revocation whose close is slow must not pin the watcher: the hub session ending still shuts
