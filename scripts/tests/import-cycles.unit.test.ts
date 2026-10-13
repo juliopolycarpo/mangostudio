@@ -598,6 +598,16 @@ describe('Biome import cycle checks', () => {
     expect(rejected.output).toContain(NO_IMPORT_CYCLES);
   });
 
+  test('rejects workspace formatting drift with the actual dprint check', () => {
+    const root = createFixture();
+    writeFileSync(join(root, 'apps/api/AGENTS.md'), '#    Unformatted fixture\n');
+    const rejected = runCheck(root, 'apps/api');
+    expectCheck(rejected, 'fail', 'apps/api with unformatted AGENTS.md');
+    expect(rejected.output).toContain('root:dprint:api');
+    expect(rejected.output).toContain('AGENTS.md');
+    expect(rejected.output).toContain('Found 1 not formatted file');
+  });
+
   test('keeps node_modules and git internals outside the TS/JS scan', async () => {
     const root = createFixture();
     const files = {
