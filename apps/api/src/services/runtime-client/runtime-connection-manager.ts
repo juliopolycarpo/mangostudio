@@ -704,7 +704,7 @@ export class RuntimeConnectionManager {
           ...(entry.status.offlineRuntimeCache ? { offlineRuntimeCache: true } : {}),
         };
         this.#publish(userId);
-        return connection.client;
+        return this.#readHostedAgents(entry, revision, userId, environmentId);
       })
       .catch((error: unknown) => {
         if (isBoundElsewhere(error)) {
@@ -879,7 +879,34 @@ export class RuntimeConnectionManager {
       ...peerRelease(connection.client.runtimeVersion),
     };
     this.#publish(userId);
-    return connection.client;
+    return await this.#readHostedAgents(entry, revision, userId, environmentId);
+  }
+
+  /**
+   * Reads which agents the runtime hosts before the connection is handed out.
+   *
+   * `hello` says only that the build hosts external agents. The list of targets
+   * and the isolation attestation arrive with `runtime.health`, which is
+   * otherwise read when an environment read finds the manifest stale: at least
+   * {@link MANIFEST_FRESHNESS_MS} after the connect. A send or a discovery that
+   * landed in that gap judged a runtime that was still starting as one hosting
+   * no agent, and refused it as `runtime-unsupported`. Best effort: a peer that
+   * cannot answer health yet keeps the handshake manifest and the later read.
+   */
+  async #readHostedAgents(
+    entry: RuntimeConnectionEntry,
+    revision: number,
+    userId: string,
+    environmentId: string
+  ): Promise<RuntimeClient> {
+    const client = entry.connection?.client;
+    if (!client) throw unavailable('Runtime connection was closed.');
+    const needsRead =
+      client.manifest.features.externalAgents === true &&
+      client.manifest.externalAgents === undefined;
+    if (!needsRead || entry.revision !== revision) return client;
+    await this.refreshManifest(userId, environmentId).catch(() => undefined);
+    return client;
   }
 
   /**

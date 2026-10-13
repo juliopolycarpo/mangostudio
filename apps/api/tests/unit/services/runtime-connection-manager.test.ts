@@ -1260,6 +1260,62 @@ describe('RuntimeConnectionManager', () => {
     }
   );
 
+  // The hello says only that the build hosts external agents; the list of targets and the
+  // isolation attestation arrive with `runtime.health`. A send or a discovery that lands before
+  // anything read health judged a runtime that is still starting as one that hosts no agent.
+  it('reads which agents a runtime hosts before it hands the connection out', async () => {
+    const hello: RuntimeCapabilityManifest = {
+      ...TEST_MANIFEST,
+      features: { ...TEST_MANIFEST.features, externalAgents: true },
+    };
+    let discoveryCalls = 0;
+    const runtime = await connectTestRuntime({
+      manifest: hello,
+      externalAgentIsolation: 'single-user',
+      handlers: {
+        'runtime.health': () => ({
+          ...HEALTH_REPORT,
+          allow: { ...HEALTH_REPORT.allow, externalAgents: true },
+          externalAgents: {
+            targets: ['codex'],
+            identityIsolation: ATTESTED,
+            liveSessionCount: 0,
+            liveSessions: [],
+          },
+        }),
+        'external-agent.discover': () => {
+          discoveryCalls += 1;
+          return { descriptors: [] };
+        },
+      },
+    });
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(runtime) },
+    });
+    try {
+      const authority = createRuntimeAuthoritativeAgentDiscovery(
+        (userId, environmentId) => manager.getClient(userId, environmentId),
+        1_000,
+        createExternalIdentityIsolationRegistry()
+      );
+
+      const [status] = await authority.describe(
+        { userId: 'user-1', environmentId: 'devbox' },
+        ['codex'],
+        { signal: new AbortController().signal }
+      );
+
+      expect(
+        { reason: status?.unavailableReason, discoveryCalls },
+        'expected a runtime that hosts codex to be asked, not refused as runtime-unsupported'
+      ).toEqual({ reason: undefined, discoveryCalls: 1 });
+    } finally {
+      manager.disconnect('user-1', 'devbox');
+      await runtime.close();
+    }
+  });
+
   /**
    * A Local `open` that answers at once, the way the spawned runtime does: an
    * attested manifest when the hub claimed `single-user`, none when it
@@ -1950,7 +2006,8 @@ describe('RuntimeConnectionManager', () => {
     manager.refreshManifestIfStale('user-1', 'devbox');
     await flushMicrotasks();
 
-    expect(probe.calls()).toBe(1);
+    // One read at connect (a consenting peer that listed no agents is asked for them), one stale.
+    expect(probe.calls()).toBe(2);
     expect(publishes).toBe(0);
   });
 
