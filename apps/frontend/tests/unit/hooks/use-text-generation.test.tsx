@@ -8,6 +8,10 @@ import { en } from '@mangostudio/shared/i18n';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  getComposerDraft,
+  setComposerDraft,
+} from '../../../src/features/chat/lib/composer-draft-store';
+import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
 } from '../../../src/hooks/use-global-settings';
@@ -1693,6 +1697,90 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
       messagesInvalidations(invalidateSpy),
       'expected no transcript re-read after a pre-stream refusal | received a re-read that replaces the refusal'
     ).toHaveLength(0);
+  });
+
+  // The composer clears on submit, and a refusal stores nothing, so a reload loses the rows too:
+  // the typed text would be gone for good. The composer's own draft is where it goes back.
+  describe('the text of a send refused before anything was stored', () => {
+    const refusal = () =>
+      new ApiError({
+        error: 'This agent cannot run here right now.',
+        code: 'UNSUPPORTED',
+        details: { unavailableReason: 'version-unsupported', requiredVersion: '0.154.0' },
+      });
+
+    beforeEach(() => {
+      setComposerDraft('chat-1', '');
+    });
+
+    it('goes back to the composer draft of that chat', async () => {
+      const props = makeProps();
+      mockStream.mockImplementation(() => Promise.reject(refusal()));
+      const { result } = renderWithQueryClient(props);
+
+      await act(async () => {
+        await result.current.generation.handleRespond('write the migration');
+      });
+
+      expect(
+        getComposerDraft('chat-1'),
+        'expected the refused text back in the draft of chat-1'
+      ).toBe('write the migration');
+    });
+
+    it('goes back when the refusal arrives as a stream chunk', async () => {
+      const props = makeProps();
+      mockStream.mockImplementation(
+        makeStreamFn([
+          {
+            type: 'error',
+            error: 'The external agent turn could not be started.',
+            unavailableReason: 'signed-out',
+            remedy: { kind: 'sign-in', command: 'codex login' },
+            done: true,
+          },
+        ])
+      );
+      const { result } = renderWithQueryClient(props);
+
+      await act(async () => {
+        await result.current.generation.handleRespond('write the migration');
+      });
+
+      expect(
+        getComposerDraft('chat-1'),
+        'expected the refused text back in the draft of chat-1'
+      ).toBe('write the migration');
+    });
+
+    it('does not replace what the user has typed since', async () => {
+      const props = makeProps();
+      mockStream.mockImplementation(() => {
+        setComposerDraft('chat-1', 'something newer');
+        return Promise.reject(refusal());
+      });
+      const { result } = renderWithQueryClient(props);
+
+      await act(async () => {
+        await result.current.generation.handleRespond('write the migration');
+      });
+
+      expect(getComposerDraft('chat-1'), 'expected the newer draft to stay').toBe(
+        'something newer'
+      );
+    });
+
+    it('is not restored for a send that failed for another reason', async () => {
+      const props = makeProps();
+      mockStream.mockImplementation(() => Promise.reject(new Error('socket hang up')));
+      const { result } = renderWithQueryClient(props);
+
+      await act(async () => {
+        await result.current.generation.handleRespond('write the migration');
+      });
+
+      expect(getComposerDraft('chat-1'), 'expected an empty draft').toBe('');
+    });
   });
 
   it('keeps the optimistic rows after a runtime refused the open at its session cap', async () => {

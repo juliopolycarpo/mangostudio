@@ -35,6 +35,7 @@ import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-fi
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import { setChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import type { useChats } from '@/features/chat/hooks/use-chats';
+import { getComposerDraft, setComposerDraft } from '@/features/chat/lib/composer-draft-store';
 import { chatKeys, messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
@@ -792,6 +793,12 @@ export function useTextGeneration({
             ?.pages.flatMap((page) => page.messages)
             .filter((row) => row.id === optimisticUserMsgId || row.id === optimisticAiMsgId);
           if (rows?.length) refusalRows.current.set(activeChatId, rows);
+          // The composer cleared on submit and nothing was stored, so a reload would lose the
+          // text for good. Back into the draft, unless the user has already typed something
+          // else; a review's prompt is a button label and a recovery's is ours, not theirs.
+          if (!recovery && !review && getComposerDraft(activeChatId) === '') {
+            setComposerDraft(activeChatId, prompt);
+          }
         }
         if (streamThrew && !refusalIsOnlyCopy) {
           pendingTranscriptReconciles.current.add(activeChatId);
