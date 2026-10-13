@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Glob } from 'bun';
 
 // Bun parses JSONC natively, so the import tolerates turbo.jsonc's comments.
 import turboConfigJson from '../../turbo.jsonc';
@@ -156,13 +157,8 @@ const BUN_TEST_FILE = /(\.test|_test|\.spec|_spec)\.(js|jsx|mjs|cjs|ts|tsx|mts|c
 
 /** The test files `bun test <filter>` selects in the repository: a substring of the path, as Bun matches it. */
 function filterSelects(filter: string): string[] {
-  const listed = Bun.spawnSync({
-    cmd: ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-    cwd: ROOT_DIR,
-  });
-  return listed.stdout
-    .toString()
-    .split('\0')
+  // Bun selects ordinary ignored files too; Git's exclude-standard list does not.
+  return [...new Glob('**/*').scanSync({ cwd: ROOT_DIR })]
     .filter((file) => file && BUN_TEST_FILE.test(file) && !skippedByBun(file))
     .filter((file) => file.includes(filter))
     .sort();

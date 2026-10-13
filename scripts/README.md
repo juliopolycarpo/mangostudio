@@ -203,6 +203,21 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   job set into one measurement per lane: `partial` for a lost, cut-off or
   timed-out job, `unavailable` for nothing readable, retries deduplicated by
   test identity. See `docs/reference/testing.md`.
+- `../lib/shard-receipt.ts` — the watchdog, shard merger and QA reader share
+  this process-receipt contract. Version 1 requires a shard identity matching
+  its job directory, an integer exit code from 0 to 255, a nonnegative finite
+  duration, one or two attempts and a boolean `failuresSeen`. Retained findings
+  always force a nonzero exit, even after a clean retry. Unversioned legacy
+  receipts still require identity and exit; omitted duration, attempt count and
+  findings are unavailable. A missing duration makes the merged duration `null`;
+  measured zero remains zero. Malformed fields invalidate either format.
+
+- `../lib/test-workers.ts` — its inventory includes the ordinary ignored and
+  untracked tests Bun runs, and skips dot directories and `node_modules`.
+  Turbo's default inputs include untracked files but omit ignored files, so
+  cached root tasks name `scripts/**` and cached workspace unit tasks name
+  `tests/unit/**` explicitly. The inventory fixture reproduces a cached pass after an ignored
+  test starts failing and verifies that the explicit input invalidates it.
 - `policy/` — the verdict as a pure function (`pass` / `fail` / `incomplete`)
   with a truth-table test; `render/verdict.ts` only words it.
 - `unhandled-errors.ts` — the one signal JUnit cannot carry, for either runner:

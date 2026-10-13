@@ -51,6 +51,7 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { normalizeLogLine } from '../lib/log-lines';
+import { serializeShardReceipt } from '../lib/shard-receipt';
 import { TIMINGS_DIR } from '../lib/test-lanes';
 
 export interface WatchdogOptions {
@@ -554,7 +555,14 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   // tell that the job ran twice.
   await Bun.write(
     options.metaFile,
-    `${JSON.stringify({ shard, exitCode, durationSeconds, attempts })}\n`
+    serializeShardReceipt({
+      schemaVersion: 1,
+      shard,
+      exitCode,
+      durationSeconds,
+      attempts,
+      failuresSeen,
+    })
   );
 
   const githubOutput = process.env.GITHUB_OUTPUT;

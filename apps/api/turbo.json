@@ -8,6 +8,7 @@
     "test:unit": {
       "inputs": [
         "$TURBO_DEFAULT$",
+        "tests/unit/**",
         "$TURBO_ROOT$/scripts/with-test-home.ts",
         "$TURBO_ROOT$/scripts/lib/test-home.ts",
         "$TURBO_ROOT$/scripts/lib/temp-home.ts",

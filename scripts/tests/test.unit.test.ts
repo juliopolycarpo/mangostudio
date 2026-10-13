@@ -55,7 +55,11 @@ describe('test script', () => {
 
   test('declares env and cache boundaries for test lanes', () => {
     const testEnv = ['DATABASE_PATH', 'CI', 'MANGOSTUDIO_*'];
-    expect(turboConfig.tasks['test:unit']).toEqual({ dependsOn: ['transit'], env: testEnv });
+    expect(turboConfig.tasks['test:unit']).toEqual({
+      dependsOn: ['transit'],
+      inputs: ['$TURBO_DEFAULT$', 'tests/unit/**'],
+      env: testEnv,
+    });
     expect(turboConfig.tasks['test:integration']).toEqual({ cache: false, env: testEnv });
     expect(turboConfig.tasks['test:coverage']).toEqual({
       cache: false,

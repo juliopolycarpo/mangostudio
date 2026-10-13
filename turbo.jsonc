@@ -103,6 +103,8 @@
     // the key without making any lane wait or run another workspace's tests.
     "test:unit": {
       "dependsOn": ["transit"],
+      // Bun selects ignored test files too; the default VCS inputs omit them.
+      "inputs": ["$TURBO_DEFAULT$", "tests/unit/**"],
       "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
     },
     "test:integration": {
