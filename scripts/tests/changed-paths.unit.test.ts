@@ -162,48 +162,43 @@ describe('literal Git path transport', () => {
 });
 
 describe('relevance policy parity', () => {
-  test('all ordinary tracked paths retain every lane verdict except the detector self-inputs', () => {
+  test('all tracked paths retain every lane verdict with exact detector and reuse inputs', () => {
     const tracked = Bun.spawnSync(['git', 'ls-files', '-z'], { cwd: ROOT_DIR, stdout: 'pipe' });
     expect(tracked.exitCode).toBe(0);
     for (const path of decodeChangedPaths(tracked.stdout)) {
       expect(distributionRelevant([path]), path).toBe(
         !new RegExp(baseline.policies.distribution).test(path)
       );
-      const previous = {
-        release: new RegExp(baseline.policies.release).test(path),
-        launcher: new RegExp(baseline.policies.launcher).test(path),
-      };
-      // Detector inputs now exercise their own launcher policy too.
-      if (
-        ![
-          'scripts/lib/changed-paths.ts',
-          'scripts/lib/ci-lanes.ts',
-          'scripts/ci/changed-paths.ts',
-        ].includes(path)
-      ) {
-        expect(releaseRelevance([path]), path).toEqual(previous);
-      }
-      const detectorInputs = [
+      const sharedDetectorInputs = [
         'scripts/lib/changed-paths.ts',
         'scripts/lib/ci-lanes.ts',
         'scripts/ci/changed-paths.ts',
-        'scripts/ci/protocol-lanes.ts',
       ];
-      if (!detectorInputs.includes(path)) {
-        expect(touchesProtocolSurface([path]), path).toBe(
-          new RegExp(baseline.policies.protocol).test(path)
-        );
-      }
-      if (
-        ![...detectorInputs, 'scripts/lib/rust-lanes.ts', 'scripts/ci/rust-lanes.ts'].includes(path)
-      ) {
-        const matches = (globs: readonly string[]) =>
-          globs.some((glob) => new Bun.Glob(glob).match(path));
-        expect(classifyChangedPaths([path]), path).toEqual({
-          rust: matches(baseline.rustPaths.workspace),
-          qualification: matches(baseline.rustPaths.qualification),
-        });
-      }
+      expect(releaseRelevance([path]), path).toEqual({
+        release:
+          new RegExp(baseline.policies.release).test(path) ||
+          path === 'scripts/ci/changed-paths.ts' ||
+          path === 'scripts/ci/dry-run-artifacts.ts' ||
+          path.startsWith('.github/actions/download-distribution/'),
+        launcher:
+          new RegExp(baseline.policies.launcher).test(path) || sharedDetectorInputs.includes(path),
+      });
+      expect(touchesProtocolSurface([path]), path).toBe(
+        new RegExp(baseline.policies.protocol).test(path) ||
+          [...sharedDetectorInputs, 'scripts/ci/protocol-lanes.ts'].includes(path)
+      );
+      const rustDetectorInputs = [
+        ...sharedDetectorInputs,
+        'scripts/lib/rust-lanes.ts',
+        'scripts/ci/rust-lanes.ts',
+      ];
+      const matches = (globs: readonly string[]) =>
+        globs.some((glob) => new Bun.Glob(glob).match(path));
+      expect(classifyChangedPaths([path]), path).toEqual({
+        rust: matches(baseline.rustPaths.workspace) || rustDetectorInputs.includes(path),
+        qualification:
+          matches(baseline.rustPaths.qualification) || rustDetectorInputs.includes(path),
+      });
     }
   });
 
