@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SCOPED_CACHE_FAMILIES } from '../ci/cache-families';
 import { RUST_CACHE_FAMILIES, RUST_CACHE_WRITERS } from '../ci/rust-cache/families';
 import { ROOT_DIR } from '../lib/config';
 import { evaluateWriteScope, runCompositeStep } from './support/cache-scoped-steps';
@@ -32,7 +33,7 @@ import {
 const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
-const EXPECTED_FAMILIES = ['bun', 'turbo', 'lint-tools', 'playwright', 'timings'] as const;
+const EXPECTED_FAMILIES = SCOPED_CACHE_FAMILIES;
 const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-${EXPRESSION_START} hashFiles('Cargo.toml') }}`;
 const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/heads/main' }}`;
 // The fuzz workspace is excluded from the root workspace and has its own
@@ -400,7 +401,7 @@ describe('CI cache policy', () => {
   });
 
   // Pull requests restore main's rust caches but cannot replace them, so a
-  // pull request adds nothing to the 10 GiB repository quota that main's own
+  // pull request adds nothing to the configured repository allowance that main's own
   // entries already fill most of.
   test('saves rust caches only from main', () => {
     const steps = rustCacheSteps();

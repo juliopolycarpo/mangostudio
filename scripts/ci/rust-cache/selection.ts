@@ -1,4 +1,4 @@
-import { MAIN_CACHE_REF, RUST_CACHE_FAMILIES } from './families';
+import { MAIN_CACHE_REF, parseRustCacheKey } from './families';
 
 export interface RustCacheEntry {
   readonly id: number;
@@ -14,15 +14,6 @@ export interface RustCacheDeletion {
   readonly replacement: RustCacheEntry;
 }
 
-// Grammar from Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-// src/config.ts: prefix + shared-key (or key + job) + os.type() + os.arch()
-// + 8-hex rust/environment hash + 8-hex dependency hash. hashFiles(Cargo.toml)
-// supplies the first 64-hex segment. No segment is guessed from a loose prefix.
-// https://github.com/Swatinem/rust-cache/blob/6323deb102c322ba6fcbdcafc7e3dddab59af2b6/src/config.ts
-const KEY_GRAMMAR =
-  /^v0-rust-([a-f0-9]{64})-([a-z0-9-]+)-(Linux|Darwin|Windows_NT)-(x64|arm64)-([a-f0-9]{8})-([a-f0-9]{8})$/;
-const KNOWN_FAMILIES = new Set<string>(RUST_CACHE_FAMILIES);
-
 function familyIdentity(entry: RustCacheEntry): string | undefined {
   if (
     !Number.isSafeInteger(entry.id) ||
@@ -32,9 +23,9 @@ function familyIdentity(entry: RustCacheEntry): string | undefined {
   )
     return;
   if (entry.ref !== MAIN_CACHE_REF || !/^[a-f0-9]{64}$/.test(entry.version)) return;
-  const match = KEY_GRAMMAR.exec(entry.key);
-  if (!match || !KNOWN_FAMILIES.has(match[2])) return;
-  const [, , family, os, arch, environment] = match;
+  const parsed = parseRustCacheKey(entry.key);
+  if (!parsed) return;
+  const { family, os, arch, environment } = parsed;
   // Preserve the cache archive version as well as the compiler/environment,
   // platform, target and profile. Only manifest/dependency generations rotate.
   return [family, os, arch, environment, entry.version].join(':');

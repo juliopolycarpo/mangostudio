@@ -245,8 +245,9 @@ jobs:
     # and already run on x64. Behind the same Rust signal as every lane here,
     # which `crates/**` selects, and part of this workflow's one `Gate`. No
     # rust-cache step: a cache entry is only ever saved from main and none
-    # exists for this runner yet, so nothing shows it would help, while the
-    # repository's Actions cache is already over its quota.
+    # exists for this runner yet, so nothing shows it would help, while
+    # cache reservations can be blocked by the repository's billing budget even
+    # when retained bytes fit the configured storage allowance.
     name: Workspace (windows-11-arm)
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'

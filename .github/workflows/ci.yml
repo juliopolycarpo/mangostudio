@@ -255,18 +255,6 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      # Before the verdict, so a failing gate still reports it. Four cache
-      # families are keyed on the Bun revision, so every toolchain bump replaces
-      # rather than reuses them — the correct invalidator, and also the thing
-      # spending the 10 GB budget. This makes that spend visible instead of
-      # surfacing as a silent eviction.
-      - name: Report Actions cache usage
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Dependency-free script; runs without `bun install`.
-        run: bun ./scripts/ci/report-cache-usage.ts
-
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
@@ -278,6 +266,18 @@ jobs:
             needs.changes.outputs.rust == 'false' && 'rust-coverage' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
+
+      # Advisory work follows the verdict and still runs after a failed verdict.
+      # The script bounds each request to 3s and the whole report to 15s; this
+      # step timeout also bounds a stuck process without spending Gate's 5m.
+      - name: Report Actions cache usage
+        if: ${{ always() }}
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Read-only and dependency-free; an unavailable storage limit stays unknown.
+        run: bun ./scripts/ci/report-cache-usage.ts
 
   gate-unique:
     # Additive compatibility check for the future ruleset cutover. Keep the
