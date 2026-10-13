@@ -73,7 +73,12 @@ export function externalPreflightDetails(
     // Structured so the client renders its own sentence and the matching
     // remedy. The `message` beside it stays English on purpose: it is what an
     // External API consumer that renders nothing itself falls back to.
-    return { details: { unavailableReason: failure.unavailableReason } };
+    return {
+      details: {
+        unavailableReason: failure.unavailableReason,
+        ...(failure.requiredVersion ? { requiredVersion: failure.requiredVersion } : {}),
+      },
+    };
   }
   return {};
 }

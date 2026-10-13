@@ -111,6 +111,8 @@ export type ExternalTurnPreflightFailure =
       readonly message: string;
       /** The descriptor's own reason, so the client can say it in the user's language. */
       readonly unavailableReason?: ExternalAgentUnavailableReason;
+      /** The build `version-unsupported` asks for, so the client can name it. */
+      readonly requiredVersion?: string;
     }
   /**
    * The environment has not proved that vendor credentials belong to the user
@@ -238,6 +240,7 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
           kind,
           message: resolution.message,
           ...(resolution.reason ? { unavailableReason: resolution.reason } : {}),
+          ...(resolution.requiredVersion ? { requiredVersion: resolution.requiredVersion } : {}),
         },
       };
     }

@@ -79,6 +79,8 @@ export type ExternalTurnConfigurationResolution =
        * consumer sees when it renders nothing itself.
        */
       readonly reason?: ExternalAgentUnavailableReason;
+      /** The build `version-unsupported` asks for, when the descriptor names one. */
+      readonly requiredVersion?: string;
       /**
        * Set when the refusal is the isolation gate rather than a configuration
        * one. The two read very differently to a user — one is "change a
@@ -187,6 +189,9 @@ export function createExternalTurnConfigurationResolver(
       return {
         ok: false,
         reason: descriptor.unavailableReason,
+        ...(descriptor.unavailableReason === 'version-unsupported' && descriptor.requiredVersion
+          ? { requiredVersion: descriptor.requiredVersion }
+          : {}),
         message: 'This agent cannot run here right now.',
       };
     }
