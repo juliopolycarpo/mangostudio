@@ -2,13 +2,55 @@
 // Human output is never evidence: the versioned result must match the caller.
 
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { CHECK_RESULT_MAX_BYTES, parseCheckResult } from '../../lib/check-result';
 import { runCapture } from './support';
 import type { ToolingCheckStats } from './types';
+
+interface CheckReportFile {
+  stat(): Promise<{ readonly size: number; isFile(): boolean }>;
+  read(
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number
+  ): Promise<{ bytesRead: number }>;
+  close(): Promise<void>;
+}
+
+/** Check and read the same descriptor, bounded even if the report grows. */
+export const readCheckReport = async (
+  path: string,
+  openFile: (path: string) => Promise<CheckReportFile> = (path) =>
+    open(path, constants.O_RDONLY | constants.O_NONBLOCK)
+): Promise<string> => {
+  const file = await openFile(path);
+  try {
+    const info = await file.stat();
+    if (!info.isFile() || info.size > CHECK_RESULT_MAX_BYTES) {
+      throw new Error(`expected a report file of at most ${CHECK_RESULT_MAX_BYTES} bytes`);
+    }
+    // Reading one extra byte detects growth beyond the cap after fstat. Short
+    // reads are retried on this descriptor; its path is never opened again.
+    const buffer = Buffer.alloc(CHECK_RESULT_MAX_BYTES + 1);
+    let total = 0;
+    while (total < buffer.length) {
+      const { bytesRead } = await file.read(buffer, total, buffer.length - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    if (total > CHECK_RESULT_MAX_BYTES) {
+      throw new Error(`Check report grew beyond ${CHECK_RESULT_MAX_BYTES} bytes`);
+    }
+    return buffer.subarray(0, total).toString('utf8');
+  } finally {
+    await file.close();
+  }
+};
 
 /**
  * Run Check locally and validate its report before extracting failed labels.
@@ -36,11 +78,7 @@ export const collectToolingStats = async (
     ]);
     let text: string;
     try {
-      const file = await stat(path);
-      if (!file.isFile() || file.size > CHECK_RESULT_MAX_BYTES) {
-        throw new Error(`expected a report file of at most ${CHECK_RESULT_MAX_BYTES} bytes`);
-      }
-      text = await readFile(path, 'utf8');
+      text = await readCheckReport(path);
     } catch (caught) {
       const reason = caught instanceof Error ? caught.message : String(caught);
       throw new Error(`Check exited ${result.exitCode} without a readable report: ${reason}`);

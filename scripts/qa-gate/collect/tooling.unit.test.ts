@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { access, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, open, rename, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { CHECK_RESULT_MAX_BYTES, type CheckResult } from '../../lib/check-result';
 import { completedCheckFixture, executedCheckTask } from '../../tests/support/check-result-fixture';
 import { measure, type RunResult } from './support';
-import { collectToolingStats } from './tooling';
+import { collectToolingStats, readCheckReport } from './tooling';
 
 /** A local process fixture writes to the actual caller-selected report file. */
 const makeFakeCheck = (
@@ -31,6 +33,139 @@ const makeFakeCheck = (
 
 const success = { exitCode: 0, stdout: '', stderr: '' };
 const failure = { exitCode: 1, stdout: '', stderr: '' };
+
+describe('bounded Check report descriptor', () => {
+  it('reads the checked descriptor when another file replaces its path', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mango-report-descriptor-'));
+    const path = join(directory, 'result.json');
+    await writeFile(path, 'checked file');
+    const file = await open(path, 'r');
+    let opens = 0;
+    let closes = 0;
+    try {
+      const text = await readCheckReport(path, () => {
+        opens++;
+        return Promise.resolve({
+          stat: async () => {
+            const info = await file.stat();
+            await rename(path, join(directory, 'original.json'));
+            await writeFile(path, 'replacement file');
+            return info;
+          },
+          read: file.read.bind(file),
+          close: async () => {
+            closes++;
+            await file.close();
+          },
+        });
+      });
+      expect(text).toBe('checked file');
+      expect(opens).toBe(1);
+      expect(closes).toBe(1);
+      await expect(file.stat()).rejects.toThrow();
+    } finally {
+      await file.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('bounds bytes read and closes the descriptor when a small checked file grows', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mango-report-growth-'));
+    const path = join(directory, 'result.json');
+    await writeFile(path, '{}');
+    const file = await open(path, 'r');
+    let bytesRead = 0;
+    let closes = 0;
+    try {
+      await expect(
+        readCheckReport(path, async () => ({
+          stat: async () => {
+            const info = await file.stat();
+            await writeFile(path, 'x'.repeat(CHECK_RESULT_MAX_BYTES * 2));
+            return info;
+          },
+          read: async (buffer, offset, length, position) => {
+            const result = await file.read(buffer, offset, length, position);
+            bytesRead += result.bytesRead;
+            return result;
+          },
+          close: async () => {
+            closes++;
+            await file.close();
+          },
+        }))
+      ).rejects.toThrow('grew beyond');
+      expect(bytesRead).toBe(CHECK_RESULT_MAX_BYTES + 1);
+      expect(closes).toBe(1);
+      await expect(file.stat()).rejects.toThrow();
+    } finally {
+      await file.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('continues short reads on one descriptor and accepts exactly the byte cap', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mango-report-short-read-'));
+    const path = join(directory, 'result.json');
+    const text = 'x'.repeat(CHECK_RESULT_MAX_BYTES);
+    await writeFile(path, text);
+    const file = await open(path, 'r');
+    let reads = 0;
+    try {
+      expect(
+        await readCheckReport(path, async () => ({
+          stat: file.stat.bind(file),
+          read: (buffer, offset, length, position) => {
+            reads++;
+            return file.read(buffer, offset, Math.min(length, 1024), position);
+          },
+          close: file.close.bind(file),
+        }))
+      ).toBe(text);
+      expect(reads).toBeGreaterThan(1);
+      await expect(file.stat()).rejects.toThrow();
+    } finally {
+      await file.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a nonregular descriptor and closes it', async () => {
+    let read = false;
+    let closed = false;
+    await expect(
+      readCheckReport('nonregular', async () => ({
+        stat: () => Promise.resolve({ size: 0, isFile: () => false }),
+        read: () => {
+          read = true;
+          throw new Error('must not read');
+        },
+        close: () => {
+          closed = true;
+          return Promise.resolve();
+        },
+      }))
+    ).rejects.toThrow('expected a report file');
+    expect(read).toBe(false);
+    expect(closed).toBe(true);
+  });
+
+  it('closes the descriptor after a read failure', async () => {
+    const failure = new Error('descriptor read failed');
+    let closed = false;
+    await expect(
+      readCheckReport('read-failure', async () => ({
+        stat: () => Promise.resolve({ size: 1, isFile: () => true }),
+        read: () => Promise.reject(failure),
+        close: () => {
+          closed = true;
+          return Promise.resolve();
+        },
+      }))
+    ).rejects.toBe(failure);
+    expect(closed).toBe(true);
+  });
+});
 
 describe('collectToolingStats', () => {
   it('retains multiple failures from structured tasks without parsing either console stream', async () => {
@@ -120,6 +255,17 @@ describe('collectToolingStats', () => {
   it('rejects an oversize report file', async () => {
     const check = makeFakeCheck(success, ' '.repeat(CHECK_RESULT_MAX_BYTES + 1));
     await expect(collectToolingStats(check.run)).rejects.toThrow('without a readable report');
+  });
+
+  it('rejects a directory report and removes the temporary directory', async () => {
+    const commands: string[][] = [];
+    const run = async (cmd: readonly string[]) => {
+      commands.push([...cmd]);
+      await mkdir(cmd[cmd.indexOf('--report-file') + 1]);
+      return success;
+    };
+    await expect(collectToolingStats(run)).rejects.toThrow('without a readable report');
+    await expect(access(commands[0][5])).rejects.toThrow();
   });
 
   it('propagates a thrown runner error and removes the caller temporary directory', async () => {
