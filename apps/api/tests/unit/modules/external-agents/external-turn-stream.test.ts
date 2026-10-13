@@ -380,6 +380,26 @@ describe('external turn configuration', () => {
     expect(resolution.configuration.effort).toBeUndefined();
   });
 
+  it('names the build an outdated agent needs in the refusal', async () => {
+    const { resolveConfiguration } = harness({
+      agents: [
+        descriptor({ unavailableReason: 'version-unsupported', requiredVersion: '0.154.0' }),
+      ],
+    });
+    const resolution = await resolveConfiguration({
+      userId,
+      chat: chatRecord(),
+      targetId: 'codex',
+      workdir: '/work/repo',
+    });
+    expect(
+      resolution.ok
+        ? 'accepted'
+        : { reason: resolution.reason, requiredVersion: resolution.requiredVersion },
+      'expected a refusal naming version-unsupported and 0.154.0'
+    ).toEqual({ reason: 'version-unsupported', requiredVersion: '0.154.0' });
+  });
+
   it('refuses a target discovery reports as unavailable', async () => {
     const { resolveConfiguration } = harness({
       agents: [descriptor({ unavailableReason: 'signed-out' })],

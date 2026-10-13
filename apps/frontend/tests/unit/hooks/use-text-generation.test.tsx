@@ -8,6 +8,10 @@ import { en } from '@mangostudio/shared/i18n';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  getComposerDraft,
+  setComposerDraft,
+} from '../../../src/features/chat/lib/composer-draft-store';
+import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
 } from '../../../src/hooks/use-global-settings';
@@ -973,6 +977,37 @@ describe('useTextGeneration — failure surfaced as timeline item', () => {
     );
   });
 
+  it('names the build an outdated agent needs when the hub refused the send', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(() =>
+      Promise.reject(
+        new ApiError({
+          error: 'This agent cannot run here right now.',
+          code: 'UNSUPPORTED',
+          details: { unavailableReason: 'version-unsupported', requiredVersion: '0.154.0' },
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+
+    await act(async () => {
+      await result.current.handleRespond('test prompt');
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls = props.updateOptimisticMessage.mock.calls as Array<
+      [string, string, Partial<{ parts: MessagePart[]; isGenerating: boolean }>]
+    >;
+    const finalCall = [...calls].reverse().find(([, , update]) => update.isGenerating === false);
+    if (!finalCall) throw new Error('expected a terminal update');
+    const errorParts = (finalCall[2].parts ?? []).filter((p) => p.type === 'error');
+    expect(errorParts[0]?.type === 'error' && errorParts[0].text).toBe(
+      'Update this agent to 0.154.0 or later on this machine'
+    );
+  });
+
   // A dropped socket rejects out of the reader as a network error, not an
   // abort, so it lands here rather than in the abort branch. The card it leaves
   // behind at `generating` is the same one, and nothing downstream settles it.
@@ -1634,6 +1669,118 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     });
 
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
+  });
+
+  // The hub also refuses a send before the stream opens, as an HTTP 409 that names the reason. It
+  // stored nothing either, so the same rule holds: a re-read would swap the refusal for rows that
+  // hold neither the refusal nor the user's message, and the send would vanish without a trace.
+  it('keeps the optimistic rows after the hub refused the send before the stream opened', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(() =>
+      Promise.reject(
+        new ApiError({
+          error: 'This agent cannot run here right now.',
+          code: 'UNSUPPORTED',
+          details: { unavailableReason: 'version-unsupported' },
+        })
+      )
+    );
+
+    const { result } = renderWithQueryClient(props);
+    const invalidateSpy = spyOn(result.current.queryClient, 'invalidateQueries');
+
+    await act(async () => {
+      await result.current.generation.handleRespond('hello');
+    });
+
+    expect(
+      messagesInvalidations(invalidateSpy),
+      'expected no transcript re-read after a pre-stream refusal | received a re-read that replaces the refusal'
+    ).toHaveLength(0);
+  });
+
+  // The composer clears on submit, and a refusal stores nothing, so a reload loses the rows too:
+  // the typed text would be gone for good. The composer's own draft is where it goes back.
+  describe('the text of a send refused before anything was stored', () => {
+    const refusal = () =>
+      new ApiError({
+        error: 'This agent cannot run here right now.',
+        code: 'UNSUPPORTED',
+        details: { unavailableReason: 'version-unsupported', requiredVersion: '0.154.0' },
+      });
+
+    beforeEach(() => {
+      setComposerDraft('chat-1', '');
+    });
+
+    it('goes back to the composer draft of that chat', async () => {
+      const props = makeProps();
+      mockStream.mockImplementation(() => Promise.reject(refusal()));
+      const { result } = renderWithQueryClient(props);
+
+      await act(async () => {
+        await result.current.generation.handleRespond('write the migration');
+      });
+
+      expect(
+        getComposerDraft('chat-1'),
+        'expected the refused text back in the draft of chat-1'
+      ).toBe('write the migration');
+    });
+
+    it('goes back when the refusal arrives as a stream chunk', async () => {
+      const props = makeProps();
+      mockStream.mockImplementation(
+        makeStreamFn([
+          {
+            type: 'error',
+            error: 'The external agent turn could not be started.',
+            unavailableReason: 'signed-out',
+            remedy: { kind: 'sign-in', command: 'codex login' },
+            done: true,
+          },
+        ])
+      );
+      const { result } = renderWithQueryClient(props);
+
+      await act(async () => {
+        await result.current.generation.handleRespond('write the migration');
+      });
+
+      expect(
+        getComposerDraft('chat-1'),
+        'expected the refused text back in the draft of chat-1'
+      ).toBe('write the migration');
+    });
+
+    it('does not replace what the user has typed since', async () => {
+      const props = makeProps();
+      mockStream.mockImplementation(() => {
+        setComposerDraft('chat-1', 'something newer');
+        return Promise.reject(refusal());
+      });
+      const { result } = renderWithQueryClient(props);
+
+      await act(async () => {
+        await result.current.generation.handleRespond('write the migration');
+      });
+
+      expect(getComposerDraft('chat-1'), 'expected the newer draft to stay').toBe(
+        'something newer'
+      );
+    });
+
+    it('is not restored for a send that failed for another reason', async () => {
+      const props = makeProps();
+      mockStream.mockImplementation(() => Promise.reject(new Error('socket hang up')));
+      const { result } = renderWithQueryClient(props);
+
+      await act(async () => {
+        await result.current.generation.handleRespond('write the migration');
+      });
+
+      expect(getComposerDraft('chat-1'), 'expected an empty draft').toBe('');
+    });
   });
 
   it('keeps the optimistic rows after a runtime refused the open at its session cap', async () => {

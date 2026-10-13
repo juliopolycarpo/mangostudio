@@ -35,6 +35,7 @@ import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-fi
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import { setChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import type { useChats } from '@/features/chat/hooks/use-chats';
+import { getComposerDraft, setComposerDraft } from '@/features/chat/lib/composer-draft-store';
 import { chatKeys, messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
@@ -90,9 +91,9 @@ function deprecatedProviderRefusal(error: unknown): ModelUnavailableDetails | un
  * `message` beside it stays as the fallback for an External API consumer that
  * renders nothing itself.
  *
- * `{version}` is the one reason whose copy names a build, and a send refusal
- * does not carry one — the same fallback the selector uses keeps the sentence
- * readable rather than printing a literal placeholder.
+ * `{version}` is the one reason whose copy names a build. The refusal carries it
+ * as `requiredVersion` when the descriptor knew one; without it the selector's
+ * fallback keeps the sentence readable rather than printing a literal placeholder.
  */
 function unavailableReasonText(
   error: unknown,
@@ -101,7 +102,8 @@ function unavailableReasonText(
   if (!(error instanceof ApiError)) return undefined;
   const reason = error.details?.unavailableReason;
   if (!reason || !isExternalAgentUnavailableReason(reason)) return undefined;
-  return externalUnavailableText(reason, t);
+  const required = error.details?.requiredVersion;
+  return externalUnavailableText(reason, t, typeof required === 'string' ? required : undefined);
 }
 
 function isExternalAgentUnavailableReason(value: string): value is ExternalAgentUnavailableReason {
@@ -745,9 +747,12 @@ export function useTextGeneration({
           // transcript says what happened, the notice is where the way out is.
           const deprecated = deprecatedProviderRefusal(error);
           if (deprecated) setModelUnavailable({ chatId: activeChatId, details: deprecated });
+          const reasonText = unavailableReasonText(error, t);
+          // The hub refused this send before it stored anything, so these optimistic rows are
+          // the only copy of the refusal: keep them past the re-read in `finally`.
+          if (reasonText) refusedBeforeStart = true;
           const errorText =
-            unavailableReasonText(error, t) ??
-            resolveApiErrorMessage(error, t.errors.textGenerationFailed);
+            reasonText ?? resolveApiErrorMessage(error, t.errors.textGenerationFailed);
           const alreadyHasError = settledParts.some((part) => part.type === 'error');
           const nextParts: MessagePart[] = alreadyHasError
             ? settledParts
@@ -788,6 +793,12 @@ export function useTextGeneration({
             ?.pages.flatMap((page) => page.messages)
             .filter((row) => row.id === optimisticUserMsgId || row.id === optimisticAiMsgId);
           if (rows?.length) refusalRows.current.set(activeChatId, rows);
+          // The composer cleared on submit and nothing was stored, so a reload would lose the
+          // text for good. Back into the draft, unless the user has already typed something
+          // else; a review's prompt is a button label and a recovery's is ours, not theirs.
+          if (!recovery && !review && getComposerDraft(activeChatId) === '') {
+            setComposerDraft(activeChatId, prompt);
+          }
         }
         if (streamThrew && !refusalIsOnlyCopy) {
           pendingTranscriptReconciles.current.add(activeChatId);
