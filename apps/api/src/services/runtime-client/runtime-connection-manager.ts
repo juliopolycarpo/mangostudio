@@ -176,6 +176,13 @@ export interface RuntimeConnectionManagerOptions {
   readonly connectDeadlinesMs?: Partial<Record<EnvironmentTransportKind, number>>;
   /** Told of every new connection's manifest, so a changed build drops its cached surface. */
   readonly discoveryCache?: RuntimeDiscoveryCache;
+  /**
+   * How long a new connection waits for the `runtime.health` read that lists the agents the
+   * runtime hosts, defaulting to {@link HOSTED_AGENTS_READ_TIMEOUT_MS}. The protocol session has
+   * no request deadline of its own, so without this a peer that answers hello and then never
+   * health would hold every connect.
+   */
+  readonly hostedAgentsReadTimeoutMs?: number;
 }
 
 /**
@@ -298,6 +305,9 @@ const HEALTHY_CONNECTION_MS = 10_000;
  * polling card from making one per poll.
  */
 const MANIFEST_FRESHNESS_MS = 15_000;
+
+/** The default bound on the connect-time read of hosted agents; see the option. */
+const HOSTED_AGENTS_READ_TIMEOUT_MS = 5_000;
 
 /**
  * Transports where the hub cannot open the connection at all — the runtime
@@ -496,12 +506,15 @@ export class RuntimeConnectionManager {
   readonly #resolveEnvironment: RuntimeEnvironmentResolver;
   readonly #discoveryCache: RuntimeDiscoveryCache;
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
+  readonly #hostedAgentsReadTimeoutMs: number;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
   #terminalsRevoked: TerminalsRevokedObserver | undefined;
 
   constructor(options: RuntimeConnectionManagerOptions) {
     this.#connectors = options.connectors;
     this.#connectDeadlinesMs = options.connectDeadlinesMs ?? CONNECT_DEADLINE_MS;
+    this.#hostedAgentsReadTimeoutMs =
+      options.hostedAgentsReadTimeoutMs ?? HOSTED_AGENTS_READ_TIMEOUT_MS;
     this.#publishHook = options.publish ?? (() => undefined);
     this.#recordTransition = options.recordTransition ?? recordEnvironmentStateTransition;
     this.#resolveEnvironment = options.resolveEnvironment;
@@ -704,7 +717,7 @@ export class RuntimeConnectionManager {
           ...(entry.status.offlineRuntimeCache ? { offlineRuntimeCache: true } : {}),
         };
         this.#publish(userId);
-        return connection.client;
+        return this.#readHostedAgents(entry, revision, userId, environmentId);
       })
       .catch((error: unknown) => {
         if (isBoundElsewhere(error)) {
@@ -879,7 +892,39 @@ export class RuntimeConnectionManager {
       ...peerRelease(connection.client.runtimeVersion),
     };
     this.#publish(userId);
-    return connection.client;
+    return await this.#readHostedAgents(entry, revision, userId, environmentId);
+  }
+
+  /**
+   * Reads which agents the runtime hosts before the connection is handed out.
+   *
+   * `hello` says only that the build hosts external agents. The list of targets
+   * and the isolation attestation arrive with `runtime.health`, which is
+   * otherwise read when an environment read finds the manifest stale: at least
+   * {@link MANIFEST_FRESHNESS_MS} after the connect. A send or a discovery that
+   * landed in that gap judged a runtime that was still starting as one hosting
+   * no agent, and refused it as `runtime-unsupported`. Best effort: a peer that
+   * cannot answer health yet keeps the handshake manifest and the later read.
+   * Bounded by `hostedAgentsReadTimeoutMs`, so a peer that never answers costs
+   * a connect that long and no more; it runs once per connection, here, not per
+   * caller.
+   */
+  async #readHostedAgents(
+    entry: RuntimeConnectionEntry,
+    revision: number,
+    userId: string,
+    environmentId: string
+  ): Promise<RuntimeClient> {
+    const client = entry.connection?.client;
+    if (!client) throw unavailable('Runtime connection was closed.');
+    const needsRead =
+      client.manifest.features.externalAgents === true &&
+      client.manifest.externalAgents === undefined;
+    if (!needsRead || entry.revision !== revision) return client;
+    await this.refreshManifest(userId, environmentId, {
+      timeoutMs: this.#hostedAgentsReadTimeoutMs,
+    }).catch(() => undefined);
+    return client;
   }
 
   /**
@@ -1172,7 +1217,8 @@ export class RuntimeConnectionManager {
    */
   async refreshManifest(
     userId: string,
-    environmentId: string
+    environmentId: string,
+    options: { readonly timeoutMs?: number } = {}
   ): Promise<EnvironmentConnectionStatus> {
     const key = connectionKey(userId, environmentId);
     const entry = this.#entries.get(key);
@@ -1185,7 +1231,9 @@ export class RuntimeConnectionManager {
     // to answer must not be asked again by every read that arrives meanwhile.
     entry.manifestReadAtMs = Date.now();
 
-    const health = await client.health();
+    const health = await client.health(
+      options.timeoutMs === undefined ? undefined : { timeoutMs: options.timeoutMs }
+    );
     if (
       entry.revision !== revision ||
       entry.connection?.client !== client ||
