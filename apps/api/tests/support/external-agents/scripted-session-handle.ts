@@ -36,6 +36,7 @@ export function createScriptedSessionHandle(sessionId = 'session-1'): ScriptedSe
     capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
     isLive: () => live,
     takeConversationReset: () => undefined,
+    setConversationUnresumable: () => Promise.resolve(),
     retire() {
       retired += 1;
       live = false;

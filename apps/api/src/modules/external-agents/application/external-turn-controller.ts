@@ -85,7 +85,6 @@ import {
   type RetryPolicy,
 } from '../domain/external-turn-retry-policy';
 import { ExternalTurnTranscript } from '../domain/external-turn-transcript';
-import { setContinuationUnresumable } from '../infrastructure/external-session-continuation-repository';
 import { sealAttemptsForMessage } from '../infrastructure/external-turn-attempt-repository';
 import { cacheExternalAccountLimitsBestEffort } from './external-account-limits';
 import {
@@ -1179,11 +1178,10 @@ export function createExternalTurnController(
     // Before the message settles, so a settled turn always has its effect on the stored
     // conversation recorded: a hub that dies in between is covered by the boot sweep.
     await recordEndOnConversation(
-      db,
       handle,
-      input.chatId,
       reason,
-      transcript.turnPart.error?.code
+      transcript.turnPart.error?.code,
+      nativeTurnId !== undefined
     );
 
     const abandonedSource = reason === 'cancelled-by-user' ? 'cancelled' : 'expired';
@@ -1259,28 +1257,20 @@ export function createExternalTurnController(
    *
    * A turn that may have killed the vendor's child marks the conversation unsafe to resume, for a
    * harness that would carry on the killed turn; a turn that completed on the same session
-   * clears the mark, because the SDK refuses turns on a session it killed. Best effort: a store
-   * failure is logged and does not stop the turn from settling.
+   * clears the mark, because the SDK refuses turns on a session it killed. A turn the vendor never
+   * accepted ran nothing, so its failure is not a reason to mark. The handle keeps a mark the
+   * store refuses and acts on it at the next open.
    */
   async function recordEndOnConversation(
-    db: Kysely<Database>,
     handle: ExternalSessionHandle,
-    chatId: string,
     reason: ExternalTurnTerminalReason,
-    errorCode: string | undefined
+    errorCode: string | undefined,
+    turnAccepted: boolean
   ): Promise<void> {
-    try {
-      if (endLeavesConversationUnresumable(handle.targetId, reason, errorCode)) {
-        await setContinuationUnresumable(chatId, handle.sessionId, true, db);
-      } else if (reason === 'completed') {
-        await setContinuationUnresumable(chatId, handle.sessionId, false, db);
-      }
-    } catch (error) {
-      logger.warn('conversation_effect_failed', {
-        sessionId: handle.sessionId,
-        reason,
-        error: String(error),
-      });
+    if (endLeavesConversationUnresumable(handle.targetId, reason, errorCode, turnAccepted)) {
+      await handle.setConversationUnresumable(true);
+    } else if (reason === 'completed') {
+      await handle.setConversationUnresumable(false);
     }
   }
 

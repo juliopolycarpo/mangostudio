@@ -1284,10 +1284,13 @@ against the real harness. What the two states do:
   `nonresumable` for a `Cancelled` refusal that is not the host's own shutdown; a turn racing a
   shutdown is `closed` and keeps its conversation.
 
-For one `clientMessageId` the hub therefore takes the turn on at most three sessions, whatever the
-capacity retries of each open add (a runtime at its session cap is retried inside the open, so the
-open requests are at most three plus those retries). A dropped connection between attempts reopens
-as before, and is bounded by the connection coming back, not by these budgets.
+For one `clientMessageId` the hub takes the turn on at most three sessions: the first, one
+replacing a `closed` one and one replacing a `nonresumable` one. That is the bound on sessions. The
+open requests are not bounded by a count: a runtime at its session cap answers an open with a
+capacity refusal, and each open retries once a second for 42 seconds (`CAPACITY_RETRY_MS`), so one
+session can cost up to that many requests, inside a 42-second window per session. A dropped
+connection between attempts reopens as before and is bounded by the connection coming back, not by
+these budgets.
 
 A refused reopen goes through the same mapping as a first open (the refusal card), including a
 consent withdrawal the hub has not seen yet: the reopen's open is denied, the send ends
@@ -1313,14 +1316,29 @@ the hub cannot tell a clean interrupt from a kill and treats every end that may 
 child as one.
 
 The continuation row therefore carries `unresumable`. For a target whose harness continues a killed
-turn on resume (Claude; the policy table's `continuesKilledTurn`), the hub sets it when a turn ends
-`cancelled-by-user`, `interrupted`, `runtime-disconnected`, `hub-restarted`, `acceptance-unknown`,
-`sequence-gap`, `limit-exceeded`, `consent-revoked` or `session-lost`, and when it ends
-`vendor-error` with a code that names the child dying (`claude-stream-broken`, `claude-no-result`,
-`claude-terminated`). It is written before the turn's message settles; a turn the hub stopped
-watching is marked by the boot sweep. The write is conditional on the runtime session that ran the
-turn, so a stale end cannot mark a conversation a later open replaced. A turn that completes on the
-same session clears the mark, since the SDK would have refused it on a killed one.
+turn on resume (Claude; the policy table's `continuesKilledTurn`, held to the SDK by runtime tests:
+a forced Claude stop leaves the session refusing turns, while a Codex or Cursor cancel leaves it
+running them), the hub sets it when a turn ends `cancelled-by-user`, `interrupted`,
+`runtime-disconnected`, `hub-restarted`, `acceptance-unknown`, `sequence-gap`, `limit-exceeded`,
+`consent-revoked` or `session-lost`, and when it ends `vendor-error` after the vendor accepted the
+turn, **except** for the codes the vendor's own failed result gets (`claude-error` and the four
+`claude-error_*` subtypes: the vendor finished the turn and reported the failure). The rule is
+inverted on purpose: the runtime stops a turn itself on its hard and idle timeouts, a payload
+overflow and an invalid event (all reported as `adapter-stream`), a broken stream or a process that
+ended without a result is a kill, and a code a later SDK adds is unknown, so everything but the
+allow-list marks the row. The list lives in the shared runtime contract
+(`errors.externalAgentFinishedTurnErrorCodes`), mirrored in Rust, and a runtime test holds it to the
+codes the SDK's reducer gives a failed result. A refusal at start, before the vendor accepted a
+turn, ran nothing and does not mark.
+
+The mark is written before the turn's message settles; a turn the hub stopped watching is marked by
+the boot sweep, by chat rather than by the stored session id because a reopen inside the send
+re-points the turn at a new session in memory before any event is written. The write is
+conditional on the runtime session that ran the turn, so a stale end cannot mark a conversation a
+later open replaced. If the store refuses the write, the session handle keeps the mark in memory and
+the next open of that chat in the same hub process starts a new conversation and retries; a hub
+that restarts before any write succeeds loses that memory, which is the one window left. A turn that
+completes on the same session clears the mark, since the SDK would have refused it on a killed one.
 
 The next open of a marked row sends no resume reference, reports `conversationReset: nonresumable`,
 and writes the new conversation unmarked. A clean interrupt followed immediately by a lost session

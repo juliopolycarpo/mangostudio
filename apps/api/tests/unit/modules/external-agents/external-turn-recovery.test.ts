@@ -292,7 +292,10 @@ describe('external turn recovery', () => {
   });
 
   describe('the stored conversation of a turn the hub stopped watching', () => {
-    async function storeConversation(targetId: 'claude' | 'codex'): Promise<void> {
+    async function storeConversation(
+      targetId: 'claude' | 'codex',
+      runtimeSessionId = 'session-1'
+    ): Promise<void> {
       await writeContinuation(
         {
           chatId,
@@ -302,7 +305,7 @@ describe('external turn recovery', () => {
           canonicalWorkspacePath: '/work/repo',
           vendorAccountFingerprint: null,
           credentialHomeFingerprint: null,
-          runtimeSessionId: 'session-1',
+          runtimeSessionId,
           nativeSessionId: 'native-1',
           effectiveConfiguration: null,
           updatedAt: 1_000,
@@ -320,6 +323,21 @@ describe('external turn recovery', () => {
       expect(
         (await readContinuation(chatId, getDb()))?.unresumable,
         'expected a Claude conversation left mid-turn by a hub restart to be unresumable'
+      ).toBe(true);
+    });
+
+    it('is marked even when a reopen re-pointed the turn at a session no event was written for', async () => {
+      // The row names the session the reopen opened; the stored turn still names the first one.
+      await storeConversation('claude', 'session-2');
+      await insertGeneratingMessage([
+        { ...ACTIVE_TURN_PART, targetId: 'claude', sessionId: 'session-1' },
+      ]);
+
+      await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+
+      expect(
+        (await readContinuation(chatId, getDb()))?.unresumable,
+        'expected the conversation of session-2 to be unresumable though the turn names session-1'
       ).toBe(true);
     });
 

@@ -1436,7 +1436,10 @@ describe('external turn controller', () => {
       it.each([
         ['claude-no-result', 'a process that ended without a result', undefined],
         ['claude-stream-broken', 'a stream that broke', undefined],
+        ['adapter-stream', "the runtime's own timeout or overflow stop", undefined],
+        ['claude-a-code-a-later-sdk-adds', 'a code nobody has seen', undefined],
         ['claude-error', 'an ordinary vendor error', 'native-session-1'],
+        ['claude-error_max_turns', 'a vendor result that hit its turn limit', 'native-session-1'],
       ])('after %s (%s) resumes: %p', async (code, _label, expectedResume) => {
         const rig = harness({ refuseFallbackResume: true });
         await completedFirstTurn(rig);
@@ -1454,6 +1457,37 @@ describe('external turn controller', () => {
           next.runtime.calls.open[0]?.resumeRef,
           `expected the open after ${code} to ${expectedResume ? 'resume' : 'start fresh'}`
         ).toBe(expectedResume);
+      });
+
+      it('resumes the conversation after a turn the vendor never accepted', async () => {
+        const rig = harness({ refuseFallbackResume: true });
+        await completedFirstTurn(rig);
+        // A deterministic refusal at start: nothing reached the vendor, so nothing was killed.
+        let refused = false;
+        const refusing = harness({
+          refuseFallbackResume: true,
+          turnFailure: () => {
+            if (refused) return undefined;
+            refused = true;
+            return new RemoteError('INVALID_PARAMS', 'the prompt is too long', {
+              kind: 'external_agent_turn_refused',
+            });
+          },
+        });
+        rig.runtime.dropConnection();
+        await Promise.resolve();
+        const failing = await startTurn(refusing.controller);
+        expect(failing.reason).toBe('vendor-error');
+        nextSendIds();
+        refusing.runtime.dropConnection();
+        await Promise.resolve();
+
+        const { next } = await sendOnNewRuntime();
+
+        expect(
+          next.runtime.calls.open[0]?.resumeRef,
+          'expected the open after a refused start to resume native-session-1'
+        ).toBe('native-session-1');
       });
 
       it('fails one send for a gone conversation, then opens fresh even after the runtime restarts', async () => {

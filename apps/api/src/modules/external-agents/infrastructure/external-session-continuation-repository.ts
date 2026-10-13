@@ -138,25 +138,28 @@ export async function writeContinuation(
  * Marks (or unmarks) the stored conversation as unsafe to resume.
  *
  * Conditional on `runtimeSessionId`, the session that ran the turn: a stale end of an older turn
- * must not taint a conversation that a later open has since replaced. Returns whether a row was
- * changed.
+ * must not taint a conversation that a later open has since replaced. Pass `undefined` to mark
+ * whichever conversation the chat has now, for a caller that knows the turn is the chat's latest
+ * but not which session it ended on (the boot sweep). Returns whether a row was changed.
  *
  * @example
  * await setContinuationUnresumable(chatId, 'session-1', true, db);
  */
 export async function setContinuationUnresumable(
   chatId: string,
-  runtimeSessionId: string,
+  runtimeSessionId: string | undefined,
   unresumable: boolean,
   db: Kysely<Database>
 ): Promise<boolean> {
-  const result = await db
+  let update = db
     .updateTable('external_session_continuations')
     .set({ unresumable: unresumable ? 1 : 0 })
     .where('chatId', '=', chatId)
-    .where('runtimeSessionId', '=', runtimeSessionId)
-    .where('unresumable', '=', unresumable ? 0 : 1)
-    .executeTakeFirst();
+    .where('unresumable', '=', unresumable ? 0 : 1);
+  if (runtimeSessionId !== undefined) {
+    update = update.where('runtimeSessionId', '=', runtimeSessionId);
+  }
+  const result = await update.executeTakeFirst();
   return Number(result.numUpdatedRows) > 0;
 }
 

@@ -4,6 +4,7 @@ import {
   EXTERNAL_TURN_TERMINAL_REASONS,
   type ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
+import { EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES } from '@mangostudio/shared/runtime-contract';
 import {
   EXTERNAL_RESUME_POLICIES,
   endLeavesConversationUnresumable,
@@ -67,17 +68,25 @@ describe('what the end of a turn means for the stored conversation', () => {
   });
 
   it.each([
+    ...EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES.map((code) => [code, false] as const),
+    ['adapter-stream', true],
     ['claude-stream-broken', true],
     ['claude-no-result', true],
     ['claude-terminated', true],
-    ['claude-error', false],
-    ['claude-error_during_execution', false],
-    [undefined, false],
+    ['a-code-a-later-sdk-adds', true],
+    [undefined, true],
   ] as const)('treats a Claude vendor error %p as unresumable: %p', (code, expected) => {
     expect(
       endLeavesConversationUnresumable('claude', 'vendor-error', code),
       `expected vendor error ${String(code)} to be ${expected ? 'unresumable' : 'resumable'}`
     ).toBe(expected);
+  });
+
+  it('leaves the conversation alone when the vendor never accepted the turn', () => {
+    expect(
+      endLeavesConversationUnresumable('claude', 'vendor-error', 'turn-start', false),
+      'expected a refusal at start, which ran nothing, to leave the conversation resumable'
+    ).toBe(false);
   });
 
   it.each(['codex', 'cursor'] as const)('never marks a %s conversation', (targetId) => {

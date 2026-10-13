@@ -76,11 +76,13 @@ export async function reconcileExternalTurns(
       turnPart.updatedAt = at;
       // A turn the hub stopped watching may have been running when the runtime or the hub went
       // away, so the child may have been killed under it: its conversation is not safe to resume.
-      // A turn that was already terminal decided this when it ended.
+      // A turn that was already terminal decided this when it ended. Marked by chat, not by the
+      // stored session id: a reopen inside the send re-points the turn at a new session in memory
+      // before any event is written, and a generating turn is the chat's latest.
       if (
         endLeavesConversationUnresumable(turnPart.targetId, turnPart.terminalReason ?? input.reason)
       ) {
-        await setContinuationUnresumable(row.chatId, turnPart.sessionId, true, db);
+        await setContinuationUnresumable(row.chatId, undefined, true, db);
       }
     }
     sealPendingApprovals(parts, at);

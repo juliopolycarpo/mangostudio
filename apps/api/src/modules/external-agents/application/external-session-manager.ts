@@ -68,6 +68,7 @@ import {
   continuationMatches,
   deleteContinuation,
   readContinuation,
+  setContinuationUnresumable,
   writeContinuation,
 } from '../infrastructure/external-session-continuation-repository';
 
@@ -241,6 +242,13 @@ export interface ExternalSessionHandle {
    * for a vendor session the agent will not run further turns on.
    */
   retire(options?: { readonly dropContinuation?: boolean }): Promise<void>;
+  /**
+   * Records whether the stored conversation is unsafe to resume (see `endLeavesConversationUnresumable`).
+   * Never rejects. A mark the store refuses is kept in memory, and until a write lands the next
+   * open of this chat starts a new conversation instead of resuming this one: failing to remember a
+   * kill must not become resuming the killed turn.
+   */
+  setConversationUnresumable(unresumable: boolean): Promise<void>;
   /**
    * The exact params a turn is submitted with. Built once per attempt and kept:
    * the runtime answers a repeated `clientMessageId` from its receipt only when
@@ -455,6 +463,30 @@ export function createExternalSessionManager(
    * have. Comparing the generation across the await is what closes that.
    */
   const reapGenerations = new Map<string, number>();
+  /**
+   * Chats whose unresumable mark could not be written, by the runtime session it belongs to.
+   * Read by the next open, which then starts a new conversation and retries the write.
+   */
+  const unwrittenMarks = new Map<string, string>();
+
+  async function setUnresumable(
+    chatId: string,
+    sessionId: string,
+    unresumable: boolean
+  ): Promise<void> {
+    try {
+      await setContinuationUnresumable(chatId, sessionId, unresumable, resolveDb());
+      if (unwrittenMarks.get(chatId) === sessionId) unwrittenMarks.delete(chatId);
+    } catch (error) {
+      logger.warn('conversation_mark_failed', {
+        sessionId,
+        unresumable,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Only a mark is a safety fact. Failing to clear one costs context, not correctness.
+      if (unresumable) unwrittenMarks.set(chatId, sessionId);
+    }
+  }
 
   function handleFor(record: SessionRecord): ExternalSessionHandle {
     const turnParams = (input: ExternalTurnInput): ExternalAgentTurnParams => ({
@@ -508,6 +540,9 @@ export function createExternalSessionManager(
           'runtime-disconnected',
           options?.dropContinuation !== true
         );
+      },
+      setConversationUnresumable(unresumable) {
+        return setUnresumable(record.binding.chatId, record.sessionId, unresumable);
       },
       turnParams,
       sendTurn,
@@ -674,7 +709,9 @@ export function createExternalSessionManager(
     }
     // A conversation marked unsafe to resume is not offered to the vendor: resuming it could
     // carry on a turn the user stopped. The open starts a new one and the turn says so.
-    const startsFresh = matching?.unresumable === true;
+    const startsFresh =
+      matching?.unresumable === true ||
+      (matching !== undefined && unwrittenMarks.get(input.chatId) === matching.runtimeSessionId);
     if (startsFresh) await releaseAdoptionLease(input.chatId, db);
     const resumable = startsFresh ? undefined : matching;
 
@@ -778,6 +815,8 @@ export function createExternalSessionManager(
       throw new ExternalSessionReapedError(input.chatId);
     }
     sessions.set(input.chatId, record);
+    // The row just written describes the new conversation, which the old mark does not concern.
+    unwrittenMarks.delete(input.chatId);
 
     return handleFor(record);
   }

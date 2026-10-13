@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
+import { UpdateQueryBuilder } from 'kysely';
 import { getDb } from '../../../../src/db/database';
 import {
   createExternalSessionManager,
@@ -80,6 +81,24 @@ function managerFor(
     newSessionId: () => sessionIds[index++] ?? `session-${index}`,
     now: () => 1_000,
   });
+}
+
+/**
+ * A continuation store whose writes to the unresumable mark fail, as a database that has gone
+ * read-only would. Every other statement runs against the real database.
+ */
+function refuseContinuationWrites() {
+  const original = UpdateQueryBuilder.prototype.execute;
+  let refused = 0;
+  const spy = spyOn(UpdateQueryBuilder.prototype, 'execute');
+  spy.mockImplementation(function (this: UpdateQueryBuilder<never, never, never, never>) {
+    if (this.compile().sql.startsWith('update "external_session_continuations"')) {
+      refused += 1;
+      return Promise.reject(new Error('attempt to write a readonly database'));
+    }
+    return original.call(this);
+  } as typeof original);
+  return { refused: () => refused, restore: () => spy.mockRestore() };
 }
 
 function recordingConsumer(): ExternalSessionConsumer & { readonly teardowns: string[] } {
@@ -422,6 +441,35 @@ describe('external session manager', () => {
           runtimeSessionId: reopened.sessionId,
           thirdResumeRef: row?.nativeSessionId,
         });
+      });
+
+      it('is not resumed when the mark could not be written, until a write lands', async () => {
+        const first = createFakeExternalRuntime({ refuseFallbackResume: true });
+        const manager = managerFor(first);
+        const handle = await manager.ensureSession(baseInput({ targetId: 'claude' }));
+        const store = refuseContinuationWrites();
+        try {
+          await expect(
+            handle.setConversationUnresumable(true),
+            'expected a refused mark write to be absorbed, not thrown'
+          ).resolves.toBeUndefined();
+        } finally {
+          store.restore();
+        }
+        const stored = await readContinuation(chatId, getDb());
+        await handle.retire();
+
+        const reopened = await manager.ensureSession(baseInput({ targetId: 'claude' }));
+
+        expect(
+          {
+            writes: store.refused(),
+            storedMark: stored?.unresumable,
+            resumeRef: first.calls.open[1]?.resumeRef,
+            reset: reopened.takeConversationReset(),
+          },
+          'expected the mark to be refused once, the row unmarked, and the next open fresh'
+        ).toEqual({ writes: 1, storedMark: false, resumeRef: undefined, reset: 'nonresumable' });
       });
 
       it('is not marked by the end of a turn on a session an open has since replaced', async () => {

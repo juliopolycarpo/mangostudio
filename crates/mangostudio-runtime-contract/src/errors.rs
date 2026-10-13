@@ -82,6 +82,19 @@ pub const EXTERNAL_AGENT_SESSION_STATES: [&str; 2] = [
     EXTERNAL_AGENT_SESSION_NONRESUMABLE,
 ];
 
+/// The error codes a Claude turn ends with when the vendor itself finished it and reported a
+/// failure. Every other code on a failed turn may mean the child was killed under it.
+///
+/// Mirrors `EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES` in
+/// `apps/shared/src/runtime-contract/errors.ts`; the runtime holds it to the SDK's own codes.
+pub const EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES: [&str; 5] = [
+    "claude-error",
+    "claude-error_during_execution",
+    "claude-error_max_turns",
+    "claude-error_max_budget_usd",
+    "claude-error_max_structured_output_retries",
+];
+
 /// Maps a wire error code onto the known union, mirroring
 /// `narrowRuntimeErrorCode` in `apps/shared/src/runtime-contract/errors.ts`.
 ///
@@ -172,6 +185,22 @@ mod tests {
 
     /// The hub reads this key and these values off the wire, so a spelling that drifts on either
     /// side would turn a reopen into a lost session without any test noticing.
+    #[test]
+    fn the_finished_turn_error_codes_mirror_strings_json() {
+        let document = errors_document();
+        let codes: Vec<&str> = document["externalAgentFinishedTurnErrorCodes"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|value| value.as_str().expect("a string"))
+            .collect();
+        assert_eq!(
+            super::EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES.to_vec(),
+            codes,
+            "expected the Rust finished-turn error codes to match strings.json"
+        );
+    }
+
     #[test]
     fn the_external_agent_session_detail_and_states_mirror_strings_json() {
         let document = errors_document();

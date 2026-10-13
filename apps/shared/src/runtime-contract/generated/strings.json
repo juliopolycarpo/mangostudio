@@ -50,6 +50,13 @@
     "externalAgentSessionStates": [
       "closed",
       "nonresumable"
+    ],
+    "externalAgentFinishedTurnErrorCodes": [
+      "claude-error",
+      "claude-error_during_execution",
+      "claude-error_max_turns",
+      "claude-error_max_budget_usd",
+      "claude-error_max_structured_output_retries"
     ]
   },
   "setupPendingSignature": "runtime setup is pending on this machine",

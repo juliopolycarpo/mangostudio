@@ -220,7 +220,7 @@ pub(super) fn limits() -> Limits {
         ..Limits::default()
     }
 }
-fn backend(launcher: Arc<StubbornClaudeLauncher>) -> Backend {
+pub(super) fn backend(launcher: Arc<StubbornClaudeLauncher>) -> Backend {
     Backend::new(
         launcher,
         Arc::new(ProductHarnesses),
@@ -240,7 +240,7 @@ fn open_params(target: wire::TargetId, workspace: &std::path::Path) -> wire::Ope
         toolchain: None,
     }
 }
-async fn open_claude(backend: &Backend) -> Box<dyn AgentSession> {
+pub(super) async fn open_claude(backend: &Backend) -> Box<dyn AgentSession> {
     let workspace = std::env::temp_dir();
     let params = open_params(wire::TargetId::Claude, &workspace);
     backend
@@ -254,7 +254,7 @@ async fn open_claude(backend: &Backend) -> Box<dyn AgentSession> {
         .map_err(|failure| failure.to_string())
         .expect("expected the Claude harness to open over the probe fakes")
 }
-async fn start(session: &dyn AgentSession) -> crate::external_agents::port::TurnStream {
+pub(super) async fn start(session: &dyn AgentSession) -> crate::external_agents::port::TurnStream {
     let configuration = fixtures::configuration();
     session
         .start_turn(TurnRequest {
