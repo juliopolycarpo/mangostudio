@@ -170,10 +170,26 @@ describe('runtime profile callers and cache isolation', () => {
       '.github/workflows/release-dry-run.yml:runtime',
       '.github/workflows/smoke-binary.yml:runtime',
     ]);
-    for (const caller of [
-      '.github/workflows/release-dry-run.yml',
-      '.github/workflows/smoke-binary.yml',
-    ]) {
+    const dryRun = readText('.github/workflows/release-dry-run.yml');
+    const reusesDistribution = dryRun.includes('reuse_distribution:');
+    const profileCallers = ['.github/workflows/smoke-binary.yml'];
+    if (reusesDistribution) {
+      const runtime = extractJobBlock(dryRun, 'runtime');
+      expect(runtime).toContain(
+        "needs.changes.outputs.release == 'true' && !inputs.reuse_distribution"
+      );
+      expect(runtime).toContain('cache: false');
+      expect(runtime).not.toContain('profile:');
+      expect(extractJobBlock(dryRun, 'changes')).toContain(
+        'PR dry runs require their same-run distribution identity'
+      );
+      expect(extractJobBlock(readText('.github/workflows/ci.yml'), 'release-dry-run')).toContain(
+        'reuse_distribution: true'
+      );
+    } else {
+      profileCallers.push('.github/workflows/release-dry-run.yml');
+    }
+    for (const caller of profileCallers) {
       const runtime = extractJobBlock(readText(caller), 'runtime');
       expect(runtime, `${caller} must select the profile for its runtime caller`).toContain(
         `profile: ${PROFILE_SELECTION}`
