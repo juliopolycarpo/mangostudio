@@ -817,3 +817,48 @@ describe('stream state sealing', () => {
     expect(state.aiMessageUpdate?.patch.modelName).toBeUndefined();
   });
 });
+
+describe('an external session announced again after a reopen', () => {
+  const FIRST: StreamChunk = {
+    type: 'external_session_started',
+    sessionId: 'hub-session-1',
+    targetId: 'claude',
+    resumed: false,
+    done: false,
+  };
+  const turnOf = (state: ReturnType<typeof reduceChunks>) =>
+    state.parts.find((part) => part.type === 'external_turn');
+
+  it('names the session that ran the turn and keeps what the turn already holds', () => {
+    const state = reduceChunks([
+      FIRST,
+      { type: 'external_text', text: 'partial', done: false },
+      { ...FIRST, sessionId: 'hub-session-2' } as StreamChunk,
+    ]);
+
+    expect(
+      {
+        sessionId: turnOf(state)?.sessionId,
+        text: state.text,
+        turns: state.parts.filter((p) => p.type === 'external_turn').length,
+      },
+      'expected one external_turn part naming hub-session-2 with the streamed text kept'
+    ).toEqual({ sessionId: 'hub-session-2', text: 'partial', turns: 1 });
+  });
+
+  it('shows the reset the second announcement carries, and drops one that no longer applies', () => {
+    const reset = reduceChunks([
+      FIRST,
+      { ...FIRST, sessionId: 'hub-session-2', conversationReset: 'nonresumable' } as StreamChunk,
+    ]);
+    const cleared = reduceChunks([
+      { ...FIRST, conversationReset: 'unavailable' } as StreamChunk,
+      { ...FIRST, sessionId: 'hub-session-2' } as StreamChunk,
+    ]);
+
+    expect({
+      reset: turnOf(reset)?.conversationReset,
+      cleared: turnOf(cleared)?.conversationReset,
+    }).toEqual({ reset: 'nonresumable', cleared: undefined });
+  });
+});

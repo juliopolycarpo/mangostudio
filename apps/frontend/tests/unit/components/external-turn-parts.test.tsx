@@ -647,6 +647,32 @@ describe('external turn: still working', () => {
   });
 });
 
+describe('a conversation the agent did not continue', () => {
+  it.each([
+    ['nonresumable', en.externalAgents.turn.conversationReset.nonresumable],
+    ['unavailable', en.externalAgents.turn.conversationReset.unavailable],
+  ] as const)('says so for %s, beside the reply', (reason, words) => {
+    renderParts([
+      turnPart({ status: 'terminal', terminalReason: 'completed', conversationReset: reason }),
+      { type: 'text', text: 'a fresh answer' },
+    ]);
+
+    const notice = screen.getByRole('status');
+    expect(
+      { text: notice.textContent, reason: notice.getAttribute('data-conversation-reset') },
+      `expected the ${reason} notice under the reply`
+    ).toEqual({ text: words, reason });
+  });
+
+  it('says nothing for a turn that continued its conversation', () => {
+    renderParts([
+      turnPart({ status: 'terminal', terminalReason: 'completed' }),
+      { type: 'text', text: 'an answer' },
+    ]);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
 describe('an unfinished section', () => {
   it('marks the trailing text as cut off', () => {
     renderParts([

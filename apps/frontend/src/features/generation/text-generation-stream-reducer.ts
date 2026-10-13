@@ -711,7 +711,8 @@ function reduceExternalSessionStarted(
   state: TextGenerationStreamState,
   chunk: Extract<StreamChunk, { type: 'external_session_started' }>
 ) {
-  if (state.parts.some((part) => part.type === 'external_turn')) return state;
+  const existing = state.parts.findIndex((part) => part.type === 'external_turn');
+  if (existing >= 0) return reduceExternalSessionRebound(state, existing, chunk);
   const parts = [
     ...state.parts,
     {
@@ -720,6 +721,7 @@ function reduceExternalSessionStarted(
       targetId: chunk.targetId,
       sessionId: chunk.sessionId,
       status: 'active',
+      ...(chunk.conversationReset ? { conversationReset: chunk.conversationReset } : {}),
       // Server-owned bookkeeping. The live view has no honest value for any of
       // them — the hub counts what it persisted, not what it sent — and the
       // stored record replaces this part wholesale on the next read.
@@ -738,6 +740,36 @@ function reduceExternalSessionStarted(
     { ...state, parts },
     { parts, ...(chunk.model !== undefined ? { modelName: chunk.model } : {}) }
   );
+}
+
+/**
+ * A later announcement of the session a turn runs in: a reopen replaced the first one.
+ *
+ * Mirrors `ExternalTurnTranscript#rebindSession` and `#markConversationReset`, so the live view
+ * names the session that ran the turn and says what the stored turn will say. The turn's progress
+ * and everything else on the part stay as they are.
+ */
+function reduceExternalSessionRebound(
+  state: TextGenerationStreamState,
+  index: number,
+  chunk: Extract<StreamChunk, { type: 'external_session_started' }>
+) {
+  const current = state.parts[index];
+  if (current?.type !== 'external_turn') return state;
+  if (
+    current.sessionId === chunk.sessionId &&
+    current.conversationReset === chunk.conversationReset
+  ) {
+    return state;
+  }
+  const { conversationReset: _earlier, ...kept } = current;
+  const rebound: MessagePart = {
+    ...kept,
+    sessionId: chunk.sessionId,
+    ...(chunk.conversationReset ? { conversationReset: chunk.conversationReset } : {}),
+  };
+  const parts = state.parts.map((part, at) => (at === index ? rebound : part));
+  return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
 function reduceExternalText(state: TextGenerationStreamState, textDelta: string) {

@@ -639,6 +639,63 @@ describe('external turn: live stream vs reloaded transcript', () => {
   });
 
   /**
+   * A send whose first session was replaced before the vendor took the turn: the hub rebinds the
+   * stored turn to the session that ran it and marks the conversation reset, and announces that
+   * session to the live stream again.
+   */
+  describe('a send that reopened its session', () => {
+    function stored(reset?: 'nonresumable'): MessagePart[] {
+      const transcript = new ExternalTurnTranscript({
+        targetId: 'claude',
+        sessionId: 'hub-session-1',
+        startedAt: 0,
+      });
+      transcript.rebindSession('hub-session-2');
+      if (reset) transcript.markConversationReset(reset);
+      transcript.apply({ type: 'text_delta', text: 'fresh' }, { sequence: 1, at: 0 });
+      transcript.apply({ type: 'completed' }, { sequence: 2, at: 0 });
+      transcript.finalize('completed', 0);
+      return transcript.parts;
+    }
+
+    function streamed(reset?: 'nonresumable'): MessagePart[] {
+      const chunks: StreamChunk[] = [
+        externalSessionStartedChunk({
+          sessionId: 'hub-session-1',
+          targetId: 'claude',
+          resumed: false,
+        }),
+        externalSessionStartedChunk({
+          sessionId: 'hub-session-2',
+          targetId: 'claude',
+          resumed: false,
+          ...(reset ? { conversationReset: reset } : {}),
+        }),
+        { type: 'external_text', text: 'fresh', done: false },
+        externalTurnCompletedChunk('completed'),
+        { type: 'done', done: true, messageId: 'ai-1' },
+      ];
+      return chunks.reduce(
+        (current, next) => reduceTextGenerationStreamChunk(current, next, REDUCER_OPTIONS),
+        createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+      ).parts;
+    }
+
+    it.each([[undefined], ['nonresumable' as const]])(
+      'names the same session and reset live and after a reload (reset: %p)',
+      (reset) => {
+        const live = streamed(reset).find((part) => part.type === 'external_turn');
+        const reloaded = stored(reset).find((part) => part.type === 'external_turn');
+        expect(
+          { sessionId: live?.sessionId, reset: live?.conversationReset },
+          'expected the live turn to name hub-session-2 as the reloaded one does'
+        ).toEqual({ sessionId: reloaded?.sessionId, reset: reloaded?.conversationReset });
+        expect(comparable(streamed(reset))).toEqual(comparable(stored(reset)));
+      }
+    );
+  });
+
+  /**
    * The endings where the hub records an error of its own (a receipt it could not write, a review
    * whose acceptance it could not confirm) send it to the live stream as well as storing it.
    */
