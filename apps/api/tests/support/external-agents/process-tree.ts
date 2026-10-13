@@ -7,6 +7,7 @@
  */
 
 import { readdirSync, readFileSync, readlinkSync } from 'node:fs';
+import { join } from 'node:path';
 
 /** One process of a point-in-time snapshot. */
 export interface ProcessEntry {
@@ -76,21 +77,21 @@ export function parentPidFromStat(stat: string): number {
 }
 
 /**
- * A Linux-only snapshot of this machine's processes from `/proc`. A process that exits while it
- * is read is left out.
+ * A snapshot of this machine's processes from Linux `/proc`. A process that exits while it is
+ * read is left out. Tests can supply a proc-shaped fixture directory on any host.
  *
  * @example
  * vendorProcessesOf(runtimePid, codexPath, readProcessSnapshot());
  */
-export function readProcessSnapshot(): ProcessEntry[] {
+export function readProcessSnapshot(procRoot = '/proc'): ProcessEntry[] {
   const entries: ProcessEntry[] = [];
-  for (const name of readdirSync('/proc')) {
+  for (const name of readdirSync(procRoot)) {
     if (!/^\d+$/.test(name)) continue;
     try {
-      const parentPid = parentPidFromStat(readFileSync(`/proc/${name}/stat`, 'utf8'));
+      const parentPid = parentPidFromStat(readFileSync(join(procRoot, name, 'stat'), 'utf8'));
       let executable: string | undefined;
       try {
-        executable = readlinkSync(`/proc/${name}/exe`);
+        executable = readlinkSync(join(procRoot, name, 'exe'));
       } catch {
         executable = undefined;
       }
