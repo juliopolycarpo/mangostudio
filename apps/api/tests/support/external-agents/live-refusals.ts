@@ -25,6 +25,7 @@ const LIVE_REFUSAL_CASE_IDS = [
   'claude-signed-out',
   'cursor-signed-out',
   'codex-outdated',
+  'codex-outdated-reopen',
 ] as const;
 
 type LiveRefusalCaseId = (typeof LIVE_REFUSAL_CASE_IDS)[number];
@@ -39,13 +40,49 @@ export interface LiveRefusalCase {
    * when signed out (`authState: unknown`), so only its open refuses.
    */
   readonly selectorRefuses: boolean;
+  /**
+   * `open` refuses the first open of a session. `reopen` completes a turn, makes the agent
+   * outdated, ends its process so the session drops, and sends again: the reopen is refused.
+   */
+  readonly flow: 'open' | 'reopen';
 }
 
 export const LIVE_REFUSAL_CASES: readonly LiveRefusalCase[] = [
-  { id: 'codex-signed-out', targetId: 'codex', reason: 'signed-out', selectorRefuses: true },
-  { id: 'claude-signed-out', targetId: 'claude', reason: 'signed-out', selectorRefuses: true },
-  { id: 'cursor-signed-out', targetId: 'cursor', reason: 'signed-out', selectorRefuses: false },
-  { id: 'codex-outdated', targetId: 'codex', reason: 'version-unsupported', selectorRefuses: true },
+  {
+    id: 'codex-signed-out',
+    targetId: 'codex',
+    reason: 'signed-out',
+    selectorRefuses: true,
+    flow: 'open',
+  },
+  {
+    id: 'claude-signed-out',
+    targetId: 'claude',
+    reason: 'signed-out',
+    selectorRefuses: true,
+    flow: 'open',
+  },
+  {
+    id: 'cursor-signed-out',
+    targetId: 'cursor',
+    reason: 'signed-out',
+    selectorRefuses: false,
+    flow: 'open',
+  },
+  {
+    id: 'codex-outdated',
+    targetId: 'codex',
+    reason: 'version-unsupported',
+    selectorRefuses: true,
+    flow: 'open',
+  },
+  {
+    id: 'codex-outdated-reopen',
+    targetId: 'codex',
+    reason: 'version-unsupported',
+    selectorRefuses: false,
+    flow: 'reopen',
+  },
 ];
 
 /**
@@ -76,7 +113,7 @@ export function requestedRefusalCases(raw: string | undefined): readonly LiveRef
 export interface RefusalEnvironmentInput {
   /** An empty directory the test created and owns. */
   readonly emptyDirectory: string;
-  /** The directory holding the older `codex`; required for `codex-outdated`. */
+  /** The directory holding the older `codex`; required for `codex-outdated` and `codex-outdated-reopen`. */
   readonly outdatedCodexDirectory?: string;
   /** The directory holding the real `cursor-agent`; required for `cursor-signed-out`. */
   readonly cursorDirectory?: string;
@@ -115,6 +152,7 @@ export function refusalEnvironment(
         PATH: pathWith(input.cursorDirectory, inheritedPath),
       };
     }
+    case 'codex-outdated-reopen':
     case 'codex-outdated': {
       if (!input.outdatedCodexDirectory) {
         throw new Error(
@@ -134,14 +172,37 @@ function pathWith(first: string, inherited: string | undefined): string {
 }
 
 /**
+ * The path a lookup found, or throws naming the program.
+ *
+ * @example
+ * requiredExecutable('codex', Bun.which('codex')); // '/home/ada/.local/bin/codex'
+ */
+export function requiredExecutable(program: string, located: string | null | undefined): string {
+  if (!located) throw new Error(`expected ${program} to be on PATH | received: not found`);
+  return located;
+}
+
+/**
  * The directory a located executable lives in, or throws naming the program.
  *
  * @example
  * executableDirectory('cursor-agent', Bun.which('cursor-agent')); // '/home/ada/.local/bin'
  */
 export function executableDirectory(program: string, located: string | null | undefined): string {
-  if (!located) throw new Error(`expected ${program} to be on PATH | received: not found`);
-  return dirname(located);
+  return dirname(requiredExecutable(program, located));
+}
+
+/**
+ * The data frames of a finished server-sent-events body, parsed.
+ *
+ * @example
+ * sseFrames('data: {"type":"done"}\n\n'); // [{ type: 'done' }]
+ */
+export function sseFrames(body: string): Array<Record<string, unknown>> {
+  return body
+    .split('\n\n')
+    .filter((frame) => frame.startsWith('data: '))
+    .map((frame) => JSON.parse(frame.slice('data: '.length)) as Record<string, unknown>);
 }
 
 /**

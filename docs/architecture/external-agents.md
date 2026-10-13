@@ -1184,6 +1184,16 @@ case checks the selector, the pre-send check where the selector refuses, and the
 refuses with `external_agent_signed_out` or `external_agent_version_unsupported`, down to the `error`
 chunk's reason, remedy and required version.
 
+`codex-outdated-reopen` drives the refused reopen: a normal Codex turn on the signed-in account, then
+the first runtime is killed between the open and the submission of a second send, as a runtime that
+restarted would be, and the hub's reopen reaches a second runtime whose `codex` is the older one. It
+asserts the live `external_error` chunk, the stored turn part after a transcript read, that the two
+match, and that the hub reopens once and does not back off. The second runtime has an empty
+`CODEX_HOME`, because the SDK starts `codex app-server` before it gates the version and an older
+app-server writes state under the home it runs in. Ending the vendor's own process does not reopen:
+the runtime reports the session lost, the turn ends `session-lost`, and the next send is an ordinary
+open.
+
 A runtime-side consent withdrawal reaches the hub as the vendor ending the turn early
 (`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
 stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`.

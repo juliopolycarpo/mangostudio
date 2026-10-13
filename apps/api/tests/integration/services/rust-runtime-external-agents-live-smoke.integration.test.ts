@@ -33,6 +33,7 @@ import {
 } from '@mangostudio/shared/external-agents';
 import { getDb } from '../../../src/db/database';
 import { createDiagnosticLogger } from '../../../src/lib/logger';
+import { getChatMessagesUseCase } from '../../../src/modules/chats/application/get-chat-messages';
 import {
   createExternalAgentDiscoveryService,
   createRuntimeAuthoritativeAgentDiscovery,
@@ -43,6 +44,7 @@ import { acknowledgeExternalDisclosure } from '../../../src/modules/external-age
 import { createExternalIdentityIsolationRegistry } from '../../../src/modules/external-agents/application/external-identity-isolation';
 import {
   createExternalSessionManager,
+  type ExternalSessionHandle,
   type ExternalSessionManager,
 } from '../../../src/modules/external-agents/application/external-session-manager';
 import { createExternalTurnConfigurationResolver } from '../../../src/modules/external-agents/application/external-turn-configuration';
@@ -64,6 +66,7 @@ import {
   refusalEnvironment,
   requestedRefusalCases,
   SingleTargetDiscovery,
+  sseFrames,
   versionOf,
 } from '../../support/external-agents/live-refusals';
 import {
@@ -100,6 +103,33 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   });
+
+  /** One runtime child for `owner`, with `overrides` layered over its environment. */
+  async function connectRuntime(
+    identity: { owner: { id: string }; environmentId: string; mangoHome: string },
+    overrides: Record<string, string>
+  ) {
+    // Only the runtime child receives the original credential home. The Hub's
+    // database and configuration stay under the canonical isolated test home.
+    const peer = spawnPort({
+      argv: [binary.path, '--stdio'],
+      env: rustSmokeRuntimeEnv(process.env, identity.mangoHome, overrides),
+      terminateGraceMs: 2_000,
+      killGraceMs: 2_000,
+      exitGraceMs: 1_000,
+    });
+    const hub = await openRustSmokeHub(
+      peer,
+      async () =>
+        openHubSession(peer.port, {
+          workspaceBinding: { userId: identity.owner.id, environmentId: identity.environmentId },
+          hubVersion: await rustRuntimeVersion(binary.path),
+        }),
+      (cleanup) => cleanups.push(cleanup)
+    );
+    const client = new RuntimeClient(hub, () => undefined, identity.environmentId);
+    return { client, peer };
+  }
 
   /**
    * The compiled runtime with a chat in an empty workspace. `prepare` may create scratch
@@ -140,26 +170,9 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
     const mangoHome = join(scratch, 'mango');
     await mkdir(mangoHome);
     await grantRuntimeConsent(binary.path, mangoHome, 'host');
-    // Only the runtime child receives the original credential home. The Hub's
-    // database and configuration stay under the canonical isolated test home.
-    const peer = spawnPort({
-      argv: [binary.path, '--stdio'],
-      env: rustSmokeRuntimeEnv(process.env, mangoHome, (await prepare?.(scratch)) ?? {}),
-      terminateGraceMs: 2_000,
-      killGraceMs: 2_000,
-      exitGraceMs: 1_000,
-    });
-    const hub = await openRustSmokeHub(
-      peer,
-      async () =>
-        openHubSession(peer.port, {
-          workspaceBinding: { userId: owner.id, environmentId },
-          hubVersion: await rustRuntimeVersion(binary.path),
-        }),
-      (cleanup) => cleanups.push(cleanup)
-    );
-    const client = new RuntimeClient(hub, () => undefined, environmentId);
-    return { client, owner, chatId, workspace, environmentId };
+    const overrides = (await prepare?.(scratch)) ?? {};
+    const { client, peer } = await connectRuntime({ owner, environmentId, mangoHome }, overrides);
+    return { client, owner, chatId, workspace, environmentId, peer, mangoHome };
   }
 
   /** A signed-in vendor behind the compiled runtime, with a chat in an empty workspace. */
@@ -287,20 +300,28 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
   } as const;
 
   /** Records every refusal `ensureSession` throws, verbatim, then rethrows it. */
-  function recordingSessions(inner: ExternalSessionManager) {
+  function recordingSessions(
+    inner: ExternalSessionManager,
+    afterEnsure?: (handle: ExternalSessionHandle) => Promise<void>
+  ) {
     const refusals: unknown[] = [];
+    /** Every `ensureSession`, and whether it was a reopen of a connection the hub already had. */
+    const calls: Array<{ reopen: boolean }> = [];
     const manager: ExternalSessionManager = {
       ...inner,
       ensureSession: async (input) => {
+        calls.push({ reopen: input.existingConnectionOnly === true });
         try {
-          return await inner.ensureSession(input);
+          const handle = await inner.ensureSession(input);
+          if (!input.existingConnectionOnly) await afterEnsure?.(handle);
+          return handle;
         } catch (error) {
           refusals.push(error);
           throw error;
         }
       },
     };
-    return { refusals, manager };
+    return { refusals, calls, manager };
   }
 
   /** What the person is told for a refused agent, whatever the surface. */
@@ -319,10 +340,14 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
 
   async function refusedSession(refusal: LiveRefusalCase) {
     const outdatedDirectory = process.env.MANGOSTUDIO_LIVE_OUTDATED_CODEX_DIR?.trim();
+    // The reopen flow: the first runtime is plain, on the real signed-in account. A second runtime
+    // gets the older `codex` and an empty CODEX_HOME, because the SDK starts `codex app-server`
+    // before it gates the version, and an older app-server writes state under the home it runs in.
+    let secondRuntimeEnvironment: Record<string, string> = {};
     const session = await startRuntime(refusal.targetId, async (scratch) => {
       const emptyDirectory = join(scratch, 'empty');
       await mkdir(emptyDirectory);
-      return refusalEnvironment(refusal, {
+      const environment = refusalEnvironment(refusal, {
         emptyDirectory,
         inheritedPath: process.env.PATH,
         ...(outdatedDirectory ? { outdatedCodexDirectory: outdatedDirectory } : {}),
@@ -330,6 +355,9 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
           ? { cursorDirectory: executableDirectory('cursor-agent', Bun.which('cursor-agent')) }
           : {}),
       });
+      if (refusal.flow !== 'reopen') return environment;
+      secondRuntimeEnvironment = environment;
+      return {};
     });
     // The connection manager re-reads `runtime.health` right after the handshake: that is where the
     // manifest learns which targets the runtime hosts, and discovery refuses a target it lacks.
@@ -353,7 +381,14 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       (agent) => agent.descriptor.targetId === refusal.targetId
     );
     if (!found) throw new Error(`expected a ${refusal.targetId} descriptor | received: none`);
-    return { ...session, scope, discovery, isolationRegistry, live: found.descriptor };
+    return {
+      ...session,
+      scope,
+      discovery,
+      isolationRegistry,
+      secondRuntimeEnvironment,
+      live: found.descriptor,
+    };
   }
 
   /** The hub's real send path, resolving against `discovery`, over the live runtime. */
@@ -364,13 +399,20 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       ? D extends { discovery?: infer P }
         ? P
         : never
-      : never
+      : never,
+    hooks: {
+      /** The client the hub reaches the runtime through; the reopen flow swaps it. */
+      readonly activeClient?: () => RuntimeClient;
+      readonly afterEnsure?: (handle: ExternalSessionHandle) => Promise<void>;
+    } = {}
   ) {
+    const active = hooks.activeClient ?? (() => session.client);
     const recording = recordingSessions(
       createExternalSessionManager({
-        resolveRuntimeClient: () => Promise.resolve(session.client),
-        resolveExistingRuntimeClient: () => Promise.resolve(session.client),
-      })
+        resolveRuntimeClient: () => Promise.resolve(active()),
+        resolveExistingRuntimeClient: () => Promise.resolve(active()),
+      }),
+      hooks.afterEnsure
     );
     const stale: unknown[] = [];
     const stream = createExternalTurnStream({
@@ -409,7 +451,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
     return { send, recording, stale };
   }
 
-  for (const refusal of LIVE_REFUSAL_CASES) {
+  for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'open')) {
     it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
       `${refusal.id}: the agent is refused as ${refusal.reason}, as the person sees it`,
       async () => {
@@ -487,10 +529,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
             `expected the send to reach the open | received: ${JSON.stringify(sent)}`
           );
         }
-        const frames = (await sent.response.text())
-          .split('\n\n')
-          .filter((frame) => frame.startsWith('data: '))
-          .map((frame) => JSON.parse(frame.slice('data: '.length)) as Record<string, unknown>);
+        const frames = sseFrames(await sent.response.text());
         const [refused] = stalePass.recording.refusals;
         logger.info('refusal-open', {
           case: refusal.id,
@@ -533,7 +572,168 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       240_000
     );
   }
+
+  for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'reopen')) {
+    it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
+      `${refusal.id}: a reopen refused as outdated reaches the live stream and the stored turn alike`,
+      async () => {
+        const session = await refusedSession(refusal);
+        const { live } = session;
+        await acknowledgeExternalDisclosure(
+          { userId: session.owner.id, targetId: refusal.targetId },
+          {
+            capabilities: live.capabilities,
+            supportedConfigurations: live.supportedConfigurations,
+          },
+          getDb()
+        );
+        await grantWorkspaceTrust(
+          {
+            userId: session.owner.id,
+            targetId: refusal.targetId,
+            environmentId: session.environmentId,
+            workspacePath: session.client.paths.canonical(session.workspace),
+          },
+          getDb()
+        );
+
+        // The hub reaches the runtime through whichever client is current. The second send drops
+        // the first runtime's connection between the open and the submission, as a runtime that
+        // restarted would, and the hub's reopen then lands on a runtime whose codex is outdated.
+        // (Ending the vendor child instead does not reopen: the runtime reports the session lost,
+        // the turn ends `session-lost`, and the next send is an ordinary open.)
+        let active: RuntimeClient = session.client;
+        let dropFirstRuntime = false;
+        const dropped: number[] = [];
+        const pass = sendThrough(session, refusal, session.discovery, {
+          activeClient: () => active,
+          afterEnsure: async (handle) => {
+            if (!dropFirstRuntime) return;
+            dropFirstRuntime = false;
+            const pid = session.peer.pid;
+            if (pid === undefined)
+              throw new Error('expected the first runtime pid | received: none');
+            process.kill(pid, 'SIGKILL');
+            dropped.push(pid);
+            await session.peer.exited;
+            for (let attempt = 0; attempt < 200 && handle.isLive(); attempt += 1)
+              await Bun.sleep(25);
+            if (handle.isLive()) {
+              throw new Error(
+                'expected the hub to see the first runtime connection close | received: the session is still live'
+              );
+            }
+            const second = await connectRuntime(
+              {
+                owner: session.owner,
+                environmentId: session.environmentId,
+                mangoHome: session.mangoHome,
+              },
+              session.secondRuntimeEnvironment
+            );
+            second.client.replaceManifest(
+              capabilityManifestFromHealth(await second.client.health(), second.client.manifest)
+            );
+            active = second.client;
+          },
+        });
+
+        // A normal turn on the signed-in account.
+        const first = sseFrames(
+          await okResponse(await within(pass.send(), 'the first live codex turn', 170_000)).text()
+        );
+        expect(first.find((frame) => frame.type === 'external_turn_completed')).toMatchObject({
+          reason: 'completed',
+        });
+        expect(first.map((frame) => frame.type)).not.toContain('error');
+        const callsBefore = pass.recording.calls.length;
+
+        dropFirstRuntime = true;
+        const startedAt = Date.now();
+        const second = await within(pass.send(), 'the send after the runtime restarted', 120_000);
+        const frames = sseFrames(await okResponse(second).text());
+        const elapsedMs = Date.now() - startedAt;
+        const refusedWith = pass.recording.refusals[0];
+        logger.info('reopen-second-send', {
+          elapsedMs,
+          droppedRuntimePids: dropped,
+          calls: pass.recording.calls.slice(callsBefore),
+          refusal:
+            refusedWith instanceof RemoteError
+              ? {
+                  code: refusedWith.code,
+                  message: refusedWith.message,
+                  details: refusedWith.details,
+                }
+              : String(refusedWith),
+          frames,
+        });
+
+        const chunk = frames.find((frame) => frame.type === 'external_error');
+        const assistant = frames.find((frame) => frame.type === 'assistant_message_id');
+        if (!chunk || !assistant) {
+          throw new Error(
+            `expected an external_error and an assistant_message_id chunk | received: ${JSON.stringify(frames)}`
+          );
+        }
+        // The transcript as a reload reads it.
+        const { messages } = await getChatMessagesUseCase(
+          { chatId: session.chatId, userId: session.owner.id },
+          getDb()
+        );
+        const stored = messages
+          .find((message) => message.id === assistant.messageId)
+          ?.parts?.find((part) => part.type === 'external_turn');
+        const presentation = (source: Record<string, unknown> | undefined) => ({
+          error: source?.error,
+          remedy: source?.remedy,
+          unavailableReason: source?.unavailableReason,
+          requiredVersion: source?.requiredVersion,
+        });
+        const floor =
+          refusedWith instanceof RemoteError ? refusedWith.details?.requiredVersion : undefined;
+
+        expect(presentation(chunk)).toEqual({
+          error: chunk.error,
+          remedy: { kind: 'update' },
+          unavailableReason: 'version-unsupported',
+          requiredVersion: floor,
+        });
+        expect(floor).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(presentation(stored as Record<string, unknown> | undefined)).toEqual(
+          presentation(chunk)
+        );
+        expect(
+          frames
+            .map((frame) => frame.type)
+            .filter((type) =>
+              ['external_error', 'external_turn_completed', 'done'].includes(String(type))
+            )
+        ).toEqual(['external_error', 'external_turn_completed', 'done']);
+        // One reopen, refused once, and the hub did not loop on a backoff.
+        expect({
+          reopens: pass.recording.calls.slice(callsBefore).filter((call) => call.reopen).length,
+          refusals: pass.recording.refusals.length,
+          kind: refusedWith instanceof RemoteError ? refusedWith.details?.kind : undefined,
+        }).toEqual({ reopens: 1, refusals: 1, kind: 'external_agent_version_unsupported' });
+        expect(elapsedMs).toBeLessThan(30_000);
+      },
+      360_000
+    );
+  }
 });
+
+/** The streaming response of an accepted send, or throws with the refusal. */
+function okResponse(
+  result: Awaited<ReturnType<ReturnType<typeof createExternalTurnStream>>>
+): Response {
+  if (!result.ok) {
+    throw new Error(
+      `expected the send to be accepted | received: ${JSON.stringify(result.failure)}`
+    );
+  }
+  return result.response;
+}
 
 /** The assistant message a just-started turn is writing, once the hub has created it. */
 async function runningMessageId(turns: RustTurnHarness): Promise<string> {

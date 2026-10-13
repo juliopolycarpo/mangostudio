@@ -10,7 +10,9 @@ import {
   type LiveRefusalCase,
   refusalEnvironment,
   requestedRefusalCases,
+  requiredExecutable,
   SingleTargetDiscovery,
+  sseFrames,
   versionOf,
 } from '../../support/external-agents/live-refusals';
 
@@ -35,7 +37,7 @@ describe('requestedRefusalCases', () => {
 
   it('rejects a name it does not know, naming the value and the accepted names', () => {
     expect(() => requestedRefusalCases('codex-signed-out,codex-signedout')).toThrow(
-      'expected MANGOSTUDIO_LIVE_AGENT_REFUSALS to name only codex-signed-out | claude-signed-out | cursor-signed-out | codex-outdated | received: codex-signedout'
+      'expected MANGOSTUDIO_LIVE_AGENT_REFUSALS to name only codex-signed-out | claude-signed-out | cursor-signed-out | codex-outdated | codex-outdated-reopen | received: codex-signedout'
     );
   });
 });
@@ -72,6 +74,15 @@ describe('refusalEnvironment', () => {
   it('puts the older codex first on PATH and signs nothing in', () => {
     expect(
       refusalEnvironment(caseNamed('codex-outdated'), {
+        ...base,
+        outdatedCodexDirectory: '/scratch/old/bin',
+      })
+    ).toEqual({ CODEX_HOME: '/scratch/empty', PATH: '/scratch/old/bin:/usr/bin' });
+  });
+
+  it('gives the second runtime of the reopen flow an empty codex home and the older binary', () => {
+    expect(
+      refusalEnvironment(caseNamed('codex-outdated-reopen'), {
         ...base,
         outdatedCodexDirectory: '/scratch/old/bin',
       })
@@ -191,6 +202,25 @@ describe('LIVE_REFUSAL_CASES', () => {
       'claude-signed-out': true,
       'cursor-signed-out': false,
       'codex-outdated': true,
+      'codex-outdated-reopen': false,
     });
+  });
+});
+
+describe('requiredExecutable', () => {
+  it('returns the located path and names the program when there is none', () => {
+    expect(requiredExecutable('codex', '/usr/bin/codex')).toBe('/usr/bin/codex');
+    expect(() => requiredExecutable('codex', undefined)).toThrow(
+      'expected codex to be on PATH | received: not found'
+    );
+  });
+});
+
+describe('sseFrames', () => {
+  it('parses data frames and skips comments', () => {
+    expect(sseFrames(': keep-alive\n\ndata: {"type":"a"}\n\ndata: {"type":"done"}\n\n')).toEqual([
+      { type: 'a' },
+      { type: 'done' },
+    ]);
   });
 });
