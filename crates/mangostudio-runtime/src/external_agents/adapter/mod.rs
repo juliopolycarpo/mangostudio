@@ -6,6 +6,8 @@ mod map_events;
 mod session;
 
 #[cfg(test)]
+mod abandoned_start_tests;
+#[cfg(test)]
 mod acp_turn_tests;
 mod backend;
 #[cfg(test)]

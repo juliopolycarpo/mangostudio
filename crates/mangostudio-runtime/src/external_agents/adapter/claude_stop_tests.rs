@@ -29,7 +29,7 @@ const SIGNED_IN: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvide
 
 /// What the control does when the SDK, then the adapter, asks it to kill.
 #[derive(Clone, Copy, Debug)]
-enum Kill {
+pub(super) enum Kill {
     /// Answers with the host's own error and leaves the child running.
     Refuse,
     /// Never answers, so the SDK's stage runs out.
@@ -125,25 +125,34 @@ impl ByteSink for StubbornStdin {
     }
 }
 
+/// A launch held inside the launcher: `arrived` fires when it is reached, `release` lets it go.
+#[derive(Default)]
+pub(super) struct SpawnGate {
+    pub(super) arrived: Notify,
+    pub(super) release: Notify,
+}
+
 /// Answers Claude's three probes from a queue and gives every other launch a [`StubbornChild`].
-struct StubbornClaudeLauncher {
+pub(super) struct StubbornClaudeLauncher {
     probes: FakeLauncher,
+    gate: Mutex<Option<Arc<SpawnGate>>>,
     script: Arc<KillScript>,
     children: Mutex<Vec<Arc<StubbornChild>>>,
 }
 impl StubbornClaudeLauncher {
-    fn new(script: impl IntoIterator<Item = Kill>) -> Arc<Self> {
+    pub(super) fn new(script: impl IntoIterator<Item = Kill>) -> Arc<Self> {
         let probes = FakeLauncher::new();
         probes.push(FakeProcess::transcript([VERSION]));
         probes.push(FakeProcess::transcript(HELP.lines().map(str::to_owned)));
         probes.push(FakeProcess::transcript([SIGNED_IN]));
         Arc::new(Self {
             probes,
+            gate: Mutex::new(None),
             script: Arc::new(KillScript(Mutex::new(script.into_iter().collect()))),
             children: Mutex::new(Vec::new()),
         })
     }
-    fn live_children(&self) -> usize {
+    pub(super) fn live_children(&self) -> usize {
         let children = self.children.lock().unwrap();
         children.iter().filter(|child| !child.is_ended()).count()
     }
@@ -154,7 +163,17 @@ impl StubbornClaudeLauncher {
             let _ = child.kill(CancelReason::Shutdown).await;
         }
     }
-    fn kills(&self) -> Vec<CancelReason> {
+    /// Holds the next turn launch inside the launcher until the test releases it, as a launcher
+    /// that is still checking consent or starting a container would.
+    pub(super) fn gate_turn_launch(&self) -> Arc<SpawnGate> {
+        let gate = Arc::new(SpawnGate::default());
+        *self.gate.lock().unwrap() = Some(Arc::clone(&gate));
+        gate
+    }
+    pub(super) fn launches(&self) -> usize {
+        self.children.lock().unwrap().len()
+    }
+    pub(super) fn kills(&self) -> Vec<CancelReason> {
         let children = self.children.lock().unwrap();
         children
             .iter()
@@ -173,6 +192,11 @@ impl ProcessLauncher for StubbornClaudeLauncher {
         if is_probe(&spec) {
             return self.probes.spawn(spec).await;
         }
+        let gate = self.gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            gate.arrived.notify_one();
+            gate.release.notified().await;
+        }
         let child = Arc::new(StubbornChild {
             script: Arc::clone(&self.script),
             ended: Mutex::new(false),
@@ -188,7 +212,7 @@ impl ProcessLauncher for StubbornClaudeLauncher {
     }
 }
 
-fn limits() -> Limits {
+pub(super) fn limits() -> Limits {
     Limits {
         kill_grace: Duration::from_millis(10),
         shutdown_timeout: Duration::from_millis(300),
