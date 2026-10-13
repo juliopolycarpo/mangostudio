@@ -88,6 +88,21 @@ describe('unprivileged collection side', () => {
     expect(workflow).toContain("github.event_name == 'push' && 90 || 7");
   });
 
+  test('collector timing upload is advisory, failure-preserving and separate from the QA envelope', () => {
+    const collect = extractJobBlock(readText('.github/workflows/qa-metrics.yml'), 'collect');
+    const steps = extractStepBlocks(collect);
+    const upload = steps.find((step) => step.includes('name: Upload collector timings'));
+    expect(collect).toContain(
+      '--timings .mango/artifacts/qa-collector-timings.json > metrics.json'
+    );
+    expect(upload).toContain('if: ${{ !cancelled() }}');
+    expect(upload).toContain('continue-on-error: true');
+    expect(upload).toContain('name: qa-collector-timings');
+    expect(upload).toContain('retention-days: 7');
+    expect(upload).toContain('if-no-files-found: warn');
+    expect(readText('.github/workflows/pr-qa-report.yml')).not.toContain('qa-collector-timings');
+  });
+
   test('ci.yml collects metrics only for PRs and main pushes, after test and build', () => {
     const workflow = readText('.github/workflows/ci.yml');
 

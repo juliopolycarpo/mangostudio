@@ -111,6 +111,27 @@ toolchain (1.99.0) and workspace-wide feature unification
 replace default-feature or launcher-only checks against the committed lock. A higher minimum
 does not resolve a duplicate-crate dependency-policy failure.
 
+## QA collector timings
+
+`qa-metrics.yml` retains a separate `qa-collector-timings` artifact for seven
+days. To collect the same receipt locally, pass
+`--timings .mango/artifacts/qa-collector-timings.json` to
+`bun scripts/qa-gate/collect.ts`; stdout still contains only the metrics
+envelope. Collection remains serial. The receipt records component LoC,
+available TypeScript/coverage collectors and the remaining collector durations,
+the actual checkout SHA, envelope provenance, Bun/host and runner image.
+Nested spans overlap and must not be added together. `returned` means the
+function returned, including a partial measurement; it is not a passing QA
+verdict. A thrown collector retains its ordinary unavailable/error behavior.
+
+RSS values are snapshots of the parent collector at span boundaries. They do
+not measure child processes, peak runner memory or CPU contention. Scheduling
+adoption still needs five comparable first-attempt serial/bounded observations,
+full envelope parity, subtree/runner resource measurements and critical-path
+costs. This instrumentation makes no performance claim. Timing file or upload
+failure does not change collection, and the privileged report consumer reads
+only `qa-metrics`.
+
 ## Rust coverage
 
 The Ubuntu Rust test run is `.github/workflows/rust-coverage.yml`, called from

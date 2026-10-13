@@ -8,6 +8,7 @@ import { expectState } from '../testing/measurement-assertions';
 import { makeCoverageSummary } from '../testing/metrics-fixture';
 import { type ComponentDeps, collectComponents, coverageLane } from './components';
 import { type ComponentSpec, discoverComponents } from './registry';
+import { CollectorTimings } from './timings';
 
 interface Calls {
   readonly coverageReads: WorkspaceName[];
@@ -51,6 +52,45 @@ const byName = <T extends { name: string }>(components: readonly T[], name: stri
 };
 
 describe('collectComponents', () => {
+  it('adds timing without changing component states, diagnostic counts or serial invocation order', async () => {
+    const overrides: Partial<ComponentDeps> = {
+      countTsErrors: (root) =>
+        root === 'scripts' ? Promise.reject(new Error('tsc crashed')) : Promise.resolve(0),
+      readCoverage: () => Promise.reject(new Error('lcov missing')),
+    };
+    const plain = makeDeps(overrides);
+    const timer = new CollectorTimings();
+    const timed = makeDeps({ ...overrides, time: timer.time });
+    const specs = await specsOf();
+    expect(await collectComponents(specs, timed.deps)).toEqual(
+      await collectComponents(specs, plain.deps)
+    );
+    const receipt = timer.receipt(
+      {
+        repository: 'local/dev',
+        checkoutSha: 'a'.repeat(40),
+        provenance: {
+          sourceSha: 'a'.repeat(40),
+          producer: { name: 'fixture', version: '1' },
+          runId: 1,
+          runAttempt: 1,
+        },
+      },
+      'completed',
+      {}
+    );
+    expect(receipt.entries.map((entry) => [entry.label, entry.outcome])).toEqual([
+      ['loc:apps/api', 'returned'],
+      ['coverage:apps/api', 'threw'],
+      ['typescript:apps/api', 'returned'],
+      ['loc:crates/alpha', 'returned'],
+      ['loc:crates/beta', 'returned'],
+      ['loc:packages/cli', 'returned'],
+      ['loc:scripts', 'returned'],
+      ['typescript:scripts', 'threw'],
+    ]);
+  });
+
   it('measures every discovered component with a state per measurement', async () => {
     const { deps } = makeDeps();
 

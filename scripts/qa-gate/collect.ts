@@ -39,8 +39,10 @@ import {
 } from './collect/fragment';
 import { readProvenance } from './collect/provenance';
 import { discoverComponents, RegistryIntegrityError } from './collect/registry';
-import { errorAnnotations, getCommitSha, measure, runCapture, stderrLog } from './collect/support';
+import { errorAnnotations, getCommitSha, measure, stderrLog } from './collect/support';
+import { CollectorTimings, collectWithoutTiming, type TimeCollector } from './collect/timings';
 import { collectToolingStats } from './collect/tooling';
+import { listTrackedFiles } from './collect/tracked-files';
 import type { Metrics } from './collect/types';
 import { countTsErrors } from './collect/typescript';
 import { readWorkspaceCoverageSummary } from './coverage-summary';
@@ -50,7 +52,7 @@ import type { ProducerAbsence } from './model/states';
 import { readBoundedText, rustCoverageInputs } from './rust-coverage/inputs';
 
 const USAGE =
-  'Usage: bun ./scripts/qa-gate/collect.ts [--test-metrics <path>] [--rust-coverage <dir>]\n';
+  'Usage: bun ./scripts/qa-gate/collect.ts [--test-metrics <path>] [--rust-coverage <dir>] [--timings <path>]\n';
 
 const parsePathFlag = (argv: readonly string[], flag: string): string | null => {
   const flagIndex = argv.indexOf(flag);
@@ -80,58 +82,62 @@ const loadTestMetrics = async (
 
 const readRepoText = (path: string): Promise<string> => Bun.file(join(ROOT_DIR, path)).text();
 
-const listTrackedFiles = async (): Promise<string[]> => {
-  const { stdout, exitCode, stderr } = await runCapture(['git', 'ls-files']);
-  if (exitCode !== 0) throw new Error(`git ls-files failed: ${stderr.trim()}`);
-  return stdout.split('\n').filter((line) => line.length > 0);
-};
-
 const buildMetrics = async (
   sourceSha: string,
   testMetrics: TestMetricsInputs,
-  rustCoverageDir: string | null
+  rustCoverageDir: string | null,
+  time: TimeCollector = collectWithoutTiming
 ): Promise<Metrics> => {
-  const trackedFiles = await listTrackedFiles();
+  const trackedFiles = await time('tracked-files', listTrackedFiles);
   // Throws RegistryIntegrityError: a file no component owns must fail the run,
   // not vanish from the totals.
-  const specs = await discoverComponents({ trackedFiles, readText: readRepoText }).catch(
-    (err: unknown) => {
-      if (err instanceof RegistryIntegrityError) {
-        process.stderr.write(errorAnnotations('QA component registry', err.problems));
-      }
-      throw err;
+  const specs = await time('component-registry', () =>
+    discoverComponents({ trackedFiles, readText: readRepoText })
+  ).catch((err: unknown) => {
+    if (err instanceof RegistryIntegrityError) {
+      process.stderr.write(errorAnnotations('QA component registry', err.problems));
     }
-  );
-  const rustCoverage = await rustCoverageInputs(
-    {
-      dir: rustCoverageDir,
-      relevant: optionalEnv('QA_RUST_RELEVANT') ?? undefined,
-      result: optionalEnv('QA_RUST_RESULT') ?? undefined,
-    },
-    sourceSha,
-    specs.filter((spec) => spec.kind === 'crate').map((spec) => spec.root),
-    readBoundedText
-  );
-  const components = await collectComponents(specs, {
-    trackedFiles,
-    readText: readRepoText,
-    deliveredCoverage: testMetrics.deliveredCoverage,
-    deliveredLanes: testMetrics.deliveredLanes,
-    deliveredRustCoverage: rustCoverage,
-    readCoverage: readWorkspaceCoverageSummary,
-    countTsErrors,
+    throw err;
   });
+  const rustCoverage = await time('rust-coverage-inputs', () =>
+    rustCoverageInputs(
+      {
+        dir: rustCoverageDir,
+        relevant: optionalEnv('QA_RUST_RELEVANT') ?? undefined,
+        result: optionalEnv('QA_RUST_RESULT') ?? undefined,
+      },
+      sourceSha,
+      specs.filter((spec) => spec.kind === 'crate').map((spec) => spec.root),
+      readBoundedText
+    )
+  );
+  const components = await time('components', () =>
+    collectComponents(specs, {
+      trackedFiles,
+      readText: readRepoText,
+      deliveredCoverage: testMetrics.deliveredCoverage,
+      deliveredLanes: testMetrics.deliveredLanes,
+      deliveredRustCoverage: rustCoverage,
+      readCoverage: readWorkspaceCoverageSummary,
+      countTsErrors,
+      time,
+    })
+  );
 
   return {
     sha: sourceSha,
     generatedAt: new Date().toISOString(),
     components,
-    duplication: await measure('duplication', collectDuplication),
-    circularDeps: await measure('circularDeps', () => countCircularDeps(circularRoots(specs))),
-    frontendBundle: await measure('frontendBundle', collectFrontendBundle),
-    dependencies: await measure('dependencies', collectDependencyStats),
+    duplication: await measure('duplication', () => time('duplication', collectDuplication)),
+    circularDeps: await measure('circularDeps', () =>
+      time('circular-dependencies', () => countCircularDeps(circularRoots(specs)))
+    ),
+    frontendBundle: await measure('frontendBundle', () =>
+      time('frontend-bundle', collectFrontendBundle)
+    ),
+    dependencies: await measure('dependencies', () => time('dependencies', collectDependencyStats)),
     tests: testMetrics.tests,
-    tooling: await measure('tooling', collectToolingStats),
+    tooling: await measure('tooling', () => time('tooling', collectToolingStats)),
   };
 };
 
@@ -159,25 +165,55 @@ const resolveInputs = (
 const rootManifest = JSON.parse(await Bun.file(join(ROOT_DIR, 'package.json')).text()) as {
   version?: string;
 };
+const checkoutSha = getCommitSha();
 const provenance = readProvenance(process.env, {
-  checkoutHead: getCommitSha(),
+  checkoutHead: checkoutSha,
   producerVersion: rootManifest.version ?? '0.0.0',
 });
 const testMetricsPath = parsePathFlag(process.argv.slice(2), '--test-metrics');
 const rustCoverageDir = parsePathFlag(process.argv.slice(2), '--rust-coverage');
+const timingsPath = parsePathFlag(process.argv.slice(2), '--timings');
+const timings = timingsPath ? new CollectorTimings() : null;
+const time = timings?.time ?? collectWithoutTiming;
 // In CI the Test job's result says why a fragment is absent (canceled, failed,
 // skipped). No result at all is a local run: no flag reads coverage from disk.
 const absence = producerAbsence(process.env.QA_TEST_RESULT);
-const testMetrics = await resolveInputs(testMetricsPath, provenance.sourceSha, absence);
-
-const envelope: QaMetricsEnvelope = {
-  schemaVersion: QA_METRICS_SCHEMA_VERSION,
-  repository: optionalEnv('GITHUB_REPOSITORY') ?? 'local/dev',
-  prNumber: envPrNumber(),
-  baseSha: optionalEnv('QA_BASE_SHA'),
-  headSha: optionalEnv('QA_HEAD_SHA') ?? provenance.sourceSha,
-  provenance,
-  metrics: await buildMetrics(provenance.sourceSha, testMetrics, rustCoverageDir),
-};
-
-process.stdout.write(serializeQaMetricsEnvelope(envelope));
+let status: 'completed' | 'failed' = 'failed';
+try {
+  const testMetrics = await time('test-metrics-inputs', async () =>
+    resolveInputs(testMetricsPath, provenance.sourceSha, absence)
+  );
+  const envelope: QaMetricsEnvelope = {
+    schemaVersion: QA_METRICS_SCHEMA_VERSION,
+    repository: optionalEnv('GITHUB_REPOSITORY') ?? 'local/dev',
+    prNumber: envPrNumber(),
+    baseSha: optionalEnv('QA_BASE_SHA'),
+    headSha: optionalEnv('QA_HEAD_SHA') ?? provenance.sourceSha,
+    provenance,
+    metrics: await buildMetrics(provenance.sourceSha, testMetrics, rustCoverageDir, time),
+  };
+  process.stdout.write(serializeQaMetricsEnvelope(envelope));
+  status = 'completed';
+} finally {
+  if (timings && timingsPath) {
+    try {
+      await Bun.write(
+        timingsPath,
+        JSON.stringify(
+          timings.receipt(
+            {
+              repository: optionalEnv('GITHUB_REPOSITORY') ?? 'local/dev',
+              checkoutSha,
+              provenance,
+            },
+            status
+          ),
+          null,
+          2
+        )
+      );
+    } catch (err) {
+      stderrLog(`collector timing receipt unavailable: ${String(err)}`);
+    }
+  }
+}
