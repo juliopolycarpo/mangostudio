@@ -683,13 +683,69 @@ describe('release workflow binary gate', () => {
     );
   });
 
-  test('launcher publication and verification use the declared launcher MSRV', () => {
-    const workflow = readText('.github/workflows/release.yml');
-    const cargoPublish = extractJobBlock(workflow, 'cargo-publish');
-    const verifyCargo = extractJobBlock(workflow, 'verify-cargo');
+  test('launcher release lanes use the workspace MSRV for rustup and the installed compiler', () => {
+    const workspace = Bun.TOML.parse(readText('Cargo.toml')) as {
+      workspace: { package: { 'rust-version': string } };
+    };
+    const floor = workspace.workspace.package['rust-version'];
 
-    expect(cargoPublish).toContain('RUSTUP_TOOLCHAIN: 1.96.0');
-    expect(verifyCargo).toContain('RUSTUP_TOOLCHAIN: 1.96.0');
+    for (const [file, job] of [
+      ['release.yml', 'cargo-publish'],
+      ['release.yml', 'verify-cargo'],
+      ['release-dry-run.yml', 'dry-run-cargo'],
+    ]) {
+      const block = extractJobBlock(readText(`.github/workflows/${file}`), job);
+      expect(block, `${file}: ${job}`).toContain(`RUSTUP_TOOLCHAIN: ${floor}`);
+      const compilers = extractStepBlocks(block).filter((step) =>
+        step.includes('uses: dtolnay/rust-toolchain@')
+      );
+      expect(compilers, `${file}: ${job} compiler setup`).toHaveLength(1);
+      expect(compilers[0], `${file}: ${job} compiler version`).toContain(`toolchain: ${floor}`);
+    }
+  });
+
+  test('launcher publication and dry run verify a packaged outside-workspace install', () => {
+    const cargoPublish = extractJobBlock(
+      readText('.github/workflows/release.yml'),
+      'cargo-publish'
+    );
+    const dryRun = extractJobBlock(
+      readText('.github/workflows/release-dry-run.yml'),
+      'dry-run-cargo'
+    );
+    const verifier = 'bash scripts/release/verify-launcher-package.sh';
+
+    expect(cargoPublish).toContain(verifier);
+    expect(dryRun).toContain(verifier);
+    expect(dryRun).not.toContain('working-directory: crates/mangostudio-launcher');
+    expect(dryRun).toContain(
+      'cargo publish --dry-run --locked --manifest-path crates/mangostudio-launcher/Cargo.toml'
+    );
+    expect(dryRun.indexOf(verifier)).toBeLessThan(dryRun.indexOf('cargo publish --dry-run'));
+    expect(cargoPublish.indexOf(verifier)).toBeLessThan(
+      cargoPublish.indexOf('cargo publish --locked')
+    );
+  });
+
+  test('launcher dry run selects compiler pins and packaged verifier changes', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+    const source = /if grep -Eq '([^']+)' "\$RUNNER_TEMP\/changed-files"; then/.exec(workflow)?.[1];
+    expect(source, 'launcher relevance pattern').toBeDefined();
+    const pattern = new RegExp(source as string);
+
+    for (const path of [
+      'crates/mangostudio-launcher/src/main.rs',
+      'Cargo.toml',
+      'Cargo.lock',
+      'rust-toolchain.toml',
+      '.github/workflows/release.yml',
+      '.github/workflows/release-dry-run.yml',
+      'scripts/release/verify-launcher-package.sh',
+    ]) {
+      expect(path).toMatch(pattern);
+    }
+    expect('apps/api/src/app.ts').not.toMatch(pattern);
+    expect('scripts/release/pack-npm.ts').not.toMatch(pattern);
   });
 
   test('release dry run relevance pattern mirrors the release import graph', () => {

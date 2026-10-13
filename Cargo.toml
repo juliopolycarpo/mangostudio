@@ -18,11 +18,9 @@ authors = ["Julio Polycarpo"]
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/juliopolycarpo/mangostudio"
-# Protocol policy: current stable minus two minors is 1.97, matching the workspace MSRV.
-# The launcher's published MSRV stays explicit in its manifest so it cannot inherit
-# this protocol decision.
-# Both MSRV lanes run independently of the development toolchain in `rust-toolchain.toml`.
-rust-version = "1.97.0"
+# One source-build minimum for every stable crate, including the published launcher.
+# Policy tests require the development pin in `rust-toolchain.toml` to match.
+rust-version = "1.99.0"
 
 [workspace.lints.rust]
 # `deny`, not `forbid`: one module - the Windows named pipe's security

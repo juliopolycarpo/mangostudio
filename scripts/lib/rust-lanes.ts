@@ -13,7 +13,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 
 /**
  * Paths whose change makes the Rust workspace lanes (fmt, clippy, tests,
- * MSRV, musl clippy, fuzz metadata, fixture freshness) relevant: the cargo
+ * baseline checks, musl clippy, fuzz metadata, fixture freshness) relevant: the cargo
  * workspace itself, and the TypeScript halves of the shapes it reads and
  * writes (the generated runtime contract, runtime-home slot shapes and the
  * schemas they import, and the library readers the runtime answers for), and

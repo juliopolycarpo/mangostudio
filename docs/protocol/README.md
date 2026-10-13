@@ -28,6 +28,9 @@ every wire change follows.
 
 ## Develop
 
+Rust source builds require Rust 1.99.0 or newer, the shared workspace minimum. The development
+toolchain is pinned to 1.99.0 in `rust-toolchain.toml`.
+
 ```sh
 bun run protocol:check   # typecheck, spec, schema equality, fixtures, rustfmt, Clippy, round trip
 bun run protocol:test    # the TypeScript suite, then cargo test and the interop suites
@@ -36,7 +39,7 @@ bun run protocol:test    # the TypeScript suite, then cargo test and the interop
 The repository gate (`bun run check` / `bun run test`) runs only the TypeScript half of these —
 the Rust half is a 25-minute cold lane, split between two path-filtered workflows:
 `.github/workflows/cargo-shim.yml` (fmt, clippy, tests, doctests and `cargo doc` for the whole Rust
-workspace, plus the minimum-Rust checks) and `.github/workflows/protocol-ci.yml` (feature powerset,
+workspace at the same minimum) and `.github/workflows/protocol-ci.yml` (feature powerset,
 interop, semver checks, schema equality). Run the two commands above before handing off a protocol change.
 
 Both degrade to the TypeScript half with a warning when `cargo` is not on PATH.

@@ -27,7 +27,7 @@ Clippy over the feature powerset, `cargo doc`, the cross-language round trip —
 lane, so it stays out of every run of the repository gate. It is split across two path-filtered
 workflows: `.github/workflows/cargo-shim.yml` runs fmt, clippy, tests, doctests and `cargo doc` for
 the whole Rust workspace (the protocol crate included; `spec/**` and the other files the crates read
-select its rust lane) and the minimum-Rust checks, and `.github/workflows/protocol-ci.yml` runs what
+select its rust lane) at the shared Rust 1.99.0 minimum, and `.github/workflows/protocol-ci.yml` runs what
 only the protocol needs — the feature powerset, interop, semver checks, schema equality and the
 package lane.
 
@@ -49,7 +49,8 @@ slices ran and passed, so a dropped, failed or cancelled slice is never a shorte
 `scripts/tests/protocol-powerset.unit.test.ts` pins the split. `rm -rf target` removes them.
 
 The Rust SDK is a member of the root Cargo workspace and uses the root `Cargo.lock`. The
-`mangostudio` launcher shares that workspace but not the protocol version or MSRV. Keep protocol
+`mangostudio` launcher shares that workspace and its Rust 1.99.0 minimum, but keeps the application
+version. Keep protocol
 path filters scoped to `crates/mango-protocol/**`; launcher-only changes must not enter the
 protocol changelog or masquerade as wire-contract changes. The fuzz crate remains an excluded
 nightly workspace with its own lockfile.

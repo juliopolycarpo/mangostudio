@@ -37,6 +37,19 @@ a minor package release may still change the wire, and the changelog says so und
 A hub and a runtime built from different package versions interoperate as long as they share
 the wire major. Deploy order does not matter within a major.
 
+## Rust compiler support
+
+The Rust SDK shares the workspace's Rust 1.99.0 minimum. Releases that contain this baseline
+change require Rust 1.99.0 or newer, including codec-only consumers. Update the compiler in local
+development and downstream CI before adopting one. Previously published crate metadata keeps its
+declared minimum, so consumers that still need Rust 1.97 can retain a compatible published
+version. Check the release notes and the crate's `rust-version` when upgrading.
+
+The compiler minimum is a package source-compatibility requirement. It changes neither the wire
+version nor the TypeScript SDK's runtime requirements. The application launcher uses the same
+compiler minimum but keeps its independent application version and release train. See
+[Rust support and releases](../reference/releasing.md#rust-support-and-releases).
+
 ## Application contracts
 
 The method catalog an application defines with `defineContract` has its own `version` string,

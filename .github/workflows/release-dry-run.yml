@@ -85,7 +85,7 @@ jobs:
             echo "release=false" >> "$GITHUB_OUTPUT"
           fi
 
-          if grep -Eq '^(crates/mangostudio-launcher/|Cargo\.(toml|lock)$)' "$RUNNER_TEMP/changed-files"; then
+          if grep -Eq '^(crates/mangostudio-launcher/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.github/workflows/release(-dry-run)?\.yml$|scripts/release/verify-launcher-package\.sh$)' "$RUNNER_TEMP/changed-files"; then
             echo "launcher=true" >> "$GITHUB_OUTPUT"
           else
             echo "launcher=false" >> "$GITHUB_OUTPUT"
@@ -475,10 +475,7 @@ jobs:
     env:
       # The root rust-toolchain.toml otherwise overrides the action's selected
       # toolchain while Cargo walks up to the shared workspace manifest.
-      RUSTUP_TOOLCHAIN: 1.96.0
-    defaults:
-      run:
-        working-directory: crates/mangostudio-launcher
+      RUSTUP_TOOLCHAIN: 1.99.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -486,9 +483,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.96.0
+          toolchain: 1.99.0
 
-      - run: cargo publish --dry-run --locked
+      - name: Verify packaged launcher install
+        run: bash scripts/release/verify-launcher-package.sh
+
+      - run: cargo publish --dry-run --locked --manifest-path crates/mangostudio-launcher/Cargo.toml
 
   gate:
     # Always-reporting aggregate ("Release Dry Run / Gate"): each dry-run lane

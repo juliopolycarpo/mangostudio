@@ -8,7 +8,7 @@ Obrigado pelo seu interesse em contribuir com o MangoStudio!
 
 - [Bun](https://bun.sh/) 1.4.3 ou mais recente — `bun upgrade` ou
   `curl -fsSL https://bun.sh/install | bash` na primeira instalação
-- Um toolchain Rust via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. O hub inicia o
+- Rust 1.99.0 ou mais recente via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. O hub inicia o
   Local como o `mangostudio-runtime` construído com cargo; o `bun run dev` o compila antes, e o
   `rust-toolchain.toml` fixa a versão
 - Git com assinatura GPG configurada (veja [Diretrizes de Commit](#diretrizes-de-commit))
