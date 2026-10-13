@@ -1,0 +1,121 @@
+{
+  "dry-run-linux": {
+    "runner": "ubuntu-latest",
+    "commands": [
+      {
+        "name": "Verify committed versions are in lockstep",
+        "run": "bun run check:versions"
+      },
+      {
+        "name": "Build Linux x64 binary",
+        "run": "bun run build --binary --platform linux-x64 --runtime-dir .mango/runtime-prebuilt"
+      },
+      {
+        "name": "Assemble npm distribution",
+        "run": "bun ./scripts/release/pack-npm.ts --platform linux-x64"
+      },
+      {
+        "name": "Validate npm distribution",
+        "run": "bun ./scripts/release/pack-npm.ts --validate dist-npm --platform linux-x64"
+      },
+      {
+        "name": "Dry-run npm publish",
+        "run": "bun ./scripts/release/publish-npm.ts dist-npm --dry-run"
+      },
+      {
+        "name": "Archive Linux release assets",
+        "run": "bun ./scripts/release/archive-assets.ts --platform linux-x64"
+      },
+      {
+        "name": "Verify archive checksum",
+        "run": "archive=\"release-assets/mangostudio-${DRY_RUN_VERSION}-linux-x64.tar.gz\"\nbun ./scripts/release/verify-checksum.ts release-assets/SHA256SUMS \"$archive\""
+      },
+      {
+        "name": "Install local archive",
+        "run": "archive=\"release-assets/mangostudio-${DRY_RUN_VERSION}-linux-x64.tar.gz\"\nbash scripts/install/install.sh --local \"$archive\"\nactual=\"$(\"${MANGOSTUDIO_BIN_DIR}/mangostudio\" --version)\"\nif [ \"$actual\" != \"$DRY_RUN_VERSION\" ]; then\n  echo \"Expected ${DRY_RUN_VERSION}, got ${actual}\"\n  exit 1\nfi"
+      },
+      {
+        "name": "Verify install layout",
+        "run": "set -euo pipefail\ncurrent_target=\"$(readlink \"${MANGOSTUDIO_INSTALL_DIR}/current\")\"\nif [ \"$current_target\" != \"$DRY_RUN_VERSION\" ]; then\n  echo \"Expected current -> ${DRY_RUN_VERSION}, got ${current_target}\"\n  exit 1\nfi\nbin_target=\"$(readlink \"${MANGOSTUDIO_BIN_DIR}/mangostudio\")\"\nif [ \"$bin_target\" != \"${MANGOSTUDIO_INSTALL_DIR}/current/mangostudio\" ]; then\n  echo \"Expected the bin link to go through current/, got ${bin_target}\"\n  exit 1\nfi"
+      },
+      {
+        "name": "Verify the installed binary recognises its own install",
+        "run": "set -euo pipefail\nreport=\"$(\"${MANGOSTUDIO_BIN_DIR}/mangostudio\" upgrade --check --json)\"\necho \"$report\"\nmanager=\"$(printf '%s' \"$report\" | jq -r '.installedVia.manager')\"\nif [ \"$manager\" != \"self-managed\" ]; then\n  echo \"Expected installedVia.manager self-managed, got ${manager}\"\n  exit 1\nfi"
+      },
+      {
+        "name": "Verify local archive serves health",
+        "run": "scripts/release/smoke-binary.sh \"${RUNNER_TEMP}/mango-bin/mangostudio\" \"$DRY_RUN_VERSION\" 13003"
+      },
+      {
+        "name": "Verify the embedded installers match the committed scripts",
+        "run": "set -euo pipefail\n\"${MANGOSTUDIO_BIN_DIR}/mangostudio\" __installer sh | diff - scripts/install/install.sh\n\"${MANGOSTUDIO_BIN_DIR}/mangostudio\" __installer ps1 | diff - scripts/install/install.ps1"
+      },
+      {
+        "name": "Verify install lifecycle (--use, --prune, --uninstall)",
+        "run": "set -euo pipefail\nbash scripts/install/install.sh --use \"$DRY_RUN_VERSION\"\nif [ \"$(readlink \"${MANGOSTUDIO_INSTALL_DIR}/current\")\" != \"$DRY_RUN_VERSION\" ]; then\n  echo \"--use did not leave current pointing at ${DRY_RUN_VERSION}\"\n  exit 1\nfi\n\nmkdir -p \"${MANGOSTUDIO_INSTALL_DIR}/0.0.0-old\"\nbash scripts/install/install.sh --prune\nif [ -d \"${MANGOSTUDIO_INSTALL_DIR}/0.0.0-old\" ]; then\n  echo \"--prune left a stale version directory behind\"\n  exit 1\nfi\nif [ ! -d \"${MANGOSTUDIO_INSTALL_DIR}/${DRY_RUN_VERSION}\" ]; then\n  echo \"--prune removed the current version\"\n  exit 1\nfi\n\nbash scripts/install/install.sh --uninstall\nif [ -e \"$MANGOSTUDIO_INSTALL_DIR\" ]; then\n  echo \"--uninstall left the install root behind\"\n  exit 1\nfi"
+      },
+      {
+        "name": "Render distribution manifests",
+        "run": "sums=\"$RUNNER_TEMP/SHA256SUMS\"\ncp release-assets/SHA256SUMS \"$sums\"\n\nbun ./scripts/release/fill-dry-run-checksums.ts \\\n  --version \"$DRY_RUN_VERSION\" \\\n  --sums \"$sums\"\n\nbun ./scripts/release/update-homebrew.ts \\\n  --version \"$DRY_RUN_VERSION\" \\\n  --sums \"$sums\" \\\n  --out \"$RUNNER_TEMP/mangostudio.rb\"\ngrep -q \"version \\\"${DRY_RUN_VERSION}\\\"\" \"$RUNNER_TEMP/mangostudio.rb\"\ngrep -Eq 'sha256 \"[0-9a-f]{64}\"' \"$RUNNER_TEMP/mangostudio.rb\"\n\nbun ./scripts/release/update-scoop.ts \\\n  --version \"$DRY_RUN_VERSION\" \\\n  --sums \"$sums\" \\\n  --out \"$RUNNER_TEMP/mangostudio.json\"\nbun -e 'JSON.parse(await Bun.file(process.argv.at(-1)).text())' \"$RUNNER_TEMP/mangostudio.json\""
+      },
+      {
+        "name": "Stage Bookworm Docker context from release assets",
+        "run": "bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets --arch amd64 --variant bookworm"
+      },
+      {
+        "name": "Build Bookworm Docker image",
+        "run": "docker build \\\n  --platform linux/amd64 \\\n  --build-arg VERSION=\"${DRY_RUN_VERSION}\" \\\n  -f Dockerfile \\\n  -t mangostudio:dryrun-bookworm-amd64 ."
+      },
+      {
+        "name": "Verify Docker image serves health",
+        "run": "scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002"
+      },
+      {
+        "name": "Build Windows x64 binary",
+        "run": "bun run build --binary --platform windows-x64 --runtime-dir .mango/runtime-prebuilt"
+      },
+      {
+        "name": "Archive Windows release assets",
+        "run": "bun ./scripts/release/archive-assets.ts --platform windows-x64"
+      }
+    ]
+  },
+  "dry-run-windows": {
+    "runner": "windows-latest",
+    "commands": [
+      {
+        "name": "Install local archive",
+        "run": "$archive = \"release-assets\\mangostudio-$env:DRY_RUN_VERSION-windows-x64.zip\"\n& scripts\\install\\install.ps1 -Local $archive\n$actual = & \"$env:MANGOSTUDIO_BIN_DIR\\mangostudio.cmd\" --version\nif ($actual -ne $env:DRY_RUN_VERSION) {\n  Write-Error \"Expected $env:DRY_RUN_VERSION, got $actual\"\n  exit 1\n}"
+      },
+      {
+        "name": "Verify install layout",
+        "run": "$expected = [System.IO.Path]::GetFullPath(\"$env:MANGOSTUDIO_INSTALL_DIR\\$env:DRY_RUN_VERSION\")\n\n# The shim names the version directory relative to itself when that\n# path is ascii (\"%~dp0..\\<version>\"), because cmd.exe decodes a .cmd\n# in the console code page but resolves %~dp0 itself in Unicode.\n# Resolve it the way cmd does before comparing, and read it as Oem —\n# the encoding Write-Shim writes.\n$cmdPath = \"$env:MANGOSTUDIO_BIN_DIR\\mangostudio.cmd\"\n$content = Get-Content -Raw -Encoding Oem $cmdPath\n$match = [regex]::Match($content, '\"([^\"]+)\\\\mangostudio\\.exe\"\\s+%\\*')\nif (-not $match.Success) {\n  Write-Error \"mangostudio.cmd does not run a quoted mangostudio.exe: $content\"\n  exit 1\n}\n$target = $match.Groups[1].Value\nif ($target.StartsWith('%~dp0')) {\n  $target = Join-Path (Split-Path $cmdPath -Parent) $target.Substring(5)\n}\n$target = [System.IO.Path]::GetFullPath($target)\nif ($target -ne $expected) {\n  Write-Error \"mangostudio.cmd points at $target, expected $expected\"\n  exit 1\n}\n\n# hub-executable.ts resolves a detached restart and a service unit\n# through this junction, so a missing or stale one silently re-execs\n# the version an upgrade just replaced.\n$current = Get-Item \"$env:MANGOSTUDIO_INSTALL_DIR\\current\" -Force\nif ($current.LinkType -ne 'Junction') {\n  Write-Error \"current is $($current.LinkType), expected Junction\"\n  exit 1\n}\n$currentTarget = [System.IO.Path]::GetFullPath((@($current.Target)[0]))\nif ($currentTarget -ne $expected) {\n  Write-Error \"current points at $currentTarget, expected $expected\"\n  exit 1\n}"
+      },
+      {
+        "name": "Verify the installed binary recognises its own install",
+        "run": "$raw = & \"$env:MANGOSTUDIO_BIN_DIR\\mangostudio.cmd\" upgrade --check --json\nif ($LASTEXITCODE -ne 0) {\n  Write-Error \"upgrade --check exited $LASTEXITCODE\"\n  exit 1\n}\nWrite-Host ($raw -join \"`n\")\n$report = ($raw -join \"`n\") | ConvertFrom-Json\nif ($report.installedVia.manager -ne 'self-managed') {\n  Write-Error \"Expected installedVia.manager self-managed, got $($report.installedVia.manager)\"\n  exit 1\n}"
+      },
+      {
+        "name": "Verify install lifecycle (-Use, -Prune, -Uninstall)",
+        "run": "# install.ps1 fails via `throw`, which — with $ErrorActionPreference\n# = 'Stop' inside it — aborts this whole run block on its own;\n# $LASTEXITCODE only ever reflects native .exe calls, never a\n# PowerShell script invocation, so it is not a signal to check here.\n& scripts\\install\\install.ps1 -Use $env:DRY_RUN_VERSION\n\nNew-Item -ItemType Directory -Force \"$env:MANGOSTUDIO_INSTALL_DIR\\0.0.0-old\" | Out-Null\n& scripts\\install\\install.ps1 -Prune\nif (Test-Path \"$env:MANGOSTUDIO_INSTALL_DIR\\0.0.0-old\") {\n  Write-Error \"-Prune left a stale version directory behind\"\n  exit 1\n}\nif (-not (Test-Path \"$env:MANGOSTUDIO_INSTALL_DIR\\$env:DRY_RUN_VERSION\")) {\n  Write-Error \"-Prune removed the current version\"\n  exit 1\n}\n\n& scripts\\install\\install.ps1 -Uninstall\nif (Test-Path $env:MANGOSTUDIO_INSTALL_DIR) {\n  Write-Error \"-Uninstall left the install root behind\"\n  exit 1\n}"
+      },
+      {
+        "name": "Verify the failed version probe diagnostics and the npm tarball extraction",
+        "run": "bun test --timeout 60000 scripts/tests/install-ps1-layout.unit.test.ts -t 'failed version probe|npm tarball extraction'"
+      }
+    ]
+  },
+  "dry-run-cargo": {
+    "runner": "ubuntu-latest",
+    "commands": [
+      {
+        "name": "Verify packaged launcher install",
+        "run": "bash scripts/release/verify-launcher-package.sh"
+      },
+      {
+        "name": "cargo publish --dry-run --locked --manifest-path crates/mangostudio-launcher/Cargo.toml",
+        "run": "cargo publish --dry-run --locked --manifest-path crates/mangostudio-launcher/Cargo.toml"
+      }
+    ]
+  }
+}
