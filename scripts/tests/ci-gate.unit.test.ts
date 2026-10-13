@@ -500,7 +500,9 @@ describe('release-dry-run.yml always-reporting gate', () => {
     // Also needs `changes` directly (not just transitively through
     // dry-run-linux) so its own `if:` can read `needs.changes.outputs`.
     expect(parseNeedsList(windowsBlock)).toEqual(['changes', 'dry-run-linux']);
-    expect(windowsBlock).toContain("if: needs.changes.outputs.release == 'true'");
+    expect(windowsBlock).toContain(
+      `if: ${EXPR} !cancelled() && needs.changes.outputs.release == 'true' && needs['dry-run-linux'].result == 'success' }}`
+    );
     expect(parseNeedsList(cargoBlock)).toEqual(['changes']);
     expect(cargoBlock).toContain("if: needs.changes.outputs.launcher == 'true'");
     const floor = /^rust-version = "([^"]+)"$/m.exec(readText('Cargo.toml'))?.[1];

@@ -3,11 +3,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dryRunTargetArtifacts } from '../ci/dry-run-artifacts';
+import { evaluateGate } from '../ci/evaluate-gate';
 import { ROOT_DIR } from '../lib/config';
 import { distributionArtifactName } from '../lib/distribution-manifest';
 import { readText } from './support/read-text';
 import {
   extractJobBlock,
+  extractJobBlocks,
   extractStepBlocks,
   parseNeedsList,
   runScriptLines,
@@ -15,6 +17,7 @@ import {
 
 const EXPR = '$' + '{{';
 const WORKFLOW = readText('.github/workflows/release-dry-run.yml');
+const CI = readText('.github/workflows/ci.yml');
 const stepNamed = (job: string, name: string): string => {
   const step = extractStepBlocks(extractJobBlock(WORKFLOW, job)).find((block) =>
     block
@@ -46,7 +49,184 @@ const runScript = async (
   return { stdout, stderr, exitCode };
 };
 
+interface JobScenario {
+  readonly results: Readonly<Record<string, string | undefined>>;
+  readonly release?: string;
+  readonly cancelled?: boolean;
+  readonly event?: string;
+  readonly ref?: string;
+}
+
+// Actions applies success() to the entire dependency ancestry unless a job's
+// condition contains a status function. Walk the actual workflow needs so a
+// skipped reuse producer remains visible beyond the direct Linux dependency.
+function jobAncestors(workflow: string, target: string): string[] {
+  const ancestors = new Set<string>();
+  const visit = (job: string): void => {
+    const block = extractJobBlock(workflow, job);
+    if (!block) throw new Error(`Unknown workflow prerequisite: ${job}`);
+    for (const need of parseNeedsList(block)) {
+      if (ancestors.has(need)) continue;
+      ancestors.add(need);
+      visit(need);
+    }
+  };
+  visit(target);
+  return [...ancestors];
+}
+
+function jobRuns(workflow: string, job: string, scenario: JobScenario, override?: string): boolean {
+  const block = extractJobBlock(workflow, job);
+  const expression = override ?? /^ {4}if: (.+)$/m.exec(block)?.[1];
+  if (!expression) throw new Error(`${job} must declare its prerequisite guard`);
+  const condition = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  // Parse every atom before evaluating, including unreachable atoms. Unknown
+  // syntax must require extending this executable contract, not pass silently.
+  const values = condition.split(' && ').map((atom) => {
+    if (atom === '!cancelled()') return !scenario.cancelled;
+    if (atom === "needs.changes.outputs.release == 'true'") return scenario.release === 'true';
+    if (atom === "github.event_name == 'push'") return scenario.event === 'push';
+    if (atom === "github.ref == 'refs/heads/main'") return scenario.ref === 'refs/heads/main';
+    const result = /^needs(?:\.([\w-]+)|\['([\w-]+)'\])\.result == 'success'$/.exec(atom);
+    if (result) {
+      const need = result[1] ?? result[2];
+      if (!parseNeedsList(block).includes(need))
+        throw new Error(`Condition reads undeclared prerequisite: ${need}`);
+      return scenario.results[need] === 'success';
+    }
+    throw new Error(`Unknown workflow condition: ${atom}`);
+  });
+  const implicitSuccess =
+    !scenario.cancelled &&
+    jobAncestors(workflow, job).every((ancestor) => scenario.results[ancestor] === 'success');
+  return values.every(Boolean) && (condition.includes('cancelled()') || implicitSuccess);
+}
+
+describe('Canary prerequisites after the PR-only dry run was added', () => {
+  const mainPush: JobScenario = {
+    results: {
+      ...Object.fromEntries(extractJobBlocks(CI).map(({ job }) => [job, 'success'])),
+      'release-dry-run': 'skipped',
+    },
+    event: 'push',
+    ref: 'refs/heads/main',
+  };
+  const canaryRuns = (scenario: JobScenario, override?: string): boolean =>
+    jobRuns(CI, 'canary', scenario, override);
+
+  test('runs on a green main push despite the skipped PR-only ancestor and retains every direct producer', () => {
+    expect(parseNeedsList(extractJobBlock(CI, 'canary'))).toEqual([
+      'gate',
+      'distribution-identity',
+      'distribution',
+    ]);
+    expect(jobAncestors(CI, 'canary')).toContain('release-dry-run');
+    expect(
+      canaryRuns(mainPush, "github.event_name == 'push' && github.ref == 'refs/heads/main'")
+    ).toBe(false);
+    expect(canaryRuns(mainPush)).toBe(true);
+  });
+
+  test('other skips accepted by a successful Gate cannot suppress the publisher', () => {
+    const gate = extractJobBlock(CI, 'gate');
+    for (const skipped of ['rust-coverage', 'smoke', 'smoke-container']) {
+      expect(gate).toContain(`&& '${skipped}' || ''`);
+      // Gate owns relevance and has already accepted the skip. Canary must
+      // trust that verdict while still requiring its three direct producers.
+      expect(
+        canaryRuns({ ...mainPush, results: { ...mainPush.results, [skipped]: 'skipped' } })
+      ).toBe(true);
+    }
+  });
+
+  test.each(['gate', 'distribution-identity', 'distribution'])(
+    'refuses every unsuccessful or missing direct producer (%s)',
+    (producer) => {
+      for (const result of ['failure', 'cancelled', 'skipped', undefined])
+        expect(
+          canaryRuns({ ...mainPush, results: { ...mainPush.results, [producer]: result } })
+        ).toBe(false);
+    }
+  );
+
+  test('refuses cancellation, non-main refs, non-push events and unknown prerequisite syntax', () => {
+    expect(canaryRuns({ ...mainPush, cancelled: true })).toBe(false);
+    for (const ref of ['refs/heads/feature', 'refs/tags/v0.1.1', undefined])
+      expect(canaryRuns({ ...mainPush, ref })).toBe(false);
+    for (const event of ['pull_request', 'workflow_dispatch', 'schedule', undefined])
+      expect(canaryRuns({ ...mainPush, event })).toBe(false);
+    expect(() => canaryRuns(mainPush, "!cancelled() && needs.check.result == 'success'")).toThrow(
+      'Condition reads undeclared prerequisite'
+    );
+  });
+});
+
 describe('same-run release dry-run runtime reuse', () => {
+  const windowsRuns = (scenario: JobScenario, override?: string): boolean =>
+    jobRuns(WORKFLOW, 'dry-run-windows', scenario, override);
+  const reusedRuntime: JobScenario = {
+    results: { changes: 'success', runtime: 'skipped', 'dry-run-linux': 'success' },
+    release: 'true',
+  };
+
+  test('Windows runs after a successful Linux archive despite the deliberately skipped runtime ancestor', () => {
+    expect(parseNeedsList(extractJobBlock(WORKFLOW, 'dry-run-windows'))).toEqual([
+      'changes',
+      'dry-run-linux',
+    ]);
+    expect(jobAncestors(WORKFLOW, 'dry-run-windows').sort()).toEqual([
+      'changes',
+      'dry-run-linux',
+      'runtime',
+    ]);
+    // The previous guard's implicit success() reproduces the hosted skip even
+    // though both direct prerequisites succeeded. The source guard must run.
+    expect(windowsRuns(reusedRuntime, "needs.changes.outputs.release == 'true'")).toBe(false);
+    expect(windowsRuns(reusedRuntime)).toBe(true);
+    expect(
+      windowsRuns({ ...reusedRuntime, results: { ...reusedRuntime.results, runtime: 'success' } })
+    ).toBe(true);
+  });
+
+  test.each(['failure', 'skipped', 'cancelled', undefined])(
+    'Windows refuses an unsuccessful or missing Linux archive (%s)',
+    (result) => {
+      expect(
+        windowsRuns({
+          ...reusedRuntime,
+          results: { ...reusedRuntime.results, 'dry-run-linux': result },
+        })
+      ).toBe(false);
+    }
+  );
+
+  test('Windows refuses cancelled, irrelevant or missing-release scenarios and unknown guard syntax', () => {
+    expect(windowsRuns({ ...reusedRuntime, cancelled: true })).toBe(false);
+    for (const release of ['false', '', undefined])
+      expect(windowsRuns({ ...reusedRuntime, release })).toBe(false);
+    expect(() =>
+      windowsRuns(reusedRuntime, "always() && needs.changes.outputs.release == 'true'")
+    ).toThrow('Unknown workflow condition');
+  });
+
+  test('a missing Windows execution still fails the mandatory gate on a relevant reused PR', () => {
+    const gate = extractJobBlock(WORKFLOW, 'gate');
+    expect(parseNeedsList(gate)).toContain('dry-run-windows');
+    expect(gate).toContain("needs.changes.outputs.release == 'false' && 'dry-run-windows' || ''");
+    expect(
+      evaluateGate(
+        {
+          changes: 'success',
+          runtime: 'skipped',
+          'dry-run-linux': 'success',
+          'dry-run-windows': 'skipped',
+          'dry-run-cargo': 'success',
+        },
+        new Set(['runtime'])
+      ).ok
+    ).toBe(false);
+  });
+
   test('rejects missing, malformed or wrong-identity artifacts before an empty download can fan out', () => {
     const source = 'a'.repeat(40);
     const version = '0.1.1-pr.7.gabcdef0';

@@ -1123,7 +1123,9 @@ describe('release workflow binary gate', () => {
   test('ci gates the canary publish on the aggregate gate and a push to main', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const canaryBlock = extractJobBlock(workflow, 'canary');
-    const mainPushIf = '$' + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+    const mainPushIf =
+      '$' +
+      "{{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' && needs.distribution.result == 'success' }}";
     expect(canaryBlock, 'canary job not found in ci.yml').not.toBe('');
 
     // The gate is the definition of a green commit; the other dependencies
