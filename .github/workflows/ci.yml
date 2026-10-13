@@ -349,7 +349,9 @@ jobs:
     # own jobs scope down further.
     name: Canary
     needs: [gate, distribution-identity, distribution]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # Gate accepts deliberate ancestor skips, including the PR-only dry run.
+    # Require each direct producer explicitly instead of implicit success().
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' && needs.distribution.result == 'success' }}
     permissions:
       attestations: write # canary jobs verify build provenance and attest this build's checksums
       contents: write # canary.yml creates this commit's GitHub pre-release

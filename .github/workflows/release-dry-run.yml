@@ -391,7 +391,9 @@ jobs:
   dry-run-windows:
     name: Windows release dry run
     needs: [changes, dry-run-linux]
-    if: needs.changes.outputs.release == 'true'
+    # PR reuse skips the runtime ancestor. Override implicit success() while
+    # retaining the successful Linux archive as the Windows prerequisite.
+    if: ${{ !cancelled() && needs.changes.outputs.release == 'true' && needs['dry-run-linux'].result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 20
     defaults:
