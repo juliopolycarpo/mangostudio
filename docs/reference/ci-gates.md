@@ -39,9 +39,10 @@ ambiguous required names; no bypass was demonstrated.
 | `protocol-ci.yml` / `gate`     | [115237143505](https://github.com/juliopolycarpo/mangostudio/actions/runs/38379796748/job/115237143505) | `Protocol Gate`        |
 | `release-dry-run.yml` / `gate` | [115237168502](https://github.com/juliopolycarpo/mangostudio/actions/runs/38379796623/job/115237168502) | `Release Dry Run Gate` |
 
-Each additive producer uses job ID `gate-unique` in its respective workflow. Job names, not
-workflow-prefixed display labels, are the proposed API contexts. Their application ID must be
-confirmed from the new PR's check-runs API before enforcement changes.
+Each additive producer uses job ID `gate-unique` in its respective workflow. Standalone
+workflows use the leaf job names as API contexts; reusable callers add their job-name prefix.
+Use the final topology's check-runs API to confirm context names and application IDs before
+enforcement changes.
 
 The same PR-head snapshot verified successful security and label contexts:
 
@@ -52,7 +53,8 @@ The same PR-head snapshot verified successful security and label contexts:
 On main head `acf8930f7eb4654020c333a708c01eb2fac3b971`, the observed `Gate` came from CI
 [check 115249661537](https://github.com/juliopolycarpo/mangostudio/actions/runs/38381698650/job/115249661537).
 Cargo Shim and Protocol CI keep path filters on their push triggers; Release Dry Run has no
-push trigger. All four workflows run on every PR targeting main, including docs-only PRs.
+push trigger. At this snapshot, all four workflows ran directly on every PR targeting main,
+including docs-only PRs.
 
 Reproduce the snapshot with read-only API requests:
 
@@ -68,7 +70,14 @@ gh api repos/juliopolycarpo/mangostudio/actions/runs/38379796623
 ## Proposed later cutover
 
 After hosted cases verify all four unique producers, the separate cutover replaces only the
-`Gate` entry in `rules[type=required_status_checks].parameters.required_status_checks` with:
+`Gate` entry in `rules[type=required_status_checks].parameters.required_status_checks`.
+
+The list below is a candidate for the standalone workflow topology. The final Release Dry
+Run context depends on the topology used for PR validation. After CI calls Release Dry Run
+as a reusable workflow, the expected PR API context is
+`Release Dry Run / Release Dry Run Gate`; standalone scheduled and manual runs retain
+`Release Dry Run Gate`. The caller-prefixed name is a prediction until the final topology's
+check-runs API confirms it. Neither name is a verified final enforcement target here.
 
 ```json
 [
@@ -82,9 +91,11 @@ After hosted cases verify all four unique producers, the separate cutover replac
 ]
 ```
 
-All other ruleset parameters, conditions, and bypass actors stay as captured. That future
-change is a proposal only. Keep the legacy aliases until the cutover owner verifies the
-required contexts and moves Canary to the verified CI producer.
+For the reusable PR topology, replace the candidate `Release Dry Run Gate` entry with the
+verified PR API context before applying any settings change. All other ruleset parameters,
+conditions, and bypass actors stay as captured. That future change is a proposal only. Keep
+the legacy aliases until the cutover owner verifies the required contexts and moves Canary
+to the verified CI producer.
 
 ## Verification boundary
 
@@ -96,6 +107,8 @@ dependency, and the existing security and label contexts.
 
 Local fixtures do not establish hosted behavior. Before cutover, collect current-head API
 receipts for ordinary, docs-only, Rust, and release PRs, including failure, cancellation,
-unexpected or missing lane cases. Verify the four exact unique context names and application
-`15368` alongside the retained legacy and security contexts. An additive PR that has only
-run its own workflow-changing case has not completed that hosted case matrix.
+unexpected or missing lane cases. Verify the actual API context names after all topology
+changes and application `15368` alongside the retained legacy and security contexts. A
+reusable workflow's leaf job name alone does not establish its required-check context. An
+additive PR that has only run its own workflow-changing case has not completed that hosted
+case matrix.
