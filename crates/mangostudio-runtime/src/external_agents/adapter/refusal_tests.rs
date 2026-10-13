@@ -174,6 +174,12 @@ async fn cleanup_wrapped_spent_session_refusals_close_the_session_once() {
                 });
                 let error = start(&rig, review, "invalid").await.unwrap_err();
                 assert_eq!(error.details.as_ref().unwrap()["kind"], "tool_argument");
+                let expected = if cancelled { "nonresumable" } else { "closed" };
+                assert_eq!(
+                    error.details.as_ref().unwrap()["session"],
+                    expected,
+                    "expected a cancelled session to be nonresumable and a closed one closed | received: {error:?}"
+                );
                 assert!(
                     error.message.contains("expected a new session"),
                     "spent session must be replaced: {error:?}"

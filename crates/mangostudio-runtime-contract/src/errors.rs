@@ -64,6 +64,24 @@ pub const RUNTIME_SERVICE_ERROR_KINDS: [&str; 29] = [
     "mcp_session_missing",
 ];
 
+/// The `details` key an external-agent turn refusal uses to say the session cannot run the turn.
+///
+/// Mirrors `EXTERNAL_AGENT_SESSION_DETAIL` in `apps/shared/src/runtime-contract/errors.ts`.
+pub const EXTERNAL_AGENT_SESSION_DETAIL: &str = "session";
+
+/// The vendor's process ended or the SDK sealed the session; the conversation is intact.
+pub const EXTERNAL_AGENT_SESSION_CLOSED: &str = "closed";
+
+/// The SDK refuses every later turn on the vendor session; the conversation cannot be trusted.
+pub const EXTERNAL_AGENT_SESSION_NONRESUMABLE: &str = "nonresumable";
+
+/// Every value [`EXTERNAL_AGENT_SESSION_DETAIL`] can carry, in the order
+/// `EXTERNAL_AGENT_SESSION_STATES` lists them in the TypeScript contract.
+pub const EXTERNAL_AGENT_SESSION_STATES: [&str; 2] = [
+    EXTERNAL_AGENT_SESSION_CLOSED,
+    EXTERNAL_AGENT_SESSION_NONRESUMABLE,
+];
+
 /// Maps a wire error code onto the known union, mirroring
 /// `narrowRuntimeErrorCode` in `apps/shared/src/runtime-contract/errors.ts`.
 ///
@@ -94,8 +112,9 @@ pub fn narrow_runtime_error_code(code: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        CONSENT_DENIED_KIND, RESERVED_ERROR_CODES, RUNTIME_SERVICE_ERROR_KINDS,
-        RUNTIME_UPDATE_REFUSED, narrow_runtime_error_code,
+        CONSENT_DENIED_KIND, EXTERNAL_AGENT_SESSION_DETAIL, EXTERNAL_AGENT_SESSION_STATES,
+        RESERVED_ERROR_CODES, RUNTIME_SERVICE_ERROR_KINDS, RUNTIME_UPDATE_REFUSED,
+        narrow_runtime_error_code,
     };
     use crate::strings::errors_document;
 
@@ -149,6 +168,30 @@ mod tests {
             .map(|value| value.as_str().expect("a string"))
             .collect();
         assert_eq!(RUNTIME_SERVICE_ERROR_KINDS.to_vec(), expected);
+    }
+
+    /// The hub reads this key and these values off the wire, so a spelling that drifts on either
+    /// side would turn a reopen into a lost session without any test noticing.
+    #[test]
+    fn the_external_agent_session_detail_and_states_mirror_strings_json() {
+        let document = errors_document();
+        let states: Vec<&str> = document["externalAgentSessionStates"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|value| value.as_str().expect("a string"))
+            .collect();
+        assert_eq!(
+            (
+                EXTERNAL_AGENT_SESSION_DETAIL,
+                EXTERNAL_AGENT_SESSION_STATES.to_vec()
+            ),
+            (
+                document["externalAgentSessionDetail"].as_str().unwrap(),
+                states
+            ),
+            "expected the Rust session detail key and states to match strings.json"
+        );
     }
 
     #[test]

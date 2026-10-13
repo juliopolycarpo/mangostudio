@@ -328,6 +328,59 @@ describe('external session manager', () => {
     expect(handle.resumed).toBe(false);
   });
 
+  describe('the resume mode a reopen asks for', () => {
+    it.each([
+      ['claude', 'strict'],
+      ['codex', 'fallback'],
+      ['cursor', 'fallback'],
+    ] as const)('asks %s for a %s resume', async (targetId, expected) => {
+      const first = createFakeExternalRuntime({ refuseFallbackResume: targetId === 'claude' });
+      await managerFor(first).ensureSession(baseInput({ targetId }));
+      const second = createFakeExternalRuntime({ refuseFallbackResume: targetId === 'claude' });
+
+      await managerFor(second).ensureSession(baseInput({ targetId }));
+
+      const open = second.calls.open[0];
+      expect(
+        { resumeRef: open?.resumeRef, resumeMode: open?.resumeMode },
+        `expected a ${targetId} reopen to resume native-session-1 in ${expected} mode`
+      ).toEqual({ resumeRef: 'native-session-1', resumeMode: expected });
+    });
+
+    it('opens a Claude session whose runtime refuses fallback resume, without a reset notice', async () => {
+      const first = createFakeExternalRuntime({ refuseFallbackResume: true });
+      await managerFor(first).ensureSession(baseInput({ targetId: 'claude' }));
+      const second = createFakeExternalRuntime({ refuseFallbackResume: true });
+
+      const handle = await managerFor(second).ensureSession(baseInput({ targetId: 'claude' }));
+
+      // Claude confirms a resume on its first turn, so `resumed: false` here means unconfirmed.
+      expect({ resumed: handle.resumed, reset: handle.conversationReset }).toEqual({
+        resumed: false,
+        reset: undefined,
+      });
+    });
+
+    it('reports a conversation reset when the agent declines the resume on open', async () => {
+      const first = createFakeExternalRuntime();
+      await managerFor(first).ensureSession(baseInput());
+      const second = createFakeExternalRuntime({ resumeSucceeds: false });
+
+      const handle = await managerFor(second).ensureSession(baseInput());
+
+      expect(handle.conversationReset, 'expected conversationReset: unavailable').toBe(
+        'unavailable'
+      );
+    });
+
+    it('reports no reset for a first open', async () => {
+      const handle = await managerFor(
+        createFakeExternalRuntime({ resumeSucceeds: false })
+      ).ensureSession(baseInput());
+      expect(handle.conversationReset).toBeUndefined();
+    });
+  });
+
   it.each([
     ['environment', { environmentId: 'remote' }],
     ['workspace', { canonicalWorkspacePath: '/work/other' }],
@@ -454,6 +507,19 @@ describe('external session manager', () => {
         holdNotices: [],
         continuation: 'native-session-1',
       });
+    });
+
+    it('drops the continuation when asked, so the next open starts a new conversation', async () => {
+      const runtime = createFakeExternalRuntime();
+      const manager = managerFor(runtime);
+      const handle = await manager.ensureSession(baseInput());
+
+      await handle.retire({ dropContinuation: true });
+      await manager.ensureSession(baseInput());
+
+      expect({
+        continuationAfterRetire: runtime.calls.open[1]?.resumeRef,
+      }).toEqual({ continuationAfterRetire: undefined });
     });
 
     it('does nothing for a session the chat no longer holds', async () => {

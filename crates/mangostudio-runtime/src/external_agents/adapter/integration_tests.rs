@@ -3086,10 +3086,22 @@ async fn revoking_consent_mid_turn_closes_the_session_and_refuses_its_pending_an
         "received: {}",
         refused.message
     );
+    assert!(
+        refused.details.as_ref().unwrap().get("session").is_none(),
+        "expected an answer to a session that is not open to carry no session state, which only a turn reports | received: {refused:?}"
+    );
+    let turn_refused = rig
+        .supervisor
+        .turn(
+            rig.turn_params("one", "after-revocation", "go"),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a turn after revocation must be refused");
     assert_eq!(
-        refused.details.as_ref().unwrap()["session"],
+        turn_refused.details.as_ref().unwrap()["session"],
         "closed",
-        "a session that is not open is refused as closed; received: {refused:?}"
+        "expected a turn on a session that is not open to be refused as closed | received: {turn_refused:?}"
     );
     assert_eq!(
         rig.log.permission_answers.load(Ordering::SeqCst),

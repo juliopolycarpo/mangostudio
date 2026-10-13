@@ -41,6 +41,7 @@ import {
   type ExternalAgentSteerResult,
   type ExternalAgentTargetId,
   type ExternalApprovalRequest,
+  type ExternalConversationResetReason,
   type ExternalReviewTarget,
   type ExternalSteerRejectionReason,
   type ExternalTurnTerminalReason,
@@ -184,6 +185,7 @@ interface ExternalTurnObserver {
     readonly targetId: ExternalAgentTargetId;
     readonly resumed: boolean;
     readonly fallbackReason?: string;
+    readonly conversationReset?: ExternalConversationResetReason;
   }): void;
   /**
    * Both message rows exist and are readable. Reported after the write rather
@@ -580,6 +582,7 @@ export function createExternalTurnController(
       targetId,
       resumed: handle.resumed,
       ...(handle.fallbackReason ? { fallbackReason: handle.fallbackReason } : {}),
+      ...(handle.conversationReset ? { conversationReset: handle.conversationReset } : {}),
     });
 
     // The single-flight above can hand the same session to two sends that both
@@ -637,6 +640,7 @@ export function createExternalTurnController(
       sessionId: handle.sessionId,
       startedAt,
     });
+    if (handle.conversationReset) transcript.markConversationReset(handle.conversationReset);
     const writer = new ExternalTranscriptWriter(db, assistantMessageId, transcript, now);
 
     const settled = Promise.withResolvers<ExternalTurnTerminalReason>();
@@ -886,6 +890,9 @@ export function createExternalTurnController(
         )
       : () => undefined;
 
+    /** The runtime said the stored conversation cannot take further turns, so the next open is new. */
+    let replacedAsNonresumable = false;
+
     /** Errors that came out of {@link reacquire}, so `failStart` can tell a reopen from a turn call. */
     const reopenFailures = new WeakSet<object>();
 
@@ -902,6 +909,10 @@ export function createExternalTurnController(
       // A stop that landed during the open must not re-point a turn that ended.
       if (stop.signal.aborted) return next;
       if (next === handle || next.sessionId === handle.sessionId) return next;
+      // The agent would not run further turns on the stored conversation, so the session that
+      // runs this one started a new conversation, whatever its own open reported.
+      const conversationReset = replacedAsNonresumable ? 'nonresumable' : next.conversationReset;
+      if (conversationReset) transcript.markConversationReset(conversationReset);
       unsubscribe();
       handle = next;
       unsubscribe = handle.subscribe(consumer);
@@ -912,6 +923,15 @@ export function createExternalTurnController(
         live.handle = handle;
         live.sessionId = handle.sessionId;
       }
+      // The first announcement named the session that has since been replaced. Naming the one that
+      // runs the turn keeps the live view and a reload on the same session and the same notice.
+      input.observer?.onSession?.({
+        sessionId: handle.sessionId,
+        targetId,
+        resumed: handle.resumed,
+        ...(handle.fallbackReason ? { fallbackReason: handle.fallbackReason } : {}),
+        ...(conversationReset ? { conversationReset } : {}),
+      });
       return handle;
     }
 
@@ -1044,6 +1064,9 @@ export function createExternalTurnController(
         sleep,
         onDispatchPending: (pending) => {
           dispatchPending = pending;
+        },
+        onSessionRetired: (state) => {
+          if (state === 'nonresumable') replacedAsNonresumable = true;
         },
         onLateAcceptance: (lateHandle, nativeTurnId) => {
           void lateHandle.cancel(nativeTurnId).catch((error: unknown) => {

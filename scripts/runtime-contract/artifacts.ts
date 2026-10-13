@@ -14,6 +14,8 @@
 import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   CONSENT_DENIED_KIND,
+  EXTERNAL_AGENT_SESSION_DETAIL,
+  EXTERNAL_AGENT_SESSION_STATES,
   HUB_BINDING_KEY_HEADER,
   HUB_BINDING_KEY_LENGTH,
   HUB_CONTRACT,
@@ -160,6 +162,8 @@ function stringsDocument(): Record<string, unknown> {
       consentDeniedKind: CONSENT_DENIED_KIND,
       updateRefusedCode: RUNTIME_UPDATE_REFUSED,
       serviceErrorKinds: [...RUNTIME_SERVICE_ERROR_KINDS],
+      externalAgentSessionDetail: EXTERNAL_AGENT_SESSION_DETAIL,
+      externalAgentSessionStates: [...EXTERNAL_AGENT_SESSION_STATES],
     },
     setupPendingSignature: RUNTIME_SETUP_PENDING_SIGNATURE,
     updateExitCode: RUNTIME_UPDATE_EXIT_CODE,

@@ -395,6 +395,54 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
     };
   }
 
+  /**
+   * Hooks that restart the runtime between a send's session open and its submission, as a runtime
+   * that restarted would: the first runtime is killed, the hub sees its connection close, and a
+   * second runtime (with `secondRuntimeEnvironment` over its environment) answers the reopen.
+   */
+  function runtimeRestart(session: Awaited<ReturnType<typeof refusedSession>>) {
+    let active: RuntimeClient = session.client;
+    let armed = false;
+    const dropped: number[] = [];
+    return {
+      dropped,
+      /** The next send restarts the runtime. */
+      arm: () => {
+        armed = true;
+      },
+      hooks: {
+        activeClient: () => active,
+        afterEnsure: async (handle: ExternalSessionHandle) => {
+          if (!armed) return;
+          armed = false;
+          const pid = session.peer.pid;
+          if (pid === undefined) throw new Error('expected the first runtime pid | received: none');
+          process.kill(pid, 'SIGKILL');
+          dropped.push(pid);
+          await session.peer.exited;
+          for (let attempt = 0; attempt < 200 && handle.isLive(); attempt += 1) await Bun.sleep(25);
+          if (handle.isLive()) {
+            throw new Error(
+              'expected the hub to see the first runtime connection close | received: the session is still live'
+            );
+          }
+          const second = await connectRuntime(
+            {
+              owner: session.owner,
+              environmentId: session.environmentId,
+              mangoHome: session.mangoHome,
+            },
+            session.secondRuntimeEnvironment
+          );
+          second.client.replaceManifest(
+            capabilityManifestFromHealth(await second.client.health(), second.client.manifest)
+          );
+          active = second.client;
+        },
+      },
+    };
+  }
+
   /** The hub's real send path, resolving against `discovery`, over the live runtime. */
   function sendThrough(
     session: Awaited<ReturnType<typeof refusedSession>>,
@@ -408,6 +456,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       /** The client the hub reaches the runtime through; the reopen flow swaps it. */
       readonly activeClient?: () => RuntimeClient;
       readonly afterEnsure?: (handle: ExternalSessionHandle) => Promise<void>;
+      /** The prompt of the next send; defaults to a one-word reply. */
+      readonly prompt?: () => string;
     } = {}
   ) {
     const active = hooks.activeClient ?? (() => session.client);
@@ -446,7 +496,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
             restrictToolsToWorkdir: null,
           },
           chatId: session.chatId,
-          prompt: 'Reply with exactly the single word pong. Do not use any tools.',
+          prompt:
+            hooks.prompt?.() ?? 'Reply with exactly the single word pong. Do not use any tools.',
           attachmentIds: [],
           externalTurn: undefined,
         },
@@ -617,41 +668,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         // restarted would, and the hub's reopen then lands on a runtime whose codex is outdated.
         // (Ending the vendor child instead does not reopen: the runtime reports the session lost,
         // the turn ends `session-lost`, and the next send is an ordinary open.)
-        let active: RuntimeClient = session.client;
-        let dropFirstRuntime = false;
-        const dropped: number[] = [];
-        const pass = sendThrough(session, refusal, session.discovery, {
-          activeClient: () => active,
-          afterEnsure: async (handle) => {
-            if (!dropFirstRuntime) return;
-            dropFirstRuntime = false;
-            const pid = session.peer.pid;
-            if (pid === undefined)
-              throw new Error('expected the first runtime pid | received: none');
-            process.kill(pid, 'SIGKILL');
-            dropped.push(pid);
-            await session.peer.exited;
-            for (let attempt = 0; attempt < 200 && handle.isLive(); attempt += 1)
-              await Bun.sleep(25);
-            if (handle.isLive()) {
-              throw new Error(
-                'expected the hub to see the first runtime connection close | received: the session is still live'
-              );
-            }
-            const second = await connectRuntime(
-              {
-                owner: session.owner,
-                environmentId: session.environmentId,
-                mangoHome: session.mangoHome,
-              },
-              session.secondRuntimeEnvironment
-            );
-            second.client.replaceManifest(
-              capabilityManifestFromHealth(await second.client.health(), second.client.manifest)
-            );
-            active = second.client;
-          },
-        });
+        const restart = runtimeRestart(session);
+        const pass = sendThrough(session, refusal, session.discovery, restart.hooks);
 
         // A normal turn on the signed-in account.
         const first = sseFrames(
@@ -663,7 +681,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         expect(first.map((frame) => frame.type)).not.toContain('error');
         const callsBefore = pass.recording.calls.length;
 
-        dropFirstRuntime = true;
+        restart.arm();
         const startedAt = Date.now();
         const second = await within(pass.send(), 'the send after the runtime restarted', 120_000);
         const frames = sseFrames(await okResponse(second).text());
@@ -671,7 +689,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         const refusedWith = pass.recording.refusals[0];
         logger.info('reopen-second-send', {
           elapsedMs,
-          droppedRuntimePids: dropped,
+          droppedRuntimePids: restart.dropped,
           calls: pass.recording.calls.slice(callsBefore),
           refusal:
             refusedWith instanceof RemoteError
@@ -734,6 +752,87 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         expect(elapsedMs).toBeLessThan(30_000);
       },
       360_000
+    );
+  }
+
+  for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'connection-dropped')) {
+    it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
+      `${refusal.id}: a reopen after the runtime connection dropped resumes the conversation`,
+      async () => {
+        const session = await refusedSession(refusal);
+        await acknowledgeExternalDisclosure(
+          { userId: session.owner.id, targetId: refusal.targetId },
+          {
+            capabilities: session.live.capabilities,
+            supportedConfigurations: session.live.supportedConfigurations,
+          },
+          getDb()
+        );
+        await grantWorkspaceTrust(
+          {
+            userId: session.owner.id,
+            targetId: refusal.targetId,
+            environmentId: session.environmentId,
+            workspacePath: session.client.paths.canonical(session.workspace),
+          },
+          getDb()
+        );
+        // A word the model cannot guess, so a reply that repeats it proves the second session
+        // continued the first conversation rather than starting another.
+        const codeWord = `mango-${crypto.randomUUID().slice(0, 8)}`;
+        let sendNumber = 0;
+        const restart = runtimeRestart(session);
+        const pass = sendThrough(session, refusal, session.discovery, {
+          ...restart.hooks,
+          prompt: () => {
+            sendNumber += 1;
+            return sendNumber === 1
+              ? `Remember the code word ${codeWord}. Reply with exactly the single word noted. Do not use any tools.`
+              : 'What was the code word I asked you to remember? Reply with exactly the code word and nothing else. Do not use any tools.';
+          },
+        });
+
+        const first = sseFrames(
+          await okResponse(await within(pass.send(), 'the first live claude turn', 170_000)).text()
+        );
+        expect(first.find((frame) => frame.type === 'external_turn_completed')).toMatchObject({
+          reason: 'completed',
+        });
+        const callsBefore = pass.recording.calls.length;
+
+        restart.arm();
+        const second = await within(pass.send(), 'the send after the runtime restarted', 170_000);
+        const frames = sseFrames(await okResponse(second).text());
+        logger.info('connection-dropped-second-send', {
+          droppedRuntimePids: restart.dropped,
+          calls: pass.recording.calls.slice(callsBefore),
+          frames,
+        });
+
+        const text = frames
+          .filter((frame) => frame.type === 'external_text')
+          .map((frame) => String(frame.text ?? ''))
+          .join('');
+        const sessions = frames.filter((frame) => frame.type === 'external_session_started');
+        expect({
+          completed: frames.find((frame) => frame.type === 'external_turn_completed'),
+          errors: frames.filter((frame) =>
+            ['error', 'external_error'].includes(String(frame.type))
+          ),
+          recalled: text.includes(codeWord),
+          reopens: pass.recording.calls.slice(callsBefore).filter((call) => call.reopen).length,
+          resetNotice: sessions.some((frame) => frame.conversationReset !== undefined),
+          announced: sessions.length,
+        }).toMatchObject({
+          completed: { reason: 'completed' },
+          errors: [],
+          recalled: true,
+          reopens: 1,
+          resetNotice: false,
+          announced: 2,
+        });
+      },
+      420_000
     );
   }
 

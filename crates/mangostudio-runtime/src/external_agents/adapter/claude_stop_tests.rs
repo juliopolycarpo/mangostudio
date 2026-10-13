@@ -499,3 +499,53 @@ async fn a_supervisor_close_of_a_claude_session_reconciles_the_child_as_for_code
         error.message
     );
 }
+
+/// The UUID shape Claude documents for `--resume`.
+const STORED_CONVERSATION: &str = "0b6f3c2e-4f1a-4d57-9c1e-2a7d9e5b8c41";
+
+async fn open_resuming(
+    backend: &Backend,
+    mode: wire::ResumeMode,
+) -> Result<Box<dyn AgentSession>, AgentFailure> {
+    let workspace = std::env::temp_dir();
+    let mut params = open_params(wire::TargetId::Claude, &workspace);
+    params.resume_ref = Some(STORED_CONVERSATION.into());
+    params.resume_mode = mode;
+    backend
+        .open(
+            wire::TargetId::Claude,
+            PathBuf::from("/synthetic/claude"),
+            fixtures::host(workspace),
+            &params,
+        )
+        .await
+}
+
+/// The hub asks Claude for the only mode its harness supports. If the SDK ever starts accepting
+/// fallback, or stops accepting strict, this fails by name instead of every Claude reopen with a
+/// stored conversation failing in production.
+#[tokio::test]
+async fn the_claude_harness_refuses_fallback_resume_and_opens_a_strict_one() {
+    let backend = backend(StubbornClaudeLauncher::new([]));
+
+    let fallback = open_resuming(&backend, wire::ResumeMode::Fallback).await;
+    let strict = open_resuming(&backend, wire::ResumeMode::Strict).await;
+
+    let received = match &fallback {
+        Ok(_) => String::from("an open session"),
+        Err(failure) => format!("{:?}: {failure}", failure.cause),
+    };
+    assert!(
+        matches!(&fallback, Err(failure) if failure.cause == FailureCause::InvalidRequest
+            && failure.to_string().contains("a strict Claude resume")),
+        "expected a fallback resume refused as an invalid request naming a strict Claude resume | received: {received}"
+    );
+    let strict_received = strict
+        .as_ref()
+        .err()
+        .map_or(String::from("an open session"), ToString::to_string);
+    assert!(
+        strict.is_ok(),
+        "expected a strict resume of {STORED_CONVERSATION} to open | received: {strict_received}"
+    );
+}

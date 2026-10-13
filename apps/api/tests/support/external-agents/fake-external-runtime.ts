@@ -38,17 +38,36 @@ const FAKE_CAPABILITIES: ExternalAgentCapabilities = {
 
 /**
  * What the hub's runtime client yields when the runtime refuses a turn because the session can no
- * longer run one (the vendor's process ended between turns): an argument refusal that keeps the
- * runtime's `session: "closed"` detail on its cause.
+ * longer run one: an argument refusal that keeps the runtime's `session` detail on its cause.
+ *
+ * `closed` is a vendor process that ended between turns; `nonresumable` is Claude's SDK refusing
+ * every later turn on a vendor session after a forced stop or an unverified resume.
  *
  * @example
- * createFakeExternalRuntime({ turnFailure: () => closedSessionRefusal() });
+ * createFakeExternalRuntime({ turnFailure: () => sessionRefusal('nonresumable') });
  */
-export function closedSessionRefusal(): ToolArgumentError {
-  const message =
-    'External-agent session "session-1" can no longer run turns (expected an open session, received a closed one); expected a new session.';
+export function sessionRefusal(state: 'closed' | 'nonresumable'): ToolArgumentError {
+  const message = `External-agent session "session-1" can no longer run turns (expected an open session, received a ${state} one); expected a new session.`;
   return new ToolArgumentError(message, {
-    cause: new RemoteError('INTERNAL', message, { kind: 'tool_argument', session: 'closed' }),
+    cause: new RemoteError('INTERNAL', message, { kind: 'tool_argument', session: state }),
+  });
+}
+
+/** The refusal for a vendor process that ended between turns. */
+export function closedSessionRefusal(): ToolArgumentError {
+  return sessionRefusal('closed');
+}
+
+/**
+ * What the runtime answers when a target whose harness supports only a strict resume is opened
+ * with a fallback one (`mango-agent-claude`: "expected a strict Claude resume ... received
+ * fallback resume"). Named so a test names the refusal it relies on.
+ */
+function fallbackResumeRefusal(): ToolArgumentError {
+  const message =
+    'Invalid host configuration; expected a strict Claude resume; the documented headless surface does not provide a conclusive cannot-resume signal for fallback, received fallback resume.';
+  return new ToolArgumentError(message, {
+    cause: new RemoteError('INTERNAL', message, { kind: 'tool_argument' }),
   });
 }
 
@@ -59,6 +78,11 @@ export interface FakeExternalRuntimeOptions {
   readonly resumeSucceeds?: boolean;
   readonly onOpen?: (params: ExternalAgentOpenParams) => void;
   readonly openFailure?: () => Error | undefined;
+  /**
+   * Refuses an open that asks to resume in `fallback` mode, as the Claude harness does. A strict
+   * resume opens, and reports `resumed: false` because Claude confirms a resume on its first turn.
+   */
+  readonly refuseFallbackResume?: boolean;
   readonly turnFailure?: () => Error | undefined;
   readonly capabilities?: ExternalAgentCapabilities;
   /**
@@ -142,10 +166,22 @@ export function createFakeExternalRuntime(
         options.onOpen?.(params);
         const failure = options.openFailure?.();
         if (failure) return Promise.reject(failure);
+        if (
+          options.refuseFallbackResume &&
+          params.resumeRef !== undefined &&
+          params.resumeMode === 'fallback'
+        ) {
+          return Promise.reject(fallbackResumeRefusal());
+        }
         openSessionId = params.sessionId;
+        const lazyResume = options.refuseFallbackResume === true;
         return Promise.resolve({
           nativeSessionId: options.nativeSessionId ?? 'native-session-1',
-          resumed: params.resumeRef !== undefined && options.resumeSucceeds !== false,
+          resumed:
+            params.resumeRef !== undefined && !lazyResume && options.resumeSucceeds !== false,
+          ...(params.resumeRef !== undefined && !lazyResume && options.resumeSucceeds === false
+            ? { fallbackReason: 'no rollout found for thread id native-session-1' }
+            : {}),
           effectiveConfiguration: params.configuration,
           capabilities: options.capabilities ?? FAKE_CAPABILITIES,
         });

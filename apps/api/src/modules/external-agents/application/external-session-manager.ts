@@ -36,6 +36,7 @@ import {
   type ExternalAgentSteerResult,
   type ExternalAgentTargetId,
   type ExternalAgentTurnParams,
+  type ExternalConversationResetReason,
   type ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
@@ -57,6 +58,7 @@ import {
   type ExternalEnvelopeVerdict,
   ExternalEventSequencer,
 } from '../domain/external-event-sequencer';
+import { resumeModeFor } from '../domain/external-resume-mode';
 import {
   EXTERNAL_ADOPTION_LEASE_TTL_MS,
   refreshAdoptionLease,
@@ -210,6 +212,12 @@ export interface ExternalSessionHandle {
   readonly targetId: ExternalAgentTargetId;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
+  /**
+   * Set when the chat had a stored conversation, this open asked the agent to resume it, and the
+   * agent said it could not and started a new one. Absent for a harness whose resume is
+   * confirmed lazily (Claude): its `resumed: false` at open means unconfirmed, not failed.
+   */
+  readonly conversationReset?: ExternalConversationResetReason;
   readonly effectiveConfiguration: ExternalAgentConfiguration;
   readonly capabilities: ExternalAgentCapabilities;
   /** Replaces any previous consumer; one turn runs on a session at a time. */
@@ -223,8 +231,11 @@ export interface ExternalSessionHandle {
    * keeping the vendor conversation's continuation so the next open resumes it. Torn down as a
    * dropped connection is: the turn being submitted is not ended by it, and its submission
    * reopens. Does nothing once the session is no longer the chat's own.
+   *
+   * With `dropContinuation` the stored conversation goes too, so the next open starts a new one;
+   * for a vendor session the agent will not run further turns on.
    */
-  retire(): Promise<void>;
+  retire(options?: { readonly dropContinuation?: boolean }): Promise<void>;
   /**
    * The exact params a turn is submitted with. Built once per attempt and kept:
    * the runtime answers a repeated `clientMessageId` from its receipt only when
@@ -355,6 +366,7 @@ interface OpenedSession {
   readonly nativeSessionId: string;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
+  readonly conversationReset?: ExternalConversationResetReason;
   readonly effectiveConfiguration: ExternalAgentConfiguration;
   readonly capabilities: ExternalAgentCapabilities;
 }
@@ -467,6 +479,9 @@ export function createExternalSessionManager(
       targetId: record.binding.targetId,
       resumed: record.open.resumed,
       ...(record.open.fallbackReason ? { fallbackReason: record.open.fallbackReason } : {}),
+      ...(record.open.conversationReset
+        ? { conversationReset: record.open.conversationReset }
+        : {}),
       effectiveConfiguration: record.open.effectiveConfiguration,
       capabilities: record.open.capabilities,
       subscribe(consumer) {
@@ -478,9 +493,13 @@ export function createExternalSessionManager(
       isLive() {
         return !record.closing && sessions.get(record.binding.chatId) === record;
       },
-      async retire() {
+      async retire(options) {
         if (record.closing || sessions.get(record.binding.chatId) !== record) return;
-        await reap(record.binding.chatId, 'runtime-disconnected', true);
+        await reap(
+          record.binding.chatId,
+          'runtime-disconnected',
+          options?.dropContinuation !== true
+        );
       },
       turnParams,
       sendTurn,
@@ -648,7 +667,7 @@ export function createExternalSessionManager(
       // case. The user picked *that* conversation by name, so its first open
       // fails rather than silently handing back an empty one; every open
       // after the vendor confirms the resume is an ordinary turn again.
-      resumeMode: resumable?.pendingAdoption ? 'strict' : 'fallback',
+      resumeMode: resumeModeFor(input.targetId, resumable?.pendingAdoption === true),
       timeoutMs: openTimeoutMs,
       ...toolchain,
     } satisfies Parameters<typeof client.externalAgents.open>[0];
@@ -670,6 +689,11 @@ export function createExternalSessionManager(
         // said. Reporting the vendor's own answer is what lets the UI say so.
         resumed: opened.resumed,
         ...(opened.fallbackReason ? { fallbackReason: opened.fallbackReason } : {}),
+        // A resume the agent declined on open, by name: only then did a conversation the chat had
+        // fail to continue. An unconfirmed lazy resume says nothing yet.
+        ...(resumable && !opened.resumed && opened.fallbackReason
+          ? { conversationReset: 'unavailable' as const }
+          : {}),
         effectiveConfiguration: opened.effectiveConfiguration,
         capabilities: opened.capabilities,
       },

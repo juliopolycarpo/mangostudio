@@ -45,6 +45,11 @@
       "mcp_connection",
       "mcp_call",
       "mcp_session_missing"
+    ],
+    "externalAgentSessionDetail": "session",
+    "externalAgentSessionStates": [
+      "closed",
+      "nonresumable"
     ]
   },
   "setupPendingSignature": "runtime setup is pending on this machine",

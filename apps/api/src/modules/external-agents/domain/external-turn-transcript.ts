@@ -17,6 +17,7 @@ import type {
   ExternalAgentEvent,
   ExternalAgentTargetId,
   ExternalApprovalRequest,
+  ExternalConversationResetReason,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
   ExternalUsage,
@@ -139,6 +140,17 @@ export class ExternalTurnTranscript {
   /** The turn moved to a reopened session before the vendor accepted it. */
   rebindSession(sessionId: string): void {
     this.#turnPart.sessionId = sessionId;
+  }
+
+  /**
+   * Records that the chat had an earlier conversation the session running this turn did not
+   * continue, so a reload says what the live stream said.
+   *
+   * @example
+   * transcript.markConversationReset('nonresumable');
+   */
+  markConversationReset(reason: ExternalConversationResetReason): void {
+    this.#turnPart.conversationReset = reason;
   }
 
   bindNativeTurn(nativeTurnId: string): void {

@@ -45,6 +45,10 @@ use super::wire::{
 use crate::json_size::serialized_len;
 use crate::ports::wall_clock::epoch_millis;
 use crate::tool_argument::tool_argument;
+use mangostudio_runtime_contract::errors::{
+    EXTERNAL_AGENT_SESSION_CLOSED, EXTERNAL_AGENT_SESSION_DETAIL,
+    EXTERNAL_AGENT_SESSION_NONRESUMABLE,
+};
 
 /// The topic every turn event travels on.
 pub(crate) const EVENT_TOPIC: &str = "external-agent.event";
@@ -263,7 +267,12 @@ impl Supervisor {
         mut params: TurnParams,
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<TurnResult, RemoteError> {
-        let live = self.require_live(&params.session_id)?;
+        // Only a turn is reopened on a new session by the hub, so only its refusal says the
+        // session is closed; a respond, steer or cancel against the same session stays a plain
+        // argument refusal.
+        let live = self.require_live(&params.session_id).map_err(|refusal| {
+            refusal.with_detail(EXTERNAL_AGENT_SESSION_DETAIL, EXTERNAL_AGENT_SESSION_CLOSED)
+        })?;
         super::supervisor::refuse_unoffered_configuration(live.target, &params.configuration)?;
         // Decoded before the session's one turn slot is taken, so a malformed
         // attachment refuses this call and leaves the session idle.
@@ -404,10 +413,21 @@ impl Supervisor {
                 .err()
                 .map(|failure| format!(" Closing it also failed: {}", failure.message))
                 .unwrap_or_default();
-            return super::supervisor::session_closed(format!(
-                "External-agent session {:?} can no longer run turns ({error}); expected a new session.{cleanup}",
-                live.session_id
-            ));
+            // The SDK answers `Cancelled` once a forced stop or an unverified resume made a vendor
+            // session nonresumable (Claude), and `Closed` once the session or its process is gone
+            // (Codex). The first needs a fresh conversation, the second resumes the same one.
+            let state = if error.cause == FailureCause::Cancelled {
+                EXTERNAL_AGENT_SESSION_NONRESUMABLE
+            } else {
+                EXTERNAL_AGENT_SESSION_CLOSED
+            };
+            return super::supervisor::session_refusal(
+                state,
+                format!(
+                    "External-agent session {:?} can no longer run turns ({error}); expected a new session.{cleanup}",
+                    live.session_id
+                ),
+            );
         }
         // Preserve the established bare Busy refusal, but an explicit committed
         // dispatch is a stronger fact than the cause's advice to try again.

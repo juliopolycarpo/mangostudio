@@ -68,6 +68,27 @@ export const RUNTIME_SERVICE_ERROR_KINDS = [
 export type RuntimeServiceErrorKind = (typeof RUNTIME_SERVICE_ERROR_KINDS)[number];
 
 /**
+ * The `details` key an external-agent turn refusal uses to say the session itself cannot run the
+ * turn, and why. The refusal keeps `kind: "tool_argument"`, so a hub that does not read this key
+ * still treats it as a lost session.
+ */
+export const EXTERNAL_AGENT_SESSION_DETAIL = 'session';
+
+/**
+ * What {@link EXTERNAL_AGENT_SESSION_DETAIL} can say. Both mean the runtime dispatched nothing, so
+ * the hub may open another session and submit the same turn there.
+ *
+ * - `closed`: the vendor's process ended or the SDK sealed the session. The conversation is
+ *   intact; the new session resumes it.
+ * - `nonresumable`: the SDK refuses every later turn on this vendor session (Claude after a
+ *   forced stop or a resume it could not verify). The stored conversation cannot be trusted, so
+ *   the new session starts a fresh one.
+ */
+export const EXTERNAL_AGENT_SESSION_STATES = ['closed', 'nonresumable'] as const;
+
+export type ExternalAgentSessionState = (typeof EXTERNAL_AGENT_SESSION_STATES)[number];
+
+/**
  * Kind carried in `details.kind` when a named backup set is gone.
  *
  * Named rather than spelled inline because two processes match on it: the

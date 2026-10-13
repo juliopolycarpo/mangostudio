@@ -668,8 +668,8 @@ Three properties adoption needs beyond the listing itself:
   re-reads the exact metadata — id, cwd, updated time — and refuses if it changed or vanished. A
   picker row is a hint, not a handle, and a session written to since the picker loaded is one
   somebody is using right now.
-- **Adopt strictly.** The ordinary turn path resumes with `resumeMode: 'fallback'`, which is right
-  for a send and wrong for adoption: a user who chose a specific conversation must not silently get
+- **Adopt strictly.** The ordinary turn path resumes with `resumeMode: 'fallback'` (Claude, whose harness
+  refuses a fallback resume, resumes strictly), which is right for a send and wrong for adoption: a user who chose a specific conversation must not silently get
   an empty one. The continuation row carries `pendingAdoption` until the vendor confirms the
   resume, and that flag is what makes the first open strict.
 - **Take a lease.** Two MangoStudio chats must not attach to one native session concurrently. The
@@ -1206,6 +1206,12 @@ the same chat sends again. It asserts that the hub reopens exactly once, that th
 no error chunk, that the vendor process now running is not the one that was killed, and that the
 stored turn is `completed`.
 
+`claude-reopen-after-connection-drop` covers Claude's strict resume: a first turn gives the model a
+random code word, the first runtime is killed between the open and the submission of the second
+send, and the second send on the hub's reopen over a second plain runtime must complete, repeat the
+code word (Claude's usage is per run, so recall is the evidence that the conversation continued),
+reopen once, and carry no `conversationReset`.
+
 A runtime-side consent withdrawal reaches the hub as the vendor ending the turn early
 (`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
 stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`.
@@ -1232,38 +1238,72 @@ process, and the Windows launcher reports interrupt as unsupported
 forced termination of the process tree.
 
 A forced Claude stop — on Windows always, elsewhere when the interrupt does not settle — leaves
-that vendor session **nonresumable**: the SDK refuses every later turn on it. The runtime then
-closes the session and answers the next send as a closed session, which the hub reopens once (below)
-and runs the same turn on. A session the SDK sealed itself — Codex does after losing its app-server
-or a cancel that never settled — takes the same path. The two differ in what the reopen finds: Codex
-resumes the stored conversation, while a nonresumable Claude session falls back to a new
-conversation inside the same send. Nothing in the UI says so yet: the live stream's
-`external_session_started` chunk precedes the reopen and keeps the first session's id and
-`resumed` flag (as it does after a dropped connection), and the client does not render `resumed` or
-`fallbackReason` at all.
+that vendor session **nonresumable**: the SDK refuses every later turn on it, before anything is
+dispatched. The runtime then closes the session and answers the next send with the session refusal
+below, in its `nonresumable` state. A session the SDK sealed itself — Codex does after losing its
+app-server or a cancel that never settled — takes the closed path instead. What the reopen finds
+depends on the harness; see the next section.
 
 ### A vendor process that ended between turns
 
 The runtime has no event for this: nothing reports a vendor process that ends while no turn runs, so
 the hub learns of it only when the next send reaches the session. The runtime answers that send with
-the `tool_argument` refusal it always gave, now carrying `details.session: "closed"` — the session
-could not run the turn, and nothing was dispatched — and closes the session. The submission treats
-that detail as a reopen, once, exactly as it treats a dropped connection: it retires the session
-(`ExternalSessionHandle.retire`, a reap that keeps the continuation row and does not end the turn
-being submitted), reopens through `reacquire`, and submits the same `clientMessageId` on the new
-session. The open resumes the vendor conversation from the continuation row where the harness can
-and otherwise starts a new one, as any open after a dropped connection does. A refused reopen goes
-through the same mapping as a first open (the refusal card). The reopen happens only for the first
-request of an attempt and only for an ordinary turn:
+the `tool_argument` refusal it always gave, now carrying `details.session` — the session could not
+run the turn, and nothing was dispatched — and closes the session. The detail has two states, shared
+with the hub through the runtime contract (`errors.externalAgentSessionDetail` and
+`errors.externalAgentSessionStates`):
 
-- A second closed refusal from the reopened session ends the turn `session-lost`, as before, and
-  drops the continuation; there is no loop.
-- A closed refusal that follows a request the hub sent without an answer never reopens, because that
+- `closed`: the session is gone (the vendor process ended, or the SDK sealed it). The conversation
+  may still exist.
+- `nonresumable`: the SDK refused the turn because a forced stop tainted the session (the Claude
+  case above). The stored conversation cannot be continued through it.
+
+The submission treats either as a reopen, once per state, exactly as it treats a dropped
+connection: it retires the session (`ExternalSessionHandle.retire`, a reap that does not end the
+turn being submitted), reopens through `reacquire`, and submits the same `clientMessageId` on the
+new session. The reopen asks for the resume mode of the target: Claude resumes **strictly**, because
+its harness refuses a fallback resume outright (the External Agents SDK's `docs/harness-claude.md`,
+"Fallback is explicitly unsupported"); Codex and ACP agents resume with `fallback`, and an adopted
+session stays strict. What the two states do:
+
+- `closed`: the continuation row is kept and the reopen resumes the stored conversation.
+- `nonresumable`: the hub drops the continuation row and reopens **without a resume reference**, so
+  the turn runs in a new vendor conversation in the same send. That is one extra open, bounded by its
+  own one-shot budget, and no loop: a `closed` refusal, then a strict reopen, then a `nonresumable`
+  refusal, then the fresh open; a third refusal ends the turn `session-lost`.
+
+A refused reopen goes through the same mapping as a first open (the refusal card), including a
+consent withdrawal the hub has not seen yet: the reopen's open is denied, the send ends
+`consent-revoked`, and no session opens for the revoked target. The reopen happens only for the
+first request of an attempt and only for an ordinary turn:
+
+- A second refusal in the same state ends the turn `session-lost`, as before, and drops the
+  continuation; there is no loop.
+- A refusal that follows a request the hub sent without an answer never reopens, because that
   request may have been accepted.
-- A native review keeps its one-call policy.
+- A native review keeps its one-call policy and never reopens. The `session` detail is added only to
+  a turn refusal; `respond`, `steer` and `cancel` refusals carry none because nothing reads it there.
 - A vendor process that ends during a turn is a stream error on that turn and is not replayed.
-  Graceful interruption on Windows stays tracked separately and is not
-  required unless a bundled launcher comes to depend on it.
+- A Claude strict resume is lazy: the open cannot tell whether the stored conversation still exists,
+  and a conversation that is gone shows up as a stream error on the first turn, after the vendor
+  accepted it. The hub does not replay that turn, since the SDK has no conclusive cannot-resume
+  signal and a replay could hide an authentication, transport or acceptance-unknown failure. That
+  one send fails; the SDK taints the session, so the next send meets the `nonresumable` refusal
+  before dispatch and opens a fresh conversation.
+
+When a reopen could not continue the earlier conversation, the turn says so. The hub reports
+`conversationReset` (`nonresumable` or `unavailable`) on the `external_session_started` chunk and on
+the stored `external_turn` part, and the turn footer renders the notice from the app's own copy.
+`nonresumable` is the hub's deliberate fresh open; `unavailable` is an open that sent a resume
+reference and came back with the harness's `fallbackReason` (an eager harness that fell back). A
+Claude open's `resumed: false` alone does not raise the notice: it only means the resume is
+unconfirmed. The first `external_session_started` chunk precedes the reopen and names the session
+that was replaced, so the hub announces the session again after the reopen, and the client updates
+the existing turn part (session id and notice) rather than adding a second one. The stored turn is
+rebound to the session that ran it, so the live view and a reload agree.
+
+Graceful interruption on Windows stays tracked separately and is not required unless a bundled
+launcher comes to depend on it.
 
 ### Windows script entry points
 

@@ -13,6 +13,7 @@ import {
   ExternalAgentUnavailableReasonSchema,
   ExternalApprovalDecisionSchema,
   ExternalApprovalOptionSchema,
+  ExternalConversationResetReasonSchema,
   ExternalNoticeSeveritySchema,
   ExternalSteerRejectionReasonSchema,
   ExternalThreadUsageSchema,
@@ -360,6 +361,12 @@ const SSEExternalSessionStartedEventSchema = Type.Object({
   targetId: ExternalAgentTargetIdSchema,
   resumed: Type.Boolean(),
   fallbackReason: Type.Optional(Type.String()),
+  /**
+   * Present when the chat had an earlier conversation and this session did not continue it. Sent
+   * again, for the session that actually ran the turn, when a reopen replaced the first one; an
+   * older client ignores it.
+   */
+  conversationReset: Type.Optional(ExternalConversationResetReasonSchema),
   /**
    * The model the hub resolved for this turn, when it resolved one (#816).
    *

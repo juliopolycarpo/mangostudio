@@ -5,14 +5,14 @@ import {
   classifySubmissionFailure,
   DEFAULT_RETRY_POLICY,
   failureClosedConnection,
-  refusedBecauseSessionClosed,
+  sessionRefusalState,
 } from '../../../../src/modules/external-agents/domain/external-turn-retry-policy';
 import {
   RuntimeRequestNoReplyError,
   RuntimeRequestNotSentError,
 } from '../../../../src/services/runtime-client/request-not-sent';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
-import { closedSessionRefusal } from '../../../support/external-agents/fake-external-runtime';
+import { sessionRefusal } from '../../../support/external-agents/fake-external-runtime';
 
 describe('backoffDelay', () => {
   it('doubles from the base, jitters within [75%, 100%] and never exceeds the cap', () => {
@@ -194,28 +194,30 @@ describe('classifySubmissionFailure', () => {
   });
 });
 
-describe('refusedBecauseSessionClosed', () => {
-  const closedAnswer = () =>
-    new RemoteError('INTERNAL', 'session closed', { kind: 'tool_argument', session: 'closed' });
-  const CASES: ReadonlyArray<readonly [string, unknown, boolean]> = [
-    ['the runtime answer itself', closedAnswer(), true],
-    ['the translated refusal, through its cause', closedSessionRefusal(), true],
+describe('sessionRefusalState', () => {
+  const answer = (session: string) =>
+    new RemoteError('INTERNAL', 'session refused', { kind: 'tool_argument', session });
+  const CASES: ReadonlyArray<readonly [string, unknown, 'closed' | 'nonresumable' | undefined]> = [
+    ['the runtime answer itself, closed', answer('closed'), 'closed'],
+    ['the runtime answer itself, nonresumable', answer('nonresumable'), 'nonresumable'],
+    ['the translated refusal, through its cause', sessionRefusal('nonresumable'), 'nonresumable'],
+    ['a state this build does not know', answer('melted'), undefined],
     [
       'an argument refusal that names no session state',
       new RemoteError('INTERNAL', 'bad root', { kind: 'tool_argument' }),
-      false,
+      undefined,
     ],
     [
       'a translated argument refusal with no cause',
       Object.assign(new Error('session gone'), { name: 'ToolArgumentError' }),
-      false,
+      undefined,
     ],
-    ['a value that is not an error', 'session closed', false],
+    ['a value that is not an error', 'session closed', undefined],
   ];
   for (const [label, error, expected] of CASES) {
-    it(`reads ${label} as ${expected}`, () => {
-      const received = refusedBecauseSessionClosed(error);
-      expect(received, `expected closed-session verdict: ${expected} | received: ${received}`).toBe(
+    it(`reads ${label} as ${expected ?? 'no state'}`, () => {
+      const received = sessionRefusalState(error);
+      expect(received, `expected session state: ${expected} | received: ${received}`).toBe(
         expected
       );
     });

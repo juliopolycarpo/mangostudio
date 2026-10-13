@@ -6,6 +6,7 @@ import type {
   ExternalAgentTargetId,
   ExternalAgentUnavailableReason,
   ExternalApprovalOption,
+  ExternalConversationResetReason,
   ExternalNoticeSeverity,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
@@ -275,6 +276,11 @@ export interface ExternalTurnPart {
   unavailableReason?: ExternalAgentUnavailableReason;
   /** The build that would clear `version-unsupported`; present only beside that reason. */
   requiredVersion?: string;
+  /**
+   * Set when the chat had an earlier conversation and the session that ran this turn did not
+   * continue it, so the reply was written without the earlier messages. The footer says so.
+   */
+  conversationReset?: ExternalConversationResetReason;
 }
 
 /**
