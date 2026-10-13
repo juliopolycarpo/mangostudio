@@ -606,7 +606,7 @@ describe('Biome import cycle checks', () => {
     expectCheck(rejected, 'fail', 'apps/api with unformatted AGENTS.md');
     expect(rejected.output).toContain('root:dprint:api');
     expect(rejected.output).toContain('AGENTS.md');
-    expect(rejected.output).toContain('Found 1 not formatted file');
+    expect(Bun.stripANSI(rejected.output)).toContain('Found 1 not formatted file');
   });
 
   test('keeps node_modules and git internals outside the TS/JS scan', async () => {
