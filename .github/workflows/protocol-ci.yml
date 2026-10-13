@@ -103,31 +103,20 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      - run: bun install --frozen-lockfile
+      - id: install
+        run: bun install --frozen-lockfile
       # `--ts-only` so this job never picks up the Rust toolchain GitHub's Linux
       # images ship; the `rust` job below owns that half with a cache.
       - run: bun run protocol:check --ts-only
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       - run: bun run protocol:test --ts-only
-
-  package:
-    name: Published package
-    needs: [changes]
-    if: needs.changes.outputs.protocol == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - run: bun install --frozen-lockfile
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       # The workspace resolves this package from `src/`, so its published
       # `exports` (publishConfig.exports, pointing at dist/) and its `files` are
       # exercised nowhere else in the repository. Packing the tarball and
       # importing every subpath out of a clean install is the only proof.
       - run: bun ./scripts/protocol/verify-package.ts
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
 
   rust:
     name: Rust (${{ matrix.os }})
@@ -179,26 +168,6 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
-  transports:
-    name: Transports (${{ matrix.os }})
-    needs: [changes]
-    if: needs.changes.outputs.protocol == 'true'
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - run: bun install --frozen-lockfile
-      - run: bun run protocol:test --ts-only
-
   interop:
     name: Interop (${{ matrix.os }})
     needs: [changes]
@@ -216,16 +185,25 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
-      - run: rustup show active-toolchain
+      - id: install
+        run: bun install --frozen-lockfile
+      - id: toolchain
+        run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: bun install --frozen-lockfile
       # Built here rather than inside the suite, so a compile failure is
       # reported as one instead of as every interop case timing out.
-      - run: cargo build --locked --example conformance_peer --features testing,websocket,spawn
+      - id: peer
+        run: cargo build --locked --example conformance_peer --features testing,websocket,spawn
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.toolchain.outcome == 'success' }}
+      # Independent TS transports retain macOS/Windows coverage even if the
+      # Rust conformance peer fails to compile. Ubuntu runs them in typescript.
+      - run: bun run protocol:test --ts-only
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && matrix.os != 'ubuntu-latest' }}
       - run: bun test packages/protocol/tests/interop
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.peer.outcome == 'success' }}
         env:
           MANGO_INTEROP: "1"
 
@@ -313,9 +291,7 @@ jobs:
     needs: [
       changes,
       typescript,
-      package,
       rust,
-      transports,
       interop,
       deny,
       semver-checks,
@@ -338,6 +314,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript package rust transports interop deny semver-checks schema-equality' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript rust interop deny semver-checks schema-equality' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
