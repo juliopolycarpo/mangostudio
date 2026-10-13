@@ -1174,6 +1174,16 @@ invocation, so the SDK's `testing` feature never reaches the binary under qualif
 evidence: opt-in through `MANGOSTUDIO_LIVE_AGENT_SMOKE=claude,codex,cursor`, it runs a one-word
 turn against the signed-in CLIs on the machine, cancels a streaming Codex or Cursor turn and sends the next one at once, and never runs in CI.
 
+The same file observes the refusals the fake-driven tests only assume, through the real runtime and
+the hub's own selector and send path. `MANGOSTUDIO_LIVE_AGENT_REFUSALS` names the cases:
+`codex-signed-out`, `claude-signed-out` and `cursor-signed-out` point the vendor's config home
+(`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or `HOME` and `XDG_CONFIG_HOME`) at an empty scratch directory the
+test creates, and `codex-outdated` puts an older official `codex` first on `PATH` from the directory
+`MANGOSTUDIO_LIVE_OUTDATED_CODEX_DIR` names. Nothing signs in or out and no credential is read. Each
+case checks the selector, the pre-send check where the selector refuses, and the open that the runtime
+refuses with `external_agent_signed_out` or `external_agent_version_unsupported`, down to the `error`
+chunk's reason, remedy and required version.
+
 A runtime-side consent withdrawal reaches the hub as the vendor ending the turn early
 (`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
 stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`.

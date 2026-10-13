@@ -245,16 +245,21 @@ export async function runRustAgentSmoke<T>(
 
 /**
  * Gives only the live runtime the credential home recorded before Hub test-home isolation.
- * @example rustSmokeRuntimeEnv(process.env, scratchMangoHome);
+ *
+ * `overrides` wins over everything else, so a case can point one vendor's config home, or the
+ * whole `HOME`, at a scratch directory it owns.
+ * @example rustSmokeRuntimeEnv(process.env, scratchMangoHome, { CODEX_HOME: emptyDirectory });
  */
 export function rustSmokeRuntimeEnv(
   source: NodeJS.ProcessEnv,
-  mangoHome: string
+  mangoHome: string,
+  overrides: Readonly<Record<string, string>> = {}
 ): Record<string, string> {
   const credentialHome = source.MANGOSTUDIO_REAL_HOME;
   return sanitizedEnv(source, {
     MANGO_HOME: mangoHome,
     ...(credentialHome ? { HOME: credentialHome, USERPROFILE: credentialHome } : {}),
+    ...overrides,
   });
 }
 

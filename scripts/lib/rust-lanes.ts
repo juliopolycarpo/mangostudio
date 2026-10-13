@@ -92,7 +92,8 @@ export const RUST_BINARY_RESOLVER = 'apps/api/tests/support/rust-runtime-binary.
  */
 export const OPT_IN_TESTS = [
   // Reaches real, signed-in vendor accounts; runs only when
-  // MANGOSTUDIO_LIVE_AGENT_SMOKE names the targets to try.
+  // MANGOSTUDIO_LIVE_AGENT_SMOKE names the targets to try, and
+  // MANGOSTUDIO_LIVE_AGENT_REFUSALS the refusal cases.
   'tests/integration/services/rust-runtime-external-agents-live-smoke.integration.test.ts',
 ] as const;
 
