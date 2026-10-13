@@ -63,13 +63,31 @@ skip = [
   # by this workspace.
   { crate = "io-lifetimes@2.0.4", reason = "fs-set-times 0.20 (via cap-primitives 4) has not moved to io-lifetimes 3" },
 
-  # ring 0.17 pins an old windows-sys for its Windows RNG shim; our own Windows bindings (the
-  # named-pipe security descriptor) and tokio's (mio/socket2) are on 0.61. Bumping ring's pin
-  # isn't ours to do, and rustls' `ring` feature is the one already chosen over `aws-lc-rs` (see
-  # the comment on the crate's `rustls` dependency) specifically to avoid a cmake/nasm
-  # requirement in CI, so skip rather than fight the duplicate. (windows-targets itself only has
-  # one version in the graph — it's windows-sys@0.52.0's dependency, not independently doubled.)
-  { crate = "windows-sys@0.52.0", reason = "pulled in only by ring 0.17's RNG shim; our own windows-sys is 0.61" },
+  # Our own Windows bindings and tokio's mio/socket2 use 0.61. ring 0.17's RNG
+  # shim remains on 0.52; the shipping lock also resolves the capability-filesystem
+  # stack's wider ranges to 0.52. A fresh graph selects 0.59 for fs-set-times/winx
+  # and 0.60 for io-extras instead. Their latest releases still cap those ranges:
+  # fs-set-times 0.20.3 uses >=0.52,<0.60; winx 0.36.4 uses >=0.52,<=0.59;
+  # io-extras 0.19.0 uses >=0.52,<=0.60, all through cap-primitives/cap-std 4.0.3.
+  # Exact package specs admit only these observed versions, never a future family.
+  { crate = "windows-sys@0.52.0", reason = "ring 0.17 RNG shim and the shipping fs-set-times/io-extras/winx resolution; the workspace uses 0.61" },
+  { crate = "windows-sys@0.59.0", reason = "fresh fs-set-times 0.20.3 and winx 0.36.4 through cap-primitives 4.0.3 cannot select windows-sys 0.61" },
+  { crate = "windows-sys@0.60.2", reason = "fresh io-extras 0.19.0 through cap-primitives/cap-std 4.0.3 cannot select windows-sys 0.61" },
+
+  # windows-sys 0.52/0.59 require windows-targets 0.52.6 and its architecture
+  # import libraries. Fresh io-extras' windows-sys 0.60 selects windows-targets
+  # 0.53.5 and import libraries 0.53.1, so the old 0.52 family also duplicates.
+  # Enumerate each exact old package instead of exempting either dependency tree;
+  # other versions and unrelated transitive duplicates still fail the bans gate.
+  { crate = "windows-targets@0.52.6", reason = "windows-sys 0.52/0.59 require this old target family alongside io-extras' windows-targets 0.53.5" },
+  { crate = "windows_aarch64_gnullvm@0.52.6", reason = "exact architecture import library of windows-targets 0.52.6; the fresh graph also needs 0.53.1" },
+  { crate = "windows_aarch64_msvc@0.52.6", reason = "exact architecture import library of windows-targets 0.52.6; the fresh graph also needs 0.53.1" },
+  { crate = "windows_i686_gnu@0.52.6", reason = "exact architecture import library of windows-targets 0.52.6; the fresh graph also needs 0.53.1" },
+  { crate = "windows_i686_gnullvm@0.52.6", reason = "exact architecture import library of windows-targets 0.52.6; the fresh graph also needs 0.53.1" },
+  { crate = "windows_i686_msvc@0.52.6", reason = "exact architecture import library of windows-targets 0.52.6; the fresh graph also needs 0.53.1" },
+  { crate = "windows_x86_64_gnu@0.52.6", reason = "exact architecture import library of windows-targets 0.52.6; the fresh graph also needs 0.53.1" },
+  { crate = "windows_x86_64_gnullvm@0.52.6", reason = "exact architecture import library of windows-targets 0.52.6; the fresh graph also needs 0.53.1" },
+  { crate = "windows_x86_64_msvc@0.52.6", reason = "exact architecture import library of windows-targets 0.52.6; the fresh graph also needs 0.53.1" },
 
   # getrandom has three majors in the graph because three unrelated dependency chains each pin
   # their own: ring 0.17 wants 0.2; rand 0.10 (tungstenite's frame-masking key), uuid, and
