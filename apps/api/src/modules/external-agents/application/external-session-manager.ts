@@ -219,6 +219,13 @@ export interface ExternalSessionHandle {
   /** False once the session was torn down — its connection dropped, or it was reaped. */
   isLive(): boolean;
   /**
+   * Forgets this session after the runtime refused a turn because the session itself is closed,
+   * keeping the vendor conversation's continuation so the next open resumes it. Torn down as a
+   * dropped connection is: the turn being submitted is not ended by it, and its submission
+   * reopens. Does nothing once the session is no longer the chat's own.
+   */
+  retire(): Promise<void>;
+  /**
    * The exact params a turn is submitted with. Built once per attempt and kept:
    * the runtime answers a repeated `clientMessageId` from its receipt only when
    * the params are identical, so a resend must never rebuild them.
@@ -470,6 +477,10 @@ export function createExternalSessionManager(
       },
       isLive() {
         return !record.closing && sessions.get(record.binding.chatId) === record;
+      },
+      async retire() {
+        if (record.closing || sessions.get(record.binding.chatId) !== record) return;
+        await reap(record.binding.chatId, 'runtime-disconnected', true);
       },
       turnParams,
       sendTurn,

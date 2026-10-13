@@ -5,8 +5,8 @@
 
 /** Model-supplied arguments failed validation; classified as `validation_failed`. */
 export class ToolArgumentError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'ToolArgumentError';
   }
 }

@@ -35,6 +35,7 @@ import {
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 import { createFakeBackoffClock } from '../../../support/external-agents/fake-backoff-clock';
 import {
+  closedSessionRefusal,
   createFakeExternalRuntime,
   type FakeExternalRuntime,
   type FakeExternalRuntimeOptions,
@@ -88,9 +89,12 @@ function harness(
 ) {
   const { steerTerminationGraceMs, sleep, ...runtimeOptions } = options;
   const runtime = createFakeExternalRuntime(runtimeOptions);
+  // One id per open, so a reopen is told apart from the session it replaces.
+  let opened = 0;
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
-    newSessionId: () => 'session-1',
+    resolveExistingRuntimeClient: () => Promise.resolve(runtime.client),
+    newSessionId: () => `session-${++opened}`,
   });
   const approvals = createExternalApprovalRegistry();
   // Fresh per test: the production default is a process-wide singleton, and
@@ -985,6 +989,113 @@ describe('external turn controller', () => {
     await waitFor(() => runtime.calls.close.length === 1, 'the dead session to be closed');
     expect(sessions.liveSessionCount()).toBe(0);
     await expect(readContinuation(chatId, getDb())).resolves.toBeUndefined();
+  });
+
+  describe('a session the vendor ended between turns', () => {
+    /** The runtime refuses the first turn call as closed, then answers every later one. */
+    function closedOnce(): () => Error | undefined {
+      let refused = false;
+      return () => {
+        if (refused) return undefined;
+        refused = true;
+        return closedSessionRefusal();
+      };
+    }
+
+    it('reopens once and runs the turn on the new session, resuming the vendor conversation', async () => {
+      const { runtime, controller } = harness({ turnFailure: closedOnce() });
+
+      const running = startTurn(controller);
+      await waitFor(
+        () => runtime.calls.turn.length === 2,
+        'the turn to reach the reopened session'
+      );
+      runtime.emit({ type: 'completed' });
+      const result = await running;
+
+      expect({
+        reason: result.reason,
+        opens: runtime.calls.open.length,
+        resumeRef: runtime.calls.open[1]?.resumeRef,
+        turnSessions: runtime.calls.turn.map((call) => call.sessionId),
+        sameMessage:
+          runtime.calls.turn[0]?.clientMessageId === runtime.calls.turn[1]?.clientMessageId,
+      }).toEqual({
+        reason: 'completed',
+        opens: 2,
+        resumeRef: 'native-session-1',
+        turnSessions: ['session-1', 'session-2'],
+        sameMessage: true,
+      });
+      expect(
+        (await listAttemptsForMessage(assistantMessageId, getDb())).map((row) => row.state),
+        'the refused attempt and the reopened one each settle'
+      ).toEqual(['terminal', 'terminal']);
+      expect(await readContinuation(chatId, getDb())).toMatchObject({
+        runtimeSessionId: 'session-2',
+      });
+    });
+
+    it('does not reopen a second time when the new session is closed as well', async () => {
+      const { runtime, controller } = harness({ turnFailure: () => closedSessionRefusal() });
+
+      const result = await startTurn(controller);
+
+      expect({
+        reason: result.reason,
+        opens: runtime.calls.open.length,
+        turns: runtime.calls.turn.length,
+      }).toEqual({ reason: 'session-lost', opens: 2, turns: 2 });
+    });
+
+    it('shows the refusal card when the reopen is refused', async () => {
+      let opens = 0;
+      const { runtime, controller } = harness({
+        turnFailure: closedOnce(),
+        openFailure: () => {
+          opens += 1;
+          if (opens === 1) return undefined;
+          return new RemoteError('UNAVAILABLE', 'signed out', {
+            kind: 'external_agent_signed_out',
+          });
+        },
+      });
+
+      const result = await startTurn(controller);
+      const part = turnPartOf((await readAssistantRow()).parts);
+
+      expect({
+        reason: result.reason,
+        opens,
+        turns: runtime.calls.turn.length,
+        unavailable: part.unavailableReason,
+        code: part.error?.code,
+      }).toEqual({
+        reason: 'vendor-error',
+        opens: 2,
+        turns: 1,
+        unavailable: 'signed-out',
+        code: 'external_agent_signed_out',
+      });
+    });
+
+    it('keeps the terminal reason of a vendor that dies mid-turn', async () => {
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      runtime.emit({
+        type: 'error',
+        error: { code: 'adapter-stream', message: 'the app-server exited' },
+      });
+      const result = await running;
+
+      expect({
+        reason: result.reason,
+        opens: runtime.calls.open.length,
+        turns: runtime.calls.turn.length,
+      }).toEqual({ reason: 'vendor-error', opens: 1, turns: 1 });
+    });
   });
 
   it('records an accepted approval without waiting for the vendor to echo it', async () => {

@@ -111,6 +111,37 @@ describe('RuntimeClient', () => {
     }
   });
 
+  it('keeps the runtime session-closed detail on the cause of the argument refusal', async () => {
+    function refuseClosedSession(): never {
+      throw new RemoteError('INTERNAL', 'The session is closed.', {
+        kind: 'tool_argument',
+        session: 'closed',
+      });
+    }
+    const runtime = await connectTestRuntime({
+      handlers: { 'external-agent.turn': refuseClosedSession },
+    });
+    try {
+      const error = await runtime.client.externalAgents
+        .turn({
+          sessionId: 'closed-session',
+          clientMessageId: 'message-1',
+          input: 'hello',
+          configuration: { level: 'default', routing: 'user', workspaceRoots: ['/work'] },
+        })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({ name: 'ToolArgumentError' });
+      const cause = (error as Error).cause;
+      expect(
+        cause instanceof RemoteError ? cause.details?.session : cause,
+        'expected the translated refusal to carry the runtime error with details.session "closed"'
+      ).toBe('closed');
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it('preserves a cancelled runtime reply as cause of its AbortError', async () => {
     function refuseCancelledReview(): never {
       throw new RemoteError('CANCELLED', 'Vendor could not confirm acceptance.', {

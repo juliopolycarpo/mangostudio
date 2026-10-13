@@ -8,6 +8,7 @@
  * said it was done, and a socket that drops mid-turn.
  */
 
+import { RemoteError } from '@mangostudio/protocol';
 import type {
   ExternalAgentCapabilities,
   ExternalAgentEvent,
@@ -24,6 +25,7 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import type { RuntimeClient } from '../../../src/services/runtime-client';
+import { ToolArgumentError } from '../../../src/services/tools/arg-parsing';
 
 const FAKE_CAPABILITIES: ExternalAgentCapabilities = {
   ...NO_EXTERNAL_AGENT_CAPABILITIES,
@@ -33,6 +35,22 @@ const FAKE_CAPABILITIES: ExternalAgentCapabilities = {
   resume: true,
   steering: true,
 };
+
+/**
+ * What the hub's runtime client yields when the runtime refuses a turn because the session can no
+ * longer run one (the vendor's process ended between turns): an argument refusal that keeps the
+ * runtime's `session: "closed"` detail on its cause.
+ *
+ * @example
+ * createFakeExternalRuntime({ turnFailure: () => closedSessionRefusal() });
+ */
+export function closedSessionRefusal(): ToolArgumentError {
+  const message =
+    'External-agent session "session-1" can no longer run turns (expected an open session, received a closed one); expected a new session.';
+  return new ToolArgumentError(message, {
+    cause: new RemoteError('INTERNAL', message, { kind: 'tool_argument', session: 'closed' }),
+  });
+}
 
 export interface FakeExternalRuntimeOptions {
   readonly nativeSessionId?: string;

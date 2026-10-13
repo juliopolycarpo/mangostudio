@@ -429,6 +429,49 @@ describe('external session manager', () => {
     expect(manager.liveSessionCount()).toBe(0);
   });
 
+  describe('retire', () => {
+    it('forgets the session and keeps the continuation, without telling a hold the chat ended', async () => {
+      const runtime = createFakeExternalRuntime();
+      const manager = managerFor(runtime);
+      const handle = await manager.ensureSession(baseInput());
+      const holdNotices: string[] = [];
+      manager.holdChat({ chatId, userId, environmentId: 'local', targetId: 'codex' }, (reason) =>
+        holdNotices.push(reason)
+      );
+
+      await handle.retire();
+
+      expect({
+        live: handle.isLive(),
+        sessions: manager.liveSessionCount(),
+        closes: runtime.calls.close.length,
+        holdNotices,
+        continuation: (await readContinuation(chatId, getDb()))?.nativeSessionId,
+      }).toEqual({
+        live: false,
+        sessions: 0,
+        closes: 1,
+        holdNotices: [],
+        continuation: 'native-session-1',
+      });
+    });
+
+    it('does nothing for a session the chat no longer holds', async () => {
+      const runtime = createFakeExternalRuntime();
+      const manager = managerFor(runtime);
+      const stale = await manager.ensureSession(baseInput());
+      await stale.retire();
+      const current = await manager.ensureSession(baseInput());
+
+      await stale.retire();
+
+      expect({
+        currentLive: current.isLive(),
+        closes: runtime.calls.close.length,
+      }).toEqual({ currentLive: true, closes: 1 });
+    });
+  });
+
   it('drops the continuation when consent is withdrawn', async () => {
     const runtime = createFakeExternalRuntime();
     const manager = managerFor(runtime);

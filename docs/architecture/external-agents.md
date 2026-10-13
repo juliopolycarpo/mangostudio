@@ -1197,9 +1197,14 @@ restarted would be, and the hub's reopen reaches a second runtime whose `codex` 
 asserts the live `external_error` chunk, the stored turn part after a transcript read, that the two
 match, and that the hub reopens once and does not back off. The second runtime has an empty
 `CODEX_HOME`, because the SDK starts `codex app-server` before it gates the version and an older
-app-server writes state under the home it runs in. Ending the vendor's own process does not reopen:
-the runtime reports the session lost, the turn ends `session-lost`, and the next send is an ordinary
-open.
+app-server writes state under the home it runs in.
+
+`codex-child-killed-between-turns` ends the vendor's own process instead: a normal Codex turn on the
+signed-in account, then the `codex app-server` the runtime started (found below the runtime pid by
+its executable, never by name alone, so the developer's own sessions are out of reach) is killed, and
+the same chat sends again. It asserts that the hub reopens exactly once, that the turn completes with
+no error chunk, that the vendor process now running is not the one that was killed, and that the
+stored turn is `completed`.
 
 A runtime-side consent withdrawal reaches the hub as the vendor ending the turn early
 (`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
@@ -1228,11 +1233,37 @@ forced termination of the process tree.
 
 A forced Claude stop — on Windows always, elsewhere when the interrupt does not settle — leaves
 that vendor session **nonresumable**: the SDK refuses every later turn on it. The runtime then
-closes the session and answers the turn as a lost session, which the hub reports as
-`session-lost` and follows by opening a new session on the next send. The conversation starts
-over rather than resuming. A session the SDK sealed itself — Codex does after losing its
-app-server or a cancel that never settled — takes the same path. Graceful interruption on Windows stays tracked separately and is not
-required unless a bundled launcher comes to depend on it.
+closes the session and answers the next send as a closed session, which the hub reopens once (below)
+and runs the same turn on. A session the SDK sealed itself — Codex does after losing its app-server
+or a cancel that never settled — takes the same path. The two differ in what the reopen finds: Codex
+resumes the stored conversation, while a nonresumable Claude session falls back to a new
+conversation inside the same send. Nothing in the UI says so yet: the live stream's
+`external_session_started` chunk precedes the reopen and keeps the first session's id and
+`resumed` flag (as it does after a dropped connection), and the client does not render `resumed` or
+`fallbackReason` at all.
+
+### A vendor process that ended between turns
+
+The runtime has no event for this: nothing reports a vendor process that ends while no turn runs, so
+the hub learns of it only when the next send reaches the session. The runtime answers that send with
+the `tool_argument` refusal it always gave, now carrying `details.session: "closed"` — the session
+could not run the turn, and nothing was dispatched — and closes the session. The submission treats
+that detail as a reopen, once, exactly as it treats a dropped connection: it retires the session
+(`ExternalSessionHandle.retire`, a reap that keeps the continuation row and does not end the turn
+being submitted), reopens through `reacquire`, and submits the same `clientMessageId` on the new
+session. The open resumes the vendor conversation from the continuation row where the harness can
+and otherwise starts a new one, as any open after a dropped connection does. A refused reopen goes
+through the same mapping as a first open (the refusal card). The reopen happens only for the first
+request of an attempt and only for an ordinary turn:
+
+- A second closed refusal from the reopened session ends the turn `session-lost`, as before, and
+  drops the continuation; there is no loop.
+- A closed refusal that follows a request the hub sent without an answer never reopens, because that
+  request may have been accepted.
+- A native review keeps its one-call policy.
+- A vendor process that ends during a turn is a stream error on that turn and is not replayed.
+  Graceful interruption on Windows stays tracked separately and is not
+  required unless a bundled launcher comes to depend on it.
 
 ### Windows script entry points
 

@@ -24,7 +24,12 @@
  *    went with it, so the attempt is `unresolved` and never resent: guessing
  *    either way could run the user's work twice or silently drop it.
  * 5. **A runtime's answer is final.** An error reply is a committed refusal.
- * 6. **Stopping wins.** Abort, revocation and shutdown end the loop through
+ * 6. **A closed session is reopened once, before anything was sent.** A runtime that says the
+ *    session itself can no longer run a turn (the vendor's process ended between turns) has
+ *    dispatched nothing, so the loop forgets that session and opens another, as it does after a
+ *    dropped connection. Once per turn: a second refusal ends it, and a refusal that follows an
+ *    unanswered request never reopens, because that request may have been accepted.
+ * 7. **Stopping wins.** Abort, revocation and shutdown end the loop through
  *    `signal`; every state write is a compare-and-set, so a reply that arrives
  *    afterwards cannot revive the attempt.
  */
@@ -44,6 +49,7 @@ import {
   classifySubmissionFailure,
   failureClosedConnection,
   type RetryPolicy,
+  refusedBecauseSessionClosed,
 } from '../domain/external-turn-retry-policy';
 import {
   insertAttempt,
@@ -171,6 +177,7 @@ export async function submitExternalTurn(
 ): Promise<SubmissionOutcome> {
   let handle = input.handle;
   let retries = 0;
+  let reopenedClosedSession = false;
 
   const wait = async (): Promise<void> => {
     const ms = backoffDelay(retries, input.policy, input.random);
@@ -198,8 +205,13 @@ export async function submitExternalTurn(
       if (input.signal.aborted) break;
     }
 
-    const attempt = await runAttempt(input, handle, wait);
+    const attempt = await runAttempt(input, handle, wait, !reopenedClosedSession);
     if (attempt.kind === 'retry') continue;
+    if (attempt.kind === 'session-closed') {
+      reopenedClosedSession = true;
+      await handle.retire();
+      continue;
+    }
     return attempt.outcome;
   }
   return { kind: 'stopped' };
@@ -207,6 +219,8 @@ export async function submitExternalTurn(
 
 type AttemptResult =
   | { readonly kind: 'retry' }
+  /** The runtime refused the turn because the session is closed; nothing was dispatched. */
+  | { readonly kind: 'session-closed' }
   | { readonly kind: 'done'; readonly outcome: SubmissionOutcome };
 
 /** Builds one ordinary turn request; the closure always sends the same params. */
@@ -247,7 +261,8 @@ async function startReviewTurn(
 async function runAttempt(
   input: SubmitExternalTurnInput,
   handle: ExternalSessionHandle,
-  wait: () => Promise<void>
+  wait: () => Promise<void>,
+  mayReopenClosedSession: boolean
 ): Promise<AttemptResult> {
   const request = input.review
     ? reviewRequest(handle, input.review)
@@ -317,6 +332,18 @@ async function runAttempt(
         if (input.review) return { kind: 'done', outcome: { kind: 'refused', error } };
         await wait();
         return { kind: 'retry' };
+      }
+      // Only the first request of the attempt: after an unanswered one, the closed session may be
+      // the very one that took the turn.
+      if (
+        mayReopenClosedSession &&
+        !input.review &&
+        !unanswered &&
+        refusedBecauseSessionClosed(error)
+      ) {
+        await settle('not-submitted');
+        pending(false);
+        return { kind: 'session-closed' };
       }
       if (failure === 'refused') {
         await settle('terminal', 'refused');

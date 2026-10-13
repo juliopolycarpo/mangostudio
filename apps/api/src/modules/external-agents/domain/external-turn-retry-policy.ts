@@ -73,6 +73,21 @@ export function classifySubmissionFailure(error: unknown): SubmissionFailure {
   return 'refused';
 }
 
+/**
+ * Whether the runtime refused a turn because the session itself can no longer run one.
+ *
+ * The runtime says so only when it provably dispatched nothing: the session was already closed
+ * (the vendor's process ended under it) or the SDK sealed it before the turn was written. The
+ * refusal keeps `kind: "tool_argument"`, so a caller that does not know this fact still reads it as
+ * a lost session; this one reads the detail and opens a session that can run the turn.
+ *
+ * @example
+ * if (refusedBecauseSessionClosed(error)) await handle.retire(); // then reopen once
+ */
+export function refusedBecauseSessionClosed(error: unknown): boolean {
+  return submissionRemoteErrorOf(error)?.details?.session === 'closed';
+}
+
 /** The runtime answer behind the Hub's bounded error normalization chain. */
 function submissionRemoteErrorOf(error: unknown): RemoteError | undefined {
   let current = error;

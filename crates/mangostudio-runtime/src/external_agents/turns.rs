@@ -404,7 +404,7 @@ impl Supervisor {
                 .err()
                 .map(|failure| format!(" Closing it also failed: {}", failure.message))
                 .unwrap_or_default();
-            return tool_argument(format!(
+            return super::supervisor::session_closed(format!(
                 "External-agent session {:?} can no longer run turns ({error}); expected a new session.{cleanup}",
                 live.session_id
             ));

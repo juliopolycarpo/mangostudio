@@ -13,6 +13,7 @@ import {
   RuntimeRequestNotSentError,
 } from '../../../../src/services/runtime-client/request-not-sent';
 import { createFakeBackoffClock } from '../../../support/external-agents/fake-backoff-clock';
+import { closedSessionRefusal } from '../../../support/external-agents/fake-external-runtime';
 import { createScriptedSessionHandle } from '../../../support/external-agents/scripted-session-handle';
 import { insertTestUser } from '../../../support/factories';
 
@@ -152,6 +153,31 @@ describe('a resubmission whose session reopen the runtime answers', () => {
       kind: 'accepted',
       reopens: 4,
       waits: 3,
+    });
+  });
+});
+
+describe('a runtime that says the session is closed', () => {
+  it('is never reopened for a request that may already have been accepted', async () => {
+    const handle = createScriptedSessionHandle();
+    // The first request goes out and is never answered; the resend meets the closed session.
+    handle.failures.push(
+      () =>
+        new RuntimeRequestNoReplyError(new RemoteError('TIMEOUT', 'no reply in 30 s'), 'deadline'),
+      () => closedSessionRefusal()
+    );
+    let reopens = 0;
+    const { outcome } = submit(handle, undefined, [], () => {
+      reopens += 1;
+      return Promise.resolve(handle);
+    });
+
+    const result = await outcome;
+
+    expect({ kind: result.kind, retirements: handle.retirements(), reopens }).toEqual({
+      kind: 'refused',
+      retirements: 0,
+      reopens: 0,
     });
   });
 });

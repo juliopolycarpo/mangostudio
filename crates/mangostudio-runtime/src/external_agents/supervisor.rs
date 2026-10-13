@@ -421,7 +421,7 @@ impl Supervisor {
     pub(super) fn require_live(&self, session_id: &str) -> Result<Arc<LiveSession>, RemoteError> {
         match self.slots().get(session_id) {
             Some(Slot::Live(live)) if !live.closing.load(Ordering::Acquire) => Ok(Arc::clone(live)),
-            _ => Err(tool_argument(format!(
+            _ => Err(session_closed(format!(
                 "External-agent session {session_id:?} is not open; expected an open session id."
             ))),
         }
@@ -1257,6 +1257,19 @@ async fn wait_settled(opening: &Opening) {
             return;
         }
     }
+}
+
+/// The refusal for a session that can no longer run a turn: the vendor's process ended under it,
+/// or the SDK sealed it before the turn was written.
+///
+/// It stays an argument refusal (`kind: "tool_argument"`), which a caller that does not know the
+/// extra fact already reads as a lost session. `session: "closed"` adds that nothing was
+/// dispatched, which is what lets the hub open a new session and run the same turn there.
+///
+/// `session_closed("External-agent session \"s1\" is not open; expected an open session id.")`
+/// answers the call with that message and `details.session == "closed"`.
+pub(super) fn session_closed(message: impl Into<String>) -> RemoteError {
+    tool_argument(message).with_detail("session", "closed")
 }
 
 /// Refuses a configuration the product never offers for `target`, even where

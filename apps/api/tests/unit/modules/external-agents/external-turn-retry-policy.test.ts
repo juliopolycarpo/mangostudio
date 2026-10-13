@@ -5,12 +5,14 @@ import {
   classifySubmissionFailure,
   DEFAULT_RETRY_POLICY,
   failureClosedConnection,
+  refusedBecauseSessionClosed,
 } from '../../../../src/modules/external-agents/domain/external-turn-retry-policy';
 import {
   RuntimeRequestNoReplyError,
   RuntimeRequestNotSentError,
 } from '../../../../src/services/runtime-client/request-not-sent';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
+import { closedSessionRefusal } from '../../../support/external-agents/fake-external-runtime';
 
 describe('backoffDelay', () => {
   it('doubles from the base, jitters within [75%, 100%] and never exceeds the cap', () => {
@@ -190,4 +192,32 @@ describe('classifySubmissionFailure', () => {
       failureClosedConnection(new RemoteError('UNAVAILABLE', 'closed', { closeCode: 1001 }))
     ).toBe(false);
   });
+});
+
+describe('refusedBecauseSessionClosed', () => {
+  const closedAnswer = () =>
+    new RemoteError('INTERNAL', 'session closed', { kind: 'tool_argument', session: 'closed' });
+  const CASES: ReadonlyArray<readonly [string, unknown, boolean]> = [
+    ['the runtime answer itself', closedAnswer(), true],
+    ['the translated refusal, through its cause', closedSessionRefusal(), true],
+    [
+      'an argument refusal that names no session state',
+      new RemoteError('INTERNAL', 'bad root', { kind: 'tool_argument' }),
+      false,
+    ],
+    [
+      'a translated argument refusal with no cause',
+      Object.assign(new Error('session gone'), { name: 'ToolArgumentError' }),
+      false,
+    ],
+    ['a value that is not an error', 'session closed', false],
+  ];
+  for (const [label, error, expected] of CASES) {
+    it(`reads ${label} as ${expected}`, () => {
+      const received = refusedBecauseSessionClosed(error);
+      expect(received, `expected closed-session verdict: ${expected} | received: ${received}`).toBe(
+        expected
+      );
+    });
+  }
 });

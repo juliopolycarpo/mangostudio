@@ -3087,6 +3087,11 @@ async fn revoking_consent_mid_turn_closes_the_session_and_refuses_its_pending_an
         refused.message
     );
     assert_eq!(
+        refused.details.as_ref().unwrap()["session"],
+        "closed",
+        "a session that is not open is refused as closed; received: {refused:?}"
+    );
+    assert_eq!(
         rig.log.permission_answers.load(Ordering::SeqCst),
         0,
         "expected no answer to reach a revoked vendor"

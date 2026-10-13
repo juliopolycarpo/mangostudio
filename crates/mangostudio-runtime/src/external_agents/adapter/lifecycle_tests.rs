@@ -162,6 +162,11 @@ async fn failed_approval_stdin_settles_the_child_and_the_next_message_uses_a_fre
         "tool_argument",
         "the existing spent-session response is a product argument error; received {lost:?}"
     );
+    assert_eq!(
+        lost.details.as_ref().unwrap()["session"],
+        "closed",
+        "the hub reopens only on a refusal that says the session is closed; received {lost:?}"
+    );
     assert!(
         lost.message.contains("can no longer run turns")
             && lost.message.contains("expected a new session")
@@ -226,6 +231,11 @@ async fn failed_turn_start_stdin_reports_uncertain_admission_over_rpc_and_reopen
     fixtures::reaped(&fake).await;
     let lost = rig.turn("rpc-next-message").await.unwrap_err();
     assert_eq!(lost.details.as_ref().unwrap()["kind"], "tool_argument");
+    assert_eq!(
+        lost.details.as_ref().unwrap()["session"],
+        "closed",
+        "the hub reopens only on a refusal that says the session is closed; received {lost:?}"
+    );
     assert!(lost.message.contains("expected a new session"));
     assert_eq!(rig.supervisor.live_sessions().0, 0);
     rig.open().await;
@@ -277,6 +287,11 @@ async fn a_failed_live_account_read_exposes_rpc_link_provenance_separately_from_
     assert_eq!(log.kills.lock().unwrap().len(), 1);
     let spent = rig.turn("after-account-failure").await.unwrap_err();
     assert_eq!(spent.details.as_ref().unwrap()["kind"], "tool_argument");
+    assert_eq!(
+        spent.details.as_ref().unwrap()["session"],
+        "closed",
+        "the hub reopens only on a refusal that says the session is closed; received {spent:?}"
+    );
     assert!(spent.message.contains("expected a new session"));
     assert_eq!(rig.supervisor.live_sessions().0, 0);
     rig.open().await;
