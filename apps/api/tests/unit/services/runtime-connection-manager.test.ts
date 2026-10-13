@@ -201,16 +201,17 @@ function flushMicrotasks(): Promise<void> {
 /** A connected client that counts how often the hub asked it for health. */
 function healthProbe(
   manifest: RuntimeCapabilityManifest,
-  health: () => Promise<RuntimeHealthReport> = () => Promise.resolve(HEALTH_REPORT),
+  health: (options?: { timeoutMs?: number }) => Promise<RuntimeHealthReport> = () =>
+    Promise.resolve(HEALTH_REPORT),
   runtimeVersion = '0.0.0-test'
 ): { client: RuntimeClient; calls: () => number } {
   let calls = 0;
   const client = {
     manifest,
     runtimeVersion,
-    health: () => {
+    health: (options?: { timeoutMs?: number }) => {
       calls += 1;
-      return health();
+      return health(options);
     },
     replaceManifest: (next: RuntimeCapabilityManifest) => {
       client.manifest = next;
@@ -1314,6 +1315,82 @@ describe('RuntimeConnectionManager', () => {
       manager.disconnect('user-1', 'devbox');
       await runtime.close();
     }
+  });
+
+  describe('the read of which agents a runtime hosts at connect', () => {
+    const HELLO: RuntimeCapabilityManifest = {
+      ...TEST_MANIFEST,
+      features: { ...TEST_MANIFEST.features, externalAgents: true },
+    };
+
+    function managerOver(probe: { client: RuntimeClient }, options: { timeoutMs?: number } = {}) {
+      return new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: {
+          stdio: () => Promise.resolve({ client: probe.client, close: () => undefined }),
+        },
+        ...(options.timeoutMs === undefined
+          ? {}
+          : { hostedAgentsReadTimeoutMs: options.timeoutMs }),
+      });
+    }
+
+    it('hands the connection out when the peer never answers health', async () => {
+      // A peer that answered hello and then went quiet. Like the protocol session, it fails a
+      // request only when the caller gave it a deadline.
+      const quietPeer = (options?: { timeoutMs?: number }) =>
+        new Promise<RuntimeHealthReport>((_, reject) => {
+          if (options?.timeoutMs === undefined) return;
+          setTimeout(
+            () => reject(new RemoteError('TIMEOUT', `timed out after ${options.timeoutMs}ms`)),
+            options.timeoutMs
+          );
+        });
+      const probe = healthProbe(HELLO, quietPeer);
+      const manager = managerOver(probe, { timeoutMs: 30 });
+
+      const started = Date.now();
+      const client = await Promise.race([
+        manager.connect('user-1', 'devbox'),
+        new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 2_000)),
+      ]);
+
+      expect(
+        client === 'hung' ? 'a connect still waiting after 2000ms' : 'a connection',
+        'expected a connection within the read bound | received a hung connect'
+      ).toBe('a connection');
+      expect(
+        Date.now() - started,
+        'expected the bound, not the peer, to end the wait'
+      ).toBeLessThan(1_500);
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    });
+
+    it('hands the connection out, with the handshake manifest, when health fails', async () => {
+      const probe = healthProbe(HELLO, () =>
+        Promise.reject(new RemoteError('TIMEOUT', 'no answer'))
+      );
+      const manager = managerOver(probe);
+
+      const client = await manager.connect('user-1', 'devbox');
+
+      expect(client.manifest.externalAgents, 'expected no target list from a failed read').toBe(
+        undefined
+      );
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    });
+
+    it('asks once per connection, not once per caller', async () => {
+      const probe = healthProbe(HELLO);
+      const manager = managerOver(probe);
+
+      await manager.connect('user-1', 'devbox');
+      await manager.getClient('user-1', 'devbox');
+      await manager.getClient('user-1', 'devbox');
+      await manager.getClient('user-1', 'devbox');
+
+      expect(probe.calls(), 'expected one health read for one connection').toBe(1);
+    });
   });
 
   /**
