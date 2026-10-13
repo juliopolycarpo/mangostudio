@@ -28,6 +28,10 @@ on:
       - "rustfmt.toml"
       - "rust-toolchain.toml"
       - "scripts/lib/protocol.ts"
+      - "scripts/ci/protocol-lanes.ts"
+      - "scripts/lib/changed-paths.ts"
+      - "scripts/ci/changed-paths.ts"
+      - "scripts/lib/ci-lanes.ts"
       - ".github/workflows/protocol-ci.yml"
   workflow_dispatch:
 
@@ -61,6 +65,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
       - id: changed
         name: Check protocol paths
         env:
@@ -79,19 +87,8 @@ jobs:
             exit 0
           fi
 
-          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-
-          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
-            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip the protocol lanes" >&2
-            exit 1
-          fi
-
-          relevant='^(packages/protocol/|crates/mango-protocol/|spec/|docs/protocol/|scripts/protocol/|Cargo\.(toml|lock)$|deny\.toml$|rustfmt\.toml$|rust-toolchain\.toml$|scripts/lib/protocol\.ts$|\.github/workflows/protocol-ci\.yml$)'
-          if grep -Eq "$relevant" "$RUNNER_TEMP/changed-files"; then
-            echo "protocol=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "protocol=false" >> "$GITHUB_OUTPUT"
-          fi
+          bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
+          bun ./scripts/ci/protocol-lanes.ts relevance "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
 
   typescript:
     name: TypeScript
@@ -156,7 +153,8 @@ jobs:
       # Pinned: `--feature-powerset` decides which feature sets this lane checks,
       # so a release re-run (protocol-release.yml pins the same version) and this
       # lane must not drift apart as cargo-hack publishes.
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+      - id: tooling
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-hack@0.6.45
       # Cargo Shim runs `cargo fmt --all`, then clippy and the tests of the whole
@@ -170,12 +168,13 @@ jobs:
       # Cargo Shim runs the workspace doctests and `cargo doc` on Ubuntu only. The
       # crate has `cfg`-gated transports (unix sockets, Windows named pipes) whose
       # doctests and intra-doc links exist on one platform, so macOS and Windows
-      # keep their own copy.
+      # keep their own copy. Run these independent diagnostics after Clippy
+      # failure once setup succeeded; cancellation and failed setup stop them.
       - name: Run doctests
-        if: matrix.os != 'ubuntu-latest'
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && matrix.os != 'ubuntu-latest' }}
         run: cargo test -p mango-protocol --doc --all-features --locked
       - name: Build API docs (deny warnings)
-        if: matrix.os != 'ubuntu-latest'
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && matrix.os != 'ubuntu-latest' }}
         run: cargo doc -p mango-protocol --no-deps --all-features --locked
         env:
           RUSTDOCFLAGS: -D warnings
@@ -297,9 +296,13 @@ jobs:
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: bun install --frozen-lockfile
+      - id: dependencies
+        run: bun install --frozen-lockfile
       - run: bun ./scripts/protocol/verify-schema-equality.ts
-      - run: bun ./scripts/protocol/verify-roundtrip.ts
+      # Roundtrip remains useful when schema equality fails. Setup failure and
+      # cancellation still prevent running a diagnostic without its tools.
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: bun ./scripts/protocol/verify-roundtrip.ts
 
   gate:
     # Single stable check ("Protocol CI / Gate") aggregating every mandatory

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-
+import { LAUNCHER_PATTERN, RELEASE_PATTERN } from '../lib/ci-lanes';
 import { ROOT_DIR } from '../lib/config';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 import {
@@ -729,9 +729,8 @@ describe('release workflow binary gate', () => {
 
   test('launcher dry run selects compiler pins and packaged verifier changes', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
-    const source = /if grep -Eq '([^']+)' "\$RUNNER_TEMP\/changed-files"; then/.exec(workflow)?.[1];
-    expect(source, 'launcher relevance pattern').toBeDefined();
-    const pattern = new RegExp(source as string);
+    expect(workflow).toContain('bun ./scripts/ci/changed-paths.ts release');
+    const pattern = LAUNCHER_PATTERN;
 
     for (const path of [
       'crates/mangostudio-launcher/src/main.rs',
@@ -750,13 +749,10 @@ describe('release workflow binary gate', () => {
 
   test('release dry run relevance pattern mirrors the release import graph', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
-    expect(workflow).toContain('git diff --no-renames --name-only');
-    expect(workflow).toContain('if [ ! -s "$RUNNER_TEMP/changed-files" ]; then');
-    expect(workflow).toContain('refusing to skip release dry runs');
+    expect(workflow).toContain('bun ./scripts/ci/changed-paths.ts collect');
+    expect(workflow).toContain('bun ./scripts/ci/changed-paths.ts release');
 
-    const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
-    expect(source, 'release_pattern not found in the changes job').toBeDefined();
-    const pattern = new RegExp(source as string);
+    const pattern = RELEASE_PATTERN;
 
     // Everything the release actually imports marks the dry run relevant…
     expect('.github/workflows/release.yml').toMatch(pattern);
@@ -903,9 +899,7 @@ describe('release workflow binary gate', () => {
       ).toHaveLength(1);
     }
 
-    const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
-    expect(source, 'release_pattern not found in the changes job').toBeDefined();
-    const relevant = new RegExp(source as string);
+    const relevant = RELEASE_PATTERN;
     expect('scripts/tests/install-ps1-layout.unit.test.ts').toMatch(relevant);
 
     // The layout cases also run whatever test helpers they import (the user
@@ -921,20 +915,19 @@ describe('release workflow binary gate', () => {
     for (const helper of helpers) {
       expect(
         relevant.test(helper),
-        `expected release_pattern to match ${helper} | received: no match in ${source}`
+        `expected release_pattern to match ${helper} | received: no match in ${RELEASE_PATTERN.source}`
       ).toBe(true);
     }
   });
 
   test('release dry run relevance pattern does not over-promise Alpine Docker coverage', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
-    const source = /release_pattern='([^']+)'/.exec(workflow)?.[1];
-    expect(source, 'release_pattern not found in the changes job').toBeDefined();
+    expect(workflow).toContain('bun ./scripts/ci/changed-paths.ts release');
 
     // The dry-run only builds the Bookworm image, so its relevance pattern
     // must not claim to exercise Dockerfile.alpine; ci.yml's smoke job covers
     // that on every PR.
-    expect('Dockerfile.alpine').not.toMatch(new RegExp(source as string));
+    expect('Dockerfile.alpine').not.toMatch(RELEASE_PATTERN);
   });
 
   test('changelog lands pre-tag: no write-back job, gated by the prepare lockstep check', () => {

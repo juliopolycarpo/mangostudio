@@ -46,6 +46,11 @@ on:
       - ".github/workflows/rust-coverage.yml"
       - ".github/actions/setup-zigbuild/**"
       - "scripts/bench/rust-test-inventory.ts"
+      - "scripts/lib/rust-lanes.ts"
+      - "scripts/ci/rust-lanes.ts"
+      - "scripts/lib/changed-paths.ts"
+      - "scripts/ci/changed-paths.ts"
+      - "scripts/lib/ci-lanes.ts"
       - "apps/api/**"
       - "apps/shared/**"
       - "package.json"
@@ -53,8 +58,6 @@ on:
       - ".bun-version"
       - "patches/**"
       - "packages/protocol/**"
-      - "scripts/lib/rust-lanes.ts"
-      - "scripts/ci/rust-lanes.ts"
   workflow_dispatch:
 
 permissions:
@@ -109,7 +112,7 @@ jobs:
             exit 0
           fi
 
-          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
           bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/lanes"
           cat "$RUNNER_TEMP/lanes" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/lanes"

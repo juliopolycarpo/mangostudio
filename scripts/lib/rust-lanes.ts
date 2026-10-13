@@ -11,6 +11,8 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
+import { validateChangedPaths } from './changed-paths';
+
 /**
  * Paths whose change makes the Rust workspace lanes (fmt, clippy, tests,
  * baseline checks, musl clippy, fuzz metadata, fixture freshness) relevant: the cargo
@@ -52,6 +54,12 @@ export const RUST_WORKSPACE_PATHS = [
   '.github/actions/setup-zigbuild/**',
   // The nextest parity step in the workspace job runs this script.
   'scripts/bench/rust-test-inventory.ts',
+  // Changes to detection itself must exercise the lanes it selects.
+  'scripts/lib/rust-lanes.ts',
+  'scripts/ci/rust-lanes.ts',
+  'scripts/lib/changed-paths.ts',
+  'scripts/ci/changed-paths.ts',
+  'scripts/lib/ci-lanes.ts',
 ] as const;
 
 /**
@@ -71,8 +79,6 @@ export const QUALIFICATION_PATHS = [
   // The hub's runtime client speaks the TypeScript protocol package, so a
   // protocol-only change still has to meet the real binary.
   'packages/protocol/**',
-  'scripts/lib/rust-lanes.ts',
-  'scripts/ci/rust-lanes.ts',
 ] as const;
 
 /** The api workspace, relative to the repository root. */
@@ -124,15 +130,10 @@ function matchesAnyPath(path: string, globs: readonly string[]): boolean {
  * // { rust: false, qualification: true }
  */
 export function classifyChangedPaths(paths: readonly string[]): LaneRelevance {
-  const changed = paths.map((path) => path.trim()).filter(Boolean);
-  if (changed.length === 0) {
-    throw new Error(
-      'rust-lanes: no changed paths to classify; expected at least one repository-relative path'
-    );
-  }
+  validateChangedPaths(paths);
   return {
-    rust: changed.some((path) => matchesAnyPath(path, RUST_WORKSPACE_PATHS)),
-    qualification: changed.some((path) => matchesAnyPath(path, QUALIFICATION_PATHS)),
+    rust: paths.some((path) => matchesAnyPath(path, RUST_WORKSPACE_PATHS)),
+    qualification: paths.some((path) => matchesAnyPath(path, QUALIFICATION_PATHS)),
   };
 }
 

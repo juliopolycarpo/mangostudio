@@ -104,7 +104,13 @@ const PROTOCOL_ROOT_FILES: readonly string[] = [
  * set, the CI filter derived from it and the release-note range, and the
  * detector that decided to skip the lanes would be running the pre-edit rules.
  */
-const PROTOCOL_TOOLING_FILES: readonly string[] = ['scripts/lib/protocol.ts'];
+const PROTOCOL_TOOLING_FILES: readonly string[] = [
+  'scripts/lib/protocol.ts',
+  'scripts/ci/protocol-lanes.ts',
+  'scripts/lib/changed-paths.ts',
+  'scripts/ci/changed-paths.ts',
+  'scripts/lib/ci-lanes.ts',
+];
 
 /**
  * Every file the protocol lanes react to that is not under a protocol
@@ -114,6 +120,7 @@ const PROTOCOL_TOOLING_FILES: readonly string[] = ['scripts/lib/protocol.ts'];
 export const PROTOCOL_TRIGGER_FILES: readonly string[] = [
   ...PROTOCOL_ROOT_FILES,
   ...PROTOCOL_TOOLING_FILES,
+  '.github/workflows/protocol-ci.yml',
 ];
 
 /**

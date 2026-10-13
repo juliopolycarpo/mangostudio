@@ -3,7 +3,7 @@
 //
 //   bun ./scripts/ci/rust-lanes.ts relevance <changed-files>
 //     Prints `rust=<bool>` and `qualification=<bool>` lines for
-//     `$GITHUB_OUTPUT`, from a file of newline-separated changed paths.
+//     `$GITHUB_OUTPUT`, from a NUL-terminated changed-path file.
 //   bun ./scripts/ci/rust-lanes.ts qualify --suite unit|integration
 //     Runs the discovered Rust-backed api test files of that suite against
 //     the binary MANGOSTUDIO_RUNTIME_BINARY names.
@@ -12,8 +12,9 @@
 //
 // Dependency-free (Bun and Node built-ins only); runs without `bun install`.
 
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { readChangedPaths } from '../lib/changed-paths';
 
 import {
   API_DIR,
@@ -38,7 +39,7 @@ function parseSuite(value: string | undefined): keyof QualificationSuites {
 
 function relevance(changedFiles: string | undefined): number {
   if (!changedFiles) throw new Error('rust-lanes relevance: expected a changed-files path');
-  const verdict = classifyChangedPaths(readFileSync(changedFiles, 'utf8').split('\n'));
+  const verdict = classifyChangedPaths(readChangedPaths(changedFiles));
   console.log(`rust=${verdict.rust}`);
   console.log(`qualification=${verdict.qualification}`);
   return 0;

@@ -68,28 +68,8 @@ jobs:
             exit 0
           fi
 
-          # Keep both paths of a rename visible and fail closed if Git cannot
-          # produce a meaningful PR diff. Skipping release lanes must only be
-          # possible after classifying at least one changed path.
-          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-
-          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
-            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip release dry runs" >&2
-            exit 1
-          fi
-
-          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|\.github/workflows/runtime-build\.yml$|scripts/release/|scripts/install/|scripts/tests/install-ps1-layout\.unit\.test\.ts$|scripts/tests/support/windows-user-path\.ts$|scripts/build(-runtime)?\.ts$|scripts/lib/|packages/cli/|crates/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo/config\.toml$|\.github/actions/setup-zigbuild/|Dockerfile$)'
-          if grep -Eq "$release_pattern" "$RUNNER_TEMP/changed-files"; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          if grep -Eq '^(crates/mangostudio-launcher/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.github/workflows/release(-dry-run)?\.yml$|scripts/release/verify-launcher-package\.sh$)' "$RUNNER_TEMP/changed-files"; then
-            echo "launcher=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "launcher=false" >> "$GITHUB_OUTPUT"
-          fi
+          bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
+          bun ./scripts/ci/changed-paths.ts release "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
 
   runtime:
     # The cargo runtimes the two dry-run archives ship, built the way the
