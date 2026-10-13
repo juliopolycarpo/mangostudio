@@ -58,6 +58,13 @@ pub(crate) struct AgentFailure {
     pub cleanup: CleanupOutcome,
     /// Preserves the existing direct/operation-wrapped busy refusal behavior.
     pub busy_refusal: bool,
+    /// The failure is a cancellation whose reason is the host's own shutdown.
+    ///
+    /// The SDK answers a turn start with `Cancelled { Shutdown }` when the host token is
+    /// cancelled, and a stop that taints a session records the stop's own reason (a user stop,
+    /// a timeout, a consent withdrawal). Telling them apart keeps a turn racing a shutdown from
+    /// being reported as a session the agent will never run turns on.
+    pub cancelled_by_shutdown: bool,
 }
 impl AgentFailure {
     /// Recognizes a deterministic start refusal with proven absence and no recovery obligation.
@@ -134,6 +141,7 @@ mod tests {
             session: SessionUsability::Unknown,
             cleanup: CleanupOutcome::NotRequired,
             busy_refusal: false,
+            cancelled_by_shutdown: false,
         }
     }
 

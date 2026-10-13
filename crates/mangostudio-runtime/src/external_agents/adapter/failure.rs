@@ -73,6 +73,12 @@ pub(super) fn facts(error: Error) -> AgentFailure {
         } else {
             CleanupOutcome::NotRequired
         },
+        cancelled_by_shutdown: matches!(
+            error.cause(),
+            Error::Cancelled {
+                reason: CancelReason::Shutdown
+            }
+        ),
         busy_refusal: matches!(error, Error::Busy)
             || matches!(&error, Error::Operation { source, .. } if matches!(**source, Error::Busy)),
     }

@@ -150,6 +150,32 @@ refusal_case!(
     true
 );
 
+/// A turn racing the host's shutdown is refused `Cancelled { Shutdown }` before anything is
+/// dispatched. That is the host going away, not a session the agent will never run turns on, so the
+/// hub must not drop the conversation for it.
+#[tokio::test]
+async fn a_start_refused_for_the_hosts_shutdown_is_closed_not_nonresumable() {
+    for (reason, expected) in [
+        (CancelReason::Shutdown, "closed"),
+        (CancelReason::Requested, "nonresumable"),
+        (CancelReason::Timeout, "nonresumable"),
+        (CancelReason::ConsentRevoked, "nonresumable"),
+    ] {
+        let rig = review_rig().await;
+        rig.open("one").await.unwrap();
+        *rig.log.start_failure.lock().unwrap() =
+            Some(SdkError::Cancelled { reason }.with_dispatch(Dispatch::NotSubmitted));
+
+        let error = start(&rig, false, "invalid").await.unwrap_err();
+
+        assert_eq!(
+            error.details.as_ref().unwrap()["session"],
+            expected,
+            "expected a Cancelled({reason}) refusal to be reported {expected} | received: {error:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn cleanup_wrapped_spent_session_refusals_close_the_session_once() {
     for review in [false, true] {

@@ -634,6 +634,7 @@ fn owned_refusal(cause: FailureCause) -> AgentFailure {
         session: SessionUsability::Unknown,
         cleanup: CleanupOutcome::NotRequired,
         busy_refusal: false,
+        cancelled_by_shutdown: false,
     }
 }
 

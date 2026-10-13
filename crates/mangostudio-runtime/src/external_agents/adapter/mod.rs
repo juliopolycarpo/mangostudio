@@ -19,6 +19,8 @@ mod redaction_tests;
 #[cfg(test)]
 mod relay_tests;
 #[cfg(test)]
+mod resume_mode_tests;
+#[cfg(test)]
 mod test_support;
 use super::port::AgentBackend;
 use crate::subprocess::LaunchCheck;

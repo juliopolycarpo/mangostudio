@@ -415,8 +415,10 @@ impl Supervisor {
                 .unwrap_or_default();
             // The SDK answers `Cancelled` once a forced stop or an unverified resume made a vendor
             // session nonresumable (Claude), and `Closed` once the session or its process is gone
-            // (Codex). The first needs a fresh conversation, the second resumes the same one.
-            let state = if error.cause == FailureCause::Cancelled {
+            // (Codex). The first needs a fresh conversation, the second resumes the same one. A
+            // `Cancelled` for the host's own shutdown is not that taint: it is the host going away,
+            // and the conversation is intact.
+            let state = if error.cause == FailureCause::Cancelled && !error.cancelled_by_shutdown {
                 EXTERNAL_AGENT_SESSION_NONRESUMABLE
             } else {
                 EXTERNAL_AGENT_SESSION_CLOSED
