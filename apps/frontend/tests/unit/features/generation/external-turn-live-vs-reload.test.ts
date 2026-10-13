@@ -644,7 +644,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
    * session to the live stream again.
    */
   describe('a send that reopened its session', () => {
-    function stored(reset?: 'nonresumable'): MessagePart[] {
+    function stored(reset?: 'nonresumable' | 'unavailable'): MessagePart[] {
       const transcript = new ExternalTurnTranscript({
         targetId: 'claude',
         sessionId: 'hub-session-1',
@@ -658,7 +658,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
       return transcript.parts;
     }
 
-    function streamed(reset?: 'nonresumable'): MessagePart[] {
+    function streamed(reset?: 'nonresumable' | 'unavailable'): MessagePart[] {
       const chunks: StreamChunk[] = [
         externalSessionStartedChunk({
           sessionId: 'hub-session-1',
@@ -681,7 +681,7 @@ describe('external turn: live stream vs reloaded transcript', () => {
       ).parts;
     }
 
-    it.each([[undefined], ['nonresumable' as const]])(
+    it.each([[undefined], ['nonresumable' as const], ['unavailable' as const]])(
       'names the same session and reset live and after a reload (reset: %p)',
       (reset) => {
         const live = streamed(reset).find((part) => part.type === 'external_turn');

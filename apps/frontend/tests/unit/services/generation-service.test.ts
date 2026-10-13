@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from '
 import type { GenerateImageResponse, RespondStreamBody } from '@mangostudio/shared/generation';
 import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
+import { externalSessionStartedChunk } from '@mangostudio/shared/streaming';
 import type * as ApiClient from '../../../src/lib/api-client';
 import { ExternalRefusalError } from '../../../src/lib/external-refusal-error';
 import { ApiError } from '../../../src/lib/utils';
@@ -167,6 +168,40 @@ describe('respondTextStream', () => {
       { type: 'text', text: 'Hello', done: false },
       { type: 'text', text: ' world', done: false },
     ]);
+  });
+
+  it('delivers the conversation reset of a re-announced external session to the reducer', async () => {
+    // The hub's own chunk builder, serialized as the route sends it, read back by the service the
+    // app uses, and reduced: the field survives every hop that could drop it.
+    const announced = (sessionId: string, conversationReset?: 'nonresumable') =>
+      `data: ${JSON.stringify(
+        externalSessionStartedChunk({
+          sessionId,
+          targetId: 'claude',
+          resumed: false,
+          ...(conversationReset ? { conversationReset } : {}),
+        })
+      )}\n`;
+    fetchMock.mockResolvedValue(
+      streamingResponse([announced('hub-session-1'), announced('hub-session-2', 'nonresumable')])
+    );
+    const { chunks, onChunk } = collectChunks();
+
+    await respondTextStream(makeRequest(), onChunk);
+
+    const { createTextGenerationStreamState, reduceTextGenerationStreamChunk } = await import(
+      '../../../src/features/generation/text-generation-stream-reducer'
+    );
+    const state = chunks.reduce(
+      (current, chunk) =>
+        reduceTextGenerationStreamChunk(current, chunk, { pendingSubagentName: 'Pending' }),
+      createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+    );
+    const turn = state.parts.find((part) => part.type === 'external_turn');
+    expect(
+      { sessionId: turn?.sessionId, reset: turn?.conversationReset },
+      'expected the turn to name hub-session-2 with conversationReset: nonresumable'
+    ).toEqual({ sessionId: 'hub-session-2', reset: 'nonresumable' });
   });
 
   it('buffers data events split across multiple reader reads', async () => {
