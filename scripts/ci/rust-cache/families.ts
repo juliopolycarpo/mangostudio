@@ -3,7 +3,6 @@
 // separates toolchains, target flags and release-profile overrides.
 export const RUST_CACHE_FAMILIES = [
   'workspace',
-  'launcher-msrv',
   'musl-clippy',
   'runtime-home-fixture-freshness',
   'local-runtime',

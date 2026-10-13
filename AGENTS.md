@@ -80,9 +80,10 @@ Useful docs:
   protocol version moves (`protocol:release:prepare` refreshes it). Then run
   `cargo update -w --manifest-path crates/mango-protocol/fuzz/Cargo.toml`; the `fuzz-workspace`
   gate fails on a stale fuzz lock.
-- `rust-toolchain.toml` pins the development toolchain. The protocol inherits the workspace MSRV;
-  the published `mangostudio` launcher declares its lower MSRV explicitly. The launcher keeps the
-  application version, while `[workspace.package].version` remains the protocol version.
+- `[workspace.package].rust-version` owns the Rust 1.99.0 minimum for every stable member,
+  including the published `mangostudio` launcher. `rust-toolchain.toml` pins the same development
+  toolchain; policy tests enforce equality. The launcher keeps the application version, while
+  `[workspace.package].version` remains the protocol version.
 - Check Rust changes with `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,
   `cargo nextest run --workspace --all-targets --all-features --locked --retries 0` (install

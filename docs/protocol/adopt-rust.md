@@ -7,6 +7,10 @@ multiplexing, cancel, event streams, liveness, graceful close) over any `Port`, 
 builder that validates, serves and calls it — see [Use a session](#use-a-session) below — and
 the [transports](#transports) that session is opened over.
 
+Building this source revision requires Rust 1.99.0 or newer. Published releases that include the
+new minimum require it for every feature set, including the codec-only path. See
+[Rust compiler support](./versioning.md#rust-compiler-support) before upgrading from Rust 1.97.
+
 ```toml
 [dependencies]
 mango-protocol = { version = "0.2", features = ["tokio"] }

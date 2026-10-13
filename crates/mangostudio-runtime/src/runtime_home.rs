@@ -151,7 +151,7 @@ impl std::str::FromStr for RuntimeSlot {
 /// `std::env::home_dir` was fixed in Rust 1.85 (Windows now asks
 /// `USERPROFILE`/`GetUserProfileDirectoryW` instead of a Cygwin-style
 /// `HOME`) and its deprecation lint was lifted in 1.87
-/// (rust-lang/rust#132650); this workspace's 1.97 floor postdates both, so
+/// (rust-lang/rust#132650); the workspace Rust minimum postdates both, so
 /// this crate calls it directly rather than adding `dirs`/`directories` —
 /// both solve XDG config/cache/data resolution, a different problem from
 /// "what does this account call home".

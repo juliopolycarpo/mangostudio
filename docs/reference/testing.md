@@ -1788,8 +1788,9 @@ doctests, so they stay on `cargo test --doc`, and the ignored fixture generator
 - Process isolation. A test that passed only because another test in its binary had already
   initialised process state now runs alone and fails; fix the test, do not retry it.
 - Ubuntu's CI run of this set is the instrumented libtest one in `rust-coverage.yml`
-  (see below); macOS, Windows and the Windows ARM64 runtime lane run nextest. The launcher's
-  1.96 floor lane keeps `cargo test`, because it proves the floor with a handful of tests.
+  (see below); macOS, Windows and the Windows ARM64 runtime lane run nextest. Ubuntu also runs
+  `cargo test -p mangostudio --all-targets --locked` to test the launcher with its own default
+  features, separately from workspace feature unification, on the shared Rust 1.99.0 minimum.
 
 ## Rust Coverage In CI
 
@@ -1953,12 +1954,15 @@ interleaved runs per side, medians, the exact commands the lanes run:
 
 `Swatinem/rust-cache` (the pinned v2.9.2 exports it in `restore.ts`) already sets
 the same value for jobs that restore a cache, so the explicit setting changes
-nothing there. It matters for the lanes that have no cache on purpose
-(`workspace-msrv`, `target-msrv`, `workspace-windows-arm64`) and for the
+nothing there. It matters for the uncached `workspace-windows-arm64` lane and for the
 `local-runtime` composite when its cache step is skipped. `--release` steps are
 untouched: the rustc command line of a release build is byte-identical with the
 variable unset and set to `0`. Local builds stay incremental, because nothing in
 `.cargo/config.toml` or the profiles sets it.
+
+At the time of these measurements, the separate `workspace-msrv` and `target-msrv` lanes were
+also uncached. Their checks now run in the native workspace lanes at the shared Rust 1.99.0
+minimum, as mapped in [`ci.md`](./ci.md#minimum-supported-rust).
 
 The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
 only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches

@@ -9,6 +9,7 @@ import {
   extractJobBlock,
   extractJobBlocks,
   extractOnBlock,
+  extractStepBlocks,
   parseNeedsList,
   sectionKeys,
 } from './support/workflow-blocks';
@@ -246,76 +247,36 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(workflow).not.toContain('apps/runtime/');
   });
 
-  test('the workspace and launcher MSRV lanes run only when the changes job saw a Rust path', () => {
+  test('the unified workspace checks run only when the changes job saw a Rust path', () => {
     const workspaceBlock = extractJobBlock(workflow, 'workspace');
-    const msrvBlock = extractJobBlock(workflow, 'launcher-msrv');
 
     expect(parseNeedsList(workspaceBlock)).toEqual(['changes']);
-    expect(parseNeedsList(msrvBlock)).toEqual(['changes']);
     expect(workspaceBlock).toContain("if: needs.changes.outputs.rust == 'true'");
-    expect(msrvBlock).toContain("if: needs.changes.outputs.rust == 'true'");
     expect(workspaceBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
-    expect(msrvBlock).toContain('components: clippy');
-    expect(msrvBlock).toContain('cargo check -p mangostudio --all-targets --locked');
-    expect(msrvBlock).toContain(
-      'cargo clippy -p mangostudio --all-targets --locked -- -D warnings'
-    );
-    expect(msrvBlock).toContain('cargo test -p mangostudio --all-targets --locked');
-  });
-
-  test('the workspace minimum-Rust lane runs whenever the changes job saw a Rust path', () => {
-    // A runtime-only edit is a Rust path, so it must reach the 1.97 floor; the
-    // lane hangs off the same signal as every other Rust lane, never off the
-    // protocol one.
-    const block = extractJobBlock(workflow, 'workspace-msrv');
-    const floor = /^rust-version = "([^"]+)"$/m.exec(readText('Cargo.toml'))?.[1];
-
-    expect(
-      block,
-      'workspace-msrv job missing: runtime-only PRs skip the minimum-Rust check'
-    ).not.toBe('');
-    expect(parseNeedsList(block)).toEqual(['changes']);
-    expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
-    // The toolchain follows the manifest's rust-version, so a floor bump that
-    // forgets this lane fails here instead of checking the old minimum.
-    expect(floor, 'workspace rust-version').toBeDefined();
-    expect(block).toContain(`RUSTUP_TOOLCHAIN: ${floor}`);
-    expect(block).toContain(`rustup toolchain install ${floor} --profile minimal`);
-    expect(block).toContain('cargo check --workspace --locked');
-    expect(block).toContain('cargo check --workspace --all-targets --all-features --locked');
-    // The launcher keeps its own, lower floor in its own lane.
-    expect(block).not.toContain('1.96.0');
-  });
-
-  test('the target minimum-Rust lane checks the Windows and macOS code the Linux lane never compiles', () => {
-    const block = extractJobBlock(workflow, 'target-msrv');
-    const floor = /^rust-version = "([^"]+)"$/m.exec(readText('Cargo.toml'))?.[1];
-
-    expect(
-      block,
-      'target-msrv job missing: cfg(windows) and cfg(macos) code has no minimum-Rust proof'
-    ).not.toBe('');
-    expect(parseNeedsList(block)).toEqual(['changes']);
-    expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
-    expect(block).toContain(`RUSTUP_TOOLCHAIN: ${floor}`);
-    // The target reaches the scripts through the environment, never by
-    // interpolation into the script text.
-    expect(block).toContain(`TARGET: ${EXPR} matrix.target }}`);
-    expect(block).toContain(
-      `rustup toolchain install ${floor} --profile minimal --target "$TARGET"`
-    );
-    expect(block).toContain(
-      'cargo check --workspace --all-targets --all-features --locked --target "$TARGET"'
-    );
-    for (const target of [
-      'aarch64-apple-darwin',
-      'x86_64-pc-windows-msvc',
-      'aarch64-pc-windows-msvc',
+    for (const command of [
+      'cargo check --workspace --locked',
+      'cargo check --workspace --all-targets --all-features --locked',
+      'cargo check -p mangostudio --all-targets --locked',
+      'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings',
     ]) {
-      expect(block, `target ${target}`).toContain(`target: ${target}`);
+      const step = extractStepBlocks(workspaceBlock).find((entry) =>
+        entry.includes(`run: ${command}\n`)
+      );
+      expect(step, `native workspace checks must retain ${command}`).toBeDefined();
+      expect(step, `every native OS must run ${command}`).toContain(`if: ${EXPR} !cancelled() }}`);
     }
-    // Check-only: the 1.99 native tests stay in `workspace`, and are not minimum proof.
-    expect(block).not.toContain('cargo test');
+  });
+
+  test('launcher-only Linux clippy and tests retain their default dependency features', () => {
+    const block = extractJobBlock(workflow, 'workspace');
+    for (const command of [
+      'cargo clippy -p mangostudio --all-targets --locked -- -D warnings',
+      'cargo test -p mangostudio --all-targets --locked',
+    ]) {
+      const step = extractStepBlocks(block).find((entry) => entry.includes(`run: ${command}\n`));
+      expect(step, `launcher default-feature coverage must retain ${command}`).toBeDefined();
+      expect(step).toContain(`if: ${EXPR} !cancelled() && matrix.os == 'ubuntu-latest' }}`);
+    }
   });
 
   test('the runtime tests also run natively on Windows ARM64, behind the Rust signal and the one Gate', () => {
@@ -332,6 +293,15 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(parseNeedsList(block)).toEqual(['changes']);
     expect(block).toContain("if: needs.changes.outputs.rust == 'true'");
     expect(block).toContain('runs-on: windows-11-arm');
+    expect(block).toContain('rustup target add aarch64-pc-windows-msvc');
+    for (const command of [
+      'cargo check --workspace --all-targets --all-features --locked --target aarch64-pc-windows-msvc',
+      'cargo check -p mangostudio --all-targets --locked --target aarch64-pc-windows-msvc',
+    ]) {
+      const step = extractStepBlocks(block).find((entry) => entry.includes(`run: ${command}\n`));
+      expect(step, `Windows ARM64 must retain ${command}`).toBeDefined();
+      expect(step).toContain(`if: ${EXPR} !cancelled() }}`);
+    }
     expect(block).toContain(
       'cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0'
     );
@@ -342,24 +312,35 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     );
   });
 
-  test('the target minimum-Rust lane checks the launcher at its own lower floor on every target', () => {
-    // The launcher declares a lower rust-version than the workspace, and its
-    // Windows-only and target-specific code is compiled by no Linux lane, so the
-    // workspace's 1.97 check is no proof of the 1.96 floor on those targets.
-    const block = extractJobBlock(workflow, 'target-msrv');
-    const launcherFloor = /^rust-version = "([^"]+)"$/m.exec(
-      readText('crates/mangostudio-launcher/Cargo.toml')
-    )?.[1];
+  test('split compiler jobs disappear only after their coverage moves to native workspace jobs', () => {
+    const gate = extractJobBlock(workflow, 'gate');
+    for (const job of ['workspace-msrv', 'target-msrv', 'launcher-msrv']) {
+      expect(extractJobBlock(workflow, job), `${job} is redundant at the unified baseline`).toBe(
+        ''
+      );
+      expect(gate).not.toContain(job);
+    }
+  });
 
-    expect(launcherFloor, 'launcher rust-version').toBeDefined();
-    expect(
-      block,
-      'target-msrv has no launcher-floor check: launcher code on Windows and macOS is only checked at 1.97'
-    ).toContain('cargo check -p mangostudio --all-targets --locked --target "$TARGET"');
-    expect(block).toContain(`RUSTUP_TOOLCHAIN: ${launcherFloor}`);
-    expect(block).toContain(
-      `rustup toolchain install ${launcherFloor} --profile minimal --target "$TARGET"`
-    );
+  test('native validations and their tools continue after independent failures', () => {
+    for (const job of ['workspace', 'workspace-windows-arm64']) {
+      const steps = extractStepBlocks(extractJobBlock(workflow, job));
+      const independent = steps.filter((step) =>
+        /run: cargo (?:check|clippy|test|nextest|doc|build)\b|name: Check nextest|uses: (?:oven-sh\/setup-bun|taiki-e\/install-action)/.test(
+          step
+        )
+      );
+      expect(independent.length, `${job} has independent validation steps`).toBeGreaterThan(0);
+      for (const step of independent) {
+        expect(
+          step,
+          `${job} must run its independent validations after a sibling failure`
+        ).toContain('!cancelled()');
+        expect(step, `${job} must propagate each validation failure`).not.toContain(
+          'continue-on-error'
+        );
+      }
+    }
   });
 
   test('every Rust-gated lane is an accepted skip only when the Rust signal is false', () => {
@@ -431,7 +412,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 workspace-msrv target-msrv launcher-msrv musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy fuzz-workspace runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
     );
   });
 
@@ -514,7 +495,9 @@ describe('release-dry-run.yml always-reporting gate', () => {
     expect(windowsBlock).toContain("if: needs.changes.outputs.release == 'true'");
     expect(parseNeedsList(cargoBlock)).toEqual(['changes']);
     expect(cargoBlock).toContain("if: needs.changes.outputs.launcher == 'true'");
-    expect(cargoBlock).toContain('RUSTUP_TOOLCHAIN: 1.96.0');
+    const floor = /^rust-version = "([^"]+)"$/m.exec(readText('Cargo.toml'))?.[1];
+    expect(floor, 'workspace Rust baseline').toBeDefined();
+    expect(cargoBlock).toContain(`RUSTUP_TOOLCHAIN: ${floor}`);
   });
 
   test('non-PR events treat every lane as relevant (weekly drift check)', () => {

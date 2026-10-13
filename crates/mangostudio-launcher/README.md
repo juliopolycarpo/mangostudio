@@ -1,8 +1,8 @@
 # mangostudio (launcher crate)
 
 [MangoStudio](https://mangostudio.dev) is an AI-powered image generation and
-chat studio. This crate is **not the application source** — it is a thin launcher so the Rust
-toolchain can install the product:
+chat studio. This crate is a thin launcher that installs the product through the Rust toolchain.
+Building it requires Rust 1.99.0 or newer:
 
 ```bash
 cargo install mangostudio
@@ -26,7 +26,8 @@ assets are immutable, so the per-run refresh finds the same bytes every time.
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
 matching GitHub release archive instead of building the launcher. The installed
 binary is pinned to that crate version and does not use the launcher cache, but
-it reports the same `mangostudio --version`.
+it reports the same `mangostudio --version`. Installing a prebuilt archive does not need a local
+Rust compiler. If binstall falls back to compiling the launcher, it requires Rust 1.99.0 or newer.
 
 ## Environment overrides
 
