@@ -21,6 +21,7 @@ import type {
   ExternalAgentRemedy,
   ExternalAgentTargetId,
   ExternalAgentUnavailableReason,
+  ExternalConversationResetReason,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
 } from '../external-agents/schemas';
@@ -47,6 +48,8 @@ export interface ExternalStreamSession {
   readonly targetId: ExternalAgentTargetId;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
+  /** Why the chat's earlier conversation did not carry into this session, when it did not. */
+  readonly conversationReset?: ExternalConversationResetReason;
   /** The model the hub resolved, when it resolved one. */
   readonly model?: string;
 }
@@ -71,6 +74,9 @@ export function externalSessionStartedChunk(session: ExternalStreamSession): Str
     targetId: session.targetId,
     resumed: session.resumed,
     ...(session.fallbackReason !== undefined ? { fallbackReason: session.fallbackReason } : {}),
+    ...(session.conversationReset !== undefined
+      ? { conversationReset: session.conversationReset }
+      : {}),
     ...(session.model !== undefined ? { model: session.model } : {}),
     done: false,
   };

@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
+import { UpdateQueryBuilder } from 'kysely';
 import { getDb } from '../../../../src/db/database';
 import {
   createExternalSessionManager,
@@ -16,6 +17,7 @@ import {
 } from '../../../../src/modules/external-agents/infrastructure/external-session-adoption-lease-repository';
 import {
   readContinuation,
+  setContinuationUnresumable,
   writeContinuation,
 } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
 import { RuntimeRequestNoReplyError } from '../../../../src/services/runtime-client/request-not-sent';
@@ -79,6 +81,24 @@ function managerFor(
     newSessionId: () => sessionIds[index++] ?? `session-${index}`,
     now: () => 1_000,
   });
+}
+
+/**
+ * A continuation store whose writes to the unresumable mark fail, as a database that has gone
+ * read-only would. Every other statement runs against the real database.
+ */
+function refuseContinuationWrites() {
+  const original = UpdateQueryBuilder.prototype.execute;
+  let refused = 0;
+  const spy = spyOn(UpdateQueryBuilder.prototype, 'execute');
+  spy.mockImplementation(function (this: UpdateQueryBuilder<never, never, never, never>) {
+    if (this.compile().sql.startsWith('update "external_session_continuations"')) {
+      refused += 1;
+      return Promise.reject(new Error('attempt to write a readonly database'));
+    }
+    return original.call(this);
+  } as typeof original);
+  return { refused: () => refused, restore: () => spy.mockRestore() };
 }
 
 function recordingConsumer(): ExternalSessionConsumer & { readonly teardowns: string[] } {
@@ -328,6 +348,154 @@ describe('external session manager', () => {
     expect(handle.resumed).toBe(false);
   });
 
+  describe('the resume mode a reopen asks for', () => {
+    it.each([
+      ['claude', 'strict'],
+      ['codex', 'fallback'],
+      ['cursor', 'fallback'],
+    ] as const)('asks %s for a %s resume', async (targetId, expected) => {
+      const first = createFakeExternalRuntime({ refuseFallbackResume: targetId === 'claude' });
+      await managerFor(first).ensureSession(baseInput({ targetId }));
+      const second = createFakeExternalRuntime({ refuseFallbackResume: targetId === 'claude' });
+
+      await managerFor(second).ensureSession(baseInput({ targetId }));
+
+      const open = second.calls.open[0];
+      expect(
+        { resumeRef: open?.resumeRef, resumeMode: open?.resumeMode },
+        `expected a ${targetId} reopen to resume native-session-1 in ${expected} mode`
+      ).toEqual({ resumeRef: 'native-session-1', resumeMode: expected });
+    });
+
+    it('opens a Claude session whose runtime refuses fallback resume, without a reset notice', async () => {
+      const first = createFakeExternalRuntime({ refuseFallbackResume: true });
+      await managerFor(first).ensureSession(baseInput({ targetId: 'claude' }));
+      const second = createFakeExternalRuntime({ refuseFallbackResume: true });
+
+      const handle = await managerFor(second).ensureSession(baseInput({ targetId: 'claude' }));
+
+      // Claude confirms a resume on its first turn, so `resumed: false` here means unconfirmed.
+      expect({ resumed: handle.resumed, reset: handle.takeConversationReset() }).toEqual({
+        resumed: false,
+        reset: undefined,
+      });
+    });
+
+    it('reports a conversation reset when the agent declines the resume on open', async () => {
+      const first = createFakeExternalRuntime();
+      await managerFor(first).ensureSession(baseInput());
+      const second = createFakeExternalRuntime({ resumeSucceeds: false });
+
+      const handle = await managerFor(second).ensureSession(baseInput());
+
+      expect(
+        { first: handle.takeConversationReset(), again: handle.takeConversationReset() },
+        'expected conversationReset: unavailable once, then none'
+      ).toEqual({ first: 'unavailable', again: undefined });
+    });
+
+    describe('a stored conversation marked unresumable', () => {
+      async function markedConversation() {
+        const first = createFakeExternalRuntime({ refuseFallbackResume: true });
+        const firstHandle = await managerFor(first).ensureSession(
+          baseInput({ targetId: 'claude' })
+        );
+        await setContinuationUnresumable(chatId, firstHandle.sessionId, true, getDb());
+        return firstHandle;
+      }
+
+      it('opens a new conversation instead of resuming it, and says so once', async () => {
+        await markedConversation();
+        const second = createFakeExternalRuntime({ refuseFallbackResume: true });
+
+        const handle = await managerFor(second).ensureSession(baseInput({ targetId: 'claude' }));
+
+        expect(
+          {
+            resumeRef: second.calls.open[0]?.resumeRef,
+            first: handle.takeConversationReset(),
+            again: handle.takeConversationReset(),
+          },
+          'expected an open without a resume reference that reports nonresumable once'
+        ).toEqual({ resumeRef: undefined, first: 'nonresumable', again: undefined });
+      });
+
+      it('writes the new conversation unmarked, so the open after it resumes', async () => {
+        await markedConversation();
+        const second = createFakeExternalRuntime({ refuseFallbackResume: true });
+        const reopened = await managerFor(second).ensureSession(baseInput({ targetId: 'claude' }));
+
+        const row = await readContinuation(chatId, getDb());
+        const third = createFakeExternalRuntime({ refuseFallbackResume: true });
+        await managerFor(third).ensureSession(baseInput({ targetId: 'claude' }));
+
+        expect(
+          {
+            unresumable: row?.unresumable,
+            runtimeSessionId: row?.runtimeSessionId,
+            thirdResumeRef: third.calls.open[0]?.resumeRef,
+          },
+          'expected the new conversation to be stored unmarked and resumed by the next open'
+        ).toEqual({
+          unresumable: false,
+          runtimeSessionId: reopened.sessionId,
+          thirdResumeRef: row?.nativeSessionId,
+        });
+      });
+
+      it('is not resumed when the mark could not be written, until a write lands', async () => {
+        const first = createFakeExternalRuntime({ refuseFallbackResume: true });
+        const manager = managerFor(first);
+        const handle = await manager.ensureSession(baseInput({ targetId: 'claude' }));
+        const store = refuseContinuationWrites();
+        try {
+          await expect(
+            handle.setConversationUnresumable(true),
+            'expected a refused mark write to be absorbed, not thrown'
+          ).resolves.toBeUndefined();
+        } finally {
+          store.restore();
+        }
+        const stored = await readContinuation(chatId, getDb());
+        await handle.retire();
+
+        const reopened = await manager.ensureSession(baseInput({ targetId: 'claude' }));
+
+        expect(
+          {
+            writes: store.refused(),
+            storedMark: stored?.unresumable,
+            resumeRef: first.calls.open[1]?.resumeRef,
+            reset: reopened.takeConversationReset(),
+          },
+          'expected the mark to be refused once, the row unmarked, and the next open fresh'
+        ).toEqual({ writes: 1, storedMark: false, resumeRef: undefined, reset: 'nonresumable' });
+      });
+
+      it('is not marked by the end of a turn on a session an open has since replaced', async () => {
+        const first = await markedConversation();
+        const second = createFakeExternalRuntime({ refuseFallbackResume: true });
+        await managerFor(second, ['session-replacing']).ensureSession(
+          baseInput({ targetId: 'claude' })
+        );
+
+        const changed = await setContinuationUnresumable(chatId, first.sessionId, true, getDb());
+
+        expect(
+          { changed, unresumable: (await readContinuation(chatId, getDb()))?.unresumable },
+          'expected a stale session id to leave the newer conversation unmarked'
+        ).toEqual({ changed: false, unresumable: false });
+      });
+    });
+
+    it('reports no reset for a first open', async () => {
+      const handle = await managerFor(
+        createFakeExternalRuntime({ resumeSucceeds: false })
+      ).ensureSession(baseInput());
+      expect(handle.takeConversationReset()).toBeUndefined();
+    });
+  });
+
   it.each([
     ['environment', { environmentId: 'remote' }],
     ['workspace', { canonicalWorkspacePath: '/work/other' }],
@@ -427,6 +595,62 @@ describe('external session manager', () => {
     expect(consumer.teardowns).toEqual(['runtime-disconnected']);
     await expect(readContinuation(chatId, getDb())).resolves.toBeDefined();
     expect(manager.liveSessionCount()).toBe(0);
+  });
+
+  describe('retire', () => {
+    it('forgets the session and keeps the continuation, without telling a hold the chat ended', async () => {
+      const runtime = createFakeExternalRuntime();
+      const manager = managerFor(runtime);
+      const handle = await manager.ensureSession(baseInput());
+      const holdNotices: string[] = [];
+      manager.holdChat({ chatId, userId, environmentId: 'local', targetId: 'codex' }, (reason) =>
+        holdNotices.push(reason)
+      );
+
+      await handle.retire();
+
+      expect({
+        live: handle.isLive(),
+        sessions: manager.liveSessionCount(),
+        closes: runtime.calls.close.length,
+        holdNotices,
+        continuation: (await readContinuation(chatId, getDb()))?.nativeSessionId,
+      }).toEqual({
+        live: false,
+        sessions: 0,
+        closes: 1,
+        holdNotices: [],
+        continuation: 'native-session-1',
+      });
+    });
+
+    it('drops the continuation when asked, so the next open starts a new conversation', async () => {
+      const runtime = createFakeExternalRuntime();
+      const manager = managerFor(runtime);
+      const handle = await manager.ensureSession(baseInput());
+
+      await handle.retire({ dropContinuation: true });
+      await manager.ensureSession(baseInput());
+
+      expect({
+        continuationAfterRetire: runtime.calls.open[1]?.resumeRef,
+      }).toEqual({ continuationAfterRetire: undefined });
+    });
+
+    it('does nothing for a session the chat no longer holds', async () => {
+      const runtime = createFakeExternalRuntime();
+      const manager = managerFor(runtime);
+      const stale = await manager.ensureSession(baseInput());
+      await stale.retire();
+      const current = await manager.ensureSession(baseInput());
+
+      await stale.retire();
+
+      expect({
+        currentLive: current.isLive(),
+        closes: runtime.calls.close.length,
+      }).toEqual({ currentLive: true, closes: 1 });
+    });
   });
 
   it('drops the continuation when consent is withdrawn', async () => {

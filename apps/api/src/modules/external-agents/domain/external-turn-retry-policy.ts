@@ -7,6 +7,11 @@
  */
 
 import { RemoteError } from '@mangostudio/protocol';
+import {
+  EXTERNAL_AGENT_SESSION_DETAIL,
+  EXTERNAL_AGENT_SESSION_STATES,
+  type ExternalAgentSessionState,
+} from '@mangostudio/shared/runtime-contract';
 import { isRequestNotSent, noReplyOf } from '../../../services/runtime-client/request-not-sent';
 
 export interface RetryPolicy {
@@ -71,6 +76,27 @@ export function classifySubmissionFailure(error: unknown): SubmissionFailure {
   }
   if (dispatch === 'not-submitted') return 'not-submitted';
   return 'refused';
+}
+
+/**
+ * What the runtime said about the session when it refused a turn, if it said anything.
+ *
+ * The runtime says so only when it provably dispatched nothing, and keeps `kind: "tool_argument"`
+ * on the refusal so a caller that does not read the detail still treats it as a lost session. The
+ * key and the two values are the shared contract's (`EXTERNAL_AGENT_SESSION_DETAIL`,
+ * `EXTERNAL_AGENT_SESSION_STATES`), which the runtime crate asserts against the same JSON.
+ *
+ * - `closed`: the vendor's process ended or the SDK sealed the session; the conversation is
+ *   intact, so the new session resumes it.
+ * - `nonresumable`: the SDK refuses every later turn on the vendor session; the new session must
+ *   start a fresh conversation.
+ *
+ * @example
+ * if (sessionRefusalState(error) === 'closed') await handle.retire(); // then reopen once
+ */
+export function sessionRefusalState(error: unknown): ExternalAgentSessionState | undefined {
+  const state = submissionRemoteErrorOf(error)?.details?.[EXTERNAL_AGENT_SESSION_DETAIL];
+  return EXTERNAL_AGENT_SESSION_STATES.find((known) => known === state);
 }
 
 /** The runtime answer behind the Hub's bounded error normalization chain. */

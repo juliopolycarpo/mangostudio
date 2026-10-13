@@ -26,6 +26,9 @@ const LIVE_REFUSAL_CASE_IDS = [
   'cursor-signed-out',
   'codex-outdated',
   'codex-outdated-reopen',
+  'codex-child-killed-between-turns',
+  'claude-reopen-after-connection-drop',
+  'claude-reopen-after-killed-turn',
 ] as const;
 
 type LiveRefusalCaseId = (typeof LIVE_REFUSAL_CASE_IDS)[number];
@@ -33,8 +36,11 @@ type LiveRefusalCaseId = (typeof LIVE_REFUSAL_CASE_IDS)[number];
 export interface LiveRefusalCase {
   readonly id: LiveRefusalCaseId;
   readonly targetId: ExternalAgentTargetId;
-  /** The unavailable reason the selector and the refused send are expected to carry. */
-  readonly reason: Extract<ExternalAgentUnavailableReason, 'signed-out' | 'version-unsupported'>;
+  /**
+   * The unavailable reason the selector and the refused send are expected to carry. Absent for a
+   * case that refuses nothing.
+   */
+  readonly reason?: Extract<ExternalAgentUnavailableReason, 'signed-out' | 'version-unsupported'>;
   /**
    * Whether discovery already reports the reason. Cursor's status surface says nothing usable
    * when signed out (`authState: unknown`), so only its open refuses.
@@ -43,8 +49,15 @@ export interface LiveRefusalCase {
   /**
    * `open` refuses the first open of a session. `reopen` completes a turn, makes the agent
    * outdated, ends its process so the session drops, and sends again: the reopen is refused.
+   * `child-killed` completes a turn, ends the vendor's own process under the live session, and
+   * sends again on the signed-in account: the hub reopens once and the turn completes.
+   * `connection-dropped` restarts the runtime between two sends on the signed-in account: the
+   * hub reopens on the new runtime and the second send must recall the first.
+   * `killed-turn` ends the runtime in the middle of a turn (a kill the vendor does not get to
+   * finish), restarts it, and sends again: the stored conversation holds a turn the vendor left
+   * unfinished, so the hub must open a new conversation and say so.
    */
-  readonly flow: 'open' | 'reopen';
+  readonly flow: 'open' | 'reopen' | 'child-killed' | 'connection-dropped' | 'killed-turn';
 }
 
 export const LIVE_REFUSAL_CASES: readonly LiveRefusalCase[] = [
@@ -83,7 +96,40 @@ export const LIVE_REFUSAL_CASES: readonly LiveRefusalCase[] = [
     selectorRefuses: false,
     flow: 'reopen',
   },
+  {
+    id: 'codex-child-killed-between-turns',
+    targetId: 'codex',
+    selectorRefuses: false,
+    flow: 'child-killed',
+  },
+  {
+    id: 'claude-reopen-after-connection-drop',
+    targetId: 'claude',
+    selectorRefuses: false,
+    flow: 'connection-dropped',
+  },
+  {
+    id: 'claude-reopen-after-killed-turn',
+    targetId: 'claude',
+    selectorRefuses: false,
+    flow: 'killed-turn',
+  },
 ];
+
+/**
+ * The unavailable reason a refusing case expects.
+ *
+ * @example
+ * refusedReason(codexSignedOut); // 'signed-out'
+ */
+export function refusedReason(
+  refusal: LiveRefusalCase
+): Extract<ExternalAgentUnavailableReason, 'signed-out' | 'version-unsupported'> {
+  if (!refusal.reason) {
+    throw new Error(`expected case ${refusal.id} to name a refusal reason | received: none`);
+  }
+  return refusal.reason;
+}
 
 /**
  * The cases `MANGOSTUDIO_LIVE_AGENT_REFUSALS` names, in the order they are defined.
@@ -152,6 +198,11 @@ export function refusalEnvironment(
         PATH: pathWith(input.cursorDirectory, inheritedPath),
       };
     }
+    case 'codex-child-killed-between-turns':
+    case 'claude-reopen-after-connection-drop':
+    case 'claude-reopen-after-killed-turn':
+      // The signed-in account and the current codex, untouched: only the process is ended.
+      return {};
     case 'codex-outdated-reopen':
     case 'codex-outdated': {
       if (!input.outdatedCodexDirectory) {

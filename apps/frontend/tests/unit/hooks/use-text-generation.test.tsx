@@ -1824,6 +1824,167 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     }).toEqual({ persistedKept: true, refusalKept: true });
   });
 
+  // A send that reopened its session stores its rows before it submits, so the re-read an earlier
+  // dropped stream armed returns them with the notice or the refusal the live view showed. Nothing
+  // is lost to the replacement, and nothing is added to the optimistic copy to protect.
+  describe('after the re-read an earlier dropped stream armed', () => {
+    type Rows = {
+      pages: Array<{ messages: Array<Record<string, unknown>>; nextCursor: null }>;
+      pageParams: unknown[];
+    };
+
+    async function secondSendThenReread(
+      secondTurnChunks: Array<Parameters<Parameters<typeof respondTextStream>[1]>[0]>,
+      storedSecondTurn: Record<string, unknown>
+    ) {
+      const props = makeProps();
+      let call = 0;
+      mockStream.mockImplementation(
+        (
+          _req: unknown,
+          onChunk: (chunk: Parameters<Parameters<typeof respondTextStream>[1]>[0]) => void
+        ) => {
+          call += 1;
+          if (call === 1) {
+            onChunk({ type: 'user_message_id', messageId: 'server-user-1', done: false });
+            onChunk({ type: 'assistant_message_id', messageId: 'server-ai-1', done: false });
+            return Promise.reject(new Error('network error'));
+          }
+          for (const chunk of secondTurnChunks) onChunk(chunk);
+          return Promise.resolve();
+        }
+      );
+      const { result } = renderWithQueryClient(props);
+      const queryClient = result.current.queryClient;
+      const cacheRows = (chatId: string) => ['messages', chatId] as const;
+      (props.optimistic.appendOptimisticMessages as ReturnType<typeof jest.fn>).mockImplementation(
+        (chatId: string, added: Array<Record<string, unknown>>) => {
+          queryClient.setQueryData<Rows>(cacheRows(chatId), (old) => ({
+            pages: [{ messages: [...(old?.pages[0]?.messages ?? []), ...added], nextCursor: null }],
+            pageParams: [null],
+          }));
+        }
+      );
+      (props.optimistic.updateOptimisticMessage as ReturnType<typeof jest.fn>).mockImplementation(
+        (chatId: string, id: string, updates: Record<string, unknown>) => {
+          queryClient.setQueryData<Rows>(cacheRows(chatId), (old) =>
+            old
+              ? {
+                  ...old,
+                  pages: old.pages.map((page) => ({
+                    ...page,
+                    messages: page.messages.map((row) =>
+                      row.id === id ? { ...row, ...updates } : row
+                    ),
+                  })),
+                }
+              : old
+          );
+        }
+      );
+      const serverRows = [
+        { id: 'server-user-1', chatId: 'chat-1', role: 'user', text: 'first', timestamp: 1 },
+        { id: 'server-ai-1', chatId: 'chat-1', role: 'ai', text: 'done', timestamp: 2 },
+        { id: 'server-user-2', chatId: 'chat-1', role: 'user', text: 'second', timestamp: 3 },
+        { id: 'server-ai-2', chatId: 'chat-1', role: 'ai', timestamp: 4, ...storedSecondTurn },
+      ];
+      spyOn(queryClient, 'invalidateQueries').mockImplementation((filters) => {
+        const key = filters?.queryKey;
+        if (Array.isArray(key) && key[0] === 'messages') {
+          queryClient.setQueryData<Rows>(key, {
+            pages: [{ messages: serverRows, nextCursor: null }],
+            pageParams: [null],
+          });
+        }
+        return Promise.resolve();
+      });
+
+      await act(async () => {
+        await result.current.generation.handleRespond('first');
+      });
+      await act(async () => {
+        await result.current.generation.handleRespond('second');
+      });
+      await act(async () => {
+        await fakeRealtime.emit(ACTIVITY_TOPIC);
+      });
+      const cached = queryClient.getQueryData<{
+        pages: Array<{
+          messages: Array<{ id: string; parts?: Array<Record<string, unknown>> }>;
+        }>;
+      }>(['messages', 'chat-1']);
+      const messages = cached?.pages.flatMap((page) => page.messages) ?? [];
+      return messages.find((message) => message.id === 'server-ai-2');
+    }
+
+    it('keeps the notice of a reopened send that could not resume', async () => {
+      const row = await secondSendThenReread(
+        [
+          { type: 'user_message_id', messageId: 'server-user-2', done: false },
+          { type: 'assistant_message_id', messageId: 'server-ai-2', done: false },
+          {
+            type: 'external_session_started',
+            sessionId: 'session-2',
+            targetId: 'claude',
+            resumed: false,
+            conversationReset: 'nonresumable',
+            done: false,
+          },
+          { type: 'external_text', text: 'fresh', done: false },
+          { type: 'external_turn_completed', reason: 'completed', done: false },
+          { type: 'done', done: true, messageId: 'server-ai-2' },
+        ],
+        {
+          text: 'fresh',
+          parts: [
+            {
+              type: 'external_turn',
+              sessionId: 'session-2',
+              conversationReset: 'nonresumable',
+            },
+          ],
+        }
+      );
+
+      expect(
+        row?.parts?.find((part) => part.type === 'external_turn')?.conversationReset,
+        'expected the retried turn to keep conversationReset: nonresumable after the re-read'
+      ).toBe('nonresumable');
+    });
+
+    it('keeps the refusal card of a reopened send whose reopen was refused', async () => {
+      const row = await secondSendThenReread(
+        [
+          { type: 'user_message_id', messageId: 'server-user-2', done: false },
+          { type: 'assistant_message_id', messageId: 'server-ai-2', done: false },
+          {
+            type: 'external_error',
+            error: { code: 'external_agent_signed_out', message: 'signed out' },
+            unavailableReason: 'signed-out',
+            done: false,
+          },
+          { type: 'external_turn_completed', reason: 'vendor-error', done: false },
+          { type: 'done', done: true, messageId: 'server-ai-2' },
+        ],
+        {
+          parts: [
+            {
+              type: 'external_turn',
+              sessionId: 'session-1',
+              unavailableReason: 'signed-out',
+              error: { code: 'external_agent_signed_out', message: 'signed out' },
+            },
+          ],
+        }
+      );
+
+      expect(
+        row?.parts?.find((part) => part.type === 'external_turn')?.unavailableReason,
+        'expected the stored turn to keep unavailableReason: signed-out after the re-read'
+      ).toBe('signed-out');
+    });
+  });
+
   it('still re-reads after a terminal error chunk that names no reason', async () => {
     const props = makeProps();
     mockStream.mockImplementation(

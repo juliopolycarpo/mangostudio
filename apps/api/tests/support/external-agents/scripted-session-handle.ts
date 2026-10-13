@@ -13,23 +13,35 @@ export interface ScriptedSessionHandle extends ExternalSessionHandle {
   readonly failures: Array<() => Error>;
   readonly sent: ExternalAgentTurnParams[];
   submissions(): number;
+  /** How many times the submission retired this session as closed. */
+  retirements(): number;
 }
 
 export function createScriptedSessionHandle(sessionId = 'session-1'): ScriptedSessionHandle {
   const failures: Array<() => Error> = [];
   const sent: ExternalAgentTurnParams[] = [];
   let submitted = 0;
+  let retired = 0;
+  let live = true;
   return {
     failures,
     sent,
     submissions: () => submitted,
+    retirements: () => retired,
     sessionId,
     nativeSessionId: 'native-session-1',
     targetId: 'codex',
     resumed: false,
     effectiveConfiguration: { level: 'default', routing: 'user', workspaceRoots: ['/w'] },
     capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
-    isLive: () => true,
+    isLive: () => live,
+    takeConversationReset: () => undefined,
+    setConversationUnresumable: () => Promise.resolve(),
+    retire() {
+      retired += 1;
+      live = false;
+      return Promise.resolve();
+    },
     subscribe: () => () => undefined,
     beginTurn: () => undefined,
     endTurn: () => undefined,

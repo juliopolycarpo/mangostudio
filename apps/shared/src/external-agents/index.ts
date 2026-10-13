@@ -183,6 +183,8 @@ export {
   ExternalApprovalRequestSchema,
   type ExternalApprovalRouting,
   ExternalApprovalRoutingSchema,
+  type ExternalConversationResetReason,
+  ExternalConversationResetReasonSchema,
   type ExternalCredits,
   ExternalCreditsSchema,
   type ExternalIdentityIsolation,

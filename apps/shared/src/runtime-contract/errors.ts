@@ -68,6 +68,46 @@ export const RUNTIME_SERVICE_ERROR_KINDS = [
 export type RuntimeServiceErrorKind = (typeof RUNTIME_SERVICE_ERROR_KINDS)[number];
 
 /**
+ * The `details` key an external-agent turn refusal uses to say the session itself cannot run the
+ * turn, and why. The refusal keeps `kind: "tool_argument"`, so a hub that does not read this key
+ * still treats it as a lost session.
+ */
+export const EXTERNAL_AGENT_SESSION_DETAIL = 'session';
+
+/**
+ * What {@link EXTERNAL_AGENT_SESSION_DETAIL} can say. Both mean the runtime dispatched nothing, so
+ * the hub may open another session and submit the same turn there.
+ *
+ * - `closed`: the vendor's process ended or the SDK sealed the session. The conversation is
+ *   intact; the new session resumes it.
+ * - `nonresumable`: the SDK refuses every later turn on this vendor session (Claude after a
+ *   forced stop or a resume it could not verify). The stored conversation cannot be trusted, so
+ *   the new session starts a fresh one.
+ */
+export const EXTERNAL_AGENT_SESSION_STATES = ['closed', 'nonresumable'] as const;
+
+export type ExternalAgentSessionState = (typeof EXTERNAL_AGENT_SESSION_STATES)[number];
+
+/**
+ * The error codes a Claude turn ends with when the vendor itself finished the turn and reported a
+ * failure (a result record with `is_error`), as the External Agents SDK names them: the generic
+ * `claude-error`, and `claude-<subtype>` for the four subtypes it recognises.
+ *
+ * Any other code on a failed turn (the runtime's own `adapter-stream` for a timeout or an
+ * oversized payload, `claude-stream-broken`, `claude-no-result`, `claude-terminated`, or a code
+ * a later SDK adds) means the child may have been killed under the turn. The hub marks such a
+ * conversation unresumable, so this list is the only allow-list: a new code fails safe. A runtime
+ * test holds the list to what the SDK's reducer emits.
+ */
+export const EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES = [
+  'claude-error',
+  'claude-error_during_execution',
+  'claude-error_max_turns',
+  'claude-error_max_budget_usd',
+  'claude-error_max_structured_output_retries',
+] as const;
+
+/**
  * Kind carried in `details.kind` when a named backup set is gone.
  *
  * Named rather than spelled inline because two processes match on it: the

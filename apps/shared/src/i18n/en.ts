@@ -3942,6 +3942,13 @@ export const messages: Messages = {
       usageCacheWrite: 'cache write',
       usageTotal: 'total',
       incomplete: 'Cut off.',
+      // Shown when the chat had an earlier conversation and the agent did not continue it.
+      conversationReset: {
+        nonresumable:
+          'The agent would not continue the earlier conversation, so this reply started a new one without the earlier messages.',
+        unavailable:
+          'The agent could not find the earlier conversation, so this reply started a new one without the earlier messages.',
+      },
       terminal: {
         completed: 'Finished.',
         'cancelled-by-user': 'You stopped this turn.',

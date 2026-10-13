@@ -932,6 +932,25 @@ export const ExternalAgentUnavailableReasonSchema = Type.Union([
 export type ExternalAgentUnavailableReason = Static<typeof ExternalAgentUnavailableReasonSchema>;
 
 /**
+ * Why a chat's earlier conversation did not carry into the session that ran a turn.
+ *
+ * Added by the hub, never by a vendor: it knows it opened a session for a chat that already had a
+ * stored conversation and the agent did not continue it. The turn still ran, in a new conversation
+ * without the earlier messages, and the person is told so.
+ *
+ * - `nonresumable`: the agent refused further turns on the stored conversation (Claude after a
+ *   forced stop or a resume it could not verify), so the hub started a new one.
+ * - `unavailable`: the agent could not load the stored conversation and said so on open (Codex
+ *   `no rollout found`, an ACP stale session), and the hub accepted its fallback.
+ */
+export const ExternalConversationResetReasonSchema = Type.Union([
+  Type.Literal('nonresumable'),
+  Type.Literal('unavailable'),
+]);
+
+export type ExternalConversationResetReason = Static<typeof ExternalConversationResetReasonSchema>;
+
+/**
  * What MangoStudio can offer to fix an agent that cannot run.
  *
  * The shape lives here with the reason it answers; which reason maps to which

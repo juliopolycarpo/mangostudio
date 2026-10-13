@@ -41,6 +41,7 @@ import {
   type ExternalAgentSteerResult,
   type ExternalAgentTargetId,
   type ExternalApprovalRequest,
+  type ExternalConversationResetReason,
   type ExternalReviewTarget,
   type ExternalSteerRejectionReason,
   type ExternalTurnTerminalReason,
@@ -76,6 +77,7 @@ import {
   openFailureCodeFor,
   openRefusalFor,
 } from '../domain/external-open-refusal';
+import { endLeavesConversationUnresumable } from '../domain/external-resume-policy';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import {
   classifySubmissionFailure,
@@ -184,6 +186,7 @@ interface ExternalTurnObserver {
     readonly targetId: ExternalAgentTargetId;
     readonly resumed: boolean;
     readonly fallbackReason?: string;
+    readonly conversationReset?: ExternalConversationResetReason;
   }): void;
   /**
    * Both message rows exist and are readable. Reported after the write rather
@@ -575,11 +578,15 @@ export function createExternalTurnController(
     if (input.review && !handle.capabilities.nativeReview) {
       throw new ExternalTurnReviewUnsupportedError(input.chatId);
     }
+    // Taken, not read: the open's reset describes the send that first uses the session, and a
+    // later turn on the same session continues the conversation this one started.
+    const conversationReset = handle.takeConversationReset();
     input.observer?.onSession?.({
       sessionId: handle.sessionId,
       targetId,
       resumed: handle.resumed,
       ...(handle.fallbackReason ? { fallbackReason: handle.fallbackReason } : {}),
+      ...(conversationReset ? { conversationReset } : {}),
     });
 
     // The single-flight above can hand the same session to two sends that both
@@ -587,7 +594,7 @@ export function createExternalTurnController(
     // what makes "never a second vendor session" true rather than likely.
     if (findActiveTurnByChat(input.chatId)) throw new ExternalTurnConflictError(input.chatId);
 
-    return runTurn({ input, db, chat, targetId, handle });
+    return runTurn({ input, db, chat, targetId, handle, conversationReset });
   }
 
   /** The session inputs `start` opened with, so a resubmission reopens the same binding. */
@@ -614,9 +621,16 @@ export function createExternalTurnController(
     readonly chat: { readonly environmentId: string };
     readonly targetId: ExternalAgentTargetId;
     readonly handle: ExternalSessionHandle;
+    readonly conversationReset: ExternalConversationResetReason | undefined;
   }): Promise<ExternalTurnResult> {
     const { input, db, targetId } = context;
     let handle = context.handle;
+    /**
+     * What this send reports about its conversation. A reopen inside the send replaces the
+     * session but not the send, so a reset an earlier session reported stands until a later one
+     * reports its own: the reply still has none of the earlier messages.
+     */
+    let conversationReset = context.conversationReset;
     /**
      * Aborted by the first terminal writer. The submission loop reads it, so
      * a stop, a revocation or a shutdown ends every pending retry.
@@ -637,6 +651,7 @@ export function createExternalTurnController(
       sessionId: handle.sessionId,
       startedAt,
     });
+    if (conversationReset) transcript.markConversationReset(conversationReset);
     const writer = new ExternalTranscriptWriter(db, assistantMessageId, transcript, now);
 
     const settled = Promise.withResolvers<ExternalTurnTerminalReason>();
@@ -886,6 +901,9 @@ export function createExternalTurnController(
         )
       : () => undefined;
 
+    /** The runtime said the stored conversation cannot take further turns, so the next open is new. */
+    let replacedAsNonresumable = false;
+
     /** Errors that came out of {@link reacquire}, so `failStart` can tell a reopen from a turn call. */
     const reopenFailures = new WeakSet<object>();
 
@@ -902,6 +920,11 @@ export function createExternalTurnController(
       // A stop that landed during the open must not re-point a turn that ended.
       if (stop.signal.aborted) return next;
       if (next === handle || next.sessionId === handle.sessionId) return next;
+      // The agent would not run further turns on the stored conversation, so the session that
+      // runs this one started a new conversation, whatever its own open reported.
+      const reported = next.takeConversationReset();
+      conversationReset = replacedAsNonresumable ? 'nonresumable' : (reported ?? conversationReset);
+      if (conversationReset) transcript.markConversationReset(conversationReset);
       unsubscribe();
       handle = next;
       unsubscribe = handle.subscribe(consumer);
@@ -912,6 +935,15 @@ export function createExternalTurnController(
         live.handle = handle;
         live.sessionId = handle.sessionId;
       }
+      // The first announcement named the session that has since been replaced. Naming the one that
+      // runs the turn keeps the live view and a reload on the same session and the same notice.
+      input.observer?.onSession?.({
+        sessionId: handle.sessionId,
+        targetId,
+        resumed: handle.resumed,
+        ...(handle.fallbackReason ? { fallbackReason: handle.fallbackReason } : {}),
+        ...(conversationReset ? { conversationReset } : {}),
+      });
       return handle;
     }
 
@@ -1045,6 +1077,9 @@ export function createExternalTurnController(
         onDispatchPending: (pending) => {
           dispatchPending = pending;
         },
+        onSessionRetired: (state) => {
+          if (state === 'nonresumable') replacedAsNonresumable = true;
+        },
         onLateAcceptance: (lateHandle, nativeTurnId) => {
           void lateHandle.cancel(nativeTurnId).catch((error: unknown) => {
             logger.warn('cancel_failed', {
@@ -1140,6 +1175,15 @@ export function createExternalTurnController(
     const { db, handle, transcript, input, reason, nativeTurnId } = context;
     const at = now();
 
+    // Before the message settles, so a settled turn always has its effect on the stored
+    // conversation recorded: a hub that dies in between is covered by the boot sweep.
+    await recordEndOnConversation(
+      handle,
+      reason,
+      transcript.turnPart.error?.code,
+      nativeTurnId !== undefined
+    );
+
     const abandonedSource = reason === 'cancelled-by-user' ? 'cancelled' : 'expired';
     if (nativeTurnId) {
       handle.endTurn(nativeTurnId);
@@ -1206,6 +1250,28 @@ export function createExternalTurnController(
       ...(transcript.usage ? { usage: transcript.usage } : {}),
       ...(transcript.turnPart.error ? { error: transcript.turnPart.error } : {}),
     };
+  }
+
+  /**
+   * Records what the end of a turn means for the chat's stored conversation.
+   *
+   * A turn that may have killed the vendor's child marks the conversation unsafe to resume, for a
+   * harness that would carry on the killed turn; a turn that completed on the same session
+   * clears the mark, because the SDK refuses turns on a session it killed. A turn the vendor never
+   * accepted ran nothing, so its failure is not a reason to mark. The handle keeps a mark the
+   * store refuses and acts on it at the next open.
+   */
+  async function recordEndOnConversation(
+    handle: ExternalSessionHandle,
+    reason: ExternalTurnTerminalReason,
+    errorCode: string | undefined,
+    turnAccepted: boolean
+  ): Promise<void> {
+    if (endLeavesConversationUnresumable(handle.targetId, reason, errorCode, turnAccepted)) {
+      await handle.setConversationUnresumable(true);
+    } else if (reason === 'completed') {
+      await handle.setConversationUnresumable(false);
+    }
   }
 
   /** Whether `live` is no longer the turn that may still be steered for `chatId`. */

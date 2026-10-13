@@ -36,6 +36,7 @@ import {
   type ExternalAgentSteerResult,
   type ExternalAgentTargetId,
   type ExternalAgentTurnParams,
+  type ExternalConversationResetReason,
   type ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
@@ -57,6 +58,7 @@ import {
   type ExternalEnvelopeVerdict,
   ExternalEventSequencer,
 } from '../domain/external-event-sequencer';
+import { resumeModeFor } from '../domain/external-resume-policy';
 import {
   EXTERNAL_ADOPTION_LEASE_TTL_MS,
   refreshAdoptionLease,
@@ -66,6 +68,7 @@ import {
   continuationMatches,
   deleteContinuation,
   readContinuation,
+  setContinuationUnresumable,
   writeContinuation,
 } from '../infrastructure/external-session-continuation-repository';
 
@@ -210,6 +213,17 @@ export interface ExternalSessionHandle {
   readonly targetId: ExternalAgentTargetId;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
+  /**
+   * What this session's open says about the chat's earlier conversation, once.
+   *
+   * Returns `nonresumable` when the hub deliberately opened a new conversation because the
+   * stored one is not safe to resume, `unavailable` when the open asked the agent to resume and
+   * it said it could not, and nothing otherwise (a harness whose resume is confirmed lazily,
+   * Claude, says nothing at open: its `resumed: false` means unconfirmed, not failed). The first
+   * call takes the answer: the turn that first uses the session reports it, and later turns on
+   * the same session continue the conversation that turn started.
+   */
+  takeConversationReset(): ExternalConversationResetReason | undefined;
   readonly effectiveConfiguration: ExternalAgentConfiguration;
   readonly capabilities: ExternalAgentCapabilities;
   /** Replaces any previous consumer; one turn runs on a session at a time. */
@@ -218,6 +232,23 @@ export interface ExternalSessionHandle {
   endTurn(nativeTurnId: string): void;
   /** False once the session was torn down — its connection dropped, or it was reaped. */
   isLive(): boolean;
+  /**
+   * Forgets this session after the runtime refused a turn because the session itself is closed,
+   * keeping the vendor conversation's continuation so the next open resumes it. Torn down as a
+   * dropped connection is: the turn being submitted is not ended by it, and its submission
+   * reopens. Does nothing once the session is no longer the chat's own.
+   *
+   * With `dropContinuation` the stored conversation goes too, so the next open starts a new one;
+   * for a vendor session the agent will not run further turns on.
+   */
+  retire(options?: { readonly dropContinuation?: boolean }): Promise<void>;
+  /**
+   * Records whether the stored conversation is unsafe to resume (see `endLeavesConversationUnresumable`).
+   * Never rejects. A mark the store refuses is kept in memory, and until a write lands the next
+   * open of this chat starts a new conversation instead of resuming this one: failing to remember a
+   * kill must not become resuming the killed turn.
+   */
+  setConversationUnresumable(unresumable: boolean): Promise<void>;
   /**
    * The exact params a turn is submitted with. Built once per attempt and kept:
    * the runtime answers a repeated `clientMessageId` from its receipt only when
@@ -348,6 +379,8 @@ interface OpenedSession {
   readonly nativeSessionId: string;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
+  /** Taken by the first turn that uses the session; see `takeConversationReset`. */
+  conversationReset?: ExternalConversationResetReason;
   readonly effectiveConfiguration: ExternalAgentConfiguration;
   readonly capabilities: ExternalAgentCapabilities;
 }
@@ -430,6 +463,30 @@ export function createExternalSessionManager(
    * have. Comparing the generation across the await is what closes that.
    */
   const reapGenerations = new Map<string, number>();
+  /**
+   * Chats whose unresumable mark could not be written, by the runtime session it belongs to.
+   * Read by the next open, which then starts a new conversation and retries the write.
+   */
+  const unwrittenMarks = new Map<string, string>();
+
+  async function setUnresumable(
+    chatId: string,
+    sessionId: string,
+    unresumable: boolean
+  ): Promise<void> {
+    try {
+      await setContinuationUnresumable(chatId, sessionId, unresumable, resolveDb());
+      if (unwrittenMarks.get(chatId) === sessionId) unwrittenMarks.delete(chatId);
+    } catch (error) {
+      logger.warn('conversation_mark_failed', {
+        sessionId,
+        unresumable,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Only a mark is a safety fact. Failing to clear one costs context, not correctness.
+      if (unresumable) unwrittenMarks.set(chatId, sessionId);
+    }
+  }
 
   function handleFor(record: SessionRecord): ExternalSessionHandle {
     const turnParams = (input: ExternalTurnInput): ExternalAgentTurnParams => ({
@@ -460,6 +517,11 @@ export function createExternalSessionManager(
       targetId: record.binding.targetId,
       resumed: record.open.resumed,
       ...(record.open.fallbackReason ? { fallbackReason: record.open.fallbackReason } : {}),
+      takeConversationReset() {
+        const taken = record.open.conversationReset;
+        record.open.conversationReset = undefined;
+        return taken;
+      },
       effectiveConfiguration: record.open.effectiveConfiguration,
       capabilities: record.open.capabilities,
       subscribe(consumer) {
@@ -470,6 +532,17 @@ export function createExternalSessionManager(
       },
       isLive() {
         return !record.closing && sessions.get(record.binding.chatId) === record;
+      },
+      async retire(options) {
+        if (record.closing || sessions.get(record.binding.chatId) !== record) return;
+        await reap(
+          record.binding.chatId,
+          'runtime-disconnected',
+          options?.dropContinuation !== true
+        );
+      },
+      setConversationUnresumable(unresumable) {
+        return setUnresumable(record.binding.chatId, record.sessionId, unresumable);
       },
       turnParams,
       sendTurn,
@@ -596,6 +669,22 @@ export function createExternalSessionManager(
     if (record) await closeRemote(record, waitMs);
   }
 
+  /**
+   * What an open says about the earlier conversation: `nonresumable` when the hub chose a new
+   * one, `unavailable` when it asked the agent to resume and the agent declined by name.
+   */
+  function conversationResetOf(
+    startedFresh: boolean,
+    askedToResume: boolean,
+    opened: { readonly resumed: boolean; readonly fallbackReason?: string }
+  ): { readonly conversationReset?: ExternalConversationResetReason } {
+    if (startedFresh) return { conversationReset: 'nonresumable' };
+    if (askedToResume && !opened.resumed && opened.fallbackReason) {
+      return { conversationReset: 'unavailable' };
+    }
+    return {};
+  }
+
   async function openSession(input: EnsureExternalSessionInput): Promise<ExternalSessionHandle> {
     const db = resolveDb();
     const binding: ExternalSessionBinding = {
@@ -613,11 +702,18 @@ export function createExternalSessionManager(
     // A stale binding is dropped before the open, not after: resuming against
     // another environment's session id would hand one binding's conversation to
     // a different one.
-    const resumable = stored && continuationMatches(stored, binding) ? stored : undefined;
-    if (stored && !resumable) {
+    const matching = stored && continuationMatches(stored, binding) ? stored : undefined;
+    if (stored && !matching) {
       await deleteContinuation(input.chatId, db);
       await releaseAdoptionLease(input.chatId, db);
     }
+    // A conversation marked unsafe to resume is not offered to the vendor: resuming it could
+    // carry on a turn the user stopped. The open starts a new one and the turn says so.
+    const startsFresh =
+      matching?.unresumable === true ||
+      (matching !== undefined && unwrittenMarks.get(input.chatId) === matching.runtimeSessionId);
+    if (startsFresh) await releaseAdoptionLease(input.chatId, db);
+    const resumable = startsFresh ? undefined : matching;
 
     const client = await (input.existingConnectionOnly
       ? resolveExistingRuntimeClient
@@ -637,7 +733,7 @@ export function createExternalSessionManager(
       // case. The user picked *that* conversation by name, so its first open
       // fails rather than silently handing back an empty one; every open
       // after the vendor confirms the resume is an ordinary turn again.
-      resumeMode: resumable?.pendingAdoption ? 'strict' : 'fallback',
+      resumeMode: resumeModeFor(input.targetId, resumable?.pendingAdoption === true),
       timeoutMs: openTimeoutMs,
       ...toolchain,
     } satisfies Parameters<typeof client.externalAgents.open>[0];
@@ -659,6 +755,9 @@ export function createExternalSessionManager(
         // said. Reporting the vendor's own answer is what lets the UI say so.
         resumed: opened.resumed,
         ...(opened.fallbackReason ? { fallbackReason: opened.fallbackReason } : {}),
+        // A resume the agent declined on open, by name: only then did a conversation the chat had
+        // fail to continue. An unconfirmed lazy resume says nothing yet.
+        ...conversationResetOf(startsFresh, resumable !== undefined, opened),
         effectiveConfiguration: opened.effectiveConfiguration,
         capabilities: opened.capabilities,
       },
@@ -716,6 +815,8 @@ export function createExternalSessionManager(
       throw new ExternalSessionReapedError(input.chatId);
     }
     sessions.set(input.chatId, record);
+    // The row just written describes the new conversation, which the old mark does not concern.
+    unwrittenMarks.delete(input.chatId);
 
     return handleFor(record);
   }

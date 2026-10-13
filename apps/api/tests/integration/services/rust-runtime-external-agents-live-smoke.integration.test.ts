@@ -22,6 +22,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RemoteError } from '@mangostudio/protocol';
@@ -64,11 +65,14 @@ import {
   LIVE_REFUSAL_CASES,
   type LiveRefusalCase,
   refusalEnvironment,
+  refusedReason,
   requestedRefusalCases,
+  requiredExecutable,
   SingleTargetDiscovery,
   sseFrames,
   versionOf,
 } from '../../support/external-agents/live-refusals';
+import { readProcessSnapshot, vendorProcessesOf } from '../../support/external-agents/process-tree';
 import {
   createRustTurnHarness,
   grantRuntimeConsent,
@@ -326,7 +330,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
 
   /** What the person is told for a refused agent, whatever the surface. */
   function expectedRemedy(refusal: LiveRefusalCase): ExternalAgentRemedy {
-    if (refusal.reason === 'version-unsupported') return { kind: 'update' };
+    if (refusedReason(refusal) === 'version-unsupported') return { kind: 'update' };
     const command = productDescriptorFor(refusal.targetId)?.loginCommand;
     return { kind: 'sign-in', ...(command ? { command } : {}) };
   }
@@ -391,6 +395,66 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
     };
   }
 
+  /**
+   * Hooks that restart the runtime between a send's session open and its submission, as a runtime
+   * that restarted would: the first runtime is killed, the hub sees its connection close, and a
+   * second runtime (with `secondRuntimeEnvironment` over its environment) answers the reopen.
+   */
+  function runtimeRestart(session: Awaited<ReturnType<typeof refusedSession>>) {
+    let active: RuntimeClient = session.client;
+    let armed = false;
+    const dropped: number[] = [];
+    async function killFirst(): Promise<void> {
+      const pid = session.peer.pid;
+      if (pid === undefined) throw new Error('expected the first runtime pid | received: none');
+      process.kill(pid, 'SIGKILL');
+      dropped.push(pid);
+      await session.peer.exited;
+    }
+    async function startSecond(): Promise<void> {
+      const second = await connectRuntime(
+        {
+          owner: session.owner,
+          environmentId: session.environmentId,
+          mangoHome: session.mangoHome,
+        },
+        session.secondRuntimeEnvironment
+      );
+      second.client.replaceManifest(
+        capabilityManifestFromHealth(await second.client.health(), second.client.manifest)
+      );
+      active = second.client;
+    }
+    async function restartNow(): Promise<void> {
+      await killFirst();
+      await startSecond();
+    }
+    return {
+      dropped,
+      /** The next send restarts the runtime. */
+      arm: () => {
+        armed = true;
+      },
+      /** Kills the first runtime now and starts the second, which the hub reaches from then on. */
+      restartNow,
+      hooks: {
+        activeClient: () => active,
+        afterEnsure: async (handle: ExternalSessionHandle) => {
+          if (!armed) return;
+          armed = false;
+          await killFirst();
+          for (let attempt = 0; attempt < 200 && handle.isLive(); attempt += 1) await Bun.sleep(25);
+          if (handle.isLive()) {
+            throw new Error(
+              'expected the hub to see the first runtime connection close | received: the session is still live'
+            );
+          }
+          await startSecond();
+        },
+      },
+    };
+  }
+
   /** The hub's real send path, resolving against `discovery`, over the live runtime. */
   function sendThrough(
     session: Awaited<ReturnType<typeof refusedSession>>,
@@ -404,6 +468,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       /** The client the hub reaches the runtime through; the reopen flow swaps it. */
       readonly activeClient?: () => RuntimeClient;
       readonly afterEnsure?: (handle: ExternalSessionHandle) => Promise<void>;
+      /** The prompt of the next send; defaults to a one-word reply. */
+      readonly prompt?: () => string;
     } = {}
   ) {
     const active = hooks.activeClient ?? (() => session.client);
@@ -442,7 +508,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
             restrictToolsToWorkdir: null,
           },
           chatId: session.chatId,
-          prompt: 'Reply with exactly the single word pong. Do not use any tools.',
+          prompt:
+            hooks.prompt?.() ?? 'Reply with exactly the single word pong. Do not use any tools.',
           attachmentIds: [],
           externalTurn: undefined,
         },
@@ -453,8 +520,9 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
 
   for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'open')) {
     it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
-      `${refusal.id}: the agent is refused as ${refusal.reason}, as the person sees it`,
+      `${refusal.id}: the agent is refused as ${refusedReason(refusal)}, as the person sees it`,
       async () => {
+        const reason = refusedReason(refusal);
         const session = await refusedSession(refusal);
         const { live } = session;
         logger.info('refusal-discovery', { case: refusal.id, descriptor: live });
@@ -467,7 +535,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
             remedy: live.remedy,
           }).toEqual({
             installed: true,
-            unavailableReason: refusal.reason,
+            unavailableReason: reason,
             remedy: expectedRemedy(refusal),
           });
         } else {
@@ -477,10 +545,10 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
             unavailableReason: live.unavailableReason,
           }).toEqual({ installed: true, authState: 'unknown', unavailableReason: undefined });
         }
-        if (refusal.reason === 'signed-out' && refusal.selectorRefuses) {
+        if (reason === 'signed-out' && refusal.selectorRefuses) {
           expect(live.authState).toBe('signed-out');
         }
-        if (refusal.reason === 'version-unsupported') {
+        if (reason === 'version-unsupported') {
           const oldVersion = await outdatedCodexVersion();
           const required = live.requiredVersion ?? '';
           expect({
@@ -494,7 +562,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
           const preflight = await sendThrough(session, refusal, session.discovery).send();
           expect(preflight.ok ? 'sent' : preflight.failure).toMatchObject({
             kind: 'unsupported',
-            unavailableReason: refusal.reason,
+            unavailableReason: reason,
           });
         }
 
@@ -543,8 +611,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         expect({
           kind: refused instanceof RemoteError ? refused.details?.kind : String(refused),
           refusals: stalePass.recording.refusals.length,
-        }).toEqual({ kind: EXPECTED_KIND[refusal.reason], refusals: 1 });
-        if (refusal.reason === 'version-unsupported') {
+        }).toEqual({ kind: EXPECTED_KIND[reason], refusals: 1 });
+        if (reason === 'version-unsupported') {
           // Both builds are named from the SDK's typed fields: the one found and the floor.
           const found = await outdatedCodexVersion();
           expect({
@@ -559,11 +627,9 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         expect(frames.find((frame) => frame.type === 'error')).toEqual({
           type: 'error',
           error: GENERIC_OPEN_FAILURE,
-          unavailableReason: refusal.reason,
+          unavailableReason: reason,
           remedy: expectedRemedy(refusal),
-          ...(refusal.reason === 'version-unsupported'
-            ? { requiredVersion: live.requiredVersion }
-            : {}),
+          ...(reason === 'version-unsupported' ? { requiredVersion: live.requiredVersion } : {}),
           done: true,
         });
         expect(stalePass.stale).toEqual([
@@ -614,41 +680,8 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         // restarted would, and the hub's reopen then lands on a runtime whose codex is outdated.
         // (Ending the vendor child instead does not reopen: the runtime reports the session lost,
         // the turn ends `session-lost`, and the next send is an ordinary open.)
-        let active: RuntimeClient = session.client;
-        let dropFirstRuntime = false;
-        const dropped: number[] = [];
-        const pass = sendThrough(session, refusal, session.discovery, {
-          activeClient: () => active,
-          afterEnsure: async (handle) => {
-            if (!dropFirstRuntime) return;
-            dropFirstRuntime = false;
-            const pid = session.peer.pid;
-            if (pid === undefined)
-              throw new Error('expected the first runtime pid | received: none');
-            process.kill(pid, 'SIGKILL');
-            dropped.push(pid);
-            await session.peer.exited;
-            for (let attempt = 0; attempt < 200 && handle.isLive(); attempt += 1)
-              await Bun.sleep(25);
-            if (handle.isLive()) {
-              throw new Error(
-                'expected the hub to see the first runtime connection close | received: the session is still live'
-              );
-            }
-            const second = await connectRuntime(
-              {
-                owner: session.owner,
-                environmentId: session.environmentId,
-                mangoHome: session.mangoHome,
-              },
-              session.secondRuntimeEnvironment
-            );
-            second.client.replaceManifest(
-              capabilityManifestFromHealth(await second.client.health(), second.client.manifest)
-            );
-            active = second.client;
-          },
-        });
+        const restart = runtimeRestart(session);
+        const pass = sendThrough(session, refusal, session.discovery, restart.hooks);
 
         // A normal turn on the signed-in account.
         const first = sseFrames(
@@ -660,7 +693,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         expect(first.map((frame) => frame.type)).not.toContain('error');
         const callsBefore = pass.recording.calls.length;
 
-        dropFirstRuntime = true;
+        restart.arm();
         const startedAt = Date.now();
         const second = await within(pass.send(), 'the send after the runtime restarted', 120_000);
         const frames = sseFrames(await okResponse(second).text());
@@ -668,7 +701,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         const refusedWith = pass.recording.refusals[0];
         logger.info('reopen-second-send', {
           elapsedMs,
-          droppedRuntimePids: dropped,
+          droppedRuntimePids: restart.dropped,
           calls: pass.recording.calls.slice(callsBefore),
           refusal:
             refusedWith instanceof RemoteError
@@ -733,9 +766,316 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
       360_000
     );
   }
+
+  for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'connection-dropped')) {
+    it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
+      `${refusal.id}: a reopen after the runtime connection dropped resumes the conversation`,
+      async () => {
+        const session = await refusedSession(refusal);
+        await acknowledgeExternalDisclosure(
+          { userId: session.owner.id, targetId: refusal.targetId },
+          {
+            capabilities: session.live.capabilities,
+            supportedConfigurations: session.live.supportedConfigurations,
+          },
+          getDb()
+        );
+        await grantWorkspaceTrust(
+          {
+            userId: session.owner.id,
+            targetId: refusal.targetId,
+            environmentId: session.environmentId,
+            workspacePath: session.client.paths.canonical(session.workspace),
+          },
+          getDb()
+        );
+        // A word the model cannot guess, so a reply that repeats it proves the second session
+        // continued the first conversation rather than starting another.
+        const codeWord = `mango-${crypto.randomUUID().slice(0, 8)}`;
+        let sendNumber = 0;
+        const restart = runtimeRestart(session);
+        const pass = sendThrough(session, refusal, session.discovery, {
+          ...restart.hooks,
+          prompt: () => {
+            sendNumber += 1;
+            return sendNumber === 1
+              ? `Remember the code word ${codeWord}. Reply with exactly the single word noted. Do not use any tools.`
+              : 'What was the code word I asked you to remember? Reply with exactly the code word and nothing else. Do not use any tools.';
+          },
+        });
+
+        const first = sseFrames(
+          await okResponse(await within(pass.send(), 'the first live claude turn', 170_000)).text()
+        );
+        expect(first.find((frame) => frame.type === 'external_turn_completed')).toMatchObject({
+          reason: 'completed',
+        });
+        const callsBefore = pass.recording.calls.length;
+
+        restart.arm();
+        const second = await within(pass.send(), 'the send after the runtime restarted', 170_000);
+        const frames = sseFrames(await okResponse(second).text());
+        logger.info('connection-dropped-second-send', {
+          droppedRuntimePids: restart.dropped,
+          calls: pass.recording.calls.slice(callsBefore),
+          frames,
+        });
+
+        const text = frames
+          .filter((frame) => frame.type === 'external_text')
+          .map((frame) => String(frame.text ?? ''))
+          .join('');
+        const sessions = frames.filter((frame) => frame.type === 'external_session_started');
+        expect({
+          completed: frames.find((frame) => frame.type === 'external_turn_completed'),
+          errors: frames.filter((frame) =>
+            ['error', 'external_error'].includes(String(frame.type))
+          ),
+          recalled: text.includes(codeWord),
+          reopens: pass.recording.calls.slice(callsBefore).filter((call) => call.reopen).length,
+          resetNotice: sessions.some((frame) => frame.conversationReset !== undefined),
+          announced: sessions.length,
+        }).toMatchObject({
+          completed: { reason: 'completed' },
+          errors: [],
+          recalled: true,
+          reopens: 1,
+          resetNotice: false,
+          announced: 2,
+        });
+      },
+      420_000
+    );
+  }
+
+  for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'killed-turn')) {
+    it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
+      `${refusal.id}: a conversation whose last turn was killed is not resumed`,
+      async () => {
+        const session = await refusedSession(refusal);
+        await acknowledgeExternalDisclosure(
+          { userId: session.owner.id, targetId: refusal.targetId },
+          {
+            capabilities: session.live.capabilities,
+            supportedConfigurations: session.live.supportedConfigurations,
+          },
+          getDb()
+        );
+        await grantWorkspaceTrust(
+          {
+            userId: session.owner.id,
+            targetId: refusal.targetId,
+            environmentId: session.environmentId,
+            workspacePath: session.client.paths.canonical(session.workspace),
+          },
+          getDb()
+        );
+        // Words the model cannot guess. The code word proves whether the third send continued the
+        // first conversation; the closing token exists only in the work the kill cut off.
+        const codeWord = `mango-${crypto.randomUUID().slice(0, 8)}`;
+        const closing = `done-${crypto.randomUUID().slice(0, 8)}`;
+        const prompts = [
+          `Remember the code word ${codeWord}. Reply with exactly the single word noted. Do not use any tools.`,
+          `Write the numbers from 1 to 600, one per line, with no other text, and then a final line reading ${closing}. Do not use any tools.`,
+          'What was the code word I asked you to remember? Reply with exactly the code word, or with exactly the word unknown if you do not have it. Do not use any tools.',
+        ];
+        let sendNumber = 0;
+        const restart = runtimeRestart(session);
+        const pass = sendThrough(session, refusal, session.discovery, {
+          ...restart.hooks,
+          prompt: () => prompts[sendNumber++] ?? prompts[2] ?? '',
+        });
+
+        const first = sseFrames(
+          await okResponse(await within(pass.send(), 'the first live claude turn', 170_000)).text()
+        );
+        expect(first.find((frame) => frame.type === 'external_turn_completed')).toMatchObject({
+          reason: 'completed',
+        });
+
+        // The second send is killed under the vendor: the runtime ends on the first streamed text.
+        const killedFrames: Array<Record<string, unknown>> = [];
+        const killedResponse = okResponse(await within(pass.send(), 'the long turn', 170_000));
+        await readFrames(killedResponse, async (frame) => {
+          killedFrames.push(frame);
+          if (frame.type === 'external_text' && restart.dropped.length === 0) {
+            await restart.restartNow();
+          }
+        });
+        expect(restart.dropped, 'expected the first runtime to be killed mid-turn').toHaveLength(1);
+
+        const third = await within(pass.send(), 'the send after the killed turn', 170_000);
+        const frames = sseFrames(await okResponse(third).text());
+        logger.info('killed-turn-third-send', {
+          droppedRuntimePids: restart.dropped,
+          killedEnd: killedFrames.filter((frame) => frame.type === 'external_turn_completed'),
+          frames,
+        });
+
+        const text = frames
+          .filter((frame) => frame.type === 'external_text')
+          .map((frame) => String(frame.text ?? ''))
+          .join('');
+        const sessions = frames.filter((frame) => frame.type === 'external_session_started');
+        expect({
+          completed: frames.find((frame) => frame.type === 'external_turn_completed'),
+          errors: frames.filter((frame) =>
+            ['error', 'external_error'].includes(String(frame.type))
+          ),
+          noticeOnLastAnnouncement: sessions.at(-1)?.conversationReset,
+          continuedFirstConversation: text.includes(codeWord),
+          continuedKilledWork: text.includes(closing),
+        }).toMatchObject({
+          completed: { reason: 'completed' },
+          errors: [],
+          noticeOnLastAnnouncement: 'nonresumable',
+          continuedFirstConversation: false,
+          continuedKilledWork: false,
+        });
+      },
+      600_000
+    );
+  }
+
+  for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'child-killed')) {
+    it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
+      `${refusal.id}: a vendor process that ended between turns is reopened once and the next send completes`,
+      async () => {
+        const session = await refusedSession(refusal);
+        await acknowledgeExternalDisclosure(
+          { userId: session.owner.id, targetId: refusal.targetId },
+          {
+            capabilities: session.live.capabilities,
+            supportedConfigurations: session.live.supportedConfigurations,
+          },
+          getDb()
+        );
+        await grantWorkspaceTrust(
+          {
+            userId: session.owner.id,
+            targetId: refusal.targetId,
+            environmentId: session.environmentId,
+            workspacePath: session.client.paths.canonical(session.workspace),
+          },
+          getDb()
+        );
+        const pass = sendThrough(session, refusal, session.discovery);
+
+        const first = sseFrames(
+          await okResponse(await within(pass.send(), 'the first live codex turn', 170_000)).text()
+        );
+        expect(first.find((frame) => frame.type === 'external_turn_completed')).toMatchObject({
+          reason: 'completed',
+        });
+        expect(first.map((frame) => frame.type)).not.toContain('error');
+
+        // The app-server this runtime started, found below the runtime by its executable; the
+        // developer's own codex sessions are not descendants and are never matched.
+        const runtimePid = session.peer.pid;
+        if (runtimePid === undefined) throw new Error('expected the runtime pid | received: none');
+        const codexPath = await realpath(requiredExecutable('codex', Bun.which('codex')));
+        const started = vendorProcessesOf(runtimePid, codexPath, readProcessSnapshot());
+        if (started.length !== 1) {
+          throw new Error(
+            `expected exactly one codex process under the runtime | received: [${started.join(', ')}]`
+          );
+        }
+        const [victim] = started;
+        if (victim === undefined) throw new Error('expected a codex pid | received: none');
+        process.kill(victim, 'SIGKILL');
+        for (let attempt = 0; attempt < 200 && existsSync(`/proc/${victim}`); attempt += 1)
+          await Bun.sleep(25);
+        // Long enough for the SDK to see its child's pipe close and seal the session.
+        await Bun.sleep(1_500);
+        const callsBefore = pass.recording.calls.length;
+
+        const startedAt = Date.now();
+        const second = await within(
+          pass.send(),
+          'the send after the vendor process ended',
+          150_000
+        );
+        const frames = sseFrames(await okResponse(second).text());
+        const elapsedMs = Date.now() - startedAt;
+        logger.info('child-killed-second-send', {
+          killedPid: victim,
+          elapsedMs,
+          calls: pass.recording.calls.slice(callsBefore),
+          frames,
+        });
+
+        const assistant = frames.find((frame) => frame.type === 'assistant_message_id');
+        const text = frames
+          .filter((frame) => frame.type === 'external_text')
+          .map((frame) => String(frame.text ?? ''))
+          .join('');
+        expect({
+          completed: frames.find((frame) => frame.type === 'external_turn_completed'),
+          errors: frames.filter((frame) =>
+            ['error', 'external_error'].includes(String(frame.type))
+          ),
+          answered: /pong/i.test(text),
+        }).toMatchObject({ completed: { reason: 'completed' }, errors: [], answered: true });
+        // The reopen resumed the vendor conversation: the thread's running total covers both turns.
+        const thread = frames.find((frame) => frame.type === 'external_thread_usage') as
+          | { usage?: { last?: { totalTokens?: number }; total?: { totalTokens?: number } } }
+          | undefined;
+        expect({
+          thread:
+            (thread?.usage?.total?.totalTokens ?? 0) > (thread?.usage?.last?.totalTokens ?? 0),
+        }).toEqual({ thread: true });
+        // One reopen, and a vendor process that is not the one that was ended.
+        const replacements = vendorProcessesOf(runtimePid, codexPath, readProcessSnapshot());
+        expect({
+          reopens: pass.recording.calls.slice(callsBefore).filter((call) => call.reopen).length,
+          replaced: replacements.length === 1 && replacements[0] !== victim,
+        }).toEqual({ reopens: 1, replaced: true });
+        if (!assistant) {
+          throw new Error(
+            `expected an assistant_message_id chunk | received: ${JSON.stringify(frames)}`
+          );
+        }
+        const { messages } = await getChatMessagesUseCase(
+          { chatId: session.chatId, userId: session.owner.id },
+          getDb()
+        );
+        const stored = messages
+          .find((message) => message.id === assistant.messageId)
+          ?.parts?.find((part) => part.type === 'external_turn');
+        expect(stored).toMatchObject({ status: 'terminal', terminalReason: 'completed' });
+      },
+      420_000
+    );
+  }
 });
 
 /** The streaming response of an accepted send, or throws with the refusal. */
+/**
+ * Reads an SSE response frame by frame, handing each to `onFrame` as it arrives (and waiting for
+ * it), so a test can act in the middle of a turn.
+ */
+async function readFrames(
+  response: Response,
+  onFrame: (frame: Record<string, unknown>) => Promise<void>
+): Promise<void> {
+  if (!response.body) throw new Error('expected a streaming response body | received: none');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const pieces = buffer.split('\n\n');
+    buffer = pieces.pop() ?? '';
+    for (const piece of pieces) {
+      if (piece.startsWith('data: ')) {
+        await onFrame(JSON.parse(piece.slice('data: '.length)) as Record<string, unknown>);
+      }
+    }
+  }
+}
+
 function okResponse(
   result: Awaited<ReturnType<ReturnType<typeof createExternalTurnStream>>>
 ): Response {

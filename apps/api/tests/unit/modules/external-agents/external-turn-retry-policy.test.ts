@@ -5,12 +5,14 @@ import {
   classifySubmissionFailure,
   DEFAULT_RETRY_POLICY,
   failureClosedConnection,
+  sessionRefusalState,
 } from '../../../../src/modules/external-agents/domain/external-turn-retry-policy';
 import {
   RuntimeRequestNoReplyError,
   RuntimeRequestNotSentError,
 } from '../../../../src/services/runtime-client/request-not-sent';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
+import { sessionRefusal } from '../../../support/external-agents/fake-external-runtime';
 
 describe('backoffDelay', () => {
   it('doubles from the base, jitters within [75%, 100%] and never exceeds the cap', () => {
@@ -190,4 +192,34 @@ describe('classifySubmissionFailure', () => {
       failureClosedConnection(new RemoteError('UNAVAILABLE', 'closed', { closeCode: 1001 }))
     ).toBe(false);
   });
+});
+
+describe('sessionRefusalState', () => {
+  const answer = (session: string) =>
+    new RemoteError('INTERNAL', 'session refused', { kind: 'tool_argument', session });
+  const CASES: ReadonlyArray<readonly [string, unknown, 'closed' | 'nonresumable' | undefined]> = [
+    ['the runtime answer itself, closed', answer('closed'), 'closed'],
+    ['the runtime answer itself, nonresumable', answer('nonresumable'), 'nonresumable'],
+    ['the translated refusal, through its cause', sessionRefusal('nonresumable'), 'nonresumable'],
+    ['a state this build does not know', answer('melted'), undefined],
+    [
+      'an argument refusal that names no session state',
+      new RemoteError('INTERNAL', 'bad root', { kind: 'tool_argument' }),
+      undefined,
+    ],
+    [
+      'a translated argument refusal with no cause',
+      Object.assign(new Error('session gone'), { name: 'ToolArgumentError' }),
+      undefined,
+    ],
+    ['a value that is not an error', 'session closed', undefined],
+  ];
+  for (const [label, error, expected] of CASES) {
+    it(`reads ${label} as ${expected ?? 'no state'}`, () => {
+      const received = sessionRefusalState(error);
+      expect(received, `expected session state: ${expected} | received: ${received}`).toBe(
+        expected
+      );
+    });
+  }
 });

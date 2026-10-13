@@ -3930,6 +3930,13 @@ export const messages = {
       usageCacheWrite: 'cache escrito',
       usageTotal: 'total',
       incomplete: 'Interrompido.',
+      // Mostrado quando o chat tinha uma conversa anterior e o agente não a continuou.
+      conversationReset: {
+        nonresumable:
+          'O agente não quis continuar a conversa anterior, então esta resposta começou uma nova, sem as mensagens anteriores.',
+        unavailable:
+          'O agente não encontrou a conversa anterior, então esta resposta começou uma nova, sem as mensagens anteriores.',
+      },
       terminal: {
         completed: 'Concluído.',
         'cancelled-by-user': 'Você interrompeu este turno.',

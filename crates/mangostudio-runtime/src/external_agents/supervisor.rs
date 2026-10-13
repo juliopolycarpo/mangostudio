@@ -53,6 +53,7 @@ use crate::consent::read::{ConsentRead, ConsentReader};
 use crate::hex::hex;
 use crate::probing::detection::path_env::PathEnv;
 use crate::tool_argument::tool_argument;
+use mangostudio_runtime_contract::errors::EXTERNAL_AGENT_SESSION_DETAIL;
 
 /// How many sessions may be live or opening at once, as in the TS host.
 pub(crate) const DEFAULT_SESSION_CAP: usize = 4;
@@ -1257,6 +1258,21 @@ async fn wait_settled(opening: &Opening) {
             return;
         }
     }
+}
+
+/// The refusal for a session that can no longer run a turn, naming why.
+///
+/// It stays an argument refusal (`kind: "tool_argument"`), which a caller that does not know the
+/// extra fact already reads as a lost session. `details.session` adds that nothing was dispatched
+/// and says what the next session should do: [`EXTERNAL_AGENT_SESSION_CLOSED`] when the vendor's
+/// process ended or the SDK sealed the session, so the conversation is intact and a new session
+/// resumes it, and [`EXTERNAL_AGENT_SESSION_NONRESUMABLE`] when the SDK refuses every later turn
+/// on the vendor session, so a new session must start a fresh conversation.
+///
+/// `session_refusal(EXTERNAL_AGENT_SESSION_CLOSED, "External-agent session \"s1\" is not open; expected an open session id.")`
+/// answers the call with that message and `details.session == "closed"`.
+pub(super) fn session_refusal(state: &'static str, message: impl Into<String>) -> RemoteError {
+    tool_argument(message).with_detail(EXTERNAL_AGENT_SESSION_DETAIL, state)
 }
 
 /// Refuses a configuration the product never offers for `target`, even where

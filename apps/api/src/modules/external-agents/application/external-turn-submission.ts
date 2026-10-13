@@ -24,7 +24,15 @@
  *    went with it, so the attempt is `unresolved` and never resent: guessing
  *    either way could run the user's work twice or silently drop it.
  * 5. **A runtime's answer is final.** An error reply is a committed refusal.
- * 6. **Stopping wins.** Abort, revocation and shutdown end the loop through
+ * 6. **A session the runtime refuses is replaced, once per reason, before anything was sent.** A
+ *    runtime that says the session itself can no longer run a turn has dispatched nothing, so the
+ *    loop forgets that session and opens another, as it does after a dropped connection. `closed`
+ *    (the vendor's process ended) resumes the stored conversation; `nonresumable` (the agent will
+ *    not run further turns on it) drops the stored conversation and opens a new one. Each reason
+ *    is honoured once per turn, so the worst case is two extra opens and a third refusal ends the
+ *    turn. A refusal that follows an unanswered request never replaces the session, because that
+ *    request may have been accepted, and a native review never does.
+ * 7. **Stopping wins.** Abort, revocation and shutdown end the loop through
  *    `signal`; every state write is a compare-and-set, so a reply that arrives
  *    afterwards cannot revive the attempt.
  */
@@ -35,6 +43,7 @@ import type {
   ExternalAgentStartReviewParams,
   ExternalAgentTurnParams,
 } from '@mangostudio/shared/external-agents';
+import type { ExternalAgentSessionState } from '@mangostudio/shared/runtime-contract';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
@@ -44,6 +53,7 @@ import {
   classifySubmissionFailure,
   failureClosedConnection,
   type RetryPolicy,
+  sessionRefusalState,
 } from '../domain/external-turn-retry-policy';
 import {
   insertAttempt,
@@ -134,6 +144,11 @@ interface SubmissionContext {
    * the vendor never had it.
    */
   readonly onDispatchPending?: (pending: boolean) => void;
+  /**
+   * The runtime refused the turn on `handle` because that session cannot run it, and the loop is
+   * about to replace it. Called before the session is retired.
+   */
+  readonly onSessionRetired?: (state: ExternalAgentSessionState) => void;
 }
 
 /** One turn or native review; both use the existing durable attempt ledger. */
@@ -171,6 +186,7 @@ export async function submitExternalTurn(
 ): Promise<SubmissionOutcome> {
   let handle = input.handle;
   let retries = 0;
+  const replaced = new Set<ExternalAgentSessionState>();
 
   const wait = async (): Promise<void> => {
     const ms = backoffDelay(retries, input.policy, input.random);
@@ -198,8 +214,16 @@ export async function submitExternalTurn(
       if (input.signal.aborted) break;
     }
 
-    const attempt = await runAttempt(input, handle, wait);
+    const attempt = await runAttempt(input, handle, wait, replaced);
     if (attempt.kind === 'retry') continue;
+    if (attempt.kind === 'session-refused') {
+      replaced.add(attempt.state);
+      // Tell the caller why before the session goes: a fresh conversation is something the person
+      // is shown, and only this loop knows it was the reason.
+      input.onSessionRetired?.(attempt.state);
+      await handle.retire({ dropContinuation: attempt.state === 'nonresumable' });
+      continue;
+    }
     return attempt.outcome;
   }
   return { kind: 'stopped' };
@@ -207,6 +231,8 @@ export async function submitExternalTurn(
 
 type AttemptResult =
   | { readonly kind: 'retry' }
+  /** The runtime refused the turn because the session cannot run it; nothing was dispatched. */
+  | { readonly kind: 'session-refused'; readonly state: ExternalAgentSessionState }
   | { readonly kind: 'done'; readonly outcome: SubmissionOutcome };
 
 /** Builds one ordinary turn request; the closure always sends the same params. */
@@ -247,7 +273,8 @@ async function startReviewTurn(
 async function runAttempt(
   input: SubmitExternalTurnInput,
   handle: ExternalSessionHandle,
-  wait: () => Promise<void>
+  wait: () => Promise<void>,
+  replaced: ReadonlySet<ExternalAgentSessionState>
 ): Promise<AttemptResult> {
   const request = input.review
     ? reviewRequest(handle, input.review)
@@ -317,6 +344,14 @@ async function runAttempt(
         if (input.review) return { kind: 'done', outcome: { kind: 'refused', error } };
         await wait();
         return { kind: 'retry' };
+      }
+      // Only the first request of the attempt: after an unanswered one, the refused session may
+      // be the very one that took the turn.
+      const refusedState = !input.review && !unanswered ? sessionRefusalState(error) : undefined;
+      if (refusedState && !replaced.has(refusedState)) {
+        await settle('not-submitted');
+        pending(false);
+        return { kind: 'session-refused', state: refusedState };
       }
       if (failure === 'refused') {
         await settle('terminal', 'refused');

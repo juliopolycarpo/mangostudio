@@ -442,6 +442,15 @@ interface ExternalSessionContinuationsTable {
    * resume, after which ordinary turn semantics apply.
    */
   pendingAdoption: Generated<number>;
+  /**
+   * 1 while this chat's stored conversation must not be resumed.
+   *
+   * Set when a turn on a harness that continues a killed turn on resume ended in a way that may
+   * have killed the child (a stop, a dropped connection, a stream error, a hub restart). The
+   * next open starts a new conversation instead; a turn that completes on the same native
+   * session clears it.
+   */
+  unresumable: Generated<number>;
 }
 
 /**

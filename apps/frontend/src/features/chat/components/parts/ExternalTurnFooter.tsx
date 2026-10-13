@@ -41,7 +41,7 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
       ? labels.terminal[part.terminalReason]
       : null;
 
-  if (fields.length === 0 && !terminalNotice && !part.error) return null;
+  if (fields.length === 0 && !terminalNotice && !part.error && !part.conversationReset) return null;
 
   // An error the hub can present is shown the way the selector shows the same state: its words,
   // the sign-in command to copy, or the install and update link. Two sources name it: the reason
@@ -53,6 +53,15 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
 
   return (
     <div className="mt-2 max-w-2xl space-y-1.5 pl-4">
+      {part.conversationReset ? (
+        <p
+          role="status"
+          data-conversation-reset={part.conversationReset}
+          className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+        >
+          {labels.conversationReset[part.conversationReset]}
+        </p>
+      ) : null}
       {fields.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {fields.map(([label, value]) => (

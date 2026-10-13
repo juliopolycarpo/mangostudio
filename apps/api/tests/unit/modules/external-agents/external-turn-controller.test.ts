@@ -6,6 +6,7 @@ import type {
   ExternalAgentSteerResult,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import type {
   ExternalApprovalPart,
   ExternalSteerPart,
@@ -24,6 +25,7 @@ import {
   ExternalTurnRunnerMismatchError,
   ExternalTurnWorkspaceMissingError,
 } from '../../../../src/modules/external-agents/application/external-turn-controller';
+import { reconcileExternalTurns } from '../../../../src/modules/external-agents/application/external-turn-recovery';
 import type { CancellableSleep } from '../../../../src/modules/external-agents/application/external-turn-submission';
 import { readContinuation } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
 import { listAttemptsForMessage } from '../../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
@@ -35,9 +37,11 @@ import {
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 import { createFakeBackoffClock } from '../../../support/external-agents/fake-backoff-clock';
 import {
+  closedSessionRefusal,
   createFakeExternalRuntime,
   type FakeExternalRuntime,
   type FakeExternalRuntimeOptions,
+  sessionRefusal,
 } from '../../../support/external-agents/fake-external-runtime';
 import { createRealExternalRuntime } from '../../../support/external-agents/real-external-runtime';
 import { insertTestUser } from '../../../support/factories';
@@ -84,13 +88,18 @@ function harness(
   options: FakeExternalRuntimeOptions & {
     readonly steerTerminationGraceMs?: number;
     readonly sleep?: CancellableSleep;
+    readonly capacityRetryMs?: number;
   } = {}
 ) {
-  const { steerTerminationGraceMs, sleep, ...runtimeOptions } = options;
+  const { steerTerminationGraceMs, sleep, capacityRetryMs, ...runtimeOptions } = options;
   const runtime = createFakeExternalRuntime(runtimeOptions);
+  // One id per open, so a reopen is told apart from the session it replaces.
+  let opened = 0;
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
-    newSessionId: () => 'session-1',
+    resolveExistingRuntimeClient: () => Promise.resolve(runtime.client),
+    newSessionId: () => `session-${++opened}`,
+    ...(capacityRetryMs !== undefined ? { capacityRetryMs, capacityRetryIntervalMs: 1 } : {}),
   });
   const approvals = createExternalApprovalRegistry();
   // Fresh per test: the production default is a process-wide singleton, and
@@ -105,7 +114,7 @@ function harness(
     ...(steerTerminationGraceMs !== undefined ? { steerTerminationGraceMs } : {}),
     ...(sleep ? { sleep } : {}),
   });
-  return { runtime, sessions, approvals, commandCatalog, controller };
+  return { runtime, sessions, approvals, commandCatalog, controller, ids };
 }
 
 /**
@@ -142,7 +151,14 @@ function startTurn(
   overrides: {
     readonly chatId?: string;
     readonly attachments?: readonly ExternalAgentAttachment[];
-    readonly observer?: { readonly onSteer?: (steer: unknown) => void };
+    readonly observer?: {
+      readonly onSteer?: (steer: unknown) => void;
+      readonly onSession?: (session: {
+        readonly sessionId: string;
+        readonly resumed: boolean;
+        readonly conversationReset?: string;
+      }) => void;
+    };
   } = {}
 ): Promise<ExternalTurnResult> {
   return controller.start(
@@ -987,6 +1003,673 @@ describe('external turn controller', () => {
     await expect(readContinuation(chatId, getDb())).resolves.toBeUndefined();
   });
 
+  describe('a session the vendor ended between turns', () => {
+    /** The runtime refuses the first turn call with `state`, then answers every later one. */
+    function refusedOnce(state: 'closed' | 'nonresumable'): () => Error | undefined {
+      let refused = false;
+      return () => {
+        if (refused) return undefined;
+        refused = true;
+        return sessionRefusal(state);
+      };
+    }
+    const closedOnce = () => refusedOnce('closed');
+
+    it('reopens once and runs the turn on the new session, resuming the vendor conversation', async () => {
+      const { runtime, controller } = harness({ turnFailure: closedOnce() });
+
+      const running = startTurn(controller);
+      await waitFor(
+        () => runtime.calls.turn.length === 2,
+        'the turn to reach the reopened session'
+      );
+      runtime.emit({ type: 'completed' });
+      const result = await running;
+
+      expect(
+        {
+          reason: result.reason,
+          opens: runtime.calls.open.length,
+          resumeRef: runtime.calls.open[1]?.resumeRef,
+          turnSessions: runtime.calls.turn.map((call) => call.sessionId),
+          sameMessage:
+            runtime.calls.turn[0]?.clientMessageId === runtime.calls.turn[1]?.clientMessageId,
+        },
+        'expected one resumed reopen and the same message on session-2'
+      ).toEqual({
+        reason: 'completed',
+        opens: 2,
+        resumeRef: 'native-session-1',
+        turnSessions: ['session-1', 'session-2'],
+        sameMessage: true,
+      });
+      expect(
+        (await listAttemptsForMessage(assistantMessageId, getDb())).map((row) => row.state),
+        'the refused attempt and the reopened one each settle'
+      ).toEqual(['terminal', 'terminal']);
+      expect(await readContinuation(chatId, getDb())).toMatchObject({
+        runtimeSessionId: 'session-2',
+      });
+    });
+
+    it('does not reopen a second time when the new session is closed as well', async () => {
+      const { runtime, controller } = harness({ turnFailure: () => closedSessionRefusal() });
+
+      const result = await startTurn(controller);
+
+      expect(
+        {
+          reason: result.reason,
+          opens: runtime.calls.open.length,
+          turns: runtime.calls.turn.length,
+        },
+        'expected a second closed refusal to end session-lost after two opens and two turn calls'
+      ).toEqual({ reason: 'session-lost', opens: 2, turns: 2 });
+    });
+
+    it('shows the refusal card when the reopen is refused', async () => {
+      let opens = 0;
+      const { runtime, controller } = harness({
+        turnFailure: closedOnce(),
+        openFailure: () => {
+          opens += 1;
+          if (opens === 1) return undefined;
+          return new RemoteError('UNAVAILABLE', 'signed out', {
+            kind: 'external_agent_signed_out',
+          });
+        },
+      });
+
+      const result = await startTurn(controller);
+      const part = turnPartOf((await readAssistantRow()).parts);
+
+      expect(
+        {
+          reason: result.reason,
+          opens,
+          turns: runtime.calls.turn.length,
+          unavailable: part.unavailableReason,
+          code: part.error?.code,
+        },
+        'expected the signed-out refusal card after one reopen and no second turn call'
+      ).toEqual({
+        reason: 'vendor-error',
+        opens: 2,
+        turns: 1,
+        unavailable: 'signed-out',
+        code: 'external_agent_signed_out',
+      });
+    });
+
+    it('tells the live stream about the session that ran the turn, not the one it replaced', async () => {
+      const announced: Array<{ sessionId: string; conversationReset?: string }> = [];
+      const { runtime, controller } = harness({ turnFailure: closedOnce() });
+
+      const running = startTurn(controller, {
+        observer: { onSession: (session) => announced.push(session) },
+      });
+      await waitFor(
+        () => runtime.calls.turn.length === 2,
+        'the turn to reach the reopened session'
+      );
+      runtime.emit({ type: 'completed' });
+      await running;
+
+      const stored = turnPartOf((await readAssistantRow()).parts);
+      expect(
+        { announced: announced.map((entry) => entry.sessionId), stored: stored.sessionId },
+        'expected the last announced session id to equal the stored one'
+      ).toEqual({ announced: ['session-1', 'session-2'], stored: 'session-2' });
+    });
+
+    it('names a conversation the agent could not resume, live and stored alike', async () => {
+      const announced: Array<{ sessionId: string; conversationReset?: string }> = [];
+      const first = harness();
+      const firstRun = startTurn(first.controller);
+      await waitForTurnStart(first.runtime);
+      first.runtime.emit({ type: 'completed' });
+      await firstRun;
+      // A hub restart: the continuation survives, and the vendor has forgotten the conversation.
+      userMessageId = `user-message-${crypto.randomUUID()}`;
+      assistantMessageId = `assistant-message-${crypto.randomUUID()}`;
+      const secondRig = harness({ resumeSucceeds: false });
+
+      const running = startTurn(secondRig.controller, {
+        observer: { onSession: (session) => announced.push(session) },
+      });
+      await waitForTurnStart(secondRig.runtime);
+      secondRig.runtime.emit({ type: 'completed' });
+      await running;
+
+      const stored = turnPartOf((await readAssistantRow()).parts);
+      expect({
+        live: announced.map((entry) => entry.conversationReset),
+        stored: stored.conversationReset,
+      }).toEqual({ live: ['unavailable'], stored: 'unavailable' });
+    });
+
+    describe('the notice that a conversation could not be resumed', () => {
+      /** Assistant rows by send, in order, so each turn's stored part can be read. */
+      async function storedResetOf(messageId: string): Promise<string | undefined> {
+        const row = await getDb()
+          .selectFrom('messages')
+          .select('parts')
+          .where('id', '=', messageId)
+          .executeTakeFirstOrThrow();
+        return turnPartOf(JSON.parse(row.parts ?? '[]') as MessagePart[]).conversationReset;
+      }
+
+      async function storedConversation(): Promise<void> {
+        const first = harness();
+        const run = startTurn(first.controller);
+        await waitForTurnStart(first.runtime);
+        first.runtime.emit({ type: 'completed' });
+        await run;
+        userMessageId = `user-message-${crypto.randomUUID()}`;
+        assistantMessageId = `assistant-message-${crypto.randomUUID()}`;
+      }
+
+      it('is said on the turn that started the new conversation and on no later turn of the session', async () => {
+        await storedConversation();
+        const rig = harness({ resumeSucceeds: false });
+        const announced: Array<Array<string | undefined>> = [];
+        const sends: string[] = [];
+        for (let send = 1; send <= 3; send += 1) {
+          if (send > 1) {
+            userMessageId = `user-message-${crypto.randomUUID()}`;
+            assistantMessageId = `assistant-message-${crypto.randomUUID()}`;
+            rig.ids.push(userMessageId, assistantMessageId);
+          }
+          sends.push(assistantMessageId);
+          const seen: Array<string | undefined> = [];
+          announced.push(seen);
+          const running = startTurn(rig.controller, {
+            observer: { onSession: (session) => seen.push(session.conversationReset) },
+          });
+          await waitFor(() => rig.runtime.calls.turn.length === send, `turn ${send} to start`);
+          rig.runtime.emit({ type: 'completed' });
+          await running;
+        }
+
+        expect(
+          {
+            live: announced,
+            stored: await Promise.all(sends.map((id) => storedResetOf(id))),
+            opens: rig.runtime.calls.open.length,
+          },
+          'expected the notice on the first turn only, live and stored, on one session'
+        ).toEqual({
+          live: [['unavailable'], [undefined], [undefined]],
+          stored: ['unavailable', undefined, undefined],
+          opens: 1,
+        });
+      });
+
+      it('survives a closed-session reopen that did resume, live and stored alike', async () => {
+        await storedConversation();
+        const announced: Array<{ sessionId: string; conversationReset?: string }> = [];
+        const rig = harness({
+          resumeSucceeds: (openNumber) => openNumber !== 1,
+          turnFailure: closedOnce(),
+        });
+
+        const running = startTurn(rig.controller, {
+          observer: { onSession: (session) => announced.push(session) },
+        });
+        await waitFor(
+          () => rig.runtime.calls.turn.length === 2,
+          'the turn on the reopened session'
+        );
+        rig.runtime.emit({ type: 'completed' });
+        await running;
+
+        expect(
+          {
+            live: announced.map((entry) => entry.conversationReset),
+            stored: await storedResetOf(assistantMessageId),
+          },
+          'expected the reply, which has none of the earlier messages, to keep the unavailable notice'
+        ).toEqual({ live: ['unavailable', 'unavailable'], stored: 'unavailable' });
+      });
+    });
+
+    describe('for Claude, whose harness refuses a fallback resume', () => {
+      beforeEach(async () => {
+        await getDb()
+          .updateTable('chats')
+          .set({ runnerTargetId: 'claude' })
+          .where('id', '=', chatId)
+          .execute();
+      });
+
+      /** A first turn that completes, so the chat has a stored conversation to resume. */
+      async function completedFirstTurn(rig: ReturnType<typeof harness>): Promise<void> {
+        const first = startTurn(rig.controller);
+        await waitForTurnStart(rig.runtime);
+        rig.runtime.emit({ type: 'completed' });
+        await first;
+        userMessageId = `user-message-${crypto.randomUUID()}`;
+        assistantMessageId = `assistant-message-${crypto.randomUUID()}`;
+        rig.ids.push(userMessageId, assistantMessageId);
+      }
+
+      it('resumes strictly when the connection dropped between sends', async () => {
+        const rig = harness({ refuseFallbackResume: true });
+        await completedFirstTurn(rig);
+        rig.runtime.dropConnection();
+        await Promise.resolve();
+        // A new controller over the same runtime, as the next request builds one.
+        const next = harness({ refuseFallbackResume: true });
+        const running = startTurn(next.controller);
+        await waitForTurnStart(next.runtime);
+        next.runtime.emit({ type: 'completed' });
+        const result = await running;
+
+        const open = next.runtime.calls.open[0];
+        expect(
+          { reason: result.reason, resumeRef: open?.resumeRef, resumeMode: open?.resumeMode },
+          'expected a completed turn on a strict resume of native-session-1'
+        ).toEqual({ reason: 'completed', resumeRef: 'native-session-1', resumeMode: 'strict' });
+      });
+
+      it('resumes strictly when a closed session is reopened inside the send', async () => {
+        const rig = harness({ refuseFallbackResume: true, turnFailure: closedOnce() });
+
+        const running = startTurn(rig.controller);
+        await waitFor(
+          () => rig.runtime.calls.turn.length === 2,
+          'the turn on the reopened session'
+        );
+        rig.runtime.emit({ type: 'completed' });
+        const result = await running;
+
+        const modes = rig.runtime.calls.open.map((open) => open.resumeMode ?? 'none');
+        expect(
+          {
+            reason: result.reason,
+            opens: rig.runtime.calls.open.length,
+            resumeRef: rig.runtime.calls.open[1]?.resumeRef,
+            modes: modes.slice(1),
+          },
+          'expected one strict reopen of native-session-1 and a completed turn'
+        ).toEqual({
+          reason: 'completed',
+          opens: 2,
+          resumeRef: 'native-session-1',
+          modes: ['strict'],
+        });
+      });
+
+      it('opens a fresh conversation in the same send when the agent will not run turns on the stored one', async () => {
+        const announced: Array<{ sessionId: string; conversationReset?: string }> = [];
+        const rig = harness({
+          refuseFallbackResume: true,
+          turnFailure: refusedOnce('nonresumable'),
+        });
+
+        const running = startTurn(rig.controller, {
+          observer: { onSession: (session) => announced.push(session) },
+        });
+        await waitFor(
+          () => rig.runtime.calls.turn.length === 2,
+          'the turn on the fresh conversation'
+        );
+        rig.runtime.emit({ type: 'completed' });
+        const result = await running;
+
+        const stored = turnPartOf((await readAssistantRow()).parts);
+        expect(
+          {
+            reason: result.reason,
+            reopenedWithoutResume: rig.runtime.calls.open[1]?.resumeRef === undefined,
+            live: announced.map((entry) => entry.conversationReset),
+            stored: stored.conversationReset,
+            continuation: (await readContinuation(chatId, getDb()))?.runtimeSessionId,
+          },
+          'expected a completed turn on a fresh conversation, announced and stored as nonresumable'
+        ).toEqual({
+          reason: 'completed',
+          reopenedWithoutResume: true,
+          live: [undefined, 'nonresumable'],
+          stored: 'nonresumable',
+          continuation: 'session-2',
+        });
+      });
+
+      /** The ids the next send of the same chat writes under. */
+      function nextSendIds(rig?: ReturnType<typeof harness>): void {
+        userMessageId = `user-message-${crypto.randomUUID()}`;
+        assistantMessageId = `assistant-message-${crypto.randomUUID()}`;
+        rig?.ids.push(userMessageId, assistantMessageId);
+      }
+
+      /** A turn the user stops, so the SDK may have had to kill the child. */
+      async function stoppedTurn(rig: ReturnType<typeof harness>): Promise<void> {
+        const running = startTurn(rig.controller);
+        await waitFor(() => rig.runtime.calls.turn.length >= 2, 'the turn to reach the runtime');
+        cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled');
+        expect((await running).reason).toBe('cancelled-by-user');
+        nextSendIds(rig);
+      }
+
+      /** The next request, on a runtime that has lost the earlier session. */
+      async function sendOnNewRuntime(
+        announced: Array<{ sessionId: string; conversationReset?: string }> = []
+      ) {
+        const next = harness({ refuseFallbackResume: true });
+        const running = startTurn(next.controller, {
+          observer: { onSession: (session) => announced.push(session) },
+        });
+        await waitFor(() => next.runtime.calls.turn.length === 1, 'the turn on the new runtime');
+        next.runtime.emit({ type: 'completed' });
+        return { next, result: await running };
+      }
+
+      it('opens a fresh conversation, saying so, when the connection dropped after a stopped turn', async () => {
+        const rig = harness({ refuseFallbackResume: true });
+        await completedFirstTurn(rig);
+        await stoppedTurn(rig);
+        rig.runtime.dropConnection();
+        await Promise.resolve();
+        const announced: Array<{ sessionId: string; conversationReset?: string }> = [];
+
+        const { next, result } = await sendOnNewRuntime(announced);
+
+        const stored = turnPartOf((await readAssistantRow()).parts);
+        expect(
+          {
+            reason: result.reason,
+            resumeRef: next.runtime.calls.open[0]?.resumeRef,
+            live: announced.map((entry) => entry.conversationReset),
+            stored: stored.conversationReset,
+          },
+          'expected a fresh open, announced and stored as nonresumable, so the stopped turn is not continued'
+        ).toEqual({
+          reason: 'completed',
+          resumeRef: undefined,
+          live: ['nonresumable'],
+          stored: 'nonresumable',
+        });
+      });
+
+      it('opens a fresh conversation when the hub restarted after a stopped turn, reading the row from the store', async () => {
+        const rig = harness({ refuseFallbackResume: true });
+        await completedFirstTurn(rig);
+        const running = startTurn(rig.controller);
+        await waitFor(() => rig.runtime.calls.turn.length >= 2, 'the turn to reach the runtime');
+        // The hub dies mid-turn: the message is left generating and the boot sweep records why.
+        await reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb());
+        rig.runtime.dropConnection();
+        await running;
+        nextSendIds();
+
+        const { next } = await sendOnNewRuntime();
+
+        expect(
+          next.runtime.calls.open[0]?.resumeRef,
+          'expected no resume reference after a hub restart mid-turn'
+        ).toBeUndefined();
+      });
+
+      it('resumes the conversation when a later turn on the same session completed after a stop', async () => {
+        const rig = harness({ refuseFallbackResume: true });
+        await completedFirstTurn(rig);
+        await stoppedTurn(rig);
+        // The SDK accepts a turn after a stop only when the interrupt ended the child cleanly.
+        const second = startTurn(rig.controller);
+        await waitFor(() => rig.runtime.calls.turn.length >= 3, 'the turn after the stop');
+        rig.runtime.emit({ type: 'completed' });
+        expect((await second).reason).toBe('completed');
+        nextSendIds(rig);
+        rig.runtime.dropConnection();
+        await Promise.resolve();
+
+        const { next } = await sendOnNewRuntime();
+
+        const open = next.runtime.calls.open[0];
+        expect(
+          { resumeRef: open?.resumeRef, resumeMode: open?.resumeMode },
+          'expected a strict resume once a completed turn proved the session was not killed'
+        ).toEqual({ resumeRef: 'native-session-1', resumeMode: 'strict' });
+      });
+
+      it.each([
+        ['claude-no-result', 'a process that ended without a result', undefined],
+        ['claude-stream-broken', 'a stream that broke', undefined],
+        ['adapter-stream', "the runtime's own timeout or overflow stop", undefined],
+        ['claude-a-code-a-later-sdk-adds', 'a code nobody has seen', undefined],
+        ['claude-error', 'an ordinary vendor error', 'native-session-1'],
+        ['claude-error_max_turns', 'a vendor result that hit its turn limit', 'native-session-1'],
+      ])('after %s (%s) resumes: %p', async (code, _label, expectedResume) => {
+        const rig = harness({ refuseFallbackResume: true });
+        await completedFirstTurn(rig);
+        const failing = startTurn(rig.controller);
+        await waitFor(() => rig.runtime.calls.turn.length >= 2, 'the turn to reach the runtime');
+        rig.runtime.emit({ type: 'error', error: { code, message: 'the vendor failed' } });
+        expect((await failing).reason).toBe('vendor-error');
+        nextSendIds(rig);
+        rig.runtime.dropConnection();
+        await Promise.resolve();
+
+        const { next } = await sendOnNewRuntime();
+
+        expect(
+          next.runtime.calls.open[0]?.resumeRef,
+          `expected the open after ${code} to ${expectedResume ? 'resume' : 'start fresh'}`
+        ).toBe(expectedResume);
+      });
+
+      it('resumes the conversation after a turn the vendor never accepted', async () => {
+        const rig = harness({ refuseFallbackResume: true });
+        await completedFirstTurn(rig);
+        // A deterministic refusal at start: nothing reached the vendor, so nothing was killed.
+        let refused = false;
+        const refusing = harness({
+          refuseFallbackResume: true,
+          turnFailure: () => {
+            if (refused) return undefined;
+            refused = true;
+            return new RemoteError('INVALID_PARAMS', 'the prompt is too long', {
+              kind: 'external_agent_turn_refused',
+            });
+          },
+        });
+        rig.runtime.dropConnection();
+        await Promise.resolve();
+        const failing = await startTurn(refusing.controller);
+        expect(failing.reason).toBe('vendor-error');
+        nextSendIds();
+        refusing.runtime.dropConnection();
+        await Promise.resolve();
+
+        const { next } = await sendOnNewRuntime();
+
+        expect(
+          next.runtime.calls.open[0]?.resumeRef,
+          'expected the open after a refused start to resume native-session-1'
+        ).toBe('native-session-1');
+      });
+
+      it('fails one send for a gone conversation, then opens fresh even after the runtime restarts', async () => {
+        const rig = harness({ refuseFallbackResume: true });
+        await completedFirstTurn(rig);
+        rig.runtime.dropConnection();
+        await Promise.resolve();
+        // The strict resume opens lazily; the first turn reveals the conversation is gone.
+        const lost = harness({ refuseFallbackResume: true });
+        const failing = startTurn(lost.controller);
+        await waitFor(() => lost.runtime.calls.turn.length === 1, 'the turn on the strict resume');
+        lost.runtime.emit({
+          type: 'error',
+          error: { code: 'claude-no-result', message: 'No conversation found' },
+        });
+        expect((await failing).reason).toBe('vendor-error');
+        nextSendIds();
+        lost.runtime.dropConnection();
+        await Promise.resolve();
+
+        const announced: Array<{ sessionId: string; conversationReset?: string }> = [];
+        const { next, result } = await sendOnNewRuntime(announced);
+
+        expect(
+          {
+            strictOpens: lost.runtime.calls.open.map((open) => open.resumeMode),
+            reason: result.reason,
+            resumeRef: next.runtime.calls.open[0]?.resumeRef,
+            live: announced.map((entry) => entry.conversationReset),
+          },
+          'expected exactly one strict resume to fail and the next send to open fresh with the notice'
+        ).toEqual({
+          strictOpens: ['strict'],
+          reason: 'completed',
+          resumeRef: undefined,
+          live: ['nonresumable'],
+        });
+      });
+
+      it('shows the refusal card, without a fresh open, when the strict reopen is refused for another reason', async () => {
+        let opens = 0;
+        const rig = harness({
+          refuseFallbackResume: true,
+          turnFailure: closedOnce(),
+          openFailure: () => {
+            opens += 1;
+            if (opens === 1) return undefined;
+            return new RemoteError('UNAVAILABLE', 'signed out', {
+              kind: 'external_agent_signed_out',
+            });
+          },
+        });
+
+        const result = await startTurn(rig.controller);
+        const part = turnPartOf((await readAssistantRow()).parts);
+
+        expect(
+          {
+            reason: result.reason,
+            opens,
+            unavailable: part.unavailableReason,
+            reset: part.conversationReset,
+          },
+          'expected the signed-out card after one strict reopen and no fresh conversation'
+        ).toEqual({
+          reason: 'vendor-error',
+          opens: 2,
+          unavailable: 'signed-out',
+          reset: undefined,
+        });
+      });
+    });
+
+    it('opens at most three sessions for one message, however many capacity retries each open needs', async () => {
+      const script = [
+        sessionRefusal('closed'),
+        sessionRefusal('nonresumable'),
+        sessionRefusal('closed'),
+      ];
+      let opens = 0;
+      const capacity = new RemoteError('UNAVAILABLE', 'External-agent session capacity is 4', {
+        kind: 'external_agent_capacity',
+      });
+      const { runtime, controller } = harness({
+        capacityRetryMs: 1_000,
+        turnFailure: () => script.shift(),
+        // The first open of each reopen finds the runtime at its cap once, then gets in.
+        openFailure: () => {
+          opens += 1;
+          return opens === 2 || opens === 4 ? capacity : undefined;
+        },
+      });
+
+      const result = await startTurn(controller);
+
+      expect(
+        {
+          reason: result.reason,
+          sessionsThatTookTheTurn: runtime.calls.turn.length,
+          openRequests: runtime.calls.open.length,
+          clientMessageIds: new Set(runtime.calls.turn.map((call) => call.clientMessageId)).size,
+        },
+        'expected three sessions (one open each) and two capacity retries for one clientMessageId'
+      ).toEqual({
+        reason: 'session-lost',
+        sessionsThatTookTheTurn: 3,
+        openRequests: 5,
+        clientMessageIds: 1,
+      });
+    });
+
+    it('ends the turn session-lost on a third refusal, after one reopen per reason', async () => {
+      const script = [
+        sessionRefusal('closed'),
+        sessionRefusal('nonresumable'),
+        sessionRefusal('closed'),
+      ];
+      const { runtime, controller } = harness({ turnFailure: () => script.shift() });
+
+      const result = await startTurn(controller);
+
+      expect(
+        {
+          reason: result.reason,
+          opens: runtime.calls.open.length,
+          turns: runtime.calls.turn.length,
+        },
+        'expected closed then nonresumable to be replaced once each and a third refusal to end the turn'
+      ).toEqual({ reason: 'session-lost', opens: 3, turns: 3 });
+    });
+
+    it('ends in the consent refusal card, opening nothing, when consent was withdrawn under the session', async () => {
+      let opens = 0;
+      const { runtime, controller } = harness({
+        turnFailure: closedOnce(),
+        openFailure: () => {
+          opens += 1;
+          if (opens === 1) return undefined;
+          return new RuntimeConsentDeniedError('External agents were not granted.', {
+            capability: 'externalAgents',
+            method: 'external-agent.open',
+            slot: 'externalAgents',
+          });
+        },
+      });
+
+      const result = await startTurn(controller);
+      const part = turnPartOf((await readAssistantRow()).parts);
+
+      expect(
+        {
+          reason: result.reason,
+          opens,
+          turns: runtime.calls.turn.length,
+          unavailable: part.unavailableReason,
+        },
+        'expected consent-revoked, the runtime-denied card and no session opened after the denial'
+      ).toEqual({ reason: 'consent-revoked', opens: 2, turns: 1, unavailable: 'runtime-denied' });
+    });
+
+    it('keeps the terminal reason of a vendor that dies mid-turn', async () => {
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      runtime.emit({
+        type: 'error',
+        error: { code: 'adapter-stream', message: 'the app-server exited' },
+      });
+      const result = await running;
+
+      expect(
+        {
+          reason: result.reason,
+          opens: runtime.calls.open.length,
+          turns: runtime.calls.turn.length,
+        },
+        'expected a mid-turn death to stay vendor-error with no reopen'
+      ).toEqual({ reason: 'vendor-error', opens: 1, turns: 1 });
+    });
+  });
+
   it('records an accepted approval without waiting for the vendor to echo it', async () => {
     const { runtime, controller, approvals } = harness();
     const running = startTurn(controller);
@@ -1076,6 +1759,24 @@ describe('external turn controller', () => {
         getDb()
       );
     }
+
+    it('never reopens a closed session for a review, which is an explicit action', async () => {
+      const { runtime, controller } = harness({
+        capabilities: REVIEW_CAPABILITIES,
+        reviewFailure: () => sessionRefusal('closed'),
+      });
+
+      const result = await startReview(controller);
+
+      expect(
+        {
+          reason: result.reason,
+          opens: runtime.calls.open.length,
+          reviews: runtime.calls.startReview.length,
+        },
+        'expected a refused review to end session-lost after one open and one review call'
+      ).toEqual({ reason: 'session-lost', opens: 1, reviews: 1 });
+    });
 
     it('reports a review whose connection closed before it was sent as a disconnect', async () => {
       const { runtime, sessions: base, approvals, commandCatalog } = await realHarness();

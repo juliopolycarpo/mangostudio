@@ -913,7 +913,9 @@ function translateRuntimeError(error: unknown): Error {
     case 'path_access':
       return new PathAccessError(error.message);
     case 'tool_argument':
-      return new ToolArgumentError(error.message);
+      // The cause keeps the runtime's details, such as the session state an external-agent
+      // refusal names, for a caller that reads more than the message.
+      return new ToolArgumentError(error.message, { cause: error });
     case 'grep_pattern':
       return new GrepPatternError(error.message);
     case 'file_not_read':
