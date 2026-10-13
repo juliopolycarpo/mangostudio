@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   descendantsOf,
   type ProcessEntry,
@@ -53,7 +56,27 @@ describe('parentPidFromStat', () => {
 });
 
 describe('readProcessSnapshot', () => {
-  it.skipIf(process.platform !== 'linux')('includes this process under its parent', () => {
+  it('reads proc-shaped fixtures on every host and skips vanished or malformed entries', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mango-proc-fixture-'));
+    try {
+      for (const pid of ['7', '42', '43', '44', 'not-a-pid']) {
+        mkdirSync(join(root, pid));
+      }
+      writeFileSync(join(root, '7/stat'), '7 (runtime) S 1 7 7 0 -1');
+      writeFileSync(join(root, '42/stat'), '42 (codex (app) server) S 7 42 42 0 -1');
+      writeFileSync(join(root, '43/stat'), 'malformed');
+      writeFileSync(join(root, 'not-a-pid/stat'), '99 (ignored) S 7 99 99 0 -1');
+      // Missing stat models a vanished process; missing exe remains optional.
+      expect(readProcessSnapshot(root).sort((a, b) => a.pid - b.pid)).toEqual([
+        { pid: 7, parentPid: 1 },
+        { pid: 42, parentPid: 7 },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform !== 'linux')('includes this Linux process under its parent', () => {
     const self = readProcessSnapshot().find((entry) => entry.pid === process.pid);
     expect(self?.parentPid).toBe(process.ppid);
   });
