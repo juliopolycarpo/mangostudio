@@ -23,6 +23,8 @@ export interface RunResult {
   label: string;
   exitCode: number;
   duration: number;
+  /** Setup could not execute this task; still prints FAIL in the human summary. */
+  unavailableReason?: string;
 }
 
 export interface CaptureResult {

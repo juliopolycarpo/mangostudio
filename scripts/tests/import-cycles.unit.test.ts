@@ -29,6 +29,7 @@ const DEPENDENCY_LINKS = [
   'turbo',
   'dprint',
   'typescript',
+  'typebox',
 ];
 const VALUE_CYCLE = {
   'a.ts': "import { b } from './b';\n\nexport function a(): number {\n  return b();\n}\n",

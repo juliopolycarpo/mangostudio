@@ -437,6 +437,11 @@ describe('actions-lint tasks', () => {
     });
     const results = await Promise.all(createActionsLintTasks(broken).map((task) => task()));
     expect(results.map((r) => r.exitCode)).toEqual([1, 1, 1]);
+    expect(results.map((r) => r.unavailableReason)).toEqual([
+      'unsupported platform',
+      'unsupported platform',
+      'unsupported platform',
+    ]);
   });
 
   test('skips the ShellCheck task cleanly when no shell scripts are tracked', async () => {
