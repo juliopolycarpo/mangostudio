@@ -242,4 +242,19 @@ describe('Rust live smoke configuration', () => {
       MANGO_HOME: '/tmp/mango',
     });
   });
+
+  it('lets an override replace the recorded credential home and add a vendor config home', () => {
+    const source = { HOME: '/tmp/test-home', MANGOSTUDIO_REAL_HOME: '/home/owner' };
+    expect(
+      rustSmokeRuntimeEnv(source, '/tmp/mango', {
+        HOME: '/tmp/empty',
+        CODEX_HOME: '/tmp/empty',
+      })
+    ).toEqual({
+      HOME: '/tmp/empty',
+      USERPROFILE: '/home/owner',
+      CODEX_HOME: '/tmp/empty',
+      MANGO_HOME: '/tmp/mango',
+    });
+  });
 });

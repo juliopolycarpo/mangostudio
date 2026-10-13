@@ -1174,6 +1174,26 @@ invocation, so the SDK's `testing` feature never reaches the binary under qualif
 evidence: opt-in through `MANGOSTUDIO_LIVE_AGENT_SMOKE=claude,codex,cursor`, it runs a one-word
 turn against the signed-in CLIs on the machine, cancels a streaming Codex or Cursor turn and sends the next one at once, and never runs in CI.
 
+The same file observes the refusals the fake-driven tests only assume, through the real runtime and
+the hub's own selector and send path. `MANGOSTUDIO_LIVE_AGENT_REFUSALS` names the cases:
+`codex-signed-out`, `claude-signed-out` and `cursor-signed-out` point the vendor's config home
+(`CODEX_HOME`, `CLAUDE_CONFIG_DIR`, or `HOME` and `XDG_CONFIG_HOME`) at an empty scratch directory the
+test creates, and `codex-outdated` puts an older official `codex` first on `PATH` from the directory
+`MANGOSTUDIO_LIVE_OUTDATED_CODEX_DIR` names. Nothing signs in or out and no credential is read. Each
+case checks the selector, the pre-send check where the selector refuses, and the open that the runtime
+refuses with `external_agent_signed_out` or `external_agent_version_unsupported`, down to the `error`
+chunk's reason, remedy and required version.
+
+`codex-outdated-reopen` drives the refused reopen: a normal Codex turn on the signed-in account, then
+the first runtime is killed between the open and the submission of a second send, as a runtime that
+restarted would be, and the hub's reopen reaches a second runtime whose `codex` is the older one. It
+asserts the live `external_error` chunk, the stored turn part after a transcript read, that the two
+match, and that the hub reopens once and does not back off. The second runtime has an empty
+`CODEX_HOME`, because the SDK starts `codex app-server` before it gates the version and an older
+app-server writes state under the home it runs in. Ending the vendor's own process does not reopen:
+the runtime reports the session lost, the turn ends `session-lost`, and the next send is an ordinary
+open.
+
 A runtime-side consent withdrawal reaches the hub as the vendor ending the turn early
 (`interrupted`), not as `consent-revoked`: the wire has no event that carries why the runtime
 stopped a turn. The hub's own withdrawal path still ends turns `consent-revoked`.
