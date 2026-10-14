@@ -63,22 +63,18 @@ export const summarizeShardMeta = (
 const summarizeReceipts = (
   receipts: readonly ParsedShardReceipt[]
 ): Pick<ShardSummary, 'exitCode' | 'durationSeconds'> => {
+  const durations = receipts.flatMap((parsed) =>
+    parsed.kind === 'valid' && parsed.receipt.durationSeconds !== null
+      ? [parsed.receipt.durationSeconds]
+      : []
+  );
   return {
     exitCode:
       receipts
         .map((parsed) => (parsed.kind === 'valid' ? parsed.receipt.exitCode : 1))
         .find((code) => code !== 0) ?? 0,
     durationSeconds:
-      receipts.length === 0 ||
-      receipts.some(
-        (parsed) => parsed.kind === 'invalid' || parsed.receipt.durationSeconds === null
-      )
-        ? null
-        : Math.max(
-            ...receipts.map((parsed) =>
-              parsed.kind === 'valid' ? (parsed.receipt.durationSeconds ?? 0) : 0
-            )
-          ),
+      durations.length === 0 || durations.length < receipts.length ? null : Math.max(...durations),
   };
 };
 
