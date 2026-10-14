@@ -71,6 +71,24 @@ describe('shard-meta attempts', () => {
     ).toBe(2);
   }, 30_000);
 
+  it('rejects a label the receipt cannot carry before running the suite', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'suite-ran');
+    const run = runTestsWithWatchdog(
+      optionsIn(dir, {
+        label: 'Shard_1',
+        command: ['bun', '-e', `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "")`],
+      })
+    );
+    await expect(run).rejects.toThrow(
+      'Invalid watchdog label "Shard_1"; expected a positive shard number or a lowercase lane name'
+    );
+    expect(
+      await Bun.file(marker).exists(),
+      'expected suite state: not run | received: ran before the label was rejected'
+    ).toBe(false);
+  });
+
   it('records retained findings when a failed hanging attempt is followed by a pass', async () => {
     const dir = await makeTemp();
     const marker = join(dir, 'first-attempt-ran');

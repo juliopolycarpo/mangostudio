@@ -51,7 +51,7 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { normalizeLogLine } from '../lib/log-lines';
-import { serializeShardReceipt } from '../lib/shard-receipt';
+import { isShardIdentity, serializeShardReceipt } from '../lib/shard-receipt';
 import { TIMINGS_DIR } from '../lib/test-lanes';
 
 export interface WatchdogOptions {
@@ -433,6 +433,14 @@ const restoreTimings = async (timingsDir: string, backup: string | null): Promis
  */
 export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<WatchdogResult> => {
   const startedAt = Date.now();
+  // Checked before the suite runs: the receipt rejects this identity, and a
+  // throw after the run would lose the exit code and leave no shard-meta.json.
+  const shard = /^\d+$/.test(options.label) ? Number(options.label) : options.label;
+  if (!isShardIdentity(shard)) {
+    throw new Error(
+      `Invalid watchdog label ${JSON.stringify(options.label)}; expected a positive shard number or a lowercase lane name like "frontend".`
+    );
+  }
   // Anchored at the repo root, not at `cwd`. `TIMINGS_DIR` is a repo-root
   // path (scripts/test.ts creates it there), while `cwd` is wherever the
   // caller's step happens to run — the randomized-order nightly runs its
@@ -549,7 +557,6 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   }
 
   const durationSeconds = Math.round((Date.now() - startedAt) / 1000);
-  const shard = /^\d+$/.test(options.label) ? Number(options.label) : options.label;
   // `attempts` is the receipt of a retry: a hang that a clean second attempt
   // recovered still reports exit 0, and without this the QA report could not
   // tell that the job ran twice.
