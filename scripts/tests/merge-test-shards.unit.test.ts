@@ -10,6 +10,7 @@ import {
   ShardSetError,
   summarizeShardMeta,
 } from '../ci/merge-test-shards';
+import { ROOT_DIR } from '../lib/config';
 import { SHARDED_LCOV_PATHS } from '../lib/test-lanes';
 import { parseLcovSummary } from '../qa-gate/parse-lcov';
 import { receiptText, shardReceipts } from './support/shard-receipt-fixtures';
@@ -448,6 +449,58 @@ describe('mergeTestShards', () => {
     const summary = await mergeTestShards(shards, output, 2);
     expect(summary.shards).toBe(2);
     expect(summary.coverageErrors).toBeUndefined();
+  });
+});
+
+describe('merge-test-shards CLI verdict', () => {
+  it.each([
+    ['passing receipt', receiptText(shardReceipts.currentPass), 0, 0],
+    ['failing receipt', receiptText({ ...shardReceipts.currentPass, exitCode: 7 }), 7, 1],
+    ['invalid receipt', '{}', 1, 1],
+    ['wrong producer', receiptText({ ...shardReceipts.currentPass, shard: 2 }), 1, 1],
+    ['retained findings', receiptText(shardReceipts.retainedFindings), 1, 1],
+  ])('enforces a %s after emitting its summary', async (_name, receipt, verdict, status) => {
+    // Run the shipped CLI in an isolated checkout so its coverage writes cannot
+    // replace the developer's reports or those of a concurrent test lane.
+    const root = await makeTemp();
+    const script = 'scripts/ci/merge-test-shards.ts';
+    for (const path of [
+      script,
+      'scripts/lib/config.ts',
+      'scripts/lib/shard-receipt.ts',
+      'scripts/lib/test-lanes.ts',
+      'scripts/lib/log-lines.ts',
+      'scripts/qa-gate/merge-lcov-shards.ts',
+      'scripts/qa-gate/unhandled-errors.ts',
+    ]) {
+      await Bun.write(join(root, path), Bun.file(join(ROOT_DIR, path)));
+    }
+    const shards = join(root, 'shards');
+    await writeShards(shards, [
+      { name: 'test-shard-1', lcovLines: [[1, 1]] },
+      {
+        name: 'test-shard-frontend',
+        lcovLines: [[1, 1]],
+        meta: { shard: 'frontend', exitCode: 0, durationSeconds: 30 },
+      },
+    ]);
+    await Bun.write(join(shards, 'test-shard-1/shard-meta.json'), receipt);
+    const proc = Bun.spawn({
+      cmd: ['bun', join(root, script), shards, '1'],
+      cwd: root,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    const summary = JSON.parse(stdout);
+    expect(summary.exitCode).toBe(verdict);
+    expect(summary.coverageErrors).toBeUndefined();
+    expect(stderr).toContain(`Merged 2 shard(s): exit ${verdict}`);
+    expect(exitCode).toBe(status);
   });
 });
 

@@ -821,8 +821,10 @@ shards reading different bytes will not cover the file set between them — some
 files run twice, others not at all, and every shard still exits 0. Three things
 hold that down:
 
-- Only the merge job writes the cache, and only after all shards have read
-  it, so nothing changes underneath a fan-out in progress.
+- The resolver pins one exact trusted-main cache key for every reader in a run.
+  Only the merge job on a successful `main` push writes a new baseline, after
+  both test jobs pass and their receipts, coverage and timings merge successfully.
+  PR runs never save timings: their run-suffixed keys have no future reader.
 - `scripts/ci/merge-timings-shards.ts` fails the run if two shards claim the
   same file, which is the observable symptom of a disagreement.
 - A **missing** file is tolerated by Bun and falls back to round-robin, so a cold
