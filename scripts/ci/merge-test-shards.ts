@@ -269,5 +269,7 @@ if (import.meta.main) {
   for (const [workspace, reason] of Object.entries(summary.coverageErrors ?? {})) {
     process.stderr.write(`::error title=Coverage merge failed (${workspace})::${reason}\n`);
   }
-  if (summary.coverageErrors) process.exit(1);
+  // Keep the JSON above for QA, but fail before timings can be published from
+  // failed tests, invalid receipts or findings retained across a clean retry.
+  if (summary.exitCode !== 0 || summary.coverageErrors) process.exit(1);
 }

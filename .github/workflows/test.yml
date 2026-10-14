@@ -408,8 +408,12 @@ jobs:
       # a PR save has no future reader. All shards still consume the one exact
       # baseline key resolved up front, including on reruns of failed jobs.
       # Each main run needs a unique key because actions/cache is immutable.
+      # This job also runs after failed dependencies to collect diagnostics;
+      # success() here covers only this job, so require both test jobs too.
       - name: Save test timings
-        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        if: >-
+          ${{ success() && needs.shard.result == 'success' && needs.frontend.result == 'success'
+          && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         uses: ./.github/actions/cache-scoped
         with:
           family: timings
