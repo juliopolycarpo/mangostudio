@@ -7,6 +7,7 @@ import { basename } from 'node:path';
 
 import {
   parseShardReceipt,
+  type ShardIdentity,
   type ShardReceipt,
   shardIdentityFromDirectory,
 } from '../../lib/shard-receipt';
@@ -40,10 +41,13 @@ export const readTextOrNull: ReadText = async (path) => {
   return (await file.exists()) ? file.text() : null;
 };
 
-/** Validate process evidence with the same contract as the producer and merger. */
+/**
+ * Validate process evidence with the same contract as the producer and merger.
+ * // Usage: parseReceipt('{"shard":3,"exitCode":0,"durationSeconds":41}', 3) // { kind: 'read', exitCode: 0, ... }
+ */
 export const parseReceipt = (
   text: string | null,
-  expectedShard?: number | string
+  expectedShard?: ShardIdentity
 ): ReceiptEvidence => {
   const parsed = parseShardReceipt(text, { expectedShard });
   return parsed.kind === 'invalid'
