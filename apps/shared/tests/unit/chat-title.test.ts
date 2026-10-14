@@ -73,9 +73,10 @@ describe('sanitizeGeneratedChatTitle', () => {
     const hostile = `x${'"'.repeat(50_000)}x`;
 
     const start = performance.now();
-    sanitizeGeneratedChatTitle(hostile, 'Fallback');
+    const result = sanitizeGeneratedChatTitle(hostile, 'Fallback');
 
     expect(performance.now() - start).toBeLessThan(1_000);
+    expect(result).toBe(`x${'"'.repeat(79)}...`);
   });
 
   it('falls back when the title is only quote characters', () => {
