@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import apiTurboConfig from '../../apps/api/turbo.json';
+import rootPackage from '../../package.json';
 import rootTurboConfig from '../../turbo.jsonc';
 import { ROOT_DIR } from '../lib/config';
 import { parseJunitXml } from '../lib/junit-report';
@@ -46,7 +47,7 @@ function fixture(): string {
     join(dir, 'package.json'),
     JSON.stringify({
       name: 'test-inventory-fixture',
-      packageManager: 'bun@1.4.3',
+      packageManager: rootPackage.packageManager,
       scripts: { test: 'bun test tests' },
     })
   );
