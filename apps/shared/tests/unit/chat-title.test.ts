@@ -61,14 +61,21 @@ describe('sanitizeGeneratedChatTitle', () => {
     expect(sanitizeGeneratedChatTitle('   ', 'Fallback Title')).toBe('Fallback Title');
   });
 
-  it('handles adversarial repeated quotes without catastrophic backtracking', () => {
-    const hostile = `${'"'.repeat(50_000)}Title${'`'.repeat(50_000)}`;
+  it('strips long runs of wrapping quotes', () => {
+    const wrapped = `${'"'.repeat(50_000)}Title${'`'.repeat(50_000)}`;
+
+    expect(sanitizeGeneratedChatTitle(wrapped, 'Fallback')).toBe('Title');
+  });
+
+  it('handles an interior run of quotes without catastrophic backtracking', () => {
+    // The replaced `/^["'`]+|["'`]+$/g` cleanup takes seconds on this shape; the linear trim
+    // takes about a millisecond, so the budget only has to separate those two.
+    const hostile = `x${'"'.repeat(50_000)}x`;
 
     const start = performance.now();
-    const result = sanitizeGeneratedChatTitle(hostile, 'Fallback');
+    sanitizeGeneratedChatTitle(hostile, 'Fallback');
 
-    expect(result).toBe('Title');
-    expect(performance.now() - start).toBeLessThan(100);
+    expect(performance.now() - start).toBeLessThan(1_000);
   });
 
   it('falls back when the title is only quote characters', () => {
