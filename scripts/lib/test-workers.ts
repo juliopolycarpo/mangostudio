@@ -379,9 +379,13 @@ export function discoverTestFiles(cwd: string, testDir: string): string[] {
   // The names and extensions `bun test` itself runs.
   const glob = new Glob('**/*{.test,_test,.spec,_spec}.{js,jsx,mjs,cjs,ts,tsx,mts,cts}');
   const root = testDir.replaceAll('\\', '/').replace(/\/$/, '');
-  return [...glob.scanSync({ cwd: join(cwd, testDir) })]
-    .map((file) => `${root}/${file.replaceAll('\\', '/')}`)
-    .sort();
+  return (
+    [...glob.scanSync({ cwd: join(cwd, testDir) })]
+      // Bun's test walk skips dependency directories; Glob scans them by default.
+      .filter((file) => !file.replaceAll('\\', '/').split('/').includes('node_modules'))
+      .map((file) => `${root}/${file.replaceAll('\\', '/')}`)
+      .sort()
+  );
 }
 
 /** A case reduced to what two reports must agree on. */

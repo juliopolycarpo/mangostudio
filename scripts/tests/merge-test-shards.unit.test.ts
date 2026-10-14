@@ -7,12 +7,12 @@ import {
   expectedLcovShards,
   listShardDirs,
   mergeTestShards,
-  type ShardMeta,
   ShardSetError,
   summarizeShardMeta,
 } from '../ci/merge-test-shards';
 import { SHARDED_LCOV_PATHS } from '../lib/test-lanes';
 import { parseLcovSummary } from '../qa-gate/parse-lcov';
+import { receiptText, shardReceipts } from './support/shard-receipt-fixtures';
 
 const temps: string[] = [];
 
@@ -89,23 +89,21 @@ describe('summarizeShardMeta', () => {
   // the "failed" predicate and then folds back to 0 — a green suite over a
   // shard that reported nothing — and shadows shard 2's real failure.
   it('treats an unparseable exit code as failed instead of green', () => {
-    expect(
-      summarizeShardMeta([
-        {} as unknown as ShardMeta,
-        { shard: 2, exitCode: 5, durationSeconds: 20 },
-      ])
-    ).toEqual({ exitCode: 1, durationSeconds: 20 });
+    expect(summarizeShardMeta([{}, { shard: 2, exitCode: 5, durationSeconds: 20 }])).toEqual({
+      exitCode: 1,
+      durationSeconds: null,
+    });
   });
 
   // Same shape from the other side: Math.max with an absent duration is NaN,
   // which serializes as null and renders as a suite with no wall clock.
-  it('ignores an absent duration rather than reporting NaN', () => {
+  it('keeps an absent legacy duration unavailable rather than reporting measured zero', () => {
     expect(
       summarizeShardMeta([
-        { shard: 1, exitCode: 0 } as unknown as ShardMeta,
+        { shard: 1, exitCode: 0 },
         { shard: 2, exitCode: 0, durationSeconds: 20 },
       ]).durationSeconds
-    ).toBe(20);
+    ).toBeNull();
   });
 
   // Duration is the lane's wall clock, not its CPU time: the shards run
@@ -153,6 +151,35 @@ describe('expectedLcovShards', () => {
 });
 
 describe('mergeTestShards', () => {
+  it.each([
+    ['wrong producer', { ...shardReceipts.currentPass, shard: 2 }],
+    ['missing producer', { ...shardReceipts.currentPass, shard: undefined }],
+    ['negative duration', { ...shardReceipts.currentPass, durationSeconds: -1 }],
+    ['malformed attempts', { ...shardReceipts.currentPass, attempts: 0 }],
+  ])(
+    'fails closed for %s evidence while leaving LCOV responsibilities intact',
+    async (_name, receipt) => {
+      const root = await makeTemp();
+      const output = await makeTemp();
+      await writeShards(root, [{ name: 'test-shard-1', lcovLines: [[1, 1]] }]);
+      await Bun.write(join(root, 'test-shard-1/shard-meta.json'), receiptText(receipt));
+      const summary = await mergeTestShards(root, output);
+      expect(summary.exitCode).toBe(1);
+      expect(summary.durationSeconds).toBeNull();
+      expect(summary.coverageErrors?.api).toBeUndefined();
+    }
+  );
+
+  it('retains earlier findings after a clean retry', async () => {
+    const root = await makeTemp();
+    const output = await makeTemp();
+    await writeShards(root, [{ name: 'test-shard-1', lcovLines: [[1, 1]] }]);
+    await Bun.write(
+      join(root, 'test-shard-1/shard-meta.json'),
+      receiptText(shardReceipts.retainedFindings)
+    );
+    expect(await mergeTestShards(root, output)).toMatchObject({ exitCode: 1, durationSeconds: 42 });
+  });
   it('merges coverage and folds run metadata', async () => {
     const shards = await makeTemp();
     const output = await makeTemp();
@@ -450,6 +477,9 @@ describe('collect-test-metrics degradation', () => {
     ['truncated', '{"shards": 8, "exit'],
     ['not an object', '[]'],
     ['exitCode only', '{"exitCode":0}'],
+    ['negative exitCode', '{"shards":8,"exitCode":-1,"durationSeconds":1}'],
+    ['negative duration', '{"shards":8,"exitCode":0,"durationSeconds":-1}'],
+    ['fractional shard count', '{"shards":1.5,"exitCode":0,"durationSeconds":1}'],
     [
       'malformed unhandledErrors',
       '{"shards":8,"exitCode":0,"durationSeconds":1,"unhandledErrors":{"errors":"nope"}}',
@@ -557,6 +587,22 @@ describe('collect-test-metrics degradation', () => {
       expect(
         (JSON.parse(stdout) as { tests: { value: { exitCode: number } } }).tests.value.exitCode
       ).toBe(0);
+    },
+    COLLECT_TIMEOUT
+  );
+
+  it.each([0, null])(
+    'preserves duration %s in the metrics fragment',
+    async (durationSeconds) => {
+      const dir = await makeTemp();
+      const summaryPath = join(dir, 'shard-summary.json');
+      await Bun.write(summaryPath, JSON.stringify({ shards: 8, exitCode: 0, durationSeconds }));
+      const { stdout } = await collect(summaryPath);
+      const fragment = JSON.parse(stdout) as {
+        tests: { value: { exitCode: number; durationSeconds: number | null } };
+      };
+      expect(fragment.tests.value.exitCode).toBe(0);
+      expect(fragment.tests.value.durationSeconds).toBe(durationSeconds);
     },
     COLLECT_TIMEOUT
   );

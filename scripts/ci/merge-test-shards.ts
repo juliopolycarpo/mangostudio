@@ -29,25 +29,22 @@ import { readdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import {
+  type ParsedShardReceipt,
+  parseShardReceipt,
+  shardIdentityFromDirectory,
+  validateShardReceipt,
+} from '../lib/shard-receipt';
 import { SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
 import { type LcovShardInput, mergeLcovFiles } from '../qa-gate/merge-lcov-shards';
 import { mergeUnhandledErrors, type UnhandledErrors } from '../qa-gate/unhandled-errors';
-
-export interface ShardMeta {
-  /** A shard number, or 'frontend' for the unsharded frontend job. */
-  readonly shard: number | string;
-  readonly exitCode: number;
-  readonly durationSeconds: number;
-  /** Watchdog attempts the job took; absent in receipts from before it was recorded. */
-  readonly attempts?: number;
-}
 
 export interface ShardSummary {
   readonly shards: number;
   /** Non-zero if any shard failed. */
   readonly exitCode: number;
   /** Wall clock of the slowest shard, which is the lane's critical path. */
-  readonly durationSeconds: number;
+  readonly durationSeconds: number | null;
   readonly unhandledErrors: UnhandledErrors;
   /**
    * Workspaces whose LCOV could not be merged, each with the reason naming the
@@ -57,26 +54,29 @@ export interface ShardSummary {
   readonly coverageErrors?: Readonly<Record<string, string>>;
 }
 
-// `readJson` casts whatever parsed, so a `shard-meta.json` that is valid JSON
-// of the wrong shape reaches here with `exitCode: undefined`. Read naively,
-// `find(meta => meta.exitCode !== 0)?.exitCode ?? 0` matches that shard *and*
-// then folds it back to 0 — a green suite — while also shadowing any later
-// shard's real failure. `durationSeconds` degrades to NaN the same way. Both
-// are normalised here, mirroring the `isShardSummary` guard one step
-// downstream in collect-test-metrics.ts.
-const exitCodeOf = (meta: Partial<ShardMeta> | null): number =>
-  Number.isFinite(meta?.exitCode) ? (meta as ShardMeta).exitCode : 1;
-
-const durationOf = (meta: Partial<ShardMeta> | null): number =>
-  Number.isFinite(meta?.durationSeconds) ? (meta as ShardMeta).durationSeconds : 0;
-
-/** Fold per-shard run metadata into the single pair the QA fragment reports. */
+/** Fold receipts. The critical path is unavailable if any job's duration is unavailable. */
 export const summarizeShardMeta = (
-  metas: readonly ShardMeta[]
-): Pick<ShardSummary, 'exitCode' | 'durationSeconds'> => ({
-  exitCode: metas.map(exitCodeOf).find((code) => code !== 0) ?? 0,
-  durationSeconds: metas.reduce((max, meta) => Math.max(max, durationOf(meta)), 0),
-});
+  metas: readonly unknown[]
+): Pick<ShardSummary, 'exitCode' | 'durationSeconds'> =>
+  summarizeReceipts(metas.map((meta) => validateShardReceipt(meta)));
+
+const summarizeReceipts = (
+  receipts: readonly ParsedShardReceipt[]
+): Pick<ShardSummary, 'exitCode' | 'durationSeconds'> => {
+  const durations = receipts.flatMap((parsed) =>
+    parsed.kind === 'valid' && parsed.receipt.durationSeconds !== null
+      ? [parsed.receipt.durationSeconds]
+      : []
+  );
+  return {
+    exitCode:
+      receipts
+        .map((parsed) => (parsed.kind === 'valid' ? parsed.receipt.exitCode : 1))
+        .find((code) => code !== 0) ?? 0,
+    durationSeconds:
+      durations.length === 0 || durations.length < receipts.length ? null : Math.max(...durations),
+  };
+};
 
 const readJson = async <T>(path: string, fallback: T): Promise<T> => {
   const file = Bun.file(path);
@@ -201,13 +201,15 @@ export const mergeTestShards = async (
   }
 
   const metas = await Promise.all(
-    shardDirs.map((dir) =>
-      readJson<ShardMeta>(join(dir, 'shard-meta.json'), {
-        shard: 0,
-        exitCode: 1,
-        durationSeconds: 0,
-      })
-    )
+    shardDirs.map(async (dir) => {
+      const path = join(dir, 'shard-meta.json');
+      const text = await Bun.file(path)
+        .text()
+        .catch(() => null);
+      return parseShardReceipt(text, {
+        expectedShard: shardIdentityFromDirectory(basename(dir)),
+      });
+    })
   );
   const unhandledErrors = mergeUnhandledErrors(
     await Promise.all(
@@ -222,7 +224,7 @@ export const mergeTestShards = async (
 
   return {
     shards: shardDirs.length,
-    ...summarizeShardMeta(metas),
+    ...summarizeReceipts(metas),
     unhandledErrors,
     ...(Object.keys(coverageErrors).length > 0 ? { coverageErrors } : {}),
   };
@@ -232,7 +234,7 @@ export const mergeTestShards = async (
 const incompleteSetSummary = (reason: string): ShardSummary => ({
   shards: 0,
   exitCode: 1,
-  durationSeconds: 0,
+  durationSeconds: null,
   unhandledErrors: { errors: 0, headlines: [] },
   coverageErrors: Object.fromEntries(
     Object.keys(SHARDED_LCOV_PATHS).map((workspace) => [workspace, reason])

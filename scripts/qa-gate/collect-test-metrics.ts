@@ -23,6 +23,7 @@ import { basename } from 'node:path';
 
 import { listShardDirs, type ShardSummary } from '../ci/merge-test-shards';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
+import { isReceiptDuration, isReceiptExitCode } from '../lib/shard-receipt';
 import { TEST_LANES } from '../lib/test-lanes';
 import { resolveSourceSha } from './collect/provenance';
 import { getCommitSha, measure } from './collect/support';
@@ -56,7 +57,7 @@ if (!summaryPath) {
 const FAILED_SUMMARY: ShardSummary = {
   shards: 0,
   exitCode: 1,
-  durationSeconds: 0,
+  durationSeconds: null,
   unhandledErrors: { errors: 0, headlines: [] },
 };
 
@@ -85,9 +86,10 @@ const isShardSummary = (value: unknown): value is ShardSummary => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const summary = value as Partial<ShardSummary>;
   return (
-    isFiniteNumber(summary.shards) &&
-    isFiniteNumber(summary.exitCode) &&
-    isFiniteNumber(summary.durationSeconds) &&
+    Number.isSafeInteger(summary.shards) &&
+    (summary.shards ?? -1) >= 0 &&
+    isReceiptExitCode(summary.exitCode) &&
+    (summary.durationSeconds === null || isReceiptDuration(summary.durationSeconds)) &&
     (summary.unhandledErrors === undefined || isUnhandledErrors(summary.unhandledErrors)) &&
     (summary.coverageErrors === undefined || isCoverageErrors(summary.coverageErrors))
   );

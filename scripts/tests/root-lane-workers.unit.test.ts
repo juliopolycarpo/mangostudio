@@ -6,7 +6,7 @@
  * so the file census is the real `scripts/` tree and the workers are named fakes.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -149,21 +149,25 @@ describe('the root lane is declared as a worker lane', () => {
   });
 });
 
-/** Test files Bun's file walk skips: under a dot directory or `node_modules`. */
-const skippedByBun = (file: string): boolean =>
-  file.split('/').some((segment) => segment.startsWith('.') || segment === 'node_modules');
+/** Directories Bun's test walk never enters: dot directories and `node_modules`. */
+const skippedByBun = (name: string): boolean => name.startsWith('.') || name === 'node_modules';
 const BUN_TEST_FILE = /(\.test|_test|\.spec|_spec)\.(js|jsx|mjs|cjs|ts|tsx|mts|cts)$/;
+
+/** Every test file Bun's walk reaches under `dir`, pruning the directories it skips instead of scanning them. */
+function bunTestFiles(dir: string, prefix = ''): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = `${prefix}${entry.name}`;
+    if (entry.isDirectory()) {
+      return skippedByBun(entry.name) ? [] : bunTestFiles(join(dir, entry.name), `${path}/`);
+    }
+    return entry.isFile() && BUN_TEST_FILE.test(entry.name) ? [path] : [];
+  });
+}
 
 /** The test files `bun test <filter>` selects in the repository: a substring of the path, as Bun matches it. */
 function filterSelects(filter: string): string[] {
-  const listed = Bun.spawnSync({
-    cmd: ['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
-    cwd: ROOT_DIR,
-  });
-  return listed.stdout
-    .toString()
-    .split('\0')
-    .filter((file) => file && BUN_TEST_FILE.test(file) && !skippedByBun(file))
+  // Bun selects ordinary ignored files too; Git's exclude-standard list does not.
+  return bunTestFiles(ROOT_DIR)
     .filter((file) => file.includes(filter))
     .sort();
 }

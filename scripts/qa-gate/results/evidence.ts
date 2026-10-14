@@ -3,6 +3,14 @@
 // job hung). Reading is separate from judging (./fold.ts) so every failure mode
 // — a lost report, a cut-off report, no receipt — is a value a test can build.
 
+import { basename } from 'node:path';
+
+import {
+  parseShardReceipt,
+  type ShardIdentity,
+  type ShardReceipt,
+  shardIdentityFromDirectory,
+} from '../../lib/shard-receipt';
 import type { TestLaneId } from '../../lib/test-lanes';
 import { type JunitCounts, parseJunitXml } from '../junit-results';
 import type { ExpectedJob } from './expected-jobs';
@@ -13,7 +21,7 @@ type ReportEvidence =
 
 export type ReceiptEvidence =
   | { readonly kind: 'missing'; readonly why: string }
-  | { readonly kind: 'read'; readonly exitCode: number; readonly attempts?: number };
+  | ({ readonly kind: 'read'; readonly exitCode: number } & Partial<ShardReceipt>);
 
 /** Everything one job left behind. */
 export interface JobEvidence {
@@ -34,34 +42,17 @@ export const readTextOrNull: ReadText = async (path) => {
 };
 
 /**
- * Validate a receipt's text. `readJson`-style casting is not enough: a
- * receipt that is valid JSON of the wrong shape must not read as a clean run.
- * // Usage: parseReceipt('{"shard":3,"exitCode":0,"durationSeconds":41}') // { kind: 'read', exitCode: 0 }
+ * Validate process evidence with the same contract as the producer and merger.
+ * // Usage: parseReceipt('{"shard":3,"exitCode":0,"durationSeconds":41}', 3) // { kind: 'read', exitCode: 0, ... }
  */
-export const parseReceipt = (text: string | null): ReceiptEvidence => {
-  if (text === null) return { kind: 'missing', why: `no ${RECEIPT_FILE}` };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { kind: 'missing', why: `${RECEIPT_FILE} is not valid JSON` };
-  }
-  const exitCode =
-    typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as { exitCode?: unknown }).exitCode
-      : undefined;
-  if (typeof exitCode !== 'number' || !Number.isFinite(exitCode)) {
-    return {
-      kind: 'missing',
-      why: `${RECEIPT_FILE} has no numeric exitCode (found ${JSON.stringify(exitCode)})`,
-    };
-  }
-  const attempts = (parsed as { attempts?: unknown }).attempts;
-  // Older receipts carry no count; anything but a positive integer is ignored
-  // rather than trusted, so a bad value can only hide a retry, never invent one.
-  return Number.isInteger(attempts) && (attempts as number) >= 1
-    ? { kind: 'read', exitCode, attempts: attempts as number }
-    : { kind: 'read', exitCode };
+export const parseReceipt = (
+  text: string | null,
+  expectedShard?: ShardIdentity
+): ReceiptEvidence => {
+  const parsed = parseShardReceipt(text, { expectedShard });
+  return parsed.kind === 'invalid'
+    ? { kind: 'missing', why: parsed.why }
+    : { kind: 'read', ...parsed.receipt };
 };
 
 /**
@@ -85,7 +76,12 @@ export const readJobEvidence = async (
   }
   return {
     job,
-    receipt: receipt ?? parseReceipt(await readText(`${job.dir}/${RECEIPT_FILE}`)),
+    receipt:
+      receipt ??
+      parseReceipt(
+        await readText(`${job.dir}/${RECEIPT_FILE}`),
+        shardIdentityFromDirectory(basename(job.dir))
+      ),
     reports,
   };
 };

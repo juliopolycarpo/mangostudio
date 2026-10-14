@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { runTestsWithWatchdog, type WatchdogOptions } from '../ci/run-tests-watchdog';
+import { parseShardReceipt } from '../lib/shard-receipt';
 
 const temps: string[] = [];
 const makeTemp = async (): Promise<string> => {
@@ -41,6 +42,8 @@ describe('shard-meta attempts', () => {
     await runTestsWithWatchdog(optionsIn(dir, {}));
 
     const meta = await receipt(dir);
+    expect(meta).toMatchObject({ schemaVersion: 1, shard: 3, failuresSeen: false });
+    expect(parseShardReceipt(JSON.stringify(meta), { expectedShard: 3 }).kind).toBe('valid');
     expect(meta.attempts, `expected receipt attempts: 1 | received: ${meta.attempts}`).toBe(1);
   });
 
@@ -66,5 +69,45 @@ describe('shard-meta attempts', () => {
       meta.attempts,
       `expected receipt attempts: 2 | received: ${meta.attempts} (a retried job must not look like a first-try pass)`
     ).toBe(2);
+  }, 30_000);
+
+  it('rejects a label the receipt cannot carry before running the suite', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'suite-ran');
+    const run = runTestsWithWatchdog(
+      optionsIn(dir, {
+        label: 'Shard_1',
+        command: ['bun', '-e', `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "")`],
+      })
+    );
+    await expect(run).rejects.toThrow(
+      'Invalid watchdog label "Shard_1"; expected a positive shard number or a lowercase lane name'
+    );
+    expect(
+      await Bun.file(marker).exists(),
+      'expected suite state: not run | received: ran before the label was rejected'
+    ).toBe(false);
+  });
+
+  it('records retained findings when a failed hanging attempt is followed by a pass', async () => {
+    const dir = await makeTemp();
+    const marker = join(dir, 'first-attempt-ran');
+    const script = `
+      const fs = require("node:fs");
+      if (fs.existsSync(${JSON.stringify(marker)})) process.exit(0);
+      fs.writeFileSync(${JSON.stringify(marker)}, "");
+      console.log("(fail) earlier finding");
+      setInterval(() => {}, 1000);
+    `;
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, { command: ['bun', '-e', script], timeoutSeconds: 1 })
+    );
+    expect(result.exitCode).toBe(1);
+    const meta = await receipt(dir);
+    expect(meta).toMatchObject({ schemaVersion: 1, attempts: 2, exitCode: 1, failuresSeen: true });
+    expect(parseShardReceipt(JSON.stringify(meta))).toMatchObject({
+      kind: 'valid',
+      receipt: { exitCode: 1 },
+    });
   }, 30_000);
 });
