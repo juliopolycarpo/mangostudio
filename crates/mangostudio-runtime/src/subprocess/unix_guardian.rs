@@ -288,7 +288,7 @@ impl GuardianChild {
         let status = Receiver::from_owned_fd(status)?;
         let exec_error = Receiver::from_owned_fd(exec_error)?;
         let stdout: Box<dyn AsyncRead + Send + Unpin> = if pty_control.is_some() {
-            Box::new(PtyReader(AsyncFd::new(stdout)?))
+            Box::new(PtyReader(register_pty_fd(stdout)?))
         } else {
             Box::new(Receiver::from_owned_fd(stdout)?)
         };
@@ -296,7 +296,7 @@ impl GuardianChild {
         let stdin = stdin
             .map(|fd| -> io::Result<Box<dyn AsyncWrite + Send + Unpin>> {
                 if pty_control.is_some() {
-                    Ok(Box::new(PtyWriter(AsyncFd::new(fd)?)))
+                    Ok(Box::new(PtyWriter(register_pty_fd(fd)?)))
                 } else {
                     Ok(Box::new(Sender::from_owned_fd(fd)?))
                 }
@@ -319,6 +319,17 @@ impl GuardianChild {
             wait,
         })
     }
+}
+
+/// Registers a PTY master descriptor with the Tokio reactor for [`PtyReader`] and [`PtyWriter`].
+///
+/// ```ignore
+/// let reader = PtyReader(register_pty_fd(master)?);
+/// ```
+fn register_pty_fd(fd: OwnedFd) -> io::Result<AsyncFd<OwnedFd>> {
+    // SAFETY: the `AsyncFd` owns `fd`, so the descriptor stays open and `as_raw_fd` returns the
+    // same number until the `AsyncFd` drops it.
+    Ok(unsafe { AsyncFd::register(fd) }?)
 }
 
 /// A PTY master is a character device, so Tokio's Unix pipe wrapper refuses it. `AsyncFd`
@@ -2408,6 +2419,30 @@ mod tests {
             assert!(killed, "pidfd_send_signal errno={error} must fall back");
             assert_eq!(status.signal(), Some(libc::SIGKILL));
         }
+    }
+
+    #[tokio::test]
+    async fn registered_descriptors_carry_bytes_through_the_pty_wrappers() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let (read_end, write_end) = super::pipe_cloexec().expect("pipe opens");
+        super::set_nonblocking(&read_end).expect("read end is nonblocking");
+        super::set_nonblocking(&write_end).expect("write end is nonblocking");
+        let mut reader =
+            super::PtyReader(super::register_pty_fd(read_end).expect("read end registers"));
+        let mut writer =
+            super::PtyWriter(super::register_pty_fd(write_end).expect("write end registers"));
+
+        writer.write_all(b"ping").await.expect("bytes are written");
+        let mut received = [0_u8; 4];
+        reader
+            .read_exact(&mut received)
+            .await
+            .expect("bytes are read");
+        assert_eq!(
+            &received, b"ping",
+            "expected bytes: ping | received: {received:?}"
+        );
     }
 
     /// Regression test: this snapshot used to `.expect("OS environment has no NUL")` on every
