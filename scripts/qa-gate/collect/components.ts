@@ -11,6 +11,7 @@ import type { CrateCoverage } from '../rust-coverage/resolve';
 import { measureComponentLoc } from './loc';
 import { type ComponentSpec, ownerOf } from './registry';
 import { measure } from './support';
+import { collectWithoutTiming, type TimeCollector } from './timings';
 
 export interface ComponentDeps {
   readonly trackedFiles: readonly string[];
@@ -25,6 +26,8 @@ export interface ComponentDeps {
   readonly readCoverage: (workspace: WorkspaceName) => Promise<CoverageSummary>;
   /** Number of TypeScript errors for the tsconfig under `root`. */
   readonly countTsErrors: (root: string) => Promise<number>;
+  /** Optional advisory timing; it must retain the result and thrown failure. */
+  readonly time?: TimeCollector;
 }
 
 /** The JS app lane a component is, or null: only `apps/<lane>` has an LCOV lane today. */
@@ -53,7 +56,10 @@ const coverageOf = (
   }
   const delivered = deps.deliveredCoverage(lane);
   if (delivered) return Promise.resolve(delivered);
-  return measure(`coverage:${lane}`, () => deps.readCoverage(lane));
+  const time = deps.time ?? collectWithoutTiming;
+  return measure(`coverage:${lane}`, () =>
+    time(`coverage:${spec.root}`, () => deps.readCoverage(lane))
+  );
 };
 
 const tsErrorsOf = (spec: ComponentSpec, deps: ComponentDeps): Promise<Measurement<number>> => {
@@ -62,7 +68,10 @@ const tsErrorsOf = (spec: ComponentSpec, deps: ComponentDeps): Promise<Measureme
       unsupported(`${spec.root}/tsconfig.json is not tracked; no type-check is defined`)
     );
   }
-  return measure(`ts:${spec.name}`, () => deps.countTsErrors(spec.root));
+  const time = deps.time ?? collectWithoutTiming;
+  return measure(`ts:${spec.name}`, () =>
+    time(`typescript:${spec.root}`, () => deps.countTsErrors(spec.root))
+  );
 };
 
 /** The test lanes a component owns; empty when none is wired for it (e.g. a crate before its lane lands). */
@@ -88,13 +97,16 @@ export const collectComponents = async (
   }
 
   const components: Component[] = [];
+  const time = deps.time ?? collectWithoutTiming;
   for (const spec of specs) {
     components.push({
       id: spec.id,
       kind: spec.kind,
       name: spec.name,
       root: spec.root,
-      loc: await measureComponentLoc(filesByComponent.get(spec.id) ?? [], deps.readText),
+      loc: await time(`loc:${spec.root}`, () =>
+        measureComponentLoc(filesByComponent.get(spec.id) ?? [], deps.readText)
+      ),
       coverage: await coverageOf(spec, deps),
       tsErrors: await tsErrorsOf(spec, deps),
       lanes: lanesOf(spec, deps),

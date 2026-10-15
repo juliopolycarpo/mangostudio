@@ -1,0 +1,68 @@
+import { describe, expect, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { listTrackedFiles } from './tracked-files';
+
+const PORTABLE_PATHS = ['scripts/unicodé.ts', 'scripts/ trailing space .ts'];
+const LITERAL_PATHS = [
+  ...PORTABLE_PATHS,
+  'scripts/tab\tname.ts',
+  'scripts/line\nname.ts',
+  'scripts/quote"name.ts',
+];
+
+describe('QA tracked-file inventory', () => {
+  it('parses Unicode, control bytes, quotes and whitespace literally on every host', async () => {
+    const literalGitInventory = (command: readonly string[]) => {
+      expect(command).toEqual(['git', 'ls-files', '-z']);
+      return Promise.resolve({ stdout: `${LITERAL_PATHS.join('\0')}\0`, stderr: '', exitCode: 0 });
+    };
+    expect(await listTrackedFiles(literalGitInventory)).toEqual(LITERAL_PATHS);
+  });
+
+  it('preserves literal Git filenames supported by the host filesystem', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'qa-tracked-paths-'));
+    // Win32 rejects control bytes and quotes before Git can index them. Keep
+    // those records in the parser test above and exercise every legal name here.
+    const paths = process.platform === 'win32' ? PORTABLE_PATHS : LITERAL_PATHS;
+    const run = async (cmd: readonly string[]) => {
+      const child = Bun.spawn([...cmd], { cwd, stdout: 'pipe', stderr: 'pipe' });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      return { stdout, stderr, exitCode };
+    };
+    try {
+      expect((await run(['git', 'init', '--quiet'])).exitCode).toBe(0);
+      expect((await run(['git', 'config', 'core.quotepath', 'true'])).exitCode).toBe(0);
+      for (const path of paths) await Bun.write(join(cwd, path), 'export const x = 1;\n');
+      expect((await run(['git', 'add', '--', 'scripts'])).exitCode).toBe(0);
+      // The previous newline reader did not recover literal paths from these records.
+      const quoted = await run(['git', 'ls-files']);
+      expect(quoted.stdout.split('\n').filter(Boolean).sort()).not.toEqual([...paths].sort());
+      expect((await listTrackedFiles(run)).sort()).toEqual([...paths].sort());
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps an empty inventory distinct from Git failure or truncated transport', async () => {
+    expect(
+      await listTrackedFiles(() => Promise.resolve({ stdout: '', stderr: '', exitCode: 0 }))
+    ).toEqual([]);
+    await expect(
+      listTrackedFiles(() =>
+        Promise.resolve({ stdout: '', stderr: 'fatal: not a repository', exitCode: 128 })
+      )
+    ).rejects.toThrow('git ls-files failed: fatal: not a repository');
+    await expect(
+      listTrackedFiles(() =>
+        Promise.resolve({ stdout: 'scripts/example.ts', stderr: '', exitCode: 0 })
+      )
+    ).rejects.toThrow('incomplete path record');
+  });
+});
