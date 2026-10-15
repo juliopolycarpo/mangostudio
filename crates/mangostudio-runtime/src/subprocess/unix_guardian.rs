@@ -243,6 +243,24 @@ pub(crate) fn spawn_pty(
 
 impl GuardianChild {
     fn from_raw(raw: RawGuardianChild) -> io::Result<Self> {
+        Self::from_raw_with(raw, set_nonblocking)
+    }
+
+    /// Adopts a freshly forked guardian, with `nonblocking` as the step that makes each parent
+    /// endpoint nonblocking. [`Self::from_raw`] passes [`set_nonblocking`]; a test passes a
+    /// failing one to exercise the setup-error path.
+    ///
+    /// The reaper is spawned before any fallible step. When a later step fails, the endpoints
+    /// drop with the error, the guardian sees its handshake pipes close and exits, and this
+    /// detached wait reaps it instead of leaving a zombie until the runtime exits.
+    ///
+    /// ```ignore
+    /// let child = GuardianChild::from_raw_with(raw, set_nonblocking)?;
+    /// ```
+    fn from_raw_with(
+        raw: RawGuardianChild,
+        nonblocking: impl Fn(&OwnedFd) -> io::Result<()>,
+    ) -> io::Result<Self> {
         let RawGuardianChild {
             pid,
             stdin,
@@ -256,13 +274,14 @@ impl GuardianChild {
             finalize,
             liveness,
         } = raw;
-        set_nonblocking(&ready)?;
-        set_nonblocking(&status)?;
-        set_nonblocking(&exec_error)?;
-        set_nonblocking(&stdout)?;
-        set_nonblocking(&stderr)?;
+        let wait = tokio::task::spawn_blocking(move || wait_for_guardian(pid));
+        nonblocking(&ready)?;
+        nonblocking(&status)?;
+        nonblocking(&exec_error)?;
+        nonblocking(&stdout)?;
+        nonblocking(&stderr)?;
         if let Some(stdin) = &stdin {
-            set_nonblocking(stdin)?;
+            nonblocking(stdin)?;
         }
 
         let ready = Receiver::from_owned_fd(ready)?;
@@ -283,7 +302,6 @@ impl GuardianChild {
                 }
             })
             .transpose()?;
-        let wait = tokio::task::spawn_blocking(move || wait_for_guardian(pid));
 
         Ok(Self {
             pid,
@@ -2416,6 +2434,79 @@ mod tests {
             rendered,
             vec!["PATH=/usr/bin".to_owned()],
             "expected only entries execve can carry | received the refused names too"
+        );
+    }
+
+    /// What `pid` is to this process, probed without reaping it: `waitid` with `WNOWAIT` leaves an
+    /// exited child in place, so the probe itself never hides a missing reaper.
+    ///
+    /// Usage: `assert_eq!(child_state(pid), "reaped");`
+    fn child_state(pid: libc::pid_t) -> &'static str {
+        // SAFETY: `siginfo_t` is an all-zeroable C output structure that `waitid` fills.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let flags = libc::WEXITED | libc::WNOHANG | libc::WNOWAIT;
+        // SAFETY: `info` is valid storage and `P_PID` names a single process.
+        let probed = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &raw mut info, flags) };
+        if probed != 0 {
+            return match std::io::Error::last_os_error().raw_os_error() {
+                Some(libc::ECHILD) => "reaped",
+                _ => "unknown (waitid failed)",
+            };
+        }
+        // SAFETY: a successful `waitid` filled `info`.
+        match unsafe { info.si_pid() } {
+            0 => "still running",
+            _ => "exited but unreaped (zombie)",
+        }
+    }
+
+    /// Regression test: `from_raw` started the guardian's wait task only after every fallible
+    /// setup step, so an error after the fork (a failed `epoll_ctl` while registering the PTY
+    /// descriptors, say) dropped the guardian's pipes, the guardian exited, and nothing ever
+    /// waited on its pid: it stayed a zombie until the runtime exited.
+    #[tokio::test]
+    async fn a_setup_error_after_the_fork_still_reaps_the_guardian() {
+        use std::cell::Cell;
+        use std::os::fd::OwnedFd;
+
+        use crate::subprocess::ProcessRequest;
+
+        // The last of the five parent endpoints a request without stdin makes nonblocking.
+        const FAILING_CALL: usize = 5;
+        let request = ProcessRequest::new("/bin/sh", ["-c", "sleep 30"]);
+        let raw = crate::blocking::run_blocking(move || super::spawn_raw(&request, None))
+            .await
+            .expect("guardian forks");
+        let pid = raw.pid;
+        let calls = Cell::new(0);
+        let fail_on_last_endpoint = |_: &OwnedFd| {
+            calls.set(calls.get() + 1);
+            if calls.get() == FAILING_CALL {
+                return Err(std::io::Error::other("injected nonblocking failure"));
+            }
+            Ok(())
+        };
+
+        let error = super::GuardianChild::from_raw_with(raw, fail_on_last_endpoint)
+            .err()
+            .expect("expected the injected setup failure | received a guardian child");
+
+        assert_eq!(
+            error.to_string(),
+            "injected nonblocking failure",
+            "expected the original setup error to be returned | received: {error}"
+        );
+        let mut state = child_state(pid);
+        for _ in 0..500 {
+            if state == "reaped" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            state = child_state(pid);
+        }
+        assert_eq!(
+            state, "reaped",
+            "expected guardian pid {pid} reaped | received: {state}"
         );
     }
 }
