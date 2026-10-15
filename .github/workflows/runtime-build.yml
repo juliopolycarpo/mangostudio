@@ -78,6 +78,11 @@ jobs:
                 echo 'expected profile: shipping | received: light' >&2
                 exit 1
               fi
+              if [ "${CARGO_PROFILE_RELEASE_LTO:-}" != "thin" ] || [ "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-}" != "16" ]; then
+                printf 'expected light profile: lto=thin, codegen-units=16 | received: lto=%s, codegen-units=%s\n' \
+                  "${CARGO_PROFILE_RELEASE_LTO:-<unset>}" "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>}" >&2
+                exit 1
+              fi
               ;;
             *)
               printf 'expected profile: shipping or light | received: %s\n' "$BUILD_PROFILE" >&2

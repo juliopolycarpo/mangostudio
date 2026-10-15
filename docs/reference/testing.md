@@ -1922,8 +1922,9 @@ Shipping receives an empty override map, preserving its existing Cargo
 defaults and cache environment identity.
 
 The builder rejects empty/unknown profiles and every non-PR light artifact
-request before checkout, Cargo setup, or cache access. Main, tags, schedules,
-manual runs, and publication remain shipping. Main is the first shipping
+request before checkout, Cargo setup, or cache access. Light requests also
+require the actual Cargo overrides to be thin LTO and 16 codegen units. Main,
+tags, schedules, manual runs, and publication remain shipping. Main is the first shipping
 build of a PR change; its runtime and complete smoke lanes remain mandatory
 before Canary. A failure unique to the shipping profile can make main red
 after a green PR and blocks publication.

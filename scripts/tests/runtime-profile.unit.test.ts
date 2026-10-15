@@ -38,7 +38,7 @@ function profileGuard(): string {
   return script.replace(/^ {10}/gm, '');
 }
 
-function runGuard(event: string, profile: string) {
+function runGuard(event: string, profile: string, overrides: Record<string, string> = {}) {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !key.startsWith('CARGO_PROFILE_RELEASE_'))
   );
@@ -48,6 +48,7 @@ function runGuard(event: string, profile: string) {
       EVENT_NAME: event,
       BUILD_PROFILE: profile,
       ...jobProfileEnv(profile),
+      ...overrides,
     },
   });
 }
@@ -86,6 +87,20 @@ describe('artifact runtime profile guard', () => {
       expect(result.stderr.toString()).toContain('expected profile: shipping or light');
     }
   );
+
+  test.each([
+    ['CARGO_PROFILE_RELEASE_LTO', 'fat', 'lto=fat, codegen-units=16'],
+    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '1', 'lto=thin, codegen-units=1'],
+    ['CARGO_PROFILE_RELEASE_LTO', '', 'lto=<unset>, codegen-units=16'],
+    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '', 'lto=thin, codegen-units=<unset>'],
+  ])('light refuses %s=%j', (key, value, received) => {
+    const result = runGuard('pull_request', 'light', { [key]: value });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      `expected light profile: lto=thin, codegen-units=16 | received: ${received}`
+    );
+    expect(result.stdout.toString()).not.toContain('runtime profile: light');
+  });
 
   test('PRs may use light and every event may use shipping', () => {
     const light = runGuard('pull_request', 'light');
