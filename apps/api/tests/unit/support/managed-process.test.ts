@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync } from 'node:fs';
 import { mkdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
+import type { ProcessEntry } from '../../support/external-agents/process-tree';
 import {
   createManagedProcessFixture,
   type ManagedProcessFixture,
 } from '../../support/fixtures/managed-process';
+import { createReleaseDiagnostics } from '../../support/fixtures/managed-process-diagnostics';
 
 const fixtures: ManagedProcessFixture[] = [];
 const extraDirectories: string[] = [];
@@ -38,6 +40,81 @@ afterEach(async () => {
 });
 
 describe('createManagedProcessFixture', () => {
+  it.skipIf(process.platform !== 'linux')(
+    'retains observed descendants and snapshot errors across failed and successful reads',
+    async () => {
+      const fixture = await createFixture();
+      const child = fixture.spawn({ cmd: [process.execPath, '-e', ''] });
+      const descendant = { pid: child.pid + 1, parentPid: child.pid, executable: '/fake/vendor' };
+      const snapshotFailure = new Error('snapshot unavailable');
+      const snapshots: Array<ProcessEntry[] | Error> = [[descendant], snapshotFailure, []];
+      function readFakeProcessSnapshot(): ProcessEntry[] {
+        const next = snapshots.shift();
+        if (next === undefined) throw new Error('Unexpected process snapshot request');
+        if (next instanceof Error) throw next;
+        return next;
+      }
+      const diagnostics = createReleaseDiagnostics(fixture.tempDir, {
+        readProcessSnapshot: readFakeProcessSnapshot,
+      });
+      diagnostics.observeProcesses(child);
+      const expected = `pid=${descendant.pid} observedParent=${child.pid} currentParent=<absent>`;
+      const failedSnapshot = diagnostics.describe(child);
+      expect(failedSnapshot).toContain('descendant snapshot failed: Error: snapshot unavailable');
+      expect(failedSnapshot).toContain(expected);
+      const recoveredSnapshot = diagnostics.describe(child);
+      expect(recoveredSnapshot).toContain(
+        'descendant snapshot failed: Error: snapshot unavailable'
+      );
+      expect(recoveredSnapshot).toContain(expected);
+      expect(snapshots).toHaveLength(0);
+    }
+  );
+
+  it.each(['EACCES', 'ENOENT', 'ENOTDIR'])(
+    'retains residual paths and continues after a directory read fails with %s',
+    async (code) => {
+      const fixture = await createFixture();
+      const denied = join(fixture.tempDir, 'a-denied');
+      const readable = join(fixture.tempDir, 'b-readable');
+      await mkdir(denied);
+      await mkdir(readable);
+      await writeFile(join(readable, 'remaining'), 'private contents');
+      const requests: string[] = [];
+      function readFailingDirectory(path: string) {
+        requests.push(path);
+        if (path === denied)
+          throw Object.assign(new Error(`${code}: directory unavailable`), { code });
+        return readdirSync(path, { withFileTypes: true }).sort((a, b) =>
+          a.name.localeCompare(b.name)
+        );
+      }
+      const diagnostics = createReleaseDiagnostics(fixture.tempDir, {
+        readDirectory: readFailingDirectory,
+      }).describe(null);
+      expect(diagnostics).toContain('"a-denied"');
+      expect(diagnostics).toContain(`directory inspection failed: "a-denied": Error: ${code}`);
+      expect(diagnostics).toContain(JSON.stringify(join('b-readable', 'remaining')));
+      expect(diagnostics).not.toContain('private contents');
+      expect(requests).toEqual([fixture.tempDir, denied, readable]);
+    }
+  );
+
+  it('counts depth markers toward the residual diagnostic bound', async () => {
+    const fixture = await createFixture();
+    const deep = join('a', 'b', 'c', 'd');
+    await mkdir(join(fixture.tempDir, deep), { recursive: true });
+    for (let index = 0; index < 32; index += 1) {
+      await mkdir(join(fixture.tempDir, deep, `branch-${index}`));
+    }
+    const diagnostics = createReleaseDiagnostics(fixture.tempDir).describe(null);
+    const residual = diagnostics.split('residual paths:\n')[1]?.split('\nchild:')[0];
+    expect(residual).toBeDefined();
+    expect(residual).toContain('<depth limit reached>');
+    expect(residual).toContain('<path limit reached>');
+    expect(residual?.split('\n').filter((line) => line !== '<path limit reached>').length).toBe(32);
+  });
+
   it('counts a child ended by a signal as released', async () => {
     const fixture = await createFixture();
     fixture.spawn({

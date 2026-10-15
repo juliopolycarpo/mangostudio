@@ -1,4 +1,4 @@
-import { type BigIntStats, lstatSync, readdirSync } from 'node:fs';
+import { type BigIntStats, type Dirent, lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   descendantsOf,
@@ -21,8 +21,17 @@ export function readRootIdentity(path: string): RootIdentity | null {
   }
 }
 
-/** Observations only: diagnosing descendants does not grant ownership of them. */
-export function createReleaseDiagnostics(tempDir: string) {
+/**
+ * Observations only: diagnosing descendants does not grant ownership of them.
+ * @example const diagnostics = createReleaseDiagnostics(fixture.tempDir);
+ */
+export function createReleaseDiagnostics(
+  tempDir: string,
+  io: {
+    readProcessSnapshot?: () => ProcessEntry[];
+    readDirectory?: (path: string) => Dirent[];
+  } = {}
+) {
   const allocatedRoot = readRootIdentity(tempDir);
   let beforeRemoval: RootIdentity | null | undefined;
   const observedDescendants = new Map<number, ProcessEntry>();
@@ -31,8 +40,7 @@ export function createReleaseDiagnostics(tempDir: string) {
   const observeProcesses = (child: Bun.Subprocess | null): ProcessEntry[] => {
     if (!child || process.platform !== 'linux') return [];
     try {
-      const snapshot = readProcessSnapshot();
-      processSnapshotError = undefined;
+      const snapshot = (io.readProcessSnapshot ?? readProcessSnapshot)();
       const descendants = new Set(descendantsOf(child.pid, snapshot));
       for (const entry of snapshot) {
         if (descendants.has(entry.pid)) observedDescendants.set(entry.pid, entry);
@@ -67,7 +75,9 @@ export function createReleaseDiagnostics(tempDir: string) {
         }
         if (current) {
           lines.push(
-            ...(current.isDirectory() ? residualPaths(tempDir) : ['root is not a directory'])
+            ...(current.isDirectory()
+              ? residualPaths(tempDir, io.readDirectory)
+              : ['root is not a directory'])
           );
         }
       } catch (error) {
@@ -82,9 +92,8 @@ export function createReleaseDiagnostics(tempDir: string) {
       const snapshot = observeProcesses(child);
       if (child && process.platform !== 'linux') {
         lines.push(`descendant snapshot unavailable on ${process.platform}`);
-      } else if (processSnapshotError) {
-        lines.push(`descendant snapshot failed: ${processSnapshotError}`);
       } else {
+        if (processSnapshotError) lines.push(`descendant snapshot failed: ${processSnapshotError}`);
         const present = new Map(snapshot.map((entry) => [entry.pid, entry]));
         lines.push('observed descendants:');
         let count = 0;
@@ -114,14 +123,26 @@ function formatIdentity(identity: RootIdentity | null): string {
 }
 
 /** Bounded, relative paths only; never follows symlinks or reads file contents. */
-function residualPaths(root: string): string[] {
+function residualPaths(
+  root: string,
+  readDirectory = (path: string) => readdirSync(path, { withFileTypes: true })
+): string[] {
   const lines = ['residual paths:'];
   const pending = [{ path: '', depth: 0 }];
   let count = 0;
   while (pending.length > 0) {
+    if (count >= MAX_RESIDUAL_PATHS) return [...lines, '<path limit reached>'];
     const directory = pending.shift();
     if (!directory) break;
-    for (const entry of readdirSync(join(root, directory.path), { withFileTypes: true })) {
+    let entries: Dirent[];
+    try {
+      entries = readDirectory(join(root, directory.path));
+    } catch (error) {
+      lines.push(`directory inspection failed: ${JSON.stringify(directory.path || '.')}: ${error}`);
+      count += 1;
+      continue;
+    }
+    for (const entry of entries) {
       if (count >= MAX_RESIDUAL_PATHS) return [...lines, '<path limit reached>'];
       const path = join(directory.path, entry.name);
       lines.push(JSON.stringify(path));
@@ -130,7 +151,9 @@ function residualPaths(root: string): string[] {
         if (directory.depth < MAX_RESIDUAL_DEPTH) {
           pending.push({ path, depth: directory.depth + 1 });
         } else {
+          if (count >= MAX_RESIDUAL_PATHS) return [...lines, '<path limit reached>'];
           lines.push('<depth limit reached>');
+          count += 1;
         }
       }
     }
