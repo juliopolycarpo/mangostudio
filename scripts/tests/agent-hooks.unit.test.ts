@@ -15,6 +15,7 @@ import {
   shouldSkipFile,
 } from '../../.codex/hooks/auto-fix.mjs';
 
+const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
 
 async function makeTempDir() {
@@ -54,7 +55,20 @@ describe('agent auto-fix hooks', () => {
     expect(chooseFormatter('src/app.ts')).toBe('biome');
     expect(chooseFormatter('docs/README.md')).toBe('dprint');
     expect(chooseFormatter('Dockerfile.release')).toBe('dprint');
+    expect(chooseFormatter('crates/mango-protocol/src/lib.rs')).toBe('rustfmt');
     expect(chooseFormatter('assets/logo.png')).toBeUndefined();
+  });
+
+  it.skipIf(!Bun.which('rustfmt'))('formats a touched Rust file with rustfmt', async () => {
+    const dir = join(repoRoot, '.mango', `agent-hooks-${process.pid}-${Date.now()}`);
+    tempDirs.push(dir);
+    await mkdir(dir, { recursive: true });
+    const filePath = join(dir, 'sample.rs');
+    await writeFile(filePath, 'fn  main( ){let x=1;}\n', 'utf8');
+
+    await runAutoFixHook(JSON.stringify({ tool_input: { file_path: filePath } }));
+
+    expect(await readFile(filePath, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
   });
 
   it('ignores missing touched files without failing the hook', async () => {
