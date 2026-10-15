@@ -1,13 +1,32 @@
 name: Release Dry Run
 
-# Triggers on every PR: relevance detection happens in the cheap `changes` job
-# (not a `paths:` filter) so the `Release Dry Run / Gate` check below always
-# reports and is safe to require in branch protection — a path-filtered
-# workflow that never starts leaves a required check pending forever.
+# CI calls this workflow on every PR, including irrelevant changes, so Gate
+# always reports. PRs consume CI's immutable distribution runtimes; scheduled
+# and manual runs build clean shipping runtimes independently.
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_call:
+    inputs:
+      reuse_distribution:
+        description: Consume same-run immutable PR distribution targets instead of compiling runtimes.
+        type: boolean
+        default: false
+      version:
+        description: Exact version embedded in the PR distribution.
+        type: string
+        default: ""
+      source_sha:
+        description: Exact source commit of the PR distribution.
+        type: string
+        default: ""
+      channel:
+        description: Channel of the immutable PR distribution.
+        type: string
+        default: ""
+      target_artifacts:
+        description: JSON target ID to content-addressed same-run artifact name map.
+        type: string
+        default: "{}"
   workflow_dispatch:
   schedule:
     - cron: "0 7 * * 1"
@@ -20,7 +39,7 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  DRY_RUN_VERSION: 0.0.0-dryrun
+  DRY_RUN_VERSION: ${{ inputs.version || '0.0.0-dryrun' }}
 
 jobs:
   changes:
@@ -30,6 +49,8 @@ jobs:
     outputs:
       release: ${{ steps.changed.outputs.release }}
       launcher: ${{ steps.changed.outputs.launcher }}
+      linux_artifact: ${{ steps.artifacts.outputs.linux_artifact }}
+      windows_artifact: ${{ steps.artifacts.outputs.windows_artifact }}
       # Reusable-workflow `with:` cannot read `env`, so the runtime job gets
       # the dry-run version through here.
       dry_run_version: ${{ env.DRY_RUN_VERSION }}
@@ -38,6 +59,24 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ inputs.source_sha || github.sha }}
+
+      - name: Verify dry-run source and execution mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REUSE_DISTRIBUTION: ${{ inputs.reuse_distribution }}
+          EXPECTED_SHA: ${{ inputs.source_sha || github.sha }}
+          DISTRIBUTION_VERSION: ${{ inputs.version }}
+          DISTRIBUTION_CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          [ "$(git rev-parse HEAD)" = "$EXPECTED_SHA" ] || { echo "Unexpected dry-run source SHA" >&2; exit 1; }
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            [ "$REUSE_DISTRIBUTION" = "true" ] && [ -n "$DISTRIBUTION_VERSION" ] && [ "$DISTRIBUTION_CHANNEL" = "pr" ] || { echo "PR dry runs require their same-run distribution identity" >&2; exit 1; }
+          elif [ "$REUSE_DISTRIBUTION" = "true" ] || [ -n "$DISTRIBUTION_VERSION" ]; then
+            echo "Scheduled/manual dry runs must build clean shipping runtimes" >&2
+            exit 1
+          fi
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -78,7 +117,7 @@ jobs:
             exit 1
           fi
 
-          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|\.github/workflows/runtime-build\.yml$|scripts/release/|scripts/install/|scripts/tests/install-ps1-layout\.unit\.test\.ts$|scripts/tests/support/windows-user-path\.ts$|scripts/build(-runtime)?\.ts$|scripts/lib/|packages/cli/|crates/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo/config\.toml$|\.github/actions/setup-zigbuild/|Dockerfile$)'
+          release_pattern='^(\.github/workflows/release[^/]*\.yml$|\.github/workflows/canary\.yml$|\.github/workflows/runtime-build\.yml$|scripts/release/|scripts/install/|scripts/tests/install-ps1-layout\.unit\.test\.ts$|scripts/tests/support/windows-user-path\.ts$|scripts/build(-runtime)?\.ts$|scripts/lib/|scripts/ci/dry-run-artifacts\.ts$|\.github/actions/download-distribution/|packages/cli/|crates/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo/config\.toml$|\.github/actions/setup-zigbuild/|Dockerfile$)'
           if grep -Eq "$release_pattern" "$RUNNER_TEMP/changed-files"; then
             echo "release=true" >> "$GITHUB_OUTPUT"
           else
@@ -91,35 +130,41 @@ jobs:
             echo "launcher=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - id: artifacts
+        name: Validate PR distribution target identities
+        if: inputs.reuse_distribution && steps.changed.outputs.release == 'true'
+        env:
+          TARGET_ARTIFACTS: ${{ inputs.target_artifacts }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        run: bun ./scripts/ci/dry-run-artifacts.ts >> "$GITHUB_OUTPUT"
+
   runtime:
     # The cargo runtimes the two dry-run archives ship, built the way the
     # release builds them (zig-linked linux-x64, MSVC windows-x64).
     name: Runtime
     needs: [changes]
-    if: needs.changes.outputs.release == 'true'
+    if: needs.changes.outputs.release == 'true' && !inputs.reuse_distribution
     uses: ./.github/workflows/runtime-build.yml
     with:
       version: ${{ needs.changes.outputs.dry_run_version }}
-      source_sha: ${{ github.sha }}
+      source_sha: ${{ inputs.source_sha || github.sha }}
       platforms: '["linux-x64","windows-x64"]'
       artifact_prefix: dry-run-runtime
-      # Pull requests restore the per-platform cargo cache CI's distribution
-      # build uses (main writes it, nothing here saves): the dry-run bytes are
-      # never published, and the uncached windows-x64 build was the slowest
-      # job on a release-touching PR. The weekly schedule and manual runs stay
-      # uncached, so a clean release-profile build is still proven each week.
-      cache: ${{ github.event_name == 'pull_request' }}
+      # This producer is scheduled/manual only, clean and shipping-profile.
+      cache: false
 
   dry-run-linux:
     name: Linux release dry run
     needs: [changes, runtime]
-    if: needs.changes.outputs.release == 'true'
+    if: ${{ !cancelled() && needs.changes.outputs.release == 'true' && (needs.runtime.result == 'success' || (inputs.reuse_distribution && needs.runtime.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_sha || github.sha }}
 
       - uses: ./.github/actions/setup-mango
         with:
@@ -129,11 +174,48 @@ jobs:
         run: bun run check:versions
 
       - name: Download cargo runtimes
+        if: ${{ !inputs.reuse_distribution }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: dry-run-runtime-*
           merge-multiple: true
           path: .mango/runtime-prebuilt
+
+      - name: Download immutable Linux distribution
+        if: inputs.reuse_distribution
+        uses: ./.github/actions/download-distribution
+        with:
+          artifact-name: ${{ needs.changes.outputs.linux_artifact }}
+          source-sha: ${{ inputs.source_sha }}
+          version: ${{ inputs.version }}
+          channel: ${{ inputs.channel }}
+          target: linux-x64
+
+      # The adapter expects exactly one bundle in its fixed download directory.
+      # The extracted Linux target stays in .mango/out while the next download
+      # gets an empty, generated staging directory.
+      - name: Clear distribution download staging
+        if: inputs.reuse_distribution
+        run: rm -rf "${RUNNER_TEMP}/mango-distribution"
+
+      - name: Download immutable Windows distribution
+        if: inputs.reuse_distribution
+        uses: ./.github/actions/download-distribution
+        with:
+          artifact-name: ${{ needs.changes.outputs.windows_artifact }}
+          source-sha: ${{ inputs.source_sha }}
+          version: ${{ inputs.version }}
+          channel: ${{ inputs.channel }}
+          target: windows-x64
+
+      - name: Stage verified distribution runtimes
+        if: inputs.reuse_distribution
+        run: |
+          set -euo pipefail
+          mkdir -p .mango/runtime-prebuilt/linux-x64 .mango/runtime-prebuilt/windows-x64
+          cp .mango/out/linux-x64/mangostudio-runtime .mango/runtime-prebuilt/linux-x64/
+          cp .mango/out/windows-x64/mangostudio-runtime.exe .mango/runtime-prebuilt/windows-x64/
+          chmod +x .mango/runtime-prebuilt/linux-x64/mangostudio-runtime
 
       - name: Build Linux x64 binary
         run: bun run build --binary --platform linux-x64 --runtime-dir .mango/runtime-prebuilt
@@ -282,7 +364,7 @@ jobs:
       # release-asset staging path. Stage the linux-x64 archive produced above
       # into the Bookworm context, build the default image, and boot it — the same
       # asset → context → image → health chain the real release runs, under
-      # 0.0.0-dryrun. Native amd64 only (no QEMU): arm64 and Alpine are covered by
+      # the selected dry-run version. Native amd64 only (no QEMU): arm64 and Alpine are covered by
       # ci.yml's smoke matrix.
       - name: Stage Bookworm Docker context from release assets
         run: bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets --arch amd64 --variant bookworm
@@ -328,7 +410,9 @@ jobs:
   dry-run-windows:
     name: Windows release dry run
     needs: [changes, dry-run-linux]
-    if: needs.changes.outputs.release == 'true'
+    # PR reuse skips the runtime ancestor. Override implicit success() while
+    # retaining the successful Linux archive as the Windows prerequisite.
+    if: ${{ !cancelled() && needs.changes.outputs.release == 'true' && needs['dry-run-linux'].result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 20
     defaults:
@@ -340,6 +424,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_sha || github.sha }}
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -480,6 +565,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_sha || github.sha }}
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -492,8 +578,8 @@ jobs:
 
   gate:
     # Always-reporting aggregate ("Release Dry Run / Gate"): each dry-run lane
-    # is accepted as skipped only when the `changes` job proved its relevance
-    # predicate false for this run.
+    # is accepted as skipped only when `changes` proved it irrelevant. The
+    # clean runtime producer is also skipped on the verified PR reuse path.
     name: Gate
     needs: [changes, runtime, dry-run-linux, dry-run-windows, dry-run-cargo]
     if: ${{ always() }}
@@ -505,6 +591,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_sha || github.sha }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -513,6 +600,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', needs.changes.outputs.release == 'false' && 'runtime' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', (needs.changes.outputs.release == 'false' || inputs.reuse_distribution) && 'runtime' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

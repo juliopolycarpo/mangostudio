@@ -146,6 +146,21 @@ jobs:
     name: Check
     uses: ./.github/workflows/lint.yml
 
+  release-dry-run:
+    # Always call on PRs, even when distribution was intentionally skipped.
+    # Internal relevance guards then report Gate without compiling or waiting
+    # on a sibling workflow. A failed relevant distribution cannot supply bytes.
+    name: Release Dry Run
+    needs: [distribution-identity, distribution]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/release-dry-run.yml
+    with:
+      reuse_distribution: true
+      version: ${{ needs.distribution-identity.outputs.version }}
+      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
+      channel: ${{ needs.distribution-identity.outputs.channel }}
+      target_artifacts: ${{ needs.distribution.outputs.target_artifacts || '{}' }}
+
   local-runtime:
     name: Local Runtime
     uses: ./.github/workflows/local-runtime.yml
@@ -242,6 +257,7 @@ jobs:
       distribution-identity,
       changes,
       distribution,
+      release-dry-run,
       check,
       local-runtime,
       test,
@@ -282,7 +298,8 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4}',
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4} {5}',
+            github.event_name != 'pull_request' && 'release-dry-run' || '',
             github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',
             needs.changes.outputs.distribution == 'false' && 'distribution' || '',
             needs.changes.outputs.distribution == 'false' && 'smoke' || '',
@@ -300,7 +317,9 @@ jobs:
     # own jobs scope down further.
     name: Canary
     needs: [gate, distribution-identity, distribution]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # Gate accepts deliberate ancestor skips, including the PR-only dry run.
+    # Require each direct producer explicitly instead of implicit success().
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' && needs.distribution.result == 'success' }}
     permissions:
       attestations: write # canary jobs verify build provenance and attest this build's checksums
       contents: write # canary.yml creates this commit's GitHub pre-release
