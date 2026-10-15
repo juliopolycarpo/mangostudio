@@ -60,6 +60,7 @@ interface CheckRun {
 }
 
 let baseFixture = '';
+let dprintCache = '';
 const fixtures: string[] = [];
 
 /**
@@ -168,7 +169,12 @@ function runCheck(root: string, workspace: string): CheckRun {
   const command = workspace.startsWith('apps/')
     ? ['bun', 'run', 'check', `--${workspace.slice(5)}`]
     : ['bunx', ...(protocolTask?.cmd ?? [])];
-  const result = Bun.spawnSync(command, { cwd: root, stdout: 'pipe', stderr: 'pipe' });
+  const result = Bun.spawnSync(command, {
+    cwd: root,
+    env: { ...process.env, DPRINT_CACHE_DIR: dprintCache },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   return { exitCode: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
 }
 
@@ -505,14 +511,29 @@ function scanKinds(cases: readonly CycleCase[]) {
 }
 
 beforeAll(() => {
+  // Own the cache instead of relying on the host's platform-specific cache
+  // discovery. Warm it once outside case deadlines and share it across copies.
+  dprintCache = mkdtempSync(join(tmpdir(), 'mango-import-cycles-dprint-'));
+  const warm = Bun.spawnSync(['bunx', 'dprint', 'check', 'apps/api/AGENTS.md'], {
+    cwd: ROOT_DIR,
+    env: { ...process.env, DPRINT_CACHE_DIR: dprintCache },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  expectCheck(
+    { exitCode: warm.exitCode, output: warm.stdout.toString() + warm.stderr.toString() },
+    'pass',
+    'dprint cache warmup'
+  );
   baseFixture = buildBaseFixture();
-});
+}, 60_000);
 
 afterEach(removeFixtures);
 
 afterAll(() => {
   removeFixtures();
   rmSync(baseFixture, { recursive: true, force: true });
+  rmSync(dprintCache, { recursive: true, force: true });
 });
 
 describe('Biome import cycle checks', () => {
