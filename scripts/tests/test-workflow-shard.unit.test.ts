@@ -38,7 +38,7 @@ describe('reruns replace previous test evidence', () => {
         'coverage',
       ],
     ],
-    ['.github/workflows/qa-metrics.yml', ['qa-metrics']],
+    ['.github/workflows/qa-metrics.yml', ['qa-collector-timings', 'qa-metrics']],
     ['.github/workflows/rust-coverage.yml', ['qa-rust-coverage']],
   ] as const)('%s replaces artifacts with the same name before uploading', (path, names) => {
     const uploads = extractJobBlocks(readText(path))

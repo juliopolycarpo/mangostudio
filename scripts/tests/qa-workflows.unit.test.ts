@@ -98,6 +98,11 @@ describe('unprivileged collection side', () => {
     expect(upload).toContain('if: ${{ !cancelled() }}');
     expect(upload).toContain('continue-on-error: true');
     expect(upload).toContain('name: qa-collector-timings');
+    expect(upload).toContain('overwrite: true');
+    const envelopeUpload = steps.find((step) => step.includes('name: Upload qa-metrics envelope'));
+    expect(upload?.match(/uses: (actions\/upload-artifact@\S+)/)?.[1]).toBe(
+      envelopeUpload?.match(/uses: (actions\/upload-artifact@\S+)/)?.[1]
+    );
     expect(upload).toContain('retention-days: 7');
     expect(upload).toContain('if-no-files-found: warn');
     expect(readText('.github/workflows/pr-qa-report.yml')).not.toContain('qa-collector-timings');
