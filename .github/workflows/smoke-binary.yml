@@ -53,6 +53,7 @@ jobs:
       version: ${{ inputs.version || '' }}
       source_sha: ${{ inputs.source_sha || github.sha }}
       artifact_prefix: smoke-rebuild-runtime
+      profile: ${{ github.event_name == 'pull_request' && 'light' || 'shipping' }}
       cache: true
 
   binary:

@@ -284,6 +284,16 @@ packages, Docker images and installers all see the same two files as before.
   [runtime-metrics.md](runtime-metrics.md) for the size and build-time
   trade-off. It keeps `panic = "unwind"` on purpose: handler panic isolation
   catches unwinds, so the crate refuses to compile under `panic = "abort"`.
+  Pull-request runtime artifacts override only LTO and codegen units to thin
+  LTO and 16 units, including PRs that touch Rust. Main, tag releases, Canary,
+  scheduled distribution checks, and scheduled/manual release dry runs keep
+  fat LTO and one unit. The reusable artifact builder rejects `light` on every
+  event except `pull_request`, before checkout or cache access.
+  Main is the first shipping-profile build of a PR change. A shipping-profile
+  runtime or smoke failure on main blocks Canary through CI's mandatory Gate;
+  those bytes cannot publish. A defect unique to fat LTO can therefore turn
+  main red after a green PR. Light caches remain cold until their separate
+  cache-only main seeds pass write, lifecycle, and measured capacity admission.
 - **Toolchain pins.** Rust comes from `rust-toolchain.toml`; zig is downloaded
   at a pinned version and SHA-256 (`ZIG_VERSION`/`ZIG_SHA256` in
   `runtime-build.yml`); cargo-zigbuild is installed at a pinned version by

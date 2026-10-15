@@ -1910,11 +1910,47 @@ be conditional):
   The gate job's cache-usage summary lists the `turbo` family, so growth shows
   there before it shows as an eviction.
 
+### Pull-request runtime artifact profile
+
+`runtime-build.yml` defaults to the shipping profile: fat LTO and one codegen
+unit. CI's distribution and PR release dry runs explicitly request `light` on
+`pull_request`: thin LTO and 16 units, including PRs that change Rust. The
+binary-smoke rebuild passes the same selection, but it runs only from
+`workflow_dispatch`, so it resolves to shipping. The overrides live at job scope, so
+rust-cache's CARGO environment hash separates both exact and fallback keys by
+profile. A light cache miss does not restore shipping state. PRs never save.
+Shipping receives an empty override map, preserving its existing Cargo
+defaults and cache environment identity.
+
+The builder rejects empty/unknown profiles and every non-PR light artifact
+request before checkout, Cargo setup, or cache access. Light requests also
+require the actual Cargo overrides to be thin LTO and 16 codegen units, and
+shipping requests reject any LTO or codegen-unit override. Main,
+tags, schedules, manual runs, and publication remain shipping. Main is the first shipping
+build of a PR change; its runtime and complete smoke lanes remain mandatory
+before Canary. A failure unique to the shipping profile can make main red
+after a green PR and blocks publication.
+
+This preparation adds no main seed jobs, cache saves, or capacity claim. Light
+builds start cold until separate cache-only seeds are admitted. Before enabling
+seeds for the eight existing targets, verify cache write eligibility and older
+generation lifecycle/older-base fallback, measure each light archive, and
+account for peak retained generations plus an explicit reserve under a
+35 GB admission ceiling. Recheck the repository's configured storage limit
+before enabling seeds. Seed output must have no artifact or publication route.
+Historical size estimates and single Linux benchmarks do not establish that
+admission or a hosted performance gain.
+
+Hosted acceptance still requires current-head logs showing thin/16 on PRs and
+fat/1 with green smoke on main, then at least five comparable PR pushes with
+per-platform build and Gate medians. Report cold runs separately from light
+cache hits, and retain the Windows binary smoke's 60-second handshake budget.
+
 ### Rust cache generations
 
-Rust build caches share the repository's 10 GiB Actions cache budget with the
-shorter lanes. `rust-cache-cleanup.yml` runs trusted `main` tooling after a main
-cache writer completes, after rust-cache's post-job save, and grants
+Rust build caches share the repository's configured Actions cache budget with
+the shorter lanes. `rust-cache-cleanup.yml` runs trusted `main` tooling after a
+main cache writer completes, after rust-cache's post-job save, and grants
 `actions: write` only to its cleanup job. `scripts/ci/rust-cache-cleanup.ts`
 deletes older committed generations by exact ID only when a newer replacement
 is listed under `refs/heads/main`. The explicit family registry preserves the
