@@ -1913,9 +1913,10 @@ be conditional):
 ### Pull-request runtime artifact profile
 
 `runtime-build.yml` defaults to the shipping profile: fat LTO and one codegen
-unit. CI's distribution, PR release dry runs, and the optional binary-smoke
-rebuild explicitly request `light` on `pull_request`: thin LTO and 16 units,
-including PRs that change Rust. The overrides live at job scope, so
+unit. CI's distribution and PR release dry runs explicitly request `light` on
+`pull_request`: thin LTO and 16 units, including PRs that change Rust. The
+binary-smoke rebuild passes the same selection, but it runs only from
+`workflow_dispatch`, so it resolves to shipping. The overrides live at job scope, so
 rust-cache's CARGO environment hash separates both exact and fallback keys by
 profile. A light cache miss does not restore shipping state. PRs never save.
 Shipping receives an empty override map, preserving its existing Cargo
