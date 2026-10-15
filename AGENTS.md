@@ -54,12 +54,8 @@ Useful docs:
   `crates/mangostudio-runtime/src/probing/host.rs`'s environment snapshot for detection, and
   `crates/mangostudio-runtime/src/subprocess/unix_guardian.rs`'s `vars_os()` snapshot that copies
   inherited environment entries for exact child execution before fork (it does not select or parse
-  host configuration). `crates/mangostudio-runtime/tests/config_boundary.rs` greps its own source
-  tree for `env::var`/`var_os`/`vars`/`vars_os`/`home_dir` calls outside `config.rs` and pins each one's exact call text
-  (literal argument included) and occurrence count — not just which file it is in, since a file
-  already on the list can otherwise grow a fourth call, or swap an allowed call's literal for a
-  different one, without the test noticing. A change that adds a fifth site, or a third read in
-  an already-listed file, fails the test, not a review comment.
+  host configuration). `crates/mangostudio-runtime/tests/config_boundary.rs` pins every such call
+  outside `config.rs` by exact text and count; a new read fails the test, not a review comment.
 - Shared code must remain framework-agnostic. Shared code that reaches a Node builtin gets its
   own export subpath (`@mangostudio/shared/library/host`, `/process/host`) so the browser bundle
   never resolves it.
