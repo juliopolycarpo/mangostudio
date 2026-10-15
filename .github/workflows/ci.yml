@@ -346,3 +346,30 @@ jobs:
       npm_artifact: ${{ needs.distribution.outputs.npm_artifact }}
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  runtime-cache-seed:
+    # Saves the light-profile cargo cache entry that pull request distribution
+    # builds restore, so they stop compiling every dependency cold. Cache only:
+    # runtime-build.yml's cache-seed mode has no artifact route, and its guard
+    # refuses anything but a main push with the cache on. It needs the gate so
+    # it neither gates nor delays a mandatory lane and only runs for a green
+    # commit; it is excluded from the gate's own `needs` because it needs it.
+    # A seed re-runs only on an entry miss (a Cargo.lock, Cargo.toml or
+    # toolchain change); on a hit each platform exits after the lookup.
+    name: Runtime light cache seed
+    needs: [gate, distribution-identity]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # Serialized with itself and never cancelled mid-save; a newer pending
+    # seed replaces an older pending one.
+    concurrency:
+      group: light-runtime-cache-seed
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    uses: ./.github/workflows/runtime-build.yml
+    with:
+      version: ${{ needs.distribution-identity.outputs.version }}
+      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
+      profile: light
+      mode: cache-seed
+      cache: true
