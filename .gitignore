@@ -88,6 +88,7 @@ config.toml
 !.claude/hooks/
 .claude/hooks/*
 !.claude/hooks/auto-fix.mjs
+!.claude/hooks/protect-generated.mjs
 !.claude/hooks/session-path.mjs
 .agent/
 .agents/**
