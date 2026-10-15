@@ -119,7 +119,7 @@ function expectOutcome(
   expect(run.exitCode === 0, `expected ${outcome}, received exit ${run.exitCode}\n${output}`).toBe(
     outcome === 'pass'
   );
-  return output;
+  return Bun.stripANSI(output);
 }
 
 afterEach(() => {
@@ -156,7 +156,9 @@ describe('lint cache and required cycle scans', () => {
       expectOutcome(await rootCheck(fixture, 'frontend'), 'pass');
       fixture.writeSource('@mangostudio/frontend', 'export const bad=2;\n');
       const rejected = expectOutcome(await rootCheck(fixture, 'frontend'), 'fail');
-      expect(rejected).toContain('@mangostudio/frontend:check:quick: cache miss');
+      // GitHub Actions groups a task under its own header instead of prefixing
+      // each line as a local streamed run does. Require the same task/cache state.
+      expect(rejected).toMatch(/@mangostudio\/frontend:check:quick(?:: |\r?\n)cache miss/);
       expect(rejected).toContain('format');
       expect(rejected).toContain('src/index.ts');
     },
@@ -170,7 +172,7 @@ describe('lint cache and required cycle scans', () => {
       expectOutcome(await rootCheck(fixture, 'frontend'), 'pass');
       fixture.breakSource('@mangostudio/protocol');
       const rejected = expectOutcome(await rootCheck(fixture, 'frontend'), 'fail');
-      expect(rejected).toContain('@mangostudio/protocol:typecheck:');
+      expect(rejected).toContain('@mangostudio/protocol:typecheck');
       expect(rejected).toContain('error TS2322');
     },
     ROOT_CHECK_TIMEOUT_MS
