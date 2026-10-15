@@ -325,9 +325,7 @@ jobs:
     needs: [
       changes,
       typescript,
-      package,
       rust,
-      transports,
       interop,
       deny,
       semver-checks,
@@ -350,6 +348,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript package rust transports interop deny semver-checks schema-equality' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript rust interop deny semver-checks schema-equality' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
