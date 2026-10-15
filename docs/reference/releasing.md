@@ -640,9 +640,10 @@ canary pass `runtime-profile: shipping` to `download-distribution`, which makes
 `distribution-manifest.ts --validate` fail with
 `expected runtime profile: shipping | received: light` before anything is
 published; PR smoke consumers pass nothing and accept whichever profile the
-bundle records. `distribution-build.yml` sets `RUNTIME_PROFILE` on the step that
-creates the manifest, which is the one value a workflow that builds another
-profile changes. The manifest schema is version 4: a bundle written by an older
+bundle records. `distribution-build.yml` passes its `runtime_profile` input to
+both the runtime builder and the manifest step's `RUNTIME_PROFILE`, so PR bundles
+record `light` and release bundles record `shipping`. The manifest schema is
+version 4: a bundle written by an older
 workflow is rejected rather than read as `shipping`, because manifests never
 outlive the run that wrote them.
 

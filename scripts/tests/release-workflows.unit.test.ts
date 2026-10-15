@@ -398,13 +398,13 @@ describe('release workflow binary gate', () => {
       'bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json --expect built'
     );
     expect(workflow).toContain('bun ./scripts/release/bundle-distribution.ts');
-    // The profile is passed to the creating invocation as env, not inferred, so
-    // a caller that builds another profile only changes this one value.
+    // The manifest and runtime builder must use the same selected profile,
+    // including light bundles produced for pull requests.
     const manifestStep = workflow.slice(
       workflow.indexOf('name: Create and verify distribution manifest'),
       workflow.indexOf('id: bundle')
     );
-    expect(manifestStep).toContain('RUNTIME_PROFILE: shipping');
+    expect(manifestStep).toContain('RUNTIME_PROFILE: $' + '{{ inputs.runtime_profile }}');
     expect(workflow.match(/overwrite: false/g)).toHaveLength(11);
     expect(workflow).toContain('actions/attest-build-provenance@');
     expect(workflow).toMatch(
