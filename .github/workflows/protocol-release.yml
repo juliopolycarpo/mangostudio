@@ -147,7 +147,7 @@ jobs:
       # pull request that produced it. The version is protocol-ci.yml's, so both
       # run the same powerset; scripts/tests/protocol-package.unit.test.ts holds
       # the two pins together.
-      - uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-hack@0.6.45
       - run: bun install --frozen-lockfile
@@ -186,7 +186,7 @@ jobs:
       - run: bun ./scripts/protocol/pack.ts --out .mango/out/protocol
       # npm trusted publishing needs the npm CLI (>= 11.5.1 on Node >= 22.14);
       # this is the one place the repository runs npm instead of bun.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
