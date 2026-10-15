@@ -338,7 +338,7 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 
 ## Editor Setup
 
-Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and directory changes (`SessionStart` / `CwdChanged`). After every write or edit, a `PostToolUse` hook runs `auto-fix.mjs` to format the touched file.
+Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and directory changes (`SessionStart` / `CwdChanged`). After every write or edit, a `PostToolUse` hook runs `auto-fix.mjs` to format the touched file (Biome, dprint, or rustfmt).
 
 ### OpenCode
 
