@@ -8,7 +8,7 @@
  */
 
 import { join } from 'node:path';
-import { TYPECHECK_TASK } from '../lib/check';
+import { TURBO_CHECK_TASKS } from '../lib/check';
 import { ROOT_DIR } from '../lib/config';
 import { cargoTargetDir } from '../lib/runtime-build';
 import { hasCargo, hasCargoHack, warnNoCargo, warnNoCargoHack } from './toolchain';
@@ -102,18 +102,11 @@ const CARGO_CLIPPY = [
 function typescriptCheckTasks(tsOnly: boolean, cargo: boolean): ProtocolTask[] {
   return [
     {
-      // check:quick keeps normal lint exclusions separate from the full TS/TSX
-      // cycle scan, including generated files and top-level build helpers.
+      // Cache normal lint separately from the always-run cycle scan, including
+      // generated files and top-level build helpers.
       // Standalone/scoped protocol checks enforce the repository's same rules.
       label: 'protocol:workspace',
-      cmd: [
-        'turbo',
-        'run',
-        'check:quick',
-        TYPECHECK_TASK,
-        '--ui=stream',
-        '--filter=@mangostudio/protocol',
-      ],
+      cmd: ['turbo', 'run', ...TURBO_CHECK_TASKS, '--ui=stream', '--filter=@mangostudio/protocol'],
     },
     { label: 'protocol:versions', cmd: ['bun', './scripts/protocol/check-versions.ts'] },
     { label: 'protocol:verify-spec', cmd: ['bun', './scripts/protocol/verify-spec.ts'] },

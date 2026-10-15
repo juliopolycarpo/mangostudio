@@ -28,6 +28,7 @@ describe('check script', () => {
       'turbo',
       'run',
       'check:quick',
+      'check:cycles',
       'typecheck:with-deps',
       '--ui=stream',
       '--filter=@mangostudio/api',
@@ -90,7 +91,7 @@ describe('check script', () => {
     expect(turboConfig).toContain('"$TURBO_DEFAULT$"');
   });
 
-  test('checks each whole TypeScript workspace with Biome instead of a separate cycle task', () => {
+  test('keeps whole-workspace lint and cycle scans separate in every workspace check', () => {
     for (const manifestPath of [
       'apps/api/package.json',
       'apps/frontend/package.json',
@@ -99,8 +100,10 @@ describe('check script', () => {
     ]) {
       const manifest = JSON.parse(readText(manifestPath)) as { scripts?: Record<string, string> };
 
-      expect(manifest.scripts?.['check:quick']).toBe(
-        'biome check . && bun ../../scripts/check-import-cycles.ts .'
+      expect(manifest.scripts?.['check:quick']).toBe('biome check .');
+      expect(manifest.scripts?.['check:cycles']).toBe('bun ../../scripts/check-import-cycles.ts .');
+      expect(manifest.scripts?.check).toBe(
+        'bun run check:quick && bun run check:cycles && bun run typecheck'
       );
       expect(manifest.scripts?.circular).toBeUndefined();
     }

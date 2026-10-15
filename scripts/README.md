@@ -63,15 +63,19 @@ importing the specific module in new code:
 | `junit-report.ts`      | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
 
-Workspace `check:quick` scripts run normal Biome checks followed by
-`check-import-cycles.ts`. The cycle pass uses the independent
+Workspace `check:quick` scripts run cacheable normal Biome checks. The lint key
+includes the workspace's VCS inputs, upstream workspace sources through `transit`,
+and the root Biome, EditorConfig, Git ignore, TypeScript and Turbo configurations.
+Workspace `check:cycles` scripts always run `check-import-cycles.ts`, independently
+of lint cache hits. Both tasks are selected by `bun run check`, the protocol lane
+and each workspace's `check` script. The cycle pass uses the independent
 `biome.cycles.json`, so formatting exclusions and `.gitignore` cannot hide TS/JS
 cycles. It checks TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including JavaScript
 dependencies reached from TypeScript roots and independent JavaScript roots.
 It includes declarations and generated/build files, excludes only
 `node_modules` and `.git`, and raises the file-size limit to JavaScript's largest
 safe integer instead of inheriting Biome's one-MiB limit. Turbo always reruns
-`check:quick` because ignored files are absent from its VCS cache inputs.
+`check:cycles` because ignored files are absent from its VCS cache inputs.
 
 Run one scan from the repository root with
 `bun scripts/check-import-cycles.ts apps/api`.
