@@ -112,7 +112,14 @@ describe('literal Git path transport', () => {
   });
 
   test('literal whitespace and a Unicode BOM cannot turn an unrelated path into a compiler pin', () => {
-    for (const path of [' Cargo.toml', 'Cargo.toml ', '\ufeffCargo.toml', ' ']) {
+    for (const path of [
+      ' Cargo.toml',
+      'Cargo.toml ',
+      '\ufeffCargo.toml',
+      ' ',
+      'Cargo.toml\n',
+      'Cargo.toml\r',
+    ]) {
       expect(decodeChangedPaths(encode([path]))).toEqual([path]);
       expect(classifyChangedPaths([path])).toEqual({ rust: false, qualification: false });
       expect(touchesProtocolSurface([path])).toBe(false);
@@ -158,6 +165,17 @@ describe('literal Git path transport', () => {
       expect(run.exitCode).not.toBe(0);
       expect(run.stdout.toString()).toBe('');
     }
+  });
+
+  test('invalid revisions identify the received values and expected SHA shape', () => {
+    const run = cli('changed-paths.ts', 'collect', '--name-only', head, pathsFile);
+    expect(run.exitCode).toBe(1);
+    expect(run.stdout.toString()).toBe('');
+    expect(run.stderr.toString()).toContain('base="--name-only"');
+    expect(run.stderr.toString()).toContain(`head="${head}"`);
+    expect(run.stderr.toString()).toContain(
+      'expected 40- or 64-character lowercase hex commit SHAs'
+    );
   });
 });
 
@@ -209,6 +227,11 @@ describe('relevance policy parity', () => {
     expect(touchesProtocolSurface(paths)).toBe(false);
     expect(releaseRelevance(paths)).toEqual({ release: false, launcher: false });
   });
+
+  test.each(['LICENSE\n', 'README.md\n', 'README.md\r'])(
+    'a trailing line terminator cannot make %j a distribution exception',
+    (path) => expect(distributionRelevant([path])).toBe(true)
+  );
 
   test('every Rust detector helper triggers both of the lanes it can suppress', () => {
     for (const path of RUST_WORKSPACE_PATHS.filter(

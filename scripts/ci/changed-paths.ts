@@ -6,10 +6,16 @@ import { writeFileSync } from 'node:fs';
 import { decodeChangedPaths, readChangedPaths } from '../lib/changed-paths';
 import { distributionRelevant, releaseRelevance } from '../lib/ci-lanes';
 
-/** Collect literal paths without shell interpolation or Git's quoting rules. */
+/**
+ * Collect literal paths without shell interpolation or Git's quoting rules.
+ * @example
+ * writeFileSync('changed.nul', collectChangedPaths(baseSha, headSha));
+ */
 export function collectChangedPaths(base: string, head: string): Uint8Array {
   if (![base, head].every((sha) => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha))) {
-    throw new Error('changed-paths collect: expected full base and head commit SHAs');
+    throw new Error(
+      `changed-paths collect: received base=${JSON.stringify(base)}, head=${JSON.stringify(head)}; expected 40- or 64-character lowercase hex commit SHAs`
+    );
   }
   const diff = Bun.spawnSync(
     ['git', 'diff', '--no-renames', '--name-only', '-z', base, head, '--'],

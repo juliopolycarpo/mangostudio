@@ -11,13 +11,21 @@ export const RELEASE_PATTERN =
 export const LAUNCHER_PATTERN =
   /^(crates\/mangostudio-launcher\/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.github\/workflows\/release(-dry-run)?\.yml$|scripts\/release\/verify-launcher-package\.sh$)/;
 
-/** Unknown paths select distribution, as they did in CI's shell allowlist. */
+/**
+ * Unknown paths select distribution, as they did in CI's shell allowlist.
+ * @example
+ * distributionRelevant(['docs/guide.md']); // false
+ */
 export function distributionRelevant(paths: readonly string[]): boolean {
   validateChangedPaths(paths);
   return paths.some((path) => !DISTRIBUTION_IRRELEVANT_PATTERN.test(path));
 }
 
-/** Independent release/archive and launcher-package relevance. */
+/**
+ * Independent release/archive and launcher-package relevance.
+ * @example
+ * releaseRelevance(['Cargo.toml']); // { release: true, launcher: true }
+ */
 export function releaseRelevance(paths: readonly string[]): {
   release: boolean;
   launcher: boolean;
