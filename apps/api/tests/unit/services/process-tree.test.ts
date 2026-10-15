@@ -53,7 +53,7 @@ describe('parentPidFromStat', () => {
 });
 
 describe('readProcessSnapshot', () => {
-  it('includes this process under its parent', () => {
+  it.skipIf(process.platform !== 'linux')('includes this process under its parent', () => {
     const self = readProcessSnapshot().find((entry) => entry.pid === process.pid);
     expect(self?.parentPid).toBe(process.ppid);
   });

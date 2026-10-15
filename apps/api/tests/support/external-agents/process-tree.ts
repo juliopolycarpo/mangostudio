@@ -76,8 +76,8 @@ export function parentPidFromStat(stat: string): number {
 }
 
 /**
- * A snapshot of this machine's processes from `/proc`. A process that exits while it is read is
- * left out.
+ * A Linux-only snapshot of this machine's processes from `/proc`. A process that exits while it
+ * is read is left out.
  *
  * @example
  * vendorProcessesOf(runtimePid, codexPath, readProcessSnapshot());

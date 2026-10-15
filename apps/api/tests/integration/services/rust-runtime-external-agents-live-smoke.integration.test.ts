@@ -938,7 +938,12 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
   }
 
   for (const refusal of LIVE_REFUSAL_CASES.filter((entry) => entry.flow === 'child-killed')) {
-    it.skipIf(!binary.available || !refusals.some((entry) => entry.id === refusal.id))(
+    // This case identifies and polls the vendor process through Linux procfs.
+    it.skipIf(
+      process.platform !== 'linux' ||
+        !binary.available ||
+        !refusals.some((entry) => entry.id === refusal.id)
+    )(
       `${refusal.id}: a vendor process that ended between turns is reopened once and the next send completes`,
       async () => {
         const session = await refusedSession(refusal);
