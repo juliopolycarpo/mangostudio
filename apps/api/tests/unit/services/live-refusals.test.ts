@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { delimiter, join } from 'node:path';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import {
@@ -67,8 +68,8 @@ describe('refusalEnvironment', () => {
     ).toEqual({
       HOME: '/scratch/empty',
       USERPROFILE: '/scratch/empty',
-      XDG_CONFIG_HOME: '/scratch/empty/.config',
-      PATH: '/home/ada/.local/bin:/usr/bin',
+      XDG_CONFIG_HOME: join('/scratch/empty', '.config'),
+      PATH: ['/home/ada/.local/bin', '/usr/bin'].join(delimiter),
     });
   });
 
@@ -78,7 +79,10 @@ describe('refusalEnvironment', () => {
         ...base,
         outdatedCodexDirectory: '/scratch/old/bin',
       })
-    ).toEqual({ CODEX_HOME: '/scratch/empty', PATH: '/scratch/old/bin:/usr/bin' });
+    ).toEqual({
+      CODEX_HOME: '/scratch/empty',
+      PATH: ['/scratch/old/bin', '/usr/bin'].join(delimiter),
+    });
   });
 
   it('gives the second runtime of the reopen flow an empty codex home and the older binary', () => {
@@ -87,7 +91,10 @@ describe('refusalEnvironment', () => {
         ...base,
         outdatedCodexDirectory: '/scratch/old/bin',
       })
-    ).toEqual({ CODEX_HOME: '/scratch/empty', PATH: '/scratch/old/bin:/usr/bin' });
+    ).toEqual({
+      CODEX_HOME: '/scratch/empty',
+      PATH: ['/scratch/old/bin', '/usr/bin'].join(delimiter),
+    });
   });
 
   it('refuses an outdated case without the older binary, saying which variable names it', () => {
