@@ -73,6 +73,20 @@ describe('security workflows', () => {
     }
   });
 
+  test('publish-path distribution downloads require the shipping runtime profile', () => {
+    for (const file of ['.github/workflows/release.yml', '.github/workflows/canary.yml']) {
+      const downloads = workflowSteps(readText(file)).filter((step) =>
+        step.includes('uses: ./.github/actions/download-distribution')
+      );
+      expect(downloads.length, file).toBeGreaterThan(0);
+      for (const step of downloads) {
+        expect(step, file).toContain('runtime-profile: shipping');
+      }
+    }
+    const action = readText('.github/actions/download-distribution/action.yml');
+    expect(action).toContain('--runtime-profile "$EXPECTED_RUNTIME_PROFILE"');
+  });
+
   test('publish-path distribution downloads verify provenance; PR-path downloads do not', () => {
     for (const file of ['.github/workflows/release.yml', '.github/workflows/canary.yml']) {
       // Per step, never a byte window around the `uses:` line: a fixed slice

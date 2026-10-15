@@ -86,6 +86,7 @@ jobs:
           version: ${{ inputs.version }}
           channel: ${{ inputs.channel }}
           scope: npm
+          runtime-profile: shipping
           verify-attestation: "true"
 
       - id: publish
@@ -121,6 +122,7 @@ jobs:
           version: ${{ inputs.version }}
           channel: ${{ inputs.channel }}
           scope: assets
+          runtime-profile: shipping
           verify-attestation: "true"
 
       - name: Stage canary release assets

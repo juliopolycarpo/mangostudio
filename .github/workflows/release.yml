@@ -253,6 +253,7 @@ jobs:
           version: ${{ needs.build.outputs.version }}
           channel: release
           scope: assets
+          runtime-profile: shipping
           verify-attestation: "true"
 
       - name: Run Linux x64 binary smoke test
@@ -295,6 +296,7 @@ jobs:
           version: ${{ needs.build.outputs.version }}
           channel: release
           scope: assets
+          runtime-profile: shipping
           verify-attestation: "true"
 
       # SHA256SUMS names every archive and raw binary, so attesting it covers
@@ -379,6 +381,7 @@ jobs:
           version: ${{ needs.build.outputs.version }}
           channel: release
           scope: assets
+          runtime-profile: shipping
           verify-attestation: "true"
 
       - name: Stage Docker build context
@@ -515,6 +518,7 @@ jobs:
           version: ${{ needs.build.outputs.version }}
           channel: release
           scope: npm
+          runtime-profile: shipping
           verify-attestation: "true"
 
       - id: publish
@@ -570,6 +574,7 @@ jobs:
           version: ${{ needs.build.outputs.version }}
           channel: release
           scope: checksums
+          runtime-profile: shipping
           verify-attestation: "true"
 
       - name: Render formula and push to juliopolycarpo/homebrew-tap
@@ -626,6 +631,7 @@ jobs:
           version: ${{ needs.build.outputs.version }}
           channel: release
           scope: checksums
+          runtime-profile: shipping
           verify-attestation: "true"
 
       - name: Render manifest and push to juliopolycarpo/scoop-bucket
