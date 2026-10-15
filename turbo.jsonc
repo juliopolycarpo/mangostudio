@@ -64,10 +64,22 @@
       "outputs": ["dist/**"]
     },
     "check:quick": {
+      // Biome resolves imports in upstream workspaces. Hash their sources
+      // without waiting for another lint or typecheck to finish.
+      "dependsOn": ["transit"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/biome.json",
+        "$TURBO_ROOT$/.editorconfig",
+        "$TURBO_ROOT$/.gitignore",
+        "$TURBO_ROOT$/tsconfig.json",
+        "$TURBO_ROOT$/turbo.jsonc"
+      ]
+    },
+    "check:cycles": {
       // Cycles include generated and gitignored TS/TSX files, which are absent
       // from Turbo's VCS inputs. Always scan them instead of replaying a cache.
-      "cache": false,
-      "inputs": ["$TURBO_ROOT$/biome.json", "$TURBO_DEFAULT$"]
+      "cache": false
     },
     // Script-less: no workspace defines a `transit` script, so it runs nothing
     // and orders nothing. It exists for its hash. Turbo folds the hash of each

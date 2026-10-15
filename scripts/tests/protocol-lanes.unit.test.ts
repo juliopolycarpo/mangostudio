@@ -160,6 +160,7 @@ describe('protocol lane selection', () => {
       'turbo',
       'run',
       'check:quick',
+      'check:cycles',
       'typecheck:with-deps',
       '--ui=stream',
       '--filter=@mangostudio/protocol',

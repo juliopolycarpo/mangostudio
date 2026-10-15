@@ -109,6 +109,12 @@ function buildBaseFixture(): string {
       }
     }
   }
+  // These checks format only Markdown and TOML. Keep installed formatters so
+  // a fresh fixture cache never needs the unused remote YAML plugin.
+  const formatter = JSON.parse(readText('dprint.json'));
+  formatter.plugins = formatter.plugins.filter((plugin: string) => plugin.startsWith('./'));
+  formatter.yaml = undefined;
+  writeFileSync(join(root, 'dprint.json'), `${JSON.stringify(formatter, null, 2)}\n`);
   return root;
 }
 
@@ -514,8 +520,9 @@ beforeAll(() => {
   // Own the cache instead of relying on the host's platform-specific cache
   // discovery. Warm it once outside case deadlines and share it across copies.
   dprintCache = mkdtempSync(join(tmpdir(), 'mango-import-cycles-dprint-'));
+  baseFixture = buildBaseFixture();
   const warm = Bun.spawnSync(['bunx', 'dprint', 'check', 'apps/api/AGENTS.md'], {
-    cwd: ROOT_DIR,
+    cwd: createFixture(),
     env: { ...process.env, DPRINT_CACHE_DIR: dprintCache },
     stdout: 'pipe',
     stderr: 'pipe',
@@ -525,7 +532,6 @@ beforeAll(() => {
     'pass',
     'dprint cache warmup'
   );
-  baseFixture = buildBaseFixture();
 }, 60_000);
 
 afterEach(removeFixtures);

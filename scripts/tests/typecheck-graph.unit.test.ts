@@ -40,31 +40,44 @@ const CHECK_RUNS: Record<string, { filtered: string[]; args: string[] }> = {
 };
 
 /**
- * Every task each command executed on the commit before the typecheck graph
- * changed, when `typecheck` depended on `^typecheck`. A filtered run has to
- * keep checking every upstream workspace: a graph that only hashed them would
- * drop them from these lists.
+ * Every executable task a filtered check must retain, including the upstream
+ * typechecks. Hashing an upstream workspace alone does not check it.
  */
-const TASKS_BEFORE_THE_GRAPH_CHANGE: Record<string, string[]> = {
+const EXPECTED_CHECK_TASKS: Record<string, string[]> = {
   full: [
+    `${API}#check:cycles`,
     `${API}#check:quick`,
     `${API}#typecheck`,
+    `${FRONTEND}#check:cycles`,
     `${FRONTEND}#check:quick`,
     `${FRONTEND}#typecheck`,
     `${PROTOCOL}#typecheck`,
+    `${SHARED}#check:cycles`,
     `${SHARED}#check:quick`,
     `${SHARED}#typecheck`,
   ],
   frontend: [
     `${API}#typecheck`,
+    `${FRONTEND}#check:cycles`,
     `${FRONTEND}#check:quick`,
     `${FRONTEND}#typecheck`,
     `${PROTOCOL}#typecheck`,
     `${SHARED}#typecheck`,
   ],
-  api: [`${API}#check:quick`, `${API}#typecheck`, `${PROTOCOL}#typecheck`, `${SHARED}#typecheck`],
-  shared: [`${PROTOCOL}#typecheck`, `${SHARED}#check:quick`, `${SHARED}#typecheck`],
-  protocol: [`${PROTOCOL}#check:quick`, `${PROTOCOL}#typecheck`],
+  api: [
+    `${API}#check:cycles`,
+    `${API}#check:quick`,
+    `${API}#typecheck`,
+    `${PROTOCOL}#typecheck`,
+    `${SHARED}#typecheck`,
+  ],
+  shared: [
+    `${PROTOCOL}#typecheck`,
+    `${SHARED}#check:cycles`,
+    `${SHARED}#check:quick`,
+    `${SHARED}#typecheck`,
+  ],
+  protocol: [`${PROTOCOL}#check:cycles`, `${PROTOCOL}#check:quick`, `${PROTOCOL}#typecheck`],
 };
 
 describe('typecheck closure guard', () => {
@@ -131,15 +144,15 @@ describe('typecheck task graph', () => {
   const manifests = readWorkspaceManifests();
 
   for (const [filter, run] of Object.entries(CHECK_RUNS)) {
-    test(`a ${filter} run executes every task it executed before, and every dependency's typecheck`, async () => {
+    test(`a ${filter} run executes lint, cycles and every dependency's typecheck`, async () => {
       const received = executableTaskIds(await turboDryRun(ROOT_DIR, run.args));
 
       const violations = findClosureViolations(manifests, run.filtered, received);
       expect(violations, violations.join(' ; ')).toEqual([]);
       expect(
         received,
-        `expected the ${filter} run to execute: ${TASKS_BEFORE_THE_GRAPH_CHANGE[filter].join(', ')} | received: ${received.join(', ')}`
-      ).toEqual(TASKS_BEFORE_THE_GRAPH_CHANGE[filter]);
+        `expected the ${filter} run to execute: ${EXPECTED_CHECK_TASKS[filter].join(', ')} | received: ${received.join(', ')}`
+      ).toEqual(EXPECTED_CHECK_TASKS[filter]);
     });
   }
 
