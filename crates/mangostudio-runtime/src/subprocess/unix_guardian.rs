@@ -2495,6 +2495,24 @@ mod tests {
         }
     }
 
+    /// Waits for the guardian's detached reaper without reaping the child from the test.
+    ///
+    /// Usage: `assert_guardian_reaped(pid).await;`
+    async fn assert_guardian_reaped(pid: libc::pid_t) {
+        let mut state = child_state(pid);
+        for _ in 0..500 {
+            if state == "reaped" {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            state = child_state(pid);
+        }
+        assert_eq!(
+            state, "reaped",
+            "expected guardian pid {pid} reaped | received: {state}"
+        );
+    }
+
     /// Regression test: `from_raw` started the guardian's wait task only after every fallible
     /// setup step, so an error after the fork (a failed `epoll_ctl` while registering the PTY
     /// descriptors, say) dropped the guardian's pipes, the guardian exited, and nothing ever
@@ -2531,17 +2549,40 @@ mod tests {
             "injected nonblocking failure",
             "expected the original setup error to be returned | received: {error}"
         );
-        let mut state = child_state(pid);
-        for _ in 0..500 {
-            if state == "reaped" {
-                break;
+        assert_guardian_reaped(pid).await;
+    }
+
+    /// Linux epoll refuses `/dev/null`, so replacing either PTY endpoint exercises a real
+    /// registration error after the guardian's pipes have already joined the reactor.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_pty_registration_error_after_the_fork_still_reaps_the_guardian() {
+        use crate::subprocess::ProcessRequest;
+
+        for endpoint in ["stdout", "stdin"] {
+            let request = ProcessRequest::new("/bin/sh", ["-c", "sleep 30"]);
+            let mut raw =
+                crate::blocking::run_blocking(move || super::spawn_raw(&request, Some((80, 24))))
+                    .await
+                    .expect("PTY guardian forks");
+            let pid = raw.pid;
+            let refused = super::open_null_stdin().expect("/dev/null opens");
+            if endpoint == "stdout" {
+                raw.stdout = refused;
+            } else {
+                raw.stdin = Some(refused);
             }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            state = child_state(pid);
+
+            let error = super::GuardianChild::from_raw(raw)
+                .err()
+                .expect("expected PTY registration failure | received a guardian child");
+
+            assert_eq!(
+                error.raw_os_error(),
+                Some(libc::EPERM),
+                "expected epoll to reject {endpoint} with EPERM | received: {error}"
+            );
+            assert_guardian_reaped(pid).await;
         }
-        assert_eq!(
-            state, "reaped",
-            "expected guardian pid {pid} reaped | received: {state}"
-        );
     }
 }
