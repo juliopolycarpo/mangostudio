@@ -5,16 +5,28 @@ import { join } from 'node:path';
 
 import { listTrackedFiles } from './tracked-files';
 
+const PORTABLE_PATHS = ['scripts/unicodé.ts', 'scripts/ trailing space .ts'];
+const LITERAL_PATHS = [
+  ...PORTABLE_PATHS,
+  'scripts/tab\tname.ts',
+  'scripts/line\nname.ts',
+  'scripts/quote"name.ts',
+];
+
 describe('QA tracked-file inventory', () => {
-  it('preserves Git-quoted Unicode, control bytes, quotes and whitespace as literal paths', async () => {
+  it('parses Unicode, control bytes, quotes and whitespace literally on every host', async () => {
+    const literalGitInventory = (command: readonly string[]) => {
+      expect(command).toEqual(['git', 'ls-files', '-z']);
+      return Promise.resolve({ stdout: `${LITERAL_PATHS.join('\0')}\0`, stderr: '', exitCode: 0 });
+    };
+    expect(await listTrackedFiles(literalGitInventory)).toEqual(LITERAL_PATHS);
+  });
+
+  it('preserves literal Git filenames supported by the host filesystem', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'qa-tracked-paths-'));
-    const paths = [
-      'scripts/unicodé.ts',
-      'scripts/tab\tname.ts',
-      'scripts/line\nname.ts',
-      'scripts/quote"name.ts',
-      'scripts/ trailing space .ts',
-    ];
+    // Win32 rejects control bytes and quotes before Git can index them. Keep
+    // those records in the parser test above and exercise every legal name here.
+    const paths = process.platform === 'win32' ? PORTABLE_PATHS : LITERAL_PATHS;
     const run = async (cmd: readonly string[]) => {
       const child = Bun.spawn([...cmd], { cwd, stdout: 'pipe', stderr: 'pipe' });
       const [stdout, stderr, exitCode] = await Promise.all([
