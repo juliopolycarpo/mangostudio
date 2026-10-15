@@ -335,7 +335,7 @@ Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks
 
 ## Configuração do Editor
 
-Os hooks do Claude Code prependem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.mjs` para formatar o arquivo modificado (Biome, dprint ou rustfmt).
+Os hooks do Claude Code prependem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.mjs` para formatar o arquivo modificado (Biome, dprint ou rustfmt). Antes de cada escrita ou edição, um hook `PreToolUse` (`protect-generated.mjs`) bloqueia edições manuais em arquivos gerados, como `CHANGELOG.md`, lockfiles e `routeTree.gen.ts`, e indica o comando que os regenera.
 
 ### OpenCode
 
