@@ -40,34 +40,30 @@ interface MediaRange {
  */
 function splitUnquoted(value: string, separator: ',' | ';'): string[] {
   const parts: string[] = [];
-  let current = '';
+  let start = 0;
   let quoted = false;
   let escaped = false;
 
-  for (const char of value) {
+  for (let index = 0; index < value.length; index++) {
+    const char = value[index];
     if (escaped) {
-      current += char;
       escaped = false;
       continue;
     }
     if (quoted && char === '\\') {
-      current += char;
       escaped = true;
       continue;
     }
     if (char === '"') {
       quoted = !quoted;
-      current += char;
       continue;
     }
     if (char === separator && !quoted) {
-      parts.push(current);
-      current = '';
-      continue;
+      parts.push(value.slice(start, index));
+      start = index + 1;
     }
-    current += char;
   }
-  parts.push(current);
+  parts.push(value.slice(start));
 
   return parts;
 }
