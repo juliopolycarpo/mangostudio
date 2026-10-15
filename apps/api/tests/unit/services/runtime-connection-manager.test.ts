@@ -161,14 +161,17 @@ class DiscoveringConnection implements ManagedRuntimeConnection {
 function stalledThenFreshConnector(fresh: ManagedRuntimeConnection): {
   connector: RuntimeEnvironmentConnector;
   signals: AbortSignal[];
+  started: Promise<void>;
   release: (connection: ManagedRuntimeConnection) => void;
 } {
   const signals: AbortSignal[] = [];
+  const started = Promise.withResolvers<void>();
   let release: (connection: ManagedRuntimeConnection) => void = () => undefined;
   let attempts = 0;
   const connector: RuntimeEnvironmentConnector = (_definition, _onUnavailable, context) => {
     attempts += 1;
     signals.push(context.signal);
+    started.resolve();
     if (attempts === 1) {
       return new Promise((resolve) => {
         release = resolve;
@@ -179,6 +182,7 @@ function stalledThenFreshConnector(fresh: ManagedRuntimeConnection): {
   return {
     connector,
     signals,
+    started: started.promise,
     release: (connection) => release(connection),
   };
 }
@@ -240,8 +244,7 @@ describe('RuntimeConnectionManager', () => {
 
     const first = manager.getClient('user-1', 'devbox');
     const second = manager.getClient('user-1', 'devbox');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushMicrotasks();
 
     expect(manager.getStatus('user-1', 'devbox').state).toBe('connecting');
     expect(connectCalls).toBe(1);
@@ -480,11 +483,13 @@ describe('RuntimeConnectionManager', () => {
     // discarded on its own merits (superseded), not merely assumed to lose
     // a race it never actually ran.
     const closedStale: string[] = [];
+    const staleClosed = Promise.withResolvers<void>();
     const staleConnection = fakeConnection(() => {
       closedStale.push('closed');
+      staleClosed.resolve();
     });
     const fresh = fakeConnection(() => undefined);
-    const { connector, signals, release } = stalledThenFreshConnector(fresh);
+    const { connector, signals, started, release } = stalledThenFreshConnector(fresh);
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
       connectors: { stdio: connector },
@@ -493,8 +498,9 @@ describe('RuntimeConnectionManager', () => {
     // Attempt A starts, then the caller gives up on it before it handshakes —
     // a disconnect, or a second `connect()` call from real code.
     const staleAttempt = manager.connect('user-1', 'devbox');
-    await Promise.resolve();
-    await Promise.resolve();
+    // Cancellation rejects callers promptly; ownership still waits for the opener.
+    void staleAttempt.catch(() => undefined);
+    await started;
     manager.disconnect('user-1', 'devbox');
     expect(signals[0]?.aborted).toBe(true);
 
@@ -505,6 +511,7 @@ describe('RuntimeConnectionManager', () => {
     // A's handshake finally answers, after B has already published.
     release(staleConnection);
     await expect(staleAttempt).rejects.toThrow('Runtime connection was closed.');
+    await staleClosed.promise;
 
     expect(closedStale).toEqual(['closed']);
     expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
@@ -2263,8 +2270,7 @@ describe('RuntimeConnectionManager — activity transitions', () => {
     });
 
     const connecting = manager.connect('user-1', 'devbox');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushMicrotasks();
     // `connecting` settles to `undefined`: a step, not an outcome.
     expect(manager.getStatus('user-1', 'devbox').state).toBe('connecting');
     expect(transitions).toEqual([]);
@@ -2293,8 +2299,7 @@ describe('RuntimeConnectionManager — activity transitions', () => {
     });
 
     const connecting = manager.connect('user-1', 'devbox');
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushMicrotasks();
     finishConnect?.(fakeConnection(() => undefined));
     await connecting;
     expect(transitions).toEqual([]);

@@ -37,8 +37,8 @@ import {
   loadObservabilitySnapshot,
 } from '../services/providers/core/provider-observability';
 import {
-  closeAllRuntimeConnections,
   getRuntimeConnectionManager,
+  shutdownRuntimeConnections,
 } from '../services/runtime-client/runtime-connection-manager';
 import { getDevFrontendDir } from './dev-frontend-dir';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
@@ -203,7 +203,7 @@ async function gracefulStop(): Promise<void> {
   // terminal session gets a real `terminal.close` instead of the connection
   // simply dropping out from under it.
   await terminalSessionService.closeAll();
-  await closeAllRuntimeConnections();
+  await shutdownRuntimeConnections();
   // After the connections close, so a scope withdrawn while they closed is still reaped.
   stopRuntimeScopeReaps?.();
   stopRuntimeScopeReaps = null;
