@@ -149,7 +149,7 @@ sse-stream = "0.2"
 # non-Windows child, while Windows turns its explicit pipe handles into
 # `tokio::fs::File` endpoints. See `crate::blocking`'s module docs for the pool
 # it shares the executor threads with.
-tokio = { version = "1.53", default-features = false, features = [
+tokio = { version = "1.53.3", default-features = false, features = [
   "fs",
   "io-util",
   "macros",
@@ -190,7 +190,7 @@ mango-external-agents = { version = "=0.7.0", default-features = false, features
   "testing",
 ] }
 mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
-tokio = { version = "1.53", features = ["io-std", "test-util"] }
+tokio = { version = "1.53.3", features = ["io-std", "test-util"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.189"

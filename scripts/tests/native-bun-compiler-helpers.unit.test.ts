@@ -7,7 +7,6 @@ import {
   type NativeProcess,
   parseNativeProcesses,
   runNativeCommand,
-  snapshotNativeProcesses,
   unattributedNativeCompilerHelpers,
   withoutUnownedCommandLines,
 } from '../lib/native-bun-qualification-process';
@@ -23,29 +22,56 @@ class DiscardOutput extends Writable {
   }
 }
 
+const compilerHelper = {
+  pid: 10_000_003,
+  parentPid: 10_000_004,
+  group: null,
+  identity: '10000003:2026-10-09T01:25:07.1062730Z',
+  command:
+    '"C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\VCTIP.EXE"',
+  name: 'VCTIP.EXE',
+  executablePath:
+    'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\VCTIP.EXE',
+};
+
 class NewCompilerHelperCensus {
   private appeared = false;
-  constructor(private readonly releasePath?: string) {}
-  readonly helper = {
-    pid: 10_000_003,
-    parentPid: 10_000_004,
+  readonly helper = compilerHelper;
+  readonly unrelated: NativeProcess = {
+    pid: 10_000_005,
+    parentPid: 10_000_006,
     group: null,
-    identity: '10000003:2026-10-09T01:25:07.1062730Z',
-    command:
-      '"C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\VCTIP.EXE"',
-    name: 'VCTIP.EXE',
-    executablePath:
-      'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\VCTIP.EXE',
+    identity: '10000005:2026-10-09T01:25:06.0000000Z',
+    command: 'unrelated-tool --token=secret',
   };
 
+  constructor(
+    private readonly pidPath: string,
+    private readonly releasePath: string
+  ) {}
+
   read = async (): Promise<NativeProcess[]> => {
-    const rows = await snapshotNativeProcesses();
-    const visible = rows.some(
-      (row) => row.parentPid === process.pid && row.command.includes('nativeCompilerGuardChild')
-    );
-    if (visible && !this.appeared) {
+    const rows = [this.unrelated];
+    const pidFile = Bun.file(this.pidPath);
+    if (!(await pidFile.exists())) return rows;
+    const pid = Number(await pidFile.text());
+    if (!Number.isSafeInteger(pid) || pid <= 0)
+      throw new Error(`Invalid fixture PID ${pid}; expected a positive safe integer`);
+    try {
+      process.kill(pid, 0);
+      rows.push({
+        pid,
+        parentPid: process.pid,
+        group: process.platform === 'win32' ? null : pid,
+        identity: `${pid}:2026-10-09T01:25:07.0000000Z`,
+        command: 'bun nativeCompilerGuardChild',
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+    if (rows.length > 1 && !this.appeared) {
       this.appeared = true;
-      if (this.releasePath) await writeFile(this.releasePath, 'observed');
+      await writeFile(this.releasePath, 'observed');
     }
     return this.appeared ? [...rows, this.helper] : rows;
   };
@@ -54,14 +80,16 @@ class NewCompilerHelperCensus {
 test('new unattributed compiler helper blocks a falsely empty command scope', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'native-compiler-guard-'));
   temporary.push(dir);
+  const pidPath = join(dir, 'child.pid');
   const releasePath = join(dir, 'release');
-  const census = new NewCompilerHelperCensus(releasePath);
+  const census = new NewCompilerHelperCensus(pidPath, releasePath);
   const result = await runNativeCommand({
     label: 'compiler-guard',
     command: [
       process.execPath,
       '-e',
-      'const deadline = Date.now() + 15000; while (!(await Bun.file(process.argv[1]).exists())) { if (Date.now() > deadline) throw new Error("census did not observe child"); await Bun.sleep(10); } /* nativeCompilerGuardChild */',
+      'const { rename } = await import("node:fs/promises"); await Bun.write(process.argv[1] + ".tmp", String(process.pid)); await rename(process.argv[1] + ".tmp", process.argv[1]); const deadline = Date.now() + 15000; while (!(await Bun.file(process.argv[2]).exists())) { if (Date.now() > deadline) throw new Error("census did not observe child"); await Bun.sleep(10); }',
+      pidPath,
       releasePath,
     ],
     root: dir,
@@ -75,6 +103,11 @@ test('new unattributed compiler helper blocks a falsely empty command scope', as
     stream: new DiscardOutput(),
   });
   expect(result.exitCode).toBe(0);
+  expect(result.signal).toBeNull();
+  expect(result.timedOut).toBe(false);
+  expect(result.settlement.snapshotErrors).toEqual([]);
+  expect(result.settlement.pollErrors).toEqual([]);
+  expect(result.settlement.survivors).toEqual([]);
   expect(result.settlement.rootObserved).toBe(true);
   expect(result.settlement.observed.some((row) => row.pid === census.helper.pid)).toBe(false);
   expect(result.settlement.empty).toBe(false);
@@ -89,6 +122,10 @@ test('new unattributed compiler helper blocks a falsely empty command scope', as
     'processes-latest-compiler-guard.json',
   ]) {
     const recorded: NativeProcess[] = await Bun.file(join(dir, name)).json();
+    expect(recorded.find((row) => row.identity === census.unrelated.identity)).toEqual({
+      ...census.unrelated,
+      command: '',
+    });
     const exposed = recorded.filter((row) => row.command !== '' && !owned.has(row.identity));
     expect(
       exposed.length,
@@ -98,7 +135,7 @@ test('new unattributed compiler helper blocks a falsely empty command scope', as
 }, 60_000);
 
 test('a persisted census keeps the command line of owned processes only', () => {
-  const helper = new NewCompilerHelperCensus().helper;
+  const helper = compilerHelper;
   const owned = {
     ...helper,
     pid: 7,
@@ -126,7 +163,7 @@ test('a persisted census keeps the command line of owned processes only', () => 
 });
 
 test('preexisting and owned helper identities grant no new termination authority', () => {
-  const helper = new NewCompilerHelperCensus().helper;
+  const helper = compilerHelper;
   expect(unattributedNativeCompilerHelpers([helper], [helper], [])).toEqual([]);
   expect(unattributedNativeCompilerHelpers([], [helper], [helper])).toEqual([]);
   const reused = { ...helper, identity: '10000003:2026-10-09T01:28:08.5064100Z' };
@@ -134,7 +171,7 @@ test('preexisting and owned helper identities grant no new termination authority
 });
 
 test('helper detection uses native image metadata when command text is unavailable', () => {
-  const helper = new NewCompilerHelperCensus().helper;
+  const helper = compilerHelper;
   const nameOnly = { ...helper, command: '', executablePath: null };
   const imageOnly = { ...helper, command: '', name: '' };
   const unrelated = { ...helper, command: '', name: 'NOTVCTIP.EXE', executablePath: null };
@@ -145,7 +182,7 @@ test('helper detection uses native image metadata when command text is unavailab
 
 test('CIM snapshots retain validated image metadata without depending on command text', () => {
   expect(() => parseNativeProcesses('[]', 'win32')).toThrow('JSON array containing processes');
-  const helper = new NewCompilerHelperCensus().helper;
+  const helper = compilerHelper;
   const input = {
     pid: helper.pid,
     parentPid: helper.parentPid,

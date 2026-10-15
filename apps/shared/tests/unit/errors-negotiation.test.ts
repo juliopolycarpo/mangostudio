@@ -125,6 +125,19 @@ describe('prefersProblemDetails', () => {
     expect(prefersProblemDetails('text/plain;title="x,application/problem+json"')).toBe(false);
   });
 
+  it('preserves escaped quotes, backslashes and Unicode while finding separators', () => {
+    expect(prefersProblemDetails(String.raw`text/plain;title="a\",application/problem+json"`)).toBe(
+      false
+    );
+    expect(prefersProblemDetails(String.raw`application/problem+json;title="a\";q=0"`)).toBe(true);
+    expect(prefersProblemDetails(String.raw`application/problem+json;title="🦋\";q=0";q=0`)).toBe(
+      false
+    );
+    expect(
+      prefersProblemDetails(String.raw`text/plain;title="🦋\\",application/problem+json`)
+    ).toBe(true);
+  });
+
   it('clamps out-of-range quality values instead of dropping the range', () => {
     expect(prefersProblemDetails('application/problem+json;q=9')).toBe(true);
     expect(prefersProblemDetails('application/json, application/problem+json;q=-1')).toBe(false);

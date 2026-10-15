@@ -86,7 +86,9 @@ describe('ignored/untracked inventory parity', () => {
     expect(run.exitCode, run.stderr.toString()).toBe(0);
     const report = parseJunitXml(readFileSync(join(dir, 'report.xml'), 'utf8'));
     const selected = [
-      ...new Set(report.cases.flatMap((entry) => (entry.file ? [entry.file] : []))),
+      ...new Set(
+        report.cases.flatMap((entry) => (entry.file ? [entry.file.replaceAll('\\', '/')] : []))
+      ),
     ].sort();
     expect(selected).toEqual(
       files.filter((file) => !file.includes('/.hidden/') && !file.includes('/node_modules/')).sort()
