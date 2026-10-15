@@ -67,10 +67,12 @@ describe('unprivileged collection side', () => {
   test('test.yml hands the fragment off with 1-day retention and failure-only coverage', () => {
     const workflow = readText('.github/workflows/test.yml');
 
-    expect(workflow).toContain('name: qa-test-metrics');
-    expect(workflow).toMatch(
-      /name: qa-test-metrics\n\s+path: test-metrics\.json\n\s+retention-days: 1\n/
+    const upload = extractStepBlocks(extractJobBlock(workflow, 'merge')).find((step) =>
+      step.includes('name: qa-test-metrics\n')
     );
+    expect(upload).toBeDefined();
+    expect(upload).toMatch(/^ {10}path: test-metrics\.json$/m);
+    expect(upload).toMatch(/^ {10}retention-days: 1$/m);
     expect(workflow).toContain(
       'bun ./scripts/qa-gate/render-coverage-summary.ts test-metrics.json'
     );

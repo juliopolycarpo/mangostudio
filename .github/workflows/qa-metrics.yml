@@ -126,6 +126,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: qa-metrics
+          overwrite: true
           path: metrics.json
           # Main-push envelopes are long-lived baselines for future PRs keyed
           # by base SHA; PR envelopes only need to outlive their report run.

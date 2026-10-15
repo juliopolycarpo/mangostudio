@@ -105,6 +105,12 @@ success, failure, cancellation, unexpected skips, malformed results, missing lan
 and missing relevance outputs. It also protects PR event visibility, Canary's legacy
 dependency, and the existing security and label contexts.
 
+Result artifacts, failure logs, and QA envelopes replace earlier uploads with the same name
+on a job rerun. This prevents the merger or report publisher from selecting a previous
+attempt's failed receipt after the producer passes. The workflow policy tests cover these
+uploads in `test.yml`, `rust-coverage.yml`, and `qa-metrics.yml`; earlier job logs remain
+available in the workflow's attempt history.
+
 Local fixtures do not establish hosted behavior. Before cutover, collect current-head API
 receipts for ordinary, docs-only, Rust, and release PRs, including failure, cancellation,
 unexpected or missing lane cases. Verify the actual API context names after all topology
