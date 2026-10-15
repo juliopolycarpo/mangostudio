@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createReleaseDiagnostics, readRootIdentity } from './managed-process-diagnostics';
 
 const DEFAULT_DIAGNOSTIC_LIMIT_BYTES = 32 * 1024;
 const DEFAULT_EXIT_TIMEOUT_MS = 5_000;
@@ -52,6 +52,8 @@ async function reserveEphemeralPort(): Promise<number> {
 export async function createManagedProcessFixture(options: {
   tempPrefix: string;
   diagnosticLimitBytes?: number;
+  /** Inject removal failures/postconditions without racing the host filesystem. */
+  removeTempDir?: (path: string) => Promise<void>;
 }): Promise<ManagedProcessFixture> {
   const port = await reserveEphemeralPort();
   const tempDir = await mkdtemp(join(tmpdir(), options.tempPrefix));
@@ -61,7 +63,24 @@ export async function createManagedProcessFixture(options: {
   let stderr = '';
   let stdoutCapture: Promise<void> | null = null;
   let stderrCapture: Promise<void> | null = null;
-  let cleaned = false;
+  let cleanupPromise: Promise<void> | null = null;
+  const releaseDiagnostics = createReleaseDiagnostics(tempDir);
+
+  const assertResourcesReleased = async (): Promise<void> => {
+    if (child && isRunning(child)) {
+      throw new Error(`Child process ${child.pid} is still running.`);
+    }
+    if (readRootIdentity(tempDir)) {
+      throw new Error(`Fixture temp directory still exists: ${tempDir}`);
+    }
+    await assertPortAvailable(port);
+  };
+
+  const releaseError = (message: string, cause: unknown): Error =>
+    new Error(
+      `${message}: ${cause}\n${releaseDiagnostics.describe(child)}\n${fixture.diagnostics()}`,
+      { cause }
+    );
 
   const appendBounded = (current: string, chunk: string): string => {
     const combined = current + chunk;
@@ -89,6 +108,7 @@ export async function createManagedProcessFixture(options: {
       return child;
     },
     spawn(spawnOptions) {
+      if (cleanupPromise) throw new Error('Managed process fixture cleanup has started.');
       if (child) throw new Error('Managed process fixture already has a child.');
       child = Bun.spawn({
         cmd: spawnOptions.cmd,
@@ -124,6 +144,7 @@ export async function createManagedProcessFixture(options: {
     },
     async waitForExit(timeoutMs = DEFAULT_EXIT_TIMEOUT_MS) {
       if (!child) throw new Error('Managed process fixture has not spawned a child.');
+      releaseDiagnostics.observeProcesses(child);
       const timedOut = Symbol('timed-out');
       // A ref'd timer is cleared once the child exits so the loser of the race
       // does not keep the event loop alive for the full timeout after teardown.
@@ -146,34 +167,47 @@ export async function createManagedProcessFixture(options: {
     },
     stop(signal = 'SIGTERM') {
       if (!child) throw new Error('Managed process fixture has not spawned a child.');
+      releaseDiagnostics.observeProcesses(child);
       if (isRunning(child)) child.kill(signal);
       return fixture.waitForExit();
     },
     diagnostics() {
       return [`stdout:\n${stdout || '<empty>'}`, `stderr:\n${stderr || '<empty>'}`].join('\n');
     },
-    async cleanup() {
-      if (cleaned) return;
-      cleaned = true;
-      if (child && isRunning(child)) {
-        child.kill('SIGTERM');
+    cleanup() {
+      cleanupPromise ??= (async () => {
         try {
-          await fixture.waitForExit();
-        } catch {
-          child.kill('SIGKILL');
-          await fixture.waitForExit();
+          releaseDiagnostics.observeProcesses(child);
+          if (child && isRunning(child)) {
+            child.kill('SIGTERM');
+            try {
+              await fixture.waitForExit();
+            } catch {
+              child.kill('SIGKILL');
+              await fixture.waitForExit();
+            }
+          } else if (child) {
+            await Promise.all([stdoutCapture, stderrCapture]);
+          }
+          releaseDiagnostics.beforeRemoval();
+          if (options.removeTempDir) {
+            await options.removeTempDir(tempDir);
+          } else {
+            await rm(tempDir, { force: true, recursive: true });
+          }
+          await assertResourcesReleased();
+        } catch (error) {
+          throw releaseError('Fixture cleanup failed', error);
         }
-      } else if (child) {
-        await Promise.all([stdoutCapture, stderrCapture]);
-      }
-      await rm(tempDir, { force: true, recursive: true });
+      })();
+      return cleanupPromise;
     },
     async assertReleased() {
-      if (child && isRunning(child)) {
-        throw new Error(`Child process ${child.pid} is still running.`);
+      try {
+        await assertResourcesReleased();
+      } catch (error) {
+        throw releaseError('Fixture release assertion failed', error);
       }
-      if (existsSync(tempDir)) throw new Error(`Fixture temp directory still exists: ${tempDir}`);
-      await assertPortAvailable(port);
     },
   };
 
