@@ -37,9 +37,16 @@ const sampleRss = (clock: TimingClock): number | null => {
   }
 };
 
+/**
+ * Run collection without recording telemetry.
+ * @example await collectWithoutTiming('dependencies', collectDependencyStats)
+ */
 export const collectWithoutTiming: TimeCollector = (_label, collect) => collect();
 
-/** Times a function without catching or changing its result/failure. */
+/**
+ * Time collection without changing its result or failure.
+ * @example await new CollectorTimings().time('dependencies', collectDependencyStats)
+ */
 export class CollectorTimings {
   private readonly started: number;
   private readonly startedAt: string;
@@ -70,6 +77,10 @@ export class CollectorTimings {
     }
   };
 
+  /**
+   * Snapshot spans and their source identity separately from QA metrics.
+   * @example timings.receipt({ repository, checkoutSha, provenance }, 'completed')
+   */
   receipt(
     identity: {
       readonly repository: string;
