@@ -9,6 +9,8 @@ import {
   createDistributionManifest,
   distributionArtifactName,
   parseDistributionManifest,
+  parseRuntimeProfile,
+  type RuntimeProfile,
   validateDistributionManifest,
 } from '../lib/distribution-manifest';
 import { ALL_BINARY_TARGETS, releaseArchiveFileName } from '../lib/release-targets';
@@ -20,7 +22,7 @@ afterEach(() => {
   tempDirs = [];
 });
 
-function fixture(): {
+function fixture(runtimeProfile: RuntimeProfile = 'shipping'): {
   rootDir: string;
   manifest: ReturnType<typeof createDistributionManifest>;
 } {
@@ -54,6 +56,7 @@ function fixture(): {
       channel: 'test',
       bunVersion: '1.4.0',
       bunRevision: '32e87032b98b46d9c3c1d082c58cb390abf35e33',
+      runtimeProfile,
       bunRuntimes: {
         'linux-x64': {
           source: 'host',
@@ -156,6 +159,84 @@ describe('distribution manifest', () => {
     expect(() => parseDistributionManifest(JSON.stringify(withoutField))).toThrow(
       /field bunRevision must be a non-empty string/
     );
+  });
+
+  test('records the runtime profile and round-trips it through parsing', () => {
+    for (const profile of ['shipping', 'light'] as const) {
+      const { manifest } = fixture(profile);
+
+      expect(manifest.runtimeProfile).toBe(profile);
+      expect(parseDistributionManifest(JSON.stringify(manifest)).runtimeProfile).toBe(profile);
+    }
+  });
+
+  test('names the received and expected value for an unknown runtime profile', () => {
+    expect(parseRuntimeProfile('light')).toBe('light');
+    expect(() => parseRuntimeProfile('fast')).toThrow(
+      'expected runtime profile: shipping | light | received: fast'
+    );
+    expect(() => parseRuntimeProfile(undefined)).toThrow(
+      'expected runtime profile: shipping | light | received: undefined'
+    );
+    expect(() => parseRuntimeProfile('')).toThrow(
+      'expected runtime profile: shipping | light | received: '
+    );
+  });
+
+  test('rejects a manifest whose runtime profile is missing or unknown', () => {
+    const { manifest } = fixture();
+    const { runtimeProfile: _omitted, ...withoutField } = manifest;
+
+    expect(() => parseDistributionManifest(JSON.stringify(withoutField))).toThrow(
+      'expected runtime profile: shipping | light | received: undefined'
+    );
+    expect(() =>
+      parseDistributionManifest(JSON.stringify({ ...manifest, runtimeProfile: 'debug' }))
+    ).toThrow('expected runtime profile: shipping | light | received: debug');
+  });
+
+  test('rejects a version 3 manifest that predates the runtime profile', () => {
+    const { manifest } = fixture();
+    const { runtimeProfile: _omitted, ...withoutField } = manifest;
+
+    expect(() =>
+      parseDistributionManifest(JSON.stringify({ ...withoutField, schemaVersion: 3 }))
+    ).toThrow('Unsupported distribution manifest schema: 3');
+  });
+
+  test('a publishing consumer requiring shipping rejects a light bundle', () => {
+    const { rootDir, manifest } = fixture('light');
+    const base = {
+      rootDir,
+      sourceSha: manifest.sourceSha,
+      packageVersion: '1.2.3',
+      expect: 'built' as const,
+    };
+
+    expect(() =>
+      validateDistributionManifest(manifest, { ...base, runtimeProfile: 'shipping' })
+    ).toThrow(
+      'Distribution runtime profile mismatch: expected runtime profile: shipping | received: light'
+    );
+    expect(() =>
+      validateDistributionManifest(manifest, { ...base, runtimeProfile: 'light' })
+    ).not.toThrow();
+    // A consumer that names no profile accepts whichever the bundle records.
+    expect(() => validateDistributionManifest(manifest, base)).not.toThrow();
+  });
+
+  test('a publishing consumer requiring shipping accepts a shipping bundle', () => {
+    const { rootDir, manifest } = fixture('shipping');
+
+    expect(() =>
+      validateDistributionManifest(manifest, {
+        rootDir,
+        sourceSha: manifest.sourceSha,
+        packageVersion: '1.2.3',
+        expect: 'built',
+        runtimeProfile: 'shipping',
+      })
+    ).not.toThrow();
   });
 
   test('records what each target was compiled against, and nothing for the rest', () => {

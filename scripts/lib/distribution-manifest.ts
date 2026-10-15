@@ -13,11 +13,37 @@ import {
 /**
  * Version 2 added bunRevision and bunCompileRevision; version 3 replaced the
  * latter with per-target provenance, because one field cannot describe eight
- * independently fetched runtimes. Manifests never outlive the workflow run that
- * wrote them, so no reader has to understand an older shape.
+ * independently fetched runtimes; version 4 added runtimeProfile. Manifests never
+ * outlive the workflow run that wrote them, so no reader has to understand an
+ * older shape: a version-3 manifest is rejected, not defaulted to shipping.
  */
-const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 3;
+const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 4;
 export const DISTRIBUTION_MANIFEST_FILE = 'distribution-manifest.json';
+
+/**
+ * Which cargo profile built the bundle's runtimes. Only `shipping` bytes may be
+ * published or promoted; `light` (thin LTO, more codegen units) exists for pull
+ * request bundles and is indistinguishable from `shipping` by size, name or
+ * digest alone, which is why the manifest records it.
+ */
+const RUNTIME_PROFILES = ['shipping', 'light'] as const;
+export type RuntimeProfile = (typeof RUNTIME_PROFILES)[number];
+
+/**
+ * Narrows a raw string (an env var, a CLI flag, a parsed JSON field) to a
+ * {@link RuntimeProfile}, naming the received value when it is not one.
+ *
+ * @example
+ * parseRuntimeProfile('shipping'); // 'shipping'
+ * parseRuntimeProfile('fast'); // throws: expected runtime profile: shipping | light | received: fast
+ */
+export function parseRuntimeProfile(value: unknown): RuntimeProfile {
+  const profile = RUNTIME_PROFILES.find((candidate) => candidate === value);
+  if (profile) return profile;
+  throw new Error(
+    `expected runtime profile: ${RUNTIME_PROFILES.join(' | ')} | received: ${String(value)}`
+  );
+}
 
 /**
  * Which Bun ended up inside one target's binaries.
@@ -75,6 +101,8 @@ export interface DistributionManifest {
   readonly bunVersion: string;
   /** Bun.revision: the commit, which Bun.version's plain "1.4.0" cannot name. */
   readonly bunRevision: string;
+  /** The cargo profile every target's runtime was built with. */
+  readonly runtimeProfile: RuntimeProfile;
   readonly targets: readonly DistributionTarget[];
   readonly files: readonly DistributionFile[];
 }
@@ -87,6 +115,7 @@ export interface CreateDistributionManifestOptions {
   readonly channel: string;
   readonly bunVersion: string;
   readonly bunRevision: string;
+  readonly runtimeProfile: RuntimeProfile;
   /** Provenance per target, for whichever targets this build resolved a runtime for. */
   readonly bunRuntimes: Partial<Record<ReleasePlatformId, BunRuntimeProvenance>>;
 }
@@ -96,6 +125,11 @@ export interface ValidateDistributionManifestOptions {
   readonly sourceSha: string;
   readonly packageVersion: string;
   readonly channel?: string;
+  /**
+   * The profile the consumer requires. Publishing and promoting consumers pass
+   * `shipping`; omitted, any recorded profile is accepted.
+   */
+  readonly runtimeProfile?: RuntimeProfile;
   readonly target?: string;
   readonly scope?: DistributionManifestScope;
   /** Defaults to downloaded for the prebuilt smoke consumer; producer CLIs pass this explicitly. */
@@ -152,6 +186,7 @@ export function createDistributionManifest(
     channel: options.channel,
     bunVersion: options.bunVersion,
     bunRevision: options.bunRevision,
+    runtimeProfile: parseRuntimeProfile(options.runtimeProfile),
     targets,
     files,
   };
@@ -180,6 +215,7 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
       throw new Error(`Distribution manifest field ${key} must be a non-empty string.`);
     }
   }
+  const runtimeProfile = parseRuntimeProfile(value.runtimeProfile);
   if (typeof value.dirty !== 'boolean') {
     throw new Error('Distribution manifest field dirty must be a boolean.');
   }
@@ -206,6 +242,7 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
     channel: value.channel as string,
     bunVersion: value.bunVersion as string,
     bunRevision: value.bunRevision as string,
+    runtimeProfile,
     targets,
     files,
   };
@@ -234,6 +271,11 @@ export function validateDistributionManifest(
   if (options.channel && manifest.channel !== options.channel) {
     throw new Error(
       `Distribution channel mismatch: expected ${options.channel}, got ${manifest.channel}`
+    );
+  }
+  if (options.runtimeProfile && manifest.runtimeProfile !== options.runtimeProfile) {
+    throw new Error(
+      `Distribution runtime profile mismatch: expected runtime profile: ${options.runtimeProfile} | received: ${manifest.runtimeProfile}`
     );
   }
 

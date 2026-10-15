@@ -188,6 +188,22 @@ describe('release workflow binary gate', () => {
     }
   });
 
+  test('only the creating manifest invocation requires RUNTIME_PROFILE, including bash-array validation', () => {
+    const script = 'scripts/release/distribution-manifest.ts';
+
+    expect(requiredEnvForReleaseScriptInvocation(script, `bun ./${script}`)).toContain(
+      'RUNTIME_PROFILE'
+    );
+    for (const command of [
+      `bun ./${script} --validate distribution-manifest.json --expect built`,
+      `args=(--validate distribution-manifest.json --scope "$SCOPE")\nbun ./${script}`,
+    ]) {
+      expect(requiredEnvForReleaseScriptInvocation(script, command), command).not.toContain(
+        'RUNTIME_PROFILE'
+      );
+    }
+  });
+
   test('release and canary publish through one composite, differing only by dist-tag', () => {
     const release = extractJobBlock(readText('.github/workflows/release.yml'), 'npm-publish');
     const canary = extractJobBlock(readText('.github/workflows/canary.yml'), 'npm-canary');
@@ -382,6 +398,13 @@ describe('release workflow binary gate', () => {
       'bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json --expect built'
     );
     expect(workflow).toContain('bun ./scripts/release/bundle-distribution.ts');
+    // The profile is passed to the creating invocation as env, not inferred, so
+    // a caller that builds another profile only changes this one value.
+    const manifestStep = workflow.slice(
+      workflow.indexOf('name: Create and verify distribution manifest'),
+      workflow.indexOf('id: bundle')
+    );
+    expect(manifestStep).toContain('RUNTIME_PROFILE: shipping');
     expect(workflow.match(/overwrite: false/g)).toHaveLength(11);
     expect(workflow).toContain('actions/attest-build-provenance@');
     expect(workflow).toMatch(

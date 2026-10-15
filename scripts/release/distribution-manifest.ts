@@ -10,6 +10,8 @@ import {
   DISTRIBUTION_MANIFEST_FILE,
   type DistributionManifestExpectation,
   type DistributionManifestScope,
+  parseRuntimeProfile,
+  type RuntimeProfile,
   readDistributionManifest,
   validateDistributionManifest,
 } from '../lib/distribution-manifest';
@@ -22,6 +24,7 @@ interface Args {
   readonly target?: string;
   readonly scope: DistributionManifestScope;
   readonly expect?: DistributionManifestExpectation;
+  readonly runtimeProfile?: RuntimeProfile;
 }
 
 const MANIFEST_SCOPES = ['all', 'checksums', 'assets', 'npm', 'packaged'] as const;
@@ -41,6 +44,7 @@ function parseArgs(args: readonly string[]): Args {
   let target: string | undefined;
   let scope: DistributionManifestScope = 'all';
   let expect: DistributionManifestExpectation | undefined;
+  let runtimeProfile: RuntimeProfile | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -73,12 +77,21 @@ function parseArgs(args: readonly string[]): Args {
       expect = value;
       continue;
     }
+    if (arg === '--runtime-profile') {
+      runtimeProfile = parseRuntimeProfile(requiredValue(args, ++index, '--runtime-profile'));
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
   if (validate && !expect) {
     throw new Error('--expect is required with --validate');
   }
-  return { validate, manifestPath, target, scope, expect };
+  if (runtimeProfile && !validate) {
+    throw new Error(
+      '--runtime-profile only applies with --validate; creation reads RUNTIME_PROFILE'
+    );
+  }
+  return { validate, manifestPath, target, scope, expect, runtimeProfile };
 }
 
 function requiredValue(args: readonly string[], index: number, flag: string): string {
@@ -112,6 +125,7 @@ async function main(): Promise<void> {
       target: args.target,
       scope: args.scope,
       expect: args.expect,
+      runtimeProfile: args.runtimeProfile,
     });
     success(`Distribution identity and checksums verified: ${args.manifestPath}`);
     return;
@@ -126,6 +140,7 @@ async function main(): Promise<void> {
     channel,
     bunVersion: Bun.version,
     bunRevision: Bun.revision,
+    runtimeProfile: parseRuntimeProfile(requiredEnv('RUNTIME_PROFILE')),
     // Reads what the build already resolved, per target, and records nothing for
     // a target it did not build — a `--platform`-limited run leaves most of them
     // unbuilt, and the honest answer for those is that this build produced no

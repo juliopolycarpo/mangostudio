@@ -17,6 +17,9 @@ export const RELEASE_SCRIPT_ENV_CONTRACTS = {
   'scripts/release/bundle-distribution.ts': {},
   'scripts/release/distribution-manifest.ts': {
     requiredEnv: ['DISTRIBUTION_CHANNEL', 'SOURCE_SHA', 'VERSION'],
+    // Only the creating invocation records a profile; validation compares it
+    // against `--runtime-profile`.
+    requirements: [{ env: ['RUNTIME_PROFILE'], unlessArgsInclude: '--validate' }],
   },
   'scripts/release/extract-distribution.ts': {},
   'scripts/release/extract-target.ts': {},
@@ -76,8 +79,10 @@ export function requiredEnvForReleaseScriptInvocation(
   return [...required].sort();
 }
 
+// `(` also opens an argument: the download-distribution action builds its
+// invocation as a bash array, `args=(--validate ...)`.
 function commandIncludesArg(command: string, arg: string): boolean {
-  return new RegExp(`(^|\\s)${escapeRegExp(arg)}(=|\\s|$)`).test(command);
+  return new RegExp(`(^|[\\s(])${escapeRegExp(arg)}(=|\\s|$)`).test(command);
 }
 
 function valueAfterArg(command: string, arg: string): string | undefined {

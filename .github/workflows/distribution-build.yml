@@ -130,6 +130,9 @@ jobs:
       - name: Create and verify distribution manifest
         env:
           DISTRIBUTION_CHANNEL: ${{ inputs.channel }}
+          # Every runtime on main is built with the shipping profile; a caller
+          # that builds another passes its profile input here instead.
+          RUNTIME_PROFILE: shipping
           SOURCE_SHA: ${{ inputs.source_sha }}
           VERSION: ${{ inputs.version }}
         run: |
