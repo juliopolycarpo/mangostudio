@@ -33,13 +33,9 @@ async function runFixture(pattern: string, file: string) {
   const recordLine = (line: string): void => {
     lines.push(line);
   };
-  // No outer tripwire here: the nested process's lifetime also covers the inner
-  // test's pidfile wait (up to 30_000ms), so any outer deadline that fits a
-  // healthy teardown could false-fire on a slow-but-healthy pidfile wait under a
-  // loaded CI shard. The teardown stall is bounded where it happens instead —
-  // at the source in scripts/lib/test-worker-process.ts, by the inner
-  // beforeTeardownDeadline tripwire in test-workers-cancel.unit.test.ts, and
-  // ultimately by this fixture's own `bun test --timeout 15000`.
+  // The outer cases allow 60 seconds for the full root-lane census and launcher
+  // startup. The selected inner fixture still has its own 15-second deadline,
+  // and teardown remains bounded in scripts/lib/test-worker-process.ts.
   const exit = await startWorkerProcess(plan, '', { out: recordLine, err: recordLine }).exited;
   expect(
     exit,
@@ -70,7 +66,8 @@ describe('controlled process fixtures under a root worker', () => {
         'reaps SIGTERM-resistant leaders and token children before the outer deadline',
         'scripts/tests/test-workers-cancel.unit.test.ts'
       );
-    }
+    },
+    60_000
   );
 
   it('keeps the inherited-stdout failure and the original child exit status', async () => {
@@ -78,7 +75,7 @@ describe('controlled process fixtures under a root worker', () => {
       'keeps the exit status of a child that died holding stdout open',
       'scripts/tests/runtime-handshake.unit.test.ts'
     );
-  });
+  }, 60_000);
 
   it.skipIf(process.platform === 'win32')(
     'keeps exactly one SIGINT delivery to each child of the nested runner',
@@ -87,7 +84,8 @@ describe('controlled process fixtures under a root worker', () => {
         'reaches the children of a nested runner exactly once',
         'scripts/tests/exec-process-tree.unit.test.ts'
       );
-    }
+    },
+    60_000
   );
 
   it('keeps the leaked pipe alive until the worker drain grace', async () => {
@@ -95,12 +93,12 @@ describe('controlled process fixtures under a root worker', () => {
       'does not hold the lane open past the drain grace, and still passes',
       'scripts/tests/test-workers-process.unit.test.ts'
     );
-  });
+  }, 60_000);
 
   it('leaves the crashed attempt stray for the watchdog to reap', async () => {
     await runFixture(
       "reaps a crashed attempt's process group before retrying",
       'scripts/tests/run-tests-watchdog.unit.test.ts'
     );
-  });
+  }, 60_000);
 });
