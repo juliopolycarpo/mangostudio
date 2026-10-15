@@ -222,6 +222,55 @@ describe('Local over the real Rust runtime', () => {
   );
 
   it.skipIf(!binary.available || !isPosix)(
+    'awaits a cancelled Local open and reaps the real runtime returned late',
+    async () => {
+      const user = await insertTestUser();
+      const connector = createLocalRuntimeConnector();
+      const opened = Promise.withResolvers<number>();
+      const handoff = Promise.withResolvers<void>();
+      manager = new RuntimeConnectionManager({
+        resolveEnvironment: (userId) =>
+          Promise.resolve({
+            id: LOCAL_ENVIRONMENT_ID,
+            userId,
+            name: LOCAL_ENVIRONMENT_NAME,
+            transportKind: 'in-process',
+            config: {},
+            enabled: true,
+          }),
+        connectors: {
+          'in-process': async (definition, onUnavailable, context) => {
+            const connection = await connector(definition, onUnavailable, context);
+            opened.resolve(await runtimePid(connection.client, mangoHome));
+            // The real child is live, but the manager still owns a pending open.
+            await handoff.promise;
+            return connection;
+          },
+        },
+      });
+      const attempt = manager
+        .getClient(user.id, LOCAL_ENVIRONMENT_ID)
+        .catch((error: unknown) => error);
+      const pid = await opened.promise;
+      let settled = false;
+      const shutdown = manager.shutdown().then(() => {
+        settled = true;
+      });
+      try {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(settled).toBe(false);
+        expect(await processGone(pid, 0)).toBe(false);
+      } finally {
+        handoff.resolve();
+        await shutdown;
+      }
+      expect(await attempt).toMatchObject({ code: 'UNAVAILABLE' });
+      expect(await processGone(pid, 0)).toBe(true);
+    },
+    30_000
+  );
+
+  it.skipIf(!binary.available || !isPosix)(
     'reaps the runtime child when Local disconnects',
     async () => {
       const user = await insertTestUser();
