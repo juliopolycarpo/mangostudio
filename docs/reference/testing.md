@@ -1932,10 +1932,11 @@ This preparation adds no main seed jobs, cache saves, or capacity claim. Light
 builds start cold until separate cache-only seeds are admitted. Before enabling
 seeds for the eight existing targets, verify cache write eligibility and older
 generation lifecycle/older-base fallback, measure each light archive, and
-account for peak retained generations plus an explicit reserve under the
-configured 35 GB budget. Seed output must have no artifact or publication
-route. Historical size estimates and single Linux benchmarks do not establish
-that admission or a hosted performance gain.
+account for peak retained generations plus an explicit reserve under a
+35 GB admission ceiling. Recheck the repository's configured storage limit
+before enabling seeds. Seed output must have no artifact or publication route.
+Historical size estimates and single Linux benchmarks do not establish that
+admission or a hosted performance gain.
 
 Hosted acceptance still requires current-head logs showing thin/16 on PRs and
 fat/1 with green smoke on main, then at least five comparable PR pushes with
@@ -1944,9 +1945,9 @@ cache hits, and retain the Windows binary smoke's 60-second handshake budget.
 
 ### Rust cache generations
 
-Rust build caches share the repository's 10 GiB Actions cache budget with the
-shorter lanes. `rust-cache-cleanup.yml` runs trusted `main` tooling after a main
-cache writer completes, after rust-cache's post-job save, and grants
+Rust build caches share the repository's configured Actions cache budget with
+the shorter lanes. `rust-cache-cleanup.yml` runs trusted `main` tooling after a
+main cache writer completes, after rust-cache's post-job save, and grants
 `actions: write` only to its cleanup job. `scripts/ci/rust-cache-cleanup.ts`
 deletes older committed generations by exact ID only when a newer replacement
 is listed under `refs/heads/main`. The explicit family registry preserves the
