@@ -1,0 +1,144 @@
+[
+  {
+    "workflow": ".github/workflows/ci.yml",
+    "name": "CI Gate",
+    "cases": [
+      {
+        "name": "ordinary PR",
+        "event": "pull_request",
+        "outputs": { "distribution": "true", "rust": "false" },
+        "allowedSkips": ["rust-coverage"]
+      },
+      {
+        "name": "docs-only PR",
+        "event": "pull_request",
+        "outputs": { "distribution": "false", "rust": "false" },
+        "allowedSkips": ["distribution", "rust-coverage", "smoke", "smoke-container"]
+      },
+      {
+        "name": "Rust PR",
+        "event": "pull_request",
+        "outputs": { "distribution": "true", "rust": "true" },
+        "allowedSkips": []
+      },
+      {
+        "name": "release PR",
+        "event": "pull_request",
+        "outputs": { "distribution": "true", "rust": "false" },
+        "allowedSkips": ["rust-coverage"]
+      },
+      {
+        "name": "manual run",
+        "event": "workflow_dispatch",
+        "outputs": { "distribution": "true", "rust": "true" },
+        "allowedSkips": ["qa-metrics"]
+      },
+      {
+        "name": "failed change detection",
+        "event": "pull_request",
+        "outputs": {},
+        "allowedSkips": []
+      }
+    ]
+  },
+  {
+    "workflow": ".github/workflows/cargo-shim.yml",
+    "name": "Cargo Shim Gate",
+    "cases": [
+      {
+        "name": "ordinary or docs-only PR",
+        "event": "pull_request",
+        "outputs": { "rust": "false", "qualification": "false" },
+        "allowedSkips": [
+          "fuzz-workspace",
+          "musl-clippy",
+          "real-binary-qualification",
+          "runtime-home-fixture-freshness",
+          "workspace",
+          "workspace-windows-arm64"
+        ]
+      },
+      {
+        "name": "Rust PR or manual run",
+        "event": "pull_request",
+        "outputs": { "rust": "true", "qualification": "true" },
+        "allowedSkips": []
+      },
+      {
+        "name": "Rust PR without qualification paths",
+        "event": "pull_request",
+        "outputs": { "rust": "true", "qualification": "false" },
+        "allowedSkips": ["real-binary-qualification"]
+      },
+      {
+        "name": "failed change detection",
+        "event": "pull_request",
+        "outputs": {},
+        "allowedSkips": []
+      }
+    ]
+  },
+  {
+    "workflow": ".github/workflows/protocol-ci.yml",
+    "name": "Protocol Gate",
+    "cases": [
+      {
+        "name": "ordinary or docs-only PR",
+        "event": "pull_request",
+        "outputs": { "protocol": "false" },
+        "allowedSkips": [
+          "deny",
+          "interop",
+          "package",
+          "rust",
+          "schema-equality",
+          "semver-checks",
+          "transports",
+          "typescript"
+        ]
+      },
+      {
+        "name": "protocol Rust PR or manual run",
+        "event": "pull_request",
+        "outputs": { "protocol": "true" },
+        "allowedSkips": []
+      },
+      {
+        "name": "failed change detection",
+        "event": "pull_request",
+        "outputs": {},
+        "allowedSkips": []
+      }
+    ]
+  },
+  {
+    "workflow": ".github/workflows/release-dry-run.yml",
+    "name": "Release Dry Run Gate",
+    "cases": [
+      {
+        "name": "ordinary or docs-only PR",
+        "event": "pull_request",
+        "outputs": { "release": "false", "launcher": "false" },
+        "allowedSkips": ["dry-run-cargo", "dry-run-linux", "dry-run-windows", "runtime"]
+      },
+      {
+        "name": "release PR",
+        "event": "pull_request",
+        "outputs": { "release": "true", "launcher": "false" },
+        "allowedSkips": ["dry-run-cargo"]
+      },
+      {
+        "name": "launcher PR, scheduled or manual run",
+        "event": "pull_request",
+        "outputs": { "release": "true", "launcher": "true" },
+        "allowedSkips": []
+      },
+      {
+        "name": "failed change detection",
+        "event": "pull_request",
+        "outputs": {},
+        "allowedSkips": []
+      }
+    ]
+  }
+]

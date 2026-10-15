@@ -25,6 +25,32 @@ const NOT_CANCELLED = `if: ${EXPR} !cancelled() }}`;
 // four-shard runs measured at most 45s; see docs/reference/testing.md.
 const OTHER_STEPS_SECONDS = 60;
 
+describe('reruns replace previous test evidence', () => {
+  test.each([
+    [
+      '.github/workflows/test.yml',
+      [
+        `test-shard-${EXPR} matrix.shard }}`,
+        `test-shard-${EXPR} matrix.shard }}-log`,
+        'test-shard-frontend',
+        'test-shard-frontend-log',
+        'qa-test-metrics',
+        'coverage',
+      ],
+    ],
+    ['.github/workflows/qa-metrics.yml', ['qa-metrics']],
+    ['.github/workflows/rust-coverage.yml', ['qa-rust-coverage']],
+  ] as const)('%s replaces artifacts with the same name before uploading', (path, names) => {
+    const uploads = extractJobBlocks(readText(path))
+      .flatMap(({ block }) => extractStepBlocks(block))
+      .filter((step) => step.includes('uses: actions/upload-artifact@'));
+    expect(uploads.map((step) => /^ {10}name: (.+)$/m.exec(step)?.[1])).toEqual([...names]);
+    // A failed-job rerun can otherwise leave duplicate names and the merger
+    // can download the earlier failed receipt even after the shard passed.
+    for (const step of uploads) expect(step).toContain('          overwrite: true\n');
+  });
+});
+
 const shardCount = (): number => {
   const declared = /^ {2}SHARD_COUNT: (\d+)$/m.exec(workflow)?.[1];
   expect(declared).toBeDefined();
