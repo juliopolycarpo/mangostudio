@@ -203,7 +203,11 @@ async function gracefulStop(): Promise<void> {
   // terminal session gets a real `terminal.close` instead of the connection
   // simply dropping out from under it.
   await terminalSessionService.closeAll();
-  await shutdownRuntimeConnections();
+  try {
+    await shutdownRuntimeConnections();
+  } catch (error) {
+    console.warn('[api] Runtime connection teardown failed during shutdown:', error);
+  }
   // After the connections close, so a scope withdrawn while they closed is still reaped.
   stopRuntimeScopeReaps?.();
   stopRuntimeScopeReaps = null;

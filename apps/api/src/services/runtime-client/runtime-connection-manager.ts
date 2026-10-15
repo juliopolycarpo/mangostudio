@@ -158,6 +158,11 @@ export interface RuntimeConnectionManagerOptions {
   /** Told of every new connection's manifest, so a changed build drops its cached surface. */
   readonly discoveryCache?: RuntimeDiscoveryCache;
   /**
+   * Maximum release wait for an opener ignoring cancellation, defaulting to 6s.
+   * Live connection closes remain awaited.
+   */
+  readonly openerReleaseTimeoutMs?: number;
+  /**
    * How long a new connection waits for the `runtime.health` read that lists the agents the
    * runtime hosts, defaulting to {@link HOSTED_AGENTS_READ_TIMEOUT_MS}. The protocol session has
    * no request deadline of its own, so without this a peer that answers hello and then never
@@ -203,6 +208,8 @@ interface RuntimeConnectionEntry {
   connecting?: Promise<RuntimeClient>;
   /** Openers and closes still owning resources, even after callers stop waiting. */
   pendingTeardowns?: Set<Promise<void>>;
+  /** Starts a bounded cancellation wait for each raw opener that has not settled. */
+  pendingOpenings?: Set<() => void>;
   /** Shared by releases until every resource they observed has settled. */
   releasing?: Promise<void>;
   /** Consecutive failures since the last connection that proved itself. */
@@ -447,12 +454,16 @@ export class RuntimeConnectionManager {
   readonly #discoveryCache: RuntimeDiscoveryCache;
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   readonly #hostedAgentsReadTimeoutMs: number;
+  readonly #openerReleaseTimeoutMs: number;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
   #terminalsRevoked: TerminalsRevokedObserver | undefined;
   #shutdown: Promise<void> | undefined;
 
   constructor(options: RuntimeConnectionManagerOptions) {
     this.#connectors = options.connectors;
+    // Startup child teardown can take 5s (terminate + kill + exit grace). Allow
+    // that to finish, leaving room in the server's 12s budget for final cleanup.
+    this.#openerReleaseTimeoutMs = options.openerReleaseTimeoutMs ?? 6_000;
     this.#connectDeadlinesMs = options.connectDeadlinesMs ?? CONNECT_DEADLINE_MS;
     this.#hostedAgentsReadTimeoutMs =
       options.hostedAgentsReadTimeoutMs ?? HOSTED_AGENTS_READ_TIMEOUT_MS;
@@ -542,7 +553,7 @@ export class RuntimeConnectionManager {
     userId: string,
     environmentId: string = LOCAL_ENVIRONMENT_ID
   ): Promise<RuntimeClient> {
-    this.#assertRunning();
+    this.#assertRunning(userId, environmentId);
     const key = connectionKey(userId, environmentId);
     const entry = this.#entries.get(key);
     if (entry?.connection) return entry.connection.client;
@@ -564,7 +575,7 @@ export class RuntimeConnectionManager {
    * const client = await manager.getExistingClient(userId, environmentId);
    */
   async getExistingClient(userId: string, environmentId: string): Promise<RuntimeClient> {
-    this.#assertRunning();
+    this.#assertRunning(userId, environmentId);
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (entry?.connection) return entry.connection.client;
     if (entry?.connecting) return await entry.connecting;
@@ -583,7 +594,7 @@ export class RuntimeConnectionManager {
     environmentId: string,
     options: { readonly force?: boolean } = {}
   ): Promise<RuntimeClient> {
-    this.#assertRunning();
+    this.#assertRunning(userId, environmentId);
     const key = connectionKey(userId, environmentId);
     const current = this.#entries.get(key);
     if (current?.connection) return current.connection.client;
@@ -792,9 +803,9 @@ export class RuntimeConnectionManager {
     environmentId: string,
     open: (onUnavailable: () => void) => Promise<ManagedRuntimeConnection>
   ): Promise<RuntimeClient> {
-    this.#assertRunning();
+    this.#assertRunning(userId, environmentId);
     const definition = await this.#resolveEnvironment(userId, environmentId);
-    this.#assertRunning();
+    this.#assertRunning(userId, environmentId);
     if (!definition) {
       throw unavailable(`Environment "${environmentId}" was not found.`);
     }
@@ -966,15 +977,20 @@ export class RuntimeConnectionManager {
   }
 
   /**
-   * Releases live connections and pending opens, resolving once their processes are gone.
-   * Runtime children are the hub's responsibility, so shutdown waits for them
-   * rather than exiting mid-kill and leaving orphans behind.
+   * Releases live connections and pending opens, waiting for their teardown.
+   * Unsettled openers get a bounded cancellation wait so an unresponsive connector
+   * cannot prevent server cleanup. Connections that arrive later are still closed.
    */
   async closeAll(): Promise<void> {
     await this.#awaitTeardowns([...this.#entries.values()].map((entry) => this.#release(entry)));
   }
 
-  /** Permanently stops admission before releasing resources. Ordinary closeAll stays reusable. */
+  /**
+   * Permanently stops admission before releasing resources. Ordinary closeAll stays reusable.
+   *
+   * @example
+   * await manager.shutdown();
+   */
   shutdown(): Promise<void> {
     if (!this.#shutdown) {
       // Install the latch before abort/close callbacks can reenter the manager.
@@ -985,8 +1001,12 @@ export class RuntimeConnectionManager {
     return this.#shutdown;
   }
 
-  #assertRunning(): void {
-    if (this.#shutdown) throw unavailable('Runtime connection manager is shutting down.');
+  #assertRunning(userId: string, environmentId: string): void {
+    if (this.#shutdown) {
+      throw unavailable(
+        `Cannot admit runtime connection for user "${userId}", environment "${environmentId}": the manager is no longer accepting connections; expected a running manager.`
+      );
+    }
   }
 
   /** Wait for every resource even when one close fails. */
@@ -1020,32 +1040,52 @@ export class RuntimeConnectionManager {
     reason: RuntimeConnectionCloseReason = 'released'
   ): Promise<ManagedRuntimeConnection> {
     const ready = Promise.withResolvers<ManagedRuntimeConnection>();
-    this.#trackTeardown(
-      entry,
-      opening.then(
-        async (connection) => {
-          let accepted: boolean;
-          try {
-            accepted = accept(connection);
-          } catch (error) {
-            ready.reject(error);
-            if (entry.connection === connection) entry.connection = undefined;
-            await this.#closeConnection(entry, connection, reason);
-            return;
-          }
-          if (!accepted) {
-            ready.reject(unavailable('Runtime connection was closed.'));
-            await this.#closeConnection(entry, connection, reason);
-            return;
-          }
-          ready.resolve(connection);
-        },
-        (error: unknown) => {
-          // A rejected open has already completed the connector's own teardown.
+    const expired = Promise.withResolvers<void>();
+    entry.pendingOpenings ??= new Set();
+    const pending = entry.pendingOpenings;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const boundOpening = () => {
+      if (timer !== undefined) return;
+      timer = setTimeout(() => {
+        pending.delete(boundOpening);
+        console.warn(
+          `[runtime] Stopped waiting for cancelled opener for user "${entry.userId}", environment "${entry.environmentId}" after ${this.#openerReleaseTimeoutMs}ms; expected the opener to settle after cancellation. Any late connection will still be closed.`
+        );
+        expired.resolve();
+      }, this.#openerReleaseTimeoutMs);
+    };
+    pending.add(boundOpening);
+    const finishOpening = () => {
+      clearTimeout(timer);
+      pending.delete(boundOpening);
+    };
+    const ownership = opening.then(
+      async (connection) => {
+        // Only an unsettled opener is bounded, never a connection's actual close.
+        finishOpening();
+        let accepted: boolean;
+        try {
+          accepted = accept(connection);
+        } catch (error) {
           ready.reject(error);
+          if (entry.connection === connection) entry.connection = undefined;
+          await this.#closeConnection(entry, connection, reason);
+          return;
         }
-      )
+        if (!accepted) {
+          ready.reject(unavailable('Runtime connection was closed.'));
+          await this.#closeConnection(entry, connection, reason);
+          return;
+        }
+        ready.resolve(connection);
+      },
+      (error: unknown) => {
+        finishOpening();
+        // A rejected open has already completed the connector's own teardown.
+        ready.reject(error);
+      }
     );
+    this.#trackTeardown(entry, Promise.race([ownership, expired.promise]));
     return ready.promise;
   }
 
@@ -1071,9 +1111,6 @@ export class RuntimeConnectionManager {
 
   /** Cancels the public connect, retaining resource ownership until teardown settles. */
   #release(entry: RuntimeConnectionEntry): Promise<void> {
-    if (entry.releasing && !entry.abort && !entry.connection && !entry.connecting) {
-      return entry.releasing;
-    }
     const previousRelease = entry.releasing;
     const release = Promise.withResolvers<void>();
     entry.releasing = release.promise;
@@ -1088,21 +1125,18 @@ export class RuntimeConnectionManager {
     entry.retryAfterMs = 0;
     entry.expectedUpdateDisconnect = false;
     entry.status = { state: 'disconnected', ...this.#cachedPeer(entry) };
+    for (const boundOpening of entry.pendingOpenings ?? []) boundOpening();
     abort?.abort(unavailable('Runtime connection was closed.'));
     if (connection) this.#closeConnection(entry, connection, 'released');
     const teardowns = [...(entry.pendingTeardowns ?? [])];
     if (previousRelease) teardowns.push(previousRelease);
     void this.#awaitTeardowns(teardowns).then(release.resolve, release.reject);
-    void release.promise.then(
-      () => {
-        if (entry.releasing === release.promise) entry.releasing = undefined;
-      },
-      () => {
-        if (entry.releasing === release.promise) entry.releasing = undefined;
-      }
-    );
     // Fire-and-forget disconnects must not create an unhandled rejection.
-    void release.promise.catch(() => undefined);
+    void release.promise
+      .finally(() => {
+        if (entry.releasing === release.promise) entry.releasing = undefined;
+      })
+      .catch(() => undefined);
     return release.promise;
   }
 
@@ -1850,9 +1884,14 @@ export async function closeAllRuntimeConnections(): Promise<void> {
   await managerInstance?.closeAll();
 }
 
-/** Permanently stops runtime admission and waits for teardown during server shutdown. */
+/**
+ * Permanently stops runtime admission and waits for teardown during server shutdown.
+ *
+ * @example
+ * await shutdownRuntimeConnections();
+ */
 export async function shutdownRuntimeConnections(): Promise<void> {
-  await getRuntimeConnectionManager().shutdown();
+  await managerInstance?.shutdown();
 }
 
 /**
