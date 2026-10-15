@@ -633,6 +633,19 @@ Release and canary publish jobs opt into `verify-attestation` on
 that publishes to npm, GitHub Releases, Homebrew, or Scoop. Manifest checksum
 validation still runs after extract.
 
+The manifest also records the `runtimeProfile` the bundle's runtimes were built
+with (`shipping` or `light`). A light bundle has the same names, layout and
+manifest shape as a shipping one, so nothing else tells them apart. Release and
+canary pass `runtime-profile: shipping` to `download-distribution`, which makes
+`distribution-manifest.ts --validate` fail with
+`expected runtime profile: shipping | received: light` before anything is
+published; PR smoke consumers pass nothing and accept whichever profile the
+bundle records. `distribution-build.yml` sets `RUNTIME_PROFILE` on the step that
+creates the manifest, which is the one value a workflow that builds another
+profile changes. The manifest schema is version 4: a bundle written by an older
+workflow is rejected rather than read as `shipping`, because manifests never
+outlive the run that wrote them.
+
 The public assets carry provenance too: `github-release` (stable) and
 `github-release-canary` attest `SHA256SUMS`, `install.sh` and `install.ps1`
 with `actions/attest-build-provenance` right before uploading them. `SHA256SUMS`

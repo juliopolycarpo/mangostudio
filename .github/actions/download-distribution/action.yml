@@ -24,6 +24,13 @@ inputs:
       packaged — packaged is a transitional alias of assets).
     required: false
     default: assets
+  runtime-profile:
+    description: >
+      Runtime profile the manifest must record (shipping or light). Consumers
+      that publish or promote a bundle must pass shipping; leave it empty only
+      for PR smoke consumers, which accept whichever profile the bundle records.
+    required: false
+    default: ""
   verify-attestation:
     description: >
       Verify the bundle's build provenance before extracting. Only valid for
@@ -81,6 +88,7 @@ runs:
       shell: bash
       env:
         DISTRIBUTION_CHANNEL: ${{ inputs.channel }}
+        EXPECTED_RUNTIME_PROFILE: ${{ inputs.runtime-profile }}
         SCOPE: ${{ inputs.scope }}
         SOURCE_SHA: ${{ inputs.source-sha }}
         TARGET: ${{ inputs.target }}
@@ -89,6 +97,9 @@ runs:
         args=(--validate distribution-manifest.json --scope "$SCOPE" --expect downloaded)
         if [ -n "$TARGET" ]; then
           args+=(--target "$TARGET")
+        fi
+        if [ -n "$EXPECTED_RUNTIME_PROFILE" ]; then
+          args+=(--runtime-profile "$EXPECTED_RUNTIME_PROFILE")
         fi
         bun --no-install ./scripts/release/distribution-manifest.ts "${args[@]}"
 
