@@ -9,7 +9,7 @@ import { createTypecheckFixture, type TypecheckFixture } from './support/typeche
 
 const WORKSPACES = ['apps/api', 'apps/frontend', 'apps/shared', 'packages/protocol'];
 const fixtures: TypecheckFixture[] = [];
-// These two CLI cases also compile dprint's plugins in a fresh writable cache.
+// These CLI cases also compile dprint's plugins in a fresh writable cache.
 // Keep that tool startup bounded separately from the small Turbo-only cases.
 const ROOT_CHECK_TIMEOUT_MS = 60_000;
 
@@ -127,27 +127,71 @@ afterEach(() => {
 });
 
 describe('lint cache and required cycle scans', () => {
+  const cycles = [
+    {
+      name: 'self-import',
+      files: {
+        'a.ts': "import { cycle as self } from './a';\nexport const cycle = () => self();\n",
+      },
+      rule: 'lint/nursery/noSelfImport',
+    },
+    {
+      name: 'value cycle',
+      files: {
+        'a.ts': "import { b } from './b';\nexport const a = () => b();\n",
+        'b.ts': "import { a } from './a';\nexport const b = () => a();\n",
+      },
+      rule: 'lint/suspicious/noImportCycles',
+    },
+    {
+      name: 'type-only cycle',
+      files: {
+        'a.ts': "import type { B } from './b';\nexport type A = { b?: B };\n",
+        'b.ts': "import type { A } from './a';\nexport type B = { a?: A };\n",
+      },
+      rule: 'lint/suspicious/noImportCycles',
+    },
+  ];
   for (const workspace of WORKSPACES) {
-    test(`${workspace} rejects a new ignored cycle while replaying cached lint`, async () => {
+    for (const cycle of cycles) {
+      test(`${workspace} rejects a new ignored ${cycle.name} while replaying cached lint`, async () => {
+        const fixture = createFixture();
+        const packageName = JSON.parse(
+          readFileSync(join(fixture.root, workspace, 'package.json'), 'utf8')
+        ).name;
+        expectOutcome(await requiredCheck(fixture, workspace), 'pass');
+        for (const [file, source] of Object.entries(cycle.files)) {
+          await Bun.write(join(fixture.root, workspace, 'build', file), source);
+        }
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const rejected = expectOutcome(await requiredCheck(fixture, workspace), 'fail');
+          expect(rejected).toContain(`${packageName}:check:quick: cache hit`);
+          expect(rejected).toContain(`${packageName}:check:cycles: cache bypass`);
+          expect(rejected).toContain(cycle.rule);
+          expect(rejected.replaceAll('\\', '/')).toContain('build/a.ts');
+        }
+      });
+    }
+  }
+
+  test(
+    'an ignored cycle introduced after a warm pass reaches the root check exit',
+    async () => {
       const fixture = createFixture();
-      const packageName = JSON.parse(
-        readFileSync(join(fixture.root, workspace, 'package.json'), 'utf8')
-      ).name;
-      expectOutcome(await requiredCheck(fixture, workspace), 'pass');
-      const generated = join(fixture.root, workspace, 'build/new-cycle.ts');
+      expectOutcome(await rootCheck(fixture, 'frontend'), 'pass');
+      expectOutcome(await rootCheck(fixture, 'frontend'), 'pass');
       await Bun.write(
-        generated,
+        join(fixture.root, 'apps/frontend/build/new-cycle.ts'),
         "import { cycle as self } from './new-cycle';\nexport const cycle = () => self();\n"
       );
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const rejected = expectOutcome(await requiredCheck(fixture, workspace), 'fail');
-        expect(rejected).toContain(`${packageName}:check:quick: cache hit`);
-        expect(rejected).toContain(`${packageName}:check:cycles: cache bypass`);
-        expect(rejected).toContain('lint/nursery/noSelfImport');
-        expect(rejected.replaceAll('\\', '/')).toContain('build/new-cycle.ts');
-      }
-    });
-  }
+      const rejected = expectOutcome(await rootCheck(fixture, 'frontend'), 'fail');
+      expect(rejected).toMatch(/@mangostudio\/frontend:check:quick(?:: |\r?\n)cache hit/);
+      expect(rejected).toMatch(/@mangostudio\/frontend:check:cycles(?:: |\r?\n)cache bypass/);
+      expect(rejected).toContain('lint/nursery/noSelfImport');
+      expect(rejected.replaceAll('\\', '/')).toContain('build/new-cycle.ts');
+    },
+    ROOT_CHECK_TIMEOUT_MS
+  );
 
   test(
     'a lint failure invalidates a warm pass and reaches the root check exit',
