@@ -72,7 +72,13 @@ jobs:
         # remains shipping; future cache-only seeds need a separate path.
         run: |
           case "$BUILD_PROFILE" in
-            shipping) ;;
+            shipping)
+              if [ -n "${CARGO_PROFILE_RELEASE_LTO:-}" ] || [ -n "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-}" ]; then
+                printf 'expected shipping profile: no lto/codegen-units overrides | received: lto=%s, codegen-units=%s\n' \
+                  "${CARGO_PROFILE_RELEASE_LTO:-<unset>}" "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>}" >&2
+                exit 1
+              fi
+              ;;
             light)
               if [ "$EVENT_NAME" != "pull_request" ]; then
                 echo 'expected profile: shipping | received: light' >&2

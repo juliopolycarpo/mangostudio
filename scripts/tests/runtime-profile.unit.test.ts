@@ -65,18 +65,20 @@ describe('artifact runtime profile guard', () => {
 
   test('a tag push refuses light artifacts', () => {
     // Tags use the push event too; a ref exception must never admit light.
-    const result = Bun.spawnSync(['bash', '-euo', 'pipefail', '-c', profileGuard()], {
-      env: {
-        ...process.env,
-        EVENT_NAME: 'push',
-        BUILD_PROFILE: 'light',
-        GITHUB_REF: 'refs/tags/v0.2.0',
-        CARGO_PROFILE_RELEASE_LTO: 'thin',
-        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16',
-      },
-    });
+    const result = runGuard('push', 'light', { GITHUB_REF: 'refs/tags/v0.2.0' });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain('expected profile: shipping | received: light');
+  });
+
+  test.each([
+    ['CARGO_PROFILE_RELEASE_LTO', 'thin', 'lto=thin, codegen-units=<unset>'],
+    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '16', 'lto=<unset>, codegen-units=16'],
+  ])('shipping refuses %s=%j', (key, value, received) => {
+    const result = runGuard('push', 'shipping', { [key]: value });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      `expected shipping profile: no lto/codegen-units overrides | received: ${received}`
+    );
   });
 
   test.each(['', 'lite', 'Shipping', 'seed', 'unknown'])(

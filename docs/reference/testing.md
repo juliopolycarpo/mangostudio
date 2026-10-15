@@ -1923,7 +1923,8 @@ defaults and cache environment identity.
 
 The builder rejects empty/unknown profiles and every non-PR light artifact
 request before checkout, Cargo setup, or cache access. Light requests also
-require the actual Cargo overrides to be thin LTO and 16 codegen units. Main,
+require the actual Cargo overrides to be thin LTO and 16 codegen units, and
+shipping requests reject any LTO or codegen-unit override. Main,
 tags, schedules, manual runs, and publication remain shipping. Main is the first shipping
 build of a PR change; its runtime and complete smoke lanes remain mandatory
 before Canary. A failure unique to the shipping profile can make main red
