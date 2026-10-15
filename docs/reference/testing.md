@@ -1918,7 +1918,8 @@ unit. CI's distribution and PR release dry runs explicitly request `light` on
 binary-smoke rebuild passes the same selection, but it runs only from
 `workflow_dispatch`, so it resolves to shipping. The overrides live at job scope, so
 rust-cache's CARGO environment hash separates both exact and fallback keys by
-profile. A light cache miss does not restore shipping state. PRs never save.
+profile. A light cache miss does not restore shipping state. PRs never save;
+the light entry comes from the main-push seed described below.
 Shipping receives an empty override map, preserving its existing Cargo
 defaults and cache environment identity.
 
@@ -1931,15 +1932,51 @@ build of a PR change; its runtime and complete smoke lanes remain mandatory
 before Canary. A failure unique to the shipping profile can make main red
 after a green PR and blocks publication.
 
-This preparation adds no main seed jobs, cache saves, or capacity claim. Light
-builds start cold until separate cache-only seeds are admitted. Before enabling
-seeds for the eight existing targets, verify cache write eligibility and older
-generation lifecycle/older-base fallback, measure each light archive, and
-account for peak retained generations plus an explicit reserve under a
-35 GB admission ceiling. Recheck the repository's configured storage limit
-before enabling seeds. Seed output must have no artifact or publication route.
-Historical size estimates and single Linux benchmarks do not establish that
-admission or a hosted performance gain.
+#### Light cache seed
+
+CI's `runtime-cache-seed` job fills the light entry. It runs only on a push to
+`main`, after the Gate passes, and calls `runtime-build.yml` with
+`mode: cache-seed`, `profile: light` and `cache: true`. The default mode is
+`artifact`. A seed goes through the same matrix, job `env` and single rust-cache
+step as a PR light build, so it saves under the key a PR restores:
+`v0-rust-<sha256 of Cargo.toml>-runtime-build-<platform>-<OS>-<arch>-<CARGO env
+hash>-<lockfile hash>`. Nothing in the job `env`, the runner, or the steps
+before the cache step may read the mode, and `runtime-profile.unit.test.ts`
+rebuilds that key for both paths and every target, so a seed cannot drift from
+the key a PR looks up. It reproduces rust-cache v2.9.2's hash, which it cannot
+read from the action at test time.
+
+The guard accepts `cache-seed` only for a `push` to `refs/heads/main`, profile
+`light` with thin LTO and 16 units, the cache on, and an empty
+`artifact_prefix`. Artifact mode still rejects light on every event except
+`pull_request` and requires a prefix. The seed has no upload step to reach: the
+single `actions/upload-artifact` step is conditional on `mode == 'artifact'`,
+and the job holds `contents: read` only. The seed builds only on an exact-key
+miss, so a lockfile, root manifest, toolchain or CARGO-environment change seeds
+again and any other main push ends each platform after the lookup. An entry
+evicted by the 12-day retention is re-seeded by the next main push.
+
+The job waits on the Gate and nothing waits on it, so it never gates a
+mandatory lane or Canary. It sits outside the Gate's `needs`, which the
+`ci-gate` tests allow because it needs the Gate. Its job-level concurrency group
+`light-runtime-cache-seed` does not cancel in-flight saves. CI's own main group
+already runs main pushes one at a time. The CI run now ends after the seed, so a
+cold seed can delay the next main run's start; if that shows up in measurements,
+move the seed to a standalone workflow and register it as a Rust cache writer.
+
+Capacity, from the repository on 2026-10-15: the configured limit is 40 GB, the
+active caches hold 16.3 GiB, and each shipping runtime entry is about 243 to 253
+MiB. Light archives are unmeasured. If they are the same size, one light
+generation adds about 2 GiB for the eight targets and a replacement generation
+doubles that until `rust-cache-cleanup.yml` deletes the older one, which stays
+under the 35 GB admission ceiling. Measure the first seeded light archives
+before relying on that, and recheck the limit. The cleanup family registry
+already keys on the environment hash, so light and shipping entries of one
+target stay separate families of the same name.
+
+Cost: a seed on a key miss is up to eight light builds on one main push, and
+each other main push starts eight runners that only look the entry up. Neither
+cost has been measured, and no PR speedup is claimed yet.
 
 Hosted acceptance still requires current-head logs showing thin/16 on PRs and
 fat/1 with green smoke on main, then at least five comparable PR pushes with
