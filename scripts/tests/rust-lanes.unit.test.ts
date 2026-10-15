@@ -92,7 +92,7 @@ describe('classifyChangedPaths', () => {
     ['apps/api/tests/support/rust-runtime-binary.ts', false, true],
     ['apps/shared/src/i18n/pt-BR.ts', false, true],
     ['apps/shared/src/i18n/en.ts', false, true],
-    ['scripts/lib/rust-lanes.ts', false, true],
+    ['scripts/lib/rust-lanes.ts', true, true],
     ['packages/protocol/src/session.ts', false, true],
     // Files a crate reads from outside crates/: a change must run the crate.
     ['spec/schema/1/protocol.json', true, true],
@@ -110,15 +110,15 @@ describe('classifyChangedPaths', () => {
   });
 
   test('one relevant path in a mixed diff is enough', () => {
-    expect(classifyChangedPaths(['docs/a.md', '', 'crates/x/Cargo.toml'])).toEqual({
+    expect(classifyChangedPaths(['docs/a.md', 'crates/x/Cargo.toml'])).toEqual({
       rust: true,
       qualification: true,
     });
   });
 
   test('an empty diff is refused rather than skipping every lane', () => {
-    expect(() => classifyChangedPaths(['', '  '])).toThrow(
-      'rust-lanes: no changed paths to classify; expected at least one repository-relative path'
+    expect(() => classifyChangedPaths([])).toThrow(
+      'changed-paths: empty diff; refusing to skip lanes'
     );
   });
 });

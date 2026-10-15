@@ -127,15 +127,20 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - id: ready
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           key: fresh-dependencies
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # A Clippy failure still needs test evidence for this resolved graph.
+      # The final setup outcome prevents diagnostics after lock/tool setup fails.
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - run: cargo test --workspace --all-targets --all-features --locked
-      - run: cargo test --doc --workspace --all-features --locked
+      - if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
+        run: cargo test --workspace --all-targets --all-features --locked
+      - if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
+        run: cargo test --doc --workspace --all-features --locked
 
   receipt:
     # The terminal outcome of every run that was not cancelled: source, compiler,

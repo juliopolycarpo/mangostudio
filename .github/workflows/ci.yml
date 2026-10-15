@@ -38,6 +38,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
       - id: changed
         name: Check for changes outside the documentation surface
         env:
@@ -54,26 +58,8 @@ jobs:
             exit 0
           fi
 
-          git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-
-          if [ ! -s "$RUNNER_TEMP/changed-files" ]; then
-            echo "changes job: empty diff between $BASE_SHA and $HEAD_SHA; refusing to skip distribution" >&2
-            exit 1
-          fi
-
-          # One grep, no pipeline: `grep … | grep -q .` dies of SIGPIPE under
-          # `set -o pipefail` once the reader exits early on a large diff, and
-          # the non-zero pipeline status would read as "nothing relevant".
-          irrelevant='^(docs/|\.github/ISSUE_TEMPLATE/|\.github/(CODE_OF_CONDUCT|CONTRIBUTING|SECURITY|pull_request_template)\.md$|[^/]*\.md$|LICENSE$)'
-          if grep -Eqv "$irrelevant" "$RUNNER_TEMP/changed-files"; then
-            echo "distribution=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "distribution=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+          bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
+          bun ./scripts/ci/changed-paths.ts distribution "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
 
       - id: rust
         name: Classify Rust-relevant paths
@@ -82,7 +68,7 @@ jobs:
         # The same predicate Cargo Shim's own `changes` job applies, from the
         # same manifest (scripts/lib/rust-lanes.ts), so the instrumented Rust
         # test run and the Rust lanes agree on what a Rust change is. It reads
-        # the file the step above wrote, which is empty-checked there. Every
+        # the validated NUL path file the step above wrote. Every
         # push and manual run measures: main-push envelopes are the baselines a
         # later Rust change is compared with, so they cannot skip.
         # Dependency-free script; runs without `bun install`.

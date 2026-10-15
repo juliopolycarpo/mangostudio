@@ -21,7 +21,7 @@ import {
   type ToolchainProbe,
 } from '../protocol/tasks';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
+import { extractJobBlock, extractOnBlock, extractStepBlocks } from './support/workflow-blocks';
 
 // The protocol ships on its own version line from inside this repository. These
 // tests pin the two things that silently break when it does not: the tag prefix
@@ -340,7 +340,7 @@ describe('protocol lane selection', () => {
     }
     expect(shimStep).toContain("!cancelled() && matrix.os == 'ubuntu-latest'");
     expect(protocolStep, `${label}: expected protocol-ci to keep macOS and Windows`).toContain(
-      "if: matrix.os != 'ubuntu-latest'"
+      "!cancelled() && steps.tooling.outcome == 'success' && matrix.os != 'ubuntu-latest'"
     );
   });
 
@@ -493,13 +493,27 @@ describe('the protocol tree at the repository root', () => {
 describe('the CI path filter reads the same list as everything else', () => {
   const workflow = readText('.github/workflows/protocol-ci.yml');
 
-  /** The `relevant` regex the `changes` job greps the diff with. */
-  const relevance = (): RegExp => {
-    const literal = /relevant='(\^\([^']+\))'/.exec(workflow)?.[1];
-    expect(literal, 'protocol-ci.yml has no `relevant=` regex to read').toBeDefined();
-    return new RegExp(literal as string);
-  };
+  test('the detector calls the canonical classifier over collected NUL paths', () => {
+    const changes = extractJobBlock(workflow, 'changes');
+    expect(changes).toContain('bun ./scripts/ci/protocol-lanes.ts relevance');
+    expect(changes).not.toContain('relevant=');
+    expect(changes).not.toContain('grep -Eq');
+    expect(readText('scripts/ci/protocol-lanes.ts')).toContain(
+      'touchesProtocolSurface(readChangedPaths(file))'
+    );
+  });
 
+  test('the push trigger mirrors the complete canonical path set', () => {
+    const paths = [...extractOnBlock(workflow).matchAll(/^ {6}- "([^"]+)"$/gm)].map(
+      (match) => match[1]
+    );
+    expect(paths).toEqual([
+      ...PROTOCOL_PATHS.map((prefix) => `${prefix}**`),
+      ...PROTOCOL_TRIGGER_FILES,
+    ]);
+  });
+
+  const relevance = () => ({ test: (file: string) => touchesProtocolSurface([file]) });
   test.each([...PROTOCOL_PATHS, ...PROTOCOL_TRIGGER_FILES])(
     'the changes job claims %s',
     (entry) => {

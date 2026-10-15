@@ -202,18 +202,18 @@ describe('CI / Gate aggregate', () => {
   });
 
   test('an empty PR diff fails closed instead of skipping distribution', () => {
-    expect(workflow).toContain('if [ ! -s "$RUNNER_TEMP/changed-files" ]; then');
-    expect(workflow).toContain('refusing to skip distribution');
+    expect(workflow).toContain(
+      'bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"'
+    );
   });
 
   test('relevance detection cannot silently fail open', () => {
-    // Renames must list both sides, or moving a source file under an
-    // irrelevant path would hide the source-side deletion.
-    expect(workflow).toContain('git diff --no-renames --name-only');
-    // A single grep, never `grep … | grep -q .`: under `set -o pipefail` the
-    // producer dies of SIGPIPE on a large diff and the non-zero pipeline
-    // status reads as "no relevant paths changed".
-    expect(workflow).toContain('if grep -Eqv "$irrelevant" "$RUNNER_TEMP/changed-files"; then');
+    const changes = extractJobBlock(workflow, 'changes');
+    expect(changes).toContain('bun ./scripts/ci/changed-paths.ts distribution');
+    expect(changes).not.toContain('grep -Eq');
+    expect(readText('scripts/ci/changed-paths.ts')).toContain(
+      "'--no-renames', '--name-only', '-z'"
+    );
   });
 });
 
