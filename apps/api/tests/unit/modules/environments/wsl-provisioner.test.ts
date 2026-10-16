@@ -43,6 +43,11 @@ function ok(stdout = ''): DistroCommandResult {
   return { stdout, stderr: '', exitCode: 0 };
 }
 
+/** Keep the fake release transport behind the real address policy without using DNS. */
+function resolveReleaseHostname() {
+  return Promise.resolve([{ address: '93.184.216.34', family: 4 as const }]);
+}
+
 /** What the hub would have written for a distribution already holding `version`. */
 function provisionedConfig(version: string, bytes: Uint8Array): RuntimeSlotConfig {
   return {
@@ -93,6 +98,7 @@ function harness(
 
   const cache = recordingCacheFs(options.cacheEntries ?? []);
   const provisioner = createWslProvisioner({
+    resolveHostname: resolveReleaseHostname,
     version: () => version,
     hubHost: () => 'win-desktop',
     cacheDir: (cacheVersion) => join(CACHE_ROOT, cacheVersion),
