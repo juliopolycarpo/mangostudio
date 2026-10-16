@@ -64,8 +64,27 @@ runs:
 
     # Save inline: nested actions/cache post steps lose their path input.
     # Publish only trusted main entries after the frozen install succeeds.
-    - name: Save Bun install cache
+    # A parallel caller may have completed this key since our initial restore.
+    # Check before compressing; the advisory lookup must not prevent another
+    # eligible writer from saving if it fails or the first writer never finishes.
+    - id: bun-save-check
+      name: Check whether another Bun writer completed this key
       if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: ./.github/actions/cache-scoped
+      with:
+        mode: restore
+        family: bun
+        path: ~/.bun/install/cache
+        validity: ${{ steps.toolchain.outputs.bun }}-${{ hashFiles('bun.lock') }}
+        cache-epoch: ${{ inputs.cache-epoch }}
+        lookup-only: "true"
+        exact-restore: "true"
+
+    # Simultaneous lookup misses can still race at reserve. Keep the cache
+    # action's normal collision/upload diagnostics and never serialize installs.
+    - name: Save Bun install cache
+      if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true' && (steps.bun-save-check.outcome != 'success' || steps.bun-save-check.outputs.cache-hit != 'true')
       uses: ./.github/actions/cache-scoped
       with:
         mode: save

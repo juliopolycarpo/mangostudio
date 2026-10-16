@@ -288,8 +288,10 @@ describe('CI cache policy', () => {
     const byFamily = (family: string) => sites.filter((site) => site.inputs.family === family);
 
     const bun = byFamily('bun');
-    expect(bun).toHaveLength(2);
-    expect(bun[0].inputs.validity).toContain("hashFiles('bun.lock')");
+    expect(bun).toHaveLength(3);
+    for (const site of bun) {
+      expect(site.inputs.validity).toContain("hashFiles('bun.lock')");
+    }
     // The revision, not the version: every canary build reports the same
     // `1.4.0-canary.1` from `bun --version`, so a key built on that would share
     // one Bun build's extracted packages with a different one.
