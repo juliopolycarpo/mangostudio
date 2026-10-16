@@ -975,9 +975,9 @@ to a vendor child. Since SDK 0.7.1 that allowlist includes the XDG base director
 `XDG_RUNTIME_DIR`), `APPDATA` and `LOCALAPPDATA`, plus each ACP profile's documented home variable
 (`CURSOR_CONFIG_DIR` for Cursor), so `cursor-agent` reads the login the user configured rather
 than the default location's. Credentials still never cross. `adapter/environment_tests.rs` pins
-both halves. Opening a Codex session also runs `codex --version` before `codex app-server`.
-The runtime passes no discovery receipt, so an outdated build is refused before it can write to
-`CODEX_HOME`. The probe runs inside the open's own deadline.
+both halves. Opening a Codex session or listing its native sessions also runs `codex --version`
+before `codex app-server`. The runtime passes no discovery receipt, so an outdated build is refused
+before it can write to `CODEX_HOME`. The probe runs inside that request's own deadline.
 
 The product consumes `port.rs`'s `AgentBackend` and `AgentSession` operations for discovery,
 opening, native history, turns/reviews, responses, steering, cancellation, close and account usage.
