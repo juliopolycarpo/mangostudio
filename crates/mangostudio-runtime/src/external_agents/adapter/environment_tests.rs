@@ -14,7 +14,7 @@ use mango_external_agents::testing::FakeLauncher;
 use super::backend::{Backend, ProductHarnesses};
 use super::test_support as fixtures;
 use crate::commands::toolchain::{self, NativeToolchainFs};
-use crate::external_agents::port::AgentBackend;
+use crate::external_agents::port::{AgentBackend, CloseCause};
 use crate::external_agents::wire;
 use crate::probing::detection::path_env::PathEnv;
 use crate::test_support::ScratchDir;
@@ -67,18 +67,17 @@ async fn a_cursor_child_reads_the_users_config_location_and_never_a_credential()
         timeout_ms: 5_000,
         toolchain: None,
     };
-    let opened = backend
+    let session = backend
         .open(
             wire::TargetId::Cursor,
             "/synthetic/cursor".into(),
             host,
             &params,
         )
-        .await;
-    assert!(
-        opened.is_ok(),
-        "expected the fake Cursor agent to open | received an open failure"
-    );
+        .await
+        .unwrap_or_else(|failure| {
+            panic!("expected the fake Cursor agent to open | received {failure}")
+        });
 
     let launches = launcher.launches();
     let [launch] = launches.as_slice() else {
@@ -101,4 +100,10 @@ async fn a_cursor_child_reads_the_users_config_location_and_never_a_credential()
             "expected {key} withheld from the Cursor child | received it in the launch environment"
         );
     }
+    session
+        .close(CloseCause::Requested)
+        .await
+        .unwrap_or_else(|failure| {
+            panic!("expected the Cursor session to close | received {failure}")
+        });
 }
