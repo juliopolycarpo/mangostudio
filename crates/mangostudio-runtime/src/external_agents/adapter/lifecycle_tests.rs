@@ -11,7 +11,7 @@ use mango_external_agents::{
 };
 
 use super::backend::{Backend, ProductHarnesses};
-use super::test_support::{self as fixtures, CodexPeer, Rig};
+use super::test_support::{self as fixtures, CodexPeer, Rig, VersionAnsweringLauncher};
 use crate::external_agents::failure::{CleanupOutcome, FailureCause, SessionUsability};
 use crate::external_agents::port::{AgentBackend, CloseCause, TurnRequest};
 use crate::external_agents::wire;
@@ -356,7 +356,7 @@ async fn dropping_an_active_stream_settles_work_while_session_drop_reaps_the_chi
     let (launcher, log) = observed(fake.clone(), false, 0);
     let rig = Rig::new(launcher.clone(), wire::TargetId::Codex, fixtures::limits()).await;
     let backend = Backend::new(
-        launcher,
+        VersionAnsweringLauncher::over(launcher),
         Arc::new(ProductHarnesses),
         fixtures::limits(),
         Duration::from_secs(2),
