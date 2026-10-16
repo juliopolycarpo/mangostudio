@@ -13,6 +13,8 @@ mod backend;
 #[cfg(test)]
 mod claude_stop_tests;
 #[cfg(test)]
+mod environment_tests;
+#[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]
 mod redaction_tests;
