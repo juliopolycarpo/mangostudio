@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mango_external_agents::testing::{Announcer, FakeLauncher, FakeProcess};
-use mango_external_agents::{Limits, ProcessLauncher};
+use mango_external_agents::{LaunchSpec, Limits, ManagedProcess, ProcessLauncher};
 use mango_protocol::frame::PeerInfo;
 use mango_protocol::session::{Session, SessionOptions};
 use serde_json::{Value, json};
@@ -126,6 +126,61 @@ impl ExecutableResolver for InstalledExecutable {
     }
 }
 
+/// A launcher that answers the Codex `codex --version` probe itself and hands every other launch to
+/// the launcher it wraps.
+///
+/// Since SDK 0.7.1, opening a Codex session or listing its native sessions first launches
+/// `codex --version` through the host's launcher, and the runtime vouches for no discovery receipt
+/// on purpose. The fake launchers here queue one child per launch with no argv to tell launches
+/// apart, so the probe would take the child queued for the app-server and the open would time out.
+/// The probe is answered with a build at the supported floor and is not forwarded, so the wrapped
+/// launcher's queue and launch log keep counting only the launches a test scripts.
+///
+/// ```ignore
+/// let fake = FakeLauncher::new();
+/// fake.push(CodexPeer::default().process(Announcer::new()));
+/// let launcher = VersionAnsweringLauncher::over(Arc::new(fake.clone()));
+/// let rig = Rig::new(launcher, wire::TargetId::Codex, limits()).await;
+/// // The version probe never reaches `fake`; the app-server launch does.
+/// ```
+pub(super) struct VersionAnsweringLauncher {
+    inner: Arc<dyn ProcessLauncher>,
+}
+impl VersionAnsweringLauncher {
+    /// Wraps `inner`.
+    pub(super) fn over(inner: Arc<dyn ProcessLauncher>) -> Arc<Self> {
+        Arc::new(Self { inner })
+    }
+}
+#[async_trait::async_trait]
+impl ProcessLauncher for VersionAnsweringLauncher {
+    async fn spawn(&self, spec: LaunchSpec) -> mango_external_agents::Result<ManagedProcess> {
+        if spec.argv.get(1).map(String::as_str) != Some("--version") {
+            return self.inner.spawn(spec).await;
+        }
+        let answer = FakeLauncher::new();
+        answer.push(FakeProcess::transcript([format!(
+            "codex-cli {}",
+            mango_agent_codex::MINIMUM_CODEX_VERSION
+        )]));
+        answer.spawn(spec).await
+    }
+}
+
+/// `launcher`, wrapped in a [`VersionAnsweringLauncher`] when `target` is Codex.
+///
+/// Claude's own `--version` probe is answered by its test launchers with a Claude build, so only
+/// Codex gets the Codex answer.
+fn codex_probe_answered(
+    launcher: Arc<dyn ProcessLauncher>,
+    target: wire::TargetId,
+) -> Arc<dyn ProcessLauncher> {
+    match target {
+        wire::TargetId::Codex => VersionAnsweringLauncher::over(launcher),
+        _ => launcher,
+    }
+}
+
 pub(super) struct Rig {
     pub supervisor: Arc<Supervisor>,
     pub runtime: Session,
@@ -145,7 +200,7 @@ impl Rig {
         let private = ScratchDir::created("sdk-lifecycle-private");
         let supervisor = Supervisor::new(Ports {
             harnesses: Arc::new(Backend::new(
-                launcher,
+                codex_probe_answered(launcher, target),
                 Arc::new(ProductHarnesses),
                 limits,
                 Duration::from_secs(2),

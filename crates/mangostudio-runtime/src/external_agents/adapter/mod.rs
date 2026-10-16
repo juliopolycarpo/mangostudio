@@ -22,6 +22,8 @@ mod relay_tests;
 mod resume_mode_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod version_answering_tests;
 use super::port::AgentBackend;
 use crate::subprocess::LaunchCheck;
 use mango_external_agents::Limits;
