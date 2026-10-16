@@ -1,23 +1,21 @@
 //! What reaches a vendor child from the runtime's environment, observed at the launcher.
 //!
+//! The open runs through the supervisor, so the environment it builds from the machine snapshot is
+//! the one the child receives.
+//!
 //! The runtime hands the SDK its whole environment snapshot and the SDK forwards only its
 //! allowlist. Since SDK 0.7.1 that allowlist carries the XDG base directories and each ACP
 //! profile's documented home variable, so `cursor-agent` reads the account the user configured
 //! instead of the default location's. Credentials still never cross.
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use mango_agent_acp::testing::FakeAcpAgent;
 use mango_external_agents::testing::FakeLauncher;
 
-use super::backend::{Backend, ProductHarnesses};
-use super::test_support as fixtures;
-use crate::commands::toolchain::{self, NativeToolchainFs};
-use crate::external_agents::port::{AgentBackend, CloseCause};
+use super::test_support::{self as fixtures, Rig};
 use crate::external_agents::wire;
 use crate::probing::detection::path_env::PathEnv;
-use crate::test_support::ScratchDir;
 
 const FORWARDED: [(&str, &str); 3] = [
     ("XDG_CONFIG_HOME", "/home/synthetic/.config-elsewhere"),
@@ -30,9 +28,9 @@ const WITHHELD: [(&str, &str); 3] = [
     ("OPENAI_API_KEY", "sk-synthetic-never-forwarded"),
 ];
 
-/// The environment the supervisor builds for a host, from a runtime snapshot holding `pairs`.
-fn runtime_environment(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
-    let snapshot = PathEnv {
+/// A Linux machine whose process environment holds `pairs` beside a `PATH`.
+fn machine_environment(pairs: &[(&str, &str)]) -> PathEnv {
+    PathEnv {
         platform: "linux".into(),
         home_dir: "/home/synthetic".into(),
         env: pairs
@@ -40,44 +38,21 @@ fn runtime_environment(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<Str
             .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
             .chain([("PATH".to_owned(), "/usr/bin".to_owned())])
             .collect::<HashMap<_, _>>(),
-    };
-    toolchain::build(&snapshot, None, &NativeToolchainFs)
+    }
 }
 
 #[tokio::test]
 async fn a_cursor_child_reads_the_users_config_location_and_never_a_credential() {
     let launcher = Arc::new(FakeLauncher::new());
     launcher.push(FakeAcpAgent::new().process());
-    let backend = Backend::new(
+    let rig = Rig::with_environment(
         launcher.clone(),
-        Arc::new(ProductHarnesses),
+        wire::TargetId::Cursor,
         fixtures::limits(),
-        Duration::from_secs(2),
-    );
-    let workspace = ScratchDir::created("acp-environment-workspace");
-    let mut host = fixtures::host(workspace.path().to_path_buf());
-    host.environment = runtime_environment(&[FORWARDED, WITHHELD].concat());
-    let params = wire::OpenParams {
-        session_id: "environment-open".into(),
-        target_id: wire::TargetId::Cursor,
-        workspace_path: workspace.path().to_string_lossy().into_owned(),
-        configuration: fixtures::configuration(),
-        resume_ref: None,
-        resume_mode: wire::ResumeMode::Fallback,
-        timeout_ms: 5_000,
-        toolchain: None,
-    };
-    let session = backend
-        .open(
-            wire::TargetId::Cursor,
-            "/synthetic/cursor".into(),
-            host,
-            &params,
-        )
-        .await
-        .unwrap_or_else(|failure| {
-            panic!("expected the fake Cursor agent to open | received {failure}")
-        });
+        machine_environment(&[FORWARDED, WITHHELD].concat()),
+    )
+    .await;
+    rig.open().await;
 
     let launches = launcher.launches();
     let [launch] = launches.as_slice() else {
@@ -100,10 +75,5 @@ async fn a_cursor_child_reads_the_users_config_location_and_never_a_credential()
             "expected {key} withheld from the Cursor child | received it in the launch environment"
         );
     }
-    session
-        .close(CloseCause::Requested)
-        .await
-        .unwrap_or_else(|failure| {
-            panic!("expected the Cursor session to close | received {failure}")
-        });
+    rig.close().await;
 }
