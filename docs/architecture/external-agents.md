@@ -966,9 +966,18 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.7.0). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.7.1). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
+
+The runtime hands the SDK its whole environment snapshot, and the SDK forwards only its allowlist
+to a vendor child. Since SDK 0.7.1 that allowlist includes the XDG base directories (not
+`XDG_RUNTIME_DIR`), `APPDATA` and `LOCALAPPDATA`, plus each ACP profile's documented home variable
+(`CURSOR_CONFIG_DIR` for Cursor), so `cursor-agent` reads the login the user configured rather
+than the default location's. Credentials still never cross. `adapter/environment_tests.rs` pins
+both halves. Opening a Codex session also runs `codex --version` before `codex app-server`.
+The runtime passes no discovery receipt, so an outdated build is refused before it can write to
+`CODEX_HOME`. The probe runs inside the open's own deadline.
 
 The product consumes `port.rs`'s `AgentBackend` and `AgentSession` operations for discovery,
 opening, native history, turns/reviews, responses, steering, cancellation, close and account usage.
