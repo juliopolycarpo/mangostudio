@@ -76,6 +76,9 @@ describe('writeFileAtomic', () => {
     // A pre-existing world-readable file must end up owner-only after a secret write.
     const target = join(dir, '.env');
     writeFileSync(target, 'OLD="x"\n', { mode: 0o644 });
+    // Creation modes are masked by umask; establish the state this write must replace.
+    chmodSync(target, 0o644);
+    expect(statSync(target).mode & 0o777).toBe(0o644);
 
     writeFileAtomic(target, 'NEW="y"\n', { mode: SECRET_FILE_MODE });
 
@@ -121,6 +124,9 @@ describe('writeRegularFileAtomic', () => {
     if (isWindows) return;
     const target = join(dir, 'note.txt');
     writeFileSync(target, 'first', { mode: 0o640 });
+    // Preserve an explicit mode even when the test runner inherits a restrictive umask.
+    chmodSync(target, 0o640);
+    expect(statSync(target).mode & 0o777).toBe(0o640);
 
     await writeRegularFileAtomic(target, 'second');
 
