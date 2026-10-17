@@ -100,6 +100,7 @@ function jobRuns(workflow: string, job: string, scenario: JobScenario, override?
       );
     }
     if (atom === "github.event_name == 'push'") return scenario.event === 'push';
+    if (atom === "github.event_name == 'pull_request'") return scenario.event === 'pull_request';
     if (atom === "github.ref == 'refs/heads/main'") return scenario.ref === 'refs/heads/main';
     const result = /^needs(?:\.([\w-]+)|\['([\w-]+)'\])\.result == 'success'$/.exec(atom);
     if (result) {
@@ -115,6 +116,33 @@ function jobRuns(workflow: string, job: string, scenario: JobScenario, override?
     jobAncestors(workflow, job).every((ancestor) => scenario.results[ancestor] === 'success');
   return values.every(Boolean) && (condition.includes('cancelled()') || implicitSuccess);
 }
+
+describe('PR dry-run caller after a skipped distribution', () => {
+  const docsOnly: JobScenario = {
+    results: { 'distribution-identity': 'success', changes: 'success', distribution: 'skipped' },
+    event: 'pull_request',
+  };
+
+  test('runs for a docs-only PR with a skipped distribution because its status check overrides implicit success', () => {
+    expect(jobRuns(CI, 'release-dry-run', docsOnly)).toBe(true);
+    expect(jobRuns(CI, 'release-dry-run', docsOnly, "github.event_name == 'pull_request'")).toBe(
+      false
+    );
+  });
+
+  test('still reports after distribution failure, and refuses cancellation and non-PR events', () => {
+    expect(
+      jobRuns(CI, 'release-dry-run', {
+        ...docsOnly,
+        results: { ...docsOnly.results, distribution: 'failure' },
+      })
+    ).toBe(true);
+    expect(jobRuns(CI, 'release-dry-run', { ...docsOnly, cancelled: true })).toBe(false);
+    for (const event of ['push', 'workflow_dispatch', 'schedule', undefined]) {
+      expect(jobRuns(CI, 'release-dry-run', { ...docsOnly, event })).toBe(false);
+    }
+  });
+});
 
 describe('Canary prerequisites after the PR-only dry run was added', () => {
   const mainPush: JobScenario = {
