@@ -28,7 +28,7 @@ flate2 = "1"
 tar = "0.4"
 
 [target.'cfg(windows)'.dependencies]
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 
 [package.metadata.binstall]
 # Release archives have a flat root: mangostudio(.exe), mangostudio-runtime(.exe)
