@@ -2,6 +2,14 @@
 // piped command execution, and the current commit SHA.
 
 import { ROOT_DIR } from '../../lib/config';
+import {
+  bindDescendantsToRunner,
+  ChildSupervisor,
+  isNestedRunner,
+  processHost,
+  RUNNER_GROUP_ENV,
+  supervisionMode,
+} from '../../lib/process-tree';
 import { type Measurement, measured, unavailable } from '../model/states';
 
 /** Write a namespaced diagnostic line to stderr (keeps stdout pure JSON). */
@@ -45,24 +53,59 @@ export interface RunResult {
   readonly exitCode: number;
 }
 
-/** Spawn a command with piped stdio and capture stdout/stderr/exit code. */
+const captureSupervisor = new ChildSupervisor(processHost());
+let nestedCapture: boolean | undefined;
+
+// The supervisor owns the signal exit. A cancelled capture must not return a
+// result while its descendants are still stopping, even if the leader exited.
+const cancellationExit = (): Promise<never> => new Promise(() => undefined);
+
+/**
+ * Capture a command's output and exit while retaining ownership through pipe
+ * draining. Root POSIX captures own a group; nested runners keep their owner's
+ * group and Windows uses the existing kill-on-close job binding.
+ * @example await runCapture(['bunx', 'tsc', '--noEmit'])
+ */
 export const runCapture = async (
   cmd: readonly string[],
   opts?: { cwd?: string }
 ): Promise<RunResult> => {
+  if (captureSupervisor.cancelling) return cancellationExit();
+  await bindDescendantsToRunner();
+  if (captureSupervisor.cancelling) return cancellationExit();
+  // Retain the original owner even if its group's leader exits during capture.
+  nestedCapture ??= process.platform !== 'win32' && isNestedRunner();
+  const ownsGroup = supervisionMode('ignore', process.platform, nestedCapture) === 'group';
   const proc = Bun.spawn({
     cmd: [...cmd],
     cwd: opts?.cwd ?? ROOT_DIR,
+    stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
-    env: process.env,
+    env: ownsGroup ? { ...process.env, [RUNNER_GROUP_ENV]: String(process.pid) } : process.env,
+    detached: ownsGroup,
   });
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ]);
-  const exitCode = await proc.exited;
-  return { stdout, stderr, exitCode };
+  const release = ownsGroup
+    ? captureSupervisor.adopt({
+        label: cmd[0] ?? 'captured command',
+        pid: proc.pid,
+        ownsGroup: true,
+        exited: proc.exited,
+        signal: (signal) => proc.kill(signal),
+      })
+    : undefined;
+  try {
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    if (captureSupervisor.cancelling) return await cancellationExit();
+    return { stdout, stderr, exitCode };
+  } finally {
+    await proc.exited;
+    release?.();
+  }
 };
 
 /** HEAD commit SHA, or 'unknown' outside a git checkout. */
