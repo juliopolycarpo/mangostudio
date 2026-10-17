@@ -2014,7 +2014,11 @@ changing counts, short pages, rate limits and timeouts leave the inventory
 an atomic snapshot, so even matching counts do not prove that no concurrent
 save or eviction occurred. Each request, including response-body decoding, has
 a 3-second deadline; the whole report has a 15-second deadline and at most 50
-pages of 100 entries. Gate evaluates mandatory results first, then runs the
+pages of 100 entries. Pages are read one after another, so on a slow API the
+deadline is the effective cap: at the 3-second ceiling, only about five pages
+(500 entries) fit. The summary then reports **incomplete**, with entries seen
+of the expected count and pages read; raise the report budget if that becomes
+common. Gate evaluates mandatory results first, then runs the
 advisory report with `always()`, `continue-on-error` and a 1-minute step timeout.
 
 Keep three measurements separate when adding or recovering a cache writer:
