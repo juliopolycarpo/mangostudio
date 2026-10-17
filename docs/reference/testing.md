@@ -1951,7 +1951,10 @@ The guard accepts `cache-seed` only for a `push` to `refs/heads/main`, profile
 `artifact_prefix`. Artifact mode still rejects light on every event except
 `pull_request` and requires a prefix. The seed has no upload step to reach: the
 single `actions/upload-artifact` step is conditional on `mode == 'artifact'`,
-and the job holds `contents: read` only. The seed builds only on an exact-key
+and the job holds `contents: read` only. Light bytes that did reach a bundle
+would still stop at publication: the distribution manifest records the runtime
+profile, and Release and Canary require `shipping` (see `releasing.md`). The
+seed builds only on an exact-key
 miss, so a lockfile, root manifest, toolchain or CARGO-environment change seeds
 again and any other main push ends each platform after the lookup. An entry
 evicted by the 12-day retention is re-seeded by the next main push.
