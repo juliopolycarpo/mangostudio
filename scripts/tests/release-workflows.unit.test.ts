@@ -459,12 +459,11 @@ describe('release workflow binary gate', () => {
     expect(readText('.github/workflows/release.yml'), 'release.yml cargo cache').not.toMatch(
       /\n\s+cache:/
     );
-    // The dry run publishes nothing, so pull requests may restore; its weekly
-    // schedule and manual runs keep proving a clean build.
+    // PRs reuse distribution bytes; scheduled/manual producers stay clean.
     expect(
       extractJobBlock(readText('.github/workflows/release-dry-run.yml'), 'runtime'),
       'release-dry-run.yml runtime job cargo cache'
-    ).toContain('cache: $' + "{{ github.event_name == 'pull_request' }}");
+    ).toContain('cache: false');
     expect(extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution')).toContain(
       'cache: true'
     );
@@ -1140,7 +1139,9 @@ describe('release workflow binary gate', () => {
   test('ci gates the canary publish on the aggregate gate and a push to main', () => {
     const workflow = readText('.github/workflows/ci.yml');
     const canaryBlock = extractJobBlock(workflow, 'canary');
-    const mainPushIf = '$' + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}";
+    const mainPushIf =
+      '$' +
+      "{{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' && needs.distribution.result == 'success' }}";
     expect(canaryBlock, 'canary job not found in ci.yml').not.toBe('');
 
     // The gate is the definition of a green commit; the other dependencies

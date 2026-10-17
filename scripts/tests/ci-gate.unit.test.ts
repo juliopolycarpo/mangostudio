@@ -32,7 +32,6 @@ const INTEGRATION_PR_WORKFLOWS = [
   '.github/workflows/dependency-review.yml',
   '.github/workflows/dependency-audit.yml',
   '.github/workflows/protocol-ci.yml',
-  '.github/workflows/release-dry-run.yml',
 ] as const;
 
 // GitHub expression opener, assembled out of band so the literal `${{` never
@@ -172,7 +171,8 @@ describe('CI / Gate aggregate', () => {
     // The placeholder count is pinned deliberately: `format` drops arguments it
     // has no slot for, so a fifth skip added without widening this would be
     // accepted silently and never allow the skip it was written for.
-    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3} {4}',`);
+    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3} {4} {5}',`);
+    expect(gateBlock).toContain("github.event_name != 'pull_request' && 'release-dry-run'");
     expect(gateBlock).toContain("github.event_name == 'workflow_dispatch' && 'qa-metrics'");
     expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'distribution'");
     expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'smoke'");
@@ -488,11 +488,14 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 describe('release-dry-run.yml always-reporting gate', () => {
   const workflow = readText('.github/workflows/release-dry-run.yml');
 
-  test('triggers on every PR without a path filter, plus schedule and dispatch', () => {
+  test('is called from every PR CI run without a path filter, plus clean schedule and dispatch', () => {
     const onBlock = extractOnBlock(workflow);
 
-    expect(sectionKeys(onBlock)).toEqual(['pull_request', 'workflow_dispatch', 'schedule']);
-    expect(onBlock).toContain('pull_request:\n    branches: [main]\n  workflow_dispatch:');
+    expect(sectionKeys(onBlock)).toEqual(['workflow_call', 'workflow_dispatch', 'schedule']);
+    const caller = extractJobBlock(readText('.github/workflows/ci.yml'), 'release-dry-run');
+    expect(caller).toContain(`if: ${EXPR} !cancelled() && github.event_name == 'pull_request' }}`);
+    expect(caller).toContain('uses: ./.github/workflows/release-dry-run.yml');
+    expect(caller).not.toContain('outputs.distribution ==');
   });
 
   test('each dry-run lane runs only when its relevance predicate is true', () => {
@@ -504,13 +507,20 @@ describe('release-dry-run.yml always-reporting gate', () => {
     // The cargo runtimes both dry-run archives ship come from the runtime lane,
     // which is relevant exactly when the Linux lane is.
     expect(parseNeedsList(runtimeBlock)).toEqual(['changes']);
-    expect(runtimeBlock).toContain("if: needs.changes.outputs.release == 'true'");
+    expect(runtimeBlock).toContain(
+      "if: needs.changes.outputs.release == 'true' && !inputs.reuse_distribution"
+    );
     expect(parseNeedsList(linuxBlock)).toEqual(['changes', 'runtime']);
-    expect(linuxBlock).toContain("if: needs.changes.outputs.release == 'true'");
+    expect(linuxBlock).toContain("needs.changes.outputs.release == 'true'");
+    expect(linuxBlock).toContain(
+      "needs.runtime.result == 'success' || (inputs.reuse_distribution && needs.runtime.result == 'skipped')"
+    );
     // Also needs `changes` directly (not just transitively through
     // dry-run-linux) so its own `if:` can read `needs.changes.outputs`.
     expect(parseNeedsList(windowsBlock)).toEqual(['changes', 'dry-run-linux']);
-    expect(windowsBlock).toContain("if: needs.changes.outputs.release == 'true'");
+    expect(windowsBlock).toContain(
+      `if: ${EXPR} !cancelled() && needs.changes.outputs.release == 'true' && needs['dry-run-linux'].result == 'success' }}`
+    );
     expect(parseNeedsList(cargoBlock)).toEqual(['changes']);
     expect(cargoBlock).toContain("if: needs.changes.outputs.launcher == 'true'");
     const floor = /^rust-version = "([^"]+)"$/m.exec(readText('Cargo.toml'))?.[1];
@@ -528,7 +538,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', needs.changes.outputs.release == 'false' && 'runtime' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', (needs.changes.outputs.release == 'false' || inputs.reuse_distribution) && 'runtime' || '') }}`
     );
   });
 });

@@ -13,15 +13,17 @@ shapes, or path filters.
 
 | Workflow check name      | Workflow                                | Role                                                                                                                                                                                                                                                 |
 | ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary also depends on this gate; accepts `distribution` and `smoke` skips when only documentation-surface paths changed, `rust-coverage` when no Rust-relevant path changed, and `qa-metrics` on `workflow_dispatch`                |
+| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary depends on it; accepts distribution/smoke skips for documentation-only paths, Rust coverage for irrelevant paths, QA on dispatch, and the PR-only release dry run on non-PR events                                            |
 | `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs locked checks and builds at the Rust 1.99.0 minimum on Linux, macOS and Windows, native tests on macOS and Windows, Windows ARM64 checks and runtime tests, and fuzz-workspace resolution |
 | `Protocol CI / Gate`     | `.github/workflows/protocol-ci.yml`     | Always reports; accepts every protocol lane skip when no protocol path changed                                                                                                                                                                       |
-| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Always reports; accepts each dry-run lane skip when irrelevant                                                                                                                                                                                       |
+| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Called by every PR CI run; accepts irrelevant assertion lanes and the clean runtime producer on the verified same-run PR reuse path                                                                                                                  |
 
 Repository rules match required checks by the name `Gate`, and all four workflows
-above emit a check with that name, so each must keep reporting on every pull
-request: no workflow-level `paths` filter on `pull_request`, and every conditional
-lane listed in the gate's `ALLOWED_SKIPS` only under its own relevance proof.
+above retain that compatibility job name. CI calls the reusable release dry run
+on every PR; the other gated workflows start directly on `pull_request` without
+workflow-level path filters. Allowed skips require their relevance proof or the
+explicit PR-reuse/non-PR execution mode. Verify the current hosted producer
+identities before changing required contexts.
 
 Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
 `needs` from the workflow text: every job except the gate itself and any job
@@ -81,6 +83,27 @@ Windows ARM64 now compiles the full workspace as well as the launcher alone at 1
 test command remains scoped to the runtime; full-workspace compilation does not claim native
 execution of every crate's tests there. Fuzz-workspace resolution, ignored fixture regeneration
 and real-binary qualification retain their commands and relevance predicates.
+
+## Release dry runs
+
+PR CI calls `release-dry-run.yml` in the same run as Distribution Build, even
+when release paths are irrelevant. Its internal Gate retains relevance-based
+skips and both CI gates include the reusable workflow result. Relevant PR dry runs
+download the Linux x64 and Windows x64 content-addressed target bundles,
+verify source, version, channel and checksums through `download-distribution`,
+and stage their light-profile runtimes for the existing hub build and packaging checks.
+They use the distribution's PR version throughout installer, health, checksum,
+manifest rendering and lifecycle assertions. Both release dry-run gates accept
+the skipped clean runtime producer on this reuse path. On main pushes, Canary
+and the light runtime cache seed explicitly require successful direct producers
+after Gate accepts the skipped PR-only dry run.
+
+Weekly and manual dry runs keep separate clean, uncached shipping-profile
+runtime builds and the `0.0.0-dryrun` version. The Linux packaging/Docker checks,
+Windows PowerShell 5.1 installer checks and Cargo publish dry run retain their
+complete command inventory. This removes duplicate PR runtime compilation;
+hosted check identities, artifact overhead and timing still require validation
+on the opened PR before merge. It makes no measured wall-clock claim.
 
 ## Fresh Rust dependencies
 
