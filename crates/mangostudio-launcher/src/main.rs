@@ -340,6 +340,47 @@ mod tests {
         );
     }
 
+    /// RUSTSEC-2026-0368: zip 8.x created a symlink entry whose target left
+    /// the destination. The release archive is checksummed, but the manifest
+    /// comes from the same release, so extraction itself must stay contained.
+    #[cfg(windows)]
+    #[test]
+    fn unpack_refuses_a_symlink_that_escapes_the_destination() {
+        use std::io::Write;
+        use zip::write::{SimpleFileOptions, ZipWriter};
+
+        let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer
+            .start_file("mangostudio.exe", SimpleFileOptions::default())
+            .and_then(|()| writer.write_all(b"binary").map_err(Into::into))
+            .expect("expected the fixture binary entry to be written");
+        writer
+            .add_symlink("escape", "../outside", SimpleFileOptions::default())
+            .expect("expected the fixture symlink entry to be written");
+        let archive = writer
+            .finish()
+            .expect("expected the fixture archive to finish")
+            .into_inner();
+        let destination = env::temp_dir().join(format!(
+            "mangostudio-launcher-unpack-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&destination).expect("expected a fresh destination");
+
+        let result = unpack(&archive, &destination);
+        let escape_exists = fs::symlink_metadata(destination.join("escape")).is_ok();
+        fs::remove_dir_all(&destination).ok();
+
+        assert!(
+            matches!(&result, Err(message) if message.contains("escapes the destination")),
+            "expected unpack to refuse the escaping symlink | received {result:?}"
+        );
+        assert!(
+            !escape_exists,
+            "expected no `escape` entry in the destination | received one"
+        );
+    }
+
     #[test]
     fn launcher_command_sets_both_markers() {
         let command = launcher_command(Path::new("/tmp/mangostudio"));
