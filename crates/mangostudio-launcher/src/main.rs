@@ -365,6 +365,7 @@ mod tests {
             "mangostudio-launcher-unpack-{}",
             std::process::id()
         ));
+        let _ = fs::remove_dir_all(&destination);
         fs::create_dir_all(&destination).expect("expected a fresh destination");
 
         let result = unpack(&archive, &destination);
