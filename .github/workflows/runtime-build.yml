@@ -30,19 +30,30 @@ on:
         type: string
         default: '["linux-x64","linux-arm64","linux-x64-musl","linux-arm64-musl","darwin-x64","darwin-arm64","windows-x64","windows-arm64"]'
       artifact_prefix:
-        description: Artifact name prefix; each platform uploads `<prefix>-<platform-id>`.
+        description: >-
+          Artifact name prefix; each platform uploads `<prefix>-<platform-id>`.
+          Required in artifact mode and refused in cache-seed mode.
         type: string
-        required: true
+        default: ""
       profile:
-        description: Artifact profile, shipping (fat LTO/1 unit) or light (thin LTO/16 units, PR only).
+        description: >-
+          Build profile, shipping (fat LTO/1 unit) or light (thin LTO/16 units).
+          Light artifacts are PR only; light is also what cache-seed mode builds.
         type: string
         default: shipping
+      mode:
+        description: >-
+          artifact builds and uploads the runtime. cache-seed builds the light
+          profile on a push to main only to save its cargo cache entry, and
+          uploads nothing.
+        type: string
+        default: artifact
       cache:
         description: >-
           Restore matching-profile dependency state from the cargo cache main
           writes. Release builds leave it off, and main only looks the entry
-          up, so a published binary never starts from restored state. Light
-          caches have no seed writer until measured cache admission is proven.
+          up, so a published binary never starts from restored state. The
+          light entry is written only by cache-seed mode.
         type: boolean
         default: false
 
@@ -68,9 +79,45 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BUILD_PROFILE: ${{ inputs.profile }}
+          BUILD_MODE: ${{ inputs.mode }}
+          BUILD_REF: ${{ github.ref }}
+          ARTIFACT_PREFIX: ${{ inputs.artifact_prefix }}
+          CACHE_ENABLED: ${{ inputs.cache }}
         # Before checkout, Cargo setup, or cache access. Every non-PR artifact
-        # remains shipping; future cache-only seeds need a separate path.
+        # remains shipping. The only non-PR light build is cache-seed mode: a
+        # push to main with the cargo cache on and no artifact name to upload.
         run: |
+          case "$BUILD_MODE" in
+            artifact)
+              if [ -z "$ARTIFACT_PREFIX" ]; then
+                echo 'expected artifact mode artifact_prefix: non-empty | received: <empty>' >&2
+                exit 1
+              fi
+              ;;
+            cache-seed)
+              if [ "$EVENT_NAME" != "push" ] || [ "$BUILD_REF" != "refs/heads/main" ]; then
+                printf 'expected cache-seed context: event=push, ref=refs/heads/main | received: event=%s, ref=%s\n' \
+                  "$EVENT_NAME" "$BUILD_REF" >&2
+                exit 1
+              fi
+              if [ "$BUILD_PROFILE" != "light" ]; then
+                printf 'expected cache-seed profile: light | received: %s\n' "$BUILD_PROFILE" >&2
+                exit 1
+              fi
+              if [ -n "$ARTIFACT_PREFIX" ]; then
+                printf 'expected cache-seed artifact_prefix: empty | received: %s\n' "$ARTIFACT_PREFIX" >&2
+                exit 1
+              fi
+              if [ "$CACHE_ENABLED" != "true" ]; then
+                printf 'expected cache-seed cache: true | received: %s\n' "${CACHE_ENABLED:-<empty>}" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              printf 'expected mode: artifact or cache-seed | received: %s\n' "$BUILD_MODE" >&2
+              exit 1
+              ;;
+          esac
           case "$BUILD_PROFILE" in
             shipping)
               if [ -n "${CARGO_PROFILE_RELEASE_LTO:-}" ] || [ -n "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-}" ]; then
@@ -80,7 +127,7 @@ jobs:
               fi
               ;;
             light)
-              if [ "$EVENT_NAME" != "pull_request" ]; then
+              if [ "$BUILD_MODE" = "artifact" ] && [ "$EVENT_NAME" != "pull_request" ]; then
                 echo 'expected profile: shipping | received: light' >&2
                 exit 1
               fi
@@ -97,6 +144,7 @@ jobs:
           esac
           printf 'runtime profile: %s (lto=%s, codegen-units=%s)\n' \
             "$BUILD_PROFILE" "${CARGO_PROFILE_RELEASE_LTO:-fat}" "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-1}"
+          printf 'runtime mode: %s\n' "$BUILD_MODE"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -115,14 +163,17 @@ jobs:
         uses: ./.github/actions/setup-zigbuild
 
       # One cache per platform and profile, shared by callers that opt in.
-      # Pull requests restore only their profile but never save one. Light
-      # starts cold until its separate cache-only seeds are admitted.
+      # Pull requests restore only their profile but never save one.
       # Main never restores because canary publishes its distribution:
       # `lookup-only` checks for the entry, and a miss may save this clean
-      # shipping generation. Light PRs never restore that shipping entry.
+      # generation. Light PRs never restore the shipping entry. The light
+      # entry is written by cache-seed mode through this same step, so its
+      # key is the one a PR light build restores: nothing here, in the job
+      # `env`, or in the steps before it may depend on the run mode.
       # prefix-key hashes the root manifest because rust-cache's own key
       # ignores [profile.*].
       - name: Restore the cargo cache
+        id: rust-cache
         if: inputs.cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -131,7 +182,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           lookup-only: ${{ github.ref == 'refs/heads/main' }}
 
+      # A seed has nothing to do on an exact hit: the entry it would save
+      # exists. A miss builds exactly what a PR light build does, then
+      # rust-cache's post-job step saves the new entry.
       - name: Build runtime
+        if: inputs.mode == 'artifact' || steps.rust-cache.outputs.cache-hit != 'true'
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}
@@ -140,7 +195,9 @@ jobs:
         # Dependency-free script; runs without `bun install`.
         run: bun --no-install ./scripts/build-runtime.ts --platform "$PLATFORM" --zig --rustup --out "${RUNNER_TEMP}/runtime"
 
+      # The only artifact route. Cache-seed mode never reaches it.
       - name: Upload runtime
+        if: inputs.mode == 'artifact'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact_prefix }}-${{ matrix.platform }}

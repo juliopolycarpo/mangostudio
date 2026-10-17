@@ -292,8 +292,9 @@ packages, Docker images and installers all see the same two files as before.
   Main is the first shipping-profile build of a PR change. A shipping-profile
   runtime or smoke failure on main blocks Canary through CI's mandatory Gate;
   those bytes cannot publish. A defect unique to fat LTO can therefore turn
-  main red after a green PR. Light caches remain cold until their separate
-  cache-only main seeds pass write, lifecycle, and measured capacity admission.
+  main red after a green PR. Light caches come only from CI's cache-only main
+  seed, which builds the light profile after the Gate and uploads nothing; see
+  `docs/reference/testing.md`.
 - **Toolchain pins.** Rust comes from `rust-toolchain.toml`; zig is downloaded
   at a pinned version and SHA-256 (`ZIG_VERSION`/`ZIG_SHA256` in
   `runtime-build.yml`); cargo-zigbuild is installed at a pinned version by
