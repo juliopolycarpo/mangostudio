@@ -29,6 +29,7 @@ const DEPENDENCY_LINKS = [
   'turbo',
   'dprint',
   'typescript',
+  'typebox',
 ];
 const VALUE_CYCLE = {
   'a.ts': "import { b } from './b';\n\nexport function a(): number {\n  return b();\n}\n",
@@ -595,6 +596,16 @@ describe('Biome import cycle checks', () => {
     const rejected = runCheck(root, 'apps/api');
     expectCheck(rejected, 'fail', 'apps/api after injecting dist/a.ts and dist/b.ts');
     expect(rejected.output).toContain(NO_IMPORT_CYCLES);
+  });
+
+  test('rejects workspace formatting drift with the actual dprint check', () => {
+    const root = createFixture();
+    writeFileSync(join(root, 'apps/api/AGENTS.md'), '#    Unformatted fixture\n');
+    const rejected = runCheck(root, 'apps/api');
+    expectCheck(rejected, 'fail', 'apps/api with unformatted AGENTS.md');
+    expect(rejected.output).toContain('root:dprint:api');
+    expect(rejected.output).toContain('AGENTS.md');
+    expect(Bun.stripANSI(rejected.output)).toContain('Found 1 not formatted file');
   });
 
   test('keeps node_modules and git internals outside the TS/JS scan', async () => {
