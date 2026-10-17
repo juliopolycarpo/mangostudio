@@ -12,6 +12,7 @@ use mango_external_agents::{LaunchSpec, ProcessLauncher};
 
 use super::backend::{Backend, ProductHarnesses};
 use super::test_support::{self as fixtures, VersionAnsweringLauncher};
+use crate::external_agents::failure::FailureCause;
 use crate::external_agents::port::AgentBackend;
 use crate::external_agents::wire;
 use crate::test_support::ScratchDir;
@@ -114,9 +115,22 @@ async fn a_codex_open_refuses_an_outdated_build_before_starting_an_app_server() 
         )
         .await;
 
-    assert!(
-        opened.is_err(),
-        "expected an outdated Codex build refused at open | received an open session"
+    let Err(failure) = opened else {
+        panic!("expected an outdated Codex build refused at open | received an open session");
+    };
+    let kind = failure
+        .remote
+        .details
+        .as_ref()
+        .and_then(|details| details.get("kind"))
+        .and_then(|kind| kind.as_str());
+    assert_eq!(
+        (failure.cause, kind),
+        (
+            FailureCause::Version,
+            Some("external_agent_version_unsupported")
+        ),
+        "expected (cause, kind) of a version refusal | received {failure:?}"
     );
     let argv: Vec<_> = launcher
         .launches()
