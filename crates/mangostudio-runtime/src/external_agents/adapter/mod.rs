@@ -13,6 +13,8 @@ mod backend;
 #[cfg(test)]
 mod claude_stop_tests;
 #[cfg(test)]
+mod environment_tests;
+#[cfg(test)]
 mod lifecycle_tests;
 #[cfg(test)]
 mod redaction_tests;
@@ -22,6 +24,8 @@ mod relay_tests;
 mod resume_mode_tests;
 #[cfg(test)]
 mod test_support;
+#[cfg(test)]
+mod version_answering_tests;
 use super::port::AgentBackend;
 use crate::subprocess::LaunchCheck;
 use mango_external_agents::Limits;
