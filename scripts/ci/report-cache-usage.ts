@@ -10,6 +10,7 @@ import {
   GithubCacheUsageApi,
   STORAGE_LIMIT_FIELD,
 } from './cache-usage/github';
+import { parseRustCacheKey } from './rust-cache/families';
 
 export { cacheFamily } from './cache-families';
 
@@ -234,6 +235,52 @@ function markdown(value: string): string {
     .replace(/\s+/g, ' ');
 }
 
+interface EnvironmentRow {
+  readonly family: string;
+  readonly runner: string;
+  readonly environment: string;
+  bytes: number;
+  count: number;
+}
+
+/**
+ * Split Rust families that one runner holds under several environment hashes.
+ * Light and shipping runtime-build entries differ only in that hash, and so do
+ * generations across a toolchain change; the hash alone cannot say which is which.
+ *
+ * @example environmentRows(entries) // [{ family: 'runtime-build-linux-x64', runner: 'Linux-x64', environment: '1a2b3c4d', bytes, count }]
+ */
+export function environmentRows(entries: readonly CacheEntry[]): EnvironmentRow[] {
+  const rows = new Map<string, EnvironmentRow>();
+  for (const entry of entries) {
+    const rust = parseRustCacheKey(entry.key);
+    if (!rust) continue;
+    const runner = `${rust.os}-${rust.arch}`;
+    const id = [rust.family, runner, rust.environment].join(':');
+    const row = rows.get(id) ?? {
+      family: rust.family,
+      runner,
+      environment: rust.environment,
+      bytes: 0,
+      count: 0,
+    };
+    row.bytes += entry.sizeInBytes;
+    row.count += 1;
+    rows.set(id, row);
+  }
+  const environments = new Map<string, number>();
+  for (const row of rows.values()) {
+    const owner = `${row.family}:${row.runner}`;
+    environments.set(owner, (environments.get(owner) ?? 0) + 1);
+  }
+  return [...rows.values()]
+    .filter((row) => (environments.get(`${row.family}:${row.runner}`) ?? 0) > 1)
+    .sort(
+      (a, b) =>
+        a.family.localeCompare(b.family) || a.runner.localeCompare(b.runner) || b.bytes - a.bytes
+    );
+}
+
 /** Full family totals reconcile to the unique entries actually observed. */
 export function renderCacheSummary(report: CacheReport): string {
   const { inventory: listing } = report;
@@ -289,7 +336,24 @@ export function renderCacheSummary(report: CacheReport): string {
   }
   lines.push(
     `| **Total listed** | **${formatBytes(listing.totalBytes)}** | **${listing.totalBytes}** | **${listing.entries.length}** |`,
-    '',
+    ''
+  );
+  const split = environmentRows(listing.entries);
+  if (split.length > 0) {
+    lines.push(
+      'Rust families held under more than one environment hash on one runner (light and shipping profiles, or a toolchain change):',
+      '',
+      '| Family | Runner | Environment hash | Size | Bytes | Entries |',
+      '| --- | --- | --- | ---: | ---: | ---: |'
+    );
+    for (const row of split) {
+      lines.push(
+        `| rust/${row.family} | ${row.runner} | ${row.environment} | ${formatBytes(row.bytes)} | ${row.bytes} | ${row.count} |`
+      );
+    }
+    lines.push('');
+  }
+  lines.push(
     '<sub>Read-only advisory report. API reads are not atomic. Retained bytes do not measure archive transfer cost or prove cache-write eligibility; billing budgets can reject writes below the configured storage allowance.</sub>',
     ''
   );

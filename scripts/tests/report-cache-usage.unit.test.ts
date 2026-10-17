@@ -8,6 +8,7 @@ import {
   CACHE_REPORT_LIMITS,
   cacheFamily,
   collectCacheReport,
+  environmentRows,
   formatBytes,
   renderCacheSummary,
 } from '../ci/report-cache-usage';
@@ -131,6 +132,46 @@ describe('complete cache inventory', () => {
     expect(summary).toContain('| unknown | 6 KiB | 6578 | 52 |');
     expect(summary).toContain('**11628** | **152**');
     expect(summary).toContain('Usage sample minus listing: 0 bytes, 0 entries');
+  });
+
+  test('a Rust family under two environment hashes lists each hash separately', async () => {
+    // Light and shipping runtime-build entries share a family and runner and
+    // differ only in rust-cache's environment hash.
+    const runtime = (environment: string) =>
+      `v0-rust-${'a'.repeat(64)}-runtime-build-linux-x64-Linux-x64-${environment}-87654321`;
+    const api = new SnapshotCacheApi([
+      page([
+        cache(1, 300, runtime('11111111')),
+        cache(2, 100, runtime('22222222')),
+        cache(3, 50, rustKey('workspace')),
+      ]),
+    ]);
+    const summary = renderCacheSummary(await collectCacheReport(api));
+    expect(summary).toContain('| rust/runtime-build-linux-x64 | 400 B | 400 | 2 |');
+    expect(summary).toContain(
+      '| rust/runtime-build-linux-x64 | Linux-x64 | 11111111 | 300 B | 300 | 1 |'
+    );
+    expect(summary).toContain(
+      '| rust/runtime-build-linux-x64 | Linux-x64 | 22222222 | 100 B | 100 | 1 |'
+    );
+    // One environment needs no breakdown.
+    expect(summary).not.toContain('| rust/workspace | Linux-x64 |');
+  });
+
+  test('no environment breakdown when every Rust family has one hash', async () => {
+    const api = new SnapshotCacheApi([page([cache(1, 50, rustKey('workspace'))])]);
+    expect(renderCacheSummary(await collectCacheReport(api))).not.toContain('Environment hash');
+  });
+
+  test('one environment per runner is not split even when runners differ', () => {
+    const key = (runner: string, environment: string) =>
+      `v0-rust-${'a'.repeat(64)}-workspace-${runner}-${environment}-87654321`;
+    const entries = [
+      { id: 1, key: key('Linux-x64', '11111111'), sizeInBytes: 10 },
+      { id: 2, key: key('Windows_NT-x64', '22222222'), sizeInBytes: 20 },
+      { id: 3, key: scopedKey('bun'), sizeInBytes: 30 },
+    ];
+    expect(environmentRows(entries)).toEqual([]);
   });
 
   test('complete empty inventory is distinct from missing API data', async () => {

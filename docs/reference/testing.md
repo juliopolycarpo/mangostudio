@@ -1977,8 +1977,12 @@ before relying on that, and recheck the limit; the Gate's cache report (see
 [Cache accounting and write recovery](#cache-accounting-and-write-recovery))
 records it. The cleanup family registry already keys on the environment hash,
 so light and shipping entries of one target stay separate families of the same
-name. The report groups by that name alone, so its `rust/runtime-build-*` rows
-add light and shipping bytes together.
+name. The report's family table adds both profiles into one
+`rust/runtime-build-*` row. A second table lists every Rust family that one
+runner holds under more than one environment hash, which separates the light
+archive sizes. The hash includes the runner's `rustc -vV` and `CARGO_HOME`, so
+the report cannot name the profile; the hash that appears after the first seed
+is the light one.
 
 Cost: a seed on a key miss is up to eight light builds on one main push, and
 each other main push starts eight runners that only look the entry up. Neither
