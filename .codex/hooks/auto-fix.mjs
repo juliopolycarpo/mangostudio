@@ -80,6 +80,10 @@ export function chooseFormatter(filePath) {
     return 'dprint';
   }
 
+  if (extension === '.rs') {
+    return 'rustfmt';
+  }
+
   return undefined;
 }
 
@@ -103,6 +107,10 @@ export async function runAutoFixHook(input) {
 
   if (formatter === 'dprint') {
     await runDprint(filePath);
+  }
+
+  if (formatter === 'rustfmt') {
+    await runRustfmt(filePath);
   }
 }
 
@@ -144,6 +152,7 @@ async function isExistingFile(filePath) {
 
 async function runBiome(filePath) {
   await runFormatter([
+    process.execPath,
     'x',
     '--no-install',
     'biome',
@@ -156,13 +165,26 @@ async function runBiome(filePath) {
 }
 
 async function runDprint(filePath) {
-  await runFormatter(['x', '--no-install', 'dprint', 'fmt', '--allow-no-files', filePath]);
+  await runFormatter([
+    process.execPath,
+    'x',
+    '--no-install',
+    'dprint',
+    'fmt',
+    '--allow-no-files',
+    filePath,
+  ]);
 }
 
-async function runFormatter(args) {
+// rustfmt reads the edition and style from the nearest rustfmt.toml.
+async function runRustfmt(filePath) {
+  await runFormatter(['rustfmt', filePath]);
+}
+
+async function runFormatter(command) {
   try {
     await new Promise((resolveProcess) => {
-      Bun.spawn([process.execPath, ...args], {
+      Bun.spawn(command, {
         cwd: repoRoot,
         stderr: 'ignore',
         stdout: 'ignore',

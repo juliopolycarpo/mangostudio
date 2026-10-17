@@ -3,6 +3,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import {
+  findProtectedFile,
+  runProtectGeneratedHook,
+} from '../../.claude/hooks/protect-generated.mjs';
+import {
   createPathExportLine,
   resolveRepoBin,
   updateClaudeEnvPath,
@@ -15,6 +19,7 @@ import {
   shouldSkipFile,
 } from '../../.codex/hooks/auto-fix.mjs';
 
+const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
 
 async function makeTempDir() {
@@ -54,7 +59,20 @@ describe('agent auto-fix hooks', () => {
     expect(chooseFormatter('src/app.ts')).toBe('biome');
     expect(chooseFormatter('docs/README.md')).toBe('dprint');
     expect(chooseFormatter('Dockerfile.release')).toBe('dprint');
+    expect(chooseFormatter('crates/mango-protocol/src/lib.rs')).toBe('rustfmt');
     expect(chooseFormatter('assets/logo.png')).toBeUndefined();
+  });
+
+  it.skipIf(!Bun.which('rustfmt'))('formats a touched Rust file with rustfmt', async () => {
+    const dir = join(repoRoot, '.mango', `agent-hooks-${process.pid}-${Date.now()}`);
+    tempDirs.push(dir);
+    await mkdir(dir, { recursive: true });
+    const filePath = join(dir, 'sample.rs');
+    await writeFile(filePath, 'fn  main( ){let x=1;}\n', 'utf8');
+
+    await runAutoFixHook(JSON.stringify({ tool_input: { file_path: filePath } }));
+
+    expect(await readFile(filePath, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
   });
 
   it('ignores missing touched files without failing the hook', async () => {
@@ -86,5 +104,65 @@ describe('Claude session path hook', () => {
     await updateClaudeEnvPath({ CLAUDE_ENV_FILE: envFile, CLAUDE_PROJECT_DIR: projectDir });
 
     expect(await readFile(envFile, 'utf8')).toBe(createPathExportLine(repoBin, delimiter));
+  });
+});
+
+describe('Claude protect-generated hook', () => {
+  const root = join('/workspace', 'mangostudio');
+
+  it.each([
+    ['CHANGELOG.md', 'bun run changelog'],
+    ['packages/protocol/CHANGELOG.md', 'bun run protocol:release:prepare'],
+    ['apps/frontend/src/routeTree.gen.ts', 'bun run --filter @mangostudio/frontend routes'],
+    ['bun.lock', 'bun install'],
+    ['Cargo.lock', 'cargo update'],
+    ['crates/mango-protocol/fuzz/Cargo.lock', 'cargo update -w --manifest-path'],
+    ['apps/shared/src/runtime-contract/generated/catalog.json', 'bun run contracts:emit'],
+  ])('protects generated file %s', (path, regenerate) => {
+    const match = findProtectedFile(join(root, path), root);
+
+    expect(match?.path).toBe(path);
+    expect(match?.regenerate).toContain(regenerate);
+  });
+
+  it('protects generated files inside a nested agent worktree', () => {
+    const match = findProtectedFile(join(root, '.claude', 'worktrees', 'wt', 'bun.lock'), root);
+
+    expect(match?.path).toBe('bun.lock');
+  });
+
+  it('allows hand-written files and files outside the repo', () => {
+    expect(findProtectedFile(join(root, 'apps', 'api', 'src', 'app.ts'), root)).toBeUndefined();
+    expect(findProtectedFile(join(root, 'docs', 'CHANGELOG-notes.md'), root)).toBeUndefined();
+    expect(findProtectedFile(join('/workspace', 'other', 'CHANGELOG.md'), root)).toBeUndefined();
+  });
+
+  it('blocks a protected edit with the path and the regeneration command', () => {
+    const input = JSON.stringify({ tool_input: { file_path: join(root, 'CHANGELOG.md') } });
+
+    const result = runProtectGeneratedHook(input, root);
+
+    expect(result.blocked).toBe(true);
+    expect(result.message).toContain('CHANGELOG.md');
+    expect(result.message).toContain('bun run changelog');
+  });
+
+  it('lets unprotected and unparseable payloads through', () => {
+    const input = JSON.stringify({ tool_input: { file_path: join(root, 'README.md') } });
+
+    expect(runProtectGeneratedHook(input, root)).toEqual({ blocked: false, message: '' });
+    expect(runProtectGeneratedHook('not json', root)).toEqual({ blocked: false, message: '' });
+  });
+
+  it('exits with code 2 and a stderr reason when run as a Claude hook', async () => {
+    const proc = Bun.spawn(
+      [process.execPath, join(repoRoot, '.claude', 'hooks', 'protect-generated.mjs')],
+      { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }
+    );
+    proc.stdin.write(JSON.stringify({ tool_input: { file_path: join(repoRoot, 'bun.lock') } }));
+    proc.stdin.end();
+
+    expect(await proc.exited).toBe(2);
+    expect(await new Response(proc.stderr).text()).toContain('bun install');
   });
 });
