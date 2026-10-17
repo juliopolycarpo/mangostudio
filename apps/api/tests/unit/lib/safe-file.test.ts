@@ -122,14 +122,15 @@ describe('writeRegularFileAtomic', () => {
   it('preserves the destination permission bits across an overwrite', async () => {
     if (isWindows) return;
     const target = join(dir, 'note.txt');
-    writeFileSync(target, 'first', { mode: 0o640 });
-    // Preserve an explicit mode even when the test runner inherits a restrictive umask.
-    chmodSync(target, 0o640);
+    // Group write is stripped by both the default 022 umask and a restrictive 077
+    // one, so the assertion fails if the writer stops reapplying the mode.
+    writeFileSync(target, 'first', { mode: 0o664 });
+    chmodSync(target, 0o664);
 
     await writeRegularFileAtomic(target, 'second');
 
     expect(readFileSync(target, 'utf8')).toBe('second');
-    expect(statSync(target).mode & 0o777).toBe(0o640);
+    expect(statSync(target).mode & 0o777).toBe(0o664);
   });
 
   it('rejects a non-regular destination and leaves no temp file', async () => {
@@ -405,11 +406,13 @@ describe('writeFileAtomic through symlinks', () => {
   it('inherits the destination permission bits when no mode is requested', () => {
     if (isWindows) return;
     const target = join(dir, 'config.toml');
-    writeFileSync(target, 'old\n', { mode: 0o600 });
+    // A umask-derived default never yields group write, so 0o664 proves inheritance.
+    writeFileSync(target, 'old\n', { mode: 0o664 });
+    chmodSync(target, 0o664);
 
     writeFileAtomic(target, 'new\n');
 
-    expect(statSync(target).mode & 0o777).toBe(0o600);
+    expect(statSync(target).mode & 0o777).toBe(0o664);
   });
 
   it('keeps copy-on-write semantics for a hard-linked destination', () => {
