@@ -40,3 +40,27 @@ export const RUST_CACHE_WRITERS = [
 
 export const MAIN_CACHE_REF = 'refs/heads/main';
 export const MAIN_WRITER_EVENTS = ['push', 'schedule', 'workflow_dispatch'] as const;
+
+// Grammar from Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6:
+// prefix + shared-key (or key + job) + os.type() + os.arch() + 8-hex
+// Rust/environment hash + 8-hex dependency hash. The manifest hash is 64-hex.
+// https://github.com/Swatinem/rust-cache/blob/6323deb102c322ba6fcbdcafc7e3dddab59af2b6/src/config.ts
+// Match the entire key so hyphenated families are never guessed.
+const KEY_GRAMMAR =
+  /^v0-rust-([a-f0-9]{64})-([a-z0-9-]+)-(Linux|Darwin|Windows_NT)-(x64|arm64)-([a-f0-9]{8})-([a-f0-9]{8})$/;
+const KNOWN_FAMILIES = new Set<string>(RUST_CACHE_FAMILIES);
+
+/** Read a known Rust cache key, independently of its ref and archive version. */
+export function parseRustCacheKey(key: string):
+  | {
+      readonly family: string;
+      readonly os: string;
+      readonly arch: string;
+      readonly environment: string;
+    }
+  | undefined {
+  const match = KEY_GRAMMAR.exec(key);
+  if (!match || !KNOWN_FAMILIES.has(match[2])) return;
+  const [, , family, os, arch, environment] = match;
+  return { family, os, arch, environment };
+}

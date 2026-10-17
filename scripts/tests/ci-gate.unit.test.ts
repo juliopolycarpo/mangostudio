@@ -150,6 +150,24 @@ describe('CI / Gate aggregate', () => {
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
   });
 
+  test('mandatory verdict executes before advisory API work, including on report failure', () => {
+    const steps = extractStepBlocks(gateBlock);
+    const verdict = steps.findIndex((step) =>
+      step.includes('run: bun ./scripts/ci/evaluate-gate.ts')
+    );
+    const report = steps.findIndex((step) =>
+      step.includes('run: bun ./scripts/ci/report-cache-usage.ts')
+    );
+    expect(verdict).toBeGreaterThanOrEqual(0);
+    expect(report).toBeGreaterThan(verdict);
+    // A failed verdict still gets its report, but an unavailable API, stuck
+    // reporter process or report step failure cannot replace the verdict.
+    expect(steps[report]).toContain(`if: ${EXPR} always() }}`);
+    expect(steps[report]).toContain('continue-on-error: true');
+    expect(steps[report]).toContain('timeout-minutes: 1');
+    expect(steps[verdict]).not.toContain('continue-on-error: true');
+  });
+
   test('gate accepts qa-metrics on workflow_dispatch and distribution skips when irrelevant', () => {
     // The placeholder count is pinned deliberately: `format` drops arguments it
     // has no slot for, so a fifth skip added without widening this would be
