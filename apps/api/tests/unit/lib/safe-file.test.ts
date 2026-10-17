@@ -71,12 +71,12 @@ describe('writeFileAtomic', () => {
     expect(statSync(target).mode & 0o777).toBe(SECRET_FILE_MODE);
   });
 
-  it('never widens permissions on the temp file before the rename', () => {
+  it('narrows a world-readable destination to the requested secret mode', () => {
     if (isWindows) return;
     // A pre-existing world-readable file must end up owner-only after a secret write.
     const target = join(dir, '.env');
-    writeFileSync(target, 'OLD="x"\n', { mode: 0o644 });
-    // Creation modes are masked by umask; establish the state this write must replace.
+    writeFileSync(target, 'OLD="x"\n');
+    // chmod, not the creation mode, sets the fixture: creation modes are masked by umask.
     chmodSync(target, 0o644);
 
     writeFileAtomic(target, 'NEW="y"\n', { mode: SECRET_FILE_MODE });
@@ -124,7 +124,7 @@ describe('writeRegularFileAtomic', () => {
     const target = join(dir, 'note.txt');
     // Group write is stripped by both the default 022 umask and a restrictive 077
     // one, so the assertion fails if the writer stops reapplying the mode.
-    writeFileSync(target, 'first', { mode: 0o664 });
+    writeFileSync(target, 'first');
     chmodSync(target, 0o664);
 
     await writeRegularFileAtomic(target, 'second');
@@ -407,7 +407,7 @@ describe('writeFileAtomic through symlinks', () => {
     if (isWindows) return;
     const target = join(dir, 'config.toml');
     // A umask-derived default never yields group write, so 0o664 proves inheritance.
-    writeFileSync(target, 'old\n', { mode: 0o664 });
+    writeFileSync(target, 'old\n');
     chmodSync(target, 0o664);
 
     writeFileAtomic(target, 'new\n');
