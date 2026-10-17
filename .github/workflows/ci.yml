@@ -274,7 +274,8 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4}',
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4} {5}',
+            github.event_name != 'pull_request' && 'release-dry-run' || '',
             github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',
             needs.changes.outputs.distribution == 'false' && 'distribution' || '',
             needs.changes.outputs.distribution == 'false' && 'smoke' || '',
@@ -303,6 +304,7 @@ jobs:
       distribution-identity,
       changes,
       distribution,
+      release-dry-run,
       check,
       local-runtime,
       test,
@@ -377,7 +379,8 @@ jobs:
     # toolchain change); on a hit each platform exits after the lookup.
     name: Runtime light cache seed
     needs: [gate, distribution-identity]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # Gate accepts the skipped PR-only dry run; require successful direct needs.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' }}
     # Serialized with itself and never cancelled mid-save; a newer pending
     # seed replaces an older pending one.
     concurrency:

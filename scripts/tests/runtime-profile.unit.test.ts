@@ -478,7 +478,7 @@ describe('runtime profile callers and cache isolation', () => {
         "needs.changes.outputs.release == 'true' && !inputs.reuse_distribution"
       );
       expect(runtime).toContain('cache: false');
-      expect(runtime).not.toContain('profile:');
+      expect(runtime).toContain('profile: shipping');
       expect(extractJobBlock(dryRun, 'changes')).toContain(
         'PR dry runs require their same-run distribution identity'
       );
@@ -528,7 +528,7 @@ describe('runtime profile callers and cache isolation', () => {
     const ci = readText('.github/workflows/ci.yml');
     const seed = extractJobBlock(ci, 'runtime-cache-seed');
     expect(seed).toContain(
-      `if: ${EXPR} github.event_name == 'push' && github.ref == 'refs/heads/main' }}`
+      `if: ${EXPR} !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' }}`
     );
     expect(seed).toContain(`uses: ./${RUNTIME_WORKFLOW}`);
     for (const input of ['profile: light', 'mode: cache-seed', 'cache: true']) {

@@ -2,7 +2,11 @@ import { distributionArtifactName } from '../lib/distribution-manifest';
 
 const TARGETS = ['linux-x64', 'windows-x64'] as const;
 
-/** Validate exact same-run artifact names before a download with an empty name can fan out. */
+/**
+ * Validate exact same-run artifact names before an empty download name can fan out.
+ * @example
+ * dryRunTargetArtifacts(JSON.stringify(targetArtifacts), sourceSha, version);
+ */
 export function dryRunTargetArtifacts(
   raw: string,
   sourceSha: string,

@@ -52,6 +52,7 @@ const runScript = async (
 interface JobScenario {
   readonly results: Readonly<Record<string, string | undefined>>;
   readonly release?: string;
+  readonly reuseDistribution?: boolean;
   readonly cancelled?: boolean;
   readonly event?: string;
   readonly ref?: string;
@@ -79,12 +80,25 @@ function jobRuns(workflow: string, job: string, scenario: JobScenario, override?
   const block = extractJobBlock(workflow, job);
   const expression = override ?? /^ {4}if: (.+)$/m.exec(block)?.[1];
   if (!expression) throw new Error(`${job} must declare its prerequisite guard`);
-  const condition = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  const condition = expression
+    .replace(/^\$\{\{\s*|\s*\}\}$/g, '')
+    .replace(
+      "(needs.runtime.result == 'success' || (inputs.reuse_distribution && needs.runtime.result == 'skipped'))",
+      'runtimeReady'
+    );
   // Parse every atom before evaluating, including unreachable atoms. Unknown
   // syntax must require extending this executable contract, not pass silently.
   const values = condition.split(' && ').map((atom) => {
     if (atom === '!cancelled()') return !scenario.cancelled;
     if (atom === "needs.changes.outputs.release == 'true'") return scenario.release === 'true';
+    if (atom === 'runtimeReady') {
+      if (!parseNeedsList(block).includes('runtime'))
+        throw new Error('Condition reads undeclared prerequisite: runtime');
+      return (
+        scenario.results.runtime === 'success' ||
+        (scenario.reuseDistribution === true && scenario.results.runtime === 'skipped')
+      );
+    }
     if (atom === "github.event_name == 'push'") return scenario.event === 'push';
     if (atom === "github.ref == 'refs/heads/main'") return scenario.ref === 'refs/heads/main';
     const result = /^needs(?:\.([\w-]+)|\['([\w-]+)'\])\.result == 'success'$/.exec(atom);
@@ -161,6 +175,46 @@ describe('Canary prerequisites after the PR-only dry run was added', () => {
   });
 });
 
+describe('light runtime cache seed after the PR-only dry run was added', () => {
+  const mainPush: JobScenario = {
+    results: {
+      ...Object.fromEntries(extractJobBlocks(CI).map(({ job }) => [job, 'success'])),
+      'release-dry-run': 'skipped',
+    },
+    event: 'push',
+    ref: 'refs/heads/main',
+  };
+
+  test('seeds on a green main push despite the skipped PR-only ancestor', () => {
+    expect(jobAncestors(CI, 'runtime-cache-seed')).toContain('release-dry-run');
+    expect(jobRuns(CI, 'runtime-cache-seed', mainPush)).toBe(true);
+  });
+
+  test.each(['gate', 'distribution-identity'])(
+    'refuses an unsuccessful or missing prerequisite (%s)',
+    (producer) => {
+      for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
+        expect(
+          jobRuns(CI, 'runtime-cache-seed', {
+            ...mainPush,
+            results: { ...mainPush.results, [producer]: result },
+          })
+        ).toBe(false);
+      }
+    }
+  );
+
+  test('refuses cancellation, non-main refs and non-push events', () => {
+    expect(jobRuns(CI, 'runtime-cache-seed', { ...mainPush, cancelled: true })).toBe(false);
+    expect(jobRuns(CI, 'runtime-cache-seed', { ...mainPush, ref: 'refs/heads/feature' })).toBe(
+      false
+    );
+    for (const event of ['pull_request', 'workflow_dispatch', 'schedule', undefined]) {
+      expect(jobRuns(CI, 'runtime-cache-seed', { ...mainPush, event })).toBe(false);
+    }
+  });
+});
+
 describe('same-run release dry-run runtime reuse', () => {
   const windowsRuns = (scenario: JobScenario, override?: string): boolean =>
     jobRuns(WORKFLOW, 'dry-run-windows', scenario, override);
@@ -168,6 +222,38 @@ describe('same-run release dry-run runtime reuse', () => {
     results: { changes: 'success', runtime: 'skipped', 'dry-run-linux': 'success' },
     release: 'true',
   };
+
+  test('Linux requires successful source and artifact validation before downloading reused runtimes', () => {
+    const reused: JobScenario = { ...reusedRuntime, reuseDistribution: true };
+    expect(jobRuns(WORKFLOW, 'dry-run-linux', reused)).toBe(true);
+    for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
+      expect(
+        jobRuns(WORKFLOW, 'dry-run-linux', {
+          ...reused,
+          results: { ...reused.results, changes: result },
+        }),
+        `changes=${result}: expected Linux to refuse unvalidated artifact names`
+      ).toBe(false);
+    }
+    expect(jobRuns(WORKFLOW, 'dry-run-linux', { ...reused, cancelled: true })).toBe(false);
+    expect(jobRuns(WORKFLOW, 'dry-run-linux', { ...reused, release: 'false' })).toBe(false);
+    expect(
+      jobRuns(WORKFLOW, 'dry-run-linux', {
+        ...reused,
+        reuseDistribution: false,
+        results: { ...reused.results, runtime: 'success' },
+      })
+    ).toBe(true);
+    for (const result of ['failure', 'cancelled', undefined]) {
+      expect(
+        jobRuns(WORKFLOW, 'dry-run-linux', {
+          ...reused,
+          results: { ...reused.results, runtime: result },
+        })
+      ).toBe(false);
+    }
+    expect(jobRuns(WORKFLOW, 'dry-run-linux', { ...reused, reuseDistribution: false })).toBe(false);
+  });
 
   test('Windows runs after a successful Linux archive despite the deliberately skipped runtime ancestor', () => {
     expect(parseNeedsList(extractJobBlock(WORKFLOW, 'dry-run-windows'))).toEqual([

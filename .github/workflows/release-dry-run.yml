@@ -138,7 +138,7 @@ jobs:
   dry-run-linux:
     name: Linux release dry run
     needs: [changes, runtime]
-    if: ${{ !cancelled() && needs.changes.outputs.release == 'true' && (needs.runtime.result == 'success' || (inputs.reuse_distribution && needs.runtime.result == 'skipped')) }}
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.release == 'true' && (needs.runtime.result == 'success' || (inputs.reuse_distribution && needs.runtime.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -599,6 +599,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_sha || github.sha }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -607,6 +608,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', needs.changes.outputs.release == 'false' && 'runtime' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}', needs.changes.outputs.release == 'false' && 'dry-run-linux' || '', needs.changes.outputs.launcher == 'false' && 'dry-run-cargo' || '', needs.changes.outputs.release == 'false' && 'dry-run-windows' || '', (needs.changes.outputs.release == 'false' || inputs.reuse_distribution) && 'runtime' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

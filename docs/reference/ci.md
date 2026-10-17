@@ -88,12 +88,15 @@ and real-binary qualification retain their commands and relevance predicates.
 
 PR CI calls `release-dry-run.yml` in the same run as Distribution Build, even
 when release paths are irrelevant. Its internal Gate retains relevance-based
-skips and CI Gate includes the reusable workflow result. Relevant PR dry runs
+skips and both CI gates include the reusable workflow result. Relevant PR dry runs
 download the Linux x64 and Windows x64 content-addressed target bundles,
 verify source, version, channel and checksums through `download-distribution`,
-and stage their runtimes for the existing hub build and packaging checks.
+and stage their light-profile runtimes for the existing hub build and packaging checks.
 They use the distribution's PR version throughout installer, health, checksum,
-manifest rendering and lifecycle assertions.
+manifest rendering and lifecycle assertions. Both release dry-run gates accept
+the skipped clean runtime producer on this reuse path. On main pushes, Canary
+and the light runtime cache seed explicitly require successful direct producers
+after Gate accepts the skipped PR-only dry run.
 
 Weekly and manual dry runs keep separate clean, uncached shipping-profile
 runtime builds and the `0.0.0-dryrun` version. The Linux packaging/Docker checks,
