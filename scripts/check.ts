@@ -350,6 +350,11 @@ async function check(): Promise<never> {
 try {
   await check();
 } catch (caught) {
-  writeReport(pendingResults(), reasonText(caught));
+  try {
+    writeReport(pendingResults(), reasonText(caught));
+  } catch (writeFailure) {
+    // The original failure stays the thrown error; the report stays unavailable.
+    console.error(`Check report not written: ${reasonText(writeFailure)}`);
+  }
   throw caught;
 }
