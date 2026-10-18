@@ -183,14 +183,14 @@ async function runRustfmt(filePath) {
 
 async function runFormatter(command) {
   try {
-    await new Promise((resolveProcess) => {
-      Bun.spawn(command, {
-        cwd: repoRoot,
-        stderr: 'ignore',
-        stdout: 'ignore',
-        onExit: resolveProcess,
-      });
+    const formatter = Bun.spawn(command, {
+      cwd: repoRoot,
+      stderr: 'ignore',
+      stdout: 'ignore',
+      timeout: 5000,
+      killSignal: 'SIGKILL',
     });
+    await formatter.exited;
   } catch {
     // Hook formatting should never block the agent workflow.
   }

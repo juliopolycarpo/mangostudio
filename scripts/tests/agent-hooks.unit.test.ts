@@ -21,6 +21,14 @@ import {
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
+// A rustup proxy on PATH does not mean the pinned formatter is installed.
+const installedRustfmt = Bun.which('rustup')
+  ? Bun.spawnSync(['rustup', 'which', 'rustfmt'], {
+      stdout: 'pipe',
+      stderr: 'ignore',
+      timeout: 5000,
+    }).exitCode === 0
+  : Boolean(Bun.which('rustfmt'));
 
 async function makeTempDir() {
   const path = await mkdtemp(join(tmpdir(), 'mango-agent-hooks-'));
@@ -63,7 +71,7 @@ describe('agent auto-fix hooks', () => {
     expect(chooseFormatter('assets/logo.png')).toBeUndefined();
   });
 
-  it.skipIf(!Bun.which('rustfmt'))('formats a touched Rust file with rustfmt', async () => {
+  it.skipIf(!installedRustfmt)('formats a touched Rust file with rustfmt', async () => {
     const dir = join(repoRoot, '.mango', `agent-hooks-${process.pid}-${Date.now()}`);
     tempDirs.push(dir);
     await mkdir(dir, { recursive: true });
@@ -74,6 +82,28 @@ describe('agent auto-fix hooks', () => {
 
     expect(await readFile(filePath, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
   });
+
+  it('bounds a formatter that never exits', async () => {
+    const dir = await makeTempDir();
+    const fakeFormatter = join(dir, 'rustfmt');
+    await writeFile(fakeFormatter, '#!/bin/sh\nexec sleep 60\n', { mode: 0o755 });
+    const filePath = join(repoRoot, '.mango', `formatter-timeout-${process.pid}.rs`);
+    tempDirs.push(filePath);
+    await writeFile(filePath, 'fn main() {}\n');
+    const proc = Bun.spawn([process.execPath, join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')], {
+      env: { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}` },
+      stdin: 'pipe',
+      stdout: 'ignore',
+      stderr: 'pipe',
+      timeout: 8000,
+    });
+    proc.stdin.write(JSON.stringify({ path: filePath }));
+    proc.stdin.end();
+
+    expect(await proc.exited).toBe(0);
+    expect(proc.signalCode).toBeNull();
+    expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
+  }, 10000);
 
   it('ignores missing touched files without failing the hook', async () => {
     await expect(
@@ -145,6 +175,21 @@ describe('Claude protect-generated hook', () => {
     expect(result.blocked).toBe(true);
     expect(result.message).toContain('CHANGELOG.md');
     expect(result.message).toContain('bun run changelog');
+  });
+
+  it('resolves relative edits from the tool working directory', () => {
+    const input = JSON.stringify({
+      cwd: join(root, 'packages', 'protocol'),
+      tool_input: { file_path: 'CHANGELOG.md' },
+    });
+    expect(runProtectGeneratedHook(input, root).message).toContain(
+      'bun run protocol:release:prepare'
+    );
+    const outside = JSON.stringify({
+      cwd: '/workspace/other',
+      tool_input: { file_path: 'CHANGELOG.md' },
+    });
+    expect(runProtectGeneratedHook(outside, root).blocked).toBe(false);
   });
 
   it('lets unprotected and unparseable payloads through', () => {

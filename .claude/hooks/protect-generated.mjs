@@ -53,7 +53,8 @@ export function findProtectedFile(filePath, root = repoRoot) {
  */
 export function runProtectGeneratedHook(input, root = repoRoot) {
   const filePath = extractTouchedFilePath(input) || extractNotebookPath(input);
-  const match = filePath ? findProtectedFile(resolve(root, filePath), root) : undefined;
+  const cwd = extractWorkingDirectory(input, root);
+  const match = filePath ? findProtectedFile(resolve(cwd, filePath), root) : undefined;
 
   if (!match) {
     return { blocked: false, message: '' };
@@ -75,6 +76,15 @@ function toRepoPath(filePath, root) {
   }
 
   return relativePath.replace(nestedWorktreePrefix, '');
+}
+
+function extractWorkingDirectory(input, root) {
+  try {
+    const cwd = JSON.parse(input)?.cwd;
+    return typeof cwd === 'string' && isAbsolute(cwd) ? cwd : root;
+  } catch {
+    return root;
+  }
 }
 
 function extractNotebookPath(input) {
