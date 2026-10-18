@@ -35,7 +35,9 @@ const HOST_TOOLS = new Set([
 /** Validate the CLI contract before classifying optional host findings. */
 export function assessDoctorReport(report, exitCode) {
   if (!report || !Array.isArray(report.checks) || report.checks.length === 0) {
-    throw new Error('doctor returned no checks');
+    throw new Error(
+      `(doctor report): expected a non-empty checks array | received: ${JSON.stringify(report?.checks)}`
+    );
   }
   for (const row of report.checks) {
     if (
@@ -45,22 +47,29 @@ export function assessDoctorReport(report, exitCode) {
       !['ok', 'warn', 'fail'].includes(row.status) ||
       typeof row.detail !== 'string'
     ) {
-      throw new Error('doctor returned an invalid check');
+      throw new Error(
+        `(doctor report): invalid check, expected { label: non-empty string, status: ok | warn | fail, detail: string } | received: ${JSON.stringify(row)}`
+      );
     }
   }
   const failed = report.checks.filter((row) => row.status === 'fail');
   const warnings = report.checks.filter((row) => row.status === 'warn');
   if (report.failures !== failed.length || report.warnings !== warnings.length) {
-    throw new Error('doctor counters disagree with its checks');
+    throw new Error(
+      `(doctor report): expected counters failures=${failed.length} warnings=${warnings.length} | received: failures=${report.failures} warnings=${report.warnings}`
+    );
   }
   const expectedExit = failed.length > 0 ? 1 : 0;
   if (exitCode !== expectedExit) {
-    throw new Error(`doctor exited ${exitCode}; its report requires exit ${expectedExit}`);
+    throw new Error(`(doctor exit): expected ${expectedExit} | received: ${exitCode}`);
   }
   for (const label of REQUIRED) {
     const rows = report.checks.filter((row) => row.label === label);
     if (rows.length !== 1 || rows[0].status !== 'ok') {
-      throw new Error(`distribution check ${label} must appear once and be healthy`);
+      const received = rows.map((row) => row.status).join(', ') || 'missing';
+      throw new Error(
+        `(distribution check ${label}): expected exactly one ok row | received: ${received}`
+      );
     }
   }
   const hostFailures = [];

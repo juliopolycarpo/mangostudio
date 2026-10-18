@@ -159,18 +159,28 @@ describe('nightly npm doctor contract', () => {
   });
 
   test('rejects incomplete, malformed or contradictory doctor reports', () => {
-    for (const value of [null, {}, { checks: [] }, { ...report([]), failures: 1 }]) {
-      expect(() => assessDoctorReport(value, 0)).toThrow();
+    for (const value of [null, {}, { checks: [] }]) {
+      expect(() => assessDoctorReport(value, 0)).toThrow('expected a non-empty checks array');
     }
+    expect(() => assessDoctorReport({ ...report([]), failures: 1 }, 0)).toThrow(
+      'expected counters failures=0 warnings=0 | received: failures=1 warnings=0'
+    );
+    expect(() => assessDoctorReport(report([]), 1)).toThrow(
+      '(doctor exit): expected 0 | received: 1'
+    );
     const incomplete = report([]);
     incomplete.checks.pop();
-    expect(() => assessDoctorReport(incomplete, 0)).toThrow('Runtime binary');
+    expect(() => assessDoctorReport(incomplete, 0)).toThrow(
+      '(distribution check Runtime binary): expected exactly one ok row | received: missing'
+    );
     const duplicate = report([]);
     duplicate.checks.push({ label: 'Home directory', status: 'ok', detail: 'duplicate' });
-    expect(() => assessDoctorReport(duplicate, 0)).toThrow('Home directory');
+    expect(() => assessDoctorReport(duplicate, 0)).toThrow(
+      '(distribution check Home directory): expected exactly one ok row | received: ok, ok'
+    );
     const invalidStatus = report([]);
     invalidStatus.checks = invalidStatus.checks.map((row) => ({ ...row, status: 'unexpected' }));
-    expect(() => assessDoctorReport(invalidStatus, 0)).toThrow('invalid check');
+    expect(() => assessDoctorReport(invalidStatus, 0)).toThrow('"status":"unexpected"');
   });
 
   test('fails closed for new failures and library failures beyond an empty home', () => {
