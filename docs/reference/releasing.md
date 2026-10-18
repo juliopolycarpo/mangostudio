@@ -698,6 +698,17 @@ emits a warning naming both versions.
 Dispatch inputs: `channel` (`canary` default, or `stable`), `version` (exact npm
 version override), and `deep_diagnostics` (runs `doctor --all`).
 
+The npm lane retains the complete `doctor --json` report for both the fresh
+install and the upgrade. `scripts/ci/verify-distribution-doctor.mjs` validates
+the report's shape, counters and original exit code before judging distribution
+health. Core checks (including the auth secret, embedded frontend and sibling
+runtime) must be present and healthy. Missing optional host runtimes, version
+managers and agent CLIs, plus zero Library locations in the empty home, are
+reported separately: the published package does not install these prerequisites.
+Unexpected failures, missing core checks, malformed output and crashes fail the
+lane. `deep_diagnostics` applies to both installations; provider, skills and MCP
+failures remain fatal. The CLI's ordinary `doctor` exit semantics are unchanged.
+
 Deliberate boundaries:
 
 - No build or dependency caches — the lanes test published bytes and installer
@@ -709,13 +720,17 @@ Deliberate boundaries:
   checked-in, non-secret fixture policy exists.
 
 Failures rely on the standard failed-scheduled-run notification (no auto-filed
-issues); npm debug logs are uploaded only on failure and retained for 14 days.
+issues); npm debug logs and doctor JSON reports are uploaded only on failure and
+retained for 14 days.
 Reproduce a lane locally:
 
 ```bash
 # npm lane (any OS with node)
 npm install -g mangostudio@<exact-version>
-mangostudio --version && mangostudio doctor
+mangostudio --version
+doctor_status=0
+mangostudio doctor --json > doctor.json || doctor_status=$?
+node scripts/ci/verify-distribution-doctor.mjs doctor.json "$doctor_status"
 
 # archive lane (substitute the resolved tag/platform)
 gh release download v0.1.1-canary -p 'mangostudio-0.1.1-canary-linux-x64.tar.gz' -p SHA256SUMS

@@ -193,6 +193,12 @@ jobs:
       BETTER_AUTH_SECRET: nightly-smoke-secret-at-least-32-characters-long
       GEMINI_API_KEY: dummy
     steps:
+      # Only the dependency-free report validator comes from source; the
+      # installed package and both doctor invocations still use published bytes.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       # The repo is Bun-native, but npm is the distribution channel under test
       # here: these steps exercise what `npm install -g mangostudio` gives users.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -219,11 +225,13 @@ jobs:
           fi
           home="$RUNNER_TEMP/mango-home-fresh"
           mkdir -p "$home"
+          doctor_args=(doctor --json)
           if [ "$DEEP_DIAGNOSTICS" = "true" ]; then
-            HOME="$home" USERPROFILE="$home" "$bin" doctor --all
-          else
-            HOME="$home" USERPROFILE="$home" "$bin" doctor
+            doctor_args+=(--all)
           fi
+          doctor_status=0
+          HOME="$home" USERPROFILE="$home" "$bin" "${doctor_args[@]}" > "$RUNNER_TEMP/nightly-doctor-fresh.json" || doctor_status=$?
+          node scripts/ci/verify-distribution-doctor.mjs "$RUNNER_TEMP/nightly-doctor-fresh.json" "$doctor_status"
 
       - name: Upgrade from the pinned stable to the resolved version
         # Same as above: the registry install path is the lane's subject.
@@ -254,7 +262,13 @@ jobs:
           fi
           home="$RUNNER_TEMP/mango-home-upgrade"
           mkdir -p "$home"
-          HOME="$home" USERPROFILE="$home" "$bin" doctor
+          doctor_args=(doctor --json)
+          if [ "$DEEP_DIAGNOSTICS" = "true" ]; then
+            doctor_args+=(--all)
+          fi
+          doctor_status=0
+          HOME="$home" USERPROFILE="$home" "$bin" "${doctor_args[@]}" > "$RUNNER_TEMP/nightly-doctor-upgrade.json" || doctor_status=$?
+          node scripts/ci/verify-distribution-doctor.mjs "$RUNNER_TEMP/nightly-doctor-upgrade.json" "$doctor_status"
 
       - name: Stage npm failure diagnostics
         if: failure()
@@ -263,6 +277,9 @@ jobs:
           mkdir -p npm-failure-logs
           cache_dir="$(npm config get cache)"
           cp -R "${cache_dir}/_logs/." npm-failure-logs/ 2>/dev/null || true
+          for report in "$RUNNER_TEMP"/nightly-doctor-*.json; do
+            if [ -f "$report" ]; then cp "$report" npm-failure-logs/; fi
+          done
 
       - name: Upload npm failure diagnostics
         if: failure()
