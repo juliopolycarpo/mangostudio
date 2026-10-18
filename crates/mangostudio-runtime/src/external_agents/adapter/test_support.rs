@@ -15,6 +15,7 @@ use crate::external_agents::supervisor::{
     ExecutableResolver, PortFuture, Ports, Supervisor, WorkspaceAuthority,
 };
 use crate::external_agents::wire;
+use crate::probing::detection::path_env::PathEnv;
 use crate::test_support::ScratchDir;
 
 pub(super) const THREAD: &str = "sdk-test-thread";
@@ -195,6 +196,28 @@ impl Rig {
         target: wire::TargetId,
         limits: Limits,
     ) -> Self {
+        Self::with_environment(launcher, target, limits, PathEnv::default()).await
+    }
+
+    /// A rig whose supervisor reads `environment` as the machine's process environment.
+    ///
+    /// The supervisor builds each launch's environment from this snapshot, so a test sees what a
+    /// real host would hand the vendor child.
+    ///
+    /// ```ignore
+    /// let environment = PathEnv {
+    ///     platform: "linux".into(),
+    ///     home_dir: "/home/synthetic".into(),
+    ///     env: HashMap::from([("PATH".into(), "/usr/bin".into())]),
+    /// };
+    /// let rig = Rig::with_environment(launcher, wire::TargetId::Cursor, limits(), environment).await;
+    /// ```
+    pub async fn with_environment(
+        launcher: Arc<dyn ProcessLauncher>,
+        target: wire::TargetId,
+        limits: Limits,
+        environment: PathEnv,
+    ) -> Self {
         let workspace = ScratchDir::created("sdk-lifecycle-workspace");
         let canonical = crate::workspace_path::canonical_directory(workspace.path()).unwrap();
         let private = ScratchDir::created("sdk-lifecycle-private");
@@ -207,7 +230,7 @@ impl Rig {
             )),
             workspaces: Arc::new(AuthorizedWorkspace(canonical.clone())),
             executables: Arc::new(InstalledExecutable),
-            environment: Arc::new(crate::probing::detection::path_env::PathEnv::default),
+            environment: Arc::new(move || environment.clone()),
             consent: Arc::new(|| true),
             private_root: private.path().to_path_buf(),
             runtime_version: "sdk-test".into(),
@@ -256,7 +279,12 @@ impl Rig {
                 &CancellationToken::new(),
             )
             .await
-            .expect("the actual SDK opens");
+            .unwrap_or_else(|failure| {
+                panic!(
+                    "expected the {:?} session to open | received {failure:?}",
+                    self.params.target_id
+                )
+            });
     }
     pub async fn turn(
         &self,
