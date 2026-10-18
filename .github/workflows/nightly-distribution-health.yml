@@ -456,15 +456,15 @@ jobs:
           MANGOSTUDIO_VERSION: ${{ needs.resolve.outputs.asset_version }}
         run: |
           # Actions writes this as UTF-8 without a BOM; keep the block ASCII
-          # for Windows PowerShell 5.1's ANSI script decoder.
-          $LASTEXITCODE = 0
+          # for Windows PowerShell 5.1's ANSI script decoder. install.ps1
+          # fails via `throw`, which aborts the block on its own; only the
+          # native mangostudio.cmd probe below reports through $LASTEXITCODE.
           if ($env:CHANNEL -eq 'canary') {
             Remove-Item Env:\MANGOSTUDIO_VERSION -ErrorAction SilentlyContinue
             & install-script\install.ps1 -Canary
           } else {
             & install-script\install.ps1
           }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $actual = & "$env:MANGOSTUDIO_BIN_DIR\mangostudio.cmd" --version
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($actual -ne $env:ARCHIVE_VERSION) {

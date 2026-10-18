@@ -155,17 +155,18 @@ describe('nightly distribution health workflow', () => {
       expect([...Buffer.from(body)].every((byte) => byte < 128)).toBe(true);
     });
 
-    test('resets $LASTEXITCODE before install.ps1 and checks it after each native step', () => {
+    test('checks $LASTEXITCODE only after the native version probe', () => {
       const body = windowsRunBlock(readText(WORKFLOW_PATH));
-      const reset = body.indexOf('$LASTEXITCODE = 0');
-      const install = body.indexOf('& install-script\\install.ps1');
+      const probe = body.indexOf('mangostudio.cmd" --version');
+      const comparison = body.indexOf('if ($actual -ne $env:ARCHIVE_VERSION)');
       const guards = [...body.matchAll(/if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}/g)];
 
-      expect(reset).toBeGreaterThanOrEqual(0);
-      expect(reset).toBeLessThan(install);
-      expect(guards).toHaveLength(2);
-      expect(guards[0]?.index).toBeGreaterThan(body.lastIndexOf('install-script\\install.ps1'));
-      expect(guards[1]?.index).toBeGreaterThan(body.indexOf('mangostudio.cmd'));
+      // install.ps1 fails via `throw`; $LASTEXITCODE after it is whatever native
+      // command ran last inside the script, not the script's own status.
+      expect(body).not.toContain('$LASTEXITCODE = 0');
+      expect(guards).toHaveLength(1);
+      expect(guards[0]?.index).toBeGreaterThan(probe);
+      expect(guards[0]?.index).toBeLessThan(comparison);
     });
 
     test('runs one lane per OS against the pinned identity, with no toolchain setup', () => {
