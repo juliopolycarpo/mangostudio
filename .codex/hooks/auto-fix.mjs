@@ -43,6 +43,45 @@ export function extractTouchedFilePath(input) {
 }
 
 /**
+ * Read the hook's absolute working directory, falling back to the repository root.
+ * // Usage: const cwd = extractHookCwd(input); // '/repo/packages/protocol'
+ */
+export function extractHookCwd(input, root = repoRoot) {
+  const cwd = parseHookInput(input)?.cwd;
+  return typeof cwd === 'string' && isAbsolute(cwd) ? cwd : root;
+}
+
+/**
+ * List the absolute paths a touched file may name: from the hook cwd first, then the repo root
+ * when the cwd is inside the repo, since agents also send repo-relative paths from nested dirs.
+ * // Usage: candidatePaths('CHANGELOG.md', '/repo/packages/protocol', '/repo'); // ['/repo/packages/protocol/CHANGELOG.md', '/repo/CHANGELOG.md']
+ */
+export function candidatePaths(filePath, cwd, root = repoRoot) {
+  if (!filePath) {
+    return [];
+  }
+
+  if (isAbsolute(filePath)) {
+    return [resolve(filePath)];
+  }
+
+  const fromCwd = resolve(cwd, filePath);
+  return isInsideRepo(cwd, root) ? [fromCwd, resolve(root, filePath)] : [fromCwd];
+}
+
+async function resolveTouchedPath(input) {
+  const candidates = candidatePaths(extractTouchedFilePath(input), extractHookCwd(input));
+
+  for (const candidate of candidates) {
+    if (await isExistingFile(candidate)) {
+      return candidate;
+    }
+  }
+
+  return '';
+}
+
+/**
  * Check whether a resolved file path belongs to the current repository.
  * // Usage: if (!isInsideRepo(filePath)) return;
  */
@@ -93,9 +132,9 @@ export function chooseFormatter(filePath) {
  */
 export async function runAutoFixHook(input) {
   const hookInput = input ?? (await readStdin());
-  const filePath = resolveTouchedPath(extractTouchedFilePath(hookInput));
+  const filePath = await resolveTouchedPath(hookInput);
 
-  if (!(await isExistingFile(filePath)) || !isInsideRepo(filePath) || shouldSkipFile(filePath)) {
+  if (!filePath || !isInsideRepo(filePath) || shouldSkipFile(filePath)) {
     return;
   }
 
@@ -128,14 +167,6 @@ function normalizePath(filePath) {
 
 function isDockerfile(filePath) {
   return basename(filePath).toLowerCase().startsWith('dockerfile');
-}
-
-function resolveTouchedPath(filePath) {
-  if (!filePath) {
-    return '';
-  }
-
-  return isAbsolute(filePath) ? resolve(filePath) : resolve(repoRoot, filePath);
 }
 
 async function isExistingFile(filePath) {

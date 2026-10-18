@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, join, relative } from 'node:path';
 import {
   findProtectedFile,
   runProtectGeneratedHook,
@@ -12,6 +12,7 @@ import {
   updateClaudeEnvPath,
 } from '../../.claude/hooks/session-path.mjs';
 import {
+  candidatePaths,
   chooseFormatter,
   extractTouchedFilePath,
   isInsideRepo,
@@ -105,6 +106,56 @@ describe('agent auto-fix hooks', () => {
     expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
   }, 10000);
 
+  it('lists cwd-relative paths before repo-root ones only for a cwd inside the repo', () => {
+    const root = join('/workspace', 'mangostudio');
+    const nested = join(root, 'crates', 'foo');
+
+    expect(candidatePaths('src/lib.rs', nested, root)).toEqual([
+      join(nested, 'src', 'lib.rs'),
+      join(root, 'src', 'lib.rs'),
+    ]);
+    expect(candidatePaths('src/lib.rs', root, root)).toEqual([join(root, 'src', 'lib.rs')]);
+    expect(candidatePaths('lib.rs', '/workspace/other', root)).toEqual(['/workspace/other/lib.rs']);
+    expect(candidatePaths(join(nested, 'lib.rs'), root, root)).toEqual([join(nested, 'lib.rs')]);
+    expect(candidatePaths('', root, root)).toEqual([]);
+  });
+
+  it.each([
+    ['cwd-relative', () => 'sample.rs'],
+    ['repo-relative', (dir: string) => relative(repoRoot, join(dir, 'sample.rs'))],
+  ])(
+    'formats a %s touched file from a nested cwd',
+    async (_kind, touchedPath) => {
+      const bin = await makeTempDir();
+      const marker = join(bin, 'formatted');
+      await writeFile(join(bin, 'rustfmt'), `#!/bin/sh\nprintf '%s' "$1" > '${marker}'\n`, {
+        mode: 0o755,
+      });
+      const dir = join(repoRoot, '.mango', `agent-hooks-cwd-${process.pid}-${Date.now()}`);
+      tempDirs.push(dir);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'sample.rs'), 'fn main() {}\n');
+      const proc = Bun.spawn(
+        [process.execPath, join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')],
+        {
+          env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+          stdin: 'pipe',
+          stdout: 'ignore',
+          stderr: 'ignore',
+          timeout: 8000,
+        }
+      );
+      proc.stdin.write(JSON.stringify({ cwd: dir, path: touchedPath(dir) }));
+      proc.stdin.end();
+
+      expect(await proc.exited).toBe(0);
+      expect(await readFile(marker, 'utf8').catch(() => 'rustfmt was not run')).toBe(
+        join(dir, 'sample.rs')
+      );
+    },
+    10000
+  );
+
   it('ignores missing touched files without failing the hook', async () => {
     await expect(
       runAutoFixHook(JSON.stringify({ path: 'missing-file.ts' }))
@@ -190,6 +241,17 @@ describe('Claude protect-generated hook', () => {
       tool_input: { file_path: 'CHANGELOG.md' },
     });
     expect(runProtectGeneratedHook(outside, root).blocked).toBe(false);
+  });
+
+  it('falls back to the repo root for a repo-relative path from a nested cwd', () => {
+    const input = JSON.stringify({
+      cwd: join(root, 'packages', 'protocol'),
+      tool_input: { file_path: 'packages/protocol/CHANGELOG.md' },
+    });
+
+    expect(runProtectGeneratedHook(input, root).message).toContain(
+      'bun run protocol:release:prepare'
+    );
   });
 
   it('lets unprotected and unparseable payloads through', () => {

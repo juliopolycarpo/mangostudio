@@ -1,7 +1,11 @@
 import { isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { extractTouchedFilePath } from '../../.codex/hooks/auto-fix.mjs';
+import {
+  candidatePaths,
+  extractHookCwd,
+  extractTouchedFilePath,
+} from '../../.codex/hooks/auto-fix.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 const nestedWorktreePrefix = /^\.claude\/worktrees\/[^/]+\//;
@@ -53,8 +57,9 @@ export function findProtectedFile(filePath, root = repoRoot) {
  */
 export function runProtectGeneratedHook(input, root = repoRoot) {
   const filePath = extractTouchedFilePath(input) || extractNotebookPath(input);
-  const cwd = extractWorkingDirectory(input, root);
-  const match = filePath ? findProtectedFile(resolve(cwd, filePath), root) : undefined;
+  const match = candidatePaths(filePath, extractHookCwd(input, root), root)
+    .map((candidate) => findProtectedFile(candidate, root))
+    .find(Boolean);
 
   if (!match) {
     return { blocked: false, message: '' };
@@ -76,15 +81,6 @@ function toRepoPath(filePath, root) {
   }
 
   return relativePath.replace(nestedWorktreePrefix, '');
-}
-
-function extractWorkingDirectory(input, root) {
-  try {
-    const cwd = JSON.parse(input)?.cwd;
-    return typeof cwd === 'string' && isAbsolute(cwd) ? cwd : root;
-  } catch {
-    return root;
-  }
 }
 
 function extractNotebookPath(input) {
