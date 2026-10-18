@@ -17,7 +17,7 @@ use tokio::sync::Notify;
 
 use super::backend::{Backend, ProductHarnesses};
 use super::lifecycle_tests::observed;
-use super::test_support::{self as fixtures, CodexPeer, Rig};
+use super::test_support::{self as fixtures, CodexPeer, Rig, VersionAnsweringLauncher};
 use crate::external_agents::failure::{AgentFailure, CleanupOutcome, FailureCause};
 use crate::external_agents::port::{AgentBackend, AgentSession, CloseCause, TurnRequest};
 use crate::external_agents::wire;
@@ -428,7 +428,7 @@ async fn claude_reports_a_refused_close_the_way_codex_does() {
         fake.push(CodexPeer::default().process(Announcer::new()));
         let (codex_launcher, log) = observed(fake.clone(), false, refusals);
         let backend = Backend::new(
-            codex_launcher,
+            VersionAnsweringLauncher::over(codex_launcher),
             Arc::new(ProductHarnesses),
             limits(),
             Duration::from_millis(500),
