@@ -205,7 +205,11 @@ impl Rig {
     /// real host would hand the vendor child.
     ///
     /// ```ignore
-    /// let environment = PathEnv { env: HashMap::from([("PATH".into(), "/usr/bin".into())]), ..PathEnv::default() };
+    /// let environment = PathEnv {
+    ///     platform: "linux".into(),
+    ///     home_dir: "/home/synthetic".into(),
+    ///     env: HashMap::from([("PATH".into(), "/usr/bin".into())]),
+    /// };
     /// let rig = Rig::with_environment(launcher, wire::TargetId::Cursor, limits(), environment).await;
     /// ```
     pub async fn with_environment(
@@ -275,7 +279,12 @@ impl Rig {
                 &CancellationToken::new(),
             )
             .await
-            .expect("the actual SDK opens");
+            .unwrap_or_else(|failure| {
+                panic!(
+                    "expected the {:?} session to open | received {failure:?}",
+                    self.params.target_id
+                )
+            });
     }
     pub async fn turn(
         &self,
