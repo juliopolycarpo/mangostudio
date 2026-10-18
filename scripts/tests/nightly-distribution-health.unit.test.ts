@@ -11,6 +11,20 @@ import { readText } from './support/read-text';
 // pattern or let matrix lanes drift onto different channel identities.
 
 const WORKFLOW_PATH = '.github/workflows/nightly-distribution-health.yml';
+const WINDOWS_STEP_NAME = '- name: Run the install script and verify its own report (Windows)';
+
+/** Returns the `run:` body of the Windows install-script step, failing loudly when it is absent. */
+function windowsRunBlock(workflow: string): string {
+  const [, windowsStep = ''] = workflow.split(WINDOWS_STEP_NAME);
+  const [, run = ''] = windowsStep.split('        run: |\n');
+  const [body = ''] = run.split('\n  health-summary:');
+  if (!body.includes('install.ps1')) {
+    throw new Error(
+      `(nightly workflow): expected Windows step "${WINDOWS_STEP_NAME}" with a run block invoking install.ps1 | received: ${body.length} bytes`
+    );
+  }
+  return body;
+}
 
 describe('nightly distribution health workflow', () => {
   test('the redundant extended Windows smoke workflow stays deleted', () => {
@@ -130,6 +144,31 @@ describe('nightly distribution health workflow', () => {
   });
 
   describe('install-script lane', () => {
+    test('keeps the Windows PowerShell run block safe to decode without a UTF-8 BOM', () => {
+      const workflow = readText(WORKFLOW_PATH);
+      const body = windowsRunBlock(workflow);
+
+      expect(body).toContain('install-script\\install.ps1');
+      // Actions writes this temporary .ps1 without a BOM. Windows PowerShell
+      // 5.1 reads it as ANSI: an UTF-8 em dash becomes a smart closing quote
+      // under Windows-1252 and terminates the warning string prematurely.
+      expect([...Buffer.from(body)].every((byte) => byte < 128)).toBe(true);
+    });
+
+    test('checks $LASTEXITCODE only after the native version probe', () => {
+      const body = windowsRunBlock(readText(WORKFLOW_PATH));
+      const probe = body.indexOf('mangostudio.cmd" --version');
+      const comparison = body.indexOf('if ($actual -ne $env:ARCHIVE_VERSION)');
+      const guards = [...body.matchAll(/if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}/g)];
+
+      // install.ps1 fails via `throw`; $LASTEXITCODE after it is whatever native
+      // command ran last inside the script, not the script's own status.
+      expect(body).not.toContain('$LASTEXITCODE = 0');
+      expect(guards).toHaveLength(1);
+      expect(guards[0]?.index).toBeGreaterThan(probe);
+      expect(guards[0]?.index).toBeLessThan(comparison);
+    });
+
     test('runs one lane per OS against the pinned identity, with no toolchain setup', () => {
       const workflow = readText(WORKFLOW_PATH);
 
