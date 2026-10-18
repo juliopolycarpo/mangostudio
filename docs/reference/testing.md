@@ -1863,6 +1863,13 @@ mode that reports a trusted-`main` match; `restore-save` sees a primary-key hit
 only. `cache-restored` is therefore only safe to gate an install step when the
 call site opts into both exact restore and `mode: restore` (today: Playwright).
 
+`setup-mango` also rechecks the exact Bun key with a metadata-only lookup
+(`lookup-only`, `exact-restore`) after the frozen install and before its inline save on
+`main` pushes. A completed exact hit skips compression, since another caller already saved
+the immutable key. A failed lookup or a miss keeps the normal save, so no writer is
+excluded and no install waits. Callers that miss at the same moment can still race at
+reserve.
+
 ### Turbo snapshot rotation
 
 `actions/cache` never overwrites a key. A snapshot keyed by validity alone keeps
