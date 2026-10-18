@@ -17,15 +17,29 @@ use super::test_support::{self as fixtures, Rig};
 use crate::external_agents::wire;
 use crate::probing::detection::path_env::PathEnv;
 
-const FORWARDED: [(&str, &str); 3] = [
+const FORWARDED: [(&str, &str); 7] = [
     ("XDG_CONFIG_HOME", "/home/synthetic/.config-elsewhere"),
     ("XDG_DATA_HOME", "/home/synthetic/.data-elsewhere"),
+    ("XDG_STATE_HOME", "/home/synthetic/.state-elsewhere"),
+    ("XDG_CACHE_HOME", "/home/synthetic/.cache-elsewhere"),
+    ("APPDATA", r"D:\Users\synthetic\Roaming"),
+    ("LOCALAPPDATA", r"D:\Users\synthetic\Local"),
     ("CURSOR_CONFIG_DIR", "/home/synthetic/.cursor-elsewhere"),
 ];
-const WITHHELD: [(&str, &str); 3] = [
+const WITHHELD: [(&str, &str); 7] = [
     ("XDG_RUNTIME_DIR", "/run/user/1000"),
     ("GITHUB_TOKEN", "ghp_synthetic_never_forwarded"),
     ("OPENAI_API_KEY", "sk-synthetic-never-forwarded"),
+    ("CURSOR_API_KEY", "cursor-synthetic-never-forwarded"),
+    (
+        "CURSOR_AUTH_TOKEN",
+        "cursor-token-synthetic-never-forwarded",
+    ),
+    ("NODE_OPTIONS", "--require=/synthetic/injected.js"),
+    (
+        "HTTPS_PROXY",
+        "http://synthetic:credential@proxy.invalid:8080",
+    ),
 ];
 
 /// A Linux machine whose process environment holds `pairs` beside a `PATH`.
@@ -76,4 +90,5 @@ async fn a_cursor_child_reads_the_users_config_location_and_never_a_credential()
         );
     }
     rig.close().await;
+    fixtures::reaped(&launcher).await;
 }
