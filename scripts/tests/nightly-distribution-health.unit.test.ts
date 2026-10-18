@@ -130,6 +130,21 @@ describe('nightly distribution health workflow', () => {
   });
 
   describe('install-script lane', () => {
+    test('keeps the Windows PowerShell run block safe to decode without a UTF-8 BOM', () => {
+      const workflow = readText(WORKFLOW_PATH);
+      const [, windowsStep = ''] = workflow.split(
+        '- name: Run the install script and verify its own report (Windows)'
+      );
+      const [, run = ''] = windowsStep.split('        run: |\n');
+      const [body = ''] = run.split('\n  health-summary:');
+
+      expect(body.length).toBeGreaterThan(0);
+      // Actions writes this temporary .ps1 without a BOM. Windows PowerShell
+      // 5.1 reads it as ANSI: an UTF-8 em dash becomes a smart closing quote
+      // under Windows-1252 and terminates the warning string prematurely.
+      expect([...Buffer.from(body)].every((byte) => byte < 128)).toBe(true);
+    });
+
     test('runs one lane per OS against the pinned identity, with no toolchain setup', () => {
       const workflow = readText(WORKFLOW_PATH);
 
