@@ -98,7 +98,7 @@ const makeCliFixture = () => {
   const git = Bun.spawnSync(['git', 'init', '--quiet'], { cwd: directory });
   if (!git.success) throw new Error(git.stderr.toString());
   const fakeTool =
-    '#!/bin/sh\ncase "$0" in\n  */turbo) if [ "$CHECK_FIXTURE_TURBO_DELAY" = yes ]; then exec sleep 30; fi; exit "$CHECK_FIXTURE_TURBO_EXIT";;\n  *) exit "$CHECK_FIXTURE_DPRINT_EXIT";;\nesac\n';
+    '#!/bin/sh\ncase "$0" in\n  */turbo) if [ -n "$CHECK_FIXTURE_LOCK_DIR" ]; then chmod 500 "$CHECK_FIXTURE_LOCK_DIR"; fi; if [ "$CHECK_FIXTURE_TURBO_DELAY" = yes ]; then exec sleep 30; fi; exit "$CHECK_FIXTURE_TURBO_EXIT";;\n  *) exit "$CHECK_FIXTURE_DPRINT_EXIT";;\nesac\n';
   for (const tool of ['turbo', 'bunx']) {
     const path = join(directory, tool);
     writeFileSync(path, fakeTool);
@@ -188,6 +188,24 @@ describe.skipIf(process.platform === 'win32')('Check CLI result parity', () => {
       expect(result.stderr).toContain('Invalid MANGO_RUNNER_CONCURRENCY');
       expect(result.stderr).toContain('2 task(s) failed.');
     } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
+  test('a report write that fails after setup keeps the original failure visible', async () => {
+    const fixture = makeCliFixture();
+    try {
+      // The fake turbo task locks the report directory, so the first task
+      // snapshot and the top-level fallback snapshot both fail to write.
+      const result = await runCli(
+        ['--api', '--report-file', fixture.path, '--report-id', CHECK_INVOCATION_ID],
+        { ...fixture.env, CHECK_FIXTURE_LOCK_DIR: fixture.directory },
+        fixture.directory
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain('Check report not written:');
+    } finally {
+      chmodSync(fixture.directory, 0o700);
       rmSync(fixture.directory, { recursive: true, force: true });
     }
   });
