@@ -47,6 +47,8 @@ beforeAll(async () => {
     entrypoint,
     `const marker = process.env.MANGO_TEST_RUSTFMT_MARKER;
 if (!marker) throw new Error('fake rustfmt expected a marker path');
+// Model cold startup inside the formatter deadline without slowing the fast cases.
+if (process.env.MANGO_TEST_RUSTFMT_HANG === '1') await Bun.sleep(1000);
 await Bun.write(marker, JSON.stringify({
   args: process.argv.slice(2), cwd: process.cwd(), pid: process.pid, startedAt: Date.now(),
 }));
@@ -121,6 +123,8 @@ describe('agent auto-fix hooks', () => {
     const filePath = join(repoRoot, '.mango', `formatter-timeout-${process.pid}.rs`);
     tempDirs.push(filePath);
     await writeFile(filePath, 'fn main() {}\n');
+    // The formatter deadline includes startup, before the fake can write its marker.
+    const startedAt = performance.now();
     const proc = Bun.spawn([process.execPath, join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')], {
       env: {
         // The hook must stop rustfmt itself; inherited --no-orphans would mask a leak.
@@ -138,6 +142,7 @@ describe('agent auto-fix hooks', () => {
     proc.stdin.end();
 
     const exitCode = await proc.exited;
+    const elapsedMs = performance.now() - startedAt;
     const started = JSON.parse(await readFile(marker, 'utf8'));
     let stopped = false;
     try {
@@ -145,7 +150,7 @@ describe('agent auto-fix hooks', () => {
       expect(proc.signalCode).toBeNull();
       expect(started.args).toEqual([filePath]);
       expect(started.cwd).toBe(repoRoot);
-      expect(Date.now() - started.startedAt).toBeGreaterThanOrEqual(4500);
+      expect(elapsedMs).toBeGreaterThanOrEqual(4500);
       expect(() => process.kill(started.pid, 0)).toThrow(
         expect.objectContaining({ code: 'ESRCH' })
       );
