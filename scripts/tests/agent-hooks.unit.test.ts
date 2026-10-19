@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join, relative } from 'node:path';
+import { delimiter, join, relative, resolve } from 'node:path';
 import {
   findProtectedFile,
   runProtectGeneratedHook,
@@ -22,6 +22,7 @@ import {
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
+let fakeRustfmtBin: string;
 // A rustup proxy on PATH does not mean the pinned formatter is installed.
 const installedRustfmt = Bun.which('rustup')
   ? Bun.spawnSync(['rustup', 'which', 'rustfmt'], {
@@ -36,6 +37,35 @@ async function makeTempDir() {
   tempDirs.push(path);
   return path;
 }
+
+beforeAll(async () => {
+  // A native executable exercises the hook's real PATH lookup on Windows too.
+  fakeRustfmtBin = await mkdtemp(join(tmpdir(), 'mango-fake-rustfmt-'));
+  const entrypoint = join(fakeRustfmtBin, 'fake-rustfmt.ts');
+  await writeFile(
+    entrypoint,
+    `const marker = process.env.MANGO_TEST_RUSTFMT_MARKER;
+if (!marker) throw new Error('fake rustfmt expected a marker path');
+await Bun.write(marker, JSON.stringify({
+  args: process.argv.slice(2), cwd: process.cwd(), pid: process.pid, startedAt: Date.now(),
+}));
+if (process.env.MANGO_TEST_RUSTFMT_HANG === '1') await Bun.sleep(60_000);
+`
+  );
+  const result = await Bun.build({
+    entrypoints: [entrypoint],
+    compile: {
+      outfile: join(fakeRustfmtBin, process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt'),
+      autoloadDotenv: false,
+      autoloadBunfig: false,
+    },
+  });
+  expect(result.success, result.logs.map(String).join('\n')).toBe(true);
+}, 30_000);
+
+afterAll(async () => {
+  if (fakeRustfmtBin) await rm(fakeRustfmtBin, { recursive: true, force: true });
+});
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -86,13 +116,17 @@ describe('agent auto-fix hooks', () => {
 
   it('bounds a formatter that never exits', async () => {
     const dir = await makeTempDir();
-    const fakeFormatter = join(dir, 'rustfmt');
-    await writeFile(fakeFormatter, '#!/bin/sh\nexec sleep 60\n', { mode: 0o755 });
+    const marker = join(dir, 'started.json');
     const filePath = join(repoRoot, '.mango', `formatter-timeout-${process.pid}.rs`);
     tempDirs.push(filePath);
     await writeFile(filePath, 'fn main() {}\n');
     const proc = Bun.spawn([process.execPath, join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')], {
-      env: { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}` },
+      env: {
+        ...process.env,
+        PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
+        MANGO_TEST_RUSTFMT_MARKER: marker,
+        MANGO_TEST_RUSTFMT_HANG: '1',
+      },
       stdin: 'pipe',
       stdout: 'ignore',
       stderr: 'pipe',
@@ -101,13 +135,34 @@ describe('agent auto-fix hooks', () => {
     proc.stdin.write(JSON.stringify({ path: filePath }));
     proc.stdin.end();
 
-    expect(await proc.exited).toBe(0);
-    expect(proc.signalCode).toBeNull();
-    expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
+    const exitCode = await proc.exited;
+    const started = JSON.parse(await readFile(marker, 'utf8'));
+    let stopped = false;
+    try {
+      expect(exitCode).toBe(0);
+      expect(proc.signalCode).toBeNull();
+      expect(started.args).toEqual([filePath]);
+      expect(started.cwd).toBe(repoRoot);
+      expect(Date.now() - started.startedAt).toBeGreaterThanOrEqual(4500);
+      expect(() => process.kill(started.pid, 0)).toThrow(
+        expect.objectContaining({ code: 'ESRCH' })
+      );
+      stopped = true;
+      expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
+    } finally {
+      if (!stopped) {
+        try {
+          process.kill(started.pid, 'SIGKILL');
+        } catch {
+          // Already stopped by the formatter timeout.
+        }
+      }
+    }
   }, 10000);
 
   it('lists cwd-relative paths before repo-root ones only for a cwd inside the repo', () => {
-    const root = join('/workspace', 'mangostudio');
+    const root = resolve('/workspace', 'mangostudio');
+    const outside = resolve('/workspace', 'other');
     const nested = join(root, 'crates', 'foo');
 
     expect(candidatePaths('src/lib.rs', nested, root)).toEqual([
@@ -115,7 +170,7 @@ describe('agent auto-fix hooks', () => {
       join(root, 'src', 'lib.rs'),
     ]);
     expect(candidatePaths('src/lib.rs', root, root)).toEqual([join(root, 'src', 'lib.rs')]);
-    expect(candidatePaths('lib.rs', '/workspace/other', root)).toEqual(['/workspace/other/lib.rs']);
+    expect(candidatePaths('lib.rs', outside, root)).toEqual([join(outside, 'lib.rs')]);
     expect(candidatePaths(join(nested, 'lib.rs'), root, root)).toEqual([join(nested, 'lib.rs')]);
     expect(candidatePaths('', root, root)).toEqual([]);
   });
@@ -128,9 +183,6 @@ describe('agent auto-fix hooks', () => {
     async (_kind, touchedPath) => {
       const bin = await makeTempDir();
       const marker = join(bin, 'formatted');
-      await writeFile(join(bin, 'rustfmt'), `#!/bin/sh\nprintf '%s' "$1" > '${marker}'\n`, {
-        mode: 0o755,
-      });
       const dir = join(repoRoot, '.mango', `agent-hooks-cwd-${process.pid}-${Date.now()}`);
       tempDirs.push(dir);
       await mkdir(dir, { recursive: true });
@@ -138,7 +190,12 @@ describe('agent auto-fix hooks', () => {
       const proc = Bun.spawn(
         [process.execPath, join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')],
         {
-          env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+          env: {
+            ...process.env,
+            PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
+            MANGO_TEST_RUSTFMT_MARKER: marker,
+            MANGO_TEST_RUSTFMT_HANG: '0',
+          },
           stdin: 'pipe',
           stdout: 'ignore',
           stderr: 'ignore',
@@ -149,9 +206,9 @@ describe('agent auto-fix hooks', () => {
       proc.stdin.end();
 
       expect(await proc.exited).toBe(0);
-      expect(await readFile(marker, 'utf8').catch(() => 'rustfmt was not run')).toBe(
-        join(dir, 'sample.rs')
-      );
+      const recorded = JSON.parse(await readFile(marker, 'utf8'));
+      expect(recorded.args).toEqual([join(dir, 'sample.rs')]);
+      expect(recorded.cwd).toBe(repoRoot);
     },
     10000
   );
