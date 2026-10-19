@@ -212,18 +212,51 @@ async function runRustfmt(filePath) {
   await runFormatter(['rustfmt', filePath]);
 }
 
+const formatterTimeoutMs = 5000;
+
+// A formatter may be a proxy (rustup, `bun x`) whose real process is a grandchild, so the
+// deadline stops the whole tree: its own process group on POSIX, `taskkill /T` on Windows,
+// where `detached` would only let the tree escape Bun's job object.
 async function runFormatter(command) {
+  let formatter;
   try {
-    const formatter = Bun.spawn(command, {
+    formatter = Bun.spawn(command, {
       cwd: repoRoot,
       stderr: 'ignore',
       stdout: 'ignore',
-      timeout: 5000,
-      killSignal: 'SIGKILL',
+      detached: process.platform !== 'win32',
     });
-    await formatter.exited;
   } catch {
     // Hook formatting should never block the agent workflow.
+    return;
+  }
+
+  const deadline = setTimeout(() => stopFormatterTree(formatter), formatterTimeoutMs);
+  try {
+    await formatter.exited;
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
+function stopFormatterTree(formatter) {
+  try {
+    if (process.platform === 'win32') {
+      Bun.spawnSync(['taskkill', '/T', '/F', '/PID', String(formatter.pid)], {
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+    } else {
+      process.kill(-formatter.pid, 'SIGKILL');
+    }
+  } catch {
+    // The tree already exited.
+  }
+  try {
+    // The formatter itself must stop even when the tree could not be reached.
+    formatter.kill('SIGKILL');
+  } catch {
+    // Already stopped.
   }
 }
 
