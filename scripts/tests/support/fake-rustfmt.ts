@@ -18,19 +18,33 @@ export const HANG_ENV = 'MANGO_TEST_RUSTFMT_HANG';
 export const GRANDCHILD_ENV = 'MANGO_TEST_RUSTFMT_GRANDCHILD';
 export const HEARTBEAT_MS = 50;
 
-/** The heartbeat file beside a marker. */
+/**
+ * The heartbeat file beside a marker.
+ *
+ * @example
+ * heartbeatPath('/tmp/started.json'); // '/tmp/started.json.beat'
+ */
 export function heartbeatPath(marker: string): string {
   return `${marker}.beat`;
 }
 
-/** The marker of the copy a hanging fake starts. */
+/**
+ * The marker of the copy a hanging fake starts.
+ *
+ * @example
+ * grandchildMarker('/tmp/started.json'); // '/tmp/started.json.grandchild'
+ */
 export function grandchildMarker(marker: string): string {
   return `${marker}.grandchild`;
 }
 
 if (import.meta.main) {
   const marker = process.env[MARKER_ENV];
-  if (!marker) throw new Error(`fake rustfmt expected ${MARKER_ENV}`);
+  if (!marker) {
+    throw new Error(
+      `fake rustfmt (${MARKER_ENV}): expected a marker file path | received: ${JSON.stringify(marker)}`
+    );
+  }
   const hang = process.env[HANG_ENV] === '1';
 
   if (hang && process.env[GRANDCHILD_ENV] !== '1') {
