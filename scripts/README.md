@@ -340,13 +340,13 @@ updates it as tasks finish. Cancellation can therefore retain finished labels
 alongside unfinished ones, with the signal exit recorded when the exit handler
 can run. A hard kill leaves pending evidence whose provisional exit cannot match
 a successful subprocess. An intermediate snapshot that cannot be written is
-logged and leaves the previous one in place; it never relabels a task, and only
-a failed final write fails Check. The validator in `../lib/check-result.ts`
-rejects unexpected fields, mismatched identity/arguments/exit, missing or
-duplicate tasks, contradictory success, and payloads over 128 KiB. Missing,
-truncated, invalid or unavailable reports make QA tooling explicitly
-unavailable, never zero errors or a passing check. Human logs are not used as
-report evidence.
+logged and leaves the previous one in place; it never relabels a task. The
+setup, pre-run and final writes still fail Check when they cannot be written.
+The validator in `../lib/check-result.ts` rejects unexpected fields, mismatched
+identity/arguments/exit, missing or duplicate tasks, contradictory success, and
+payloads over 128 KiB. Missing, truncated, invalid or unavailable reports make
+QA tooling explicitly unavailable, never zero errors or a passing check. Human
+logs are not used as report evidence.
 
 ## release/ — release-time packaging + publication
 
