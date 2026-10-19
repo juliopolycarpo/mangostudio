@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import {
-  chmodSync,
   cpSync,
   linkSync,
   mkdirSync,
@@ -100,8 +99,12 @@ const runCli = async (args: string[], environment: Record<string, string>, root:
 };
 
 const EXECUTABLE_EXTENSION = process.platform === 'win32' ? '.exe' : '';
+const FAILING_GIT_DIRECTORY = 'failing-git';
 
-/** Compiles the fake `turbo` and `bunx` once, into one directory for every CLI fixture's `PATH`. */
+/**
+ * Compiles the fake tools once: `turbo` and `bunx` for every CLI fixture's `PATH`, and `git`
+ * in its own directory for the one test that fails Check's change scan.
+ */
 const compileFakeCheckTools = async (directory: string) => {
   const turbo = join(directory, `turbo${EXECUTABLE_EXTENSION}`);
   const result = await Bun.build({
@@ -116,6 +119,8 @@ const compileFakeCheckTools = async (directory: string) => {
   expect(result.success, result.logs.map(String).join('\n')).toBe(true);
   // The fake reads its tool name from the path it was started by.
   linkSync(turbo, join(directory, `bunx${EXECUTABLE_EXTENSION}`));
+  mkdirSync(join(directory, FAILING_GIT_DIRECTORY));
+  linkSync(turbo, join(directory, FAILING_GIT_DIRECTORY, `git${EXECUTABLE_EXTENSION}`));
 };
 
 const makeCliFixture = (fakeToolDirectory: string) => {
@@ -261,27 +266,36 @@ describe('Check CLI result parity', () => {
     }
   });
 
-  // Windows has no POSIX directory permissions to lock the report with.
-  test.skipIf(process.platform === 'win32')(
-    'a report write that fails after setup keeps the original failure visible',
-    async () => {
-      const fixture = makeCliFixture(fakeToolDirectory);
-      try {
-        // The fake turbo task locks the report directory, so the first task
-        // snapshot and the top-level fallback snapshot both fail to write.
-        const result = await runCli(
-          ['--api', '--report-file', fixture.path, '--report-id', CHECK_INVOCATION_ID],
-          { ...fixture.env, CHECK_FIXTURE_LOCK_DIR: fixture.directory },
-          fixture.directory
-        );
-        expect(result.exitCode).not.toBe(0);
-        expect(result.stderr).toContain('Check report not written:');
-      } finally {
-        chmodSync(fixture.directory, 0o700);
-        rmSync(fixture.directory, { recursive: true, force: true });
-      }
+  test('a failed fallback write keeps the original failure as the thrown error', async () => {
+    const fixture = makeCliFixture(fakeToolDirectory);
+    try {
+      // The fake git blocks the report before failing the change scan, so the
+      // top-level handler cannot publish its unavailable report.
+      const failingGit = join(fakeToolDirectory, FAILING_GIT_DIRECTORY);
+      const result = await runCli(
+        [
+          '--changed',
+          '--base',
+          'HEAD',
+          '--report-file',
+          fixture.path,
+          '--report-id',
+          CHECK_INVOCATION_ID,
+        ],
+        {
+          ...fixture.env,
+          PATH: `${failingGit}${delimiter}${fixture.env.PATH}`,
+          CHECK_FIXTURE_BLOCK_REPORT: fixture.path,
+        },
+        fixture.directory
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr).toContain('Check report not written:');
+      expect(result.stderr).toContain('fake git failed after blocking the report');
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
     }
-  );
+  });
 
   test('a CLI setup abort leaves an explicit unavailable report', async () => {
     const fixture = makeCliFixture(fakeToolDirectory);
