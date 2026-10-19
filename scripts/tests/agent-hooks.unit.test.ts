@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join, relative } from 'node:path';
+import { delimiter, join, relative, resolve } from 'node:path';
 import {
   findProtectedFile,
   runProtectGeneratedHook,
@@ -19,9 +19,22 @@ import {
   runAutoFixHook,
   shouldSkipFile,
 } from '../../.codex/hooks/auto-fix.mjs';
+import { fixtureChildEnvironment } from './support/child-supervision';
+import {
+  GRANDCHILD_ENV,
+  grandchildMarker,
+  HANG_ENV,
+  HEARTBEAT_MS,
+  heartbeatPath,
+  MARKER_ENV,
+} from './support/fake-rustfmt-markers';
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
+const hookEntrypoints = [
+  ['Codex', join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')],
+  ['Claude', join(repoRoot, '.claude', 'hooks', 'auto-fix.mjs')],
+] as const;
 // A rustup proxy on PATH does not mean the pinned formatter is installed.
 const installedRustfmt = Bun.which('rustup')
   ? Bun.spawnSync(['rustup', 'which', 'rustfmt'], {
@@ -37,11 +50,78 @@ async function makeTempDir() {
   return path;
 }
 
+/** Reads a fake's marker, naming the fake that never started instead of a bare ENOENT. */
+async function readMarker(marker: string, who: string) {
+  const text = await readFile(marker, 'utf8').catch(() => {
+    throw new Error(`${who} never started | expected: a marker at ${marker} | received: none`);
+  });
+  return JSON.parse(text) as { args: string[]; cwd: string; pid: number };
+}
+
+/**
+ * True when the fake behind `marker` still beats. A stopped process cannot, so unlike a pid
+ * probe this never mistakes an unrelated process that reused the pid for the fake.
+ */
+async function stillBeating(marker: string) {
+  const read = () => readFile(heartbeatPath(marker), 'utf8').catch(() => '');
+  const before = await read();
+  await Bun.sleep(HEARTBEAT_MS * 6);
+  return (await read()) !== before;
+}
+
+/**
+ * Waits for the fake behind `marker` to beat once, naming it if it never does.
+ *
+ * @example
+ * await firstHeartbeat(marker, 'fake rustfmt');
+ */
+async function firstHeartbeat(marker: string, who: string, timeoutMs = 5000) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    if (await Bun.file(heartbeatPath(marker)).exists()) return;
+    await Bun.sleep(HEARTBEAT_MS);
+  }
+  throw new Error(
+    `${who} never beat | expected: ${heartbeatPath(marker)} within ${timeoutMs}ms | received: none`
+  );
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
 describe('agent auto-fix hooks', () => {
+  let fakeRustfmtBin = '';
+
+  beforeAll(async () => {
+    // A native executable exercises the hook's real PATH lookup on Windows too.
+    fakeRustfmtBin = await mkdtemp(join(tmpdir(), 'mango-fake-rustfmt-'));
+    const result = await Bun.build({
+      entrypoints: [join(import.meta.dir, 'support', 'fake-rustfmt.ts')],
+      compile: {
+        outfile: join(fakeRustfmtBin, process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt'),
+        // The fake runs in the repo root; its bunfig.toml and .env are not the fake's.
+        autoloadDotenv: false,
+        autoloadBunfig: false,
+      },
+    });
+    expect(result.success, result.logs.map(String).join('\n')).toBe(true);
+  }, 30_000);
+
+  afterAll(async () => {
+    if (fakeRustfmtBin) await rm(fakeRustfmtBin, { recursive: true, force: true });
+  });
+
+  /** The environment of a hook whose rustfmt hangs and starts a grandchild. */
+  const hangingFormatterEnv = (marker: string) => ({
+    // The hook must stop rustfmt itself; inherited --no-orphans would mask a leak.
+    ...fixtureChildEnvironment(),
+    PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
+    [MARKER_ENV]: marker,
+    [HANG_ENV]: '1',
+    [GRANDCHILD_ENV]: '0',
+  });
+
   it('extracts touched files from Claude and Codex hook payloads', () => {
     const claudeInput = JSON.stringify({ tool_input: { file_path: 'apps/api/src/app.ts' } });
     const codexInput = JSON.stringify({ path: 'README.md' });
@@ -84,15 +164,16 @@ describe('agent auto-fix hooks', () => {
     expect(await readFile(filePath, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
   });
 
-  it('bounds a formatter that never exits', async () => {
+  it('bounds a formatter that never exits, grandchildren included', async () => {
     const dir = await makeTempDir();
-    const fakeFormatter = join(dir, 'rustfmt');
-    await writeFile(fakeFormatter, '#!/bin/sh\nexec sleep 60\n', { mode: 0o755 });
+    const marker = join(dir, 'started.json');
     const filePath = join(repoRoot, '.mango', `formatter-timeout-${process.pid}.rs`);
     tempDirs.push(filePath);
     await writeFile(filePath, 'fn main() {}\n');
-    const proc = Bun.spawn([process.execPath, join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')], {
-      env: { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}` },
+    // The formatter deadline includes startup, before the fake can write its marker.
+    const startedAt = performance.now();
+    const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
+      env: hangingFormatterEnv(marker),
       stdin: 'pipe',
       stdout: 'ignore',
       stderr: 'pipe',
@@ -101,13 +182,89 @@ describe('agent auto-fix hooks', () => {
     proc.stdin.write(JSON.stringify({ path: filePath }));
     proc.stdin.end();
 
-    expect(await proc.exited).toBe(0);
-    expect(proc.signalCode).toBeNull();
-    expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
+    const exitCode = await proc.exited;
+    const elapsedMs = performance.now() - startedAt;
+    const fakes = [
+      [marker, 'fake rustfmt'],
+      [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
+    ] as const;
+    const leaked: number[] = [];
+    try {
+      expect(exitCode).toBe(0);
+      expect(proc.signalCode).toBeNull();
+      expect(elapsedMs).toBeGreaterThanOrEqual(4500);
+      expect(elapsedMs).toBeLessThan(7000);
+      for (const [fakeMarker, who] of fakes) {
+        const started = await readMarker(fakeMarker, who);
+        expect(started.args).toEqual([filePath]);
+        expect(started.cwd).toBe(repoRoot);
+        if (await stillBeating(fakeMarker)) leaked.push(started.pid);
+      }
+      expect(leaked).toEqual([]);
+      expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
+    } finally {
+      for (const pid of leaked) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // Stopped between the heartbeat check and here.
+        }
+      }
+    }
   }, 10000);
 
+  // Windows has no group signal to forward; Bun's job object ends the hook's children there.
+  it.skipIf(process.platform === 'win32')(
+    'stops the formatter tree when the agent cancels the hook before the deadline',
+    async () => {
+      const dir = await makeTempDir();
+      const marker = join(dir, 'started.json');
+      const filePath = join(repoRoot, '.mango', `formatter-cancel-${process.pid}.rs`);
+      tempDirs.push(filePath);
+      await writeFile(filePath, 'fn main() {}\n');
+      // An agent cancels a hook by signalling the group it started the hook in.
+      const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
+        env: hangingFormatterEnv(marker),
+        detached: true,
+        stdin: 'pipe',
+        stdout: 'ignore',
+        stderr: 'ignore',
+        timeout: 8000,
+      });
+      proc.stdin.write(JSON.stringify({ path: filePath }));
+      proc.stdin.end();
+
+      const fakes = [
+        [marker, 'fake rustfmt'],
+        [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
+      ] as const;
+      const leaked: number[] = [];
+      try {
+        for (const [fakeMarker, who] of fakes) await firstHeartbeat(fakeMarker, who);
+        process.kill(-proc.pid, 'SIGTERM');
+        await proc.exited;
+        for (const [fakeMarker, who] of fakes) {
+          const started = await readMarker(fakeMarker, who);
+          if (await stillBeating(fakeMarker)) leaked.push(started.pid);
+        }
+        expect(leaked).toEqual([]);
+        expect(proc.exitCode).toBe(143);
+      } finally {
+        for (const pid of leaked) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            // Stopped between the heartbeat check and here.
+          }
+        }
+      }
+    },
+    10000
+  );
+
   it('lists cwd-relative paths before repo-root ones only for a cwd inside the repo', () => {
-    const root = join('/workspace', 'mangostudio');
+    const root = resolve('/workspace', 'mangostudio');
+    const outside = resolve('/workspace', 'other');
     const nested = join(root, 'crates', 'foo');
 
     expect(candidatePaths('src/lib.rs', nested, root)).toEqual([
@@ -115,43 +272,49 @@ describe('agent auto-fix hooks', () => {
       join(root, 'src', 'lib.rs'),
     ]);
     expect(candidatePaths('src/lib.rs', root, root)).toEqual([join(root, 'src', 'lib.rs')]);
-    expect(candidatePaths('lib.rs', '/workspace/other', root)).toEqual(['/workspace/other/lib.rs']);
+    expect(candidatePaths('lib.rs', outside, root)).toEqual([join(outside, 'lib.rs')]);
     expect(candidatePaths(join(nested, 'lib.rs'), root, root)).toEqual([join(nested, 'lib.rs')]);
     expect(candidatePaths('', root, root)).toEqual([]);
   });
 
-  it.each([
-    ['cwd-relative', () => 'sample.rs'],
-    ['repo-relative', (dir: string) => relative(repoRoot, join(dir, 'sample.rs'))],
-  ])(
-    'formats a %s touched file from a nested cwd',
-    async (_kind, touchedPath) => {
+  it.each(
+    hookEntrypoints.flatMap(([agent, entrypoint]) => [
+      [agent, 'cwd-relative', entrypoint, () => 'sample.rs'] as const,
+      [
+        agent,
+        'repo-relative',
+        entrypoint,
+        (dir: string) => relative(repoRoot, join(dir, 'sample.rs')),
+      ] as const,
+    ])
+  )(
+    'the %s hook formats a %s touched file from a nested cwd',
+    async (_agent, _kind, entrypoint, touchedPath) => {
       const bin = await makeTempDir();
       const marker = join(bin, 'formatted');
-      await writeFile(join(bin, 'rustfmt'), `#!/bin/sh\nprintf '%s' "$1" > '${marker}'\n`, {
-        mode: 0o755,
-      });
       const dir = join(repoRoot, '.mango', `agent-hooks-cwd-${process.pid}-${Date.now()}`);
       tempDirs.push(dir);
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, 'sample.rs'), 'fn main() {}\n');
-      const proc = Bun.spawn(
-        [process.execPath, join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')],
-        {
-          env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
-          stdin: 'pipe',
-          stdout: 'ignore',
-          stderr: 'ignore',
-          timeout: 8000,
-        }
-      );
+      const proc = Bun.spawn([process.execPath, entrypoint], {
+        env: {
+          ...process.env,
+          PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
+          [MARKER_ENV]: marker,
+          [HANG_ENV]: '0',
+        },
+        stdin: 'pipe',
+        stdout: 'ignore',
+        stderr: 'ignore',
+        timeout: 8000,
+      });
       proc.stdin.write(JSON.stringify({ cwd: dir, path: touchedPath(dir) }));
       proc.stdin.end();
 
       expect(await proc.exited).toBe(0);
-      expect(await readFile(marker, 'utf8').catch(() => 'rustfmt was not run')).toBe(
-        join(dir, 'sample.rs')
-      );
+      const recorded = await readMarker(marker, 'fake rustfmt');
+      expect(recorded.args).toEqual([join(dir, 'sample.rs')]);
+      expect(recorded.cwd).toBe(repoRoot);
     },
     10000
   );
