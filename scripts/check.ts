@@ -184,6 +184,43 @@ const pendingResults = (): CheckTaskResult[] =>
       }
   );
 
+// A snapshot is interruption evidence only. A failed one keeps the previous
+// unavailable snapshot and never relabels a task; the final write decides.
+const writeSnapshot = (): void => {
+  try {
+    writeReport(pendingResults(), null);
+  } catch (caught) {
+    console.error(`Check report snapshot not written: ${reasonText(caught)}`);
+  }
+};
+
+const observedResult = (result: RunResult): CheckTaskResult =>
+  result.unavailableReason
+    ? { label: result.label, state: 'unavailable', reason: reasonText(result.unavailableReason) }
+    : {
+        label: result.label,
+        state: 'executed',
+        exitCode: result.exitCode,
+        durationMs: result.duration,
+      };
+
+// Reported runs also retain every result when an individual spawn/setup throws.
+async function runReportedTask(task: CheckTask): Promise<RunResult> {
+  let result: RunResult;
+  try {
+    result = await task.run();
+  } catch (caught) {
+    const reason = reasonText(caught);
+    console.error(reason);
+    observed.set(task.label, { label: task.label, state: 'unavailable', reason });
+    writeSnapshot();
+    return { label: task.label, exitCode: 1, duration: 0 };
+  }
+  observed.set(task.label, observedResult(result));
+  writeSnapshot();
+  return result;
+}
+
 // An early abort or signal leaves explicit unavailable evidence, never a prior success.
 writeReport([], 'Check setup did not finish');
 
@@ -310,38 +347,9 @@ async function check(): Promise<never> {
   tasks.push(localTask('root:shared-import-boundary', () => assertNoSharedRootImports()));
 
   // Ordinary runs retain the runner's existing console and exit behavior.
-  // Reported runs also retain every result when an individual spawn/setup throws.
   writeReport(pendingResults(), null);
   const results = await runParallel(
-    tasks.map((task) => async () => {
-      if (!reportTarget) return task.run();
-      try {
-        const result = await task.run();
-        observed.set(
-          task.label,
-          result.unavailableReason
-            ? {
-                label: result.label,
-                state: 'unavailable',
-                reason: reasonText(result.unavailableReason),
-              }
-            : {
-                label: result.label,
-                state: 'executed',
-                exitCode: result.exitCode,
-                durationMs: result.duration,
-              }
-        );
-        writeReport(pendingResults(), null);
-        return result;
-      } catch (caught) {
-        const reason = reasonText(caught);
-        console.error(reason);
-        observed.set(task.label, { label: task.label, state: 'unavailable', reason });
-        writeReport(pendingResults(), null);
-        return { label: task.label, exitCode: 1, duration: 0 };
-      }
-    })
+    tasks.map((task) => () => (reportTarget ? runReportedTask(task) : task.run()))
   );
   writeReport(pendingResults(), null);
   exitWithResults(results);
