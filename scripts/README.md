@@ -194,41 +194,6 @@ reason — never a global ignore.
 
 ## qa-gate/ — PR QA report automation
 
-Check's local subprocess adapter replaces console-label parsing for tooling
-metrics. `bun run check --all --report-file <path> --report-id <UUID>` preserves
-the console summary and exit code, and writes an internal JSON document to the
-chosen file. `collect/tooling.ts` creates a fresh temporary directory and UUID
-for each invocation, validates the document and observed process exit, and
-removes the temporary directory afterward. It continues to execute Check
-locally; this document does not enable cross-job artifact reuse. Per-component
-TypeScript error counts still come from direct `tsc` executions in
-`collect/typescript.ts`.
-
-The document's `kind` is `mangostudio.check-result` and `schemaVersion` is `1`.
-`invocationId` identifies the caller; `args` records its exact Check arguments
-with the two report flags removed. `plannedTasks` lists ordered labels, and
-`tasks` records each label exactly once. An `executed` task has `exitCode` and
-`durationMs`; an `unavailable` task has a `reason` because setup or execution
-could not finish. The top-level `state` is `completed` or `unavailable`,
-`exitCode` records Check's command exit, and `error` is a setup reason
-or null. A completed report with any failed task requires exit 1; unavailable
-evidence requires a nonzero exit, including cancellation's signal status.
-An empty completed result is valid only for a scoped invocation with
-no changed or staged files.
-
-Check writes a pending unavailable report before executing tasks and atomically
-updates it as tasks finish. Cancellation can therefore retain finished labels
-alongside unfinished ones, with the signal exit recorded when the exit handler
-can run. A hard kill leaves pending evidence whose provisional exit cannot match
-a successful subprocess. An intermediate snapshot that cannot be written is
-logged and leaves the previous one in place; it never relabels a task, and only
-a failed final write fails Check. The validator in `../lib/check-result.ts`
-rejects unexpected fields, mismatched identity/arguments/exit, missing or
-duplicate tasks, contradictory success, and payloads over 128 KiB. Missing,
-truncated, invalid or unavailable reports make QA tooling explicitly
-unavailable, never zero errors or a passing check. Human logs are not used as
-report evidence.
-
 Powers the two QA bot comments on every PR: QA metrics, and commits plus
 changelog preview. Collection runs
 unprivileged inside CI (`ci.yml`); publishing runs in the trusted
@@ -345,6 +310,43 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   deletes legacy comments (the retired combined report included) only after
   both replacements are written, and skips publishing when the PR head has
   moved on.
+
+### Check result report
+
+Check's local subprocess adapter replaces console-label parsing for tooling
+metrics. `bun run check --all --report-file <path> --report-id <UUID>` preserves
+the console summary and exit code, and writes an internal JSON document to the
+chosen file. `collect/tooling.ts` creates a fresh temporary directory and UUID
+for each invocation, validates the document and observed process exit, and
+removes the temporary directory afterward. It continues to execute Check
+locally; this document does not enable cross-job artifact reuse. Per-component
+TypeScript error counts still come from direct `tsc` executions in
+`collect/typescript.ts`.
+
+The document's `kind` is `mangostudio.check-result` and `schemaVersion` is `1`.
+`invocationId` identifies the caller; `args` records its exact Check arguments
+with the two report flags removed. `plannedTasks` lists ordered labels, and
+`tasks` records each label exactly once. An `executed` task has `exitCode` and
+`durationMs`; an `unavailable` task has a `reason` because setup or execution
+could not finish. The top-level `state` is `completed` or `unavailable`,
+`exitCode` records Check's command exit, and `error` is a setup reason
+or null. A completed report with any failed task requires exit 1; unavailable
+evidence requires a nonzero exit, including cancellation's signal status.
+An empty completed result is valid only for a scoped invocation with
+no changed or staged files.
+
+Check writes a pending unavailable report before executing tasks and atomically
+updates it as tasks finish. Cancellation can therefore retain finished labels
+alongside unfinished ones, with the signal exit recorded when the exit handler
+can run. A hard kill leaves pending evidence whose provisional exit cannot match
+a successful subprocess. An intermediate snapshot that cannot be written is
+logged and leaves the previous one in place; it never relabels a task, and only
+a failed final write fails Check. The validator in `../lib/check-result.ts`
+rejects unexpected fields, mismatched identity/arguments/exit, missing or
+duplicate tasks, contradictory success, and payloads over 128 KiB. Missing,
+truncated, invalid or unavailable reports make QA tooling explicitly
+unavailable, never zero errors or a passing check. Human logs are not used as
+report evidence.
 
 ## release/ — release-time packaging + publication
 
