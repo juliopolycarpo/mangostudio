@@ -8,6 +8,9 @@ import { type RunResult, runCommand } from '../exec';
 import { ensureTool } from './bootstrap';
 import type { ToolName } from './manifest';
 
+/** Ordered labels for Check's task manifest, including bootstrap failures. */
+export const ACTIONS_LINT_LABELS = ['root:actionlint', 'root:zizmor', 'root:shellcheck'] as const;
+
 /** Paths that must trigger repository-wide workflow analysis in scoped runs. */
 export function touchesActionsLintSurface(files: string[]): boolean {
   return files.some(
@@ -66,14 +69,16 @@ const defaultDeps: ActionsLintDeps = {
 };
 
 function toBootstrapFailure(label: string, caught: unknown): RunResult {
-  console.error(caught instanceof Error ? caught.message : String(caught));
-  return { label, exitCode: 1, duration: 0 };
+  const reason = caught instanceof Error ? caught.message : String(caught);
+  console.error(reason);
+  return { label, exitCode: 1, duration: 0, unavailableReason: reason || 'Tool bootstrap failed' };
 }
 
 /** Build the three parallel lint tasks; bootstrap failures fail the task. */
 export function createActionsLintTasks(
   deps: ActionsLintDeps = defaultDeps
 ): Array<() => Promise<RunResult>> {
+  const [actionlintLabel, zizmorLabel, shellcheckLabel] = ACTIONS_LINT_LABELS;
   return [
     async () => {
       try {
@@ -81,17 +86,17 @@ export function createActionsLintTasks(
           deps.ensure('actionlint'),
           deps.ensure('shellcheck'),
         ]);
-        return await deps.run('root:actionlint', createActionlintCommand(actionlint, shellcheck));
+        return await deps.run(actionlintLabel, createActionlintCommand(actionlint, shellcheck));
       } catch (caught) {
-        return toBootstrapFailure('root:actionlint', caught);
+        return toBootstrapFailure(actionlintLabel, caught);
       }
     },
     async () => {
       try {
         const zizmor = await deps.ensure('zizmor');
-        return await deps.run('root:zizmor', createZizmorCommand(zizmor));
+        return await deps.run(zizmorLabel, createZizmorCommand(zizmor));
       } catch (caught) {
-        return toBootstrapFailure('root:zizmor', caught);
+        return toBootstrapFailure(zizmorLabel, caught);
       }
     },
     async () => {
@@ -99,11 +104,11 @@ export function createActionsLintTasks(
         const shellcheck = await deps.ensure('shellcheck');
         const scripts = deps.listShellScripts();
         if (scripts.length === 0) {
-          return { label: 'root:shellcheck', exitCode: 0, duration: 0 };
+          return { label: shellcheckLabel, exitCode: 0, duration: 0 };
         }
-        return await deps.run('root:shellcheck', createShellcheckCommand(shellcheck, scripts));
+        return await deps.run(shellcheckLabel, createShellcheckCommand(shellcheck, scripts));
       } catch (caught) {
-        return toBootstrapFailure('root:shellcheck', caught);
+        return toBootstrapFailure(shellcheckLabel, caught);
       }
     },
   ];
