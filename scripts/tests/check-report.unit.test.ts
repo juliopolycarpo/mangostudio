@@ -228,6 +228,39 @@ describe('Check CLI result parity', () => {
     }
   });
 
+  test('a failed snapshot never relabels a finished task', async () => {
+    const fixture = makeCliFixture(fakeToolDirectory);
+    try {
+      // Turbo blocks the report, so its snapshot fails. Dprint runs next and
+      // unblocks it, so the final write must record every task as executed.
+      const result = await runCli(
+        ['--api', '--report-file', fixture.path, '--report-id', CHECK_INVOCATION_ID],
+        {
+          ...fixture.env,
+          MANGO_RUNNER_CONCURRENCY: '1',
+          CHECK_FIXTURE_BLOCK_REPORT: fixture.path,
+          CHECK_FIXTURE_UNBLOCK_REPORT: fixture.path,
+        },
+        fixture.directory
+      );
+      expect(result.stderr).toContain('Check report snapshot not written:');
+      expect(result.exitCode).toBe(0);
+      const report = parseCheckResult(readFileSync(fixture.path, 'utf8'), {
+        invocationId: CHECK_INVOCATION_ID,
+        args: ['--api'],
+        exitCode: 0,
+      });
+      expect(report.state).toBe('completed');
+      expect(report.tasks.map((task) => `${task.label}:${task.state}`)).toEqual([
+        'workspaces:check:executed',
+        'root:dprint:api:executed',
+        'root:shared-import-boundary:executed',
+      ]);
+    } finally {
+      rmSync(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
   // Windows has no POSIX directory permissions to lock the report with.
   test.skipIf(process.platform === 'win32')(
     'a report write that fails after setup keeps the original failure visible',
