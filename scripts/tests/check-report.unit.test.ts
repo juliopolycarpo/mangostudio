@@ -118,7 +118,14 @@ const compileFakeCheckTools = async (directory: string) => {
   });
   expect(result.success, result.logs.map(String).join('\n')).toBe(true);
   // The fake reads its tool name from the path it was started by.
-  linkSync(turbo, join(directory, `bunx${EXECUTABLE_EXTENSION}`));
+  const bunx = join(directory, `bunx${EXECUTABLE_EXTENSION}`);
+  linkSync(turbo, bunx);
+  // Windows can spend seconds scanning a new executable on its first start. Pay that once
+  // here, outside every case's timeout, and confirm the linked name answers as `bunx`.
+  const started = Bun.spawnSync([bunx, 'dprint', 'check'], {
+    env: { ...process.env, CHECK_FIXTURE_DPRINT_EXIT: '0' },
+  });
+  expect(started.exitCode, started.stderr.toString()).toBe(0);
   mkdirSync(join(directory, FAILING_GIT_DIRECTORY));
   linkSync(turbo, join(directory, FAILING_GIT_DIRECTORY, `git${EXECUTABLE_EXTENSION}`));
 };
@@ -154,7 +161,7 @@ describe('Check CLI result parity', () => {
   beforeAll(async () => {
     fakeToolDirectory = mkdtempSync(join(tmpdir(), 'mango-fake-check-tool-'));
     await compileFakeCheckTools(fakeToolDirectory);
-  }, 30_000);
+  }, 60_000);
 
   afterAll(() => {
     if (fakeToolDirectory) rmSync(fakeToolDirectory, { recursive: true, force: true });
