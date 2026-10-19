@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { access, mkdir, mkdtemp, open, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { CHECK_RESULT_MAX_BYTES, type CheckResult } from '../../lib/check-result';
 import { completedCheckFixture, executedCheckTask } from '../../tests/support/check-result-fixture';
@@ -272,6 +272,7 @@ describe('collectToolingStats', () => {
     const error = new Error('spawn bun ENOENT');
     const check = makeFakeCheck(error);
     await expect(collectToolingStats(check.run)).rejects.toBe(error);
-    await expect(access(check.commands[0][5])).rejects.toThrow();
+    // The fake throws before writing a report, so only the directory proves cleanup.
+    await expect(access(dirname(check.commands[0][5]))).rejects.toThrow();
   });
 });
