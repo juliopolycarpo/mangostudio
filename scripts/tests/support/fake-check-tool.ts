@@ -1,12 +1,13 @@
 /**
- * A stand-in for the `turbo` and `bunx dprint` commands Check spawns, compiled by
+ * A stand-in for the `turbo`, `bunx dprint` and `git` commands Check spawns, compiled by
  * `check-report.unit.test.ts` into native executables named after each tool, so Check's real
  * `PATH` lookup finds them on Windows too.
  *
- * - `turbo` locks `CHECK_FIXTURE_LOCK_DIR` and blocks `CHECK_FIXTURE_BLOCK_REPORT` when set,
- *   sleeps when `CHECK_FIXTURE_TURBO_DELAY=yes`, then exits with `CHECK_FIXTURE_TURBO_EXIT`.
+ * - `turbo` blocks `CHECK_FIXTURE_BLOCK_REPORT` when set, sleeps when
+ *   `CHECK_FIXTURE_TURBO_DELAY=yes`, then exits with `CHECK_FIXTURE_TURBO_EXIT`.
  * - `bunx` unblocks `CHECK_FIXTURE_UNBLOCK_REPORT` once Check has failed to publish a snapshot
  *   onto it, then exits with `CHECK_FIXTURE_DPRINT_EXIT`.
+ * - `git` blocks `CHECK_FIXTURE_BLOCK_REPORT` and fails with a fixed message.
  *
  * Blocking replaces the report file with a directory, so Check's next rename onto it fails and
  * leaves its temporary file beside it.
@@ -14,7 +15,7 @@
  * @example
  * CHECK_FIXTURE_TURBO_EXIT=2 turbo run check --filter=@mangostudio/api
  */
-import { chmodSync, mkdirSync, readdirSync, rmdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync, rmdirSync, rmSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 
 const UNBLOCK_TIMEOUT_MS = 10_000;
@@ -56,14 +57,21 @@ async function unblockAfterFailedSnapshot(report: string): Promise<void> {
 }
 
 const tool = basename(process.execPath).replace(/\.exe$/i, '');
+if (tool === 'git') {
+  const report = fixtureEnv('CHECK_FIXTURE_BLOCK_REPORT');
+  if (!report) {
+    throw new Error('fake git (block): expected CHECK_FIXTURE_BLOCK_REPORT | received: unset');
+  }
+  blockReport(report);
+  console.error('fake git failed after blocking the report');
+  process.exit(128);
+}
 if (tool === 'bunx') {
   const report = fixtureEnv('CHECK_FIXTURE_UNBLOCK_REPORT');
   if (report) await unblockAfterFailedSnapshot(report);
   process.exit(exitCodeFrom('CHECK_FIXTURE_DPRINT_EXIT'));
 }
 
-const lockDirectory = fixtureEnv('CHECK_FIXTURE_LOCK_DIR');
-if (lockDirectory) chmodSync(lockDirectory, 0o500);
 const report = fixtureEnv('CHECK_FIXTURE_BLOCK_REPORT');
 if (report) blockReport(report);
 if (fixtureEnv('CHECK_FIXTURE_TURBO_DELAY') === 'yes') await Bun.sleep(30_000);
