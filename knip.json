@@ -25,6 +25,7 @@
         "scripts/tests/**/*.test.ts",
         "scripts/tests/support/fake-smoke-server.ts",
         "scripts/tests/support/fake-build-smoke-server.ts",
+        "scripts/tests/support/fake-check-tool.ts",
         "scripts/tests/support/fake-rustfmt.ts",
         "scripts/tests/support/fake-smoke-workflow-command.ts",
         "scripts/tests/support/fixture-command-main.ts",

@@ -1,7 +1,8 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import {
   chmodSync,
   cpSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -10,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 import { checkReportTarget, writeCheckReport } from '../lib/check-report';
 import { parseCheckResult } from '../lib/check-result';
@@ -72,10 +73,21 @@ describe('Check report file adapter', () => {
   });
 });
 
+/**
+ * The ambient environment under a fixture's, which always sets `PATH`. Windows spells the
+ * inherited key `Path`; keeping both would leave Check's env-less `git` lookup on the old one.
+ */
+const childEnvironment = (fixture: Record<string, string>) => ({
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH')
+  ),
+  ...fixture,
+});
+
 const runCli = async (args: string[], environment: Record<string, string>, root: string) => {
   const child = Bun.spawn([process.execPath, './scripts/check.ts', ...args], {
     cwd: root,
-    env: { ...process.env, ...environment },
+    env: childEnvironment(environment),
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -87,28 +99,41 @@ const runCli = async (args: string[], environment: Record<string, string>, root:
   return { stdout, stderr, exitCode };
 };
 
-const makeCliFixture = () => {
+const EXECUTABLE_EXTENSION = process.platform === 'win32' ? '.exe' : '';
+
+/** Compiles the fake `turbo` and `bunx` once, into one directory for every CLI fixture's `PATH`. */
+const compileFakeCheckTools = async (directory: string) => {
+  const turbo = join(directory, `turbo${EXECUTABLE_EXTENSION}`);
+  const result = await Bun.build({
+    entrypoints: [join(import.meta.dir, 'support', 'fake-check-tool.ts')],
+    compile: {
+      outfile: turbo,
+      // The fake runs in a fixture root; its bunfig.toml and .env are not the fake's.
+      autoloadDotenv: false,
+      autoloadBunfig: false,
+    },
+  });
+  expect(result.success, result.logs.map(String).join('\n')).toBe(true);
+  // The fake reads its tool name from the path it was started by.
+  linkSync(turbo, join(directory, `bunx${EXECUTABLE_EXTENSION}`));
+};
+
+const makeCliFixture = (fakeToolDirectory: string) => {
   const directory = temporary();
   mkdirSync(join(directory, 'scripts'));
   cpSync(join(ROOT_DIR, 'scripts/check.ts'), join(directory, 'scripts/check.ts'));
   cpSync(join(ROOT_DIR, 'scripts/lib'), join(directory, 'scripts/lib'), { recursive: true });
-  symlinkSync(join(ROOT_DIR, 'node_modules'), join(directory, 'node_modules'), 'dir');
+  // A junction needs no symlink privilege on Windows; POSIX ignores the type.
+  symlinkSync(join(ROOT_DIR, 'node_modules'), join(directory, 'node_modules'), 'junction');
   writeFileSync(join(directory, '.gitignore'), '/node_modules/\n/scripts/\n');
   writeFileSync(join(directory, 'source.ts'), 'export const fixture = true;\n');
   const git = Bun.spawnSync(['git', 'init', '--quiet'], { cwd: directory });
   if (!git.success) throw new Error(git.stderr.toString());
-  const fakeTool =
-    '#!/bin/sh\ncase "$0" in\n  */turbo) if [ -n "$CHECK_FIXTURE_LOCK_DIR" ]; then chmod 500 "$CHECK_FIXTURE_LOCK_DIR"; fi; if [ "$CHECK_FIXTURE_TURBO_DELAY" = yes ]; then exec sleep 30; fi; exit "$CHECK_FIXTURE_TURBO_EXIT";;\n  *) exit "$CHECK_FIXTURE_DPRINT_EXIT";;\nesac\n';
-  for (const tool of ['turbo', 'bunx']) {
-    const path = join(directory, tool);
-    writeFileSync(path, fakeTool);
-    chmodSync(path, 0o755);
-  }
   return {
     directory,
     path: join(directory, 'result.json'),
     env: {
-      PATH: `${directory}:${process.env.PATH}`,
+      PATH: `${fakeToolDirectory}${delimiter}${process.env.PATH}`,
       MANGO_RUNNER_CONCURRENCY: '2',
       CHECK_FIXTURE_TURBO_EXIT: '0',
       CHECK_FIXTURE_DPRINT_EXIT: '0',
@@ -118,14 +143,25 @@ const makeCliFixture = () => {
 
 // These fixture executables exercise the real Check CLI, including its summary,
 // while leaving workspace commands deterministic and avoiding a second full gate.
-describe.skipIf(process.platform === 'win32')('Check CLI result parity', () => {
+describe('Check CLI result parity', () => {
+  let fakeToolDirectory = '';
+
+  beforeAll(async () => {
+    fakeToolDirectory = mkdtempSync(join(tmpdir(), 'mango-fake-check-tool-'));
+    await compileFakeCheckTools(fakeToolDirectory);
+  }, 30_000);
+
+  afterAll(() => {
+    if (fakeToolDirectory) rmSync(fakeToolDirectory, { recursive: true, force: true });
+  });
+
   test.each([
     ['success', '0', '0', 0],
     ['multiple task failures', '2', '7', 1],
   ])(
     '%s preserves human logs and exit with the report adapter enabled',
     async (_name, turbo, dprint, exitCode) => {
-      const fixture = makeCliFixture();
+      const fixture = makeCliFixture(fakeToolDirectory);
       try {
         const env = {
           ...fixture.env,
@@ -166,7 +202,7 @@ describe.skipIf(process.platform === 'win32')('Check CLI result parity', () => {
   );
 
   test('a subprocess setup failure keeps unavailable labels and the executed source scan', async () => {
-    const fixture = makeCliFixture();
+    const fixture = makeCliFixture(fakeToolDirectory);
     try {
       const result = await runCli(
         ['--api', '--report-file', fixture.path, '--report-id', CHECK_INVOCATION_ID],
@@ -192,26 +228,30 @@ describe.skipIf(process.platform === 'win32')('Check CLI result parity', () => {
     }
   });
 
-  test('a report write that fails after setup keeps the original failure visible', async () => {
-    const fixture = makeCliFixture();
-    try {
-      // The fake turbo task locks the report directory, so the first task
-      // snapshot and the top-level fallback snapshot both fail to write.
-      const result = await runCli(
-        ['--api', '--report-file', fixture.path, '--report-id', CHECK_INVOCATION_ID],
-        { ...fixture.env, CHECK_FIXTURE_LOCK_DIR: fixture.directory },
-        fixture.directory
-      );
-      expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toContain('Check report not written:');
-    } finally {
-      chmodSync(fixture.directory, 0o700);
-      rmSync(fixture.directory, { recursive: true, force: true });
+  // Windows has no POSIX directory permissions to lock the report with.
+  test.skipIf(process.platform === 'win32')(
+    'a report write that fails after setup keeps the original failure visible',
+    async () => {
+      const fixture = makeCliFixture(fakeToolDirectory);
+      try {
+        // The fake turbo task locks the report directory, so the first task
+        // snapshot and the top-level fallback snapshot both fail to write.
+        const result = await runCli(
+          ['--api', '--report-file', fixture.path, '--report-id', CHECK_INVOCATION_ID],
+          { ...fixture.env, CHECK_FIXTURE_LOCK_DIR: fixture.directory },
+          fixture.directory
+        );
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain('Check report not written:');
+      } finally {
+        chmodSync(fixture.directory, 0o700);
+        rmSync(fixture.directory, { recursive: true, force: true });
+      }
     }
-  });
+  );
 
   test('a CLI setup abort leaves an explicit unavailable report', async () => {
-    const fixture = makeCliFixture();
+    const fixture = makeCliFixture(fakeToolDirectory);
     try {
       const result = await runCli(
         ['--unknown', '--report-file', fixture.path, '--report-id', CHECK_INVOCATION_ID],
@@ -232,71 +272,74 @@ describe.skipIf(process.platform === 'win32')('Check CLI result parity', () => {
     }
   });
 
-  test('interruption retains executed labels, unavailable labels and the signal exit', async () => {
-    const fixture = makeCliFixture();
-    const child = Bun.spawn(
-      [
-        process.execPath,
-        './scripts/check.ts',
-        '--api',
-        '--report-file',
-        fixture.path,
-        '--report-id',
-        CHECK_INVOCATION_ID,
-      ],
-      {
-        cwd: fixture.directory,
-        env: {
-          ...process.env,
-          ...fixture.env,
-          MANGO_RUNNER_GROUP: '',
-          CHECK_FIXTURE_TURBO_DELAY: 'yes',
-        },
-        detached: true,
-        stdout: 'ignore',
-        stderr: 'pipe',
-      }
-    );
-    const stderr = new Response(child.stderr).text();
-    try {
-      const deadline = Date.now() + 3000;
-      let taskFinished = false;
-      while (Date.now() < deadline) {
-        try {
-          const report = JSON.parse(readFileSync(fixture.path, 'utf8')) as {
-            tasks: Array<{ label: string; state: string }>;
-          };
-          taskFinished = report.tasks.some(
-            (task) => task.label === 'root:shared-import-boundary' && task.state === 'executed'
-          );
-        } catch {
-          // Setup has not yet atomically published a report.
+  // Windows has no SIGTERM to deliver, so the signal exit is POSIX-only evidence.
+  test.skipIf(process.platform === 'win32')(
+    'interruption retains executed labels, unavailable labels and the signal exit',
+    async () => {
+      const fixture = makeCliFixture(fakeToolDirectory);
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          './scripts/check.ts',
+          '--api',
+          '--report-file',
+          fixture.path,
+          '--report-id',
+          CHECK_INVOCATION_ID,
+        ],
+        {
+          cwd: fixture.directory,
+          env: childEnvironment({
+            ...fixture.env,
+            MANGO_RUNNER_GROUP: '',
+            CHECK_FIXTURE_TURBO_DELAY: 'yes',
+          }),
+          detached: true,
+          stdout: 'ignore',
+          stderr: 'pipe',
         }
-        if (taskFinished) break;
-        await Bun.sleep(10);
+      );
+      const stderr = new Response(child.stderr).text();
+      try {
+        const deadline = Date.now() + 3000;
+        let taskFinished = false;
+        while (Date.now() < deadline) {
+          try {
+            const report = JSON.parse(readFileSync(fixture.path, 'utf8')) as {
+              tasks: Array<{ label: string; state: string }>;
+            };
+            taskFinished = report.tasks.some(
+              (task) => task.label === 'root:shared-import-boundary' && task.state === 'executed'
+            );
+          } catch {
+            // Setup has not yet atomically published a report.
+          }
+          if (taskFinished) break;
+          await Bun.sleep(10);
+        }
+        expect(taskFinished).toBe(true);
+        child.kill('SIGTERM');
+        const exitCode = await child.exited;
+        expect(exitCode).toBe(143);
+        const report = parseCheckResult(readFileSync(fixture.path, 'utf8'), {
+          invocationId: CHECK_INVOCATION_ID,
+          args: ['--api'],
+          exitCode,
+        });
+        expect(report.state).toBe('unavailable');
+        expect(report.tasks.find((task) => task.label === 'workspaces:check')?.state).toBe(
+          'unavailable'
+        );
+        expect(
+          report.tasks.find((task) => task.label === 'root:shared-import-boundary')?.state
+        ).toBe('executed');
+        expect(await stderr).toContain('SIGTERM: stopping');
+      } finally {
+        child.kill('SIGKILL');
+        await child.exited;
+        await stderr;
+        rmSync(fixture.directory, { recursive: true, force: true });
       }
-      expect(taskFinished).toBe(true);
-      child.kill('SIGTERM');
-      const exitCode = await child.exited;
-      expect(exitCode).toBe(143);
-      const report = parseCheckResult(readFileSync(fixture.path, 'utf8'), {
-        invocationId: CHECK_INVOCATION_ID,
-        args: ['--api'],
-        exitCode,
-      });
-      expect(report.state).toBe('unavailable');
-      expect(report.tasks.find((task) => task.label === 'workspaces:check')?.state).toBe(
-        'unavailable'
-      );
-      expect(report.tasks.find((task) => task.label === 'root:shared-import-boundary')?.state).toBe(
-        'executed'
-      );
-      expect(await stderr).toContain('SIGTERM: stopping');
-    } finally {
-      child.kill('SIGKILL');
-      await child.exited;
-      await stderr;
-      rmSync(fixture.directory, { recursive: true, force: true });
     }
-  });
+  );
 });
