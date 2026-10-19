@@ -262,7 +262,7 @@ describe('createManagedProcessFixture', () => {
     await mkdir(join(fixture.tempDir, '.mango', 'run'), { recursive: true });
     await writeFile(join(fixture.tempDir, '.mango', 'run', 'server.json'), 'private contents');
     const failure = await fixture.cleanup().catch((error: Error) => error);
-    expect(String(failure)).toContain(join('.mango', 'run', 'server.json'));
+    expect(String(failure)).toContain(JSON.stringify(join('.mango', 'run', 'server.json')));
     expect(String(failure)).not.toContain('private contents');
 
     for (let index = 0; index < 40; index += 1) {
