@@ -19,6 +19,7 @@ import {
   runAutoFixHook,
   shouldSkipFile,
 } from '../../.codex/hooks/auto-fix.mjs';
+import { fixtureChildEnvironment } from './support/child-supervision';
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
@@ -122,7 +123,8 @@ describe('agent auto-fix hooks', () => {
     await writeFile(filePath, 'fn main() {}\n');
     const proc = Bun.spawn([process.execPath, join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')], {
       env: {
-        ...process.env,
+        // The hook must stop rustfmt itself; inherited --no-orphans would mask a leak.
+        ...fixtureChildEnvironment(),
         PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
         MANGO_TEST_RUSTFMT_MARKER: marker,
         MANGO_TEST_RUSTFMT_HANG: '1',
