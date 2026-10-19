@@ -1,4 +1,5 @@
 import { stat } from 'node:fs/promises';
+import { constants } from 'node:os';
 import { basename, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -213,10 +214,12 @@ async function runRustfmt(filePath) {
 }
 
 const formatterTimeoutMs = 5000;
+const cancelSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 // A formatter may be a proxy (rustup, `bun x`) whose real process is a grandchild, so the
 // deadline stops the whole tree: its own process group on POSIX, `taskkill /T` on Windows,
-// where `detached` would only let the tree escape Bun's job object.
+// where `detached` would only let the tree escape Bun's job object. On POSIX that group no
+// longer receives the signal an agent sends to cancel the hook, so the hook forwards it.
 async function runFormatter(command) {
   let formatter;
   try {
@@ -232,10 +235,17 @@ async function runFormatter(command) {
   }
 
   const deadline = setTimeout(() => stopFormatterTree(formatter), formatterTimeoutMs);
+  const onCancel = (signal) => {
+    stopFormatterTree(formatter);
+    process.exit(128 + constants.signals[signal]);
+  };
+  const forwarded = process.platform === 'win32' ? [] : cancelSignals;
+  for (const signal of forwarded) process.once(signal, onCancel);
   try {
     await formatter.exited;
   } finally {
     clearTimeout(deadline);
+    for (const signal of forwarded) process.off(signal, onCancel);
   }
 }
 

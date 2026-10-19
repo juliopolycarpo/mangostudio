@@ -69,6 +69,23 @@ async function stillBeating(marker: string) {
   return (await read()) !== before;
 }
 
+/**
+ * Waits for the fake behind `marker` to beat once, naming it if it never does.
+ *
+ * @example
+ * await firstHeartbeat(marker, 'fake rustfmt');
+ */
+async function firstHeartbeat(marker: string, who: string, timeoutMs = 5000) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    if (await Bun.file(heartbeatPath(marker)).exists()) return;
+    await Bun.sleep(HEARTBEAT_MS);
+  }
+  throw new Error(
+    `${who} never beat | expected: ${heartbeatPath(marker)} within ${timeoutMs}ms | received: none`
+  );
+}
+
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
@@ -93,6 +110,16 @@ describe('agent auto-fix hooks', () => {
 
   afterAll(async () => {
     if (fakeRustfmtBin) await rm(fakeRustfmtBin, { recursive: true, force: true });
+  });
+
+  /** The environment of a hook whose rustfmt hangs and starts a grandchild. */
+  const hangingFormatterEnv = (marker: string) => ({
+    // The hook must stop rustfmt itself; inherited --no-orphans would mask a leak.
+    ...fixtureChildEnvironment(),
+    PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
+    [MARKER_ENV]: marker,
+    [HANG_ENV]: '1',
+    [GRANDCHILD_ENV]: '0',
   });
 
   it('extracts touched files from Claude and Codex hook payloads', () => {
@@ -146,14 +173,7 @@ describe('agent auto-fix hooks', () => {
     // The formatter deadline includes startup, before the fake can write its marker.
     const startedAt = performance.now();
     const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
-      env: {
-        // The hook must stop rustfmt itself; inherited --no-orphans would mask a leak.
-        ...fixtureChildEnvironment(),
-        PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
-        [MARKER_ENV]: marker,
-        [HANG_ENV]: '1',
-        [GRANDCHILD_ENV]: '0',
-      },
+      env: hangingFormatterEnv(marker),
       stdin: 'pipe',
       stdout: 'ignore',
       stderr: 'pipe',
@@ -192,6 +212,55 @@ describe('agent auto-fix hooks', () => {
       }
     }
   }, 10000);
+
+  // Windows has no group signal to forward; Bun's job object ends the hook's children there.
+  it.skipIf(process.platform === 'win32')(
+    'stops the formatter tree when the agent cancels the hook before the deadline',
+    async () => {
+      const dir = await makeTempDir();
+      const marker = join(dir, 'started.json');
+      const filePath = join(repoRoot, '.mango', `formatter-cancel-${process.pid}.rs`);
+      tempDirs.push(filePath);
+      await writeFile(filePath, 'fn main() {}\n');
+      // An agent cancels a hook by signalling the group it started the hook in.
+      const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
+        env: hangingFormatterEnv(marker),
+        detached: true,
+        stdin: 'pipe',
+        stdout: 'ignore',
+        stderr: 'ignore',
+        timeout: 8000,
+      });
+      proc.stdin.write(JSON.stringify({ path: filePath }));
+      proc.stdin.end();
+
+      const fakes = [
+        [marker, 'fake rustfmt'],
+        [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
+      ] as const;
+      const leaked: number[] = [];
+      try {
+        for (const [fakeMarker, who] of fakes) await firstHeartbeat(fakeMarker, who);
+        process.kill(-proc.pid, 'SIGTERM');
+        await proc.exited;
+        for (const [fakeMarker, who] of fakes) {
+          const started = await readMarker(fakeMarker, who);
+          if (await stillBeating(fakeMarker)) leaked.push(started.pid);
+        }
+        expect(leaked).toEqual([]);
+        expect(proc.exitCode).toBe(143);
+      } finally {
+        for (const pid of leaked) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            // Stopped between the heartbeat check and here.
+          }
+        }
+      }
+    },
+    10000
+  );
 
   it('lists cwd-relative paths before repo-root ones only for a cwd inside the repo', () => {
     const root = resolve('/workspace', 'mangostudio');
