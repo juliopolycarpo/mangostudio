@@ -27,7 +27,7 @@ import {
   HEARTBEAT_MS,
   heartbeatPath,
   MARKER_ENV,
-} from './support/fake-rustfmt';
+} from './support/fake-rustfmt-markers';
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];

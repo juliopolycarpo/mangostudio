@@ -25,6 +25,7 @@
         "scripts/tests/**/*.test.ts",
         "scripts/tests/support/fake-smoke-server.ts",
         "scripts/tests/support/fake-build-smoke-server.ts",
+        "scripts/tests/support/fake-rustfmt.ts",
         "scripts/tests/support/fake-smoke-workflow-command.ts"
       ],
       "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"]
