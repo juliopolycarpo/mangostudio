@@ -27,14 +27,14 @@
     "test:coverage:integration": "MANGOSTUDIO_DIAGNOSTIC_LOGS=0 bun ../../scripts/with-test-home.ts bun test --coverage --coverage-dir=../../.mango/artifacts/coverage/api-integration --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/api-integration.xml $MANGOSTUDIO_BUN_TEST_ARGS tests/integration"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.134.0",
-    "@better-auth/api-key": "1.7.8",
+    "@anthropic-ai/sdk": "^0.135.0",
+    "@better-auth/api-key": "1.7.10",
     "@elysia/cors": "2.0.0-beta.1",
     "@elysia/openapi": "2.0.0-beta.4",
     "@google/genai": "^2.30.0",
     "@mangostudio/protocol": "workspace:*",
     "@mangostudio/shared": "workspace:*",
-    "better-auth": "^1.7.8",
+    "better-auth": "^1.7.10",
     "elysia": "2.0.0-beta.29",
     "exact-mirror": "1.2.6",
     "file-type": "^22.2.0",
