@@ -1,7 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { $ } from 'bun';
 import { createReleaseDiagnostics, readRootIdentity } from './managed-process-diagnostics';
 
 const DEFAULT_DIAGNOSTIC_LIMIT_BYTES = 32 * 1024;
@@ -193,7 +194,9 @@ export async function createManagedProcessFixture(options: {
           if (options.removeTempDir) {
             await options.removeTempDir(tempDir);
           } else {
-            await rm(tempDir, { force: true, recursive: true });
+            // Bun's fs.rm can resolve early when a child disappears during its
+            // walk (oven-sh/bun#35800). The shell builtin continues that walk.
+            await $`rm -rf ${tempDir}`.quiet();
           }
           await assertResourcesReleased();
         } catch (error) {
