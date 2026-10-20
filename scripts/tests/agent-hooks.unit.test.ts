@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative, resolve } from 'node:path';
@@ -20,6 +20,7 @@ import {
   shouldSkipFile,
 } from '../../.codex/hooks/auto-fix.mjs';
 import { fixtureChildEnvironment } from './support/child-supervision';
+import { FormatterClock, HangingFormatter } from './support/fake-formatter-deadline';
 import {
   GRANDCHILD_ENV,
   grandchildMarker,
@@ -191,14 +192,58 @@ describe('agent auto-fix hooks', () => {
     expect(await readFile(filePath, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
   });
 
+  it('starts the five-second formatter deadline after cold hook startup', async () => {
+    const dir = join(repoRoot, '.mango', `formatter-clock-${process.pid}`);
+    tempDirs.push(dir);
+    await mkdir(dir, { recursive: true });
+    const filePath = join(dir, 'sample.rs');
+    await writeFile(filePath, 'fn main() {}\n');
+    const clock = new FormatterClock();
+    const formatter = new HangingFormatter(clock);
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(formatter.spawn as typeof Bun.spawn);
+    const spawnSync = spyOn(Bun, 'spawnSync').mockImplementation(
+      formatter.taskkill as typeof Bun.spawnSync
+    );
+    const signal = spyOn(process, 'kill').mockImplementation(formatter.signal);
+    const schedule = spyOn(globalThis, 'setTimeout').mockImplementation(
+      clock.schedule as typeof setTimeout
+    );
+    const cancel = spyOn(globalThis, 'clearTimeout').mockImplementation(
+      clock.cancel as typeof clearTimeout
+    );
+    const running = runAutoFixHook(JSON.stringify({ path: filePath }));
+    try {
+      await formatter.started;
+      expect(formatter.startedAt).toBe(6_000);
+      clock.advance(4_999);
+      expect(
+        formatter.killedAt,
+        'formatter must remain alive until its own five-second deadline'
+      ).toEqual([]);
+      clock.advance(1);
+      expect(formatter.killedAt).toEqual([11_000]);
+      expect(formatter.treeStops).toEqual([process.platform === 'win32' ? 'taskkill' : 'group']);
+      await running;
+    } finally {
+      formatter.release();
+      try {
+        await running;
+      } finally {
+        cancel.mockRestore();
+        schedule.mockRestore();
+        signal.mockRestore();
+        spawnSync.mockRestore();
+        spawn.mockRestore();
+      }
+    }
+  });
+
   it('bounds a formatter that never exits, grandchildren included', async () => {
     const dir = await makeTempDir();
     const marker = join(dir, 'started.json');
     const filePath = join(repoRoot, '.mango', `formatter-timeout-${process.pid}.rs`);
     tempDirs.push(filePath);
     await writeFile(filePath, 'fn main() {}\n');
-    // The formatter deadline includes startup, before the fake can write its marker.
-    const startedAt = performance.now();
     const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
       env: formatterEnvironment(marker, '1'),
       stdin: 'pipe',
@@ -211,7 +256,6 @@ describe('agent auto-fix hooks', () => {
     proc.stdin.end();
 
     const exitCode = await proc.exited;
-    const elapsedMs = performance.now() - startedAt;
     const fakes = [
       [marker, 'fake rustfmt'],
       [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
@@ -220,7 +264,6 @@ describe('agent auto-fix hooks', () => {
     try {
       expect(exitCode).toBe(0);
       expect(proc.signalCode).toBeNull();
-      expect(elapsedMs).toBeGreaterThanOrEqual(4500);
       for (const [fakeMarker, who] of fakes) {
         const started = await readMarker(fakeMarker, who);
         expect(started.args).toEqual([filePath]);
