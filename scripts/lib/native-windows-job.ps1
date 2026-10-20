@@ -549,12 +549,14 @@ namespace Mango.NativeJobProbe {
                     }
                     try {
                         if(!Alive(handle)) { retry=true; races++; break; }
-                        Member member=Attest(handle,pid,null,budget);
-                        if(!member.IsMember) throw new InvalidOperationException("Invalid recycled/outside-job PID " + pid + "; expected exact-job process object");
-                        if(!member.Alive) { retry=true; races++; break; }
-                        HeldProcess existing;
-                        if(held.TryGetValue(member.Identity,out existing)) member=Attest(existing.Handle,pid,member.Identity,budget,existing.Member.Path);
-                        else { held.Add(member.Identity,new HeldProcess{Handle=handle,Member=member}); handle=IntPtr.Zero; }
+                        Member state=ReadState(handle,pid,null);
+                        if(!state.IsMember) throw new InvalidOperationException("Invalid recycled/outside-job PID " + pid + "; expected exact-job process object");
+                        if(!state.Alive) { retry=true; races++; break; }
+                        // The PID-opened handle selects the full creation identity; the retained handle supplies one fresh image attestation.
+                        // New identities still require full attestation before the handle is retained. Never reuse a cached image as authority.
+                        HeldProcess existing; Member member;
+                        if(held.TryGetValue(state.Identity,out existing)) member=Attest(existing.Handle,pid,state.Identity,budget,existing.Member.Path);
+                        else { member=Attest(handle,pid,state.Identity,budget); held.Add(member.Identity,new HeldProcess{Handle=handle,Member=member}); handle=IntPtr.Zero; }
                         members.Add(member);
                     } catch(MemberExitedException) { retry=true; races++; break; }
                     finally { Win32.Close(ref handle); }
