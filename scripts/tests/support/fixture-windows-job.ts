@@ -66,6 +66,39 @@ export interface FixtureJob {
   close(): void;
 }
 
+/** Own native query handles before verification can fail.
+ * @example const handle = owner.acquire(openMember, verifyMembership); owner.close();
+ */
+export class FixtureHandles {
+  private readonly owned = new Set<Pointer>();
+
+  constructor(private readonly dispose: (handle: Pointer) => void) {}
+
+  acquire(open: () => Pointer, verify: (handle: Pointer) => void): Pointer {
+    const handle = open();
+    this.owned.add(handle);
+    verify(handle);
+    return handle;
+  }
+
+  close(): void {
+    const errors: unknown[] = [];
+    for (const handle of this.owned) {
+      try {
+        this.dispose(handle);
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    this.owned.clear();
+    if (errors.length)
+      throw new AggregateError(
+        errors,
+        `fixture handle disposal failed: ${errors.map(String).join('; ')}`
+      );
+  }
+}
+
 /** Create a private job retained by the fixture owner; the command wrapper joins before spawning.
  * @example const job = createFixtureJob(); await run(job.name); job.stop();
  */
@@ -78,6 +111,9 @@ export function createFixtureJob(): FixtureJob {
   const handle = job as Pointer;
   const limits = new Uint8Array(144);
   const members = new Map<number, Pointer>();
+  const handles = new FixtureHandles((member) =>
+    requireSuccess(symbols.CloseHandle(member), 'CloseHandle(member)')
+  );
   const coverage = new FixtureJobCoverage();
   let censusFailed = false;
   new DataView(limits.buffer).setUint32(16, 0x2000, true);
@@ -120,19 +156,25 @@ export function createFixtureJob(): FixtureJob {
         for (let index = 0; index < view.getUint32(4, true); index++) {
           const pid = Number(view.getBigUint64(8 + index * 8, true));
           if (members.has(pid)) continue;
-          const member = symbols.OpenProcess(0x101000, false, pid);
-          if (!member) {
-            requireSuccess(member, 'OpenProcess(same-job settlement)');
-          }
-          const belongs = new Uint8Array(4);
-          requireSuccess(symbols.IsProcessInJob(member, handle, ptr(belongs)), 'IsProcessInJob');
-          if (!new DataView(belongs.buffer).getUint32(0, true)) {
-            symbols.CloseHandle(member);
-            throw new Error(
-              `fixture census PID ${pid} no longer belongs to retained job; storage retained`
-            );
-          }
-          members.set(pid, member as Pointer);
+          const member = handles.acquire(
+            () => {
+              const opened = symbols.OpenProcess(0x101000, false, pid);
+              requireSuccess(opened, 'OpenProcess(same-job settlement)');
+              return opened as Pointer;
+            },
+            (opened) => {
+              const belongs = new Uint8Array(4);
+              requireSuccess(
+                symbols.IsProcessInJob(opened, handle, ptr(belongs)),
+                'IsProcessInJob'
+              );
+              if (!new DataView(belongs.buffer).getUint32(0, true))
+                throw new Error(
+                  `fixture census PID ${pid} no longer belongs to retained job; storage retained`
+                );
+            }
+          );
+          members.set(pid, member);
         }
       } catch (error) {
         censusFailed = true;
@@ -158,9 +200,23 @@ export function createFixtureJob(): FixtureJob {
       return current.getUint32(40, true) === 0;
     },
     close() {
-      for (const member of members.values()) symbols.CloseHandle(member);
+      const errors: unknown[] = [];
+      try {
+        handles.close();
+      } catch (error) {
+        errors.push(error);
+      }
       members.clear();
-      requireSuccess(symbols.CloseHandle(handle), 'CloseHandle');
+      try {
+        requireSuccess(symbols.CloseHandle(handle), 'CloseHandle(job)');
+      } catch (error) {
+        errors.push(error);
+      }
+      if (errors.length)
+        throw new AggregateError(
+          errors,
+          `fixture native handle disposal failed: ${errors.map(String).join('; ')}`
+        );
     },
   };
 }
