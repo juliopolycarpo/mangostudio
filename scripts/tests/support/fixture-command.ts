@@ -141,8 +141,11 @@ export const fixtureCommandHost: FixtureCommandHost = {
         stopped = true;
         if (!child.pid) return;
         if (process.platform === 'win32') {
-          child.kill('SIGKILL');
-          job?.stop();
+          try {
+            job?.stop();
+          } finally {
+            child.kill('SIGKILL');
+          }
           return;
         }
         try {
