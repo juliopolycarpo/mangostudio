@@ -9,12 +9,13 @@
 
 import { describe, expect, it } from 'bun:test';
 import { createServer, type Server as HttpServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 import {
+  type McpClientHandle,
   McpConnectionError,
   type McpServerRuntimeConfig,
 } from '../../../../src/services/mcp/types';
@@ -38,6 +39,7 @@ interface LegacySseServer {
   readonly url: string;
   /** `METHOD path` of every request, in arrival order. */
   readonly requests: string[];
+  readonly requestsByConnection: string[][];
   stop(): Promise<void>;
 }
 
@@ -50,10 +52,20 @@ async function startLegacySseServer(answer: {
   text?: boolean;
 }): Promise<LegacySseServer> {
   const requests: string[] = [];
+  const requestsByConnection: string[][] = [];
+  const connectionRequests = new Map<Socket, string[]>();
   const server = createEchoMcpServer();
   let sse: SSEServerTransport | undefined;
   const httpServer: HttpServer = createServer((request, response) => {
-    requests.push(`${request.method} ${request.url?.split('?')[0]}`);
+    const label = `${request.method} ${request.url?.split('?')[0]}`;
+    requests.push(label);
+    let connection = connectionRequests.get(request.socket);
+    if (!connection) {
+      connection = [];
+      connectionRequests.set(request.socket, connection);
+      requestsByConnection.push(connection);
+    }
+    connection.push(label);
     void (async () => {
       if (request.method === 'GET' && request.url === '/') {
         sse = new SSEServerTransport('/messages', response);
@@ -76,6 +88,7 @@ async function startLegacySseServer(answer: {
   return {
     url: `http://127.0.0.1:${port}/`,
     requests,
+    requestsByConnection,
     stop: async () => {
       await server.close();
       httpServer.closeAllConnections();
@@ -161,6 +174,29 @@ describe('mcp http transport', () => {
     } finally {
       await server.close();
       httpServer.close();
+    }
+  });
+
+  it('keeps the legacy event stream on a connection separate from message POSTs', async () => {
+    const legacy = await startLegacySseServer({ status: 405 });
+    let handle: McpClientHandle | undefined;
+    try {
+      handle = await connectMcpClient(httpConfig(legacy.url), {
+        userId: 'http-transport-user',
+      });
+      expect((await handle.callTool('echo', { text: 'isolated stream' })).contentText).toBe(
+        'isolated stream'
+      );
+      const streamRequests = legacy.requestsByConnection.find((requests) =>
+        requests.includes('GET /')
+      );
+      // A streaming response occupies its HTTP/1 connection until close. It must
+      // never enter the pool that serves the initialize and message POSTs.
+      expect(streamRequests).toEqual(['GET /']);
+      expect(legacy.requests.filter((request) => request === 'POST /messages')).toHaveLength(3);
+    } finally {
+      await handle?.close();
+      await legacy.stop();
     }
   });
 
