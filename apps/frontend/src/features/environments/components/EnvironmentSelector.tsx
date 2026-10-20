@@ -72,7 +72,7 @@ export function EnvironmentSelector({
         adornment={<StatusDot tone={STATUS_TONE[status]} pulse={status === 'connecting'} />}
         title={actionError ?? selected?.name ?? t.chat.input.selectEnvironment}
         describedBy={statusId}
-        className={actionError ? 'border-error/45 text-error' : undefined}
+        className={actionError ? 'border-danger text-danger' : undefined}
         testId="environment-selector"
         dataState={status}
       />

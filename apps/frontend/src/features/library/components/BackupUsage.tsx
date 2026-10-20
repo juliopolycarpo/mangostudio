@@ -32,7 +32,7 @@ export function BackupUsage() {
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="backup-usage">
-      <p className="text-[11px] text-on-surface-variant/60">
+      <p className="text-[11px] text-fg-muted">
         {formatMessage(l.backups.usage, {
           count: String(usage.setCount),
           size: formatBytes(usage.sizeBytes),
@@ -44,7 +44,7 @@ export function BackupUsage() {
       </p>
       <Link
         to="/environments/library/backups"
-        className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+        className="inline-flex items-center gap-1 text-[11px] text-accent-fg hover:underline"
         data-testid="manage-backups"
       >
         {l.backups.manage}

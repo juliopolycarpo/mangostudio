@@ -45,47 +45,40 @@ export function McpServerResources({ server }: McpServerResourcesProps) {
   };
 
   if (resourcesQuery.isLoading) {
-    return <p className="text-sm text-on-surface-variant py-2">{t.common.loading}</p>;
+    return <p className="text-sm text-fg-muted py-2">{t.common.loading}</p>;
   }
   if (resourcesQuery.error) {
-    return <p className="text-sm text-error py-2">{s.loadError}</p>;
+    return <p className="text-sm text-danger py-2">{s.loadError}</p>;
   }
   if (resourcesQuery.data === null) {
-    return <p className="text-sm text-on-surface-variant/60 py-2">{s.notSupported}</p>;
+    return <p className="text-sm text-fg-muted py-2">{s.notSupported}</p>;
   }
 
   const resources = resourcesQuery.data?.resources ?? [];
   if (resources.length === 0) {
-    return <p className="text-sm text-on-surface-variant/60 py-2">{s.empty}</p>;
+    return <p className="text-sm text-fg-muted py-2">{s.empty}</p>;
   }
 
   return (
     <ul className="space-y-2 py-2">
       {resources.map((resource) => (
-        <li
-          key={resource.uri}
-          className="rounded-xl bg-surface-container-lowest/60 px-3 py-2 space-y-2"
-        >
+        <li key={resource.uri} className="rounded-xl bg-control px-3 py-2 space-y-2">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 space-y-0.5">
-              <p className="flex items-center gap-1.5 text-sm font-medium text-on-surface break-all">
-                <FileText size={13} className="shrink-0 text-primary/70" />
+              <p className="flex items-center gap-1.5 text-sm font-medium text-fg break-all">
+                <FileText size={13} className="shrink-0 text-accent-fg" />
                 {resource.name}
               </p>
-              <p className="text-xs text-on-surface-variant/70 break-all">{resource.uri}</p>
+              <p className="text-xs text-fg-muted break-all">{resource.uri}</p>
               {resource.description && (
-                <p className="text-xs text-on-surface-variant/70 leading-relaxed">
-                  {resource.description}
-                </p>
+                <p className="text-xs text-fg-muted leading-relaxed">{resource.description}</p>
               )}
               {resource.mimeType && (
-                <p className="text-[10px] font-mono text-on-surface-variant/50">
-                  {resource.mimeType}
-                </p>
+                <p className="text-[10px] font-mono text-fg-subtle">{resource.mimeType}</p>
               )}
             </div>
             <Button
-              variant="ghost"
+              variant="subtle"
               size="sm"
               className="shrink-0"
               loading={preview?.uri === resource.uri && preview.loading}
@@ -97,18 +90,18 @@ export function McpServerResources({ server }: McpServerResourcesProps) {
           </div>
 
           {preview?.uri === resource.uri && !preview.loading && (
-            <div className="rounded-lg bg-surface-container-high/60 px-3 py-2">
+            <div className="rounded-lg bg-surface px-3 py-2">
               {preview.error ? (
-                <p className="text-xs text-error">{preview.error}</p>
+                <p className="text-xs text-danger">{preview.error}</p>
               ) : (
                 preview.response?.contents.map((content) => (
                   <div key={content.uri} className="space-y-1">
                     {content.text !== undefined ? (
-                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-on-surface-variant font-mono">
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-fg-muted font-mono">
                         {content.text}
                       </pre>
                     ) : (
-                      <p className="text-xs text-on-surface-variant/70">
+                      <p className="text-xs text-fg-muted">
                         {s.binaryNotice.replace('{mime}', content.mimeType ?? 'binary')}
                       </p>
                     )}

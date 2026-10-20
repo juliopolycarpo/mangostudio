@@ -98,7 +98,7 @@ export function AgentEditor({
   }, [handleSave, isSaving, dirty]);
 
   return (
-    <div className="space-y-0 rounded-2xl border border-outline-variant/20 bg-surface-container-high">
+    <div className="space-y-0 rounded-2xl border border-stroke bg-surface">
       <AgentEditorHeader
         title={title}
         draft={draft}

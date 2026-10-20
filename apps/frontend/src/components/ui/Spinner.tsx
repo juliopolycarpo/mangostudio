@@ -12,7 +12,7 @@ const sizes = {
 export function Spinner({ size = 'md', className = '' }: SpinnerProps) {
   return (
     <div
-      className={`${sizes[size]} rounded-full border-2 border-primary border-t-transparent animate-spin ${className}`}
+      className={`${sizes[size]} rounded-full border-2 border-stroke border-t-accent animate-spin ${className}`}
     />
   );
 }

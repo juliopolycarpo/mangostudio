@@ -26,11 +26,11 @@ export function AgentEditorHeader({
   onRawMode,
 }: AgentEditorHeaderProps) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between p-4 sm:p-6 border-b border-outline-variant/10">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between p-4 sm:p-6 border-b border-stroke">
       <div className="min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <h2 className="text-xl font-bold text-on-surface">{title}</h2>
-          <span className="rounded-full bg-surface-container-lowest px-2 py-0.5 text-xs text-on-surface-variant">
+          <h2 className="text-xl font-bold text-fg">{title}</h2>
+          <span className="rounded-full bg-control px-2 py-0.5 text-xs text-fg-muted">
             {draft.kind === 'builtin' ? labels.builtIn : labels.user}
           </span>
           {dirty && (
@@ -40,10 +40,10 @@ export function AgentEditorHeader({
             </span>
           )}
         </div>
-        <p className="mt-1 text-sm text-on-surface-variant/70 truncate">{draft.id}</p>
+        <p className="mt-1 text-sm text-fg-muted truncate">{draft.id}</p>
       </div>
       {isUserAgent && (
-        <div className="flex gap-1 p-1 rounded-xl bg-surface-container-lowest border border-outline-variant/10 shrink-0">
+        <div className="flex gap-1 p-1 rounded-xl bg-control border border-stroke shrink-0">
           <ModeToggleButton active={mode === 'friendly'} onClick={onFriendlyMode}>
             {labels.friendlyMode}
           </ModeToggleButton>
@@ -68,9 +68,7 @@ function ModeToggleButton({ active, onClick, children }: ModeToggleButtonProps) 
       type="button"
       onClick={onClick}
       className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
-        active
-          ? 'bg-surface-container-high text-on-surface shadow-sm'
-          : 'text-on-surface-variant/60 hover:text-on-surface'
+        active ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'
       }`}
     >
       {children}
@@ -102,17 +100,17 @@ export function AgentEditorActionBar({
   onSave,
 }: AgentEditorActionBarProps) {
   return (
-    <div className="sticky bottom-0 z-10 flex flex-wrap justify-between gap-2 border-t border-outline-variant/10 bg-surface-container-high/95 backdrop-blur-sm p-4 sm:p-6 rounded-b-2xl">
+    <div className="sticky bottom-0 z-10 flex flex-wrap justify-between gap-2 border-t border-stroke bg-surface p-4 sm:p-6 rounded-b-2xl">
       <div>
         {isUserAgent && !isNew && (
-          <Button type="button" variant="ghost" onClick={() => onDelete(draft)}>
+          <Button type="button" variant="subtle" onClick={() => onDelete(draft)}>
             <Trash2 size={16} />
             {labels.delete}
           </Button>
         )}
       </div>
       <div className="flex gap-2">
-        <Button type="button" variant="ghost" onClick={onReset}>
+        <Button type="button" variant="subtle" onClick={onReset}>
           <RotateCcw size={16} />
           {labels.reset}
         </Button>
@@ -134,13 +132,13 @@ interface AgentResetDialogProps {
 export function AgentResetDialog({ labels, onCancel, onConfirm }: AgentResetDialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-md rounded-2xl border border-outline-variant/20 bg-surface p-5 shadow-xl space-y-4">
+      <div className="w-full max-w-md rounded-2xl border border-stroke bg-canvas p-5 shadow-xl space-y-4">
         <div className="space-y-1">
-          <h3 className="text-lg font-bold text-on-surface">{labels.confirmResetTitle}</h3>
-          <p className="text-sm text-on-surface-variant/70">{labels.confirmResetDescription}</p>
+          <h3 className="text-lg font-bold text-fg">{labels.confirmResetTitle}</h3>
+          <p className="text-sm text-fg-muted">{labels.confirmResetDescription}</p>
         </div>
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onCancel}>
+          <Button type="button" variant="subtle" onClick={onCancel}>
             {labels.cancel}
           </Button>
           <Button type="button" variant="primary" onClick={onConfirm}>

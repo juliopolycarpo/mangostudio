@@ -90,16 +90,16 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
           : labels.cancelled;
 
   return (
-    <div className="max-w-2xl w-full rounded-2xl border border-outline-variant/15 bg-surface-container-low p-4 sm:p-5 text-sm text-on-surface space-y-4">
-      <div className="flex flex-wrap items-center gap-2 text-on-surface-variant">
-        <CircleHelp size={16} className="text-primary" />
+    <div className="max-w-2xl w-full rounded-2xl border border-stroke bg-surface p-4 sm:p-5 text-sm text-fg space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-fg-muted">
+        <CircleHelp size={16} className="text-accent-fg" />
         <span className="text-xs font-bold uppercase tracking-widest">{title}</span>
-        <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs">
+        <span className="rounded-full bg-surface px-2 py-0.5 text-xs">
           {labels.fromServer.replace('{server}', part.serverSlug)}
         </span>
       </div>
 
-      <p className="font-medium text-on-surface whitespace-pre-wrap">{part.message}</p>
+      <p className="font-medium text-fg whitespace-pre-wrap">{part.message}</p>
 
       {part.fields.map((field) => (
         <FieldEditor
@@ -115,7 +115,7 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
         />
       ))}
 
-      {interactive && error && <p className="text-xs text-error">{error}</p>}
+      {interactive && error && <p className="text-xs text-danger">{error}</p>}
 
       {interactive && (
         <div className="flex flex-wrap justify-end gap-2">
@@ -123,7 +123,7 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
             type="button"
             disabled={submitting}
             onClick={() => void respond({ action: 'cancel' })}
-            className="rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high cursor-pointer disabled:opacity-40"
+            className="rounded-xl border border-stroke px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-fill-hover cursor-pointer disabled:opacity-40"
           >
             {labels.cancel}
           </button>
@@ -131,7 +131,7 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
             type="button"
             disabled={submitting}
             onClick={() => void respond({ action: 'decline' })}
-            className="rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high cursor-pointer disabled:opacity-40"
+            className="rounded-xl border border-stroke px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-fill-hover cursor-pointer disabled:opacity-40"
           >
             {labels.decline}
           </button>
@@ -144,7 +144,7 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
                 content: buildContent(part.fields, values),
               })
             }
-            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity duration-150 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+            className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity duration-150 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
           >
             {labels.submit}
           </button>
@@ -178,19 +178,15 @@ function FieldEditor({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="font-medium text-on-surface">{label}</p>
-        {field.required && (
-          <span className="text-xs text-on-surface-variant/70">{requiredHint}</span>
-        )}
+        <p className="font-medium text-fg">{label}</p>
+        {field.required && <span className="text-xs text-fg-muted">{requiredHint}</span>}
       </div>
-      {field.description && (
-        <p className="text-xs text-on-surface-variant/80">{field.description}</p>
-      )}
+      {field.description && <p className="text-xs text-fg-muted">{field.description}</p>}
 
       {field.kind === 'enum' || field.kind === 'multi_enum' ? (
         <>
           {field.kind === 'multi_enum' && (
-            <p className="text-xs text-on-surface-variant/70">{multiSelectHint}</p>
+            <p className="text-xs text-fg-muted">{multiSelectHint}</p>
           )}
           <div className="space-y-1.5">
             {(field.options ?? []).map((option) => {
@@ -216,17 +212,15 @@ function FieldEditor({
                     onChange(selected ? '' : option.value);
                   }}
                   className={`flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors duration-150 ${
-                    selected
-                      ? 'border-primary/50 bg-primary/10'
-                      : 'border-outline-variant/15 bg-surface-container-high'
-                  } ${interactive ? 'cursor-pointer hover:border-outline-variant/40' : 'cursor-default opacity-70'}`}
+                    selected ? 'border-accent bg-accent-subtle' : 'border-stroke bg-surface'
+                  } ${interactive ? 'cursor-pointer hover:border-stroke' : 'cursor-default opacity-70'}`}
                 >
                   <span
-                    className={`mt-0.5 text-xs font-semibold ${selected ? 'text-primary' : 'text-on-surface-variant/70'}`}
+                    className={`mt-0.5 text-xs font-semibold ${selected ? 'text-accent-fg' : 'text-fg-muted'}`}
                   >
                     {selected ? <Check size={14} /> : '○'}
                   </span>
-                  <span className="min-w-0 flex-1 font-medium text-on-surface">{option.label}</span>
+                  <span className="min-w-0 flex-1 font-medium text-fg">{option.label}</span>
                 </button>
               );
             })}
@@ -244,8 +238,8 @@ function FieldEditor({
                 onClick={() => onChange(option)}
                 className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
                   selected
-                    ? 'border-primary/50 bg-primary/10 text-on-surface'
-                    : 'border-outline-variant/15 bg-surface-container-high text-on-surface-variant'
+                    ? 'border-accent bg-accent-subtle text-fg'
+                    : 'border-stroke bg-surface text-fg-muted'
                 } ${interactive ? 'cursor-pointer' : 'cursor-default opacity-70'}`}
               >
                 {option ? booleanTrue : booleanFalse}
@@ -283,7 +277,7 @@ function FieldEditor({
             }
             onChange(event.target.value);
           }}
-          className="w-full rounded-xl border border-outline-variant/15 bg-surface-container-high px-3 py-2 text-sm text-on-surface focus:border-primary/50 focus:outline-none disabled:opacity-70"
+          className="w-full rounded-xl border border-stroke bg-surface px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none disabled:opacity-70"
         />
       )}
     </div>

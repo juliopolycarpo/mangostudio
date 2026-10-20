@@ -39,9 +39,9 @@ export function ChatGptPromoChip({
   };
 
   return (
-    <div className="mt-1.5 flex max-w-xs items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2">
-      <Megaphone size={14} className="mt-0.5 shrink-0 text-primary/80" />
-      <p className="flex-1 text-[11px] leading-relaxed text-on-surface-variant">{message}</p>
+    <div className="mt-1.5 flex max-w-xs items-start gap-2 rounded-xl border border-accent bg-accent-subtle px-3 py-2">
+      <Megaphone size={14} className="mt-0.5 shrink-0 text-accent-fg" />
+      <p className="flex-1 text-[11px] leading-relaxed text-fg-muted">{message}</p>
       <button
         type="button"
         onClick={dismiss}

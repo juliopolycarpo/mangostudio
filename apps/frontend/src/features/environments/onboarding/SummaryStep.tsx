@@ -65,23 +65,23 @@ export function SummaryStep({ environment, endState, onDone }: SummaryStepProps)
 
   return (
     <div className="space-y-4" data-testid="onboarding-summary-step">
-      <p className="text-on-surface-variant/70 text-xs">
+      <p className="text-fg-muted text-xs">
         {formatMessage(connected ? labels.summaryReady : labels.summaryPending, {
           name: environment.name,
         })}
       </p>
 
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5">
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl border border-stroke bg-control px-3 py-2.5">
         {rows.map((row) => (
           <div key={row.label} className="contents">
-            <dt className="text-on-surface-variant/60 text-xs">{row.label}</dt>
-            <dd className="truncate font-mono text-[11px] text-on-surface-variant">{row.value}</dd>
+            <dt className="text-fg-muted text-xs">{row.label}</dt>
+            <dd className="truncate font-mono text-[11px] text-fg-muted">{row.value}</dd>
           </div>
         ))}
       </dl>
 
       <div className="space-y-2">
-        <p className="text-on-surface-variant/70 text-xs">{labels.summaryAudit}</p>
+        <p className="text-fg-muted text-xs">{labels.summaryAudit}</p>
         <CopyLine
           label={entities.permissions.setupCommand}
           value={runtimeCommand(health, 'setup --slot remote')}

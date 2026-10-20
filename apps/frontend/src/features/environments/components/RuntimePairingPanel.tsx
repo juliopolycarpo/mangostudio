@@ -59,25 +59,25 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
 
   return (
     <section
-      className="space-y-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 p-3"
+      className="space-y-3 rounded-xl border border-stroke bg-control p-3"
       data-testid="runtime-pairing-panel"
     >
       <div className="flex items-start gap-2">
-        <KeyRound size={14} className="mt-0.5 shrink-0 text-primary" />
+        <KeyRound size={14} className="mt-0.5 shrink-0 text-accent-fg" />
         <div className="min-w-0 space-y-0.5">
-          <p className="font-semibold text-on-surface text-xs">{labels.title}</p>
-          <p className="text-[11px] text-on-surface-variant/70">{labels.description}</p>
+          <p className="font-semibold text-fg text-xs">{labels.title}</p>
+          <p className="text-[11px] text-fg-muted">{labels.description}</p>
         </div>
       </div>
 
       {status?.endpoint ? null : (
-        <p className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant">
+        <p className="rounded-lg border border-warning bg-warning-subtle px-2.5 py-2 text-[11px] text-fg-muted">
           {labels.endpointUnset}
         </p>
       )}
 
       {status?.token ? (
-        <p className="text-[11px] text-on-surface-variant/70">
+        <p className="text-[11px] text-fg-muted">
           {status.token.lastSeenAt
             ? formatMessage(labels.lastSeen, {
                 when: new Date(status.token.lastSeenAt).toLocaleString(),
@@ -85,7 +85,7 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
             : labels.neverSeen}
         </p>
       ) : (
-        <p className="text-[11px] text-on-surface-variant/70">{labels.noToken}</p>
+        <p className="text-[11px] text-fg-muted">{labels.noToken}</p>
       )}
 
       {issuedToken ? (
@@ -97,7 +97,7 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
       ) : null}
 
       {error ? (
-        <p className="text-[11px] text-error" role="alert">
+        <p className="text-[11px] text-danger" role="alert">
           {error}
         </p>
       ) : null}
@@ -107,7 +107,7 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
           type="button"
           onClick={() => void runIssue()}
           disabled={busy}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 font-semibold text-primary text-xs transition-colors hover:bg-primary/15 disabled:opacity-45"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent-subtle px-2.5 font-semibold text-accent-fg text-xs transition-colors hover:bg-accent-hover disabled:opacity-45"
         >
           <RefreshCw size={13} />
           {status?.token ? labels.rotate : labels.issue}
@@ -117,7 +117,7 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
             type="button"
             onClick={() => void runRevoke()}
             disabled={busy}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-error/80 text-xs hover:bg-error/10 hover:text-error disabled:opacity-45"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-danger text-xs hover:bg-danger-subtle hover:text-danger disabled:opacity-45"
           >
             <Trash2 size={13} />
             {labels.revoke}
@@ -162,15 +162,15 @@ function SetupSteps({
   const powershell = `$env:MANGOSTUDIO_RUNTIME_TOKEN='${token}'; mangostudio-runtime connect --hub ${target}`;
 
   return (
-    <div className="space-y-2 rounded-lg border border-primary/35 bg-primary/5 p-2.5">
-      <p className="font-semibold text-[11px] text-on-surface">{labels.tokenIssued}</p>
-      <p className="text-[11px] text-on-surface-variant/70">{labels.tokenOnce}</p>
+    <div className="space-y-2 rounded-lg border border-accent bg-accent-subtle p-2.5">
+      <p className="font-semibold text-[11px] text-fg">{labels.tokenIssued}</p>
+      <p className="text-[11px] text-fg-muted">{labels.tokenOnce}</p>
       <CopyLine label={labels.stepConnect} value={posix} />
       <CopyLine label={labels.stepConnectPowerShell} value={powershell} />
       {serviceInstall ? (
         <>
           <CopyLine label={labels.stepService} value={serviceInstall} />
-          <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
+          <p className="text-[11px] text-fg-muted">{labels.serviceHint}</p>
         </>
       ) : null}
     </div>

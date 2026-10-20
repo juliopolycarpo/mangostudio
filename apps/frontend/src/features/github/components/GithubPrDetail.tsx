@@ -55,7 +55,7 @@ export function GithubPrDetail({ chatId, number, onBack }: GithubPrDetailProps) 
       <button
         type="button"
         onClick={onBack}
-        className="flex cursor-pointer items-center gap-1 text-[10px] font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+        className="flex cursor-pointer items-center gap-1 text-[10px] font-semibold text-accent-fg hover:underline focus-visible:outline-2 focus-visible:outline-focus"
       >
         <ArrowLeft size={12} aria-hidden="true" />
         {t.github.panel.back}
@@ -97,21 +97,21 @@ function DetailBody({ chatId, number }: { readonly chatId: string; readonly numb
           href={pr.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs font-semibold leading-4 text-on-surface hover:text-primary"
+          className="text-xs font-semibold leading-4 text-fg hover:text-accent-fg"
         >
           {formatMessage(t.github.row.number, { number: String(pr.number) })} {pr.title}
         </a>
-        <p className="mt-1 text-[10px] text-on-surface-variant">
+        <p className="mt-1 text-[10px] text-fg-muted">
           {formatMessage(t.github.row.diffStat, {
             additions: String(pr.additions),
             deletions: String(pr.deletions),
             files: String(pr.changedFiles),
           })}
         </p>
-        <p className="mt-0.5 text-[10px] text-on-surface-variant">
+        <p className="mt-0.5 text-[10px] text-fg-muted">
           {t.github.mergeState[pr.mergeStateStatus]} · {t.github.mergeable[pr.mergeable]}
         </p>
-        <p className="mt-0.5 text-[10px] text-on-surface-variant">
+        <p className="mt-0.5 text-[10px] text-fg-muted">
           {pr.reviewDecision
             ? t.github.reviewDecision[pr.reviewDecision]
             : t.github.reviewDecisionNone}
@@ -190,12 +190,12 @@ function DetailQueryError({
   const { t } = useI18n();
 
   return (
-    <p className="text-[10px] text-error">
+    <p className="text-[10px] text-danger">
       {label}{' '}
       <button
         type="button"
         onClick={() => void onRetry()}
-        className="cursor-pointer font-semibold underline hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+        className="cursor-pointer font-semibold underline hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
       >
         {t.common.retry}
       </button>
@@ -229,7 +229,7 @@ function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly num
   // in a 360px rail is noise.
   if (query.data?.state !== 'ok') return null;
   if (query.data.checks.length === 0) {
-    return <p className="text-[10px] text-on-surface-variant">{t.github.empty.checks}</p>;
+    return <p className="text-[10px] text-fg-muted">{t.github.empty.checks}</p>;
   }
 
   return (
@@ -254,16 +254,14 @@ function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly num
                 href={check.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="min-w-0 flex-1 truncate text-[10px] text-on-surface hover:text-primary"
+                className="min-w-0 flex-1 truncate text-[10px] text-fg hover:text-accent-fg"
               >
                 {check.name}
               </a>
             ) : (
-              <span className="min-w-0 flex-1 truncate text-[10px] text-on-surface">
-                {check.name}
-              </span>
+              <span className="min-w-0 flex-1 truncate text-[10px] text-fg">{check.name}</span>
             )}
-            <span className="shrink-0 text-[10px] text-on-surface-variant">
+            <span className="shrink-0 text-[10px] text-fg-muted">
               {t.github.checkBucket[check.bucket]}
             </span>
           </li>
@@ -310,7 +308,7 @@ function ReviewThreadsAction({
   // sentence from "this pull request was never reviewed" but reads the same to
   // somebody looking for work to do.
   if (!task) {
-    return <p className="text-[10px] text-on-surface-variant">{t.github.empty.threads}</p>;
+    return <p className="text-[10px] text-fg-muted">{t.github.empty.threads}</p>;
   }
 
   const send = () => {

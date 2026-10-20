@@ -61,14 +61,14 @@ export function ExternalApiSettingsPage({
 
   return (
     <div className="space-y-4">
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h2 className="text-lg font-bold text-on-surface">{s.title}</h2>
-        <p className="text-sm text-on-surface-variant/70">{s.description}</p>
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h2 className="text-lg font-bold text-fg">{s.title}</h2>
+        <p className="text-sm text-fg-muted">{s.description}</p>
       </Card>
 
       {/* The toggle is the kill switch for every key on the account, so it stays
           reachable even when the key list is still loading or failed to load. */}
-      <Card variant="solid" className="space-y-5 p-4 sm:p-6">
+      <Card className="space-y-5 p-4 sm:p-6">
         <SettingToggle
           label={s.enableLabel}
           description={s.enableDescription}
@@ -76,17 +76,17 @@ export function ExternalApiSettingsPage({
           onChange={setExternalApiEnabled}
         />
         {!enabled && (
-          <p className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-on-surface">
+          <p className="rounded-xl border border-warning bg-warning-subtle px-4 py-3 text-sm text-fg">
             {s.disabledNotice}
           </p>
         )}
       </Card>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+      <Card className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
-            <h3 className="text-base font-bold text-on-surface">{s.keysTitle}</h3>
-            {atCap && <p className="text-xs text-on-surface-variant/60">{atCapMessage}</p>}
+            <h3 className="text-base font-bold text-fg">{s.keysTitle}</h3>
+            {atCap && <p className="text-xs text-fg-muted">{atCapMessage}</p>}
           </div>
           <Button
             size="sm"
@@ -100,21 +100,21 @@ export function ExternalApiSettingsPage({
         </div>
 
         {isLoading ? (
-          <p className="py-8 text-center text-sm text-on-surface-variant">{t.common.loading}</p>
+          <p className="py-8 text-center text-sm text-fg-muted">{t.common.loading}</p>
         ) : error ? (
           <div className="flex flex-col items-center gap-3 py-8">
-            <p className="text-sm text-error">{s.loadError}</p>
-            <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+            <p className="text-sm text-danger">{s.loadError}</p>
+            <Button variant="subtle" size="sm" onClick={() => void refetch()}>
               {t.common.retry}
             </Button>
           </div>
         ) : keys.length === 0 ? (
-          <p className="py-8 text-center text-sm text-on-surface-variant/60">{s.empty}</p>
+          <p className="py-8 text-center text-sm text-fg-muted">{s.empty}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-outline-variant/20 text-xs uppercase tracking-wide text-on-surface-variant/60">
+                <tr className="border-b border-stroke text-xs uppercase tracking-wide text-fg-muted">
                   <th className="px-2 py-2 font-semibold">{s.columns.name}</th>
                   <th className="px-2 py-2 font-semibold">{s.columns.scope}</th>
                   <th className="px-2 py-2 font-semibold">{s.columns.key}</th>
@@ -133,42 +133,40 @@ export function ExternalApiSettingsPage({
                   return (
                     <tr
                       key={apiKey.id}
-                      className={`border-b border-outline-variant/10 ${
-                        inactive ? 'opacity-60' : ''
-                      }`}
+                      className={`border-b border-stroke ${inactive ? 'opacity-60' : ''}`}
                     >
                       <td className="px-2 py-3 align-top">
                         <div className="space-y-1">
-                          <span className="font-medium text-on-surface">
+                          <span className="font-medium text-fg">
                             {displayKeyName(t, apiKey.name)}
                           </span>
                           {inactive && (
-                            <span className="block text-xs text-on-surface-variant/70">
+                            <span className="block text-xs text-fg-muted">
                               {!enabled ? s.inactive : s.expired}
                             </span>
                           )}
                         </div>
                       </td>
                       <td className="px-2 py-3 align-top">
-                        <span className="inline-flex rounded-full bg-surface-container-high px-2 py-0.5 text-xs font-medium text-on-surface-variant">
+                        <span className="inline-flex rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-fg-muted">
                           {scopeLabel(t, apiKey.scope)}
                         </span>
                       </td>
-                      <td className="px-2 py-3 align-top font-mono text-xs text-on-surface-variant">
+                      <td className="px-2 py-3 align-top font-mono text-xs text-fg-muted">
                         {formatKeyHint(apiKey.start)}
                       </td>
-                      <td className="px-2 py-3 align-top text-on-surface-variant">
+                      <td className="px-2 py-3 align-top text-fg-muted">
                         {formatApiKeyDate(apiKey.createdAt, locale, '—')}
                       </td>
-                      <td className="px-2 py-3 align-top text-on-surface-variant">
+                      <td className="px-2 py-3 align-top text-fg-muted">
                         {formatApiKeyDate(apiKey.expiresAt, locale, s.neverExpires)}
                       </td>
-                      <td className="px-2 py-3 align-top text-on-surface-variant">
+                      <td className="px-2 py-3 align-top text-fg-muted">
                         {formatApiKeyDate(apiKey.lastUsedAt, locale, s.neverUsed)}
                       </td>
                       <td className="px-2 py-3 align-top text-right">
                         <Button
-                          variant="ghost"
+                          variant="subtle"
                           size="sm"
                           aria-label={`${s.revoke.confirmButton}: ${displayKeyName(t, apiKey.name)}`}
                           onClick={() => setKeyToRevoke(apiKey)}

@@ -31,11 +31,11 @@ export interface ActivityFeedProps {
 }
 
 const TONE_ICON_CLASS: Record<StatusDotTone, string> = {
-  accent: 'text-primary',
+  accent: 'text-accent-fg',
   success: 'text-success',
   warning: 'text-warning',
-  error: 'text-error',
-  neutral: 'text-on-surface-variant/60',
+  error: 'text-danger',
+  neutral: 'text-fg-muted',
 };
 
 export function ActivityFeed({
@@ -49,7 +49,7 @@ export function ActivityFeed({
   const rows = maxRows !== undefined ? events.slice(0, maxRows) : events;
 
   if (rows.length === 0) {
-    return <p className="text-xs text-on-surface-variant/70">{labels.empty}</p>;
+    return <p className="text-xs text-fg-muted">{labels.empty}</p>;
   }
 
   if (compact) {
@@ -74,7 +74,7 @@ export function ActivityFeed({
     <div className="space-y-4">
       {groups.map((group) => (
         <div key={group.key} className="space-y-2">
-          <p className="micro-label text-on-surface-variant/60">
+          <p className="micro-label text-fg-muted">
             {activityDayGroupLabel(group, labels, locale)}
           </p>
           <ul className="space-y-2">
@@ -83,7 +83,7 @@ export function ActivityFeed({
               return (
                 <li key={event.id}>
                   {showDivider ? (
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-primary/70">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-accent-fg">
                       {labels.sinceLastVisit}
                     </p>
                   ) : null}
@@ -103,10 +103,10 @@ function ActivityRow({ event, locale, t }: { event: ActivityEvent; locale: strin
   return (
     <div className="flex min-w-0 items-start gap-2 text-sm">
       <Icon aria-hidden="true" className={`mt-0.5 size-3.5 shrink-0 ${TONE_ICON_CLASS[tone]}`} />
-      <p className="min-w-0 flex-1 truncate text-on-surface-variant">{text}</p>
+      <p className="min-w-0 flex-1 truncate text-fg-muted">{text}</p>
       <time
         dateTime={new Date(event.createdAt).toISOString()}
-        className="shrink-0 text-xs text-on-surface-variant/50"
+        className="shrink-0 text-xs text-fg-subtle"
       >
         {formatRelativeTime(event.createdAt, locale)}
       </time>

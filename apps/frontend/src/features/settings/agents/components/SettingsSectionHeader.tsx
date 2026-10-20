@@ -16,13 +16,13 @@ export function SettingsSectionHeader({
   action,
 }: SettingsSectionHeaderProps) {
   return (
-    <Card variant="solid" className="space-y-3 p-4 sm:p-6">
+    <Card className="space-y-3 p-4 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex gap-3 items-start">
-          <div className="rounded-2xl bg-primary/10 p-2 text-primary">{icon}</div>
+          <div className="rounded-2xl bg-accent-subtle p-2 text-accent-fg">{icon}</div>
           <div>
-            <h2 className="text-lg font-bold text-on-surface">{title}</h2>
-            <p className="text-sm text-on-surface-variant/70">{description}</p>
+            <h2 className="text-lg font-bold text-fg">{title}</h2>
+            <p className="text-sm text-fg-muted">{description}</p>
           </div>
         </div>
         {action}

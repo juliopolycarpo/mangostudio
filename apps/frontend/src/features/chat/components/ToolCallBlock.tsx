@@ -130,11 +130,11 @@ export function ToolCallBlock({
       >
         <span className={`shrink-0 font-mono font-semibold ${toneTextClass(tone)}`}>{label}</span>
         {source !== 'builtin' && (
-          <span className="shrink-0 rounded-sm bg-surface-container-high px-1 py-px text-[10px] text-on-surface-variant/70">
+          <span className="shrink-0 rounded-sm bg-surface px-1 py-px text-[10px] text-fg-muted">
             {t.tools.sources[source]}
           </span>
         )}
-        {hint && <span className="truncate font-mono text-on-surface-variant/60">{hint}</span>}
+        {hint && <span className="truncate font-mono text-fg-muted">{hint}</span>}
         {statusLabel && (
           <span className={`shrink-0 text-[11px] ${toneTextClass(tone)}`}>{statusLabel}</span>
         )}
@@ -147,7 +147,7 @@ export function ToolCallBlock({
               <button
                 type="button"
                 onClick={() => setShowRaw((v) => !v)}
-                className="cursor-pointer text-[10px] uppercase tracking-wider text-on-surface-variant/50 transition-colors duration-200 hover:text-on-surface-variant"
+                className="cursor-pointer text-[10px] uppercase tracking-wider text-fg-subtle transition-colors duration-200 hover:text-fg-muted"
               >
                 {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
               </button>
@@ -156,10 +156,10 @@ export function ToolCallBlock({
           {preview !== null && !showRaw && <FileChangePreviewBody preview={preview} />}
           {(preview === null || showRaw) && Object.keys(args).length > 0 && (
             <div>
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-on-surface-variant/50">
+              <p className="mb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
                 {t.tools.argsLabel}
               </p>
-              <pre className="whitespace-pre-wrap leading-relaxed text-on-surface-variant/70">
+              <pre className="whitespace-pre-wrap leading-relaxed text-fg-muted">
                 {JSON.stringify(args, null, 2)}
               </pre>
             </div>
@@ -168,7 +168,7 @@ export function ToolCallBlock({
             <div>
               <div className="mb-1 flex items-center justify-between">
                 <p
-                  className={`text-[10px] uppercase tracking-wider ${isError ? 'text-error/50' : 'text-on-surface-variant/50'}`}
+                  className={`text-[10px] uppercase tracking-wider ${isError ? 'text-danger' : 'text-fg-subtle'}`}
                 >
                   {isError ? t.tools.errorLabel : t.tools.resultLabel}
                 </p>
@@ -176,13 +176,13 @@ export function ToolCallBlock({
                   type="button"
                   onClick={() => void handleCopyResult()}
                   title={copied ? t.tools.resultCopied : t.tools.copyResult}
-                  className="cursor-pointer text-on-surface-variant opacity-60 transition-opacity duration-200 hover:opacity-100"
+                  className="cursor-pointer text-fg-muted opacity-60 transition-opacity duration-200 hover:opacity-100"
                 >
                   {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
                 </button>
               </div>
               <pre
-                className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}
+                className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-danger' : 'text-fg-muted'}`}
               >
                 {displayedResult}
               </pre>

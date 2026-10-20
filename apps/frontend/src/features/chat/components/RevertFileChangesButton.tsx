@@ -73,7 +73,7 @@ export function RevertFileChangesButton({
         type="button"
         onClick={() => setIsConfirming(true)}
         disabled={revert.isPending}
-        className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-[10px] font-label uppercase tracking-wide text-on-surface-variant hover:text-primary disabled:opacity-40"
+        className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-[10px] uppercase tracking-wide text-fg-muted hover:text-accent-fg disabled:opacity-40"
       >
         {revert.isPending ? labels.reverting : labels.revert}
       </button>

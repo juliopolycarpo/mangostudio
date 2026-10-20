@@ -26,7 +26,7 @@ export function OverviewToolchainCard({ status }: { readonly status: RuntimeStat
       testId="overview-toolchain-card"
       dataAttributes={{ 'data-runtime-id': status.id }}
       subtitle={
-        <p className="truncate font-mono text-xs text-on-surface-variant/70">
+        <p className="truncate font-mono text-xs text-fg-muted">
           {installation ? versionLabel(t, installation.version) : e.agents.notInstalled}
         </p>
       }

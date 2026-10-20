@@ -14,7 +14,7 @@ export function SettingsSaveIndicator() {
   if (status === 'idle') return null;
 
   const label = t.settings.autoSave[status];
-  const tone = status === 'error' ? 'text-error' : 'text-on-surface-variant';
+  const tone = status === 'error' ? 'text-danger' : 'text-fg-muted';
 
   return (
     <span

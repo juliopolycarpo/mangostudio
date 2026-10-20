@@ -23,20 +23,20 @@ export function AgentToolPicker({
 
   return (
     <fieldset className="space-y-2" disabled={disabled}>
-      <legend className="text-sm font-semibold text-on-surface">{label}</legend>
+      <legend className="text-sm font-semibold text-fg">{label}</legend>
       {tools.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/60">{disabledLabel}</p>
+        <p className="text-sm text-fg-muted">{disabledLabel}</p>
       ) : (
         <div className={`grid gap-2 sm:grid-cols-2 ${disabled ? 'opacity-50' : ''}`}>
           {tools.map((tool) => (
             <label
               key={tool.name}
-              className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm text-on-surface transition-all duration-200 ${
+              className={`flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm text-fg transition-all duration-200 ${
                 disabled
-                  ? 'border-outline-variant/10 bg-surface-container-lowest/50 cursor-not-allowed'
+                  ? 'border-stroke bg-control cursor-not-allowed'
                   : selected.has(tool.name)
-                    ? 'border-primary/30 bg-primary/5 cursor-pointer'
-                    : 'border-outline-variant/20 bg-surface-container-lowest hover:border-outline-variant/40 hover:bg-surface-container-high cursor-pointer'
+                    ? 'border-accent bg-accent-subtle cursor-pointer'
+                    : 'border-stroke bg-control hover:border-stroke hover:bg-fill-hover cursor-pointer'
               }`}
             >
               <Checkbox
@@ -51,12 +51,10 @@ export function AgentToolPicker({
               />
               <span className="flex-1 min-w-0">
                 <span className="flex items-center gap-1.5">
-                  <Wrench size={12} className="shrink-0 text-on-surface-variant/50" />
+                  <Wrench size={12} className="shrink-0 text-fg-subtle" />
                   <span className="block font-medium text-sm">{tool.title}</span>
                 </span>
-                <span className="block text-xs text-on-surface-variant/60 truncate">
-                  {tool.name}
-                </span>
+                <span className="block text-xs text-fg-muted truncate">{tool.name}</span>
               </span>
             </label>
           ))}

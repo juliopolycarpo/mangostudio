@@ -111,7 +111,7 @@ describe('ToolCallBlock', () => {
     expect(button).toHaveTextContent('30.0s');
     // The rail node and the tool's own name carry the outcome together.
     expect(container.querySelector('.chat-timeline-item--error')).toBeInTheDocument();
-    expect(screen.getByText('Bash').className).toContain('text-error');
+    expect(screen.getByText('Bash').className).toContain('text-danger');
   });
 
   it('colours the tool name by outcome', () => {

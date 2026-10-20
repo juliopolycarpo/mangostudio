@@ -135,9 +135,7 @@ export function EndStateStep({
   return (
     <div className="space-y-4" data-testid="onboarding-end-state-step">
       <fieldset className="space-y-2">
-        <legend className="font-medium text-on-surface-variant text-sm">
-          {labels.endStateLabel}
-        </legend>
+        <legend className="font-medium text-fg-muted text-sm">{labels.endStateLabel}</legend>
         {/* Real radios rather than styled buttons: this is one choice out of
             two, and arrow-key navigation and the announced group come free. */}
         <div className="grid gap-2">
@@ -146,8 +144,8 @@ export function EndStateStep({
               key={choice.value}
               className={`cursor-pointer rounded-xl border px-3 py-2 text-left font-semibold text-sm transition-colors has-disabled:cursor-default has-disabled:opacity-60 ${
                 endState === choice.value
-                  ? 'border-primary/45 bg-primary/10 text-on-surface'
-                  : 'border-outline-variant/20 text-on-surface-variant/70 hover:bg-surface-container-highest'
+                  ? 'border-accent bg-accent-subtle text-fg'
+                  : 'border-stroke text-fg-muted hover:bg-fill-hover'
               }`}
             >
               <input
@@ -163,8 +161,8 @@ export function EndStateStep({
             </label>
           ))}
         </div>
-        <div className="rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-          <p className="text-on-surface-variant/70 text-xs">
+        <div className="rounded-xl border border-accent bg-accent-subtle px-3 py-2.5">
+          <p className="text-fg-muted text-xs">
             {endState === 'paired' ? labels.endStatePairedHint : labels.endStateSshHint}
           </p>
         </div>
@@ -172,7 +170,7 @@ export function EndStateStep({
 
       {dialEndpointMissing ? (
         <p
-          className="rounded-xl border border-warning/35 bg-warning/5 px-3 py-2.5 text-on-surface-variant text-xs"
+          className="rounded-xl border border-warning bg-warning-subtle px-3 py-2.5 text-fg-muted text-xs"
           role="alert"
           data-testid="onboarding-public-url-gate"
         >
@@ -182,11 +180,11 @@ export function EndStateStep({
 
       {dialEndpointFailed ? (
         <div
-          className="space-y-2 rounded-xl border border-error/35 bg-error/5 px-3 py-2.5"
+          className="space-y-2 rounded-xl border border-danger bg-danger-subtle px-3 py-2.5"
           role="alert"
           data-testid="onboarding-pairing-error"
         >
-          <p className="text-on-surface-variant text-xs">{labels.endStatePairingUnavailable}</p>
+          <p className="text-fg-muted text-xs">{labels.endStatePairingUnavailable}</p>
           <Button
             variant="secondary"
             className="w-full"
@@ -220,13 +218,13 @@ export function EndStateStep({
                 setId(event.target.value);
               }}
             />
-            {!idInvalid && <p className="text-on-surface-variant/60 text-xs">{add.idHint}</p>}
+            {!idInvalid && <p className="text-fg-muted text-xs">{add.idHint}</p>}
           </div>
         </>
       )}
 
       {error ? (
-        <p className="text-error text-xs" role="alert">
+        <p className="text-danger text-xs" role="alert">
           {error}
         </p>
       ) : null}

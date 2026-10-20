@@ -32,19 +32,19 @@ function OptionButton({
       aria-pressed={selected}
       className={`
         flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200
-        border focus:outline-none focus:ring-2 focus:ring-primary/40
+        border focus:outline-none focus:ring-2 focus:ring-focus
         ${
           selected
-            ? 'bg-primary/15 border-primary/50 text-primary'
+            ? 'bg-accent-subtle border-accent text-accent-fg'
             : disabled
-              ? 'opacity-40 cursor-not-allowed border-outline-variant/20 text-on-surface-variant/50'
-              : 'border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer'
+              ? 'opacity-40 cursor-not-allowed border-stroke text-fg-subtle'
+              : 'border-stroke text-fg-muted hover:bg-fill-hover hover:text-fg cursor-pointer'
         }
       `}
     >
       {label}
       {badge && (
-        <span className="ml-1.5 text-[10px] font-label font-bold text-on-surface-variant/50 uppercase tracking-wide">
+        <span className="ml-1.5 text-[10px] font-bold text-fg-subtle uppercase tracking-wide">
           {badge}
         </span>
       )}
@@ -62,11 +62,9 @@ function SettingsSection({
   children: React.ReactNode;
 }) {
   return (
-    <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-        {title}
-      </h3>
-      <p className="text-sm text-on-surface-variant/60">{description}</p>
+    <Card className="space-y-3 p-4 sm:p-6">
+      <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">{title}</h3>
+      <p className="text-sm text-fg-muted">{description}</p>
       {children}
     </Card>
   );
@@ -97,14 +95,12 @@ function ThemeCard({
       aria-pressed={selected}
       className={`
         rounded-xl border-2 transition-all duration-200 overflow-hidden text-left
-        focus:outline-none focus:ring-2 focus:ring-primary/40
-        ${selected ? 'border-primary ring-1 ring-primary/30' : 'border-outline-variant/20 hover:border-outline-variant/50 cursor-pointer'}
+        focus:outline-none focus:ring-2 focus:ring-focus
+        ${selected ? 'border-accent ring-1 ring-focus' : 'border-stroke hover:border-stroke cursor-pointer'}
       `}
     >
       <ThemePreviewSample themeId={themeId} />
-      <div className="px-3 py-2 text-xs font-semibold text-on-surface-variant bg-surface-container-high">
-        {label}
-      </div>
+      <div className="px-3 py-2 text-xs font-semibold text-fg-muted bg-surface">{label}</div>
     </button>
   );
 }
@@ -186,7 +182,7 @@ export function AppearanceSettings() {
         {codeTheme.mode === 'auto' ? (
           <div className="space-y-3 mt-2">
             <div>
-              <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
+              <p className="text-xs font-semibold text-fg-muted mb-2">
                 {s.codeTheme.darkPreference}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -202,7 +198,7 @@ export function AppearanceSettings() {
               </div>
             </div>
             <div>
-              <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
+              <p className="text-xs font-semibold text-fg-muted mb-2">
                 {s.codeTheme.lightPreference}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -247,7 +243,7 @@ export function AppearanceSettings() {
         </div>
         {/* Live preview */}
         <p
-          className="mt-2 text-on-surface-variant/70 font-body leading-relaxed transition-all duration-200"
+          className="mt-2 text-fg-muted leading-relaxed transition-all duration-200"
           style={{ fontSize: 'var(--chat-font-size)' }}
         >
           {PREVIEW_SENTENCE_KEY}
@@ -257,7 +253,7 @@ export function AppearanceSettings() {
       {/* ── File Change Previews ── */}
       <SettingsSection title={s.fileChanges.label} description={s.fileChanges.description}>
         <div className="flex items-start justify-between gap-4">
-          <p className="text-sm font-medium text-on-surface">{s.fileChanges.enabled}</p>
+          <p className="text-sm font-medium text-fg">{s.fileChanges.enabled}</p>
           <Checkbox
             checked={chatDisplaySettings.diffPreviewsEnabled}
             onChange={(event) => setDiffPreviewsEnabled(event.target.checked)}
@@ -277,7 +273,7 @@ export function AppearanceSettings() {
                 />
               ))}
             </div>
-            <p className="text-xs text-on-surface-variant/50">{s.fileChanges.modeDescription}</p>
+            <p className="text-xs text-fg-subtle">{s.fileChanges.modeDescription}</p>
           </>
         )}
       </SettingsSection>

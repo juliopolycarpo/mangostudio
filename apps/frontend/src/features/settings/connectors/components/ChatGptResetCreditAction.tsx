@@ -59,14 +59,14 @@ export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptReset
       </Button>
 
       {isConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-surface-container-high w-full max-w-sm rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5 sm:space-y-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
+          <div className="bg-surface w-full max-w-sm rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke space-y-5 sm:space-y-6">
             <div className="space-y-2 text-center">
-              <div className="p-4 bg-primary/10 rounded-full w-fit mx-auto text-primary mb-2">
+              <div className="p-4 bg-accent-subtle rounded-full w-fit mx-auto text-accent-fg mb-2">
                 <Zap size={32} />
               </div>
-              <h3 className="text-xl font-bold text-on-surface">{s.chatgptRedeemConfirmTitle}</h3>
-              <p className="text-sm text-on-surface-variant/70">
+              <h3 className="text-xl font-bold text-fg">{s.chatgptRedeemConfirmTitle}</h3>
+              <p className="text-sm text-fg-muted">
                 {s.chatgptRedeemConfirmBody.replace('{count}', String(availableCount))}
                 {lastWindowsReset !== null &&
                   lastWindowsReset > 0 &&

@@ -104,13 +104,13 @@ export function InstanceDiff({
         </Banner>
       )}
       {kind === 'skill' && (
-        <p className="text-on-surface-variant/60" data-testid="entrypoint-only-note">
+        <p className="text-fg-muted" data-testid="entrypoint-only-note">
           {l.detail.entrypointOnly}
         </p>
       )}
-      {truncated && <p className="text-tertiary">{l.diff.truncated}</p>}
+      {truncated && <p className="text-info">{l.diff.truncated}</p>}
       {noVisibleDifference ? (
-        <p className="text-on-surface-variant" data-testid="diff-identical">
+        <p className="text-fg-muted" data-testid="diff-identical">
           {kind === 'skill' ? l.detail.identicalEntrypoint : l.diff.identical}
         </p>
       ) : (
@@ -136,12 +136,12 @@ function Banner({
       data-testid={testId}
       className={`rounded-lg border p-2.5 ${
         tone === 'warn'
-          ? 'border-tertiary/25 bg-tertiary/5 text-on-surface'
-          : 'border-outline-variant/20 bg-surface-container/60 text-on-surface-variant'
+          ? 'border-info bg-info-subtle text-fg'
+          : 'border-stroke bg-surface text-fg-muted'
       }`}
     >
       <p className="font-semibold text-[11px]">{title}</p>
-      <p className="mt-0.5 text-[11px] text-on-surface-variant/80">{children}</p>
+      <p className="mt-0.5 text-[11px] text-fg-muted">{children}</p>
     </div>
   );
 }

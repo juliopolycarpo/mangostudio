@@ -189,10 +189,8 @@ function TabBar({
           role="tab"
           aria-selected={tab === id}
           onClick={() => onSelect(id)}
-          className={`cursor-pointer rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
-            tab === id
-              ? 'bg-primary/12 text-primary'
-              : 'text-on-surface-variant hover:bg-surface-container-high'
+          className={`cursor-pointer rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
+            tab === id ? 'bg-accent-subtle text-accent-fg' : 'text-fg-muted hover:bg-fill-hover'
           }`}
         >
           {labels[id]}
@@ -222,10 +220,8 @@ function FilterBar<T extends string>({
           type="button"
           aria-pressed={filter === active}
           onClick={() => onSelect(filter)}
-          className={`cursor-pointer rounded-full px-2 py-0.5 text-[10px] transition-colors focus-visible:outline-2 focus-visible:outline-primary ${
-            filter === active
-              ? 'bg-surface-container-highest text-on-surface'
-              : 'text-on-surface-variant hover:text-on-surface'
+          className={`cursor-pointer rounded-full px-2 py-0.5 text-[10px] transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
+            filter === active ? 'bg-fill-selected text-fg' : 'text-fg-muted hover:text-fg'
           }`}
         >
           {labels[filter]}
@@ -338,9 +334,7 @@ function PrsPane({
         // cannot name) has no branch for `gh pr create` to push, and the
         // command fails with a generic server error rather than explaining
         // why — so this state is caught here instead.
-        <p className="text-[10px] leading-4 text-on-surface-variant">
-          {t.github.createPr.noBranch}
-        </p>
+        <p className="text-[10px] leading-4 text-fg-muted">{t.github.createPr.noBranch}</p>
       )}
       <ListGate query={query} errorLabel={t.github.errors.prs} emptyLabel={t.github.empty.prs}>
         {(payload) =>

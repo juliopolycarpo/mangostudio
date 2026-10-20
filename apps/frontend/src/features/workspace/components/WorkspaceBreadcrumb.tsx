@@ -76,26 +76,26 @@ export function WorkspaceBreadcrumbView({
   const { t } = useI18n();
   return (
     <span
-      className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-on-surface-variant"
+      className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-fg-muted"
       data-testid="workspace-breadcrumb"
     >
-      <span className="shrink-0 text-on-surface-variant/60">{t.workspace.breadcrumbIn}</span>
+      <span className="shrink-0 text-fg-muted">{t.workspace.breadcrumbIn}</span>
       {onChangeWorkdir ? (
         <button
           type="button"
           onClick={onChangeWorkdir}
           aria-label={formatMessage(t.workspace.changeWorkdir, { name: basename })}
-          className="truncate font-medium text-on-surface underline-offset-2 transition-colors hover:text-primary hover:underline"
+          className="truncate font-medium text-fg underline-offset-2 transition-colors hover:text-accent-fg hover:underline"
         >
           {basename}
         </button>
       ) : (
-        <span className="truncate font-medium text-on-surface">{basename}</span>
+        <span className="truncate font-medium text-fg">{basename}</span>
       )}
       {branch ? (
         <>
-          <span className="shrink-0 text-on-surface-variant/60">/</span>
-          <span className="truncate text-primary">{branch}</span>
+          <span className="shrink-0 text-fg-muted">/</span>
+          <span className="truncate text-accent-fg">{branch}</span>
         </>
       ) : null}
       {dirty ? (

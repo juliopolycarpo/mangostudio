@@ -245,7 +245,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus.
     <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-background/80 p-4 fade-in backdrop-blur-sm duration-200"
+      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-scrim p-4 fade-in duration-200"
       data-testid="add-environment-dialog"
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return;
@@ -257,18 +257,18 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="max-h-full w-full max-w-md space-y-5 overflow-y-auto rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8"
+        className="max-h-full w-full max-w-md space-y-5 overflow-y-auto rounded-3xl border border-stroke bg-surface p-5 shadow-2xl sm:p-8"
       >
         <div className="space-y-1">
-          <h3 id={titleId} className="font-bold text-lg text-on-surface">
+          <h3 id={titleId} className="font-bold text-lg text-fg">
             {labels.title}
           </h3>
-          <p className="text-on-surface-variant/60 text-xs">{labels.description}</p>
+          <p className="text-fg-muted text-xs">{labels.description}</p>
         </div>
 
         <div className="space-y-4">
           <div className="space-y-1">
-            <p className="font-medium text-on-surface-variant text-sm">{labels.reachLabel}</p>
+            <p className="font-medium text-fg-muted text-sm">{labels.reachLabel}</p>
             <div className="grid gap-2" role="tablist">
               {choices.map((choice) => (
                 <ReachabilityOption
@@ -288,22 +288,22 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                 type="button"
                 onClick={onStartOnboarding}
                 data-testid="add-environment-onboarding"
-                className="mt-2 block w-full rounded-xl border border-outline-variant/20 border-dashed px-3 py-2 text-left font-semibold text-on-surface-variant/70 text-sm transition-colors hover:bg-surface-container-highest"
+                className="mt-2 block w-full rounded-xl border border-stroke border-dashed px-3 py-2 text-left font-semibold text-fg-muted text-sm transition-colors hover:bg-fill-hover"
               >
                 {labels.reachNewMachine}
-                <span className="mt-0.5 block font-normal text-on-surface-variant/55 text-xs">
+                <span className="mt-0.5 block font-normal text-fg-subtle text-xs">
                   {labels.newMachineHint}
                 </span>
               </button>
             ) : null}
-            <div className="rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-              <p className="text-on-surface-variant/70 text-xs">{hints[kind]}</p>
+            <div className="rounded-xl border border-accent bg-accent-subtle px-3 py-2.5">
+              <p className="text-fg-muted text-xs">{hints[kind]}</p>
             </div>
           </div>
 
           {kind === 'wsl' ? (
             <div className="space-y-1">
-              <p className="font-medium text-on-surface-variant text-sm">{labels.wslDistroLabel}</p>
+              <p className="font-medium text-fg-muted text-sm">{labels.wslDistroLabel}</p>
               <WslDistributionPicker
                 distributions={distributions}
                 selected={selectedDistro}
@@ -339,7 +339,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                 setId(event.target.value);
               }}
             />
-            {!idInvalid && <p className="text-on-surface-variant/60 text-xs">{labels.idHint}</p>}
+            {!idInvalid && <p className="text-fg-muted text-xs">{labels.idHint}</p>}
           </div>
 
           {kind === 'stdio' ? (
@@ -351,7 +351,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                   value={binaryPath}
                   onChange={(event) => setBinaryPath(event.target.value)}
                 />
-                <p className="text-on-surface-variant/60 text-xs">{labels.binaryPathHint}</p>
+                <p className="text-fg-muted text-xs">{labels.binaryPathHint}</p>
               </div>
 
               <div className="space-y-1">
@@ -361,7 +361,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                   value={cwd}
                   onChange={(event) => setCwd(event.target.value)}
                 />
-                <p className="text-on-surface-variant/60 text-xs">{labels.cwdHint}</p>
+                <p className="text-fg-muted text-xs">{labels.cwdHint}</p>
               </div>
             </>
           ) : null}
@@ -377,7 +377,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
           ) : null}
 
           {kind === 'websocket' ? (
-            <p className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5 text-on-surface-variant/70 text-xs">
+            <p className="rounded-xl border border-stroke bg-control px-3 py-2.5 text-fg-muted text-xs">
               {labels.pairedNext}
             </p>
           ) : null}
@@ -391,7 +391,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                 onChange={(event) => setBaseUrl(event.target.value)}
               />
               {shouldWarnPlaintextHttpRuntime(trimmedBaseUrl) ? (
-                <p className="rounded-xl border border-warning/35 bg-warning/5 px-3 py-2.5 text-on-surface-variant text-xs">
+                <p className="rounded-xl border border-warning bg-warning-subtle px-3 py-2.5 text-fg-muted text-xs">
                   {labels.directPlaintextWarning}
                 </p>
               ) : null}
@@ -471,12 +471,12 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                   }
                   onChange={(event) => setSshRuntimePath(event.target.value)}
                 />
-                <p className="text-on-surface-variant/60 text-xs">{labels.sshRuntimePathHint}</p>
+                <p className="text-fg-muted text-xs">{labels.sshRuntimePathHint}</p>
               </div>
 
               {sshConfig.host ? (
-                <div className="space-y-2 rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-                  <p className="text-on-surface-variant/70 text-xs">{labels.sshPreflight}</p>
+                <div className="space-y-2 rounded-xl border border-accent bg-accent-subtle px-3 py-2.5">
+                  <p className="text-fg-muted text-xs">{labels.sshPreflight}</p>
                   <CopyLine
                     label={labels.sshPreflightReach}
                     value={sshPreflightCommands(sshConfig).reach}
@@ -488,7 +488,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
         </div>
 
         {error ? (
-          <p className="text-error text-xs" role="alert">
+          <p className="text-danger text-xs" role="alert">
             {error}
           </p>
         ) : null}
@@ -529,8 +529,8 @@ function ReachabilityOption({
       onClick={onSelect}
       className={`rounded-xl border px-3 py-2 text-left font-semibold text-sm transition-colors ${
         active
-          ? 'border-primary/45 bg-primary/10 text-on-surface'
-          : 'border-outline-variant/20 text-on-surface-variant/70 hover:bg-surface-container-highest'
+          ? 'border-accent bg-accent-subtle text-fg'
+          : 'border-stroke text-fg-muted hover:bg-fill-hover'
       }`}
     >
       {label}

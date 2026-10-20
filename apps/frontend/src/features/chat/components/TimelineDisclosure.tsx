@@ -10,8 +10,7 @@ import { useMotionPresets } from '@/lib/motion/use-motion-presets';
  * own detail must not, and two overflow utilities on one element resolve by
  * stylesheet order rather than by the order they are written in.
  */
-export const TIMELINE_PANEL_CLASS =
-  'mt-1.5 rounded-lg border border-outline-variant/15 bg-surface-container-lowest/60';
+export const TIMELINE_PANEL_CLASS = 'mt-1.5 rounded-lg border border-stroke bg-control';
 
 interface TimelineDisclosureProps {
   open: boolean;

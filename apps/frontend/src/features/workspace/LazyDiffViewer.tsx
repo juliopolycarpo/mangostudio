@@ -38,7 +38,7 @@ function DiffViewerFallback() {
   const { t } = useI18n();
 
   return (
-    <div className="flex min-h-32 flex-col items-center justify-center gap-2 px-4 text-center text-xs text-on-surface-variant">
+    <div className="flex min-h-32 flex-col items-center justify-center gap-2 px-4 text-center text-xs text-fg-muted">
       <LoaderCircle size={18} className="animate-spin" />
       <p>{t.git.diff.loading}</p>
     </div>

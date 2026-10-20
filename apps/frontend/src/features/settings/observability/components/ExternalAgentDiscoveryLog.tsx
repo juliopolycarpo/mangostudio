@@ -37,39 +37,36 @@ export function ExternalAgentDiscoveryLog() {
   const labels = t.settings.logs.externalAgentDiscovery;
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+    <Card className="space-y-4 p-4 sm:p-6">
       <div className="space-y-1">
-        <h2 className="text-lg font-semibold text-on-surface">{labels.title}</h2>
-        <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
+        <h2 className="text-lg font-semibold text-fg">{labels.title}</h2>
+        <p className="text-sm text-fg-muted">{labels.description}</p>
       </div>
 
       {external.isLoading ? (
         // "No agents" is a verdict, and this query outlives the page's other
         // one: claiming it before discovery answers would read as a machine
         // with nothing installed.
-        <p className="text-sm text-on-surface-variant/70">{t.common.loading}</p>
+        <p className="text-sm text-fg-muted">{t.common.loading}</p>
       ) : external.agents.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/70">{labels.empty}</p>
+        <p className="text-sm text-fg-muted">{labels.empty}</p>
       ) : (
         <ul className="space-y-2">
           {external.agents.map((agent) => (
-            <li
-              key={agent.targetId}
-              className="rounded-xl bg-surface-container-lowest px-4 py-3 text-sm"
-            >
+            <li key={agent.targetId} className="rounded-xl bg-control px-4 py-3 text-sm">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="font-medium text-on-surface">
+                <span className="font-medium text-fg">
                   {t.externalAgents.target[agent.targetId]}
                 </span>
-                <span className="text-xs text-on-surface-variant/60">{summary(agent, labels)}</span>
+                <span className="text-xs text-fg-muted">{summary(agent, labels)}</span>
               </div>
               {agent.discoveryState === 'undetermined' && externalAgentSelectable(agent) ? (
-                <p className="mt-1 text-xs text-on-surface-variant/70">
+                <p className="mt-1 text-xs text-fg-muted">
                   {t.externalAgents.selector.discoveryUndeterminedHint}
                 </p>
               ) : null}
               {agent.discovery ? (
-                <p className="mt-1 text-xs text-on-surface-variant/70">
+                <p className="mt-1 text-xs text-fg-muted">
                   {formatTimestamp(agent.discovery.probedAtMs, locale)}
                   {agent.discovery.attempts > 1
                     ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`

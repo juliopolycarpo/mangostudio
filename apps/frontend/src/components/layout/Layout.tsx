@@ -53,7 +53,7 @@ export function Layout({
 
   return (
     <div
-      className="flex h-screen overflow-hidden bg-surface text-on-surface font-body selection:bg-primary/30"
+      className="flex h-screen overflow-hidden bg-canvas text-fg selection:bg-accent-subtle"
       style={{ ['--chat-sidebar-width' as string]: `${previewWidth}px` }}
     >
       <Sidebar

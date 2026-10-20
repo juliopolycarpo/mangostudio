@@ -48,7 +48,7 @@ export function RemovalResultPanel({
     <div className="space-y-4" data-testid="removal-result-panel" data-partial={result.partial}>
       {result.partial && (
         <p
-          className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/5 p-3 text-error text-xs"
+          className="flex items-start gap-2 rounded-lg border border-danger bg-danger-subtle p-3 text-danger text-xs"
           data-testid="partial-warning"
         >
           <TriangleAlert size={14} className="mt-0.5 shrink-0" />
@@ -56,14 +56,14 @@ export function RemovalResultPanel({
         </p>
       )}
       {rolledBack && (
-        <p className="text-on-surface-variant text-xs" data-testid="rolled-back">
+        <p className="text-fg-muted text-xs" data-testid="rolled-back">
           {l.removal.resultRolledBack}
         </p>
       )}
 
       {result.removed.length > 0 && (
         <section className="space-y-1.5">
-          <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
             {l.removal.resultRemovedHeading}
           </h3>
           <ul className="space-y-1">
@@ -73,14 +73,14 @@ export function RemovalResultPanel({
                 className="flex items-start gap-2 text-xs"
                 data-testid="removed-row"
               >
-                <CircleCheck size={12} className="mt-0.5 shrink-0 text-primary" />
+                <CircleCheck size={12} className="mt-0.5 shrink-0 text-accent-fg" />
                 <span className="min-w-0">
-                  <span className="text-on-surface">{removed.resourceKey}</span>
-                  <span className="block break-all font-mono text-[11px] text-on-surface-variant/60">
+                  <span className="text-fg">{removed.resourceKey}</span>
+                  <span className="block break-all font-mono text-[11px] text-fg-muted">
                     {removed.path}
                   </span>
                   {removed.lastCopy && (
-                    <span className="block text-[11px] text-error" data-testid="last-copy-removed">
+                    <span className="block text-[11px] text-danger" data-testid="last-copy-removed">
                       {l.removal.resultLastCopy}
                     </span>
                   )}
@@ -93,7 +93,7 @@ export function RemovalResultPanel({
 
       {result.failed.length > 0 && (
         <section className="space-y-1.5">
-          <h3 className="font-label font-semibold text-[10px] text-error uppercase tracking-widest">
+          <h3 className="font-semibold text-[10px] text-danger uppercase tracking-widest">
             {l.result.failedHeading}
           </h3>
           <ul className="space-y-1">
@@ -103,10 +103,10 @@ export function RemovalResultPanel({
                 className="flex items-start gap-2 text-xs"
                 data-testid="failed-row"
               >
-                <CircleX size={12} className="mt-0.5 shrink-0 text-error" />
+                <CircleX size={12} className="mt-0.5 shrink-0 text-danger" />
                 <span className="min-w-0">
-                  <span className="text-on-surface">{failure.resourceKey}</span>
-                  <span className="block text-[11px] text-on-surface-variant/70">
+                  <span className="text-fg">{failure.resourceKey}</span>
+                  <span className="block text-[11px] text-fg-muted">
                     {l.removalFailureReason[failure.reason]}
                   </span>
                 </span>
@@ -118,7 +118,7 @@ export function RemovalResultPanel({
 
       {unresolved.length > 0 && (
         <section className="space-y-1.5">
-          <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
             {l.removal.resultKeptHeading}
           </h3>
           <ul className="space-y-1">
@@ -128,10 +128,10 @@ export function RemovalResultPanel({
                 className="flex items-start gap-2 text-xs"
                 data-testid="kept-row"
               >
-                <CircleSlash size={12} className="mt-0.5 shrink-0 text-on-surface-variant/60" />
+                <CircleSlash size={12} className="mt-0.5 shrink-0 text-fg-muted" />
                 <span className="min-w-0">
-                  <span className="text-on-surface">{kept.resourceKey}</span>
-                  <span className="block text-[11px] text-on-surface-variant/70">
+                  <span className="text-fg">{kept.resourceKey}</span>
+                  <span className="block text-[11px] text-fg-muted">
                     {l.removalKeptReason[kept.reason]}
                   </span>
                 </span>
@@ -142,7 +142,7 @@ export function RemovalResultPanel({
       )}
 
       {result.removed.length === 0 && result.failed.length === 0 && (
-        <p className="text-on-surface-variant text-xs">{l.removal.resultNone}</p>
+        <p className="text-fg-muted text-xs">{l.removal.resultNone}</p>
       )}
 
       {/*
@@ -158,24 +158,24 @@ export function RemovalResultPanel({
         return (
           <div
             key={`${handle.environmentId}:${handle.backupId}`}
-            className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container p-3"
+            className="space-y-2 rounded-lg border border-stroke bg-surface p-3"
             data-testid="removal-backup-handle"
             data-environment-id={handle.environmentId}
           >
-            <p className="break-all font-mono text-[11px] text-on-surface-variant/70">
+            <p className="break-all font-mono text-[11px] text-fg-muted">
               {environmentName(handle.environmentId)} ·{' '}
               {formatMessage(l.result.backupId, { id: handle.backupId })}
             </p>
             {handleUndoResult ? (
               <div className="space-y-1" data-testid="removal-undo-result">
-                <p className="text-on-surface text-xs">
+                <p className="text-fg text-xs">
                   {formatMessage(l.result.undone, {
                     restored: String(handleUndoResult.restored.length),
                     removed: String(handleUndoResult.removed.length),
                   })}
                 </p>
                 {handleUndoResult.skipped.length > 0 && (
-                  <p className="text-[11px] text-tertiary">
+                  <p className="text-[11px] text-info">
                     {formatMessage(l.result.undoSkipped, {
                       count: String(handleUndoResult.skipped.length),
                     })}
@@ -195,7 +195,7 @@ export function RemovalResultPanel({
               </Button>
             )}
             {handleUndoError !== null && handleUndoError !== undefined && (
-              <p className="text-error text-[11px]">{l.result.undoError}</p>
+              <p className="text-danger text-[11px]">{l.result.undoError}</p>
             )}
           </div>
         );

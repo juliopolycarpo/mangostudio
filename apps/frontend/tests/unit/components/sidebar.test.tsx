@@ -300,7 +300,7 @@ describe('sidebar shell', () => {
   it('highlights Studio when it is the current page', () => {
     renderSidebar({ currentPage: 'studio' });
     const studioButtons = screen.getAllByRole('button', { name: /studio/i });
-    expect(studioButtons[0]?.className).toContain('text-primary');
+    expect(studioButtons[0]?.className).toContain('text-accent-fg');
   });
 
   it('calls onNavigate with "studio" when Studio is clicked', () => {
@@ -337,7 +337,7 @@ describe('sidebar shell', () => {
     expect(handle).toHaveAttribute('aria-valuenow', '256');
     // `h-auto` overrides the preflight `hr { height: 0 }`; without it the handle is unhittable.
     expect(handle).toHaveClass('h-auto');
-    expect(handle.nextElementSibling).toHaveClass('bg-outline-variant/50');
+    expect(handle.nextElementSibling).toHaveClass('bg-stroke');
 
     fireEvent.keyDown(handle, { key: 'ArrowRight' });
     fireEvent.keyUp(handle, { key: 'ArrowRight' });

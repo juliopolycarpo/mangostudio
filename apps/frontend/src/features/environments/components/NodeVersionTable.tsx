@@ -33,12 +33,12 @@ interface NodeVersionTableProps {
 }
 
 const LTS_STYLES: Record<LtsStatus, string> = {
-  'current-lts': 'text-primary',
-  'lts-outdated-patch': 'text-tertiary',
-  'lts-superseded': 'text-tertiary',
-  'end-of-life': 'text-error',
-  'current-release': 'text-on-surface-variant',
-  unknown: 'text-on-surface-variant/60',
+  'current-lts': 'text-accent-fg',
+  'lts-outdated-patch': 'text-info',
+  'lts-superseded': 'text-info',
+  'end-of-life': 'text-danger',
+  'current-release': 'text-fg-muted',
+  unknown: 'text-fg-muted',
 };
 
 /** Statuses whose fix is an upgrade, so the row offers one. */
@@ -69,7 +69,7 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
   if (!status.installed) {
     return (
       <section className="space-y-3" data-testid="node-version-table">
-        <p className="text-sm text-on-surface-variant/70">
+        <p className="text-sm text-fg-muted">
           {formatMessage(e.versions.managerMissing, { manager })}
         </p>
         {/* What the user wants here is a Node, not a version manager. The Node
@@ -128,9 +128,7 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
       <FindingList findings={status.findings} />
 
       {status.versions.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/70">
-          {formatMessage(e.versions.empty, { manager })}
-        </p>
+        <p className="text-sm text-fg-muted">{formatMessage(e.versions.empty, { manager })}</p>
       ) : (
         <ul className="space-y-1.5">
           {status.versions.map((version) => (
@@ -140,12 +138,12 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
               data-testid="managed-version-row"
               data-version={version.version}
             >
-              <span className="font-mono text-on-surface">{version.version}</span>
+              <span className="font-mono text-fg">{version.version}</span>
               {version.isDefault && (
-                <span className="text-xs text-on-surface-variant/60">{e.versions.default}</span>
+                <span className="text-xs text-fg-muted">{e.versions.default}</span>
               )}
               {version.isCurrent && (
-                <span className="text-xs text-on-surface-variant/60">{e.versions.current}</span>
+                <span className="text-xs text-fg-muted">{e.versions.current}</span>
               )}
               <span
                 className={`ml-auto text-xs ${LTS_STYLES[version.ltsStatus]}`}
@@ -162,7 +160,7 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
                   catalog={recipes}
                   input={{ kind: 'node-version', version: version.version }}
                   label={e.versions.setDefault}
-                  variant="ghost"
+                  variant="subtle"
                   environmentId={environmentId}
                 />
               )}

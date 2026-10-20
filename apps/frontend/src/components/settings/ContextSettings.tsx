@@ -52,17 +52,17 @@ export function ContextSettings({
 
   return (
     <div className="space-y-4">
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h2 className="text-lg font-bold text-on-surface">{s.title}</h2>
-        <p className="text-sm text-on-surface-variant/70">{s.description}</p>
-        <p className="text-sm text-on-surface-variant/60">{s.keepHistory}</p>
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h2 className="text-lg font-bold text-fg">{s.title}</h2>
+        <p className="text-sm text-fg-muted">{s.description}</p>
+        <p className="text-sm text-fg-muted">{s.keepHistory}</p>
       </Card>
 
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {s.behaviorLabel}
         </h3>
-        <p className="text-sm text-on-surface-variant/60">{s.behaviorDescription}</p>
+        <p className="text-sm text-fg-muted">{s.behaviorDescription}</p>
         <Select
           value={settings.compactionBehavior}
           onChange={(value) => setCompactionBehavior(value as ContextCompactionBehavior)}
@@ -76,13 +76,13 @@ export function ContextSettings({
         />
       </Card>
 
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
+      <Card className="space-y-3 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+            <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
               {s.providerCompactionLabel}
             </h3>
-            <p className="text-sm text-on-surface-variant/60">{s.providerCompactionDescription}</p>
+            <p className="text-sm text-fg-muted">{s.providerCompactionDescription}</p>
           </div>
           <Checkbox
             checked={settings.providerCompactionEnabled}
@@ -93,7 +93,7 @@ export function ContextSettings({
         </div>
       </Card>
 
-      <Card variant="solid" className="space-y-5 p-4 sm:p-6">
+      <Card className="space-y-5 p-4 sm:p-6">
         <ThresholdControl
           label={s.warningThresholdLabel}
           description={s.warningThresholdDescription}
@@ -117,11 +117,11 @@ export function ContextSettings({
         />
       </Card>
 
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {s.summaryModelLabel}
         </h3>
-        <p className="text-sm text-on-surface-variant/60">{s.summaryModelDescription}</p>
+        <p className="text-sm text-fg-muted">{s.summaryModelDescription}</p>
         <Select
           value={settings.preferredSummaryModel}
           onChange={setPreferredSummaryModel}
@@ -153,12 +153,10 @@ function ThresholdControl({
   return (
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {label}
-        </h3>
-        <span className="text-sm font-medium text-on-surface">{hint}</span>
+        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">{label}</h3>
+        <span className="text-sm font-medium text-fg">{hint}</span>
       </div>
-      <p className="text-sm text-on-surface-variant/60">{description}</p>
+      <p className="text-sm text-fg-muted">{description}</p>
       <div className="flex items-center gap-4">
         <input
           type="range"
@@ -179,7 +177,7 @@ function ThresholdControl({
           onChange={(event) => onChange(Number(event.target.value))}
           onBlur={(event) => onChange(Number(event.target.value))}
           aria-label={label}
-          className="w-20 rounded-xl px-3 py-2 text-sm text-center bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors"
+          className="w-20 rounded-xl px-3 py-2 text-sm text-center bg-control text-fg border border-stroke focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors"
         />
       </div>
     </div>

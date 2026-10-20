@@ -1,4 +1,3 @@
-import { Trash2 } from 'lucide-react';
 import { type ReactNode, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
@@ -56,38 +55,29 @@ export function ConfirmDialog({
   const dialogRef = useFocusTrap(handleEscape);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 animate-in fade-in duration-200">
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="bg-surface-container-high w-full max-w-sm rounded-2xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5 sm:space-y-6 outline-none"
+        className="w-full max-w-sm rounded-lg border border-stroke bg-surface-raised shadow-dialog outline-none"
       >
-        <div className="space-y-2 text-center">
-          <div className="p-4 bg-error/10 rounded-full w-fit mx-auto text-error mb-2">
-            <Trash2 size={32} />
-          </div>
-          <h3 className="text-xl font-bold text-on-surface">{title}</h3>
-          <p className="text-sm text-on-surface-variant/70">
+        <div className="space-y-2 p-6">
+          <h3 className="text-title font-semibold text-fg">{title}</h3>
+          <p className="text-sm text-fg-muted">
             {description} <br />
-            <span className="text-on-surface font-bold">&ldquo;{entityName}&rdquo;</span>
+            <span className="font-medium text-fg">&ldquo;{entityName}&rdquo;</span>
           </p>
+          {children}
         </div>
 
-        {children}
-
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onCancel} className="flex-1" disabled={isPending}>
+        <div className="flex justify-end gap-2 rounded-b-lg border-t border-stroke bg-canvas px-6 py-4">
+          <Button variant="secondary" onClick={onCancel} disabled={isPending}>
             {cancelLabel}
           </Button>
-          <Button
-            variant="primary"
-            loading={isPending}
-            onClick={onConfirm}
-            className="flex-1 bg-error hover:bg-error/80 shadow-error/20"
-          >
+          <Button variant="danger" loading={isPending} onClick={onConfirm}>
             {confirmLabel}
           </Button>
         </div>

@@ -13,11 +13,11 @@ import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { CELL_GLYPHS, type CoverageCell as Cell, hashPrefix } from '../format';
 
 const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
-  present: 'text-primary',
-  absent: 'text-on-surface-variant/35',
-  shadowed: 'text-tertiary',
-  divergent: 'text-error',
-  'only-here': 'text-tertiary',
+  present: 'text-accent-fg',
+  absent: 'text-fg-subtle',
+  shadowed: 'text-info',
+  divergent: 'text-danger',
+  'only-here': 'text-info',
   incomparable: 'text-warning',
 };
 

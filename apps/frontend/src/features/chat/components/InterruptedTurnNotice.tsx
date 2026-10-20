@@ -65,26 +65,22 @@ export function InterruptedTurnNotice({
 
   return (
     <div className="px-4 pt-3 sm:px-6" role="status" aria-live="polite">
-      <Card
-        variant="solid"
-        padded={false}
-        className="mx-auto max-w-4xl border-warning/25 bg-warning/8 p-4"
-      >
+      <Card padded={false} className="mx-auto max-w-4xl border-warning bg-warning-subtle p-4">
         <div className="space-y-4">
           <div className="flex items-start gap-3">
             <AlertTriangle className="mt-0.5 shrink-0 text-warning" size={18} />
             <div className="min-w-0 space-y-1">
-              <h2 className="text-sm font-bold text-on-surface">{t.chat.recovery.title}</h2>
-              <p className="text-sm text-on-surface-variant/80">
+              <h2 className="text-sm font-bold text-fg">{t.chat.recovery.title}</h2>
+              <p className="text-sm text-fg-muted">
                 {reasonLabel(checkpoint.reasonCode, t.chat.recovery.reason)}
               </p>
-              <p className="text-xs text-on-surface-variant/60">{t.chat.recovery.detail}</p>
+              <p className="text-xs text-fg-muted">{t.chat.recovery.detail}</p>
             </div>
           </div>
 
           {checkpoint.completedCalls.length > 0 && (
             <section className="space-y-2">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-on-surface-variant/70">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-fg-muted">
                 {t.chat.recovery.completedCalls.replace(
                   '{count}',
                   String(checkpoint.completedCalls.length)
@@ -94,14 +90,14 @@ export function InterruptedTurnNotice({
                 {checkpoint.completedCalls.map((call) => (
                   <span
                     key={call.callId}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-surface-container-high px-2.5 py-1 text-xs text-on-surface-variant"
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-surface px-2.5 py-1 text-xs text-fg-muted"
                   >
                     <CheckCircle2
                       size={12}
-                      className={call.isError ? 'text-error' : 'text-success'}
+                      className={call.isError ? 'text-danger' : 'text-success'}
                     />
                     <span className="font-mono">{call.name}</span>
-                    {call.isError && <span className="text-error">{t.chat.recovery.failed}</span>}
+                    {call.isError && <span className="text-danger">{t.chat.recovery.failed}</span>}
                   </span>
                 ))}
               </div>
@@ -110,7 +106,7 @@ export function InterruptedTurnNotice({
 
           {checkpoint.incompleteCalls.length > 0 && (
             <section className="space-y-2">
-              <h3 className="text-xs font-bold uppercase tracking-wide text-on-surface-variant/70">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-fg-muted">
                 {t.chat.recovery.incompleteCalls.replace(
                   '{count}',
                   String(checkpoint.incompleteCalls.length)
@@ -120,31 +116,31 @@ export function InterruptedTurnNotice({
                 {checkpoint.incompleteCalls.map((call) => (
                   <label
                     key={call.callId}
-                    className="flex cursor-pointer items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low px-3 py-2 text-sm"
+                    className="flex cursor-pointer items-center gap-3 rounded-xl border border-stroke bg-surface px-3 py-2 text-sm"
                   >
                     <Checkbox
                       checked={selectedRetries.has(call.callId)}
                       disabled={disabled || isPending}
                       onChange={() => toggleRetry(call.callId)}
                     />
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-on-surface">
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">
                       {call.name}
                     </span>
-                    <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-on-surface-variant/70">
+                    <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-fg-muted">
                       {call.retrySafety !== 'safe_read' && <ShieldAlert size={12} />}
                       {safetyLabel(call.retrySafety, t.chat.recovery)}
                     </span>
                   </label>
                 ))}
               </div>
-              <p className="text-xs text-on-surface-variant/60">{t.chat.recovery.retryHint}</p>
+              <p className="text-xs text-fg-muted">{t.chat.recovery.retryHint}</p>
             </section>
           )}
 
           <div className="flex flex-wrap justify-end gap-2">
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="sm"
               disabled={disabled || isPending}
               loading={pendingAction === 'dismiss'}

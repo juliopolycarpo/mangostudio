@@ -60,7 +60,7 @@ function StarterList({
             key={id}
             type="button"
             onClick={() => onSelect(text)}
-            className="rounded-xl border border-outline-variant/20 bg-surface-container-low/60 px-3.5 py-2 text-left text-sm text-on-surface-variant transition-colors hover:border-primary/30 hover:text-on-surface"
+            className="rounded-xl border border-stroke bg-surface px-3.5 py-2 text-left text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
           >
             {text}
           </button>

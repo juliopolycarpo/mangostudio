@@ -65,11 +65,11 @@ export function ExternalDisclosureDialog({
         aria-modal="true"
         tabIndex={-1}
         aria-label={labels.title.replace('{vendor}', vendor)}
-        className="w-full max-w-lg space-y-4 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-5 text-sm text-on-surface shadow-2xl outline-none"
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-stroke bg-surface p-5 text-sm text-fg shadow-2xl outline-none"
       >
         <h2 className="text-base font-semibold">{labels.title.replace('{vendor}', vendor)}</h2>
 
-        <ul className="space-y-2 text-xs leading-relaxed text-on-surface-variant">
+        <ul className="space-y-2 text-xs leading-relaxed text-fg-muted">
           <li>{labels.thirdParty.replace('{vendor}', vendor)}</li>
           <li>{labels.dataFlow.replace('{vendor}', vendor)}</li>
           <li>{labels.billing.replace('{vendor}', vendor)}</li>
@@ -84,7 +84,7 @@ export function ExternalDisclosureDialog({
           {targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
         </ul>
 
-        <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
+        <p className="flex items-start gap-2 rounded-xl border border-warning bg-warning-subtle px-3 py-2 text-xs leading-relaxed text-warning">
           <AlertTriangle size={14} className="mt-px shrink-0" />
           {labels.autoExecution.replace('{vendor}', vendor)}
         </p>
@@ -95,7 +95,7 @@ export function ExternalDisclosureDialog({
           caution into something the user can check before agreeing.
         */}
         {permissionLevel ? (
-          <p className="text-xs text-on-surface-variant">
+          <p className="text-xs text-fg-muted">
             {labels.permissionNow.replace(
               '{level}',
               t.externalAgents.permission.levelName[permissionLevel]
@@ -107,13 +107,13 @@ export function ExternalDisclosureDialog({
           Linked, never summarized. Paraphrasing another company's terms would be
           MangoStudio making a claim about obligations that are not its to state.
         */}
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-on-surface-variant/70">
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-muted">
           <ExternalLink size={12} className="shrink-0" />
           <a
             href={links.termsUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="underline underline-offset-2 hover:text-on-surface"
+            className="underline underline-offset-2 hover:text-fg"
           >
             {labels.terms.replace('{vendor}', vendor)}
           </a>
@@ -121,7 +121,7 @@ export function ExternalDisclosureDialog({
             href={links.privacyUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="underline underline-offset-2 hover:text-on-surface"
+            className="underline underline-offset-2 hover:text-fg"
           >
             {labels.privacy.replace('{vendor}', vendor)}
           </a>
@@ -132,7 +132,7 @@ export function ExternalDisclosureDialog({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="cursor-pointer rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:cursor-default disabled:opacity-50"
+            className="cursor-pointer rounded-xl border border-stroke px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-fill-hover disabled:cursor-default disabled:opacity-50"
           >
             {reviewOnly ? labels.close : labels.cancel}
           </button>
@@ -141,7 +141,7 @@ export function ExternalDisclosureDialog({
               type="button"
               onClick={onAccept}
               disabled={busy}
-              className="cursor-pointer rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+              className="cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
             >
               {busy ? labels.accepting : labels.accept}
             </button>

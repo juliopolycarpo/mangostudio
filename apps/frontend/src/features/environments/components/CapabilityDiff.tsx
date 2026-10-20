@@ -45,10 +45,10 @@ interface DiffRow {
 }
 
 const CELL_CLASS: Record<CellState, string> = {
-  present: 'text-primary',
-  absent: 'text-on-surface-variant/50',
-  'not-permitted': 'text-tertiary',
-  unknown: 'text-on-surface-variant/40',
+  present: 'text-accent-fg',
+  absent: 'text-fg-subtle',
+  'not-permitted': 'text-info',
+  unknown: 'text-fg-subtle',
 };
 
 /**
@@ -164,21 +164,19 @@ export function CapabilityDiff({
 
   return (
     <section
-      className="space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-high p-4"
+      className="space-y-3 rounded-2xl border border-stroke bg-surface p-4"
       data-testid="capability-diff"
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="font-headline text-base font-semibold text-on-surface">
-            {e.scope.compareTitle}
-          </h2>
-          <p className="text-sm text-on-surface-variant/60">{e.scope.compareHint}</p>
+          <h2 className="text-base font-semibold text-fg">{e.scope.compareTitle}</h2>
+          <p className="text-sm text-fg-muted">{e.scope.compareHint}</p>
         </div>
         <button
           type="button"
           onClick={onClose}
           aria-label={e.scope.compareClose}
-          className="rounded-lg p-1 text-on-surface-variant/60 transition-colors hover:bg-surface-container-highest hover:text-on-surface"
+          className="rounded-lg p-1 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
         >
           <X size={16} />
         </button>
@@ -190,8 +188,8 @@ export function CapabilityDiff({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[32rem] border-collapse text-sm">
             <thead>
-              <tr className="border-b border-outline-variant/15 text-left">
-                <th className="py-2 pr-4 font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
+              <tr className="border-b border-stroke text-left">
+                <th className="py-2 pr-4 text-[10px] font-bold uppercase tracking-widest text-fg-muted">
                   {e.tabs.health}
                 </th>
                 <ColumnHeader
@@ -212,13 +210,13 @@ export function CapabilityDiff({
               {rows.map((row, index) => (
                 <tr
                   key={row.key}
-                  className="border-b border-outline-variant/10 last:border-b-0"
+                  className="border-b border-stroke last:border-b-0"
                   data-testid="capability-diff-row"
                   data-row-key={row.key}
                 >
-                  <th scope="row" className="py-2 pr-4 text-left font-medium text-on-surface">
+                  <th scope="row" className="py-2 pr-4 text-left font-medium text-fg">
                     {isGroupStart(rows, index) && (
-                      <span className="mb-1 block font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">
+                      <span className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-fg-subtle">
                         {groupLabel(e.scope, row.group)}
                       </span>
                     )}
@@ -257,7 +255,7 @@ function ColumnHeader({
         value={value}
         aria-label={label}
         onChange={(event) => onSelect(event.target.value)}
-        className="max-w-[10rem] appearance-none rounded-lg bg-transparent py-1 text-sm font-semibold text-on-surface outline-none"
+        className="max-w-[10rem] appearance-none rounded-lg bg-transparent py-1 text-sm font-semibold text-fg outline-none"
       >
         {environments.map((environment) => (
           <option key={environment.id} value={environment.id}>

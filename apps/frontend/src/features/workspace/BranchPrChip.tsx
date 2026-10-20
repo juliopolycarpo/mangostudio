@@ -52,10 +52,10 @@ export function BranchPrChip({ chatId, context }: BranchPrChipProps) {
       type="button"
       onClick={() => requestRailPanel('github')}
       title={t.github.panel.open}
-      className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-outline-variant/15 bg-surface-container/35 px-3 py-2 text-left transition-colors hover:border-primary/30 focus-visible:outline-2 focus-visible:outline-primary"
+      className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-stroke bg-surface px-3 py-2 text-left transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-focus"
     >
-      <GitPullRequest size={ICON_SM} className="shrink-0 text-primary" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate text-xs text-on-surface">
+      <GitPullRequest size={ICON_SM} className="shrink-0 text-accent-fg" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-xs text-fg">
         {formatMessage(t.github.panel.branchChip, {
           number: String(pr.number),
           status: t.github.chip[checks.labelKey],

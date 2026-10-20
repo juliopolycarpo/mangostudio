@@ -71,15 +71,15 @@ export function CopyCommandBlock({ recipe, message, environmentId }: CopyCommand
 
   return (
     <div
-      className="space-y-3 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/60 p-4"
+      className="space-y-3 rounded-2xl border border-stroke bg-control p-4"
       data-testid="copy-command-block"
     >
       <div className="space-y-1">
-        <p className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/70">
+        <p className="text-xs font-bold uppercase tracking-widest text-fg-muted">
           {s.guardBlockedTitle}
         </p>
         {reasons.map((reason) => (
-          <p key={reason.key} className="text-sm text-on-surface-variant">
+          <p key={reason.key} className="text-sm text-fg-muted">
             {reason.text}
           </p>
         ))}
@@ -87,10 +87,10 @@ export function CopyCommandBlock({ recipe, message, environmentId }: CopyCommand
 
       {canEnableInstalls && <EnableInstallsButton />}
 
-      <p className="text-sm text-on-surface-variant/70">{s.copyCommandHint}</p>
+      <p className="text-sm text-fg-muted">{s.copyCommandHint}</p>
 
       <div className="flex items-start gap-2">
-        <code className="min-w-0 flex-1 break-all rounded-xl bg-surface-container-highest px-3 py-2 font-mono text-xs text-on-surface">
+        <code className="min-w-0 flex-1 break-all rounded-xl bg-fill-selected px-3 py-2 font-mono text-xs text-fg">
           {recipe.copyCommand}
         </code>
         <Button variant="secondary" size="sm" onClick={() => void copy(recipe.copyCommand)}>
@@ -99,7 +99,7 @@ export function CopyCommandBlock({ recipe, message, environmentId }: CopyCommand
         </Button>
       </div>
 
-      {copyFailed && <p className="text-xs text-error">{t.environments.actions.copyFailed}</p>}
+      {copyFailed && <p className="text-xs text-danger">{t.environments.actions.copyFailed}</p>}
     </div>
   );
 }

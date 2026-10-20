@@ -35,7 +35,7 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-on-surface-variant/60">{t.environments.overview.description}</p>
+      <p className="text-sm text-fg-muted">{t.environments.overview.description}</p>
 
       <SetupChecklist
         runtimes={runtimes.data ?? []}

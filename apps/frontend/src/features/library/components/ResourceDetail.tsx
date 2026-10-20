@@ -165,19 +165,19 @@ export function ResourceDetail({
           <Link
             to={kindTab(resource)}
             search={libraryEnvironmentSearch(scope.environmentId)}
-            className="inline-flex items-center gap-1.5 text-on-surface-variant text-xs hover:text-on-surface"
+            className="inline-flex items-center gap-1.5 text-fg-muted text-xs hover:text-fg"
           >
             <ArrowLeft size={12} />
             {l.detail.back}
           </Link>
-          <h2 className="font-bold text-lg text-on-surface">{resource.key}</h2>
-          <p className="text-on-surface-variant/60 text-xs">
+          <h2 className="font-bold text-lg text-fg">{resource.key}</h2>
+          <p className="text-fg-muted text-xs">
             {`${l.kinds[resource.ref.kind]} · ${l.divergence[resource.divergence]}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
           {candidates.isDetecting && (
-            <span className="text-on-surface-variant/60 text-xs" data-testid="detecting-agents">
+            <span className="text-fg-muted text-xs" data-testid="detecting-agents">
               {l.locationSettings.detecting}
             </span>
           )}
@@ -197,22 +197,22 @@ export function ResourceDetail({
       </header>
 
       {resource.divergence === 'not-comparable' && (
-        <p className="text-on-surface-variant text-xs" data-testid="not-comparable">
+        <p className="text-fg-muted text-xs" data-testid="not-comparable">
           {l.detail.notComparable}
         </p>
       )}
       {resource.divergence === 'incomparable' && (
-        <p className="text-on-surface-variant text-xs" data-testid="incomparable">
+        <p className="text-fg-muted text-xs" data-testid="incomparable">
           {l.detail.incomparable}
         </p>
       )}
 
       <section className="space-y-2">
-        <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+        <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
           {l.detail.contentHeading}
         </h3>
         {groups.length === 0 ? (
-          <p className="text-on-surface-variant text-xs">{l.detail.notFound}</p>
+          <p className="text-fg-muted text-xs">{l.detail.notFound}</p>
         ) : (
           <ContentGroupList
             groups={groups}
@@ -256,7 +256,7 @@ export function ResourceDetail({
               />
             )}
             {groups.length > 2 && (
-              <p className="text-[11px] text-on-surface-variant/60">{l.detail.compareSelect}</p>
+              <p className="text-[11px] text-fg-muted">{l.detail.compareSelect}</p>
             )}
           </div>
         )}
@@ -265,7 +265,7 @@ export function ResourceDetail({
       {invalid.length > 0 && (
         <ul className="space-y-1" data-testid="invalid-instances">
           {invalid.map((instance) => (
-            <li key={instance.locationId} className="text-[11px] text-error">
+            <li key={instance.locationId} className="text-[11px] text-danger">
               {formatMessage(l.detail.invalidInstance, {
                 location: locationLabel(instance.locationId),
               })}
@@ -276,7 +276,7 @@ export function ResourceDetail({
       )}
 
       <section className="space-y-2">
-        <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+        <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
           {l.detail.coverageHeading}
         </h3>
         <ul className="space-y-1.5">
@@ -288,12 +288,12 @@ export function ResourceDetail({
               data-target-id={coverage.targetId}
               data-state={coverage.state}
             >
-              <span className="w-28 shrink-0 font-medium text-on-surface">
+              <span className="w-28 shrink-0 font-medium text-fg">
                 {l.targets[coverage.targetId]}
               </span>
-              <span className="text-on-surface-variant">{l.coverage[coverage.state]}</span>
+              <span className="text-fg-muted">{l.coverage[coverage.state]}</span>
               {coverage.effectiveLocationId && (
-                <span className="text-on-surface-variant/60">
+                <span className="text-fg-muted">
                   {formatMessage(l.detail.via, {
                     location: locationLabel(coverage.effectiveLocationId),
                   })}
@@ -305,7 +305,7 @@ export function ResourceDetail({
                 where they asked.
               */}
               {coverage.shadowedLocationIds.length > 0 && (
-                <span className="text-on-surface-variant/60">
+                <span className="text-fg-muted">
                   {formatMessage(l.detail.alsoIn, {
                     locations: coverage.shadowedLocationIds.map(locationLabel).join(', '),
                   })}
@@ -314,7 +314,7 @@ export function ResourceDetail({
             </li>
           ))}
         </ul>
-        {targetsQuery.isError && <p className="text-[11px] text-error">{l.matrix.loadError}</p>}
+        {targetsQuery.isError && <p className="text-[11px] text-danger">{l.matrix.loadError}</p>}
       </section>
 
       {propagating && (

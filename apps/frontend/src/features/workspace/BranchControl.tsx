@@ -173,9 +173,9 @@ export function BranchControl({
       <details ref={menuRef} className="group relative">
         <summary
           aria-label={labels.menu}
-          className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-1 text-on-surface transition-colors hover:bg-surface-container-high [&::-webkit-details-marker]:hidden"
+          className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-1 text-fg transition-colors hover:bg-fill-hover [&::-webkit-details-marker]:hidden"
         >
-          <GitBranch size={15} className="shrink-0 text-primary" />
+          <GitBranch size={15} className="shrink-0 text-accent-fg" />
           <span
             className="min-w-0 flex-1 truncate font-mono text-xs font-semibold"
             title={branchName}
@@ -184,10 +184,10 @@ export function BranchControl({
           </span>
           <ChevronDown
             size={13}
-            className="shrink-0 text-on-surface-variant transition-transform group-open:rotate-180"
+            className="shrink-0 text-fg-muted transition-transform group-open:rotate-180"
           />
         </summary>
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 min-w-64 rounded-xl border border-outline-variant/20 bg-surface-container-high shadow-2xl">
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 min-w-64 rounded-xl border border-stroke bg-surface shadow-2xl">
           {/* Scrolling is dropped while a row menu is open so the popover is not clipped by this container. */}
           <div
             className={`p-1.5 max-h-64 ${
@@ -195,17 +195,17 @@ export function BranchControl({
             }`}
           >
             {branches.isLoading ? (
-              <p className="px-2 py-3 text-xs text-on-surface-variant">{t.common.loading}</p>
+              <p className="px-2 py-3 text-xs text-fg-muted">{t.common.loading}</p>
             ) : (
               <>
-                <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-fg-muted">
                   {labels.localSection}
                 </p>
                 {branches.data?.branches.length ? (
                   branches.data.branches.map((item) => (
                     <div
                       key={item.name}
-                      className="flex items-center gap-1 rounded-lg pr-1 hover:bg-surface-container-highest"
+                      className="flex items-center gap-1 rounded-lg pr-1 hover:bg-fill-hover"
                     >
                       <button
                         type="button"
@@ -215,14 +215,14 @@ export function BranchControl({
                         title={item.name}
                         className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left disabled:cursor-default"
                       >
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
+                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg">
                           {item.name}
                         </span>
                         {/* Which pull request this branch became, and whether
                             it is merged — so "delete" is an informed click
                             rather than a guess. */}
                         <BranchPrTag annotation={prAnnotations.get(item.name)} />
-                        {item.current ? <Check size={13} className="text-primary" /> : null}
+                        {item.current ? <Check size={13} className="text-accent-fg" /> : null}
                       </button>
                       <Menu
                         open={rowMenu === item.name}
@@ -233,7 +233,7 @@ export function BranchControl({
                             type="button"
                             aria-label={labels.itemMenu.replace('{branch}', item.name)}
                             title={labels.itemMenu.replace('{branch}', item.name)}
-                            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+                            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
                             {...triggerProps}
                           >
                             <MoreHorizontal size={13} />
@@ -264,11 +264,11 @@ export function BranchControl({
                     </div>
                   ))
                 ) : (
-                  <p className="px-2 py-3 text-xs text-on-surface-variant">{labels.empty}</p>
+                  <p className="px-2 py-3 text-xs text-fg-muted">{labels.empty}</p>
                 )}
                 {remotes.length > 0 ? (
                   <>
-                    <p className="mt-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                    <p className="mt-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-fg-muted">
                       {labels.remoteSection}
                     </p>
                     {remotes.map((item) => (
@@ -279,10 +279,10 @@ export function BranchControl({
                         onClick={() => void checkoutRemote(item.ref, item.name)}
                         aria-label={labels.checkoutRemote.replace('{branch}', item.ref)}
                         title={item.ref}
-                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-container-highest disabled:cursor-default"
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-fill-hover disabled:cursor-default"
                       >
-                        <Cloud size={12} className="shrink-0 text-on-surface-variant" />
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
+                        <Cloud size={12} className="shrink-0 text-fg-muted" />
+                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg">
                           {item.ref}
                         </span>
                       </button>
@@ -292,10 +292,7 @@ export function BranchControl({
               </>
             )}
           </div>
-          <form
-            onSubmit={(event) => void create(event)}
-            className="border-t border-outline-variant/15 p-2"
-          >
+          <form onSubmit={(event) => void create(event)} className="border-t border-stroke p-2">
             <label className="sr-only" htmlFor="git-create-branch">
               {labels.create}
             </label>
@@ -305,13 +302,13 @@ export function BranchControl({
                 value={newBranch}
                 onChange={(event) => setNewBranch(event.target.value)}
                 placeholder={labels.createPlaceholder}
-                className="min-w-0 flex-1 rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-2 py-1.5 font-mono text-[11px] outline-none focus:border-primary/60"
+                className="min-w-0 flex-1 rounded-lg border border-stroke bg-control px-2 py-1.5 font-mono text-[11px] outline-none focus:border-focus"
               />
               <button
                 type="submit"
                 disabled={pending || !newBranch.trim()}
                 aria-label={labels.create}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-lg bg-primary text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex size-7 cursor-pointer items-center justify-center rounded-lg bg-accent text-on-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Plus size={13} />
               </button>
@@ -325,13 +322,13 @@ export function BranchControl({
           role="dialog"
           aria-modal="true"
           aria-labelledby="git-branch-rename-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
         >
           <form
             onSubmit={(event) => void rename(event)}
-            className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl"
+            className="w-full max-w-sm space-y-4 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl"
           >
-            <h3 id="git-branch-rename-title" className="text-lg font-bold text-on-surface">
+            <h3 id="git-branch-rename-title" className="text-lg font-bold text-fg">
               {labels.renameTitle.replace('{branch}', renameTarget)}
             </h3>
             <label className="block space-y-1">
@@ -341,7 +338,7 @@ export function BranchControl({
                 onChange={(event) => setRenameValue(event.target.value)}
                 aria-label={labels.renameLabel}
                 placeholder={labels.createPlaceholder}
-                className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 font-mono text-xs text-on-surface outline-none focus:border-primary/60"
+                className="w-full rounded-lg border border-stroke bg-control px-3 py-2 font-mono text-xs text-fg outline-none focus:border-focus"
               />
             </label>
             <div className="flex gap-2">
@@ -374,19 +371,19 @@ export function BranchControl({
           role="dialog"
           aria-modal="true"
           aria-labelledby="git-branch-delete-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
         >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
             <div className="space-y-2">
-              <h3 id="git-branch-delete-title" className="text-lg font-bold text-on-surface">
+              <h3 id="git-branch-delete-title" className="text-lg font-bold text-fg">
                 {deleteTarget.notMerged
                   ? labels.deleteNotMergedTitle
                   : labels.deleteTitle.replace('{branch}', deleteTarget.name)}
               </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">
+              <p className="text-sm leading-5 text-fg-muted">
                 {deleteTarget.notMerged ? labels.deleteNotMergedHint : labels.deleteHint}
               </p>
-              <p className="truncate rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
+              <p className="truncate rounded-xl bg-control p-2 font-mono text-[11px]">
                 {deleteTarget.name}
               </p>
             </div>
@@ -418,23 +415,21 @@ export function BranchControl({
           role="dialog"
           aria-modal="true"
           aria-labelledby="git-checkout-blocked-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
         >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
             <div className="space-y-2">
-              <h3 id="git-checkout-blocked-title" className="text-lg font-bold text-on-surface">
+              <h3 id="git-checkout-blocked-title" className="text-lg font-bold text-fg">
                 {labels.checkoutBlockedTitle}
               </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">
-                {labels.checkoutBlockedHint}
-              </p>
+              <p className="text-sm leading-5 text-fg-muted">{labels.checkoutBlockedHint}</p>
             </div>
             {blockedSwitch.paths.length > 0 ? (
               <div>
-                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-muted">
                   {labels.conflictingPaths}
                 </p>
-                <ul className="max-h-32 overflow-y-auto rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
+                <ul className="max-h-32 overflow-y-auto rounded-xl bg-control p-2 font-mono text-[11px]">
                   {blockedSwitch.paths.map((path) => (
                     <li key={path} className="truncate py-0.5" title={path}>
                       {path}

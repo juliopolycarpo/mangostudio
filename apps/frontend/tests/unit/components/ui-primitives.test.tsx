@@ -11,11 +11,11 @@ import { render } from '../../support/harness/render';
 
 describe('Badge', () => {
   it.each([
-    ['neutral', 'text-on-surface-variant'],
+    ['neutral', 'text-fg-muted'],
     ['success', 'text-success'],
     ['warning', 'text-warning'],
-    ['error', 'text-error'],
-    ['accent', 'text-primary'],
+    ['error', 'text-danger'],
+    ['accent', 'text-accent-fg'],
   ] as const)('renders the %s variant with its tone class', (variant, toneClass) => {
     render(
       <Badge variant={variant} data-testid="badge">
@@ -60,11 +60,11 @@ describe('Chip', () => {
 
 describe('StatusDot', () => {
   it.each([
-    ['accent', 'bg-primary'],
+    ['accent', 'bg-accent'],
     ['success', 'bg-success'],
     ['warning', 'bg-warning'],
-    ['error', 'bg-error'],
-    ['neutral', 'bg-outline'],
+    ['error', 'bg-danger'],
+    ['neutral', 'bg-stroke-strong'],
   ] as const)('renders the %s tone', (tone, toneClass) => {
     const { container } = render(<StatusDot tone={tone} />);
     const dot = container.querySelector(`[data-tone="${tone}"]`);

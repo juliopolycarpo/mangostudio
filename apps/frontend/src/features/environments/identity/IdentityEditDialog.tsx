@@ -135,7 +135,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus.
     <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-background/80 p-4 fade-in backdrop-blur-sm duration-200"
+      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-scrim p-4 fade-in duration-200"
       data-testid="identity-edit-dialog"
       onKeyDown={handleKeyDown}
     >
@@ -143,7 +143,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="max-h-full w-full max-w-md space-y-5 overflow-y-auto rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8"
+        className="max-h-full w-full max-w-md space-y-5 overflow-y-auto rounded-3xl border border-stroke bg-surface p-5 shadow-2xl sm:p-8"
       >
         <div className="flex items-center gap-3">
           <ToolAvatar
@@ -154,10 +154,10 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
             size="lg"
           />
           <div className="min-w-0 space-y-0.5">
-            <h3 id={titleId} className="truncate font-bold text-lg text-on-surface">
+            <h3 id={titleId} className="truncate font-bold text-lg text-fg">
               {formatMessage(labels.dialogTitle, { name: identity.name })}
             </h3>
-            <p className="text-on-surface-variant/60 text-xs">{labels.preview}</p>
+            <p className="text-fg-muted text-xs">{labels.preview}</p>
           </div>
         </div>
 
@@ -174,7 +174,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
               placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
               onChange={(event) => setName(event.target.value)}
             />
-            <p className="text-on-surface-variant/60 text-xs">{labels.nameHint}</p>
+            <p className="text-fg-muted text-xs">{labels.nameHint}</p>
           </div>
 
           <div className="space-y-1">
@@ -187,9 +187,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
               error={monogramInvalid ? labels.monogramInvalid : undefined}
               onChange={(event) => setMonogram(event.target.value)}
             />
-            {!monogramInvalid && (
-              <p className="text-on-surface-variant/60 text-xs">{labels.monogramHint}</p>
-            )}
+            {!monogramInvalid && <p className="text-fg-muted text-xs">{labels.monogramHint}</p>}
           </div>
 
           <ToolImageFields
@@ -207,7 +205,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
           />
         </div>
 
-        {save.isError && <p className="text-error text-xs">{labels.saveFailed}</p>}
+        {save.isError && <p className="text-danger text-xs">{labels.saveFailed}</p>}
 
         <div className="flex gap-3">
           <Button variant="secondary" onClick={onClose} className="flex-1">

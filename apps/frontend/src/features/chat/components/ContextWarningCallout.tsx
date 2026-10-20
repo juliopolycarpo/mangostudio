@@ -38,15 +38,15 @@ export function ContextWarningCallout({
 }: ContextWarningCalloutProps) {
   const modelActionBlocked = isPending || modelActionsDisabled;
   return (
-    <Card variant="solid" padded={false} className="border-warning/20 bg-warning/8 p-4">
+    <Card padded={false} className="border-warning bg-warning-subtle p-4">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-warning">
             <AlertTriangle size={16} />
             <span className="text-sm font-bold">{title}</span>
           </div>
-          <p className="text-sm text-on-surface-variant/80">{detail}</p>
-          <p className="text-xs text-on-surface-variant/60">{keepHistoryNote}</p>
+          <p className="text-sm text-fg-muted">{detail}</p>
+          <p className="text-xs text-fg-muted">{keepHistoryNote}</p>
         </div>
         <div className="flex flex-wrap gap-2 md:justify-end">
           <Button
@@ -68,7 +68,7 @@ export function ContextWarningCallout({
             <FileText size={14} />
             {newChatLabel}
           </Button>
-          <Button variant="ghost" size="sm" disabled={isPending} onClick={onContinue}>
+          <Button variant="subtle" size="sm" disabled={isPending} onClick={onContinue}>
             {continueLabel}
           </Button>
         </div>

@@ -31,14 +31,12 @@ export function ConnectorList({
   const hasChatGpt = connectors.some((c) => c.provider === 'chatgpt');
 
   return (
-    <Card variant="solid" className="p-4 sm:p-6 space-y-4">
+    <Card className="p-4 sm:p-6 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {s.title}
-        </h2>
+        <h2 className="text-xs uppercase tracking-widest font-bold text-fg-muted">{s.title}</h2>
         <div className="flex items-center gap-3">
           {hasChatGpt && (
-            <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/60">
+            <div className="flex items-center gap-1.5 text-[10px] text-fg-muted">
               {s.chatgptAlertThresholdLabel}
               <Select
                 value={alertThreshold === null ? 'off' : String(alertThreshold)}
@@ -65,13 +63,13 @@ export function ConnectorList({
       </div>
 
       {connectors.length === 0 ? (
-        <div className="bg-surface-container-lowest border border-dashed border-outline-variant/30 rounded-2xl p-8 text-center space-y-4">
-          <div className="p-4 bg-surface-container-high rounded-full w-fit mx-auto text-on-surface-variant/40">
+        <div className="bg-control border border-dashed border-stroke rounded-2xl p-8 text-center space-y-4">
+          <div className="p-4 bg-surface rounded-full w-fit mx-auto text-fg-subtle">
             <KeyRound size={32} />
           </div>
           <div className="space-y-1">
-            <p className="text-on-surface font-bold">{s.emptyTitle}</p>
-            <p className="text-sm text-on-surface-variant/60">{s.emptyDescription}</p>
+            <p className="text-fg font-bold">{s.emptyTitle}</p>
+            <p className="text-sm text-fg-muted">{s.emptyDescription}</p>
           </div>
           <Button variant="primary" onClick={onAddConnector}>
             {s.addConnectorButton}

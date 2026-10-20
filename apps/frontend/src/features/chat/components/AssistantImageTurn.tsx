@@ -17,16 +17,16 @@ function ImageTurnMeta({ msg }: AssistantImageTurnProps) {
   return (
     <div className="space-y-6">
       {msg.styleParams && msg.styleParams.length > 0 && (
-        <div className="bg-surface-container-low p-6 rounded-xl border border-outline-variant/5">
-          <h3 className="font-headline text-sm font-bold mb-4 flex items-center gap-2 text-on-surface">
-            <Sparkles className="text-primary" size={16} />
+        <div className="bg-surface p-6 rounded-xl border border-stroke">
+          <h3 className="text-sm font-bold mb-4 flex items-center gap-2 text-fg">
+            <Sparkles className="text-accent-fg" size={16} />
             {t.chat.feed.styleParams}
           </h3>
           <div className="flex flex-wrap gap-2">
             {msg.styleParams.map((param) => (
               <span
                 key={param}
-                className="px-3 py-1 bg-surface-container-high text-on-surface-variant text-[10px] font-bold rounded-sm uppercase tracking-wider"
+                className="px-3 py-1 bg-surface text-fg-muted text-[10px] font-bold rounded-sm uppercase tracking-wider"
               >
                 {param}
               </span>
@@ -35,15 +35,13 @@ function ImageTurnMeta({ msg }: AssistantImageTurnProps) {
         </div>
       )}
       {msg.text && !msg.imageUrl && (
-        <div className="bg-error/10 border border-error/20 p-4 rounded-xl text-error text-sm font-body">
+        <div className="bg-danger-subtle border border-danger p-4 rounded-xl text-danger text-sm">
           {msg.text}
         </div>
       )}
       {!msg.text && !msg.imageUrl && (
-        <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/5">
-          <p className="font-body text-xs text-on-surface-variant leading-relaxed">
-            {t.chat.feed.neuralDiffusionPath}
-          </p>
+        <div className="bg-control p-6 rounded-xl border border-stroke">
+          <p className="text-xs text-fg-muted leading-relaxed">{t.chat.feed.neuralDiffusionPath}</p>
         </div>
       )}
     </div>
@@ -65,19 +63,19 @@ export function AssistantImageTurn({ msg }: AssistantImageTurnProps) {
   return (
     <div className="flex flex-col gap-4 w-full">
       {msg.generationTime && (
-        <div className="flex items-center gap-2 text-xs text-on-surface-variant bg-surface-container-lowest py-2 px-3 rounded-lg w-fit border border-outline-variant/10">
-          <Sparkles size={12} className="text-primary" />
+        <div className="flex items-center gap-2 text-xs text-fg-muted bg-control py-2 px-3 rounded-lg w-fit border border-stroke">
+          <Sparkles size={12} className="text-accent-fg" />
           <span>{t.chat.feed.thoughtFor.replace('{time}', msg.generationTime)}</span>
         </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start w-full">
         {imageUrl && (
-          <div className="group relative bg-surface-container-lowest rounded-xl overflow-hidden aspect-[4/5] shadow-2xl transition-transform duration-500 hover:scale-[1.01]">
+          <div className="group relative bg-control rounded-xl overflow-hidden aspect-[4/5] shadow-2xl transition-transform duration-500">
             {imageFailed ? (
-              <div className="w-full h-full flex flex-col items-center justify-center text-on-surface-variant/50 p-6 text-center bg-surface-container-high">
+              <div className="w-full h-full flex flex-col items-center justify-center text-fg-subtle p-6 text-center bg-surface">
                 <ImageOff size={48} className="mb-4 opacity-50" />
-                <p className="font-headline font-bold mb-2">{t.chat.feed.imageUnavailable}</p>
-                <p className="text-xs font-body">{t.chat.feed.imageUnavailableHint}</p>
+                <p className="font-bold mb-2">{t.chat.feed.imageUnavailable}</p>
+                <p className="text-xs">{t.chat.feed.imageUnavailableHint}</p>
               </div>
             ) : (
               <>
@@ -95,14 +93,14 @@ export function AssistantImageTurn({ msg }: AssistantImageTurnProps) {
                       onClick={() =>
                         triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix)
                       }
-                      className="w-9 h-9 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
+                      className="w-9 h-9 rounded-lg flex items-center justify-center bg-fill-selected hover:bg-accent-hover text-fg transition-colors"
                       title={t.chat.feed.download}
                     >
                       <Download size={16} />
                     </button>
                     <button
                       type="button"
-                      className="w-9 h-9 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
+                      className="w-9 h-9 rounded-lg flex items-center justify-center bg-fill-selected hover:bg-accent-hover text-fg transition-colors"
                       title={t.chat.feed.saveToGallery}
                     >
                       <Bookmark size={16} />
@@ -110,7 +108,7 @@ export function AssistantImageTurn({ msg }: AssistantImageTurnProps) {
                   </div>
                   <button
                     type="button"
-                    className="px-4 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-xs font-bold transition-colors"
+                    className="px-4 py-1.5 rounded-lg bg-accent-subtle hover:bg-accent-hover text-accent-fg text-xs font-bold transition-colors"
                   >
                     {t.chat.feed.regenerate}
                   </button>

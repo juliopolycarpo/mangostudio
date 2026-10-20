@@ -62,19 +62,19 @@ export function RemovalLocationStep({
 
   return (
     <div className="space-y-4" data-testid="removal-location-step">
-      <p className="text-on-surface text-sm">{l.removal.locationsDescription}</p>
+      <p className="text-fg text-sm">{l.removal.locationsDescription}</p>
 
       {preview.staleStagedRemovals.length > 0 && (
         <div
-          className="space-y-1 rounded-lg border border-tertiary/30 bg-tertiary/5 p-3"
+          className="space-y-1 rounded-lg border border-info bg-info-subtle p-3"
           data-testid="stale-staged-removals"
         >
-          <p className="text-tertiary text-xs">{l.removal.staleStaged}</p>
+          <p className="text-info text-xs">{l.removal.staleStaged}</p>
           <ul className="space-y-0.5">
             {preview.staleStagedRemovals.map((leftover) => (
               <li
                 key={`${leftover.environmentId}:${leftover.path}`}
-                className="break-all font-mono text-[11px] text-on-surface-variant/70"
+                className="break-all font-mono text-[11px] text-fg-muted"
               >
                 {environmentName(leftover.environmentId)} · {leftover.path}
               </li>
@@ -85,11 +85,11 @@ export function RemovalLocationStep({
 
       {preview.entries.map((entry) => (
         <section key={entry.resourceKey} className="space-y-1.5" data-testid="removal-entry">
-          <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
             {entry.resourceKey}
           </h3>
           {entry.locations.length === 0 ? (
-            <p className="text-on-surface-variant text-xs">{l.removal.noLocations}</p>
+            <p className="text-fg-muted text-xs">{l.removal.noLocations}</p>
           ) : (
             byEnvironment(entry.locations).map(([environmentId, locations]) => (
               <div
@@ -98,7 +98,7 @@ export function RemovalLocationStep({
                 data-testid="removal-machine"
                 data-environment-id={environmentId}
               >
-                <p className="flex items-center gap-1.5 font-semibold text-on-surface text-xs">
+                <p className="flex items-center gap-1.5 font-semibold text-fg text-xs">
                   <Server size={11} aria-hidden="true" />
                   {environmentName(environmentId)}
                 </p>
@@ -147,8 +147,8 @@ function RemovalRow({
     <label
       className={`flex items-start gap-2 rounded-lg border p-2.5 ${
         removable
-          ? 'cursor-pointer border-outline-variant/15 bg-surface-container-high'
-          : 'cursor-not-allowed border-outline-variant/10 bg-surface-container/40 opacity-70'
+          ? 'cursor-pointer border-stroke bg-surface'
+          : 'cursor-not-allowed border-stroke bg-surface opacity-70'
       }`}
       data-testid="removal-row"
       data-environment-id={location.environmentId}
@@ -162,13 +162,13 @@ function RemovalRow({
         // attempt outright, so the control is disabled rather than merely warned about.
         disabled={!removable}
         onChange={() => onToggle(entry.resourceKey, location.environmentId, location.locationId)}
-        className="mt-0.5 size-3.5 accent-error"
+        className="mt-0.5 size-3.5 accent-danger"
       />
       <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block break-all font-mono text-on-surface text-xs">
+        <span className="block break-all font-mono text-fg text-xs">
           {location.path ?? location.locationId}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-on-surface-variant/60">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fg-muted">
           {location.contentHash && (
             <span>
               {formatMessage(l.removal.version, {
@@ -191,7 +191,7 @@ function RemovalRow({
           often the newest work. Saying so is the whole point of the row.
         */}
         {eliminatesGroup && checked && removable && (
-          <span className="block text-[11px] text-tertiary" data-testid="eliminates-group">
+          <span className="block text-[11px] text-info" data-testid="eliminates-group">
             {formatMessage(l.removal.eliminatesGroup, {
               hash: `${hashPrefix(location.contentHash ?? '')}…`,
             })}

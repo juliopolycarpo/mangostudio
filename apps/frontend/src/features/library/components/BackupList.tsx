@@ -114,9 +114,9 @@ export function BackupList() {
   return (
     <div className="space-y-4" data-testid="backup-list">
       <div className="space-y-1">
-        <h2 className="font-semibold text-base text-on-surface">{l.backups.title}</h2>
-        <p className="text-on-surface text-sm">{l.backups.description}</p>
-        <p className="text-[11px] text-on-surface-variant/60">
+        <h2 className="font-semibold text-base text-fg">{l.backups.title}</h2>
+        <p className="text-fg text-sm">{l.backups.description}</p>
+        <p className="text-[11px] text-fg-muted">
           {formatMessage(l.backups.usage, {
             count: String(usage.setCount),
             size: formatBytes(usage.sizeBytes),
@@ -128,7 +128,7 @@ export function BackupList() {
           {l.backups.retentionPerMachine}
         </p>
         {usage.unreachableEnvironmentIds.length > 0 && (
-          <p className="text-[11px] text-on-surface-variant/60" data-testid="backup-unreachable">
+          <p className="text-[11px] text-fg-muted" data-testid="backup-unreachable">
             {formatMessage(l.backups.unreachable, {
               machines: usage.unreachableEnvironmentIds.map(nameOf).join(', '),
             })}
@@ -140,7 +140,7 @@ export function BackupList() {
           suggest. Stating them is what makes the eviction badges add up.
         */}
         {pinnedCount > 0 && (
-          <p className="text-[11px] text-tertiary" data-testid="backup-pinned-summary">
+          <p className="text-[11px] text-info" data-testid="backup-pinned-summary">
             {formatMessage(l.backups.pinned, {
               count: String(pinnedCount),
               size: formatBytes(usage.pinnedSizeBytes),
@@ -151,7 +151,7 @@ export function BackupList() {
       </div>
 
       {usage.sets.length === 0 && (
-        <p className="text-on-surface-variant/70 text-sm" data-testid="backup-list-empty">
+        <p className="text-fg-muted text-sm" data-testid="backup-list-empty">
           {l.backups.empty}
         </p>
       )}
@@ -163,10 +163,10 @@ export function BackupList() {
           data-testid="backup-machine"
           data-environment-id={environmentId}
         >
-          <h3 className="flex items-center gap-1.5 font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+          <h3 className="flex items-center gap-1.5 font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
             <Server size={11} aria-hidden="true" />
             {nameOf(environmentId)}
-            <span className="font-normal normal-case tracking-normal text-on-surface-variant/50">
+            <span className="font-normal normal-case tracking-normal text-fg-subtle">
               {formatMessage(l.backups.usage, {
                 count: String(sets.length),
                 size: formatBytes(sets.reduce((total, set) => total + set.sizeBytes, 0)),
@@ -208,7 +208,7 @@ export function BackupList() {
         </section>
       ))}
 
-      <p className="text-[11px] text-on-surface-variant/50">{l.backups.bulkHint}</p>
+      <p className="text-[11px] text-fg-subtle">{l.backups.bulkHint}</p>
     </div>
   );
 }
@@ -257,15 +257,15 @@ function BackupRow({
 
   return (
     <li
-      className="space-y-2 rounded-xl border border-outline-variant/15 bg-surface-container-high p-3"
+      className="space-y-2 rounded-xl border border-stroke bg-surface p-3"
       data-testid="backup-row"
       data-backup-id={set.backupId}
       data-operation={set.operation}
       data-availability={set.availability}
     >
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
-        <span className="text-on-surface" data-testid="backup-created">
-          <span className="text-on-surface-variant/50">{l.backups.columnCreated} </span>
+        <span className="text-fg" data-testid="backup-created">
+          <span className="text-fg-subtle">{l.backups.columnCreated} </span>
           {formatRelativeTime(set.createdAtMs, locale)}
         </span>
         {/*
@@ -274,8 +274,8 @@ function BackupRow({
           state as fact the one thing an index row cannot know.
         */}
         {set.availability === 'available' && (
-          <span className="text-on-surface" data-testid="backup-contents">
-            <span className="text-on-surface-variant/50">{l.backups.columnContents} </span>
+          <span className="text-fg" data-testid="backup-contents">
+            <span className="text-fg-subtle">{l.backups.columnContents} </span>
             {/*
               A v1 manifest carries no resource keys, so the row falls back to the
               entry count rather than printing an empty cell that reads as "this
@@ -286,23 +286,20 @@ function BackupRow({
               : formatMessage(l.backups.contentsUnknown, { count: String(set.entryCount) })}
           </span>
         )}
-        <span className="text-on-surface-variant/70" data-testid="backup-size">
-          <span className="text-on-surface-variant/50">{l.backups.columnSize} </span>
+        <span className="text-fg-muted" data-testid="backup-size">
+          <span className="text-fg-subtle">{l.backups.columnSize} </span>
           {formatBytes(set.sizeBytes)}
         </span>
-        <span className="text-on-surface-variant/70" data-testid="backup-origin">
-          <span className="text-on-surface-variant/50">{l.backups.columnOrigin} </span>
+        <span className="text-fg-muted" data-testid="backup-origin">
+          <span className="text-fg-subtle">{l.backups.columnOrigin} </span>
           {l.backups.origin[set.operation]}
         </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <span className="break-all font-mono text-on-surface-variant/50">{set.backupId}</span>
+        <span className="break-all font-mono text-fg-subtle">{set.backupId}</span>
         {set.pinned && (
-          <span
-            className="inline-flex items-center gap-1 text-tertiary"
-            data-testid="backup-pinned"
-          >
+          <span className="inline-flex items-center gap-1 text-info" data-testid="backup-pinned">
             <Pin size={11} />
             {l.backups.pinnedBadge}
           </span>
@@ -314,7 +311,7 @@ function BackupRow({
         */}
         {set.evictsNext && (
           <span
-            className="inline-flex items-center gap-1 text-error"
+            className="inline-flex items-center gap-1 text-danger"
             data-testid="backup-evicts-next"
             title={l.backups.evictsNextHint}
           >
@@ -329,7 +326,7 @@ function BackupRow({
           type="button"
           onClick={onRestore}
           disabled={restorePending || blockedReason !== null}
-          className="inline-flex items-center gap-1 text-primary hover:underline disabled:opacity-50"
+          className="inline-flex items-center gap-1 text-accent-fg hover:underline disabled:opacity-50"
           data-testid="restore-backup"
           title={
             blockedReason ?? (set.operation === 'unknown' ? l.backups.undoUnknownHint : undefined)
@@ -345,7 +342,7 @@ function BackupRow({
               type="button"
               onClick={onPurge}
               disabled={purgePending}
-              className="inline-flex items-center gap-1 font-semibold text-error hover:underline disabled:opacity-50"
+              className="inline-flex items-center gap-1 font-semibold text-danger hover:underline disabled:opacity-50"
               data-testid="purge-backup-confirm"
             >
               <Trash2 size={11} />
@@ -354,7 +351,7 @@ function BackupRow({
             <button
               type="button"
               onClick={onCancelConfirm}
-              className="text-on-surface-variant/70 hover:underline"
+              className="text-fg-muted hover:underline"
               data-testid="purge-backup-cancel"
             >
               {l.backups.purgeCancel}
@@ -365,7 +362,7 @@ function BackupRow({
             type="button"
             onClick={onConfirm}
             disabled={purgePending}
-            className="inline-flex items-center gap-1 text-error hover:underline disabled:opacity-50"
+            className="inline-flex items-center gap-1 text-danger hover:underline disabled:opacity-50"
             data-testid="purge-backup"
           >
             <Trash2 size={11} />
@@ -382,7 +379,7 @@ function BackupRow({
           unless the counts are stated.
         */}
         {result && (
-          <span className="text-on-surface-variant/70" data-testid="restore-backup-result">
+          <span className="text-fg-muted" data-testid="restore-backup-result">
             {formatMessage(l.result.undone, {
               restored: String(result.restored.length),
               removed: String(result.removed.length),
@@ -392,7 +389,7 @@ function BackupRow({
           </span>
         )}
         {restoreFailed && (
-          <span className="text-error" data-testid="restore-backup-error">
+          <span className="text-danger" data-testid="restore-backup-error">
             {l.backups.restoreError}
           </span>
         )}
@@ -401,20 +398,20 @@ function BackupRow({
           worked, and the set is still on disk counting against the budget.
         */}
         {purgeFailed && (
-          <span className="text-error" data-testid="purge-backup-error">
+          <span className="text-danger" data-testid="purge-backup-error">
             {l.backups.purgeError}
           </span>
         )}
       </div>
 
       {blockedReason !== null && (
-        <p className="text-[11px] text-on-surface-variant/70" data-testid="backup-unavailable">
+        <p className="text-[11px] text-fg-muted" data-testid="backup-unavailable">
           {blockedReason}
         </p>
       )}
 
       {set.operation === 'unknown' && blockedReason === null && (
-        <p className="text-[11px] text-on-surface-variant/50" data-testid="backup-unknown-hint">
+        <p className="text-[11px] text-fg-subtle" data-testid="backup-unknown-hint">
           {l.backups.undoUnknownHint}
         </p>
       )}

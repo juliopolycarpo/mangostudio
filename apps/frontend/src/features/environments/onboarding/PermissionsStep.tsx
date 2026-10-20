@@ -68,13 +68,13 @@ export function PermissionsStep({
 
   return (
     <div className="space-y-4" data-testid="onboarding-permissions-step">
-      <p className="text-on-surface-variant/70 text-xs">
+      <p className="text-fg-muted text-xs">
         {endState === 'paired' ? labels.permissionsPairedIntro : labels.permissionsSshIntro}
       </p>
 
-      <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5">
-        <p className="flex items-center gap-1.5 font-semibold text-on-surface text-sm">
-          <ShieldCheck size={14} className="text-primary/80" aria-hidden="true" />
+      <div className="rounded-xl border border-stroke bg-control px-3 py-2.5">
+        <p className="flex items-center gap-1.5 font-semibold text-fg text-sm">
+          <ShieldCheck size={14} className="text-accent-fg" aria-hidden="true" />
           {consent
             ? formatMessage(labels.permissionsChosen, { profile: profiles[consent.profile] })
             : labels.permissionsNone}
@@ -83,7 +83,7 @@ export function PermissionsStep({
           type="button"
           onClick={() => setOpen(true)}
           data-testid="onboarding-open-consent"
-          className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary/10 px-2 font-semibold text-[11px] text-primary transition-colors hover:bg-primary/15"
+          className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-lg bg-accent-subtle px-2 font-semibold text-[11px] text-accent-fg transition-colors hover:bg-accent-hover"
         >
           {consent ? labels.permissionsChange : labels.permissionsChoose}
         </button>
@@ -101,7 +101,7 @@ export function PermissionsStep({
       ) : null}
 
       {error ? (
-        <p className="text-error text-xs" role="alert">
+        <p className="text-danger text-xs" role="alert">
           {error}
         </p>
       ) : null}

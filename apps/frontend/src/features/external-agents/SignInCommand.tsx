@@ -21,14 +21,14 @@ export function SignInCommand({ command, className }: SignInCommandProps) {
   const { copy, copied } = useClipboard();
   return (
     <div className={`flex items-center gap-2 ${className ?? ''}`}>
-      <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-container-high px-2 py-1 text-[10px] text-on-surface-variant">
+      <code className="min-w-0 flex-1 truncate rounded-lg bg-surface px-2 py-1 text-[10px] text-fg-muted">
         {command}
       </code>
       <button
         type="button"
         onClick={() => copy(command)}
         aria-label={t.externalAgents.selector.copyLoginCommand}
-        className="shrink-0 rounded-lg p-1 text-on-surface-variant transition-colors hover:bg-surface-container-high"
+        className="shrink-0 rounded-lg p-1 text-fg-muted transition-colors hover:bg-fill-hover"
       >
         {copied ? <Check size={12} /> : <Copy size={12} />}
       </button>

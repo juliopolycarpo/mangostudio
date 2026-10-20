@@ -21,10 +21,10 @@ export function TerminalSessionPage({ sessionId }: TerminalSessionPageProps) {
   const { t } = useI18n();
 
   return (
-    <div className="flex h-screen flex-col bg-surface-container-lowest">
-      <div className="flex shrink-0 items-center gap-2 border-b border-outline-variant/15 px-4 py-2">
-        <TerminalSquare size={16} className="text-on-surface-variant" />
-        <span className="text-sm font-medium text-on-surface">{t.terminal.page.title}</span>
+    <div className="flex h-screen flex-col bg-control">
+      <div className="flex shrink-0 items-center gap-2 border-b border-stroke px-4 py-2">
+        <TerminalSquare size={16} className="text-fg-muted" />
+        <span className="text-sm font-medium text-fg">{t.terminal.page.title}</span>
       </div>
       <div className="min-h-0 flex-1">
         <TerminalView sessionId={sessionId} />

@@ -23,7 +23,7 @@ function LibraryLayout() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <p className="text-on-surface-variant/60 text-sm">{t.library.subtitle}</p>
+      <p className="text-fg-muted text-sm">{t.library.subtitle}</p>
       <LibraryTabs />
       <Outlet />
       {!onBackupsPage && <BackupUsage />}

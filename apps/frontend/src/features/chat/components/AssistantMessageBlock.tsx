@@ -38,8 +38,8 @@ interface DerivedTurn {
 function TurnCostRow({ generationTime }: { generationTime: string }) {
   const { t } = useI18n();
   return (
-    <div className="flex w-fit items-center gap-1.5 pl-4 text-[11px] text-on-surface-variant/50">
-      <Sparkles size={11} className="text-primary/60" />
+    <div className="flex w-fit items-center gap-1.5 pl-4 text-[11px] text-fg-subtle">
+      <Sparkles size={11} className="text-accent-fg" />
       <span>{formatMessage(t.chat.feed.respondedIn, { time: generationTime })}</span>
     </div>
   );

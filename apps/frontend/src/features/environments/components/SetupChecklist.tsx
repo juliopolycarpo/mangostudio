@@ -40,11 +40,11 @@ export function SetupChecklist({ runtimes, agents, recipes, machine }: SetupChec
   return (
     <section className="space-y-3" data-testid="setup-checklist">
       <div className="space-y-1">
-        <h2 className="font-headline text-lg font-bold text-on-surface">{s.title}</h2>
-        <p className="text-sm text-on-surface-variant/60">{s.description}</p>
+        <h2 className="text-lg font-bold text-fg">{s.title}</h2>
+        <p className="text-sm text-fg-muted">{s.description}</p>
       </div>
 
-      <ul className={`${TOOL_CARD_SURFACE} divide-y divide-outline-variant/15`}>
+      <ul className={`${TOOL_CARD_SURFACE} divide-y divide-stroke`}>
         {rows.map((row) => (
           <li
             key={row.id}
@@ -54,10 +54,10 @@ export function SetupChecklist({ runtimes, agents, recipes, machine }: SetupChec
             data-setup-status={row.status}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-on-surface">{row.label}</p>
+              <p className="text-sm font-semibold text-fg">{row.label}</p>
               <Badge variant={STATUS_VARIANT[row.status]}>{s.status[row.status]}</Badge>
             </div>
-            <p className="text-xs text-on-surface-variant/70">{row.explanation}</p>
+            <p className="text-xs text-fg-muted">{row.explanation}</p>
             <SetupRowRemedy row={row} recipes={recipes} />
           </li>
         ))}
@@ -91,7 +91,7 @@ function SetupRowRemedy({
 
   if (remedy.kind === 'link') {
     return (
-      <Link to={remedy.to} className="text-sm font-medium text-primary hover:underline">
+      <Link to={remedy.to} className="text-sm font-medium text-accent-fg hover:underline">
         {remedy.label}
       </Link>
     );
@@ -101,5 +101,5 @@ function SetupRowRemedy({
     return <CopyLine label={remedy.label} value={remedy.value} />;
   }
 
-  return <p className="text-xs text-on-surface-variant/70">{remedy.text}</p>;
+  return <p className="text-xs text-fg-muted">{remedy.text}</p>;
 }

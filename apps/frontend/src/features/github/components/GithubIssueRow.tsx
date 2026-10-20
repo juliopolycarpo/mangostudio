@@ -27,22 +27,22 @@ export function GithubIssueRow({ chatId, nameWithOwner, issue, onStartChat }: Gi
   const { t } = useI18n();
 
   return (
-    <li className="group flex items-start gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-surface-container-high/50">
+    <li className="group flex items-start gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-fill-hover">
       <button
         type="button"
         onClick={() => onStartChat(issue)}
         title={t.github.actions.issueToNewChat}
-        className="min-w-0 flex-1 cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-primary"
+        className="min-w-0 flex-1 cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-focus"
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0 font-mono text-[10px] text-on-surface-variant">
+          <span className="shrink-0 font-mono text-[10px] text-fg-muted">
             {formatMessage(t.github.row.number, { number: String(issue.number) })}
           </span>
-          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-on-surface">
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-fg">
             {issue.title}
           </span>
         </span>
-        <span className="mt-0.5 block truncate text-[10px] text-on-surface-variant">
+        <span className="mt-0.5 block truncate text-[10px] text-fg-muted">
           {issue.assignees.length > 0
             ? formatMessage(t.github.row.assignees, {
                 assignees: issue.assignees.map((actor) => actor.login).join(', '),

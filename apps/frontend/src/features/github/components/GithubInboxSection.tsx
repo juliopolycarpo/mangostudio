@@ -115,7 +115,7 @@ function InboxBody({
       {query.data.items.map((item) => (
         <li
           key={item.url}
-          className="group flex items-start gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-surface-container-high/50"
+          className="group flex items-start gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-fill-hover"
         >
           {/* An anchor, not a button: an inbox row is in another repository,
               so there is no local detail view to open — the browser is the
@@ -124,12 +124,10 @@ function InboxBody({
             href={item.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-primary"
+            className="min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-focus"
           >
-            <span className="block truncate text-xs font-semibold text-on-surface">
-              {item.title}
-            </span>
-            <span className="mt-0.5 block truncate font-mono text-[10px] text-on-surface-variant">
+            <span className="block truncate text-xs font-semibold text-fg">{item.title}</span>
+            <span className="mt-0.5 block truncate font-mono text-[10px] text-fg-muted">
               {formatMessage(t.home.github.row, {
                 repo: item.repository.nameWithOwner,
                 number: String(item.number),

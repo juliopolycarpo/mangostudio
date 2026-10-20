@@ -79,7 +79,7 @@ export function WorktreeSection({
       <MicroLabel as="h3" className="mb-1.5 flex items-center gap-2 font-bold tracking-[0.12em]">
         <span>{labels.title}</span>
         {worktrees.length > 0 ? (
-          <span className="rounded-full bg-surface-container-high px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
+          <span className="rounded-full bg-surface px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
             {worktrees.length}
           </span>
         ) : null}
@@ -136,12 +136,12 @@ export function WorktreeSection({
           onConfirm={() => void confirmRemove()}
           onCancel={() => setRemoveTarget(null)}
         >
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-on-surface-variant">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted">
             <input
               type="checkbox"
               checked={force}
               onChange={(event) => setForce(event.target.checked)}
-              className="accent-primary"
+              className="accent-accent"
             />
             {labels.force}
           </label>
@@ -198,7 +198,7 @@ function WorktreeList({
   if (worktrees.length <= 1) return <EmptyState title={labels.empty} />;
 
   return (
-    <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
+    <ul className="overflow-hidden rounded-xl border border-stroke bg-control">
       {worktrees.map((worktree) => (
         <WorktreeRow
           key={worktree.path}
@@ -229,16 +229,16 @@ function WorktreeRow({
   const removeLabel = labels.removeLabel.replace('{path}', worktree.path);
 
   return (
-    <li className="flex min-w-0 items-start gap-2 border-b border-outline-variant/10 px-2.5 py-2 last:border-b-0">
+    <li className="flex min-w-0 items-start gap-2 border-b border-stroke px-2.5 py-2 last:border-b-0">
       <StatusDot tone={rowTone(worktree, isCurrent)} className="mt-1.5" />
       <div className="min-w-0 flex-1">
         <p
-          className="truncate text-[11px] font-semibold leading-4 text-on-surface"
+          className="truncate text-[11px] font-semibold leading-4 text-fg"
           title={labels.open.replace('{path}', worktree.path)}
         >
           {workdirLabel(worktree.path) ?? worktree.path}
         </p>
-        <p className="truncate font-mono text-[10px] text-on-surface-variant">
+        <p className="truncate font-mono text-[10px] text-fg-muted">
           {worktree.branch ?? labels.detached.replace('{commit}', worktree.head?.slice(0, 8) ?? '')}
         </p>
         <WorktreeBadges worktree={worktree} isCurrent={isCurrent} labels={labels} />
@@ -250,7 +250,7 @@ function WorktreeRow({
           title={worktree.isLocked ? lockTitle(worktree, labels) : removeLabel}
           disabled={pending || worktree.isLocked}
           onClick={onRemove}
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant transition-colors hover:bg-error/10 hover:text-error disabled:cursor-not-allowed disabled:opacity-30"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-fg-muted transition-colors hover:bg-danger-subtle hover:text-danger disabled:cursor-not-allowed disabled:opacity-30"
         >
           <Trash2 size={ICON_SM} />
         </button>
@@ -343,7 +343,7 @@ function IconAction({
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex size-6 cursor-pointer items-center justify-center rounded tracking-normal text-on-surface-variant transition-colors hover:bg-primary/10 hover:text-primary disabled:cursor-wait disabled:opacity-50"
+      className="flex size-6 cursor-pointer items-center justify-center rounded tracking-normal text-fg-muted transition-colors hover:bg-accent-hover hover:text-accent-fg disabled:cursor-wait disabled:opacity-50"
     >
       {children}
     </button>

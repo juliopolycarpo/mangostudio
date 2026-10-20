@@ -47,14 +47,14 @@ export function LibraryStep({ environment, consent, onContinue }: LibraryStepPro
 
   return (
     <div className="space-y-4" data-testid="onboarding-library-step">
-      <p className="text-on-surface-variant/70 text-xs">{labels.libraryIntro}</p>
+      <p className="text-fg-muted text-xs">{labels.libraryIntro}</p>
 
       {permitsLibrary ? (
         <Link
           to="/environments/library"
           search={{ environmentId: environment.id }}
           data-testid="onboarding-library-link"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 font-semibold text-primary text-xs transition-colors hover:bg-primary/15"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent-subtle px-2.5 font-semibold text-accent-fg text-xs transition-colors hover:bg-accent-hover"
         >
           <LibraryBig size={13} aria-hidden="true" />
           {formatMessage(labels.libraryOpen, { name: environment.name })}
@@ -62,7 +62,7 @@ export function LibraryStep({ environment, consent, onContinue }: LibraryStepPro
       ) : (
         // A machine whose consent excludes the library is not a broken one, and
         // a link that lands on a refusal would say otherwise.
-        <p className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5 text-on-surface-variant/70 text-xs">
+        <p className="rounded-xl border border-stroke bg-control px-3 py-2.5 text-fg-muted text-xs">
           {labels.libraryNotPermitted}
         </p>
       )}

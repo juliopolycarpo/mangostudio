@@ -70,7 +70,7 @@ export function SessionTabs({
     <div
       role="tablist"
       aria-label={t.terminal.tabs}
-      className="flex items-center gap-1 overflow-x-auto border-b border-outline-variant/15 bg-surface-container-lowest px-1"
+      className="flex items-center gap-1 overflow-x-auto border-b border-stroke bg-control px-1"
     >
       {sessions.map((session) => {
         const active = session.id === activeId;
@@ -80,9 +80,7 @@ export function SessionTabs({
             key={session.id}
             data-testid={`terminal-tab-${session.id}`}
             className={`group flex shrink-0 items-center gap-1 rounded-t-lg px-2 py-1.5 text-sm ${
-              active
-                ? 'bg-surface-container text-on-surface'
-                : 'text-on-surface-variant hover:bg-surface-container/60'
+              active ? 'bg-surface text-fg' : 'text-fg-muted hover:bg-fill-hover'
             }`}
           >
             {editing ? (
@@ -96,7 +94,7 @@ export function SessionTabs({
                   if (event.key === 'Enter') commitEditing();
                   if (event.key === 'Escape') setEditingId(null);
                 }}
-                className="w-28 rounded border border-outline-variant/40 bg-surface-container-lowest px-1 text-sm text-on-surface outline-none"
+                className="w-28 rounded border border-stroke bg-control px-1 text-sm text-fg outline-none"
               />
             ) : (
               <button
@@ -113,7 +111,7 @@ export function SessionTabs({
             )}
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="icon"
               onClick={() => startEditing(session)}
               aria-label={t.terminal.rename}
@@ -123,7 +121,7 @@ export function SessionTabs({
             </Button>
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="icon"
               onClick={() => onPopOut(session.id)}
               aria-label={t.terminal.popOut}
@@ -133,7 +131,7 @@ export function SessionTabs({
             </Button>
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="icon"
               onClick={() => onRequestClose(session.id)}
               aria-label={t.terminal.closeSession}
@@ -146,7 +144,7 @@ export function SessionTabs({
       })}
       <Button
         type="button"
-        variant="ghost"
+        variant="subtle"
         size="icon"
         onClick={onNew}
         disabled={newSessionPending || newSessionDisabled}

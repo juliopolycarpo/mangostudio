@@ -31,16 +31,16 @@ export function McpServerTools({ server }: McpServerToolsProps) {
   const { mutate: updateToolSetting, isPending } = useUpdateToolSetting();
 
   if (toolsQuery.isLoading) {
-    return <p className="text-sm text-on-surface-variant py-2">{t.common.loading}</p>;
+    return <p className="text-sm text-fg-muted py-2">{t.common.loading}</p>;
   }
 
   if (toolsQuery.error) {
-    return <p className="text-sm text-error py-2">{s.toolsLoadError}</p>;
+    return <p className="text-sm text-danger py-2">{s.toolsLoadError}</p>;
   }
 
   const tools = toolsQuery.data?.tools ?? [];
   if (tools.length === 0) {
-    return <p className="text-sm text-on-surface-variant/60 py-2">{s.noToolsDiscovered}</p>;
+    return <p className="text-sm text-fg-muted py-2">{s.noToolsDiscovered}</p>;
   }
 
   const enabledByName = new Map(descriptors.map((d) => [d.name, d.enabled]));
@@ -53,18 +53,16 @@ export function McpServerTools({ server }: McpServerToolsProps) {
         return (
           <li
             key={tool.name}
-            className="flex items-start justify-between gap-4 rounded-xl bg-surface-container-lowest/60 px-3 py-2"
+            className="flex items-start justify-between gap-4 rounded-xl bg-control px-3 py-2"
           >
             <div className="min-w-0 space-y-0.5">
-              <p className="text-sm font-medium text-on-surface break-all">{tool.name}</p>
+              <p className="text-sm font-medium text-fg break-all">{tool.name}</p>
               {tool.description && (
-                <p className="text-xs text-on-surface-variant/70 leading-relaxed">
-                  {tool.description}
-                </p>
+                <p className="text-xs text-fg-muted leading-relaxed">{tool.description}</p>
               )}
             </div>
             <label className="flex items-center gap-2 shrink-0">
-              <span className="text-xs text-on-surface-variant">
+              <span className="text-xs text-fg-muted">
                 {enabled ? s.enabledLabel : s.disabledLabel}
               </span>
               <Checkbox

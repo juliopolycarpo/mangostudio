@@ -1,4 +1,4 @@
-import { X } from 'lucide-react';
+import { CircleCheck, CircleX, Info, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   createContext,
@@ -9,7 +9,9 @@ import {
   useRef,
   useState,
 } from 'react';
+import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 interface Toast {
@@ -64,10 +66,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const typeStyles: Record<Toast['type'], string> = {
-    success: 'border-success/30 text-success',
-    error: 'border-error/30 text-error',
-    info: 'border-outline-variant/30 text-on-surface',
+  const typeIcons: Record<Toast['type'], ReactNode> = {
+    success: <CircleCheck size={ICON_LG} className="text-success" aria-hidden="true" />,
+    error: <CircleX size={ICON_LG} className="text-danger" aria-hidden="true" />,
+    info: <Info size={ICON_LG} className="text-info" aria-hidden="true" />,
   };
 
   return (
@@ -79,17 +81,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <motion.div
               key={toastItem.id}
               {...fadeRise}
-              className={`glass-panel pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border text-sm max-w-sm ${typeStyles[toastItem.type]}`}
+              className="pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-md border border-stroke bg-surface-raised py-3 pl-4 pr-2 text-sm text-fg shadow-popover"
             >
-              <span className="flex-1">{toastItem.message}</span>
-              <button
-                type="button"
+              <span className="mt-0.5 shrink-0">{typeIcons[toastItem.type]}</span>
+              <span className="min-w-0 flex-1 py-0.5">{toastItem.message}</span>
+              <Button
+                variant="subtle"
+                size="icon"
                 onClick={() => dismiss(toastItem.id)}
                 aria-label={t.common.dismissToast}
-                className="shrink-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
+                className="-my-1 size-7 shrink-0 text-fg-muted"
               >
-                <X size={14} />
-              </button>
+                <X size={ICON_MD} />
+              </Button>
             </motion.div>
           ))}
         </AnimatePresence>

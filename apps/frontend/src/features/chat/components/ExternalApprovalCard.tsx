@@ -72,26 +72,24 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
   };
 
   return (
-    <div className="max-w-2xl w-full space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-4 text-sm text-on-surface sm:p-5">
-      <div className="flex flex-wrap items-center gap-2 text-on-surface-variant">
-        <ShieldQuestion size={16} className="text-primary" />
+    <div className="max-w-2xl w-full space-y-3 rounded-2xl border border-stroke bg-surface p-4 text-sm text-fg sm:p-5">
+      <div className="flex flex-wrap items-center gap-2 text-fg-muted">
+        <ShieldQuestion size={16} className="text-accent-fg" />
         <span className="text-xs font-bold uppercase tracking-widest">
           {headingFor(decisionSource ?? (expired ? 'expired' : undefined), labels)}
         </span>
       </div>
 
       {/* Vendor text, rendered inert. */}
-      <p className="whitespace-pre-wrap font-medium text-on-surface">{part.title}</p>
+      <p className="whitespace-pre-wrap font-medium text-fg">{part.title}</p>
       {part.detail ? (
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-surface-container-high px-3 py-2 text-[11px] text-on-surface-variant">
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-surface px-3 py-2 text-[11px] text-fg-muted">
           {part.detail}
         </pre>
       ) : null}
-      {part.truncated ? (
-        <p className="text-xs text-on-surface-variant/70">{labels.truncatedHint}</p>
-      ) : null}
+      {part.truncated ? <p className="text-xs text-fg-muted">{labels.truncatedHint}</p> : null}
 
-      {error ? <p className="text-xs text-error">{error}</p> : null}
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
 
       <div className="flex flex-wrap gap-2">
         {part.options.map((option) => (
@@ -107,7 +105,7 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
       </div>
 
       {decisionSource === 'expired' || decisionSource === 'cancelled' || expired ? (
-        <p className="text-xs text-on-surface-variant/70">
+        <p className="text-xs text-fg-muted">
           {decisionSource === 'cancelled' ? labels.cancelledHint : labels.expiredHint}
         </p>
       ) : null}
@@ -159,10 +157,10 @@ function OptionButton({
   onClick: () => void;
 }) {
   const tone = chosen
-    ? 'border-primary/50 bg-primary/10 text-on-surface'
+    ? 'border-accent bg-accent-subtle text-fg'
     : option.isDestructive
-      ? 'border-error/40 text-error'
-      : 'border-outline-variant/20 text-on-surface-variant';
+      ? 'border-danger text-danger'
+      : 'border-stroke text-fg-muted';
 
   return (
     <button
@@ -171,7 +169,7 @@ function OptionButton({
       onClick={onClick}
       data-destructive={option.isDestructive ? 'true' : undefined}
       className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors ${tone} ${
-        interactive ? 'cursor-pointer hover:bg-surface-container-high' : 'cursor-default opacity-70'
+        interactive ? 'cursor-pointer hover:bg-fill-hover' : 'cursor-default opacity-70'
       }`}
     >
       {/* Weight, not removal: a destructive choice the vendor offered stays

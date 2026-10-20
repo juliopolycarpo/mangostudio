@@ -47,7 +47,7 @@ export function GithubRowMenu({ chatId, target, children }: GithubRowMenuProps) 
           {...props}
           aria-label={t.common.openMenu}
           title={t.common.openMenu}
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant opacity-0 transition-opacity hover:bg-surface-container-high hover:text-on-surface focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-primary group-hover:opacity-100"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-lg text-fg-muted opacity-0 transition-opacity hover:bg-fill-hover hover:text-fg focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-focus group-hover:opacity-100"
         >
           <MoreHorizontal size={13} />
         </button>

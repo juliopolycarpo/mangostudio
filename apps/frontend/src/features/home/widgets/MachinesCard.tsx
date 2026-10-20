@@ -58,7 +58,7 @@ export function MachinesCard() {
       action={
         <Link
           to="/environments"
-          className="micro-label text-primary/80 transition-colors hover:text-primary"
+          className="micro-label text-accent-fg transition-colors hover:text-accent-fg"
         >
           {labels.open}
         </Link>
@@ -72,18 +72,18 @@ export function MachinesCard() {
             <li key={environment.id}>
               <Link
                 {...environmentScopeRoute(environment.id)}
-                className="flex min-w-0 items-center gap-2 text-xs transition-colors hover:text-on-surface"
+                className="flex min-w-0 items-center gap-2 text-xs transition-colors hover:text-fg"
                 data-environment-id={environment.id}
               >
                 <StatusDot
                   tone={STATE_TONE[environment.status.state]}
                   pulse={environment.status.state === 'connecting'}
                 />
-                <span className="min-w-0 flex-1 truncate text-on-surface">{environment.name}</span>
-                <span className="shrink-0 font-mono text-[10px] text-on-surface-variant/60">
+                <span className="min-w-0 flex-1 truncate text-fg">{environment.name}</span>
+                <span className="shrink-0 font-mono text-[10px] text-fg-muted">
                   {entityLabels.transport[environment.transportKind]}
                 </span>
-                <span className="shrink-0 font-mono text-[10px] text-on-surface-variant/80">
+                <span className="shrink-0 font-mono text-[10px] text-fg-muted">
                   {entityLabels.status[environment.status.state]}
                 </span>
               </Link>

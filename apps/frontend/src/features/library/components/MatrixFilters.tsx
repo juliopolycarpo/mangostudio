@@ -20,7 +20,7 @@ interface MatrixFiltersProps {
 }
 
 const SELECT_CLASS =
-  'rounded-lg border border-outline-variant/20 bg-surface-container px-2 py-1.5 text-xs text-on-surface outline-none focus:border-primary';
+  'rounded-lg border border-stroke bg-surface px-2 py-1.5 text-xs text-fg outline-none focus:border-focus';
 
 export function MatrixFilters({ filters, targets, locations, onChange }: MatrixFiltersProps) {
   const { t } = useI18n();
@@ -37,7 +37,7 @@ export function MatrixFilters({ filters, targets, locations, onChange }: MatrixF
       <div className="relative min-w-0 flex-1 sm:max-w-xs">
         <Search
           size={14}
-          className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 text-on-surface-variant/50"
+          className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 text-fg-subtle"
         />
         <input
           id={searchId}
@@ -46,7 +46,7 @@ export function MatrixFilters({ filters, targets, locations, onChange }: MatrixF
           onChange={(event) => onChange({ search: event.target.value })}
           placeholder={l.filters.search}
           aria-label={l.filters.search}
-          className="w-full rounded-lg border border-outline-variant/20 bg-surface-container py-1.5 pr-2 pl-8 text-xs text-on-surface outline-none placeholder:text-on-surface-variant/50 focus:border-primary"
+          className="w-full rounded-lg border border-stroke bg-surface py-1.5 pr-2 pl-8 text-xs text-fg outline-none placeholder:text-fg-subtle focus:border-focus"
         />
       </div>
 
@@ -118,14 +118,14 @@ export function MatrixFilters({ filters, targets, locations, onChange }: MatrixF
 
       <label
         htmlFor={groupId}
-        className="flex cursor-pointer items-center gap-1.5 text-xs text-on-surface-variant"
+        className="flex cursor-pointer items-center gap-1.5 text-xs text-fg-muted"
       >
         <input
           id={groupId}
           type="checkbox"
           checked={filters.groupByLocation}
           onChange={(event) => onChange({ groupByLocation: event.target.checked })}
-          className="size-3.5 accent-primary"
+          className="size-3.5 accent-accent"
         />
         {l.filters.groupByLocation}
       </label>

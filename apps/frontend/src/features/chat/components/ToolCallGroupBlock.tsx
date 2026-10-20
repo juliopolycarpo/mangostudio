@@ -112,11 +112,9 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
         duration={duration === null ? null : formatToolDuration(duration)}
       >
         <span className={`shrink-0 font-mono font-semibold ${toneTextClass(tone)}`}>{label}</span>
-        {firstHint && (
-          <span className="truncate font-mono text-on-surface-variant/60">{firstHint}</span>
-        )}
+        {firstHint && <span className="truncate font-mono text-fg-muted">{firstHint}</span>}
         {moreCount > 0 && (
-          <span className="shrink-0 rounded-sm bg-surface-container-high px-1 py-px text-[10px] text-on-surface-variant/70">
+          <span className="shrink-0 rounded-sm bg-surface px-1 py-px text-[10px] text-fg-muted">
             {moreLabel}
           </span>
         )}

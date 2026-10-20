@@ -44,12 +44,7 @@ export function ReservedAspectImage({
         onLoad={() => setIsLoaded(true)}
         onError={onLoadError}
       />
-      {!isLoaded && (
-        <div
-          aria-hidden
-          className="absolute inset-0 animate-pulse bg-surface-container-highest/40"
-        />
-      )}
+      {!isLoaded && <div aria-hidden className="absolute inset-0 animate-pulse bg-fill-selected" />}
     </div>
   );
 }

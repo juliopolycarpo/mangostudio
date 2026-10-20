@@ -228,7 +228,7 @@ export const CommandPalette = memo(function CommandPalette({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop only dismisses; Escape on the dialog is its keyboard equivalent.
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-background/70 px-4 pt-[10vh] backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-scrim px-4 pt-[10vh]"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -249,15 +249,11 @@ export const CommandPalette = memo(function CommandPalette({
           if (event.target !== inputRef.current) event.preventDefault();
         }}
         {...dialogPanel}
-        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-highest shadow-2xl"
+        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-stroke bg-fill-selected shadow-2xl"
         data-testid="command-palette"
       >
-        <div className="flex items-center gap-3 border-b border-outline-variant/15 px-4 py-3">
-          <Search
-            size={ICON_MD}
-            aria-hidden="true"
-            className="shrink-0 text-on-surface-variant/60"
-          />
+        <div className="flex items-center gap-3 border-b border-stroke px-4 py-3">
+          <Search size={ICON_MD} aria-hidden="true" className="shrink-0 text-fg-muted" />
           <input
             ref={inputRef}
             type="text"
@@ -276,7 +272,7 @@ export const CommandPalette = memo(function CommandPalette({
               setPinnedId(null);
             }}
             placeholder={labels.placeholder}
-            className="min-w-0 flex-1 bg-transparent text-sm text-on-surface outline-none placeholder:text-on-surface-variant/50"
+            className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
           />
           <KbdHint keys={labels.keys.escape} />
         </div>
@@ -289,7 +285,7 @@ export const CommandPalette = memo(function CommandPalette({
                 <MicroLabel
                   as="div"
                   id={`${listId}-${group.section}`}
-                  className="px-4 pb-1 pt-2 text-on-surface-variant/60"
+                  className="px-4 pb-1 pt-2 text-fg-muted"
                 >
                   {labels.sections[group.section]}
                 </MicroLabel>
@@ -325,7 +321,7 @@ export const CommandPalette = memo(function CommandPalette({
           ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-outline-variant/15 px-4 py-2 text-[11px] text-on-surface-variant/60">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-[11px] text-fg-muted">
           <FooterHint keys="↑↓" label={labels.hints.navigate} />
           <FooterHint keys="⏎" label={labels.hints.run} />
           <FooterHint keys="⇥" label={labels.hints.sections} />
@@ -392,19 +388,19 @@ function CommandRow({
       onMouseMove={onActivate}
       onClick={() => void item.run()}
       className={`mx-2 flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm ${
-        active ? 'bg-primary/10 text-on-surface' : 'text-on-surface/80'
+        active ? 'bg-accent-subtle text-fg' : 'text-fg-muted'
       }`}
     >
       {Icon ? (
         <Icon
           size={ICON_SM}
           aria-hidden="true"
-          className={`shrink-0 ${active ? 'text-primary' : 'text-on-surface-variant/70'}`}
+          className={`shrink-0 ${active ? 'text-accent-fg' : 'text-fg-muted'}`}
         />
       ) : null}
       <span className="truncate">{item.label}</span>
       {item.hint ? (
-        <span className="min-w-0 shrink truncate font-mono text-xs text-on-surface-variant/50">
+        <span className="min-w-0 shrink truncate font-mono text-xs text-fg-subtle">
           {item.hint}
         </span>
       ) : null}
@@ -420,7 +416,7 @@ function CommandRow({
             timestamp is taking, and the label is what the reader is scanning
             for. The words stay in the accessibility tree at every width. */}
         {item.meta ? (
-          <span className="text-[11px] text-on-surface-variant/50 max-sm:sr-only">{item.meta}</span>
+          <span className="text-[11px] text-fg-subtle max-sm:sr-only">{item.meta}</span>
         ) : null}
         {item.shortcut ? <KbdHint keys={item.shortcut} /> : null}
       </span>

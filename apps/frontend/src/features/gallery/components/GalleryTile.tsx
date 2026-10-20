@@ -23,11 +23,11 @@ export function GalleryTile({ item, onView }: GalleryTileProps) {
   const { t } = useI18n();
 
   return (
-    <div className="group relative aspect-square rounded-2xl overflow-hidden bg-surface-container-high border border-outline-variant/20 shadow-sm hover:shadow-xl transition-all duration-300">
+    <div className="group relative aspect-square rounded-2xl overflow-hidden bg-surface border border-stroke shadow-sm hover:shadow-xl transition-all duration-300">
       <img
         src={item.imageUrl}
         alt={item.prompt}
-        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+        className="w-full h-full object-cover transition-transform duration-500"
         referrerPolicy="no-referrer"
         loading="lazy"
         decoding="async"
@@ -46,7 +46,7 @@ export function GalleryTile({ item, onView }: GalleryTileProps) {
           <button
             type="button"
             onClick={() => onView(item)}
-            className="p-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-lg text-white transition-colors flex-1 flex items-center justify-center gap-2"
+            className="p-2 bg-white/20 hover:bg-white/30 rounded-lg text-white transition-colors flex-1 flex items-center justify-center gap-2"
           >
             <Maximize2 size={16} />
             <span className="text-xs font-bold uppercase tracking-wider">{t.gallery.view}</span>
@@ -58,7 +58,7 @@ export function GalleryTile({ item, onView }: GalleryTileProps) {
             target="_blank"
             rel="noreferrer"
             aria-label={t.gallery.downloadImage}
-            className="p-2 bg-primary hover:bg-primary/90 rounded-lg text-on-primary transition-colors flex items-center justify-center"
+            className="p-2 bg-accent hover:bg-accent-hover rounded-lg text-on-accent transition-colors flex items-center justify-center"
           >
             <Download size={16} />
           </a>

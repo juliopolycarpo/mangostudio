@@ -189,14 +189,12 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
           empty status column is what sets it apart from the calls around it. */}
       <TimelineRow expanded={isExpanded} onToggle={handleToggle} disclosable={hasText}>
         <span
-          className={`truncate ${isStreaming ? 'animate-pulse text-on-surface-variant' : 'text-on-surface-variant/55'}`}
+          className={`truncate ${isStreaming ? 'animate-pulse text-fg-muted' : 'text-fg-subtle'}`}
         >
           {label}
         </span>
         {incomplete && !isStreaming ? (
-          <span className="shrink-0 text-on-surface-variant/40">
-            · {t.externalAgents.turn.incomplete}
-          </span>
+          <span className="shrink-0 text-fg-subtle">· {t.externalAgents.turn.incomplete}</span>
         ) : null}
       </TimelineRow>
       {hasText ? (
@@ -206,7 +204,7 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
             onScroll={handleScroll}
             className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
           >
-            <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
+            <div className="markdown-content--thinking text-xs leading-relaxed text-fg-muted">
               <MarkdownContent
                 content={text}
                 isStreaming={isStreaming}

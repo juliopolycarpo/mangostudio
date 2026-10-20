@@ -27,7 +27,7 @@ export function AgentList({
     <div className="flex flex-col gap-6">
       {builtIn.length > 0 && (
         <section className="space-y-3">
-          <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label px-1">
+          <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted px-1">
             {builtInAgentsTitle}
           </h3>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -46,7 +46,7 @@ export function AgentList({
 
       {user.length > 0 && (
         <section className="space-y-3">
-          <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label px-1">
+          <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted px-1">
             {userAgentsTitle}
           </h3>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -82,16 +82,16 @@ function AgentListItem({ agent, kindLabel, active, onSelect }: AgentListItemProp
       onClick={onSelect}
       className={`group w-full rounded-2xl border text-left transition-all duration-200 ${
         active
-          ? 'border-primary/40 bg-primary/10 text-on-surface shadow-sm'
-          : 'border-outline-variant/20 bg-surface-container-high text-on-surface hover:bg-surface-container-highest hover:border-outline-variant/40'
+          ? 'border-accent bg-accent-subtle text-fg shadow-sm'
+          : 'border-stroke bg-surface text-fg hover:bg-fill-hover hover:border-stroke'
       }`}
     >
       <span className="flex items-center gap-3 px-3 py-2.5">
         <span
           className={`shrink-0 rounded-xl p-1.5 transition-colors ${
             active
-              ? 'bg-primary/20 text-primary'
-              : 'bg-surface-container-lowest text-on-surface-variant/60 group-hover:text-on-surface-variant'
+              ? 'bg-accent-subtle text-accent-fg'
+              : 'bg-control text-fg-muted group-hover:text-fg-muted'
           }`}
         >
           <Icon size={16} />
@@ -101,15 +101,13 @@ function AgentListItem({ agent, kindLabel, active, onSelect }: AgentListItemProp
             <span className="font-semibold text-sm truncate">{agent.name}</span>
             <span
               className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                active
-                  ? 'bg-primary/20 text-primary'
-                  : 'bg-surface-container-lowest text-on-surface-variant/70'
+                active ? 'bg-accent-subtle text-accent-fg' : 'bg-control text-fg-muted'
               }`}
             >
               {kindLabel}
             </span>
           </span>
-          <span className="block truncate text-xs text-on-surface-variant/60 mt-0.5">
+          <span className="block truncate text-xs text-fg-muted mt-0.5">
             {agent.description || agent.id}
           </span>
         </span>
@@ -117,8 +115,8 @@ function AgentListItem({ agent, kindLabel, active, onSelect }: AgentListItemProp
           size={14}
           className={`shrink-0 transition-all duration-200 ${
             active
-              ? 'text-primary translate-x-0 opacity-100'
-              : 'text-on-surface-variant/30 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0'
+              ? 'text-accent-fg translate-x-0 opacity-100'
+              : 'text-fg-subtle opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0'
           }`}
         />
       </span>

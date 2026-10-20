@@ -49,7 +49,7 @@ export function ProviderSettingsPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
+        <p className="text-sm text-fg-muted">{t.common.loading}</p>
       </div>
     );
   }
@@ -57,8 +57,8 @@ export function ProviderSettingsPage() {
   if (error || !descriptor) {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-error">{s.loadError}</p>
-        <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+        <p className="text-sm text-danger">{s.loadError}</p>
+        <Button variant="subtle" size="sm" onClick={() => void refetch()}>
           {t.common.retry}
         </Button>
       </div>
@@ -72,7 +72,7 @@ export function ProviderSettingsPage() {
       <div className="space-y-6">
         <Link
           to="/settings/providers"
-          className="inline-flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg transition-colors"
         >
           <ArrowLeft size={14} />
           {s.backToMenu}
@@ -80,12 +80,12 @@ export function ProviderSettingsPage() {
 
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-on-surface">{providerName}</h2>
+            <h2 className="text-lg font-bold text-fg">{providerName}</h2>
             <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200 border border-amber-500/20">
               {s.deprecatedBadge}
             </span>
           </div>
-          <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">{s.deprecatedNote}</p>
+          <p className="mt-2 text-sm leading-relaxed text-fg-muted">{s.deprecatedNote}</p>
         </div>
       </div>
     );
@@ -198,17 +198,17 @@ function ProviderSettingsEditor({
     <div className="space-y-6">
       <Link
         to="/settings/providers"
-        className="inline-flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg transition-colors"
       >
         <ArrowLeft size={14} />
         {s.backToMenu}
       </Link>
 
       <div>
-        <h2 className="text-lg font-bold text-on-surface">{providerName}</h2>
-        <p className="mt-0.5 text-xs text-on-surface-variant">{s.perProviderSettings}</p>
+        <h2 className="text-lg font-bold text-fg">{providerName}</h2>
+        <p className="mt-0.5 text-xs text-fg-muted">{s.perProviderSettings}</p>
         {updateMutation.isPending && (
-          <p className="mt-1 text-xs text-on-surface-variant" role="status" aria-live="polite">
+          <p className="mt-1 text-xs text-fg-muted" role="status" aria-live="polite">
             {s.saving}
           </p>
         )}

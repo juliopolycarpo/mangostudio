@@ -92,7 +92,7 @@ export function ProvisionStep({
 
   return (
     <div className="space-y-4" data-testid="onboarding-provision-step">
-      <p className="text-on-surface-variant/70 text-xs">
+      <p className="text-fg-muted text-xs">
         {paired ? labels.provisionPairedIntro : labels.provisionSshIntro}
       </p>
 
@@ -102,14 +102,14 @@ export function ProvisionStep({
           disabled={install.isPending || bootstrap.isPending}
           onClick={() => void start()}
           data-testid="onboarding-provision-start"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 font-semibold text-primary text-xs transition-colors hover:bg-primary/15 disabled:opacity-45"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent-subtle px-2.5 font-semibold text-accent-fg text-xs transition-colors hover:bg-accent-hover disabled:opacity-45"
         >
           {paired ? labels.provisionStartPaired : labels.provisionStartSsh}
         </button>
       )}
 
       {error ? (
-        <p className="text-error text-xs" role="alert">
+        <p className="text-danger text-xs" role="alert">
           {error}
         </p>
       ) : null}

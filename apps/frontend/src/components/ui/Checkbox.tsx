@@ -1,7 +1,7 @@
 /**
  * The app's checkbox.
  *
- * Twenty-odd settings rows drew a native box tinted with `accent-primary`,
+ * Twenty-odd settings rows drew a native box tinted with `accent-accent`,
  * which is not a design-system control: `accent-color` recolours the tick and
  * the fill and leaves the platform to draw everything else, so the same
  * setting is a rounded macOS square, a flat Windows one, and a Chromium one
@@ -26,7 +26,7 @@ interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'typ
 }
 
 const BOX =
-  'peer size-4 shrink-0 cursor-pointer appearance-none rounded border border-outline-variant/50 bg-surface-container-lowest transition-colors checked:border-primary checked:bg-primary enabled:hover:border-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed';
+  'peer size-4 shrink-0 cursor-pointer appearance-none rounded-xs border border-stroke-strong bg-control transition-colors checked:border-accent checked:bg-accent enabled:hover:bg-control-hover enabled:checked:hover:bg-accent-hover disabled:cursor-not-allowed';
 
 export function Checkbox({ className, ...props }: CheckboxProps) {
   return (
@@ -40,7 +40,7 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
         aria-hidden="true"
         // `inset-0 m-auto` centres it over the box without depending on the
         // wrapper's own alignment, which every call site sets differently.
-        className="pointer-events-none absolute inset-0 m-auto text-on-primary opacity-0 transition-opacity peer-checked:opacity-100"
+        className="pointer-events-none absolute inset-0 m-auto text-on-accent opacity-0 transition-opacity peer-checked:opacity-100"
       />
     </span>
   );

@@ -18,8 +18,7 @@ import { ToolIdentityHeader } from '../identity/ToolIdentityHeader';
  * being a tool — the health rollup, the library snapshot — cannot drift away
  * from the cards they sit beside.
  */
-export const TOOL_CARD_SURFACE =
-  'rounded-2xl border border-outline-variant/15 bg-surface-container-high';
+export const TOOL_CARD_SURFACE = 'rounded-2xl border border-stroke bg-surface';
 
 const DENSITY_CLASS = {
   comfortable: 'space-y-4 p-5 sm:p-6',
@@ -93,9 +92,7 @@ export function CardSectionLabel({
   readonly className?: string;
 }) {
   return (
-    <p
-      className={`font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70 ${className}`}
-    >
+    <p className={`text-[10px] font-bold uppercase tracking-widest text-fg-muted ${className}`}>
       {children}
     </p>
   );

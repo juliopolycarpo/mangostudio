@@ -27,15 +27,15 @@ export function ChatGptMetricsCard({ connector: c, onRedeemed }: ChatGptMetricsC
   const planLabel = formatPlan(c.planType, s);
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+    <Card className="space-y-4 p-4 sm:p-6">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
         <div className="flex items-center gap-2">
-          <h3 className="text-base font-semibold text-on-surface">{c.name}</h3>
-          <span className="rounded-full border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 text-[10px] text-on-surface-variant">
+          <h3 className="text-base font-semibold text-fg">{c.name}</h3>
+          <span className="rounded-full border border-stroke bg-surface px-2 py-0.5 text-[10px] text-fg-muted">
             {s.chatgptPlanBadge.replace('{plan}', planLabel)}
           </span>
         </div>
-        <span className="text-xs text-on-surface-variant/70">
+        <span className="text-xs text-fg-muted">
           {s.chatgptSignedInAs.replace('{account}', account)}
         </span>
       </div>
@@ -49,7 +49,7 @@ export function ChatGptMetricsCard({ connector: c, onRedeemed }: ChatGptMetricsC
           <ChatGptResetCreditAction connector={c} onRedeemed={onRedeemed} />
         </>
       ) : (
-        <p className="text-sm text-on-surface-variant/60">{t.settings.metrics.chatgptUsageEmpty}</p>
+        <p className="text-sm text-fg-muted">{t.settings.metrics.chatgptUsageEmpty}</p>
       )}
 
       <ChatGptUsageHistoryPanel connectorId={c.id} />

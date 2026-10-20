@@ -131,14 +131,14 @@ export function RemoteActions({
       </div>
 
       {guidance ? (
-        <div className="mt-2 space-y-2 rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5">
+        <div className="mt-2 space-y-2 rounded-lg border border-warning bg-warning-subtle px-2 py-1.5">
           <p className="text-[11px] leading-4 text-warning">{guidance}</p>
           {canForcePush ? (
             <button
               type="button"
               disabled={pending}
               onClick={() => setConfirmForcePush(true)}
-              className="cursor-pointer rounded-full bg-warning/20 px-2 py-1 text-[10px] font-semibold text-warning transition-colors hover:bg-warning/30 disabled:cursor-wait disabled:opacity-50"
+              className="cursor-pointer rounded-full bg-warning-subtle px-2 py-1 text-[10px] font-semibold text-warning transition-colors hover:bg-warning-subtle disabled:cursor-wait disabled:opacity-50"
             >
               {labels.forcePush}
             </button>
@@ -151,16 +151,14 @@ export function RemoteActions({
           role="dialog"
           aria-modal="true"
           aria-labelledby="git-force-push-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
         >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
             <div className="space-y-2">
-              <h3 id="git-force-push-title" className="text-lg font-bold text-on-surface">
+              <h3 id="git-force-push-title" className="text-lg font-bold text-fg">
                 {labels.forcePushConfirmTitle}
               </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">
-                {labels.forcePushConfirmHint}
-              </p>
+              <p className="text-sm leading-5 text-fg-muted">{labels.forcePushConfirmHint}</p>
             </div>
             <div className="flex gap-2">
               <Button
@@ -212,8 +210,8 @@ function RemoteButton({
       onClick={onClick}
       className={`flex h-7 cursor-pointer items-center gap-1 rounded-lg px-1.5 transition-colors disabled:cursor-wait disabled:opacity-50 ${
         highlight
-          ? 'text-primary hover:bg-primary/10'
-          : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+          ? 'text-accent-fg hover:bg-accent-hover'
+          : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
       }`}
     >
       {icon}

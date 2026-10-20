@@ -54,7 +54,7 @@ export function TimelineRow({
       <span className="flex w-3 shrink-0 items-center justify-center">{glyph}</span>
       {children}
       {hasMeta && (
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-[11px] tabular-nums text-on-surface-variant/50">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-[11px] tabular-nums text-fg-subtle">
           {summary && <span>{summary}</span>}
           {summary && duration && <span aria-hidden="true">·</span>}
           {duration && <span>{duration}</span>}
@@ -79,13 +79,13 @@ export function TimelineRow({
       type="button"
       aria-expanded={expanded}
       onClick={onToggle}
-      className={`${ROW_CLASS} cursor-pointer hover:bg-surface-container-low`}
+      className={`${ROW_CLASS} cursor-pointer hover:bg-fill-hover`}
     >
       {content}
       <ChevronDown
         size={11}
         aria-hidden="true"
-        className={`shrink-0 text-on-surface-variant/40 transition-all duration-(--duration-base)
+        className={`shrink-0 text-fg-subtle transition-all duration-(--duration-base)
                     ${hasMeta ? '' : 'ml-auto'}
                     ${expanded ? 'rotate-180 opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`}
       />

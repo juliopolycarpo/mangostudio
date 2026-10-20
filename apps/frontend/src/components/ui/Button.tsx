@@ -2,27 +2,46 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
-  size?: 'sm' | 'md' | 'icon';
+  variant?: 'primary' | 'secondary' | 'subtle' | 'danger';
+  size?: 'sm' | 'md' | 'lg' | 'icon';
   loading?: boolean;
   children: ReactNode;
 }
 
+/**
+ * A disabled button is a neutral grey in every variant — the way WinUI and
+ * libadwaita draw one — rather than the variant's colour faded by opacity. A
+ * button that is only loading keeps its colour: `aria-busy` is what tells the
+ * two apart, and the spinner is the signal.
+ */
+const DISABLED_NEUTRAL =
+  '[&:disabled:not([aria-busy=true])]:border-transparent [&:disabled:not([aria-busy=true])]:bg-fill-selected [&:disabled:not([aria-busy=true])]:text-fg-subtle';
+
 const variantStyles: Record<NonNullable<ButtonProps['variant']>, string> = {
-  primary: 'bg-primary text-on-primary shadow-lg shadow-primary/20 hover:opacity-90',
-  secondary: 'bg-surface-container-high text-on-surface hover:bg-surface-container-highest',
-  ghost: 'text-on-surface/70 hover:text-on-surface hover:bg-surface-container-high',
+  primary:
+    'bg-accent text-on-accent enabled:hover:bg-accent-hover enabled:active:bg-accent-pressed',
+  secondary:
+    'border border-stroke bg-control text-fg enabled:hover:bg-control-hover enabled:active:bg-control-pressed',
+  subtle: 'text-fg enabled:hover:bg-fill-hover enabled:active:bg-fill-pressed',
   // Confirming something that deletes a user's files should not look like
   // confirming anything else.
-  danger: 'bg-error text-on-error shadow-lg shadow-error/20 hover:opacity-90',
+  danger: 'bg-danger-solid text-on-danger enabled:hover:brightness-110',
 };
 
 const sizeStyles: Record<NonNullable<ButtonProps['size']>, string> = {
-  sm: 'px-3 py-1.5 text-xs',
-  md: 'px-4 py-2 text-sm',
-  icon: 'size-9 p-0',
+  sm: 'h-7 px-2 text-xs',
+  md: 'h-8 px-3 text-sm',
+  lg: 'h-10 px-4 text-sm',
+  icon: 'size-8 p-0 text-sm',
 };
 
+/**
+ * The one button. Heights are the platform's own rhythm (28/32/40px), weight is
+ * 500, and nothing about it floats: no shadow, no scale on press, no glow in
+ * the variant's colour. Hover and press change only the fill.
+ *
+ * // Usage: <Button variant="secondary" size="sm">{t.common.cancel}</Button>
+ */
 export function Button({
   variant = 'primary',
   size = 'md',
@@ -35,16 +54,18 @@ export function Button({
   return (
     <button
       disabled={disabled || loading}
+      aria-busy={loading || undefined}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-bold transition-all duration-200 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100',
+        'inline-flex items-center justify-center gap-2 rounded-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed aria-busy:cursor-progress',
         variantStyles[variant],
+        DISABLED_NEUTRAL,
         sizeStyles[size],
         className
       )}
       {...props}
     >
       {loading && (
-        <span className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />
+        <span className="size-4 rounded-full border-2 border-current border-t-transparent animate-spin shrink-0" />
       )}
       {children}
     </button>

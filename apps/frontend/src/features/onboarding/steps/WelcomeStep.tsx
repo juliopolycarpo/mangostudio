@@ -23,8 +23,8 @@ export function WelcomeStep() {
       <ul className="space-y-3">
         {points.map(({ key, Icon, text }) => (
           <li key={key} className="flex items-start gap-3">
-            <Icon aria-hidden size={16} className="mt-0.5 shrink-0 text-primary" />
-            <span className="text-on-surface-variant text-sm leading-relaxed">{text}</span>
+            <Icon aria-hidden size={16} className="mt-0.5 shrink-0 text-accent-fg" />
+            <span className="text-fg-muted text-sm leading-relaxed">{text}</span>
           </li>
         ))}
       </ul>

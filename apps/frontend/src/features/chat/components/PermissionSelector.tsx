@@ -158,7 +158,7 @@ export function PermissionSelector({
         aria-expanded={open}
         aria-label={labels.label}
         className={`composer-chip max-w-[13rem] disabled:opacity-50 ${
-          unattended ? 'border-warning/40 text-warning' : ''
+          unattended ? 'border-warning text-warning' : ''
         }`}
       >
         {unattended ? (
@@ -174,7 +174,7 @@ export function PermissionSelector({
       </button>
 
       {open ? (
-        <div className="absolute bottom-full z-50 mb-2 w-80 space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-3 shadow-2xl">
+        <div className="absolute bottom-full z-50 mb-2 w-80 space-y-3 rounded-2xl border border-stroke bg-surface p-3 shadow-2xl">
           {hasPresets ? (
             <Axis heading={labels.presetHeading}>
               {presets.map((preset) => (
@@ -204,7 +204,7 @@ export function PermissionSelector({
               type="button"
               onClick={() => setShowMatrix((value) => !value)}
               aria-expanded={showMatrix}
-              className="flex w-full items-center gap-1 px-1 text-[11px] text-on-surface-variant hover:text-on-surface"
+              className="flex w-full items-center gap-1 px-1 text-[11px] text-fg-muted hover:text-fg"
             >
               <ChevronDown
                 size={11}
@@ -290,9 +290,7 @@ function Axis({ heading, children }: { heading: string; children: React.ReactNod
           announcing an all-caps string letter by letter is reading styling, and
           a locale that does not want capitals for this role can drop the class
           without rewriting its copy. */}
-      <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-        {heading}
-      </p>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">{heading}</p>
       {children}
     </div>
   );
@@ -322,21 +320,17 @@ function Option({
       disabled={!supported}
       onClick={onSelect}
       className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
-        selected ? 'border-primary/50 bg-primary/10' : 'border-outline-variant/15'
-      } enabled:hover:border-outline-variant/40 disabled:cursor-not-allowed disabled:opacity-60`}
+        selected ? 'border-accent bg-accent-subtle' : 'border-stroke'
+      } enabled:hover:border-stroke disabled:cursor-not-allowed disabled:opacity-60`}
     >
-      <span
-        className={`mt-0.5 shrink-0 ${selected ? 'text-primary' : 'text-on-surface-variant/60'}`}
-      >
+      <span className={`mt-0.5 shrink-0 ${selected ? 'text-accent-fg' : 'text-fg-muted'}`}>
         {selected ? <Check size={13} /> : '○'}
       </span>
       <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block text-xs font-medium text-on-surface">{name}</span>
-        <span className="block text-[10px] leading-relaxed text-on-surface-variant/80">
-          {description}
-        </span>
+        <span className="block text-xs font-medium text-fg">{name}</span>
+        <span className="block text-[10px] leading-relaxed text-fg-muted">{description}</span>
         {!supported && unsupportedReason ? (
-          <span className="block text-[10px] leading-relaxed text-on-surface-variant/70">
+          <span className="block text-[10px] leading-relaxed text-fg-muted">
             {unsupportedReason}
           </span>
         ) : null}

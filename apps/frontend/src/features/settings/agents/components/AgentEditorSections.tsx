@@ -141,7 +141,7 @@ function AgentIdentitySection({ draft, labels, isNew, onDraftChange }: AgentIden
           onChange={(description) => onDraftChange({ description })}
         />
         <div className="space-y-2">
-          <span className="text-sm font-semibold text-on-surface">{labels.role}</span>
+          <span className="text-sm font-semibold text-fg">{labels.role}</span>
           <Select
             value={draft.role}
             onChange={(value) => onDraftChange({ role: value as AgentRole })}
@@ -170,16 +170,16 @@ function AgentBehaviorSection({
   return (
     <AgentEditorSection title={labels.sectionBehavior}>
       <label className="block space-y-2">
-        <span className="text-sm font-semibold text-on-surface">{labels.systemPrompt}</span>
+        <span className="text-sm font-semibold text-fg">{labels.systemPrompt}</span>
         <textarea
           value={draft.systemPrompt}
           onChange={(event) => onDraftChange({ systemPrompt: event.target.value })}
           rows={6}
-          className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20 resize-y"
+          className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus resize-y"
         />
       </label>
       <div className="space-y-2">
-        <span className="text-sm font-semibold text-on-surface">{labels.model}</span>
+        <span className="text-sm font-semibold text-fg">{labels.model}</span>
         <Select
           value={draft.model ?? ''}
           onChange={(value) => onDraftChange({ model: value ? value : undefined })}
@@ -201,7 +201,7 @@ function AgentReasoningSection({ draft, labels, onDraftChange }: AgentReasoningS
   return (
     <AgentEditorSection title={labels.sectionReasoning}>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
+        <label className="flex items-center gap-2 rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg">
           <Checkbox
             checked={draft.thinkingEnabled ?? false}
             onChange={(event) => onDraftChange({ thinkingEnabled: event.target.checked })}
@@ -209,7 +209,7 @@ function AgentReasoningSection({ draft, labels, onDraftChange }: AgentReasoningS
           {labels.thinking}
         </label>
         <div className="space-y-2">
-          <span className="text-sm font-semibold text-on-surface">{labels.reasoningEffort}</span>
+          <span className="text-sm font-semibold text-fg">{labels.reasoningEffort}</span>
           <Select
             value={draft.reasoningEffort ?? ''}
             onChange={(value) =>
@@ -258,7 +258,7 @@ function AgentToolsSection({
 }: AgentToolsSectionProps) {
   return (
     <AgentEditorSection title={labels.sectionTools}>
-      <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface w-fit">
+      <label className="flex items-center gap-2 rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg w-fit">
         <Checkbox
           checked={draft.toolsEnabled}
           onChange={(event) => onDraftChange({ toolsEnabled: event.target.checked })}
@@ -276,15 +276,15 @@ function AgentToolsSection({
       />
 
       <fieldset className="space-y-2" disabled={eligibleSubagents.length === 0}>
-        <legend className="text-sm font-semibold text-on-surface">{labels.subagents}</legend>
+        <legend className="text-sm font-semibold text-fg">{labels.subagents}</legend>
         {eligibleSubagents.length === 0 ? (
-          <p className="text-sm text-on-surface-variant/60">{labels.noSubagents}</p>
+          <p className="text-sm text-fg-muted">{labels.noSubagents}</p>
         ) : (
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {eligibleSubagents.map((subagent) => (
               <label
                 key={subagent.id}
-                className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface"
+                className="flex items-center gap-2 rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg"
               >
                 <Checkbox
                   checked={selectedSubagents.has(subagent.id)}
@@ -313,9 +313,7 @@ interface AgentEditorSectionProps {
 function AgentEditorSection({ title, children }: AgentEditorSectionProps) {
   return (
     <section className="space-y-4">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-        {title}
-      </h3>
+      <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">{title}</h3>
       {children}
     </section>
   );
@@ -329,11 +327,11 @@ interface AgentSourcePathFieldProps {
 function AgentSourcePathField({ label, value }: AgentSourcePathFieldProps) {
   return (
     <label className="block space-y-2">
-      <span className="text-sm font-semibold text-on-surface">{label}</span>
+      <span className="text-sm font-semibold text-fg">{label}</span>
       <input
         readOnly
         value={value}
-        className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface-variant"
+        className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg-muted"
       />
     </label>
   );
@@ -349,12 +347,12 @@ interface TextFieldProps {
 function TextField({ label, value, onChange, placeholder }: TextFieldProps) {
   return (
     <label className="block space-y-2">
-      <span className="text-sm font-semibold text-on-surface">{label}</span>
+      <span className="text-sm font-semibold text-fg">{label}</span>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
+        className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
       />
     </label>
   );
@@ -369,7 +367,7 @@ interface NumberFieldProps {
 function NumberField({ label, value, onChange }: NumberFieldProps) {
   return (
     <label className="block space-y-2">
-      <span className="text-sm font-semibold text-on-surface">{label}</span>
+      <span className="text-sm font-semibold text-fg">{label}</span>
       <input
         type="number"
         min={MAX_TOOL_ITERATIONS_MIN}
@@ -379,7 +377,7 @@ function NumberField({ label, value, onChange }: NumberFieldProps) {
           const nextValue = Number(event.target.value);
           onChange(Number.isFinite(nextValue) && event.target.value ? nextValue : undefined);
         }}
-        className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20"
+        className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
       />
     </label>
   );

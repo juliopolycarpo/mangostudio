@@ -35,7 +35,7 @@ export function SectionCard({ label, tone, action, className, children }: Sectio
     <motion.section
       variants={cardItem}
       className={cn(
-        'flex min-w-0 flex-col gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low/60 p-4',
+        'flex min-w-0 flex-col gap-3 rounded-md border border-stroke bg-surface p-4',
         className
       )}
     >

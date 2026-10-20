@@ -79,9 +79,9 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
   // panel below, which keeps the chrome standing around it.
   if (progress.isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center gap-3 bg-surface-dim">
+      <div className="flex min-h-screen items-center justify-center gap-3 bg-canvas">
         <Spinner size="lg" />
-        <span className="text-on-surface-variant text-sm">{s.deciding}</span>
+        <span className="text-fg-muted text-sm">{s.deciding}</span>
       </div>
     );
   }
@@ -124,14 +124,14 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
   };
 
   return (
-    <div className="min-h-screen bg-surface-dim px-4 py-8 sm:py-12">
+    <div className="min-h-screen bg-canvas px-4 py-8 sm:py-12">
       <div className="mx-auto w-full max-w-3xl space-y-6">
         <header className="space-y-2 text-center">
           {/* The only page a not-yet-configured account can reach, so the way
               back out of the wrong account has to be on it. */}
           <div className="flex justify-end">
             <Button
-              variant="ghost"
+              variant="subtle"
               size="sm"
               data-testid="logout-button"
               loading={isSigningOut}
@@ -141,8 +141,8 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             </Button>
           </div>
           <Logo className="mx-auto size-14" />
-          <h1 className="font-headline font-bold text-2xl text-on-surface">{s.title}</h1>
-          <p className="mx-auto max-w-xl text-on-surface-variant text-sm">{s.subtitle}</p>
+          <h1 className="font-bold text-2xl text-fg">{s.title}</h1>
+          <p className="mx-auto max-w-xl text-fg-muted text-sm">{s.subtitle}</p>
         </header>
 
         <div className="grid gap-5 sm:grid-cols-[13rem_1fr]">
@@ -160,14 +160,12 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                     onClick={() => setStep(candidate)}
                     className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left transition-colors ${
                       candidate === step
-                        ? 'bg-surface-container-high text-on-surface'
-                        : 'text-on-surface-variant hover:bg-surface-container-high/60'
+                        ? 'bg-surface text-fg'
+                        : 'text-fg-muted hover:bg-fill-hover'
                     }`}
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-2">
-                      <span className="font-mono text-on-surface-variant/50 text-xs">
-                        {position + 1}
-                      </span>
+                      <span className="font-mono text-fg-subtle text-xs">{position + 1}</span>
                       <span className="truncate font-semibold text-sm">{s.steps[candidate]}</span>
                     </span>
                     <StepStatusChip status={statuses[candidate]} />
@@ -177,7 +175,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             </ol>
           </nav>
 
-          <section className="min-w-0 space-y-6 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 sm:p-7">
+          <section className="min-w-0 space-y-6 rounded-3xl border border-stroke bg-surface p-5 sm:p-7">
             {/* No step chosen means resume is still waiting on a fact. The
                 wizard says so here rather than in place of the whole page: a
                 probe that keeps failing never answers, and the only exits a
@@ -185,10 +183,10 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             {step === null ? (
               <div className="flex items-center gap-3 py-6" data-testid="onboarding-deciding">
                 <Spinner size="lg" />
-                <span className="text-on-surface-variant text-sm">{s.deciding}</span>
+                <span className="text-fg-muted text-sm">{s.deciding}</span>
               </div>
             ) : (
-              <p className="font-label text-on-surface-variant/60 text-xs uppercase tracking-widest">
+              <p className="text-fg-muted text-xs uppercase tracking-widest">
                 {formatMessage(s.progress, {
                   step: String(index + 1),
                   total: String(ONBOARDING_STEP_IDS.length),
@@ -222,16 +220,16 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             ) : null}
 
             {progress.saveFailed ? (
-              <p className="text-error text-sm" data-testid="onboarding-save-failed">
+              <p className="text-danger text-sm" data-testid="onboarding-save-failed">
                 {s.saveFailed}
               </p>
             ) : null}
 
             {step === null ? null : (
-              <div className="flex flex-wrap items-center justify-between gap-3 border-outline-variant/15 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-stroke border-t pt-4">
                 <div className="flex items-center gap-2">
                   <Button
-                    variant="ghost"
+                    variant="subtle"
                     size="sm"
                     disabled={index === 0}
                     data-testid="onboarding-back"
@@ -243,7 +241,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                     {s.back}
                   </Button>
                   <Button
-                    variant="ghost"
+                    variant="subtle"
                     size="sm"
                     data-testid="onboarding-skip-step"
                     disabled={isWriting}
@@ -280,7 +278,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             data-testid="onboarding-skip-all"
             disabled={isWriting}
             onClick={() => void complete()}
-            className="text-on-surface-variant/60 text-xs underline underline-offset-4 hover:text-on-surface-variant"
+            className="text-fg-muted text-xs underline underline-offset-4 hover:text-fg-muted"
           >
             {s.skipAll}
           </button>

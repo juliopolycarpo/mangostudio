@@ -50,19 +50,19 @@ export function UncommittedWorkCard({ currentChatId, onSelectChat }: Uncommitted
 
   return (
     <SectionCard label={labels.label} tone="warning" className="sm:col-span-2">
-      <ul className="divide-y divide-outline-variant/10">
+      <ul className="divide-y divide-stroke">
         {work.rows.map((row) => (
           <li key={row.chatId}>
             <button
               type="button"
               onClick={() => onSelectChat(row.chatId)}
               aria-label={formatMessage(labels.open, { title: row.title })}
-              className="flex w-full min-w-0 items-center justify-between gap-3 py-2 text-left transition-colors hover:text-on-surface"
+              className="flex w-full min-w-0 items-center justify-between gap-3 py-2 text-left transition-colors hover:text-fg"
             >
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-on-surface">{row.title}</span>
+                <span className="block truncate text-sm text-fg">{row.title}</span>
                 {row.branch ? (
-                  <span className="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[11px] text-on-surface-variant/70">
+                  <span className="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[11px] text-fg-muted">
                     <GitBranch size={10} aria-hidden="true" className="shrink-0" />
                     <span className="truncate">{row.branch}</span>
                   </span>
@@ -83,7 +83,7 @@ export function UncommittedWorkCard({ currentChatId, onSelectChat }: Uncommitted
         ))}
       </ul>
       {work.overflowCount > 0 ? (
-        <p className="text-xs text-on-surface-variant/70">
+        <p className="text-xs text-fg-muted">
           {formatMessage(labels.more, { count: String(work.overflowCount) })}
         </p>
       ) : null}

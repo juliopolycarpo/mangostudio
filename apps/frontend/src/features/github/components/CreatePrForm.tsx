@@ -103,9 +103,9 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
   };
 
   return (
-    <form onSubmit={submit} className="space-y-2 rounded-xl bg-surface-container/40 p-2.5">
+    <form onSubmit={submit} className="space-y-2 rounded-xl bg-surface p-2.5">
       <label className="block space-y-1">
-        <span className="text-[10px] font-semibold text-on-surface-variant">
+        <span className="text-[10px] font-semibold text-fg-muted">
           {t.github.createPr.titleLabel}
         </span>
         <input
@@ -113,11 +113,11 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
           onChange={(event) => setTitle(event.target.value)}
           placeholder={t.github.createPr.titlePlaceholder}
           maxLength={256}
-          className="w-full rounded-lg border border-outline-variant/25 bg-surface-container-lowest px-2 py-1.5 text-xs text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+          className="w-full rounded-lg border border-stroke bg-control px-2 py-1.5 text-xs text-fg focus-visible:outline-2 focus-visible:outline-focus"
         />
       </label>
       <label className="block space-y-1">
-        <span className="text-[10px] font-semibold text-on-surface-variant">
+        <span className="text-[10px] font-semibold text-fg-muted">
           {t.github.createPr.bodyLabel}
         </span>
         <textarea
@@ -125,15 +125,15 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
           onChange={(event) => setBody(event.target.value)}
           placeholder={t.github.createPr.bodyPlaceholder}
           rows={4}
-          className="w-full resize-y rounded-lg border border-outline-variant/25 bg-surface-container-lowest px-2 py-1.5 text-xs text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+          className="w-full resize-y rounded-lg border border-stroke bg-control px-2 py-1.5 text-xs text-fg focus-visible:outline-2 focus-visible:outline-focus"
         />
       </label>
-      <label className="flex items-center gap-2 text-[11px] text-on-surface-variant">
+      <label className="flex items-center gap-2 text-[11px] text-fg-muted">
         <input
           type="checkbox"
           checked={draft}
           onChange={(event) => setDraft(event.target.checked)}
-          className="size-3.5 rounded border-outline-variant/30 accent-primary"
+          className="size-3.5 rounded border-stroke accent-accent"
         />
         {t.github.createPr.draftLabel}
       </label>
@@ -149,7 +149,7 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
             pull request appear moments after the form it was made in vanished. */}
         <Button
           type="button"
-          variant="ghost"
+          variant="subtle"
           size="sm"
           onClick={onDone}
           disabled={mutation.isPending}

@@ -38,31 +38,29 @@ export function UnrecognisedEntries({ entries, locations }: UnrecognisedEntriesP
 
   return (
     <section
-      className="space-y-3 rounded-lg border border-outline-variant/30 bg-surface-container/40 p-4"
+      className="space-y-3 rounded-lg border border-stroke bg-surface p-4"
       data-testid="library-unreadable-entries"
     >
       <div className="space-y-1">
-        <h2 className="text-on-surface text-sm font-medium">{l.heading}</h2>
-        <p className="text-on-surface-variant text-xs">{l.rule}</p>
+        <h2 className="text-fg text-sm font-medium">{l.heading}</h2>
+        <p className="text-fg-muted text-xs">{l.rule}</p>
       </div>
       <ul className="space-y-3">
         {groups.map(([locationId, locationEntries]) => {
           const path = locations.find((candidate) => candidate.id === locationId)?.path;
           return (
             <li key={locationId}>
-              <p className="text-on-surface-variant text-xs font-medium">{path ?? locationId}</p>
+              <p className="text-fg-muted text-xs font-medium">{path ?? locationId}</p>
               <ul className="mt-1 space-y-1">
                 {locationEntries.map((entry) => (
                   <li
                     key={`${locationId}:${entry.name}`}
                     className="flex items-center justify-between gap-2 text-sm"
                   >
-                    <span className="truncate text-on-surface" title={entry.name}>
+                    <span className="truncate text-fg" title={entry.name}>
                       {entry.name}
                     </span>
-                    <span className="shrink-0 text-on-surface-variant text-xs">
-                      {l.reason[entry.reason]}
-                    </span>
+                    <span className="shrink-0 text-fg-muted text-xs">{l.reason[entry.reason]}</span>
                   </li>
                 ))}
               </ul>

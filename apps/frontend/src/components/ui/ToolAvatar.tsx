@@ -33,12 +33,12 @@ export interface ToolImageDisplay {
 /** The size/shape/type-scale classes for each avatar size, reusable by chips that draw beside one but aren't a `ToolAvatar` themselves. */
 export const TOOL_AVATAR_SIZE_CLASS: Record<ToolAvatarSize, string> = {
   /** Inline in a chat timeline row, where a 20px avatar outweighs the status glyph. */
-  '2xs': 'size-4 rounded-sm text-[8px]',
+  '2xs': 'size-4 rounded-xs text-[8px]',
   /** Dense lists — the capability inspector, where rows are 11px tall text. */
-  xs: 'size-5 rounded-md text-[9px]',
-  sm: 'size-6 rounded-lg text-[10px]',
-  md: 'size-9 rounded-xl text-xs',
-  lg: 'size-12 rounded-2xl text-base',
+  xs: 'size-5 rounded-xs text-[9px]',
+  sm: 'size-6 rounded-sm text-[10px]',
+  md: 'size-9 rounded-md text-xs',
+  lg: 'size-12 rounded-lg text-base',
 };
 
 interface ToolAvatarProps {

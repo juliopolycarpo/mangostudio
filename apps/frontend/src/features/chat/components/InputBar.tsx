@@ -429,7 +429,7 @@ export function InputBar({
             {pendingAttachments.map((attachment) => (
               <span
                 key={attachment.id}
-                className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2.5 py-1 text-[11px] text-on-surface-variant"
+                className="flex items-center gap-1.5 rounded-full border border-stroke bg-control px-2.5 py-1 text-[11px] text-fg-muted"
               >
                 <FileText size={12} className="composer-chip-icon shrink-0" />
                 <span className="max-w-[12rem] truncate">{attachment.originalName}</span>
@@ -440,7 +440,7 @@ export function InputBar({
                       current.filter((pending) => pending.id !== attachment.id)
                     )
                   }
-                  className="text-on-surface-variant/60 hover:text-on-surface"
+                  className="text-fg-muted hover:text-fg"
                   aria-label={t.chat.input.removeAttachment}
                 >
                   <X size={12} />
@@ -451,7 +451,7 @@ export function InputBar({
               <span
                 key={name}
                 role="status"
-                className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 px-2.5 py-1 text-[11px] text-on-surface-variant/70"
+                className="flex items-center gap-1.5 rounded-full border border-stroke px-2.5 py-1 text-[11px] text-fg-muted"
               >
                 <span className="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent" />
                 <span className="max-w-[12rem] truncate">
@@ -571,7 +571,7 @@ export function InputBar({
               }}
               disabled={inputDisabled}
               style={{ maxHeight: `${TEXTAREA_MAX_HEIGHT_PX}px` }}
-              className="app-scrollbar composer-input min-w-0 flex-1 resize-none bg-transparent p-0 font-body text-sm leading-5 text-on-surface outline-none placeholder:text-on-surface-variant/40 disabled:opacity-60"
+              className="app-scrollbar composer-input min-w-0 flex-1 resize-none bg-transparent p-0 text-sm leading-5 text-fg outline-none placeholder:text-fg-subtle disabled:opacity-60"
               placeholder={placeholder}
             />
           </div>
@@ -606,7 +606,7 @@ export function InputBar({
                   variant="secondary"
                   onClick={onStop}
                   title={t.chat.input.stop}
-                  className={`text-xs hover:bg-error/20 hover:text-error shrink-0 ${
+                  className={`text-xs hover:bg-danger-subtle hover:text-danger shrink-0 ${
                     showSteerAffordance ? 'size-9 p-0' : 'h-9 gap-1.5 px-3'
                   }`}
                 >
@@ -622,13 +622,13 @@ export function InputBar({
               {showSteerAffordance ? (
                 <Button
                   type="submit"
-                  variant="ghost"
+                  variant="subtle"
                   disabled={!chatId || steering || !prompt.trim()}
                   title={t.externalAgents.steer.buttonHint}
                   // Steering only ever happens on a vendor CLI, so the one
                   // colour it must not be is MangoStudio's.
                   style={{ borderColor: 'var(--composer-accent)', color: 'var(--composer-accent)' }}
-                  className="h-9 shrink-0 gap-1.5 rounded-full border-2 px-3.5 text-xs hover:bg-surface-container-high"
+                  className="h-9 shrink-0 gap-1.5 rounded-full border-2 px-3.5 text-xs hover:bg-fill-hover"
                 >
                   <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
                   <CornerDownRight size={ICON_SM} className="sm:hidden" />
@@ -649,7 +649,7 @@ export function InputBar({
                   <Send size={ICON_SM} className="sm:hidden" />
                   <KbdHint
                     keys="⏎"
-                    className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-primary/90"
+                    className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-accent"
                   />
                 </Button>
               ) : null}
@@ -666,7 +666,7 @@ export function InputBar({
           ) : null}
         </form>
 
-        <p className="mt-2 text-center font-mono text-[10px] text-on-surface-variant/40 sm:mt-3">
+        <p className="mt-2 text-center font-mono text-[10px] text-fg-subtle sm:mt-3">
           {t.common.disclaimer}
           {/* The quiet line the user should never have to guess at: MangoStudio's
               own tool settings do not apply to a turn it is not running. It sits
@@ -688,7 +688,7 @@ export function InputBar({
 
 const NOTICE_TONE_CLASS = {
   warning: 'text-warning',
-  error: 'text-error',
+  error: 'text-danger',
 } as const;
 
 /**

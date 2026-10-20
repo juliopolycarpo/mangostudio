@@ -231,32 +231,28 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
   );
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+    <Card className="space-y-4 p-4 sm:p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1 min-w-0">
-          <h4 className="text-sm font-bold text-on-surface">{translated.title}</h4>
+          <h4 className="text-sm font-bold text-fg">{translated.title}</h4>
           {translated.description && (
-            <p className="text-xs text-on-surface-variant/70 leading-relaxed">
-              {translated.description}
-            </p>
+            <p className="text-xs text-fg-muted leading-relaxed">{translated.description}</p>
           )}
         </div>
         {descriptor.canDisable ? (
           <label className="flex items-center gap-2 shrink-0">
-            <span className="text-xs text-on-surface-variant">
-              {enabled ? s.enabled : s.disabled}
-            </span>
+            <span className="text-xs text-fg-muted">{enabled ? s.enabled : s.disabled}</span>
             <Checkbox checked={enabled} onChange={() => void handleToggle()} />
           </label>
         ) : (
-          <span className="text-xs text-on-surface-variant/50 italic shrink-0 text-right">
+          <span className="text-xs text-fg-subtle italic shrink-0 text-right">
             {s.cannotDisable}
           </span>
         )}
       </div>
 
       {hasParameters && (
-        <div className="space-y-3 pt-2 border-t border-outline-variant/10">
+        <div className="space-y-3 pt-2 border-t border-stroke">
           {descriptor.parameterDescriptors.map((pd) => {
             const qualityDisabled =
               pd.name === 'defaultQuality' && params.letAiDecideQuality === true;
@@ -271,7 +267,7 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
             );
           })}
           {isPending && (
-            <p className="text-xs text-on-surface-variant" role="status" aria-live="polite">
+            <p className="text-xs text-fg-muted" role="status" aria-live="polite">
               {s.saving}
             </p>
           )}

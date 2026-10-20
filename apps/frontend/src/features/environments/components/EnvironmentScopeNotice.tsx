@@ -50,25 +50,25 @@ export function EnvironmentScopeNotice({
 
   return (
     <div
-      className="flex flex-col items-center gap-2 rounded-2xl border border-outline-variant/15 bg-surface-container-high py-10 text-center"
+      className="flex flex-col items-center gap-2 rounded-2xl border border-stroke bg-surface py-10 text-center"
       data-testid="environment-scope-notice"
       data-reason={reason}
       data-surface={surface}
     >
       {notPermitted ? (
-        <ShieldOff size={26} className="text-on-surface-variant/50" />
+        <ShieldOff size={26} className="text-fg-subtle" />
       ) : (
         <PlugZap size={26} className="text-warning" />
       )}
-      <p className="text-sm font-semibold text-on-surface">
+      <p className="text-sm font-semibold text-fg">
         {formatMessage(title, {
           environment: environment.name,
         })}
       </p>
-      <p className="max-w-md text-sm text-on-surface-variant/60">{hint}</p>
+      <p className="max-w-md text-sm text-fg-muted">{hint}</p>
       {!notPermitted && (
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           disabled={connect.isPending}
           onClick={() => connect.mutate(environment.id)}

@@ -148,11 +148,11 @@ export function FirstChatStep({
   return (
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
       {state.workdir ? (
-        <p className="text-on-surface-variant/70 text-xs" data-testid="onboarding-chat-summary">
+        <p className="text-fg-muted text-xs" data-testid="onboarding-chat-summary">
           {formatMessage(s.summary, { runner: runnerName, workdir: state.workdir })}
         </p>
       ) : (
-        <p className="text-on-surface-variant text-sm" data-testid="onboarding-chat-needs-folder">
+        <p className="text-fg-muted text-sm" data-testid="onboarding-chat-needs-folder">
           {s.needsFolder}
         </p>
       )}
@@ -160,7 +160,7 @@ export function FirstChatStep({
       <div className="space-y-1.5">
         <label
           htmlFor="onboarding-prompt"
-          className="font-label font-semibold text-on-surface-variant text-xs uppercase tracking-wider"
+          className="font-semibold text-fg-muted text-xs uppercase tracking-wider"
         >
           {s.promptLabel}
         </label>
@@ -171,13 +171,11 @@ export function FirstChatStep({
           maxLength={GENERATION_PROMPT_MAX_LENGTH}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
-          className="w-full resize-y rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-on-surface text-sm outline-none focus:border-primary/50"
+          className="w-full resize-y rounded-2xl border border-stroke bg-control px-3 py-2 text-fg text-sm outline-none focus:border-focus"
         />
       </div>
 
-      {state.chatId && !answered ? (
-        <p className="text-on-surface-variant/60 text-xs">{s.resume}</p>
-      ) : null}
+      {state.chatId && !answered ? <p className="text-fg-muted text-xs">{s.resume}</p> : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -196,7 +194,7 @@ export function FirstChatStep({
             its most recent entry, which is this one. */}
         {state.chatId ? (
           <Button
-            variant="ghost"
+            variant="subtle"
             data-testid="onboarding-open-chat"
             onClick={() => void onOpenChat()}
           >
@@ -206,20 +204,20 @@ export function FirstChatStep({
       </div>
 
       {answered ? (
-        <p className="font-semibold text-primary text-sm" data-testid="onboarding-chat-answered">
+        <p className="font-semibold text-accent-fg text-sm" data-testid="onboarding-chat-answered">
           {s.answered}
         </p>
       ) : null}
 
       {!answered && state.chatId && !isSending && alreadyAsked(prompt) ? (
-        <p className="flex items-center gap-2 text-on-surface-variant/70 text-sm">
+        <p className="flex items-center gap-2 text-fg-muted text-sm">
           <Spinner size="sm" />
           {s.waiting}
         </p>
       ) : null}
 
       {hasFailed ? (
-        <p className="text-error text-sm" data-testid="onboarding-chat-failed">
+        <p className="text-danger text-sm" data-testid="onboarding-chat-failed">
           {s.failed}
         </p>
       ) : null}

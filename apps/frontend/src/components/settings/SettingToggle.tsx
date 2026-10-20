@@ -16,8 +16,8 @@ export function SettingToggle({ label, description, checked, onChange }: Setting
   return (
     <label className="flex cursor-pointer items-start justify-between gap-4">
       <span className="space-y-1">
-        <span className="block text-sm font-semibold text-on-surface">{label}</span>
-        <span className="block text-sm text-on-surface-variant/60">{description}</span>
+        <span className="block text-sm font-semibold text-fg">{label}</span>
+        <span className="block text-sm text-fg-muted">{description}</span>
       </span>
       <Checkbox
         checked={checked}

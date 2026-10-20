@@ -47,8 +47,8 @@ function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-dim px-4">
-      <Card variant="glass" className="w-full max-w-sm">
+    <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
+      <Card className="w-full max-w-sm">
         <form
           id="login-form"
           onSubmit={(e) => void handleSubmit(e)}
@@ -58,13 +58,11 @@ function LoginPage() {
         >
           <div className="flex flex-col items-center gap-2 mb-4">
             <Logo className="w-24 h-24" />
-            <h1 className="font-headline text-2xl font-semibold text-center text-on-surface">
-              {t.auth.loginTitle}
-            </h1>
+            <h1 className="text-2xl font-semibold text-center text-fg">{t.auth.loginTitle}</h1>
           </div>
 
           {error && (
-            <p className="text-xs text-error text-center bg-error/10 rounded-lg px-3 py-2">
+            <p className="text-xs text-danger text-center bg-danger-subtle rounded-lg px-3 py-2">
               {error}
             </p>
           )}
@@ -97,9 +95,9 @@ function LoginPage() {
             {loading ? t.auth.loginLoading : t.auth.loginButton}
           </Button>
 
-          <p className="text-sm text-center text-on-surface-variant">
+          <p className="text-sm text-center text-fg-muted">
             {t.auth.noAccount}{' '}
-            <Link to="/signup" className="text-primary hover:underline">
+            <Link to="/signup" className="text-accent-fg hover:underline">
               {t.auth.signupLink}
             </Link>
           </p>

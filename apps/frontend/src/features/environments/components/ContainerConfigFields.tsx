@@ -74,11 +74,11 @@ export function ContainerConfigFields({
           error={form.image.trim() && errorFor('image') ? labels.imageInvalid : undefined}
           onChange={(event) => onChange({ image: event.target.value })}
         />
-        <p className="text-[11px] text-on-surface-variant/60">{labels.imageHint}</p>
+        <p className="text-[11px] text-fg-muted">{labels.imageHint}</p>
       </div>
 
       <div className="space-y-1">
-        <p className="font-medium text-on-surface-variant text-xs">{labels.engineLabel}</p>
+        <p className="font-medium text-fg-muted text-xs">{labels.engineLabel}</p>
         <div className="flex gap-2">
           {ENGINES.map((engine) => {
             const status = detection?.engines.find((entry) => entry.engine === engine);
@@ -91,12 +91,12 @@ export function ContainerConfigFields({
                 onClick={() => onChange({ engine })}
                 className={`flex-1 rounded-xl border px-3 py-2 text-left text-xs transition-colors ${
                   form.engine === engine
-                    ? 'border-primary/45 bg-primary/10 text-on-surface'
-                    : 'border-outline-variant/20 text-on-surface-variant/70 hover:bg-surface-container-highest'
+                    ? 'border-accent bg-accent-subtle text-fg'
+                    : 'border-stroke text-fg-muted hover:bg-fill-hover'
                 }`}
               >
                 <span className="font-semibold">{labels.engine[engine]}</span>
-                <span className="mt-0.5 block text-[10px] text-on-surface-variant/60">
+                <span className="mt-0.5 block text-[10px] text-fg-muted">
                   {status?.available
                     ? (status.version ?? labels.engineReady)
                     : unavailable
@@ -109,7 +109,7 @@ export function ContainerConfigFields({
         </div>
       </div>
 
-      <label className="flex items-start gap-2 text-xs text-on-surface-variant">
+      <label className="flex items-start gap-2 text-xs text-fg-muted">
         <input
           type="checkbox"
           className="mt-0.5"
@@ -117,10 +117,8 @@ export function ContainerConfigFields({
           onChange={(event) => onChange({ network: !event.target.checked })}
         />
         <span>
-          <span className="font-medium text-on-surface">{labels.networkOffLabel}</span>
-          <span className="mt-0.5 block text-[11px] text-on-surface-variant/60">
-            {labels.networkOffHint}
-          </span>
+          <span className="font-medium text-fg">{labels.networkOffLabel}</span>
+          <span className="mt-0.5 block text-[11px] text-fg-muted">{labels.networkOffHint}</span>
         </span>
       </label>
 
@@ -144,11 +142,11 @@ export function ContainerConfigFields({
           onChange={(event) => onChange({ memoryMib: event.target.value })}
         />
       </div>
-      <p className="text-[11px] text-on-surface-variant/60">{labels.limitsHint}</p>
+      <p className="text-[11px] text-fg-muted">{labels.limitsHint}</p>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <p className="font-medium text-on-surface-variant text-xs">{labels.mountsLabel}</p>
+          <p className="font-medium text-fg-muted text-xs">{labels.mountsLabel}</p>
           <Button
             variant="secondary"
             className="h-7 gap-1 px-2 text-[11px]"
@@ -159,7 +157,7 @@ export function ContainerConfigFields({
             {labels.mountAdd}
           </Button>
         </div>
-        <p className="text-[11px] text-on-surface-variant/60">{labels.mountsHint}</p>
+        <p className="text-[11px] text-fg-muted">{labels.mountsHint}</p>
 
         {form.mounts.map((mount, index) => (
           <div
@@ -167,7 +165,7 @@ export function ContainerConfigFields({
             // index is the only stable identity a row has here.
             // biome-ignore lint/suspicious/noArrayIndexKey: positional rows with no id of their own
             key={index}
-            className="grid items-end gap-2 rounded-xl border border-outline-variant/20 p-2 sm:grid-cols-[1fr_1fr_auto]"
+            className="grid items-end gap-2 rounded-xl border border-stroke p-2 sm:grid-cols-[1fr_1fr_auto]"
           >
             <Input
               id={`${idPrefix}-mount-host-${index}`}
@@ -182,7 +180,7 @@ export function ContainerConfigFields({
               onChange={(event) => setMount(index, { containerPath: event.target.value })}
             />
             <div className="flex items-center gap-2 pb-2">
-              <label className="flex items-center gap-1 text-[11px] text-on-surface-variant">
+              <label className="flex items-center gap-1 text-[11px] text-fg-muted">
                 <input
                   type="checkbox"
                   checked={mount.readonly}
@@ -193,7 +191,7 @@ export function ContainerConfigFields({
               <button
                 type="button"
                 aria-label={labels.mountRemove}
-                className="rounded-lg p-1 text-on-surface-variant/70 hover:bg-surface-container-highest"
+                className="rounded-lg p-1 text-fg-muted hover:bg-fill-hover"
                 onClick={() => onChange({ mounts: form.mounts.filter((_row, at) => at !== index) })}
               >
                 <X size={14} />
@@ -203,7 +201,7 @@ export function ContainerConfigFields({
         ))}
 
         {mountError ? (
-          <p className="text-[11px] text-error" role="alert">
+          <p className="text-[11px] text-danger" role="alert">
             {mountError.refusal
               ? formatMessage(
                   labels.mountRefusal[mountError.refusal.code],

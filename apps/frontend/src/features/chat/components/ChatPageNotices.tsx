@@ -10,12 +10,12 @@ export function ChatFallbackNotice({ notice }: ChatFallbackNoticeProps) {
   const { t } = useI18n();
 
   return (
-    <div className="px-6 py-2 text-xs text-on-surface-variant bg-surface-container-low border-t border-outline-variant/10">
+    <div className="px-6 py-2 text-xs text-fg-muted bg-surface border-t border-stroke">
       <div className="mx-auto max-w-4xl">
         <div className="relative w-full pl-4 text-center" role="status" aria-live="polite">
           <span
             aria-hidden="true"
-            className="absolute left-0 top-1/2 -translate-y-1/2 text-on-surface-variant/60"
+            className="absolute left-0 top-1/2 -translate-y-1/2 text-fg-muted"
           >
             ・
           </span>

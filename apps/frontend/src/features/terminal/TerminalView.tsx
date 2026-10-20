@@ -229,16 +229,16 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
         // 2) above a sibling overlay with no z-index, which leaves the button
         // visible but unclickable.
         <div
-          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-surface/90 p-6 text-center"
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-canvas p-6 text-center"
           data-testid="terminal-replaced-overlay"
         >
-          <p className="text-sm text-on-surface-variant">{t.terminal.openInWindow}</p>
+          <p className="text-sm text-fg-muted">{t.terminal.openInWindow}</p>
           <Button onClick={() => socket.reconnect()}>{t.terminal.takeOver}</Button>
         </div>
       )}
       {socket.status === 'reconnecting' && (
         <div className="absolute inset-x-0 top-0 z-10 flex justify-center p-2">
-          <span className="rounded bg-surface/90 px-2 py-1 text-xs text-on-surface-variant">
+          <span className="rounded bg-canvas px-2 py-1 text-xs text-fg-muted">
             {t.terminal.reconnecting}
           </span>
         </div>

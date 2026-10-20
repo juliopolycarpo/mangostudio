@@ -108,20 +108,15 @@ export function ChipSelect({
         title={title}
         // The open state is styled off `aria-expanded` in `index.css`, so it
         // follows the composer's runner accent rather than the product primary.
-        className={cn('composer-chip max-w-[13rem] disabled:opacity-60', className)}
+        className={cn('composer-chip max-w-[13rem] disabled:opacity-50', className)}
       >
         {icon}
         {adornment}
-        {label ? (
-          <span className="composer-chip-key text-on-surface-variant/70">{`${label}:`}</span>
-        ) : null}
+        {label ? <span className="composer-chip-key text-fg-muted">{`${label}:`}</span> : null}
         <span className={cn('composer-chip-value', valueClassName)}>
           {selected?.label ?? placeholder ?? value}
         </span>
-        <ChevronDown
-          size={11}
-          className={cn('shrink-0 transition-transform duration-200', open && 'rotate-180')}
-        />
+        <ChevronDown size={11} className="shrink-0" />
       </button>
 
       <AnimatePresence>
@@ -131,7 +126,7 @@ export function ChipSelect({
             className={cn(
               // Always opens upward: every chip sits on the composer's status
               // strip at the foot of the viewport.
-              'dropdown-panel absolute left-0 bottom-full mb-2 max-h-[50vh] overflow-y-auto hide-scrollbar py-1',
+              'dropdown-panel absolute left-0 bottom-full mb-2 max-h-[50vh] overflow-y-auto hide-scrollbar p-1',
               panelClassName
             )}
           >
@@ -153,29 +148,24 @@ export function ChipSelect({
                     onClick={() => commit(option)}
                     onMouseEnter={() => setActiveIndex(index)}
                     className={cn(
-                      'flex w-full items-start justify-between gap-2 px-3 py-2 text-left text-xs transition-colors',
-                      'disabled:cursor-not-allowed disabled:opacity-40',
-                      index === activeIndex && !option.disabled && 'bg-primary/10',
-                      isSelected && 'bg-primary/5'
+                      'flex min-h-8 w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-xs transition-colors',
+                      'disabled:cursor-not-allowed disabled:opacity-50',
+                      index === activeIndex && !option.disabled && 'bg-fill-hover',
+                      isSelected && 'bg-fill-selected'
                     )}
                   >
                     <span className="min-w-0 flex-1">
-                      <span
-                        className={cn(
-                          'block truncate',
-                          isSelected ? 'font-medium text-primary' : 'text-on-surface'
-                        )}
-                      >
+                      <span className={cn('block truncate', isSelected ? 'font-medium' : '')}>
                         {option.label}
                       </span>
                       {option.description ? (
-                        <span className="mt-0.5 block text-[10px] leading-relaxed text-on-surface-variant/80">
+                        <span className="mt-0.5 block text-micro text-fg-muted">
                           {option.description}
                         </span>
                       ) : null}
                     </span>
                     {isSelected ? (
-                      <Check size={13} className="mt-0.5 shrink-0 text-primary" />
+                      <Check size={13} className="mt-0.5 shrink-0 text-accent-fg" />
                     ) : null}
                   </button>
                 );

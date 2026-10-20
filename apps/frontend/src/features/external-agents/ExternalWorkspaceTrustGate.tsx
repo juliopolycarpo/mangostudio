@@ -88,21 +88,21 @@ function TrustDialog({ workspacePath, busy, onAccept, onCancel }: TrustDialogPro
         aria-modal="true"
         tabIndex={-1}
         aria-label={labels.title}
-        className="w-full max-w-lg space-y-4 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-5 text-sm text-on-surface shadow-2xl outline-none"
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-stroke bg-surface p-5 text-sm text-fg shadow-2xl outline-none"
       >
         <h2 className="text-base font-semibold">{labels.title}</h2>
 
-        <p className="break-all rounded-xl bg-surface-container-lowest px-3 py-2 font-mono text-xs text-on-surface-variant">
+        <p className="break-all rounded-xl bg-control px-3 py-2 font-mono text-xs text-fg-muted">
           {workspacePath}
         </p>
 
-        <ul className="space-y-2 text-xs leading-relaxed text-on-surface-variant">
+        <ul className="space-y-2 text-xs leading-relaxed text-fg-muted">
           <li>{labels.rules}</li>
           <li>{labels.mcp}</li>
           <li>{labels.scope}</li>
         </ul>
 
-        <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
+        <p className="flex items-start gap-2 rounded-xl border border-warning bg-warning-subtle px-3 py-2 text-xs leading-relaxed text-warning">
           <AlertTriangle size={14} className="mt-px shrink-0" />
           {labels.warning}
         </p>
@@ -112,7 +112,7 @@ function TrustDialog({ workspacePath, busy, onAccept, onCancel }: TrustDialogPro
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="cursor-pointer rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:cursor-default disabled:opacity-50"
+            className="cursor-pointer rounded-xl border border-stroke px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-fill-hover disabled:cursor-default disabled:opacity-50"
           >
             {labels.cancel}
           </button>
@@ -120,7 +120,7 @@ function TrustDialog({ workspacePath, busy, onAccept, onCancel }: TrustDialogPro
             type="button"
             onClick={onAccept}
             disabled={busy}
-            className="cursor-pointer rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
+            className="cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
           >
             {busy ? labels.saving : labels.accept}
           </button>

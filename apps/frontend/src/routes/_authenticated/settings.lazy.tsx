@@ -17,12 +17,10 @@ function SettingsLayout() {
     <div className="app-scrollbar h-full overflow-y-auto">
       <div className="px-4 py-6 sm:px-8 sm:py-8 lg:px-12 max-w-7xl mx-auto space-y-4 sm:space-y-6 w-full">
         <div className="flex items-center gap-3 sm:gap-4">
-          <div className="p-2.5 sm:p-3 bg-primary-container text-on-primary-container rounded-2xl">
+          <div className="p-2.5 sm:p-3 bg-accent-subtle text-accent-fg rounded-2xl">
             <Settings size={24} />
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold font-headline text-on-background">
-            {t.settings.title}
-          </h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-fg">{t.settings.title}</h1>
           <SettingsSaveIndicator />
         </div>
         {/* The nav is a column beside the content once there is width for it,

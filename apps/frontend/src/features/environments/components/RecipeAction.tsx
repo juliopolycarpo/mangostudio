@@ -19,8 +19,8 @@ import { InstallAction } from './InstallAction';
 const ACTION_PRESENTATION = {
   install: { variant: 'primary', icon: <Download size={14} /> },
   update: {},
-  uninstall: { variant: 'ghost' },
-} as const satisfies Record<string, { variant?: 'primary' | 'ghost'; icon?: React.ReactNode }>;
+  uninstall: { variant: 'subtle' },
+} as const satisfies Record<string, { variant?: 'primary' | 'subtle'; icon?: React.ReactNode }>;
 
 export interface RecipeActionProps {
   /** The recipe and its input, or undefined when the catalog offers none — the card then shows no button. */

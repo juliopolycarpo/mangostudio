@@ -31,7 +31,7 @@ export function EnvironmentScopeHeader({
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
-      {description ? <p className="text-sm text-on-surface-variant/60">{description}</p> : null}
+      {description ? <p className="text-sm text-fg-muted">{description}</p> : null}
       <div className="ml-auto flex items-center gap-2">
         {children}
         {scope.hasChoice && (
@@ -41,7 +41,7 @@ export function EnvironmentScopeHeader({
             onSelect={scope.select}
           />
         )}
-        <Button variant="ghost" size="sm" onClick={onRefresh}>
+        <Button variant="subtle" size="sm" onClick={onRefresh}>
           {t.environments.actions.refresh}
         </Button>
       </div>

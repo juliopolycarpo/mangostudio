@@ -47,7 +47,7 @@ export function HealthPage() {
   const header = (
     <EnvironmentScopeHeader description={e.health.description} scope={scope} onRefresh={refetch}>
       {scope.hasChoice && !comparison && (
-        <Button variant="ghost" size="sm" onClick={openComparison}>
+        <Button variant="subtle" size="sm" onClick={openComparison}>
           <Columns2 size={14} />
           {e.scope.compare}
         </Button>
@@ -111,23 +111,23 @@ export function HealthPage() {
         <EnvironmentPageState variant="empty" title={e.health.empty} hint={e.health.emptyHint} />
       ) : (
         <>
-          <p className="text-sm text-on-surface-variant/70">
+          <p className="text-sm text-fg-muted">
             {formatMessage(e.health.findingCount, { count: String(entries.length) })}
           </p>
           <ul className="space-y-2" data-testid="health-list">
             {entries.map((entry) => (
               <li
                 key={entry.key}
-                className="flex items-start gap-3 rounded-2xl border border-outline-variant/15 bg-surface-container-high p-4"
+                className="flex items-start gap-3 rounded-2xl border border-stroke bg-surface p-4"
                 data-testid="health-entry"
                 data-severity={entry.severity}
               >
                 <FindingIcon severity={entry.severity} size={18} />
                 <div className="min-w-0 space-y-1">
-                  <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
                     {e.health.scope[entry.scope]} · {resolve(entry.scope, entry.subjectId).name}
                   </p>
-                  <p className="text-sm text-on-surface-variant">
+                  <p className="text-sm text-fg-muted">
                     {describeFinding(t, entry.finding, lookup)}
                   </p>
                 </div>

@@ -56,12 +56,12 @@ export function PromptSettings({
   return (
     <div className="space-y-4">
       {/* ── Default Prompts ── */}
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {s.defaultPromptsLabel}
         </h3>
 
-        <label className="text-sm font-medium text-on-surface-variant" htmlFor="text-system-prompt">
+        <label className="text-sm font-medium text-fg-muted" htmlFor="text-system-prompt">
           {s.textSystemPromptLabel}
         </label>
         <textarea
@@ -70,17 +70,13 @@ export function PromptSettings({
           onChange={(e) => onTextSystemPromptChange(e.target.value)}
           placeholder={s.textSystemPromptPlaceholder}
           className="
-            w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-4
-            text-sm text-on-surface focus:ring-1 focus:ring-primary/40 focus:outline-none
-            focus:border-primary/60 placeholder:text-on-surface-variant/40
-            min-h-25 transition-all resize-none font-body
-          "
+            w-full bg-control border border-stroke rounded-xl p-4
+            text-sm text-fg focus:ring-1 focus:ring-focus focus:outline-none
+            focus:border-focus placeholder:text-fg-subtle
+            min-h-25 transition-all resize-none           "
         />
 
-        <label
-          className="text-sm font-medium text-on-surface-variant"
-          htmlFor="image-system-prompt"
-        >
+        <label className="text-sm font-medium text-fg-muted" htmlFor="image-system-prompt">
           {s.imageSystemPromptLabel}
         </label>
         <textarea
@@ -89,17 +85,16 @@ export function PromptSettings({
           onChange={(e) => onImageSystemPromptChange(e.target.value)}
           placeholder={s.imageSystemPromptPlaceholder}
           className="
-            w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-4
-            text-sm text-on-surface focus:ring-1 focus:ring-primary/40 focus:outline-none
-            focus:border-primary/60 placeholder:text-on-surface-variant/40
-            min-h-25 transition-all resize-none font-body
-          "
+            w-full bg-control border border-stroke rounded-xl p-4
+            text-sm text-fg focus:ring-1 focus:ring-focus focus:outline-none
+            focus:border-focus placeholder:text-fg-subtle
+            min-h-25 transition-all resize-none           "
         />
       </Card>
 
       {/* ── Rule Files ── */}
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+      <Card className="space-y-4 p-4 sm:p-6">
+        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {s.ruleFilesLabel}
         </h3>
 
@@ -119,13 +114,13 @@ export function PromptSettings({
       </Card>
 
       {/* ── Custom Rules ── */}
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+      <Card className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
           <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+            <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
               {s.customRulesLabel}
             </h3>
-            <p className="text-sm text-on-surface-variant/60">{s.customRulesDescription}</p>
+            <p className="text-sm text-fg-muted">{s.customRulesDescription}</p>
           </div>
           <Button
             variant="secondary"
@@ -149,7 +144,7 @@ export function PromptSettings({
         ))}
 
         {promptSettings.customRules.length === 0 && (
-          <p className="text-sm text-on-surface-variant/40 text-center py-4">{s.addRule}</p>
+          <p className="text-sm text-fg-subtle text-center py-4">{s.addRule}</p>
         )}
       </Card>
     </div>

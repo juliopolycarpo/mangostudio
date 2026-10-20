@@ -26,7 +26,7 @@ function Flag({
   readonly no: string;
 }) {
   return (
-    <span className={`text-sm font-bold ${on ? 'text-primary' : 'text-on-surface-variant/70'}`}>
+    <span className={`text-sm font-bold ${on ? 'text-accent-fg' : 'text-fg-muted'}`}>
       {on ? yes : no}
     </span>
   );
@@ -41,15 +41,15 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
     <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-service-card">
       <div>
         <CardSectionLabel>{m.service.title}</CardSectionLabel>
-        <p className="font-headline text-lg font-bold text-on-surface">
+        <p className="text-lg font-bold text-fg">
           {service.installed ? m.service.installed : m.service.notInstalled}
         </p>
-        <p className="text-sm text-on-surface-variant/70">
+        <p className="text-sm text-fg-muted">
           {supervisorLabel(t, service.platform)} · {service.unitName}
         </p>
       </div>
 
-      <p className="text-sm text-on-surface-variant">{m.service.description}</p>
+      <p className="text-sm text-fg-muted">{m.service.description}</p>
 
       {service.error ? (
         <div className="space-y-1" data-testid="machine-service-error">
@@ -58,31 +58,31 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
               can hold, so it stays as the diagnostic beneath. */}
           {service.errorCode ? (
             <>
-              <p className="text-sm text-error">{m.service.errors[service.errorCode]}</p>
-              <p className="font-mono text-xs text-on-surface-variant/70">{service.error}</p>
+              <p className="text-sm text-danger">{m.service.errors[service.errorCode]}</p>
+              <p className="font-mono text-xs text-fg-muted">{service.error}</p>
             </>
           ) : (
-            <p className="text-sm text-error">{service.error}</p>
+            <p className="text-sm text-danger">{service.error}</p>
           )}
         </div>
       ) : (
         service.installed && (
           <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
             <div>
-              <dt className="text-on-surface-variant/70">{m.service.enabledLabel}</dt>
+              <dt className="text-fg-muted">{m.service.enabledLabel}</dt>
               <dd>
                 <Flag on={service.enabled} yes={m.service.enabled} no={m.service.disabled} />
               </dd>
             </div>
             <div>
-              <dt className="text-on-surface-variant/70">{m.service.runningLabel}</dt>
+              <dt className="text-fg-muted">{m.service.runningLabel}</dt>
               <dd>
                 <Flag on={service.running} yes={m.service.running} no={m.service.stopped} />
               </dd>
             </div>
             {service.linger !== undefined && (
               <div>
-                <dt className="text-on-surface-variant/70">{m.service.lingerLabel}</dt>
+                <dt className="text-fg-muted">{m.service.lingerLabel}</dt>
                 <dd>
                   <Flag on={service.linger} yes={m.service.lingerOn} no={m.service.lingerOff} />
                 </dd>
@@ -90,15 +90,15 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
             )}
             {service.execPath && (
               <div className="col-span-full">
-                <dt className="text-on-surface-variant/70">{m.service.runs}</dt>
-                <dd className="truncate font-mono text-xs text-on-surface">{service.execPath}</dd>
+                <dt className="text-fg-muted">{m.service.runs}</dt>
+                <dd className="truncate font-mono text-xs text-fg">{service.execPath}</dd>
               </div>
             )}
           </dl>
         )
       )}
 
-      <div className="border-t border-outline-variant/15 pt-4">
+      <div className="border-t border-stroke pt-4">
         {service.installed ? (
           <MachineActionButton
             status={status}

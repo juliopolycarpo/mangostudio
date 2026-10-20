@@ -46,26 +46,26 @@ export function InstallationList({ groups, toolchain }: InstallationListProps) {
             className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm"
             data-testid="installation-row"
           >
-            <span className="font-mono text-on-surface">{versionLabel(t, canonical.version)}</span>
-            <span className="min-w-0 break-all font-mono text-xs text-on-surface-variant/70">
+            <span className="font-mono text-fg">{versionLabel(t, canonical.version)}</span>
+            <span className="min-w-0 break-all font-mono text-xs text-fg-muted">
               {canonical.rawPath}
             </span>
             {canonical.pathIndex !== undefined && (
-              <span className="text-xs text-on-surface-variant/60">
+              <span className="text-xs text-fg-muted">
                 {formatMessage(e.runtimes.pathIndexLabel, {
                   position: String(pathPosition(canonical.pathIndex)),
                 })}
               </span>
             )}
             {canonical.managedBy && (
-              <span className="text-xs text-on-surface-variant/60">
+              <span className="text-xs text-fg-muted">
                 {formatMessage(e.runtimes.managedByLabel, {
                   manager: resolve('version-manager', canonical.managedBy).name,
                 })}
               </span>
             )}
             {aliasCount > 1 && (
-              <span className="text-xs text-on-surface-variant/60" data-testid="alias-affordance">
+              <span className="text-xs text-fg-muted" data-testid="alias-affordance">
                 {formatMessage(e.runtimes.aliasReachable, { count: String(aliasCount) })}
               </span>
             )}

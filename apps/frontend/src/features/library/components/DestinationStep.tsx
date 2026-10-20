@@ -65,7 +65,7 @@ export function DestinationStep({
 
   if (machines.length === 0) {
     return (
-      <p className="text-on-surface-variant text-sm" data-testid="destination-none">
+      <p className="text-fg-muted text-sm" data-testid="destination-none">
         {l.destination.none}
       </p>
     );
@@ -73,7 +73,7 @@ export function DestinationStep({
 
   return (
     <div className="space-y-4" data-testid="destination-step">
-      <p className="text-on-surface text-sm">{l.destination.description}</p>
+      <p className="text-fg text-sm">{l.destination.description}</p>
       {machines.map(([environmentId, machineDestinations]) => (
         <section
           key={environmentId}
@@ -81,13 +81,13 @@ export function DestinationStep({
           data-testid="destination-machine"
           data-environment-id={environmentId}
         >
-          <h3 className="flex items-center gap-1.5 font-semibold text-on-surface text-xs">
+          <h3 className="flex items-center gap-1.5 font-semibold text-fg text-xs">
             <Server size={12} aria-hidden="true" />
             {environmentName(environmentId)}
           </h3>
           {groupByTarget(machineDestinations).map(([targetId, group]) => (
             <div key={targetId} className="space-y-1.5">
-              <h4 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+              <h4 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
                 {l.targets[targetId]}
               </h4>
               {group.map((destination) => (
@@ -113,7 +113,7 @@ export function DestinationStep({
         </section>
       ))}
       {draft.destinations.size === 0 && (
-        <p className="text-error text-xs" data-testid="no-destination-selected">
+        <p className="text-danger text-xs" data-testid="no-destination-selected">
           {l.destination.noneSelected}
         </p>
       )}
@@ -141,8 +141,8 @@ function DestinationRow({
     <label
       className={`flex items-start gap-2 rounded-lg border p-2.5 ${
         blocked
-          ? 'cursor-not-allowed border-outline-variant/10 bg-surface-container/40 opacity-70'
-          : 'cursor-pointer border-outline-variant/15 bg-surface-container-high'
+          ? 'cursor-not-allowed border-stroke bg-surface opacity-70'
+          : 'cursor-pointer border-stroke bg-surface'
       }`}
       data-testid="destination-row"
       data-environment-id={destination.environmentId}
@@ -156,13 +156,13 @@ function DestinationRow({
         // it outright — so the checkbox is disabled rather than merely warned about.
         disabled={blocked}
         onChange={() => onToggle(destination.environmentId, destination.locationId)}
-        className="mt-0.5 size-3.5 accent-primary"
+        className="mt-0.5 size-3.5 accent-accent"
       />
       <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block break-all font-mono text-on-surface text-xs">
+        <span className="block break-all font-mono text-fg text-xs">
           {destination.path ?? destination.locationId}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-on-surface-variant/60">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fg-muted">
           <span>{l.format[destination.toFormat]}</span>
           <span>
             {destination.currentContentHash
@@ -175,7 +175,7 @@ function DestinationRow({
         </span>
 
         {otherTargets.length > 0 && (
-          <span className="block text-[11px] text-primary" data-testid="serves-multiple-targets">
+          <span className="block text-[11px] text-accent-fg" data-testid="serves-multiple-targets">
             {formatMessage(l.destination.servesMultipleTargets, {
               location: destination.path ?? destination.locationId,
               targets: otherTargets.map((targetId) => l.targets[targetId]).join(', '),
@@ -193,7 +193,7 @@ function DestinationRow({
                 destination.blockedReason === 'location-unwritable' ? (
                   <Link
                     to="/environments/agents"
-                    className="text-primary underline underline-offset-2"
+                    className="text-accent-fg underline underline-offset-2"
                   >
                     {l.destination.unwritableAction}
                   </Link>

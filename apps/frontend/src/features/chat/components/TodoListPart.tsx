@@ -15,11 +15,11 @@ export function TodoListPart({ part }: TodoListPartProps) {
   const summary = summarizeTodos(part.todos);
 
   return (
-    <div className="max-w-2xl rounded-2xl border border-outline-variant/15 bg-surface-container-low p-4 text-sm text-on-surface">
+    <div className="max-w-2xl rounded-2xl border border-stroke bg-surface p-4 text-sm text-fg">
       <div className="flex items-center gap-2">
-        <ListTodo size={16} className="text-on-surface-variant" />
+        <ListTodo size={16} className="text-fg-muted" />
         <span className="font-semibold">{labels.title}</span>
-        <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">
+        <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-fg-muted">
           {part.todos.length === 0
             ? labels.empty
             : labels.summary

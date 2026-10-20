@@ -33,14 +33,12 @@ export function StudioPage() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
         <div className="flex items-center gap-3 sm:gap-4">
-          <div className="rounded-2xl bg-primary-container p-2.5 text-on-primary-container sm:p-3">
+          <div className="rounded-2xl bg-accent-subtle p-2.5 text-accent-fg sm:p-3">
             <Image size={24} />
           </div>
           <div className="min-w-0">
-            <h1 className="font-headline text-2xl font-bold text-on-background sm:text-3xl">
-              {t.studio.title}
-            </h1>
-            <p className="text-sm text-on-surface-variant/70">{t.studio.subtitle}</p>
+            <h1 className="text-2xl font-bold text-fg sm:text-3xl">{t.studio.title}</h1>
+            <p className="text-sm text-fg-muted">{t.studio.subtitle}</p>
           </div>
         </div>
 
@@ -71,7 +69,7 @@ function GenerateCard() {
 
   return (
     <SectionCard label={t.studio.generate.label} className="justify-between">
-      <p className="text-sm text-on-surface-variant">{t.studio.generate.description}</p>
+      <p className="text-sm text-fg-muted">{t.studio.generate.description}</p>
       <Button
         onClick={() => {
           setImageToolIntent(true);
@@ -91,10 +89,10 @@ function GalleryCard() {
 
   return (
     <SectionCard label={t.studio.gallery.label} className="justify-between">
-      <p className="text-sm text-on-surface-variant">{t.studio.gallery.description}</p>
+      <p className="text-sm text-fg-muted">{t.studio.gallery.description}</p>
       <Link
         to="/gallery"
-        className="inline-flex items-center gap-2 self-start rounded-lg bg-surface-container-high px-4 py-2 text-sm font-bold text-on-surface transition-colors hover:bg-surface-container-highest"
+        className="inline-flex items-center gap-2 self-start rounded-lg bg-surface px-4 py-2 text-sm font-bold text-fg transition-colors hover:bg-fill-hover"
       >
         <LayoutGrid size={16} />
         {t.studio.gallery.action}
@@ -121,7 +119,7 @@ function RecentImages({ onView }: { onView: (item: GalleryItem) => void }) {
         items.length > 0 ? (
           <Link
             to="/gallery"
-            className="text-xs font-medium text-primary transition-opacity hover:opacity-80"
+            className="text-xs font-medium text-accent-fg transition-opacity hover:opacity-80"
           >
             {t.studio.recent.viewAll}
           </Link>

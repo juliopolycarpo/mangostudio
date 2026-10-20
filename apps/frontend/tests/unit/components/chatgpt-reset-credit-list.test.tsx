@@ -59,9 +59,9 @@ describe('ChatGptResetCreditList', () => {
     expect(screen.getByText('Expired')).toBeInTheDocument();
 
     const items = screen.getAllByRole('listitem');
-    expect(items[0]?.className).not.toContain('text-on-surface-variant/40');
-    expect(items[1]?.className).toContain('text-on-surface-variant/40');
-    expect(items[2]?.className).toContain('text-on-surface-variant/40');
+    expect(items[0]?.className).not.toContain('text-fg-subtle');
+    expect(items[1]?.className).toContain('text-fg-subtle');
+    expect(items[2]?.className).toContain('text-fg-subtle');
   });
 
   it('renders unknown statuses as raw text without an expiry countdown', () => {

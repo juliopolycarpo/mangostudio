@@ -30,17 +30,17 @@ export function ExternalSteerPartBlock({ part }: ExternalSteerPartBlockProps) {
     <div
       className={`max-w-2xl rounded-xl border px-3 py-2 text-sm ${
         rejected
-          ? 'border-error/30 bg-error/5 text-on-surface-variant'
-          : 'border-primary/25 bg-primary/5 text-on-surface'
+          ? 'border-danger bg-danger-subtle text-fg-muted'
+          : 'border-accent bg-accent-subtle text-fg'
       }`}
     >
-      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-fg-muted">
         <CornerDownRight size={12} className="shrink-0" />
         <span>{labels.sentLabel}</span>
       </div>
       <p className="whitespace-pre-wrap break-words">{part.text}</p>
       {rejected ? (
-        <p className="mt-1.5 text-xs text-error">
+        <p className="mt-1.5 text-xs text-danger">
           {labels.rejectedLabel}
           {part.reasonCode ? ` — ${labels.reason[part.reasonCode]}` : ''}
         </p>

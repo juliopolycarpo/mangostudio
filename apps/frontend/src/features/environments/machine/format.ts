@@ -36,11 +36,11 @@ export function hubHealthLabel(t: Messages, health: HubHealth): string {
  */
 export const HUB_HEALTH_TONE: Record<HubHealth, { readonly badge: string; readonly text: string }> =
   {
-    ok: { badge: 'bg-primary/10 text-primary', text: 'text-primary' },
-    unreachable: { badge: 'bg-error/10 text-error', text: 'text-error' },
+    ok: { badge: 'bg-accent-subtle text-accent-fg', text: 'text-accent-fg' },
+    unreachable: { badge: 'bg-danger-subtle text-danger', text: 'text-danger' },
     unprobed: {
-      badge: 'bg-on-surface-variant/10 text-on-surface-variant',
-      text: 'text-on-surface-variant',
+      badge: 'bg-fill-selected text-fg-muted',
+      text: 'text-fg-muted',
     },
   };
 

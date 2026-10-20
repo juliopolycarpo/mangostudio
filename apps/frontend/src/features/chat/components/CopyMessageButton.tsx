@@ -27,7 +27,7 @@ export function CopyMessageButton({ msg, label, copiedLabel }: CopyMessageButton
     <button
       type="button"
       onClick={() => void handleCopy()}
-      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
+      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-fg-muted hover:text-fg-muted cursor-pointer"
       title={copied ? copiedLabel : label}
     >
       {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}

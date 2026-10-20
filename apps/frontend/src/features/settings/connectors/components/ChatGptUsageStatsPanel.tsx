@@ -64,9 +64,9 @@ function hasStats(stats: ChatGptUsageStats, dailyUsage: DailyUsageBucket[]): boo
 
 function StatCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-lg border border-outline-variant/10 bg-surface-container-high/50 px-2.5 py-2">
-      <p className="truncate text-[10px] font-medium text-on-surface-variant/55">{label}</p>
-      <p className="mt-0.5 truncate font-mono text-sm text-on-surface">{value}</p>
+    <div className="min-w-0 rounded-lg border border-stroke bg-surface px-2.5 py-2">
+      <p className="truncate text-[10px] font-medium text-fg-subtle">{label}</p>
+      <p className="mt-0.5 truncate font-mono text-sm text-fg">{value}</p>
     </div>
   );
 }
@@ -84,13 +84,11 @@ function UsageStatsChart({
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-medium uppercase text-on-surface-variant/55">
-        {s.chatgptStatsChartTitle}
-      </p>
+      <p className="text-[10px] font-medium uppercase text-fg-subtle">{s.chatgptStatsChartTitle}</p>
       <div
         role="img"
         aria-label={s.chatgptStatsChartTitle}
-        className="flex h-20 items-end gap-1 rounded-lg border border-outline-variant/10 bg-surface-container-high/35 px-2 py-2"
+        className="flex h-20 items-end gap-1 rounded-lg border border-stroke bg-surface px-2 py-2"
       >
         {buckets.map((bucket) => {
           const percent = maxTokens > 0 ? (bucket.tokens / maxTokens) * 100 : 0;
@@ -102,7 +100,7 @@ function UsageStatsChart({
             <div
               key={`${bucket.startDate}:${bucket.tokens}`}
               title={label}
-              className="min-w-1 flex-1 rounded-sm bg-primary/65"
+              className="min-w-1 flex-1 rounded-sm bg-accent"
               style={{ height: bucket.tokens > 0 ? `${Math.max(8, percent)}%` : '2px' }}
             >
               <span className="sr-only">{label}</span>
@@ -125,7 +123,7 @@ function StatsBody({
 }) {
   const dailyUsage = useMemo(() => (stats ? normalizeDailyUsage(stats) : []), [stats]);
   if (!stats || !hasStats(stats, dailyUsage)) {
-    return <p className="text-[11px] text-on-surface-variant/60">{s.chatgptStatsEmpty}</p>;
+    return <p className="text-[11px] text-fg-muted">{s.chatgptStatsEmpty}</p>;
   }
 
   const streakValue = (days: number) =>
@@ -188,27 +186,24 @@ export function ChatGptUsageStatsPanel({ connectorId }: { connectorId: string })
 
   return (
     <div className="space-y-2">
-      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-on-surface-variant/55">
+      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-fg-subtle">
         <BarChart3 size={13} />
         {s.chatgptStatsToggle}
       </p>
 
-      <div
-        id={panelId}
-        className="space-y-3 rounded-xl border border-outline-variant/10 bg-surface-container-low px-3 py-3"
-      >
+      <div id={panelId} className="space-y-3 rounded-xl border border-stroke bg-surface px-3 py-3">
         {statsQuery.isLoading ? (
-          <p className="flex items-center gap-2 text-[11px] text-on-surface-variant/60">
+          <p className="flex items-center gap-2 text-[11px] text-fg-muted">
             <RefreshCw size={13} className="animate-spin" />
             {s.chatgptStatsLoading}
           </p>
         ) : statsQuery.isError ? (
           <div className="flex items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-[11px] text-error">
+            <p className="flex items-center gap-2 text-[11px] text-danger">
               <TriangleAlert size={13} />
               {s.failedToLoad}
             </p>
-            <Button variant="ghost" size="sm" onClick={() => void statsQuery.refetch()}>
+            <Button variant="subtle" size="sm" onClick={() => void statsQuery.refetch()}>
               <RefreshCw size={13} />
               {t.common.retry}
             </Button>

@@ -80,7 +80,7 @@ export function ModelSelector({
   const getModelIcon = (name: string) => {
     const low = name.toLowerCase();
     if (low.includes('flash')) return <Zap className="w-3.5 h-3.5 text-amber-400" />;
-    if (low.includes('pro')) return <Cpu className="w-3.5 h-3.5 text-primary" />;
+    if (low.includes('pro')) return <Cpu className="w-3.5 h-3.5 text-accent-fg" />;
     if (low.includes('lite')) return <Activity className="w-3.5 h-3.5 text-emerald-400" />;
     return <Sparkles className="w-3.5 h-3.5 text-blue-400" />;
   };
@@ -101,13 +101,13 @@ export function ModelSelector({
           isDisabled && 'opacity-50 cursor-not-allowed'
         )}
       >
-        <span className="composer-chip-key text-on-surface-variant/70">{`${t.chat.input.modelLabel}:`}</span>
+        <span className="composer-chip-key text-fg-muted">{`${t.chat.input.modelLabel}:`}</span>
         <span className="composer-chip-value composer-chip-runner">
           {selectedModel?.displayName || placeholder}
         </span>
         <ChevronDown
           className={cn(
-            'size-3 shrink-0 text-on-surface-variant/50 transition-transform duration-200',
+            'size-3 shrink-0 text-fg-subtle transition-transform duration-200',
             isOpen && 'rotate-180 text-current'
           )}
         />
@@ -124,13 +124,13 @@ export function ModelSelector({
           >
             <div className="py-2">
               {Object.keys(groups).length === 0 ? (
-                <div className="px-4 py-3 text-sm text-on-surface-variant italic">
+                <div className="px-4 py-3 text-sm text-fg-muted italic">
                   {t.models.noModelsAvailable}
                 </div>
               ) : (
                 Object.entries(groups).map(([providerKey, models]) => (
                   <div key={providerKey} className="mb-2 last:mb-0">
-                    <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/50">
+                    <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
                       {getProviderLabel(providerKey)}
                     </div>
                     {models.map((model) => {
@@ -143,15 +143,15 @@ export function ModelSelector({
                           disabled={isLocked}
                           className={cn(
                             'w-full flex items-center justify-between px-4 py-2.5 text-left transition-all duration-150',
-                            !isLocked && 'hover:bg-primary/10 active:bg-primary/20 group/item',
-                            activeModel === model.modelId && !isLocked && 'bg-primary/5',
+                            !isLocked && 'hover:bg-accent-hover active:bg-accent-subtle group/item',
+                            activeModel === model.modelId && !isLocked && 'bg-accent-subtle',
                             isLocked && 'opacity-40 cursor-not-allowed'
                           )}
                         >
                           <div className="flex items-center gap-3">
                             <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
                               {isLocked ? (
-                                <Lock className="w-3.5 h-3.5 text-on-surface-variant" />
+                                <Lock className="w-3.5 h-3.5 text-fg-muted" />
                               ) : (
                                 getModelIcon(model.displayName)
                               )}
@@ -161,20 +161,20 @@ export function ModelSelector({
                                 className={cn(
                                   'text-sm font-medium transition-colors',
                                   activeModel === model.modelId && !isLocked
-                                    ? 'text-primary'
-                                    : 'text-on-surface group-hover/item:text-on-surface'
+                                    ? 'text-accent-fg'
+                                    : 'text-fg group-hover/item:text-fg'
                                 )}
                               >
                                 {model.displayName}
                               </div>
                               <div className="flex items-center gap-1.5">
                                 {model.modelId.includes('preview') && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant border border-outline-variant/30">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-fill-selected text-fg-muted border border-stroke">
                                     {t.models.preview}
                                   </span>
                                 )}
                                 {model.capabilities?.reasoning && !isLocked && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-subtle text-accent-fg border border-accent">
                                     {t.thinking.reasoningBadge}
                                   </span>
                                 )}
@@ -182,7 +182,7 @@ export function ModelSelector({
                             </div>
                           </div>
                           {activeModel === model.modelId && !isLocked && (
-                            <Check className="w-4 h-4 text-primary" />
+                            <Check className="w-4 h-4 text-accent-fg" />
                           )}
                         </button>
                       );

@@ -45,7 +45,7 @@ export function ResultPanel({
     <div className="space-y-4" data-testid="result-panel" data-partial={result.partial}>
       {result.partial && (
         <p
-          className="flex items-start gap-2 rounded-lg border border-error/30 bg-error/5 p-3 text-error text-xs"
+          className="flex items-start gap-2 rounded-lg border border-danger bg-danger-subtle p-3 text-danger text-xs"
           data-testid="partial-warning"
         >
           <TriangleAlert size={14} className="mt-0.5 shrink-0" />
@@ -53,14 +53,14 @@ export function ResultPanel({
         </p>
       )}
       {rolledBack && (
-        <p className="text-on-surface-variant text-xs" data-testid="rolled-back">
+        <p className="text-fg-muted text-xs" data-testid="rolled-back">
           {l.result.rolledBack}
         </p>
       )}
 
       {result.applied.length > 0 && (
         <section className="space-y-1.5">
-          <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
             {l.result.appliedHeading}
           </h3>
           <ul className="space-y-1">
@@ -70,14 +70,14 @@ export function ResultPanel({
                 className="flex items-start gap-2 text-xs"
                 data-testid="applied-row"
               >
-                <CircleCheck size={12} className="mt-0.5 shrink-0 text-primary" />
+                <CircleCheck size={12} className="mt-0.5 shrink-0 text-accent-fg" />
                 <span className="min-w-0">
-                  <span className="text-on-surface">{applied.resourceKey}</span>
-                  <span className="block break-all font-mono text-[11px] text-on-surface-variant/60">
+                  <span className="text-fg">{applied.resourceKey}</span>
+                  <span className="block break-all font-mono text-[11px] text-fg-muted">
                     {environmentName(applied.environmentId)} · {applied.destinationPath}
                   </span>
                   {applied.adaptation && (
-                    <span className="block text-[11px] text-tertiary">
+                    <span className="block text-[11px] text-info">
                       {l.adaptation.strategy[applied.adaptation.strategy]}
                       {applied.adaptation.provenance &&
                         ` — ${formatMessage(l.adaptation.provenance, {
@@ -89,7 +89,7 @@ export function ResultPanel({
                   {applied.adaptation?.notes.map((note) => (
                     <span
                       key={`${note.code}:${note.field ?? ''}`}
-                      className="block text-[11px] text-on-surface-variant/70"
+                      className="block text-[11px] text-fg-muted"
                     >
                       {l.adaptation.note[note.code]}
                       {note.field ? ` ${note.field}` : ''} — {note.message}
@@ -104,7 +104,7 @@ export function ResultPanel({
 
       {result.failed.length > 0 && (
         <section className="space-y-1.5">
-          <h3 className="font-label font-semibold text-[10px] text-error uppercase tracking-widest">
+          <h3 className="font-semibold text-[10px] text-danger uppercase tracking-widest">
             {l.result.failedHeading}
           </h3>
           <ul className="space-y-1">
@@ -114,10 +114,10 @@ export function ResultPanel({
                 className="flex items-start gap-2 text-xs"
                 data-testid="failed-row"
               >
-                <CircleX size={12} className="mt-0.5 shrink-0 text-error" />
+                <CircleX size={12} className="mt-0.5 shrink-0 text-danger" />
                 <span className="min-w-0">
-                  <span className="text-on-surface">{failure.resourceKey}</span>
-                  <span className="block text-[11px] text-on-surface-variant/70">
+                  <span className="text-fg">{failure.resourceKey}</span>
+                  <span className="block text-[11px] text-fg-muted">
                     {environmentName(failure.environmentId)} — {l.failureReason[failure.reason]}
                   </span>
                 </span>
@@ -129,14 +129,14 @@ export function ResultPanel({
 
       {result.skipped.length > 0 && (
         <section className="space-y-1.5">
-          <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
             {l.result.skippedHeading}
           </h3>
           <ul className="space-y-0.5">
             {result.skipped.map((skipped) => (
               <li
                 key={`${skipped.environmentId}:${skipped.resourceKey}:${skipped.locationId ?? ''}`}
-                className="text-[11px] text-on-surface-variant/70"
+                className="text-[11px] text-fg-muted"
                 data-testid="skipped-row"
               >
                 {skipped.resourceKey} — {l.skipReason[skipped.reason]}
@@ -147,31 +147,31 @@ export function ResultPanel({
       )}
 
       {result.applied.length === 0 && result.failed.length === 0 && (
-        <p className="text-on-surface-variant text-xs">{l.result.none}</p>
+        <p className="text-fg-muted text-xs">{l.result.none}</p>
       )}
 
       {result.backups.map((handle) => (
         <div
           key={`${handle.environmentId}:${handle.backupId}`}
-          className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container p-3"
+          className="space-y-2 rounded-lg border border-stroke bg-surface p-3"
           data-testid="backup-handle"
           data-environment-id={handle.environmentId}
         >
-          <p className="break-all font-mono text-[11px] text-on-surface-variant/70">
+          <p className="break-all font-mono text-[11px] text-fg-muted">
             {environmentName(handle.environmentId)} ·{' '}
             {formatMessage(l.result.backupId, { id: handle.backupId })}
           </p>
           {undoResult?.environmentId === handle.environmentId &&
           undoResult.backupId === handle.backupId ? (
             <div className="space-y-1" data-testid="undo-result">
-              <p className="text-on-surface text-xs">
+              <p className="text-fg text-xs">
                 {formatMessage(l.result.undone, {
                   restored: String(undoResult.restored.length),
                   removed: String(undoResult.removed.length),
                 })}
               </p>
               {undoResult.skipped.length > 0 && (
-                <p className="text-[11px] text-tertiary">
+                <p className="text-[11px] text-info">
                   {formatMessage(l.result.undoSkipped, {
                     count: String(undoResult.skipped.length),
                   })}
@@ -179,10 +179,7 @@ export function ResultPanel({
               )}
               <ul className="space-y-0.5">
                 {undoResult.skipped.map((skipped) => (
-                  <li
-                    key={skipped.destinationPath}
-                    className="text-[11px] text-on-surface-variant/60"
-                  >
+                  <li key={skipped.destinationPath} className="text-[11px] text-fg-muted">
                     {skipped.destinationPath} — {l.result.undoSkipReason[skipped.reason]}
                   </li>
                 ))}
@@ -201,7 +198,7 @@ export function ResultPanel({
             </Button>
           )}
           {undoError !== null && undoError !== undefined && (
-            <p className="text-error text-[11px]">{l.result.undoError}</p>
+            <p className="text-danger text-[11px]">{l.result.undoError}</p>
           )}
         </div>
       ))}

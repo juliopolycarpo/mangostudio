@@ -25,12 +25,12 @@ export function RailPanel({
   const CloseIcon = closeMode === 'collapse' ? ChevronRight : X;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-container-low">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-outline-variant/15 px-4">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+    <div className="flex h-full min-h-0 flex-col bg-surface">
+      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-stroke px-4">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-accent-subtle text-accent-fg">
           <Icon size={15} />
         </span>
-        <h2 className="min-w-0 flex-1 truncate text-sm font-bold text-on-surface" title={title}>
+        <h2 className="min-w-0 flex-1 truncate text-sm font-bold text-fg" title={title}>
           {title}
         </h2>
         <button
@@ -39,7 +39,7 @@ export function RailPanel({
           onClick={onClose}
           aria-label={closeLabel}
           title={closeLabel}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
         >
           <CloseIcon size={16} />
         </button>

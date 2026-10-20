@@ -27,6 +27,7 @@ import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAnchoredPosition } from '@/hooks/use-anchored-position';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 
@@ -50,7 +51,7 @@ interface SelectProps {
 }
 
 const TRIGGER =
-  'flex w-full items-center justify-between gap-2 rounded-xl px-4 py-2.5 text-sm text-left bg-surface-container-lowest text-on-surface border border-outline-variant/20 transition-colors cursor-pointer hover:border-outline-variant/40 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50 aria-expanded:border-primary/60';
+  'flex h-8 w-full items-center justify-between gap-2 rounded-sm border border-stroke border-b-stroke-strong bg-control pl-3 pr-2 text-sm text-left text-fg transition-colors cursor-pointer hover:bg-control-hover focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-50 aria-expanded:border-focus aria-expanded:border-b-focus aria-expanded:ring-1 aria-expanded:ring-focus';
 
 /** The `max-h-[16rem]` the panel used to carry, now a number the anchor needs. */
 const PANEL_MAX_HEIGHT = 256;
@@ -117,16 +118,10 @@ export function Select({
         aria-label={ariaLabel}
         className={TRIGGER}
       >
-        <span className={cn('truncate', !selected && 'text-on-surface-variant/60')}>
+        <span className={cn('truncate', !selected && 'text-fg-muted')}>
           {selected?.label ?? placeholder ?? value}
         </span>
-        <ChevronDown
-          size={16}
-          className={cn(
-            'shrink-0 text-on-surface-variant transition-transform duration-200',
-            open && 'rotate-180'
-          )}
-        />
+        <ChevronDown size={ICON_MD} className="shrink-0 text-fg-muted" />
       </button>
 
       {createPortal(
@@ -149,7 +144,7 @@ export function Select({
                 width: position.width,
                 maxHeight: position.maxHeight,
               }}
-              className="app-scrollbar dropdown-panel overflow-y-auto py-1"
+              className="app-scrollbar dropdown-panel overflow-y-auto p-1"
             >
               <div id={listId} role="listbox" aria-label={ariaLabel}>
                 {options.map((option, index) => {
@@ -169,29 +164,29 @@ export function Select({
                       onClick={() => commit(option)}
                       onMouseEnter={() => setActiveIndex(index)}
                       className={cn(
-                        'flex w-full items-start justify-between gap-2 px-4 py-2 text-left text-sm transition-colors',
+                        'flex min-h-8 w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors',
                         'disabled:cursor-not-allowed disabled:opacity-40',
-                        index === activeIndex && !option.disabled && 'bg-primary/10',
-                        isSelected && 'bg-primary/5'
+                        index === activeIndex && !option.disabled && 'bg-fill-hover',
+                        isSelected && 'bg-fill-selected'
                       )}
                     >
                       <span className="min-w-0 flex-1">
                         <span
                           className={cn(
                             'block truncate',
-                            isSelected ? 'font-medium text-primary' : 'text-on-surface'
+                            isSelected ? 'font-medium text-fg' : 'text-fg'
                           )}
                         >
                           {option.label}
                         </span>
                         {option.description ? (
-                          <span className="mt-0.5 block text-xs leading-relaxed text-on-surface-variant/80">
+                          <span className="mt-0.5 block text-xs leading-relaxed text-fg-muted">
                             {option.description}
                           </span>
                         ) : null}
                       </span>
                       {isSelected ? (
-                        <Check size={14} className="mt-0.5 shrink-0 text-primary" />
+                        <Check size={ICON_MD} className="mt-0.5 shrink-0 text-accent-fg" />
                       ) : null}
                     </button>
                   );

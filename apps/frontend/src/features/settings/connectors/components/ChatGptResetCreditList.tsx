@@ -59,7 +59,7 @@ export function ChatGptResetCreditList({ credits }: { credits: ChatGptResetCredi
             key={credit.id}
             title={credit.description}
             className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] ${
-              isActive ? 'text-on-surface-variant' : 'text-on-surface-variant/40'
+              isActive ? 'text-fg-muted' : 'text-fg-subtle'
             }`}
           >
             <span className="font-medium">
@@ -67,9 +67,7 @@ export function ChatGptResetCreditList({ credits }: { credits: ChatGptResetCredi
             </span>
             <span
               className={`rounded-full border px-1.5 py-px text-[9px] uppercase tracking-wide ${
-                isActive
-                  ? 'border-primary/40 text-primary'
-                  : 'border-outline-variant/30 text-on-surface-variant/50'
+                isActive ? 'border-accent text-accent-fg' : 'border-stroke text-fg-subtle'
               }`}
             >
               {statusLabel(credit.status, s)}

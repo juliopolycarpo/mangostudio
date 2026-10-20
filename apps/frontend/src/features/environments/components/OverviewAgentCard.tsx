@@ -53,7 +53,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
       testId="overview-agent-card"
       dataAttributes={{ 'data-target-id': status.targetId }}
       subtitle={
-        <p className="text-xs text-on-surface-variant/60">
+        <p className="text-xs text-fg-muted">
           {status.effective
             ? prefixedVersionLabel(t, status.effective.version)
             : e.agents.notInstalled}
@@ -79,7 +79,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
           )}
           <Link
             to="/environments/agents"
-            className="ml-auto rounded-lg px-2 py-1 text-sm text-on-surface-variant/70 transition-colors hover:bg-surface-container-highest hover:text-primary"
+            className="ml-auto rounded-lg px-2 py-1 text-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-accent-fg"
           >
             {e.overview.agentDetails}
           </Link>
@@ -99,7 +99,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
           data-finding-code={finding.code}
         >
           <FindingIcon severity={findingSeverity(finding)} size={14} />
-          <p className="text-xs text-on-surface-variant">{describeFinding(t, finding, lookup)}</p>
+          <p className="text-xs text-fg-muted">{describeFinding(t, finding, lookup)}</p>
         </div>
       )}
     </ToolCard>

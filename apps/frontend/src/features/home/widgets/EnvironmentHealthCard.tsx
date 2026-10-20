@@ -45,8 +45,8 @@ export function EnvironmentHealthCard({ activeEnvironmentId }: EnvironmentHealth
         {alerts.map((alert) => (
           <li key={alert.environmentId} className="flex min-w-0 items-center gap-2 text-xs">
             <StatusDot tone={alert.severity === 'error' ? 'error' : 'warning'} />
-            <span className="truncate text-on-surface">{alert.name}</span>
-            <span className="shrink-0 font-mono text-on-surface-variant/70">
+            <span className="truncate text-fg">{alert.name}</span>
+            <span className="shrink-0 font-mono text-fg-muted">
               {alert.severity === 'error' ? labels.failed : labels.disconnected}
             </span>
           </li>
@@ -54,7 +54,7 @@ export function EnvironmentHealthCard({ activeEnvironmentId }: EnvironmentHealth
       </ul>
       <Link
         {...environmentScopeRoute(alerts[0].environmentId)}
-        className="micro-label w-fit text-primary/80 transition-colors hover:text-primary"
+        className="micro-label w-fit text-accent-fg transition-colors hover:text-accent-fg"
       >
         {labels.open}
       </Link>

@@ -45,20 +45,20 @@ export function RepositoryHistory({
 
   return (
     <div className="space-y-2">
-      <ol className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
+      <ol className="overflow-hidden rounded-xl border border-stroke bg-control">
         {commits.map((commit) => (
-          <li key={commit.hash} className="border-b border-outline-variant/10 last:border-b-0">
+          <li key={commit.hash} className="border-b border-stroke last:border-b-0">
             <button
               type="button"
               onClick={() => setSelectedHash(commit.hash)}
-              className="group w-full cursor-pointer px-3 py-2.5 text-left hover:bg-surface-container/60"
+              className="group w-full cursor-pointer px-3 py-2.5 text-left hover:bg-fill-hover"
             >
               <div className="flex items-start gap-2">
-                <GitCommitHorizontal size={13} className="mt-0.5 shrink-0 text-primary" />
+                <GitCommitHorizontal size={13} className="mt-0.5 shrink-0 text-accent-fg" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-semibold text-on-surface">{commit.subject}</p>
-                  <div className="mt-1 flex items-center gap-2 text-[10px] text-on-surface-variant">
-                    <span className="font-mono text-primary/80">{commit.shortHash}</span>
+                  <p className="truncate text-xs font-semibold text-fg">{commit.subject}</p>
+                  <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted">
+                    <span className="font-mono text-accent-fg">{commit.shortHash}</span>
                     <span className="truncate">{commit.author}</span>
                     <time className="ml-auto shrink-0" dateTime={commit.authoredAt}>
                       {formatCommitDate(commit.authoredAt)}
@@ -116,24 +116,24 @@ function CommitDetails({
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-primary"
+        className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-accent-fg"
       >
         <ArrowLeft size={13} />
         {t.git.history.back}
       </button>
-      <div className="rounded-xl border border-outline-variant/15 bg-surface-container/35 p-3">
-        <p className="text-sm font-semibold leading-5 text-on-surface">{commit.subject}</p>
-        <p className="mt-1 text-[11px] text-on-surface-variant">
+      <div className="rounded-xl border border-stroke bg-surface p-3">
+        <p className="text-sm font-semibold leading-5 text-fg">{commit.subject}</p>
+        <p className="mt-1 text-[11px] text-fg-muted">
           {commit.author} · {formatCommitDate(commit.authoredAt)}
         </p>
-        <p className="mt-2 font-mono text-[10px] text-primary">{commit.hash}</p>
+        <p className="mt-2 font-mono text-[10px] text-accent-fg">{commit.hash}</p>
         <CommitStats commit={commit} />
         {commit.refs.length > 0 ? (
           <div className="mt-2 flex flex-wrap gap-1">
             {commit.refs.map((ref) => (
               <span
                 key={ref}
-                className="rounded-full bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] text-primary"
+                className="rounded-full bg-accent-subtle px-1.5 py-0.5 font-mono text-[9px] text-accent-fg"
               >
                 {ref}
               </span>
@@ -141,11 +141,11 @@ function CommitDetails({
           </div>
         ) : null}
       </div>
-      <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
+      <ul className="overflow-hidden rounded-xl border border-stroke bg-control">
         {files.map((file) => (
           <li
             key={`${file.oldPath ?? ''}:${file.path}`}
-            className="border-b border-outline-variant/10 last:border-b-0"
+            className="border-b border-stroke last:border-b-0"
           >
             <button
               type="button"
@@ -156,14 +156,14 @@ function CommitDetails({
                   title: t.git.diff.view.replace('{path}', file.path),
                 })
               }
-              className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left hover:bg-surface-container/60"
+              className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left hover:bg-fill-hover"
             >
-              <FileCode2 size={13} className="shrink-0 text-on-surface-variant" />
+              <FileCode2 size={13} className="shrink-0 text-fg-muted" />
               <span className="min-w-0 flex-1 truncate font-mono text-[10px]">{file.path}</span>
               <span className="shrink-0 font-mono text-[9px] text-success">
                 +{file.additions ?? '—'}
               </span>
-              <span className="shrink-0 font-mono text-[9px] text-error">
+              <span className="shrink-0 font-mono text-[9px] text-danger">
                 -{file.deletions ?? '—'}
               </span>
             </button>
@@ -184,13 +184,13 @@ function CommitStats({
   const { t } = useI18n();
   return (
     <div className={`flex flex-wrap gap-x-2 font-mono text-[9px] ${compact ? 'mt-1' : 'mt-2'}`}>
-      <span className="text-on-surface-variant">
+      <span className="text-fg-muted">
         {t.git.history.filesChanged.replace('{count}', String(commit.changedFiles))}
       </span>
       <span className="text-success">
         {t.git.history.additions.replace('{count}', String(commit.additions))}
       </span>
-      <span className="text-error">
+      <span className="text-danger">
         {t.git.history.deletions.replace('{count}', String(commit.deletions))}
       </span>
     </div>
@@ -208,7 +208,7 @@ function HistoryMessage({
 }) {
   return (
     <div
-      className={`flex min-h-36 flex-col items-center justify-center gap-2 text-center text-xs ${tone === 'error' ? 'text-error' : 'text-on-surface-variant'}`}
+      className={`flex min-h-36 flex-col items-center justify-center gap-2 text-center text-xs ${tone === 'error' ? 'text-danger' : 'text-fg-muted'}`}
     >
       {icon}
       <p>{text}</p>

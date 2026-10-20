@@ -29,15 +29,15 @@ export function ReasoningSettingsSection({
   const supportedSet = new Set<ReasoningEffort>(policy.supportedEfforts);
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
+    <Card className="space-y-4 p-4 sm:p-6">
+      <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
         {s.sectionReasoning}
       </h3>
 
       {/* Thinking toggle */}
       {policy.thinkingToggleSupported && (
         <div className="flex items-center justify-between gap-4">
-          <label htmlFor="thinking-toggle" className="text-sm text-on-surface">
+          <label htmlFor="thinking-toggle" className="text-sm text-fg">
             {s.thinkingEnabled}
           </label>
           <Checkbox
@@ -50,7 +50,7 @@ export function ReasoningSettingsSection({
 
       {/* Reasoning effort */}
       <div className="space-y-2">
-        <span className="text-sm text-on-surface">{s.reasoningEffort}</span>
+        <span className="text-sm text-fg">{s.reasoningEffort}</span>
         <div className="flex flex-wrap gap-2">
           {EFFORT_DISPLAY_ORDER.filter((e) => supportedSet.has(e)).map((effort) => (
             <button
@@ -59,8 +59,8 @@ export function ReasoningSettingsSection({
               onClick={() => onChange({ ...form, reasoningEffort: effort })}
               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
                 (form.reasoningEffort ?? policy.defaultEffort) === effort
-                  ? 'bg-primary text-on-primary'
-                  : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                  ? 'bg-accent text-on-accent'
+                  : 'bg-surface text-fg-muted hover:bg-fill-hover'
               }`}
             >
               {t.thinking[EFFORT_LABEL_KEYS[effort] as keyof typeof t.thinking]}

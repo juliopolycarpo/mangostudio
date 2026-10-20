@@ -29,10 +29,10 @@ import { RuntimePairingPanel } from './RuntimePairingPanel';
 import { SshPanel } from './SshPanel';
 
 const STATUS_RAIL: Record<EnvironmentConnectionState, string> = {
-  connected: 'bg-primary',
+  connected: 'bg-accent',
   connecting: 'bg-warning animate-pulse',
-  disconnected: 'bg-outline-variant/45',
-  error: 'bg-error',
+  disconnected: 'bg-stroke',
+  error: 'bg-danger',
 };
 
 /** A binary handoff reads as a live operation, not as the outage it looks like. */
@@ -48,17 +48,13 @@ export function EnvironmentEntitiesOverview() {
     <section className="space-y-3" data-testid="overview-environments">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="font-headline text-lg font-bold text-on-surface">
-            {t.environments.entities.title}
-          </h2>
-          <p className="mt-0.5 text-sm text-on-surface-variant/60">
-            {t.environments.entities.description}
-          </p>
+          <h2 className="text-lg font-bold text-fg">{t.environments.entities.title}</h2>
+          <p className="mt-0.5 text-sm text-fg-muted">{t.environments.entities.description}</p>
         </div>
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent-subtle px-2.5 text-xs font-semibold text-accent-fg transition-colors hover:bg-accent-hover"
         >
           <Plus size={13} />
           {t.environments.entities.add.trigger}
@@ -161,7 +157,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
 
   return (
     <article
-      className="relative overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-low p-4 shadow-sm"
+      className="relative overflow-hidden rounded-2xl border border-stroke bg-surface p-4 shadow-sm"
       data-testid="environment-entity-card"
       data-environment-id={environment.id}
     >
@@ -172,7 +168,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
       <div className="space-y-3 pl-1">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2.5">
-            <span className="mt-0.5 rounded-xl bg-surface-container-high p-2 text-primary">
+            <span className="mt-0.5 rounded-xl bg-surface p-2 text-accent-fg">
               <Server size={16} />
             </span>
             <div className="min-w-0">
@@ -193,18 +189,16 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
                         cancelEditing();
                       }
                     }}
-                    className="h-8 w-full rounded-lg border border-primary/35 bg-surface-container-lowest px-2 text-sm font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary/25"
+                    className="h-8 w-full rounded-lg border border-accent bg-control px-2 text-sm font-semibold text-fg outline-none focus:ring-1 focus:ring-focus"
                   />
                 </label>
               ) : (
-                <h3 className="truncate font-headline text-base font-bold text-on-surface">
-                  {environment.name}
-                </h3>
+                <h3 className="truncate text-base font-bold text-fg">{environment.name}</h3>
               )}
-              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-on-surface-variant/65">
+              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-fg-muted">
                 <span>{labels.transport[environment.transportKind]}</span>
                 {environment.transportKind === 'container' ? (
-                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
+                  <span className="rounded-full bg-accent-subtle px-1.5 py-0.5 font-semibold text-accent-fg">
                     {labels.container.badge}
                   </span>
                 ) : null}
@@ -212,7 +206,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
                 {!environment.enabled ? <span>{labels.disabled}</span> : null}
                 {environment.status.offlineRuntimeCache ? (
                   <span
-                    className="rounded-full bg-tertiary/10 px-1.5 py-0.5 font-semibold text-tertiary"
+                    className="rounded-full bg-info-subtle px-1.5 py-0.5 font-semibold text-info"
                     title={labels.offlineCacheHint}
                   >
                     {labels.offlineCache}
@@ -221,7 +215,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
               </p>
             </div>
           </div>
-          <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+          <span className="shrink-0 rounded-full bg-surface px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-fg-muted">
             {updating
               ? labels.status.updating
               : environment.status.pullingImage
@@ -234,7 +228,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
 
         {environment.status.boundElsewhere ? (
           <p
-            className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant"
+            className="rounded-lg border border-warning bg-warning-subtle px-2.5 py-2 text-[11px] text-fg-muted"
             data-testid="environment-bound-elsewhere"
           >
             {labels.boundElsewhereHint}
@@ -243,7 +237,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
 
         {environment.status.localFailureReason ? (
           <p
-            className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant"
+            className="rounded-lg border border-warning bg-warning-subtle px-2.5 py-2 text-[11px] text-fg-muted"
             data-testid="local-failure-reason"
           >
             {labels.local.reason[environment.status.localFailureReason]}
@@ -275,17 +269,17 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
         <InstallTrustToggle environment={environment} />
 
         {actionError ? (
-          <p className="text-xs text-error" role="alert">
+          <p className="text-xs text-danger" role="alert">
             {actionError}
           </p>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-outline-variant/15 pt-3">
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-stroke pt-3">
           <button
             type="button"
             onClick={() => void runConnectionAction()}
             disabled={busy || state === 'connecting' || !environment.enabled}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15 disabled:opacity-45"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent-subtle px-2.5 text-xs font-semibold text-accent-fg transition-colors hover:bg-accent-hover disabled:opacity-45"
           >
             {state === 'connected' ? <Unplug size={13} /> : <Cable size={13} />}
             {state === 'connected' ? labels.disconnect : labels.connect}
@@ -297,7 +291,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
                 type="button"
                 onClick={() => void saveName()}
                 disabled={busy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-primary hover:bg-primary/10 disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-accent-fg hover:bg-accent-hover disabled:opacity-45"
               >
                 <Check size={13} />
                 {labels.save}
@@ -306,7 +300,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
                 type="button"
                 onClick={cancelEditing}
                 disabled={busy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-on-surface-variant hover:bg-surface-container-high disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-fg-muted hover:bg-fill-hover disabled:opacity-45"
               >
                 <X size={13} />
                 {labels.cancel}
@@ -323,7 +317,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
                   setEditing(true);
                 }}
                 disabled={busy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-fg-muted hover:bg-fill-hover hover:text-fg disabled:opacity-45"
               >
                 <Pencil size={13} />
                 {labels.edit}
@@ -335,7 +329,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
                   setRemoving(true);
                 }}
                 disabled={busy}
-                className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-error/80 hover:bg-error/10 hover:text-error disabled:opacity-45"
+                className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-danger hover:bg-danger-subtle hover:text-danger disabled:opacity-45"
               >
                 <Trash2 size={13} />
                 {labels.remove}
@@ -357,12 +351,12 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
           onConfirm={() => void removeEnvironment()}
         >
           {removableRuntime ? (
-            <label className="flex items-start gap-2 rounded-xl bg-surface-container-lowest px-3 py-2 text-left text-sm text-on-surface">
+            <label className="flex items-start gap-2 rounded-xl bg-control px-3 py-2 text-left text-sm text-fg">
               <input
                 type="checkbox"
                 checked={removeRuntime}
                 onChange={(event) => setRemoveRuntime(event.target.checked)}
-                className="mt-1 accent-primary"
+                className="mt-1 accent-accent"
               />
               <span>
                 {formatMessage(labels.removeRuntimeBytes, {
@@ -401,10 +395,7 @@ function ToolchainSummaryLine({ environment }: { environment: Environment }) {
   if (!summary) return null;
 
   return (
-    <p
-      className="text-[11px] text-on-surface-variant/65"
-      data-testid="environment-toolchain-summary"
-    >
+    <p className="text-[11px] text-fg-muted" data-testid="environment-toolchain-summary">
       {summary}
     </p>
   );
@@ -425,7 +416,7 @@ function RuntimeRelease({ environment }: { environment: Environment }) {
   if (!runtimeVersion || !runtimeVersionDrift) return null;
 
   return (
-    <p className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant">
+    <p className="rounded-lg border border-warning bg-warning-subtle px-2.5 py-2 text-[11px] text-fg-muted">
       {formatMessage(t.environments.entities.runtimeVersionDrift, { version: runtimeVersion })}
     </p>
   );
@@ -436,7 +427,7 @@ function CapabilityChips({ environment }: { environment: Environment }) {
   const labels = t.environments.entities;
   const manifest = environment.status.manifest;
   if (!manifest) {
-    return <p className="text-xs text-on-surface-variant/50">{labels.noManifest}</p>;
+    return <p className="text-xs text-fg-subtle">{labels.noManifest}</p>;
   }
 
   const chips = [
@@ -455,7 +446,7 @@ function CapabilityChips({ environment }: { environment: Environment }) {
       {chips.map((chip) => (
         <li
           key={chip}
-          className="rounded-md border border-outline-variant/15 bg-surface-container-lowest px-2 py-1 font-mono text-[10px] text-on-surface-variant"
+          className="rounded-md border border-stroke bg-control px-2 py-1 font-mono text-[10px] text-fg-muted"
         >
           {chip}
         </li>
@@ -499,20 +490,20 @@ function PermissionsRow({ environment }: { environment: Environment }) {
 
   return (
     <div
-      className="space-y-2 rounded-lg border border-outline-variant/20 bg-surface-container-lowest/70 px-2.5 py-2"
+      className="space-y-2 rounded-lg border border-stroke bg-control px-2.5 py-2"
       data-testid="environment-permissions"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
           {labels.title}
         </p>
         {profile ? (
-          <span className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
+          <span className="rounded-md bg-surface px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
             {labels.profile[profile]}
           </span>
         ) : null}
         {stale ? (
-          <span className="rounded-md bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
+          <span className="rounded-md bg-warning-subtle px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
             {t.environments.entities.runtime.stale}
           </span>
         ) : null}
@@ -520,7 +511,7 @@ function PermissionsRow({ environment }: { environment: Environment }) {
 
       {denied.length > 0 ? (
         <div className="space-y-1">
-          <p className="text-[11px] text-on-surface-variant/70">{labels.deniedIntro}</p>
+          <p className="text-[11px] text-fg-muted">{labels.deniedIntro}</p>
           <ul className="flex list-none flex-wrap gap-1.5">
             {denied.map((capability) => {
               const capabilityLabels = t.environments.entities.permissions.capabilities;
@@ -531,7 +522,7 @@ function PermissionsRow({ environment }: { environment: Environment }) {
               return (
                 <li
                   key={capability}
-                  className="rounded-md border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 font-mono text-[10px] text-on-surface-variant"
+                  className="rounded-md border border-stroke bg-surface px-2 py-0.5 font-mono text-[10px] text-fg-muted"
                 >
                   {label}
                 </li>
@@ -541,7 +532,7 @@ function PermissionsRow({ environment }: { environment: Environment }) {
         </div>
       ) : null}
 
-      <p className="text-[11px] text-on-surface-variant/65">{labels.allowShellHonesty}</p>
+      <p className="text-[11px] text-fg-muted">{labels.allowShellHonesty}</p>
 
       <CopyLine label={labels.setupCommand} value={setupCommand} />
     </div>

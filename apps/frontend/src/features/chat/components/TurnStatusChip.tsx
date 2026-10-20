@@ -36,7 +36,7 @@ export function TurnStatusChip({ phase, showWorkingRow }: TurnStatusChipProps) {
   if (phase === 'settled' || showWorkingRow) return null;
 
   return (
-    <span className="shrink-0 animate-pulse rounded-full bg-surface-container-high px-1.5 py-0.5 text-[10px] text-on-surface-variant/80">
+    <span className="shrink-0 animate-pulse rounded-full bg-surface px-1.5 py-0.5 text-[10px] text-fg-muted">
       {phaseLabel(phase, t.chat.feed)}
     </span>
   );

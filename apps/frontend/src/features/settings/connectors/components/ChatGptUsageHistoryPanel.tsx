@@ -76,16 +76,16 @@ function UsageHistoryChart({
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-medium uppercase text-on-surface-variant/55">{title}</p>
+      <p className="text-[10px] font-medium uppercase text-fg-subtle">{title}</p>
       <svg
         role="img"
         aria-label={title}
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        className="h-20 w-full rounded-lg border border-outline-variant/10 bg-surface-container-high/35"
+        className="h-20 w-full rounded-lg border border-stroke bg-surface"
         preserveAspectRatio="none"
       >
         {points.length > 1 && (
-          <polygon points={areaPath} className="fill-primary/15" stroke="none" />
+          <polygon points={areaPath} className="fill-accent-fg" stroke="none" />
         )}
         {points.length > 1 && (
           <polyline
@@ -93,7 +93,7 @@ function UsageHistoryChart({
             fill="none"
             strokeWidth={2}
             vectorEffect="non-scaling-stroke"
-            className="stroke-primary/70"
+            className="stroke-accent-fg"
           />
         )}
         {points
@@ -107,7 +107,7 @@ function UsageHistoryChart({
               y2={CHART_HEIGHT - CHART_PAD_Y}
               strokeDasharray="3 3"
               vectorEffect="non-scaling-stroke"
-              className="stroke-outline-variant/60"
+              className="stroke-stroke-strong"
             />
           ))}
         {points.map((point) => {
@@ -120,14 +120,14 @@ function UsageHistoryChart({
               cx={point.x}
               cy={point.y}
               r={3}
-              className="fill-primary/80"
+              className="fill-accent-fg"
             >
               <title>{label}</title>
             </circle>
           );
         })}
       </svg>
-      <p className="text-[10px] text-on-surface-variant/50">{s.chatgptHistoryDisclaimer}</p>
+      <p className="text-[10px] text-fg-subtle">{s.chatgptHistoryDisclaimer}</p>
     </div>
   );
 }
@@ -151,33 +151,30 @@ export function ChatGptUsageHistoryPanel({ connectorId }: { connectorId: string 
 
   return (
     <div className="space-y-2">
-      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-on-surface-variant/55">
+      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-fg-subtle">
         <History size={13} />
         {s.chatgptHistoryToggle}
       </p>
 
-      <div
-        id={panelId}
-        className="space-y-3 rounded-xl border border-outline-variant/10 bg-surface-container-low px-3 py-3"
-      >
+      <div id={panelId} className="space-y-3 rounded-xl border border-stroke bg-surface px-3 py-3">
         {historyQuery.isLoading ? (
-          <p className="flex items-center gap-2 text-[11px] text-on-surface-variant/60">
+          <p className="flex items-center gap-2 text-[11px] text-fg-muted">
             <RefreshCw size={13} className="animate-spin" />
             {s.chatgptHistoryLoading}
           </p>
         ) : historyQuery.isError ? (
           <div className="flex items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-[11px] text-error">
+            <p className="flex items-center gap-2 text-[11px] text-danger">
               <TriangleAlert size={13} />
               {s.failedToLoad}
             </p>
-            <Button variant="ghost" size="sm" onClick={() => void historyQuery.refetch()}>
+            <Button variant="subtle" size="sm" onClick={() => void historyQuery.refetch()}>
               <RefreshCw size={13} />
               {t.common.retry}
             </Button>
           </div>
         ) : samples.length === 0 ? (
-          <p className="text-[11px] text-on-surface-variant/60">{s.chatgptHistoryEmpty}</p>
+          <p className="text-[11px] text-fg-muted">{s.chatgptHistoryEmpty}</p>
         ) : (
           <UsageHistoryChart samples={samples} locale={locale} s={s} />
         )}

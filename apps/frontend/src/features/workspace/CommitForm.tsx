@@ -139,7 +139,7 @@ export function CommitForm({
   return (
     <section className="space-y-2">
       {amend ? (
-        <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-4 text-warning">
+        <div className="flex items-center gap-2 rounded-lg border border-warning bg-warning-subtle px-2.5 py-1.5 text-[11px] leading-4 text-warning">
           <History size={13} className="shrink-0" />
           <span className="min-w-0 flex-1">
             <span className="font-semibold">{labels.amendLabel}</span>
@@ -152,7 +152,7 @@ export function CommitForm({
             aria-label={labels.amendExit}
             title={labels.amendExit}
             onClick={() => setAmend(false)}
-            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded transition-colors hover:bg-warning/20"
+            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded transition-colors hover:bg-warning-subtle"
           >
             <X size={12} />
           </button>
@@ -168,9 +168,9 @@ export function CommitForm({
           maxLength={72}
           aria-label={labels.titleLabel}
           placeholder={labels.titlePlaceholder}
-          className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
+          className="w-full rounded-lg border border-stroke bg-control px-3 py-2 text-xs text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
         />
-        <span className="block text-right font-mono text-[10px] text-on-surface-variant/60">
+        <span className="block text-right font-mono text-[10px] text-fg-muted">
           {labels.titleCount.replace('{count}', String(title.length))}
         </span>
       </label>
@@ -183,7 +183,7 @@ export function CommitForm({
           aria-label={labels.bodyLabel}
           placeholder={labels.bodyPlaceholder}
           rows={2}
-          className="w-full resize-y rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
+          className="w-full resize-y rounded-lg border border-stroke bg-control px-3 py-2 text-xs text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
         />
       </label>
 
@@ -200,7 +200,7 @@ export function CommitForm({
       />
 
       {diffWasTruncated ? (
-        <p className="flex items-start gap-1.5 text-[10px] leading-4 text-on-surface-variant/70">
+        <p className="flex items-start gap-1.5 text-[10px] leading-4 text-fg-muted">
           <Info size={12} className="mt-0.5 shrink-0" />
           {labels.truncatedNotice}
         </p>
@@ -211,17 +211,15 @@ export function CommitForm({
           role="dialog"
           aria-modal="true"
           aria-labelledby="git-amend-confirm-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
         >
-          <div className="w-full max-w-sm space-y-5 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+          <div className="w-full max-w-sm space-y-5 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
             <div className="space-y-2 text-center">
               <History className="mx-auto text-warning" size={30} />
-              <h3 id="git-amend-confirm-title" className="text-lg font-bold text-on-surface">
+              <h3 id="git-amend-confirm-title" className="text-lg font-bold text-fg">
                 {amendLabels.title}
               </h3>
-              <p className="text-sm leading-5 text-on-surface-variant/70">
-                {amendLabels.description}
-              </p>
+              <p className="text-sm leading-5 text-fg-muted">{amendLabels.description}</p>
             </div>
             <div className="flex gap-3">
               <Button
@@ -253,20 +251,15 @@ export function CommitForm({
           role="dialog"
           aria-modal="true"
           aria-labelledby="git-commit-message-overwrite-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
         >
-          <div className="w-full max-w-sm space-y-5 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+          <div className="w-full max-w-sm space-y-5 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
             <div className="space-y-2 text-center">
-              <Sparkles className="mx-auto text-primary" size={30} />
-              <h3
-                id="git-commit-message-overwrite-title"
-                className="text-lg font-bold text-on-surface"
-              >
+              <Sparkles className="mx-auto text-accent-fg" size={30} />
+              <h3 id="git-commit-message-overwrite-title" className="text-lg font-bold text-fg">
                 {overwriteLabels.title}
               </h3>
-              <p className="text-sm leading-5 text-on-surface-variant/70">
-                {overwriteLabels.description}
-              </p>
+              <p className="text-sm leading-5 text-fg-muted">{overwriteLabels.description}</p>
             </div>
             <div className="flex gap-3">
               <Button

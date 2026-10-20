@@ -11,7 +11,7 @@ export function KbdHint({ keys, className }: KbdHintProps) {
   return (
     <kbd
       className={cn(
-        'inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded border border-outline-variant/40 bg-surface-container-high px-1 font-mono text-[10px] leading-none text-on-surface-variant',
+        'inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-xs border border-stroke bg-control px-1 font-mono text-micro font-medium leading-none text-fg-muted',
         className
       )}
     >

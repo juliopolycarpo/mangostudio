@@ -81,12 +81,12 @@ export function SlashCommandMenu({
       // of them would blur the textarea, which the composer answers by
       // dismissing the palette out from under the pointer mid-click.
       onMouseDown={(event) => event.preventDefault()}
-      className={`absolute bottom-full left-0 z-40 mb-2 w-80 rounded-2xl border border-outline-variant/20 bg-surface-container-high shadow-2xl ${
+      className={`absolute bottom-full left-0 z-40 mb-2 w-80 rounded-2xl border border-stroke bg-surface shadow-2xl ${
         empty ? 'p-3' : 'app-scrollbar max-h-72 overflow-y-auto p-1'
       }`}
     >
       {empty && (
-        <p className="text-xs text-on-surface-variant/70">
+        <p className="text-xs text-fg-muted">
           {pending ? labels.slashMenuLoading : labels.slashMenuEmpty}
         </p>
       )}
@@ -107,19 +107,17 @@ export function SlashCommandMenu({
           }}
           onMouseMove={() => onHighlight(index)}
           className={`flex cursor-pointer flex-col gap-0.5 rounded-xl px-2.5 py-1.5 text-left ${
-            index === activeIndex ? 'bg-surface-container-highest' : 'hover:bg-surface-container'
+            index === activeIndex ? 'bg-fill-selected' : 'hover:bg-fill-hover'
           }`}
         >
           <span className="flex items-baseline gap-2">
-            <span className="font-mono text-xs text-on-surface">/{entry.name}</span>
-            <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-on-surface-variant/60">
+            <span className="font-mono text-xs text-fg">/{entry.name}</span>
+            <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-fg-muted">
               {labels.slashMenuOrigin[entry.origin]}
             </span>
           </span>
           {entry.description && (
-            <span className="line-clamp-2 text-[11px] text-on-surface-variant">
-              {entry.description}
-            </span>
+            <span className="line-clamp-2 text-[11px] text-fg-muted">{entry.description}</span>
           )}
         </div>
       ))}

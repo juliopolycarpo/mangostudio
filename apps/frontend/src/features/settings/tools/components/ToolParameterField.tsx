@@ -139,7 +139,7 @@ function PathListField({
           }}
           disabled={disabled}
           placeholder={placeholder}
-          className="flex-1 rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 rounded-xl px-4 py-2.5 text-sm bg-control text-fg border border-stroke placeholder:text-fg-subtle focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <Button
           variant="secondary"
@@ -152,13 +152,13 @@ function PathListField({
       </div>
 
       {items.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/40 py-2">{s.noPaths}</p>
+        <p className="text-sm text-fg-subtle py-2">{s.noPaths}</p>
       ) : (
         <ul className="space-y-1.5">
           {items.map((item, index) => (
             <li
               key={item.path}
-              className="flex items-center gap-2 p-2 rounded-lg bg-surface-container-lowest border border-outline-variant/10"
+              className="flex items-center gap-2 p-2 rounded-lg bg-control border border-stroke"
             >
               <Checkbox
                 checked={item.enabled}
@@ -180,12 +180,12 @@ function PathListField({
                       cancelEdit();
                     }
                   }}
-                  className="flex-1 rounded-lg px-3 py-1.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+                  className="flex-1 rounded-lg px-3 py-1.5 text-sm bg-control text-fg border border-stroke focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus"
                 />
               ) : (
                 <>
                   <span
-                    className={`flex-1 text-sm ${item.enabled ? 'text-on-surface' : 'text-on-surface-variant/40 line-through'}`}
+                    className={`flex-1 text-sm ${item.enabled ? 'text-fg' : 'text-fg-subtle line-through'}`}
                   >
                     {item.path}
                   </span>
@@ -193,7 +193,7 @@ function PathListField({
                     type="button"
                     onClick={() => startEdit(index)}
                     disabled={disabled}
-                    className="p-1.5 rounded-md text-on-surface-variant hover:bg-surface-container-high disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="p-1.5 rounded-md text-fg-muted hover:bg-fill-hover disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label={s.edit}
                   >
                     <Pencil className="w-3.5 h-3.5" />
@@ -202,7 +202,7 @@ function PathListField({
                     type="button"
                     onClick={() => handleDelete(index)}
                     disabled={disabled}
-                    className="p-1.5 rounded-md text-error hover:bg-error/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="p-1.5 rounded-md text-danger hover:bg-danger-subtle disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label={s.delete}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -270,7 +270,7 @@ export function ToolParameterField({
   }, [descriptor.name, descriptor.description, t]);
 
   const baseInputClass =
-    'w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+    'w-full rounded-xl px-4 py-2.5 text-sm bg-control text-fg border border-stroke placeholder:text-fg-subtle focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
   const descriptorValue = value ?? descriptor.defaultValue ?? '';
 
@@ -292,7 +292,7 @@ export function ToolParameterField({
     return (
       <div className="space-y-1">
         {label && (
-          <label htmlFor={`${fieldId}-model`} className="text-sm text-on-surface-variant">
+          <label htmlFor={`${fieldId}-model`} className="text-sm text-fg-muted">
             {label}
           </label>
         )}
@@ -327,7 +327,7 @@ export function ToolParameterField({
       return (
         <div className="space-y-1">
           {label && (
-            <label htmlFor={`${fieldId}-number`} className="text-sm text-on-surface-variant">
+            <label htmlFor={`${fieldId}-number`} className="text-sm text-fg-muted">
               {label}
             </label>
           )}
@@ -352,7 +352,7 @@ export function ToolParameterField({
       return (
         <div className="space-y-1">
           {label && (
-            <label htmlFor={`${fieldId}-select`} className="text-sm text-on-surface-variant">
+            <label htmlFor={`${fieldId}-select`} className="text-sm text-fg-muted">
               {label}
             </label>
           )}
@@ -376,7 +376,7 @@ export function ToolParameterField({
       return (
         <div className="space-y-1">
           {label && (
-            <label htmlFor={`${fieldId}-list`} className="text-sm text-on-surface-variant">
+            <label htmlFor={`${fieldId}-list`} className="text-sm text-fg-muted">
               {label}
             </label>
           )}
@@ -402,7 +402,7 @@ export function ToolParameterField({
     case 'path_list': {
       return (
         <div className="space-y-1">
-          {label && <span className="text-sm text-on-surface-variant">{label}</span>}
+          {label && <span className="text-sm text-fg-muted">{label}</span>}
           <PathListField
             value={descriptorValue}
             onChange={onChange}
@@ -417,7 +417,7 @@ export function ToolParameterField({
       return (
         <div className="space-y-1">
           {label && (
-            <label htmlFor={`${fieldId}-text`} className="text-sm text-on-surface-variant">
+            <label htmlFor={`${fieldId}-text`} className="text-sm text-fg-muted">
               {label}
             </label>
           )}

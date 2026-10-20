@@ -74,24 +74,24 @@ export function InstallConfirmDialog({
       : s.confirmDescription;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm sm:p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-3 sm:p-6">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="install-confirm-title"
-        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-outline-variant/20 bg-surface-container-high shadow-2xl"
+        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-stroke bg-surface shadow-2xl"
       >
-        <header className="flex items-start justify-between gap-4 border-b border-outline-variant/15 px-5 py-4 sm:px-6">
+        <header className="flex items-start justify-between gap-4 border-b border-stroke px-5 py-4 sm:px-6">
           <div className="min-w-0 space-y-1">
-            <h2 id="install-confirm-title" className="text-xl font-bold text-on-surface">
+            <h2 id="install-confirm-title" className="text-xl font-bold text-fg">
               {title}
             </h2>
-            <p className="text-sm text-on-surface-variant/65">{description}</p>
+            <p className="text-sm text-fg-muted">{description}</p>
           </div>
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl p-2 text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface"
+            className="rounded-xl p-2 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
             aria-label={s.cancel}
           >
             <X size={18} />
@@ -102,13 +102,11 @@ export function InstallConfirmDialog({
           {recipes.map((recipe, index) => (
             <div
               key={recipe.id}
-              className={
-                isChain ? 'space-y-5 rounded-2xl border border-outline-variant/15 p-4' : 'space-y-5'
-              }
+              className={isChain ? 'space-y-5 rounded-2xl border border-stroke p-4' : 'space-y-5'}
               data-testid="install-step"
             >
               {isChain && (
-                <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
                   {chainStepLabel(
                     t,
                     index,
@@ -122,8 +120,8 @@ export function InstallConfirmDialog({
           ))}
         </div>
 
-        <footer className="flex justify-end gap-2 border-t border-outline-variant/15 px-5 py-4 sm:px-6">
-          <Button variant="ghost" onClick={onCancel}>
+        <footer className="flex justify-end gap-2 border-t border-stroke px-5 py-4 sm:px-6">
+          <Button variant="subtle" onClick={onCancel}>
             {s.cancel}
           </Button>
           <Button onClick={onConfirm} loading={isStarting}>
@@ -144,7 +142,7 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
       <section className="space-y-2">
         <SectionLabel icon={<TerminalSquare size={14} />} label={s.commandLabel} />
         <code
-          className="block break-all rounded-xl bg-surface-container-highest px-3 py-2 font-mono text-xs text-on-surface"
+          className="block break-all rounded-xl bg-fill-selected px-3 py-2 font-mono text-xs text-fg"
           data-testid="install-argv"
         >
           {/* Quoted the way the API quotes its copyable command: an
@@ -158,7 +156,7 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
           <SectionLabel icon={<FolderPen size={14} />} label={s.willWrite} />
           <ul className="space-y-1">
             {recipe.writes.map((target) => (
-              <li key={target} className="break-all font-mono text-xs text-on-surface-variant">
+              <li key={target} className="break-all font-mono text-xs text-fg-muted">
                 {target}
               </li>
             ))}
@@ -167,8 +165,8 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
       )}
 
       {recipe.networkAccess && (
-        <section className="flex items-center gap-2 text-sm text-on-surface-variant">
-          <Globe size={14} className="shrink-0 text-tertiary" />
+        <section className="flex items-center gap-2 text-sm text-fg-muted">
+          <Globe size={14} className="shrink-0 text-info" />
           <span>{s.requiresNetwork}</span>
         </section>
       )}
@@ -176,11 +174,11 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
       {recipe.download && (
         <section className="space-y-1.5">
           <SectionLabel icon={<Download size={14} />} label={s.downloadLabel} />
-          <p className="break-all font-mono text-xs text-on-surface-variant">
+          <p className="break-all font-mono text-xs text-fg-muted">
             {formatMessage(s.downloadOrigin, { url: recipe.download.url })}
           </p>
           {recipe.download.sizeBytes !== undefined && (
-            <p className="text-xs text-on-surface-variant/70">
+            <p className="text-xs text-fg-muted">
               {formatMessage(s.downloadSize, {
                 size: formatBytes(recipe.download.sizeBytes),
               })}
@@ -191,12 +189,12 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
 
       {recipe.profileSetup && (
         <section className="space-y-2">
-          <p className="text-sm text-on-surface-variant">{s.profileSetup}</p>
-          <code className="block whitespace-pre-wrap break-all rounded-xl bg-surface-container-highest px-3 py-2 font-mono text-xs text-on-surface">
+          <p className="text-sm text-fg-muted">{s.profileSetup}</p>
+          <code className="block whitespace-pre-wrap break-all rounded-xl bg-fill-selected px-3 py-2 font-mono text-xs text-fg">
             {recipe.profileSetup.lines.join('\n')}
           </code>
           {recipe.profileSetup.present && (
-            <p className="text-xs text-on-surface-variant/70">
+            <p className="text-xs text-fg-muted">
               {formatMessage(s.profileAlreadyPresent, {
                 files: recipe.profileSetup.detectedIn.join(', '),
               })}
@@ -210,9 +208,9 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
 
 function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
-    <div className="flex items-center gap-2 text-on-surface-variant/70">
+    <div className="flex items-center gap-2 text-fg-muted">
       {icon}
-      <span className="font-label text-[10px] font-bold uppercase tracking-widest">{label}</span>
+      <span className="text-[10px] font-bold uppercase tracking-widest">{label}</span>
     </div>
   );
 }

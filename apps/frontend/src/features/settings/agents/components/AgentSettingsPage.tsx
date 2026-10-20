@@ -113,7 +113,7 @@ export function AgentSettingsPage() {
   if (agentsQuery.isLoading || toolsQuery.isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
+        <p className="text-sm text-fg-muted">{t.common.loading}</p>
       </div>
     );
   }
@@ -121,9 +121,9 @@ export function AgentSettingsPage() {
   if (agentsQuery.error || toolsQuery.error) {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-error">{labels.loadError}</p>
+        <p className="text-sm text-danger">{labels.loadError}</p>
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           onClick={() => {
             void agentsQuery.refetch();
@@ -141,13 +141,13 @@ export function AgentSettingsPage() {
       <div className="space-y-6">
         <AgentSettingsHeader labels={labels} onCreate={handleCreateAgent} />
 
-        <Card variant="solid" className="p-8 sm:p-12 text-center space-y-4">
-          <div className="p-4 bg-surface-container-high rounded-full w-fit mx-auto text-on-surface-variant/40">
+        <Card className="p-8 sm:p-12 text-center space-y-4">
+          <div className="p-4 bg-surface rounded-full w-fit mx-auto text-fg-subtle">
             <Bot size={32} />
           </div>
           <div className="space-y-1">
-            <p className="text-on-surface font-bold">{labels.emptyStateTitle}</p>
-            <p className="text-sm text-on-surface-variant/60">{labels.emptyStateDescription}</p>
+            <p className="text-fg font-bold">{labels.emptyStateTitle}</p>
+            <p className="text-sm text-fg-muted">{labels.emptyStateDescription}</p>
           </div>
           <Button variant="primary" onClick={handleCreateAgent}>
             <Plus size={16} />

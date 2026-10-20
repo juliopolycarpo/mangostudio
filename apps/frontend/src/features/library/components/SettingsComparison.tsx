@@ -84,8 +84,8 @@ export function SettingsComparison() {
     <div className="space-y-4" data-testid="settings-comparison">
       {header}
       <div className="space-y-1">
-        <p className="text-on-surface text-sm">{l.settings.description}</p>
-        <p className="text-[11px] text-tertiary">{l.settings.comparability}</p>
+        <p className="text-fg text-sm">{l.settings.description}</p>
+        <p className="text-[11px] text-info">{l.settings.comparability}</p>
       </div>
 
       {comparisons.map((comparison) => (
@@ -153,19 +153,19 @@ export function SettingsSourcePanel({
 
   return (
     <section
-      className="space-y-2 rounded-xl border border-outline-variant/15 bg-surface-container-high p-3"
+      className="space-y-2 rounded-xl border border-stroke bg-surface p-3"
       data-testid="settings-sources"
     >
-      <h3 className="font-semibold text-on-surface text-sm">{l.settings.sourceHeading}</h3>
+      <h3 className="font-semibold text-fg text-sm">{l.settings.sourceHeading}</h3>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {populated.map((snapshot) => (
           <div
             key={snapshot.targetId}
-            className="space-y-1 rounded-lg border border-outline-variant/10 bg-surface-container p-2.5"
+            className="space-y-1 rounded-lg border border-stroke bg-surface p-2.5"
             data-testid="settings-source-target"
             data-target-id={snapshot.targetId}
           >
-            <p className="font-medium text-on-surface text-xs">{l.targets[snapshot.targetId]}</p>
+            <p className="font-medium text-fg text-xs">{l.targets[snapshot.targetId]}</p>
             {snapshot.sources.map((source) => (
               <SettingsSourceRow
                 key={source.locationId}
@@ -198,12 +198,12 @@ function SettingsSourceRow({
       data-location-id={source.locationId}
       data-present={source.present}
     >
-      <p className="truncate font-mono text-[10px] text-on-surface-variant/50">{label}</p>
+      <p className="truncate font-mono text-[10px] text-fg-subtle">{label}</p>
       {!source.present && (
-        <p className="text-[11px] text-on-surface-variant/70 italic">{l.settings.sourceAbsent}</p>
+        <p className="text-[11px] text-fg-muted italic">{l.settings.sourceAbsent}</p>
       )}
       {source.present && source.failureReason !== undefined && (
-        <p className="text-[11px] text-error italic">
+        <p className="text-[11px] text-danger italic">
           {l.settings.parseFailure[source.failureReason]}
         </p>
       )}
@@ -220,13 +220,11 @@ function ConceptSection({ comparison }: { readonly comparison: ConceptComparison
 
   return (
     <section
-      className="space-y-2 rounded-xl border border-outline-variant/15 bg-surface-container-high p-3"
+      className="space-y-2 rounded-xl border border-stroke bg-surface p-3"
       data-testid="concept-section"
       data-concept={comparison.concept}
     >
-      <h3 className="font-semibold text-on-surface text-sm">
-        {l.settings.concept[comparison.concept]}
-      </h3>
+      <h3 className="font-semibold text-fg text-sm">{l.settings.concept[comparison.concept]}</h3>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         {comparison.entries.map((entry) => (
           <ConceptEntry key={entry.targetId} entry={entry} />
@@ -242,15 +240,13 @@ function ConceptEntry({ entry }: { readonly entry: ConceptComparisonEntry }) {
 
   return (
     <div
-      className="space-y-1 rounded-lg border border-outline-variant/10 bg-surface-container p-2.5"
+      className="space-y-1 rounded-lg border border-stroke bg-surface p-2.5"
       data-testid="concept-entry"
       data-target-id={entry.targetId}
       data-state={entry.state}
     >
-      <p className="font-medium text-on-surface text-xs">{l.targets[entry.targetId]}</p>
-      <p className="text-[11px] text-on-surface-variant/60">
-        {l.settings.conceptState[entry.state]}
-      </p>
+      <p className="font-medium text-fg text-xs">{l.targets[entry.targetId]}</p>
+      <p className="text-[11px] text-fg-muted">{l.settings.conceptState[entry.state]}</p>
       {entry.fields.map((field) => (
         <SettingsFieldValue key={field.path} field={field} />
       ))}
@@ -276,11 +272,11 @@ export function SettingsFieldValue({ field }: { readonly field: SettingsField })
 
   return (
     <div className="min-w-0" data-testid="settings-field" data-presentation={field.presentation}>
-      <p className="truncate font-mono text-[10px] text-on-surface-variant/50">{field.path}</p>
+      <p className="truncate font-mono text-[10px] text-fg-subtle">{field.path}</p>
       {field.presentation === 'value' ? (
-        <p className="break-all font-mono text-[11px] text-on-surface">{field.value}</p>
+        <p className="break-all font-mono text-[11px] text-fg">{field.value}</p>
       ) : (
-        <p className="flex items-center gap-1 text-[11px] text-on-surface-variant/70 italic">
+        <p className="flex items-center gap-1 text-[11px] text-fg-muted italic">
           <Glyph size={10} className="shrink-0" />
           {field.presentation === 'redacted'
             ? l.settings.presentation.redacted

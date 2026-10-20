@@ -71,7 +71,7 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
       <RunnerOption
         title={t.library.targets.mangostudio}
         description={s.modelDescription}
-        icon={<Sparkles aria-hidden size={16} className="text-primary" />}
+        icon={<Sparkles aria-hidden size={16} className="text-accent-fg" />}
         selected={sameRunner(state.runner, MANGOSTUDIO_RUNNER)}
         disabled={isSaving || (!catalog.isPending && !hasModel)}
         testId="onboarding-runner-mangostudio"
@@ -79,13 +79,13 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
       />
 
       {!catalog.isPending && !hasModel ? (
-        <p className="text-on-surface-variant/70 text-sm" data-testid="onboarding-no-models">
+        <p className="text-fg-muted text-sm" data-testid="onboarding-no-models">
           {s.noModels}
         </p>
       ) : null}
 
       <div className="space-y-2 pt-1">
-        <p className="font-label font-semibold text-on-surface-variant text-xs uppercase tracking-wider">
+        <p className="font-semibold text-fg-muted text-xs uppercase tracking-wider">
           {s.cliHeading}
         </p>
         {external.isLoading ? (
@@ -96,17 +96,17 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
           // A refused probe and a machine with no CLIs on it both arrive as an
           // empty list. Only one of them is an answer, and telling the person
           // "none found" about the other sends them to install what they have.
-          <p className="text-on-surface-variant text-sm" data-testid="onboarding-agents-failed">
+          <p className="text-fg-muted text-sm" data-testid="onboarding-agents-failed">
             {s.probeFailed}
           </p>
         ) : external.agents.length === 0 ? (
-          <p className="text-on-surface-variant/70 text-sm">{s.noneFound}</p>
+          <p className="text-fg-muted text-sm">{s.noneFound}</p>
         ) : isolationWithdrawn(external.agents) ? (
           // Local's agent sign-ins belong to the OS account the hub runs as.
           // Once a second person has an account here they are no longer this
           // person's to use, and pretending otherwise would offer a runner
           // every send would refuse.
-          <p className="text-on-surface-variant text-sm" data-testid="onboarding-agents-isolated">
+          <p className="text-fg-muted text-sm" data-testid="onboarding-agents-isolated">
             {s.isolated}
           </p>
         ) : (
@@ -145,7 +145,7 @@ function AgentOption({
       <RunnerOption
         title={t.library.targets[agent.targetId]}
         description={agent.authState === 'signed-out' ? s.signedOut : s.signedIn}
-        icon={<Bot aria-hidden size={16} className="text-primary" />}
+        icon={<Bot aria-hidden size={16} className="text-accent-fg" />}
         selected={selected}
         disabled={busy || !selectable}
         testId={`onboarding-runner-${agent.targetId}`}
@@ -189,18 +189,16 @@ function RunnerOption({
       aria-pressed={selected}
       onClick={onSelect}
       className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        selected
-          ? 'border-primary/40 bg-primary/5'
-          : 'border-outline-variant/20 bg-surface-container-lowest/60 hover:bg-surface-container-high'
+        selected ? 'border-accent bg-accent-subtle' : 'border-stroke bg-control hover:bg-fill-hover'
       }`}
     >
       <span className="shrink-0">{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block font-semibold text-on-surface text-sm">{title}</span>
-        <span className="block truncate text-on-surface-variant/70 text-xs">{description}</span>
+        <span className="block font-semibold text-fg text-sm">{title}</span>
+        <span className="block truncate text-fg-muted text-xs">{description}</span>
       </span>
       {selected ? (
-        <span className="flex shrink-0 items-center gap-1 font-semibold text-primary text-xs">
+        <span className="flex shrink-0 items-center gap-1 font-semibold text-accent-fg text-xs">
           <Check aria-hidden size={13} />
           {t.onboarding.agents.selected}
         </span>

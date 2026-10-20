@@ -27,10 +27,10 @@ interface McpServerCardProps {
 }
 
 const statusStyles: Record<McpServerStatus, string> = {
-  connected: 'bg-primary/10 text-primary',
-  connecting: 'bg-on-surface-variant/10 text-on-surface-variant',
-  error: 'bg-error/10 text-error',
-  disconnected: 'bg-on-surface-variant/10 text-on-surface-variant/70',
+  connected: 'bg-accent-subtle text-accent-fg',
+  connecting: 'bg-fill-selected text-fg-muted',
+  error: 'bg-danger-subtle text-danger',
+  disconnected: 'bg-fill-selected text-fg-muted',
 };
 
 export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) {
@@ -69,7 +69,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
   };
 
   return (
-    <Card variant="solid" className="space-y-3 p-4 sm:p-6">
+    <Card className="space-y-3 p-4 sm:p-6">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -80,12 +80,12 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               image={identity.image}
               size="sm"
             />
-            <h4 className="text-sm font-bold text-on-surface">{identity.name}</h4>
-            <span className="rounded-full bg-surface-container-highest px-2 py-0.5 text-xs text-on-surface-variant">
+            <h4 className="text-sm font-bold text-fg">{identity.name}</h4>
+            <span className="rounded-full bg-fill-selected px-2 py-0.5 text-xs text-fg-muted">
               {s.transports[server.transport]}
             </span>
             <span
-              className="inline-flex items-center gap-1 rounded-full bg-surface-container-highest px-2 py-0.5 text-xs text-on-surface-variant"
+              className="inline-flex items-center gap-1 rounded-full bg-fill-selected px-2 py-0.5 text-xs text-fg-muted"
               title={`${s.environmentLabel}: ${environmentName}`}
             >
               <Server size={11} aria-hidden="true" />
@@ -98,7 +98,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               {s.status[server.status]}
             </span>
           </div>
-          <p className="text-xs text-on-surface-variant/70 break-all">
+          <p className="text-xs text-fg-muted break-all">
             {server.transport === 'stdio'
               ? [server.command, ...server.args].filter(Boolean).join(' ')
               : server.url}
@@ -114,7 +114,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
             onChange={(e) => handleToggleEnabled(e.target.checked)}
           />
           <Button
-            variant="ghost"
+            variant="subtle"
             size="sm"
             aria-label={s.editButton}
             onClick={() => onEdit(server)}
@@ -123,10 +123,10 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
           </Button>
           <ToolIdentityMenu identity={identity} defaultName={server.name} />
           <Button
-            variant="ghost"
+            variant="subtle"
             size="sm"
             aria-label={s.deleteServer}
-            className="text-error hover:text-error"
+            className="text-danger hover:text-danger"
             onClick={() => onDelete(server)}
           >
             <Trash2 size={14} />
@@ -140,16 +140,16 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
         </Button>
         {testResult &&
           (testResult.ok ? (
-            <span className="text-xs text-primary" role="status">
+            <span className="text-xs text-accent-fg" role="status">
               {s.testSuccess.replace('{count}', String(testResult.tools?.length ?? 0))}
             </span>
           ) : (
-            <span className="text-xs text-error" role="status">
+            <span className="text-xs text-danger" role="status">
               {testResult.error ?? s.testFailed}
             </span>
           ))}
         {testError && (
-          <span className="text-xs text-error" role="status">
+          <span className="text-xs text-danger" role="status">
             {testError}
           </span>
         )}
@@ -158,7 +158,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
       <button
         type="button"
         onClick={() => setToolsOpen((open) => !open)}
-        className="flex items-center gap-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface transition-colors"
+        className="flex items-center gap-1.5 text-xs font-medium text-fg-muted hover:text-fg transition-colors"
         aria-expanded={toolsOpen}
       >
         {toolsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -166,7 +166,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
       </button>
 
       {toolsOpen && (
-        <div className="border-t border-outline-variant/10">
+        <div className="border-t border-stroke">
           <McpServerTools server={server} />
         </div>
       )}
@@ -174,7 +174,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
       <button
         type="button"
         onClick={() => setResourcesOpen((open) => !open)}
-        className="flex items-center gap-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface transition-colors"
+        className="flex items-center gap-1.5 text-xs font-medium text-fg-muted hover:text-fg transition-colors"
         aria-expanded={resourcesOpen}
       >
         {resourcesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -182,7 +182,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
       </button>
 
       {resourcesOpen && (
-        <div className="border-t border-outline-variant/10">
+        <div className="border-t border-stroke">
           <McpServerResources server={server} />
         </div>
       )}

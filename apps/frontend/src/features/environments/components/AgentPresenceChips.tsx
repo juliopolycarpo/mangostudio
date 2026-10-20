@@ -64,8 +64,8 @@ export function AgentPresenceChips({ targetId, environments }: AgentPresenceChip
             })}
             className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
               present
-                ? 'border-primary/30 bg-primary/10 text-primary'
-                : 'border-outline-variant/20 text-on-surface-variant/60'
+                ? 'border-accent bg-accent-subtle text-accent-fg'
+                : 'border-stroke text-fg-muted'
             }`}
           >
             <span aria-hidden="true">{environment.name}</span>

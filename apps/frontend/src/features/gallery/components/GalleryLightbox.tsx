@@ -49,7 +49,7 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
           // close button in its corner is part of the ring Tab cycles.
           tabIndex={-1}
           {...overlay}
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8 bg-black/90 backdrop-blur-sm outline-none"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8 bg-black/90 outline-none"
           onClick={onClose}
         >
           <button
@@ -72,14 +72,14 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
               className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-2xl"
               referrerPolicy="no-referrer"
             />
-            <div className="mt-6 p-4 bg-surface-container-highest/80 backdrop-blur-md rounded-xl max-w-2xl w-full text-center border border-outline-variant/20">
-              <p className="text-on-surface font-medium">{item.prompt}</p>
+            <div className="mt-6 p-4 bg-fill-selected rounded-xl max-w-2xl w-full text-center border border-stroke">
+              <p className="text-fg font-medium">{item.prompt}</p>
               <a
                 href={item.imageUrl}
                 download={buildGeneratedImageFilename(t.common.downloadFilenamePrefix, item.id)}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-full text-sm font-bold hover:bg-primary/90 transition-colors"
+                className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-accent text-on-accent rounded-full text-sm font-bold hover:bg-accent-hover transition-colors"
               >
                 <Download size={16} />
                 {t.gallery.download}

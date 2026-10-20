@@ -27,7 +27,7 @@ function CacheMetricsTable(props: {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-on-surface-variant/70">
+          <tr className="text-left text-fg-muted">
             <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.cacheLabel}</th>
             <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.hitsLabel}</th>
             <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.missesLabel}</th>
@@ -36,15 +36,13 @@ function CacheMetricsTable(props: {
         </thead>
         <tbody>
           {props.entries.map((entry) => (
-            <tr key={entry.cacheName} className="border-t border-outline-variant/10">
-              <td className="whitespace-nowrap py-2 pr-4 text-on-surface">
+            <tr key={entry.cacheName} className="border-t border-stroke">
+              <td className="whitespace-nowrap py-2 pr-4 text-fg">
                 {props.cacheLabels[entry.cacheName]}
               </td>
-              <td className="whitespace-nowrap py-2 pr-4 text-on-surface">{entry.hits}</td>
-              <td className="whitespace-nowrap py-2 pr-4 text-on-surface">{entry.misses}</td>
-              <td className="whitespace-nowrap py-2 text-on-surface">
-                {formatPercent(entry.hitRate)}
-              </td>
+              <td className="whitespace-nowrap py-2 pr-4 text-fg">{entry.hits}</td>
+              <td className="whitespace-nowrap py-2 pr-4 text-fg">{entry.misses}</td>
+              <td className="whitespace-nowrap py-2 text-fg">{formatPercent(entry.hitRate)}</td>
             </tr>
           ))}
         </tbody>
@@ -76,40 +74,36 @@ function UsageSummaryRow(props: {
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
-        <div className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+      <div className="rounded-xl bg-control px-4 py-3">
+        <div className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {props.labels.textTurnsLabel}
         </div>
-        <div className="mt-1 text-sm font-semibold text-on-surface tabular-nums">
+        <div className="mt-1 text-sm font-semibold text-fg tabular-nums">
           {props.usage.textTurns}
         </div>
       </div>
-      <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
-        <div className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+      <div className="rounded-xl bg-control px-4 py-3">
+        <div className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {props.labels.imageGenerationsLabel}
         </div>
-        <div className="mt-1 text-sm font-semibold text-on-surface tabular-nums">
+        <div className="mt-1 text-sm font-semibold text-fg tabular-nums">
           {props.usage.imageGenerations}
         </div>
       </div>
-      <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
-        <div className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+      <div className="rounded-xl bg-control px-4 py-3">
+        <div className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {props.labels.inputTokensLabel}
         </div>
-        <div className="mt-1 text-sm font-semibold text-on-surface tabular-nums">
+        <div className="mt-1 text-sm font-semibold text-fg tabular-nums">
           {formatTokenCount(props.usage.inputTokens, props.locale)}
         </div>
-        <div className="mt-0.5 text-[10px] text-on-surface-variant/60">
-          {props.labels.inputTokensHint}
-        </div>
+        <div className="mt-0.5 text-[10px] text-fg-muted">{props.labels.inputTokensHint}</div>
       </div>
-      <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
-        <div className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+      <div className="rounded-xl bg-control px-4 py-3">
+        <div className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {props.labels.lastUsedLabel}
         </div>
-        <div className="mt-1 text-sm font-semibold text-on-surface tabular-nums">
-          {lastUsedAgo ?? '—'}
-        </div>
+        <div className="mt-1 text-sm font-semibold text-fg tabular-nums">{lastUsedAgo ?? '—'}</div>
       </div>
     </div>
   );
@@ -140,10 +134,10 @@ export function MetricsSettingsPage() {
 
   return (
     <div className="space-y-4">
-      <Card variant="solid" className="space-y-1 p-4 sm:p-6">
-        <h2 className="text-lg font-semibold text-on-surface">{labels.title}</h2>
-        <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
-        <p className="text-xs text-on-surface-variant/60">
+      <Card className="space-y-1 p-4 sm:p-6">
+        <h2 className="text-lg font-semibold text-fg">{labels.title}</h2>
+        <p className="text-sm text-fg-muted">{labels.description}</p>
+        <p className="text-xs text-fg-muted">
           {labels.generatedAtLabel.replace('{value}', generatedAtLabel)}
         </p>
       </Card>
@@ -157,21 +151,17 @@ export function MetricsSettingsPage() {
       ))}
 
       {isLoading ? (
-        <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
-          {t.common.loading}
-        </Card>
+        <Card className="p-4 sm:p-6 text-sm text-fg-muted">{t.common.loading}</Card>
       ) : error ? (
-        <Card variant="solid" className="p-4 sm:p-6 text-sm text-error">
-          {labels.failedToLoad}
-        </Card>
+        <Card className="p-4 sm:p-6 text-sm text-danger">{labels.failedToLoad}</Card>
       ) : data?.providers.length ? (
         data.providers.map((providerMetrics) => (
-          <Card key={providerMetrics.provider} variant="solid" className="space-y-4 p-4 sm:p-6">
+          <Card key={providerMetrics.provider} className="space-y-4 p-4 sm:p-6">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-              <h3 className="text-base font-semibold text-on-surface">
+              <h3 className="text-base font-semibold text-fg">
                 {t.providers[providerMetrics.provider]}
               </h3>
-              <span className="text-sm text-on-surface-variant/70">
+              <span className="text-sm text-fg-muted">
                 {labels.totalProbeTimeoutsLabel.replace(
                   '{value}',
                   String(providerMetrics.totalProbeTimeouts)
@@ -182,7 +172,7 @@ export function MetricsSettingsPage() {
             <div className="grid gap-4">
               {providerMetrics.usage ? (
                 <div className="space-y-3">
-                  <h4 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                  <h4 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
                     {labels.usageSectionTitle}
                   </h4>
                   <UsageSummaryRow
@@ -202,7 +192,7 @@ export function MetricsSettingsPage() {
               ) : null}
 
               <div className="space-y-3">
-                <h4 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                <h4 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
                   {labels.cacheSectionTitle}
                 </h4>
                 <CacheMetricsTable
@@ -216,19 +206,17 @@ export function MetricsSettingsPage() {
               </div>
 
               <div className="space-y-3">
-                <h4 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                <h4 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
                   {labels.probeSectionTitle}
                 </h4>
                 <div className="space-y-2">
                   {providerMetrics.probeTimeouts.map((entry) => (
                     <div
                       key={entry.operation}
-                      className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl bg-surface-container-lowest px-4 py-3"
+                      className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl bg-control px-4 py-3"
                     >
-                      <span className="text-sm text-on-surface">
-                        {operationLabels[entry.operation]}
-                      </span>
-                      <span className="rounded-full bg-surface-container-high px-2.5 py-1 text-xs font-semibold text-on-surface tabular-nums">
+                      <span className="text-sm text-fg">{operationLabels[entry.operation]}</span>
+                      <span className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold text-fg tabular-nums">
                         {entry.timeoutCount}
                       </span>
                     </div>
@@ -239,9 +227,7 @@ export function MetricsSettingsPage() {
           </Card>
         ))
       ) : (
-        <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
-          {labels.empty}
-        </Card>
+        <Card className="p-4 sm:p-6 text-sm text-fg-muted">{labels.empty}</Card>
       )}
     </div>
   );

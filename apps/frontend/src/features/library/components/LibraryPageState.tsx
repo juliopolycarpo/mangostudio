@@ -21,7 +21,7 @@ export function LibraryPageState({ variant, title, hint, onRetry }: LibraryPageS
   if (variant === 'loading') {
     return (
       <div
-        className="flex min-h-40 flex-col items-center justify-center gap-3 text-on-surface-variant"
+        className="flex min-h-40 flex-col items-center justify-center gap-3 text-fg-muted"
         data-testid="library-loading"
         role={title ? 'status' : undefined}
       >
@@ -37,8 +37,8 @@ export function LibraryPageState({ variant, title, hint, onRetry }: LibraryPageS
         className="flex min-h-40 flex-col items-center justify-center gap-3 text-center"
         data-testid="library-error"
       >
-        <TriangleAlert size={20} className="text-error" />
-        <p className="text-error text-sm">{title ?? l.matrix.loadError}</p>
+        <TriangleAlert size={20} className="text-danger" />
+        <p className="text-danger text-sm">{title ?? l.matrix.loadError}</p>
         {onRetry && (
           <Button variant="secondary" size="sm" onClick={onRetry}>
             {l.matrix.retry}
@@ -53,10 +53,10 @@ export function LibraryPageState({ variant, title, hint, onRetry }: LibraryPageS
       className="flex min-h-40 flex-col items-center justify-center gap-2 px-4 text-center"
       data-testid="library-empty"
     >
-      <p className="text-on-surface text-sm">{title ?? l.matrix.empty}</p>
-      {hint && <p className="text-on-surface-variant/60 text-xs">{hint}</p>}
+      <p className="text-fg text-sm">{title ?? l.matrix.empty}</p>
+      {hint && <p className="text-fg-muted text-xs">{hint}</p>}
       {onRetry && (
-        <Button variant="ghost" size="sm" onClick={onRetry}>
+        <Button variant="subtle" size="sm" onClick={onRetry}>
           {l.matrix.clearFilters}
         </Button>
       )}

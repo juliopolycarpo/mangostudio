@@ -116,15 +116,13 @@ export function McpComposerMenu({
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-outline-variant/20 bg-surface-container-high p-3 shadow-2xl space-y-3">
-          {serversQuery.isLoading && (
-            <p className="text-xs text-on-surface-variant">{t.common.loading}</p>
-          )}
+        <div className="absolute bottom-full left-0 z-40 mb-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-stroke bg-surface p-3 shadow-2xl space-y-3">
+          {serversQuery.isLoading && <p className="text-xs text-fg-muted">{t.common.loading}</p>}
           {!serversQuery.isLoading && servers.length === 0 && (
-            <p className="text-xs text-on-surface-variant/70">{labels.mcpMenuEmpty}</p>
+            <p className="text-xs text-fg-muted">{labels.mcpMenuEmpty}</p>
           )}
           {errorText && (
-            <p className="text-xs text-error" role="alert">
+            <p className="text-xs text-danger" role="alert">
               {errorText}
             </p>
           )}
@@ -178,37 +176,31 @@ function McpServerMenuSection({
   const prompts = promptsQuery.data?.prompts ?? [];
   const resources = resourcesQuery.data?.resources ?? [];
   if (promptsQuery.isLoading || resourcesQuery.isLoading) {
-    return <p className="text-xs text-on-surface-variant">{t.common.loading}</p>;
+    return <p className="text-xs text-fg-muted">{t.common.loading}</p>;
   }
   // A tools-only server (both capabilities unsupported) has nothing to offer.
   if (prompts.length === 0 && resources.length === 0) return null;
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
-        {server.name}
-      </p>
+      <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">{server.name}</p>
 
       {prompts.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[10px] font-medium text-on-surface-variant/50">
-            {labels.mcpPromptsSection}
-          </p>
+          <p className="text-[10px] font-medium text-fg-subtle">{labels.mcpPromptsSection}</p>
           {prompts.map((prompt) => (
             <button
               key={prompt.name}
               type="button"
               disabled={busy}
               onClick={() => onPromptClick(server.id, prompt)}
-              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-surface-container-highest/60 transition-colors disabled:opacity-50"
+              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-fill-hover transition-colors disabled:opacity-50"
             >
-              <SquareSlash size={13} className="mt-0.5 shrink-0 text-primary/70" />
+              <SquareSlash size={13} className="mt-0.5 shrink-0 text-accent-fg" />
               <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-on-surface">
-                  {prompt.name}
-                </span>
+                <span className="block truncate text-xs font-medium text-fg">{prompt.name}</span>
                 {prompt.description && (
-                  <span className="block truncate text-[11px] text-on-surface-variant/70">
+                  <span className="block truncate text-[11px] text-fg-muted">
                     {prompt.description}
                   </span>
                 )}
@@ -220,28 +212,20 @@ function McpServerMenuSection({
 
       {resources.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[10px] font-medium text-on-surface-variant/50">
-            {labels.mcpResourcesSection}
-          </p>
-          {!chatId && (
-            <p className="px-2 text-[11px] text-on-surface-variant/60">{labels.mcpNeedsChat}</p>
-          )}
+          <p className="text-[10px] font-medium text-fg-subtle">{labels.mcpResourcesSection}</p>
+          {!chatId && <p className="px-2 text-[11px] text-fg-muted">{labels.mcpNeedsChat}</p>}
           {resources.map((resource) => (
             <button
               key={resource.uri}
               type="button"
               disabled={busy || !chatId}
               onClick={() => onResourceClick(server.id, resource.uri)}
-              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-surface-container-highest/60 transition-colors disabled:opacity-50"
+              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-fill-hover transition-colors disabled:opacity-50"
             >
-              <FileText size={13} className="mt-0.5 shrink-0 text-primary/70" />
+              <FileText size={13} className="mt-0.5 shrink-0 text-accent-fg" />
               <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-on-surface">
-                  {resource.name}
-                </span>
-                <span className="block truncate text-[11px] text-on-surface-variant/70">
-                  {resource.uri}
-                </span>
+                <span className="block truncate text-xs font-medium text-fg">{resource.name}</span>
+                <span className="block truncate text-[11px] text-fg-muted">{resource.uri}</span>
               </span>
             </button>
           ))}
@@ -270,17 +254,17 @@ function McpPromptArgumentDialog({
   const missing = missingRequiredMcpArguments(prompt.arguments, values);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-sm rounded-3xl p-5 sm:p-6 shadow-2xl border border-outline-variant/20 space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
+      <div className="bg-surface w-full max-w-sm rounded-3xl p-5 sm:p-6 shadow-2xl border border-stroke space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-on-surface">{labels.mcpPromptArgsTitle}</h3>
-            <p className="truncate text-xs text-on-surface-variant/70">{prompt.name}</p>
+            <h3 className="text-base font-bold text-fg">{labels.mcpPromptArgsTitle}</h3>
+            <p className="truncate text-xs text-fg-muted">{prompt.name}</p>
           </div>
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg p-1 text-on-surface-variant hover:text-on-surface"
+            className="rounded-lg p-1 text-fg-muted hover:text-fg"
             aria-label={labels.mcpPromptCancel}
           >
             <X size={16} />
@@ -296,18 +280,16 @@ function McpPromptArgumentDialog({
         >
           {prompt.arguments.map((argument) => (
             <label key={argument.name} className="block space-y-1">
-              <span className="flex items-center gap-2 text-xs font-medium text-on-surface">
+              <span className="flex items-center gap-2 text-xs font-medium text-fg">
                 {argument.name}
                 {argument.required && (
-                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] text-primary">
+                  <span className="rounded-full bg-accent-subtle px-1.5 py-0.5 text-[9px] text-accent-fg">
                     {labels.mcpArgRequired}
                   </span>
                 )}
               </span>
               {argument.description && (
-                <span className="block text-[11px] text-on-surface-variant/70">
-                  {argument.description}
-                </span>
+                <span className="block text-[11px] text-fg-muted">{argument.description}</span>
               )}
               <input
                 type="text"
@@ -315,13 +297,13 @@ function McpPromptArgumentDialog({
                 onChange={(event) =>
                   setValues((current) => ({ ...current, [argument.name]: event.target.value }))
                 }
-                className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:border-primary/40"
+                className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg outline-none focus:border-focus"
               />
             </label>
           ))}
 
           <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" size="sm" type="button" onClick={onCancel}>
+            <Button variant="subtle" size="sm" type="button" onClick={onCancel}>
               {labels.mcpPromptCancel}
             </Button>
             <Button

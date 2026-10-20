@@ -90,7 +90,7 @@ export function WorkspacesGrid({
       )}
 
       {overflowCount > 0 ? (
-        <p className="text-xs text-on-surface-variant/70">
+        <p className="text-xs text-fg-muted">
           {formatMessage(labels.more, { count: String(overflowCount) })}
         </p>
       ) : null}
@@ -108,7 +108,7 @@ function EmptyWorkspaces({ onNewChat }: { onNewChat: () => void }) {
   const labels = t.home.workspaces;
   return (
     <div className="space-y-2.5">
-      <p className="text-sm text-on-surface-variant">{labels.empty}</p>
+      <p className="text-sm text-fg-muted">{labels.empty}</p>
       <Button variant="secondary" size="sm" onClick={onNewChat} className="gap-1.5">
         <MessageSquarePlus size={13} />
         {t.chat.newChat}
@@ -133,13 +133,13 @@ function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: Wor
 
   return (
     <article
-      className="flex h-full min-w-0 flex-col gap-2 rounded-lg border border-outline-variant/15 bg-surface-container-low/60 p-3"
+      className="flex h-full min-w-0 flex-col gap-2 rounded-lg border border-stroke bg-surface p-3"
       data-testid="workspace-tile"
       data-workdir={group.workdir}
     >
       <p className="flex min-w-0 items-center gap-1.5">
-        <FolderGit2 size={13} aria-hidden="true" className="shrink-0 text-on-surface-variant/60" />
-        <span className="truncate font-mono text-sm text-on-surface" title={group.workdir}>
+        <FolderGit2 size={13} aria-hidden="true" className="shrink-0 text-fg-muted" />
+        <span className="truncate font-mono text-sm text-fg" title={group.workdir}>
           {group.name}
         </span>
       </p>
@@ -148,11 +148,11 @@ function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: Wor
 
       {branch && summary ? (
         <div className="space-y-1 font-mono text-[11px]">
-          <p className="flex min-w-0 items-center gap-1.5 text-on-surface-variant">
+          <p className="flex min-w-0 items-center gap-1.5 text-fg-muted">
             <GitBranch size={11} aria-hidden="true" className="shrink-0" />
-            <span className="truncate text-on-surface">{branch}</span>
+            <span className="truncate text-fg">{branch}</span>
           </p>
-          <p className="text-on-surface-variant/80">
+          <p className="text-fg-muted">
             <span
               className={summary.changedFileCount > 0 ? 'text-warning' : 'text-success'}
               data-testid="workspace-tile-tree"
@@ -174,7 +174,7 @@ function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: Wor
         </div>
       ) : null}
 
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-on-surface-variant/70">
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-fg-muted">
         <span>
           {group.sessionCount === 0
             ? labels.noSessions
@@ -207,7 +207,7 @@ function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: Wor
           </Button>
         ) : null}
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           onClick={() => onNewChatInWorkdir(group.workdir, group.environmentId)}
           className="gap-1.5"

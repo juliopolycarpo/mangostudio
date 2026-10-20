@@ -19,15 +19,15 @@ function LogBody({ tail }: { readonly tail: MachineLogTail }) {
   const m = t.environments.machine.logs;
   return (
     <>
-      <p className="truncate font-mono text-xs text-on-surface-variant/70">
+      <p className="truncate font-mono text-xs text-fg-muted">
         {tail.truncated
           ? formatMessage(m.truncated, { count: String(tail.lines.length), file: tail.file ?? '' })
           : tail.file}
       </p>
       {tail.lines.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/70">{m.empty}</p>
+        <p className="text-sm text-fg-muted">{m.empty}</p>
       ) : (
-        <pre className="max-h-80 overflow-auto rounded-xl bg-surface-container-lowest p-3 font-mono text-[11px] leading-relaxed text-on-surface">
+        <pre className="max-h-80 overflow-auto rounded-xl bg-control p-3 font-mono text-[11px] leading-relaxed text-fg">
           {tail.lines.join('\n')}
         </pre>
       )}
@@ -56,15 +56,15 @@ function LogContent({ logs }: { readonly logs: ReturnType<typeof useMachineLogs>
     return (
       <div className="space-y-1" data-testid="machine-logs-refused">
         {logs.data.reasons.map((reason) => (
-          <p key={reason} className="text-sm text-on-surface-variant">
+          <p key={reason} className="text-sm text-fg-muted">
             {machineGuardReasonLabel(t, reason)}
           </p>
         ))}
-        <p className="text-sm text-on-surface-variant/70">{m.readLocally}</p>
+        <p className="text-sm text-fg-muted">{m.readLocally}</p>
       </div>
     );
   }
-  if (!logs.data.tail.file) return <p className="text-sm text-on-surface-variant/70">{m.none}</p>;
+  if (!logs.data.tail.file) return <p className="text-sm text-fg-muted">{m.none}</p>;
   return <LogBody tail={logs.data.tail} />;
 }
 
@@ -78,7 +78,7 @@ export function LogTail() {
       <div className="flex items-center justify-between gap-3">
         <CardSectionLabel>{m.title}</CardSectionLabel>
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           onClick={() => void logs.refetch()}
           loading={logs.isFetching && Boolean(logs.data)}

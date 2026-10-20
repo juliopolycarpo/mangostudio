@@ -38,7 +38,7 @@ interface InstallActionProps {
    * reported as unreachable — by looking at what else is on offer.
    */
   catalog: readonly InstallRecipePreview[];
-  variant?: 'primary' | 'secondary' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'subtle';
   size?: 'sm' | 'md';
   icon?: ReactNode;
   /** Which machine to install on; omitted means the hub's own. */
@@ -109,7 +109,7 @@ export function InstallAction({
   if (!recipe.runnable) {
     return (
       <div className="space-y-2" data-testid="install-unrunnable">
-        <p className="text-sm text-on-surface-variant/70">
+        <p className="text-sm text-fg-muted">
           {s.unrunnable[recipe.unrunnableReason ?? 'vendor-undocumented']}
         </p>
         <CopyCommandBlock recipe={recipe} environmentId={environmentId} />
@@ -119,7 +119,7 @@ export function InstallAction({
 
   if (chain.kind === 'unresolved') {
     return (
-      <p className="text-sm text-on-surface-variant/70" data-testid="install-unresolved">
+      <p className="text-sm text-fg-muted" data-testid="install-unresolved">
         {formatMessage(s.requirementUnavailable, {
           target: runtimeName(recipe.runtimeId),
           requirements: runtimeNameList(resolve, chain.missing),
@@ -170,7 +170,7 @@ export function InstallAction({
       )}
 
       {flow.state.step === 'error' && (
-        <p className="text-sm text-error">{t.environments.install.startError}</p>
+        <p className="text-sm text-danger">{t.environments.install.startError}</p>
       )}
 
       {flow.state.step === 'refused' && (
@@ -202,7 +202,7 @@ export function InstallAction({
       )}
 
       {flow.state.step === 'finished' && chainStopped(flow.state.chain) && currentStep && (
-        <p className="text-sm text-error" data-testid="install-chain-stopped">
+        <p className="text-sm text-danger" data-testid="install-chain-stopped">
           {formatMessage(s.chainStopped, {
             target: runtimeName(recipe.runtimeId),
             prerequisite: runtimeName(currentStep.recipe.runtimeId),

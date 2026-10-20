@@ -150,11 +150,9 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
         <span className={`shrink-0 font-mono font-semibold ${toneTextClass(tone)}`}>
           {part.name}
         </span>
-        {part.title ? (
-          <span className="truncate font-mono text-on-surface-variant/60">{part.title}</span>
-        ) : null}
+        {part.title ? <span className="truncate font-mono text-fg-muted">{part.title}</span> : null}
         {part.truncated ? (
-          <span className="shrink-0 text-on-surface-variant/50" title={labels.truncatedHint}>
+          <span className="shrink-0 text-fg-subtle" title={labels.truncatedHint}>
             <span aria-hidden>…</span>
             <span className="sr-only">{labels.truncatedHint}</span>
           </span>
@@ -163,7 +161,7 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
 
       {expanded && part.detail ? (
         <pre
-          className={`app-scrollbar max-h-64 overflow-auto whitespace-pre-wrap break-words p-3.5 font-mono text-xs text-on-surface-variant/70 ${TIMELINE_PANEL_CLASS}`}
+          className={`app-scrollbar max-h-64 overflow-auto whitespace-pre-wrap break-words p-3.5 font-mono text-xs text-fg-muted ${TIMELINE_PANEL_CLASS}`}
         >
           {part.detail}
         </pre>

@@ -53,7 +53,7 @@ describe('ContextBadge', () => {
 
     expect(container.querySelector('[data-severity="danger"]')).toBeTruthy();
     expect(container.querySelector('svg circle:last-child')?.getAttribute('class')).toContain(
-      'stroke-error'
+      'stroke-danger'
     );
   });
 });

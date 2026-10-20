@@ -68,16 +68,14 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
+      <div className="bg-surface w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke space-y-5">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h3 className="text-xl font-bold text-on-surface">{s.portability.exportTitle}</h3>
-            <p className="mt-1 text-sm text-on-surface-variant/70">
-              {s.portability.exportDescription}
-            </p>
+            <h3 className="text-xl font-bold text-fg">{s.portability.exportTitle}</h3>
+            <p className="mt-1 text-sm text-fg-muted">{s.portability.exportDescription}</p>
           </div>
-          <Button variant="ghost" size="sm" aria-label={s.cancelButton} onClick={onClose}>
+          <Button variant="subtle" size="sm" aria-label={s.cancelButton} onClick={onClose}>
             <X size={16} />
           </Button>
         </div>
@@ -89,7 +87,7 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
               aria-label={s.portability.exportTitle}
               value={preview.content}
               rows={18}
-              className="w-full rounded-2xl px-4 py-3 text-xs font-mono bg-surface-container-low text-on-surface border border-outline-variant/20 focus:outline-none resize-y"
+              className="w-full rounded-2xl px-4 py-3 text-xs font-mono bg-surface text-fg border border-stroke focus:outline-none resize-y"
             />
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" size="sm" onClick={() => void copyJson()}>
@@ -105,18 +103,18 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
         ) : (
           <>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-on-surface-variant">
+              <span className="text-sm text-fg-muted">
                 {s.portability.selectedCount.replace('{count}', String(selected.size))}
               </span>
               <div className="flex gap-2">
                 <Button
-                  variant="ghost"
+                  variant="subtle"
                   size="sm"
                   onClick={() => setSelected(new Set(servers.map((server) => server.id)))}
                 >
                   {s.portability.selectAll}
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                <Button variant="subtle" size="sm" onClick={() => setSelected(new Set())}>
                   {s.portability.selectNone}
                 </Button>
               </div>
@@ -126,7 +124,7 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
                 const checked = selected.has(server.id);
                 return (
                   <li key={server.id}>
-                    <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-outline-variant/20 px-4 py-3 hover:border-primary/40 transition-colors">
+                    <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-stroke px-4 py-3 hover:border-accent transition-colors">
                       <input
                         type="checkbox"
                         className="sr-only"
@@ -135,18 +133,14 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
                       />
                       <span
                         className={`grid size-5 place-items-center rounded-md border ${
-                          checked
-                            ? 'border-primary bg-primary text-on-primary'
-                            : 'border-outline-variant/60'
+                          checked ? 'border-accent bg-accent text-on-accent' : 'border-stroke'
                         }`}
                       >
                         {checked && <Check size={13} />}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-on-surface">
-                          {server.name}
-                        </span>
-                        <span className="block truncate text-xs font-mono text-on-surface-variant/60">
+                        <span className="block text-sm font-medium text-fg">{server.name}</span>
+                        <span className="block truncate text-xs font-mono text-fg-muted">
                           {server.slug} · {s.transports[server.transport]}
                         </span>
                       </span>
@@ -158,7 +152,7 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
           </>
         )}
 
-        {error && <p className="text-sm text-error">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
 
         <div className="flex gap-3 pt-2">
           <Button variant="secondary" className="flex-1" onClick={onClose}>

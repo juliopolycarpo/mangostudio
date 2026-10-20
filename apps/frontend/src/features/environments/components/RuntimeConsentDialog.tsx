@@ -55,19 +55,19 @@ export function RuntimeConsentDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
       data-testid="runtime-consent-dialog"
     >
-      <div className="w-full max-w-md space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-6">
+      <div className="w-full max-w-md space-y-4 rounded-3xl border border-stroke bg-surface p-5 shadow-2xl sm:p-6">
         <div className="space-y-1">
-          <h3 className="text-lg font-bold text-on-surface">{labels.title}</h3>
-          <p className="text-sm text-on-surface-variant/70">
+          <h3 className="text-lg font-bold text-fg">{labels.title}</h3>
+          <p className="text-sm text-fg-muted">
             {formatMessage(labels.description, { name: machineName })}
           </p>
         </div>
 
         <fieldset className="space-y-2">
-          <legend className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+          <legend className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
             {labels.profileLabel}
           </legend>
           <div className="flex flex-wrap gap-1.5">
@@ -79,8 +79,8 @@ export function RuntimeConsentDialog({
                 onClick={() => selectProfile(candidate)}
                 className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors ${
                   profile === candidate
-                    ? 'bg-primary/15 text-primary'
-                    : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container-high'
+                    ? 'bg-accent-subtle text-accent-fg'
+                    : 'bg-control text-fg-muted hover:bg-fill-hover'
                 }`}
               >
                 {t.environments.entities.permissions.profile[candidate]}
@@ -91,13 +91,13 @@ export function RuntimeConsentDialog({
 
         {profile === 'custom' ? (
           <fieldset className="space-y-2">
-            <legend className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+            <legend className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
               {labels.allowLabel}
             </legend>
             <ul className="grid grid-cols-2 gap-1.5">
               {RUNTIME_CAPABILITY_KEYS.map((key) => (
                 <li key={key}>
-                  <label className="flex items-center gap-2 rounded-lg bg-surface-container-lowest px-2 py-1.5 text-[11px] text-on-surface">
+                  <label className="flex items-center gap-2 rounded-lg bg-control px-2 py-1.5 text-[11px] text-fg">
                     <input
                       type="checkbox"
                       checked={allow[key]}
@@ -105,7 +105,7 @@ export function RuntimeConsentDialog({
                       onChange={(event) =>
                         setAllow((current) => ({ ...current, [key]: event.target.checked }))
                       }
-                      className="accent-primary"
+                      className="accent-accent"
                     />
                     {t.environments.entities.permissions.capabilities[key]}
                   </label>
@@ -115,7 +115,7 @@ export function RuntimeConsentDialog({
           </fieldset>
         ) : null}
 
-        <p className="text-[11px] text-on-surface-variant/65">
+        <p className="text-[11px] text-fg-muted">
           {t.environments.entities.permissions.allowShellHonesty}
         </p>
 

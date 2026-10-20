@@ -21,12 +21,12 @@ export function ProbeButton({ isPending, isError, onProbe }: ProbeButtonProps) {
   return (
     <>
       {isError && (
-        <p role="status" className="text-xs text-error" data-testid="probe-error">
+        <p role="status" className="text-xs text-danger" data-testid="probe-error">
           {e.actions.refreshFailed}
         </p>
       )}
       <Button
-        variant="ghost"
+        variant="subtle"
         size="sm"
         loading={isPending}
         onClick={onProbe}

@@ -110,7 +110,7 @@ export function TurnSeparator({
       ) : (
         <ModelMonogram monogram={identity.kind === 'model' ? identity.monogram : ''} />
       )}
-      <span className="shrink-0 text-[11px] text-on-surface-variant/70">{name}</span>
+      <span className="shrink-0 text-[11px] text-fg-muted">{name}</span>
       {/* The chip yields to the working row, but an image turn never draws one:
           `AssistantTurnBody` swaps the whole timeline for the generating
           placeholder, so deferring to it here would leave the separator silent
@@ -118,7 +118,7 @@ export function TurnSeparator({
       <TurnStatusChip phase={status.phase} showWorkingRow={status.showWorkingRow && !isImageTurn} />
       {/* The rule takes the slack, so the actions stay pinned right however
           long the name is. */}
-      <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-outline-variant/25" />
+      <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-stroke" />
       {showTurnActions && (
         <CopyMessageButton
           msg={msg}
@@ -134,7 +134,7 @@ export function TurnSeparator({
         />
       )}
       {turnIsSettledEnoughForActions && (
-        <span className="shrink-0 font-label text-[10px] text-on-surface-variant/50 opacity-0 transition-opacity duration-(--duration-base) group-hover:opacity-100">
+        <span className="shrink-0 text-[10px] text-fg-subtle opacity-0 transition-opacity duration-(--duration-base) group-hover:opacity-100">
           {formatClockTime(msg.timestamp, locale)}
         </span>
       )}

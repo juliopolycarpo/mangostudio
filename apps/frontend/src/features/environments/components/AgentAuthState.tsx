@@ -24,15 +24,15 @@ export function AgentAuthState({ status, showHint = true }: AgentAuthStateProps)
   if (status.authSignal === 'unknown') {
     return (
       <div className="space-y-0.5" data-testid="auth-state" data-auth-signal="unknown">
-        <p className="text-sm text-on-surface-variant">{e.authUnknown}</p>
-        {showHint && <p className="text-xs text-on-surface-variant/60">{e.authUnknownHint}</p>}
+        <p className="text-sm text-fg-muted">{e.authUnknown}</p>
+        {showHint && <p className="text-xs text-fg-muted">{e.authUnknownHint}</p>}
       </div>
     );
   }
 
   return (
     <p
-      className={`text-sm ${status.authenticated ? 'text-primary' : 'text-tertiary'}`}
+      className={`text-sm ${status.authenticated ? 'text-accent-fg' : 'text-info'}`}
       data-testid="auth-state"
       data-auth-signal={status.authSignal}
     >

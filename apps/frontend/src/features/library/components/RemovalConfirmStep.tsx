@@ -36,7 +36,7 @@ export function RemovalConfirmStep({
 
   return (
     <div className="space-y-4" data-testid="removal-confirm-step">
-      <p className="text-on-surface text-sm">
+      <p className="text-fg text-sm">
         {formatMessage(l.removal.confirmDescription, { count: String(planned.length) })}
       </p>
 
@@ -47,8 +47,8 @@ export function RemovalConfirmStep({
             className="text-xs"
             data-testid="removal-summary-row"
           >
-            <span className="text-on-surface">{entry.resourceKey}</span>
-            <span className="block break-all font-mono text-[11px] text-on-surface-variant/60">
+            <span className="text-fg">{entry.resourceKey}</span>
+            <span className="block break-all font-mono text-[11px] text-fg-muted">
               {location.path ?? location.locationId}
             </span>
           </li>
@@ -56,13 +56,13 @@ export function RemovalConfirmStep({
       </ul>
 
       {eliminated.length > 0 && (
-        <div className="space-y-1 rounded-lg border border-tertiary/30 bg-tertiary/5 p-3">
-          <p className="text-tertiary text-xs">{l.removal.eliminatesGroupHeading}</p>
+        <div className="space-y-1 rounded-lg border border-info bg-info-subtle p-3">
+          <p className="text-info text-xs">{l.removal.eliminatesGroupHeading}</p>
           <ul className="space-y-0.5">
             {eliminated.map(({ entry, location }) => (
               <li
                 key={`${entry.resourceKey}:${location.locationId}`}
-                className="text-[11px] text-on-surface-variant/70"
+                className="text-[11px] text-fg-muted"
               >
                 {formatMessage(l.removal.eliminatesGroupRow, {
                   resource: entry.resourceKey,
@@ -77,10 +77,10 @@ export function RemovalConfirmStep({
 
       {lastCopies.length > 0 && (
         <div
-          className="space-y-2 rounded-lg border border-error/30 bg-error/5 p-3"
+          className="space-y-2 rounded-lg border border-danger bg-danger-subtle p-3"
           data-testid="last-copy-acknowledgement"
         >
-          <p className="flex items-start gap-2 text-error text-xs">
+          <p className="flex items-start gap-2 text-danger text-xs">
             <TriangleAlert size={14} className="mt-0.5 shrink-0" />
             {l.removal.lastCopyWarning}
           </p>
@@ -95,9 +95,9 @@ export function RemovalConfirmStep({
                 type="checkbox"
                 checked={draft.acknowledged.has(entry.resourceKey)}
                 onChange={() => onToggleAcknowledgement(entry.resourceKey)}
-                className="mt-0.5 size-3.5 accent-error"
+                className="mt-0.5 size-3.5 accent-danger"
               />
-              <span className="text-on-surface">
+              <span className="text-fg">
                 {formatMessage(l.removal.lastCopyAcknowledge, { resource: entry.resourceKey })}
               </span>
             </label>
@@ -105,7 +105,7 @@ export function RemovalConfirmStep({
         </div>
       )}
 
-      <p className="text-[11px] text-on-surface-variant/60">{l.removal.backupNote}</p>
+      <p className="text-[11px] text-fg-muted">{l.removal.backupNote}</p>
     </div>
   );
 }

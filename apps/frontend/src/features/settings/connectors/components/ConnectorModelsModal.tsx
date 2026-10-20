@@ -78,13 +78,13 @@ export function ConnectorModelsModal({
   const enabledModelIds = new Set(connector.enabledModels);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[90vh] sm:max-h-[80vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
+      <div className="bg-surface w-full max-w-lg rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke flex flex-col max-h-[90vh] sm:max-h-[80vh]">
         <div className="space-y-2 mb-6">
-          <h3 className="text-xl font-bold text-on-surface">{s.modelsModalTitle}</h3>
-          <p className="text-sm text-on-surface-variant/70">
+          <h3 className="text-xl font-bold text-fg">{s.modelsModalTitle}</h3>
+          <p className="text-sm text-fg-muted">
             {s.modelsModalDescription}{' '}
-            <span className="text-primary font-bold">{connector.name}</span>{' '}
+            <span className="text-accent-fg font-bold">{connector.name}</span>{' '}
             {s.modelsModalDescriptionSuffix}
           </p>
         </div>
@@ -95,7 +95,7 @@ export function ConnectorModelsModal({
             value={modelSearchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={s.searchModelsPlaceholder}
-            className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+            className="w-full rounded-xl border border-stroke bg-control px-4 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
           />
         </div>
 
@@ -115,14 +115,14 @@ export function ConnectorModelsModal({
           />
 
           {textModels.length === 0 && imageModels.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-4 py-8 text-center text-sm text-on-surface-variant/70">
+            <div className="rounded-2xl border border-dashed border-stroke bg-control px-4 py-8 text-center text-sm text-fg-muted">
               {s.noModelsDiscovered}
             </div>
           )}
           {(textModels.length > 0 || imageModels.length > 0) &&
             filteredTextModels.length === 0 &&
             filteredImageModels.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-outline-variant/20 bg-surface-container-lowest px-4 py-8 text-center text-sm text-on-surface-variant/70">
+              <div className="rounded-2xl border border-dashed border-stroke bg-control px-4 py-8 text-center text-sm text-fg-muted">
                 {t.common.noResultsFor.replace('{query}', () => modelSearchQuery)}
               </div>
             )}

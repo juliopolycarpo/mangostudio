@@ -42,8 +42,8 @@ export function ExternalAgentSettingsPage() {
   return (
     <Card padded={false} className="space-y-4 p-5">
       <div className="space-y-1">
-        <h2 className="text-base font-semibold text-on-surface">{labels.manageTitle}</h2>
-        <p className="text-xs leading-relaxed text-on-surface-variant">{labels.revokeHint}</p>
+        <h2 className="text-base font-semibold text-fg">{labels.manageTitle}</h2>
+        <p className="text-xs leading-relaxed text-fg-muted">{labels.revokeHint}</p>
       </div>
 
       {/*
@@ -53,9 +53,9 @@ export function ExternalAgentSettingsPage() {
         consents are gone every time the page opens.
       */}
       {disclosures.isLoading ? null : disclosures.records.length === 0 ? (
-        <p className="text-sm text-on-surface-variant">{labels.manageEmpty}</p>
+        <p className="text-sm text-fg-muted">{labels.manageEmpty}</p>
       ) : (
-        <ul className="divide-y divide-outline-variant/10">
+        <ul className="divide-y divide-stroke">
           {disclosures.records.map((record) => (
             <DisclosureRow
               key={record.targetId}
@@ -93,8 +93,8 @@ function DisclosureRow({ targetId, acknowledgedAt, locale, busy, onRevoke }: Dis
   return (
     <li className="flex items-center gap-3 py-3">
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-on-surface">{name}</p>
-        <p className="text-xs text-on-surface-variant">
+        <p className="truncate text-sm text-fg">{name}</p>
+        <p className="text-xs text-fg-muted">
           {formatMessage(labels.acknowledgedAt, {
             date: formatAcknowledgedAt(acknowledgedAt, locale),
           })}
@@ -106,7 +106,7 @@ function DisclosureRow({ targetId, acknowledgedAt, locale, busy, onRevoke }: Dis
         onClick={() => {
           if (known) onRevoke(targetId);
         }}
-        className="shrink-0 cursor-pointer rounded-xl border border-outline-variant/20 px-3 py-1.5 text-xs text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:cursor-default disabled:opacity-50"
+        className="shrink-0 cursor-pointer rounded-xl border border-stroke px-3 py-1.5 text-xs text-fg-muted transition-colors hover:bg-fill-hover disabled:cursor-default disabled:opacity-50"
       >
         {busy ? labels.revoking : labels.revoke}
       </button>

@@ -3,14 +3,6 @@
 
 /* ── Self-hosted fonts (variable, latin subset — covers pt-BR) ── */
 @font-face {
-  font-family: "Manrope";
-  font-style: normal;
-  font-weight: 200 800;
-  font-display: swap;
-  src: url("/fonts/manrope-latin-wght.woff2") format("woff2-variations");
-}
-
-@font-face {
   font-family: "Inter";
   font-style: normal;
   font-weight: 100 900;
@@ -26,52 +18,120 @@
   src: url("/fonts/jetbrains-mono-latin-wght.woff2") format("woff2-variations");
 }
 
-/* `static` because the light theme below is plain CSS that Tailwind does not
+/* The design system lives in `docs/design/`. The values below are its tokens;
+ * `docs/design/foundations.md` says what each one is for, and the conformance
+ * test in `tests/unit/` fails on a class outside the vocabulary — the previous
+ * naming scheme, glass, gradients — so it cannot creep back in.
+ *
+ * `static` because the light theme below is plain CSS that Tailwind does not
  * tree-shake, while a bare `@theme` drops any token no utility references. The
  * two disagree for any token reached through `var()` in an inline style, which
- * Tailwind does not scan: `--color-agent-*` and `--color-accent-muted` are read
- * that way by the composer accent, the home agents card, the sidebar runner
- * badge and the turn separator, so a bare `@theme` would emit them for the
- * light theme only and a `var()` reading them would resolve to nothing in the
- * dark default. */
+ * Tailwind does not scan: `--color-agent-*` is read that way by the composer
+ * accent, the home agents card, the sidebar runner badge and the turn
+ * separator, so a bare `@theme` would emit them for the light theme only and a
+ * `var()` reading them would resolve to nothing in the dark default. */
 @theme static {
-  /* Dark (default): warm blue-free near-black neutrals, mango accent. */
-  --color-surface-dim: #141210;
-  --color-primary: #f5a623;
-  --color-primary-container: #3f2c08;
-  --color-on-primary: #241600;
-  --color-on-primary-container: #ffd9a0;
-  --color-accent-muted: #f5a62326;
-  --color-tertiary: #6fd0bf;
-  --color-surface-container: #201d1a;
-  --color-surface-container-low: #1a1815;
-  --color-surface-container-highest: #322e29;
-  --color-surface-container-high: #262320;
-  --color-surface-container-lowest: #0d0c0a;
-  --color-on-surface: #ece7df;
-  --color-on-surface-variant: #a8a196;
-  --color-outline: #6e675b;
-  --color-outline-variant: #3a362f;
-  --color-surface: #141210;
-  --color-background: #141210;
-  --color-on-background: #ece7df;
+  /* Tailwind's own palette (`bg-amber-500`, `text-blue-400`) is emptied: a hue
+   * that is not a token does not follow the theme, and the contrast guarantees
+   * below say nothing about it. `transparent` and `currentColor` are keywords,
+   * not palette entries, and keep working. */
+  --color-*: initial;
 
-  --color-error: #f87171;
-  --color-on-error: #ffffff;
-  --color-warning: #ffd166;
+  /* Dark (default): warm, blue-free neutrals; one mango accent. */
+
+  /* Surfaces, from the window outward. */
+  --color-canvas: #151311;
+  --color-sidebar: #1b1916;
+  --color-surface: #1f1d1a;
+  --color-surface-raised: #282521;
+
+  /* Controls and the neutral interaction fills drawn over any surface. */
+  --color-control: #2a2723;
+  --color-control-hover: #322f2a;
+  --color-control-pressed: #25221f;
+  --color-fill-hover: #fff5e60f;
+  --color-fill-pressed: #fff5e608;
+  --color-fill-selected: #fff5e614;
+
+  /* Lines: `stroke` divides, `stroke-strong` identifies a control (3:1). */
+  --color-stroke: #35312b;
+  --color-stroke-strong: #807a6e;
+
+  /* Text: all three clear 4.5:1 on every surface above. */
+  --color-fg: #ece7df;
+  --color-fg-muted: #a8a196;
+  --color-fg-subtle: #979084;
+
+  /* Mango. `accent` fills; `accent-fg` is the same hue as text or an icon. */
+  --color-accent: #f5a623;
+  --color-accent-hover: #f7b44a;
+  --color-accent-pressed: #e0961a;
+  --color-on-accent: #241600;
+  --color-accent-fg: #f5a623;
+  --color-accent-subtle: #f5a62324;
+  --color-focus: #f5a623;
+
+  /* Status. Always paired with an icon or a word, never colour alone. */
   --color-success: #4ade80;
+  --color-success-subtle: #4ade801f;
+  --color-warning: #ffd166;
+  --color-warning-subtle: #ffd1661f;
+  --color-danger: #f87171;
+  --color-danger-subtle: #f871711f;
+  --color-danger-solid: #c42b1c;
+  --color-on-danger: #ffffff;
+  --color-info: #7cb8ff;
+  --color-info-subtle: #7cb8ff1f;
 
-  /* Harness identity (runner dots and badges) */
+  /* The veil behind a dialog or the mobile sidebar. A flat tint, never a blur. */
+  --color-scrim: #0000008c;
+
+  /* Harness identity (runner dots, composer frame, badges). */
   --color-agent-mango: #f5a623;
   --color-agent-claude: #e0836a;
   --color-agent-codex: #5cc8e8;
   --color-agent-cursor: #a78bfa;
   --color-agent-generic: #8b8579;
 
-  --font-headline: "Manrope", system-ui, sans-serif;
-  --font-body: "Inter", system-ui, sans-serif;
-  --font-label: "Inter", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* One interface family and one mono. The stacks fall through to what the
+   * platform ships (Segoe UI Variable, Adwaita Sans), which is the point of a
+   * design that has to sit next to native apps. */
+  --font-sans:
+    "Inter", "Segoe UI Variable Text", "Segoe UI", "Adwaita Sans", Cantarell, system-ui, sans-serif;
+  --font-mono:
+    "JetBrains Mono", "Cascadia Mono", "Adwaita Mono", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+
+  /* Four radii by role, plus the pill. `xs` miniatures, `sm` anything clickable,
+   * `md` containers, `lg` large surfaces. `initial` empties Tailwind's own
+   * scale so a stray `rounded-2xl` renders square instead of pretending. */
+  --radius-*: initial;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Elevation is a custom utility below (`shadow-popover`, `shadow-dialog`), not
+   * a theme token: Tailwind inlines a `--shadow-*` value into the utility, so a
+   * per-theme override of the variable would never reach it. */
+  --shadow-*: initial;
+
+  /* The type scale. Sizes only — the family, weight and case are the caller's.
+   * 11px is the floor for any text in the product. */
+  --text-*: initial;
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.75rem;
+  --text-headline: 1.75rem;
+  --text-headline--line-height: 2.25rem;
+  --text-headline--letter-spacing: -0.01em;
 
   /* `--ease-*` is a Tailwind theme namespace, so these emit `ease-standard`
    * and `ease-emphasized` utilities. Durations have no such namespace and live
@@ -107,7 +167,6 @@
   }
 }
 
-/* ── Theme-aware glass & overlay tokens (dark defaults) ── */
 :root {
   /* Not decoration: the browser paints checkboxes, radios, `select` popups and
    * any unstyled scrollbar from `color-scheme`, not from our tokens. Left at
@@ -118,12 +177,10 @@
    * must not have the OS preference disagree with it. */
   color-scheme: dark;
 
-  --glass-bg: rgba(50, 46, 41, 0.6);
-  --glass-elevated: rgba(26, 24, 21, 0.85);
-  --glass-border: rgba(255, 246, 230, 0.1);
-  --glass-ring: rgba(255, 246, 230, 0.05);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  --gradient-primary: linear-gradient(135deg, #f5a623 0%, #d97706 100%);
+  /* Elevation, the only place a shadow is allowed: things that float. Cards,
+   * buttons and the composer are flat and rely on surface + stroke instead. */
+  --elevation-popover: 0 4px 16px rgba(0, 0, 0, 0.36);
+  --elevation-dialog: 0 16px 40px rgba(0, 0, 0, 0.48);
 }
 
 /* ── Duration tokens ──
@@ -154,71 +211,103 @@
 [data-theme="light"] {
   color-scheme: light;
 
-  /* Warm light palette */
-  --color-surface-dim: #eeeae3;
-  --color-primary: #8f5a00;
-  --color-primary-container: #ffe3b3;
-  --color-on-primary: #ffffff;
-  --color-on-primary-container: #5c3d00;
-  --color-accent-muted: #f0a02033;
-  --color-tertiary: #0c7d6c;
-  --color-surface-container: #eee9e1;
-  --color-surface-container-low: #f4f1ea;
-  --color-surface-container-highest: #ddd7cc;
-  --color-surface-container-high: #e7e2d9;
-  --color-surface-container-lowest: #ffffff;
-  --color-on-surface: #1e1b16;
-  --color-on-surface-variant: #56514a;
-  --color-outline: #837d72;
-  --color-outline-variant: #d5cfc4;
-  --color-surface: #faf8f4;
-  --color-background: #faf8f4;
-  --color-on-background: #1e1b16;
+  --color-canvas: #f6f4f0;
+  --color-sidebar: #eeebe5;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
 
-  --color-error: #dc2626;
-  --color-on-error: #ffffff;
-  --color-warning: #b45309;
+  --color-control: #ffffff;
+  --color-control-hover: #f7f5f1;
+  --color-control-pressed: #f0ede7;
+  --color-fill-hover: #2a1e0a0d;
+  --color-fill-pressed: #2a1e0a08;
+  --color-fill-selected: #2a1e0a12;
+
+  --color-stroke: #e3ded5;
+  --color-stroke-strong: #8a8478;
+
+  --color-fg: #1e1b16;
+  --color-fg-muted: #5a554c;
+  --color-fg-subtle: #6b655b;
+
+  /* The accent fill keeps dark text in both themes, so the mango stays orange
+   * instead of turning brown; as text on a light surface it darkens. */
+  --color-accent: #f0a020;
+  --color-accent-hover: #f2ad3c;
+  --color-accent-pressed: #e09114;
+  --color-on-accent: #241600;
+  --color-accent-fg: #8f5a00;
+  --color-accent-subtle: #f5a62329;
+  --color-focus: #8f5a00;
+
   --color-success: #15803d;
+  --color-success-subtle: #15803d1a;
+  --color-warning: #b45309;
+  --color-warning-subtle: #b453091a;
+  --color-danger: #c42b1c;
+  --color-danger-subtle: #c42b1c14;
+  --color-danger-solid: #c42b1c;
+  --color-on-danger: #ffffff;
+  --color-info: #1f63c4;
+  --color-info-subtle: #1f63c414;
 
-  --color-agent-mango: #b36b00;
+  --color-scrim: #1e1b1652;
+
+  --color-agent-mango: #a86400;
   --color-agent-claude: #b9553a;
   --color-agent-codex: #1f7a99;
   --color-agent-cursor: #6d4fd8;
   --color-agent-generic: #736d63;
 
-  /* Glass & overlay overrides */
-  --glass-bg: rgba(255, 253, 248, 0.7);
-  --glass-elevated: rgba(255, 253, 248, 0.9);
-  --glass-border: rgba(40, 30, 10, 0.08);
-  --glass-ring: rgba(40, 30, 10, 0.04);
-  --glass-shadow: 0 8px 32px rgba(30, 20, 5, 0.1);
-  --gradient-primary: linear-gradient(135deg, #d98a0e 0%, #8f5a00 100%);
+  --elevation-popover: 0 4px 16px rgba(30, 20, 5, 0.1);
+  --elevation-dialog: 0 16px 40px rgba(30, 20, 5, 0.14);
+}
+
+/* Elevation utilities. Plain `box-shadow: var()` so the theme override above
+ * reaches them; see the `--shadow-*: initial` note in `@theme`. */
+@utility shadow-popover {
+  box-shadow: var(--elevation-popover);
+}
+
+@utility shadow-dialog {
+  box-shadow: var(--elevation-dialog);
+}
+
+@layer base {
+  /* Tailwind v4 draws a bare `border` in `currentColor`. A divider in the text
+   * colour is never what the product means, so the default is the hairline. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-stroke);
+  }
+
+  /* One focus ring for every control: 2px solid, offset 2px, 3:1 on every
+   * surface. Components do not draw their own; text fields add a border change
+   * on top (see `Input`). */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
 }
 
 body {
-  background-color: var(--color-background);
-  color: var(--color-on-background);
-  font-family: var(--font-body);
+  background-color: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
 }
 
-.glass-panel {
-  background: var(--glass-bg);
-  backdrop-filter: blur(20px);
-}
-
-.glass-elevated {
-  background: var(--glass-elevated);
-  backdrop-filter: blur(12px);
-}
-
-/* ── Reusable dropdown panel (ModelSelector, ThinkingToggle, etc.) ── */
+/* ── Reusable floating panel (menus, listboxes, popovers) ──
+ * A solid surface with a hairline and the popover shadow — no transparency,
+ * no backdrop blur. WinUI flyouts and libadwaita popovers are drawn the same
+ * way, so a native port does not have to un-do a material effect. */
 .dropdown-panel {
-  background: color-mix(in srgb, var(--color-surface) 60%, transparent);
-  backdrop-filter: blur(24px) saturate(1.5);
-  border: 1px solid var(--glass-border);
-  border-radius: 1rem;
-  box-shadow: var(--glass-shadow);
-  outline: 1px solid var(--glass-ring);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-stroke);
+  border-radius: var(--radius-md);
+  box-shadow: var(--elevation-popover);
   overflow: hidden;
   z-index: 100;
 }
@@ -226,26 +315,22 @@ body {
 /* ── Mono micro-labels & terminal-style chips ── */
 /* Layered so Tailwind utilities can override individual properties at call sites. */
 @layer components {
+  /* The one place text is upper-cased: a group heading. Everything else —
+   * badges, buttons, values — is sentence case. */
   .micro-label {
     font-family: var(--font-mono);
-    font-size: 0.6875rem; /* 11px */
+    font-size: var(--text-micro);
     line-height: 1rem;
     font-weight: 500;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--color-on-surface-variant);
+    color: var(--color-fg-subtle);
   }
 
   .skeleton-block {
-    border-radius: 0.375rem;
-    background: linear-gradient(
-      90deg,
-      var(--color-surface-container-high) 25%,
-      var(--color-surface-container-highest) 50%,
-      var(--color-surface-container-high) 75%
-    );
-    background-size: 200% 100%;
-    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    border-radius: var(--radius-xs);
+    background: var(--color-fill-selected);
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
   }
 
   /*
@@ -268,8 +353,8 @@ body {
     appearance: none;
     height: 0.375rem;
     border-radius: 9999px;
-    background: var(--color-surface-container-lowest);
-    border: 1px solid var(--color-outline-variant);
+    background: var(--color-control);
+    border: 1px solid var(--color-stroke-strong);
     cursor: pointer;
   }
 
@@ -279,14 +364,10 @@ body {
     width: 1rem;
     height: 1rem;
     border-radius: 9999px;
-    background: var(--color-primary);
+    background: var(--color-accent);
     /* Rings the thumb against the track it sits on, so the handle keeps an
        edge at both ends of the travel where it overlaps the track's own. */
     border: 2px solid var(--color-surface);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
-    transition:
-      transform 150ms ease,
-      box-shadow 150ms ease;
   }
 
   .range-input::-moz-range-thumb {
@@ -294,20 +375,16 @@ body {
     width: 1rem;
     height: 1rem;
     border-radius: 9999px;
-    background: var(--color-primary);
+    background: var(--color-accent);
     border: 2px solid var(--color-surface);
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.35);
-    transition:
-      transform 150ms ease,
-      box-shadow 150ms ease;
   }
 
   .range-input:not(:disabled):hover::-webkit-slider-thumb {
-    transform: scale(1.15);
+    background: var(--color-accent-hover);
   }
 
   .range-input:not(:disabled):hover::-moz-range-thumb {
-    transform: scale(1.15);
+    background: var(--color-accent-hover);
   }
 
   /* The ring goes on the thumb rather than the element: an outline around the
@@ -317,11 +394,13 @@ body {
   }
 
   .range-input:focus-visible::-webkit-slider-thumb {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 30%, transparent);
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .range-input:focus-visible::-moz-range-thumb {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 30%, transparent);
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .range-input:disabled {
@@ -329,46 +408,47 @@ body {
     opacity: 0.5;
   }
 
+  /* The `key: value` chip, the product's terminal dialect: mono, 24px, a
+   * hairline, no fill. Static ones are information; `Chip` adds hover for the
+   * interactive kind. */
   .terminal-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.25rem;
+    height: 1.5rem;
     font-family: var(--font-mono);
-    font-size: 0.75rem; /* 12px */
-    line-height: 1.25rem;
-    padding: 0.125rem 0.5rem;
-    border: 1px solid var(--color-outline-variant);
-    border-radius: 0.375rem;
-    background: var(--color-surface-container-low);
-    color: var(--color-on-surface-variant);
+    font-size: var(--text-xs);
+    line-height: 1rem;
+    padding: 0 0.5rem;
+    border: 1px solid var(--color-stroke);
+    border-radius: var(--radius-sm);
+    color: var(--color-fg-muted);
   }
 
   /*
    * The composer's own chip dialect: same mono key:value reading as
    * `.terminal-chip`, but borderless, because a dozen bordered pills in one
-   * strip reads as a toolbar rather than as the status line the screenshot
-   * draws. The affordance is the hover fill and the focus ring instead.
+   * strip reads as a toolbar rather than as a status line. The affordance is
+   * the hover fill instead.
    *
-   * Applied to `<button>`, `<select>` and the `<label>`-wrapped selects alike,
-   * so `focus-within` rather than `focus` carries the ring.
+   * Applied to `<button>`, `<select>` and the `<label>`-wrapped selects alike.
    */
   .composer-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.3125rem;
+    gap: 0.25rem;
     max-width: 100%;
     min-width: 0;
+    height: 1.5rem;
     font-family: var(--font-mono);
-    font-size: 0.75rem; /* 12px */
-    line-height: 1.25rem;
-    padding: 0.0625rem 0.375rem;
-    border: 1px solid transparent;
-    border-radius: 0.375rem;
-    color: var(--color-on-surface-variant);
+    font-size: var(--text-xs);
+    line-height: 1rem;
+    padding: 0 0.375rem;
+    border-radius: var(--radius-sm);
+    color: var(--color-fg-muted);
     transition:
-      color 150ms ease,
-      background-color 150ms ease,
-      border-color 150ms ease;
+      color var(--duration-quick) var(--ease-standard),
+      background-color var(--duration-quick) var(--ease-standard);
   }
 
   /* `:not(…, [aria-*])` rather than source order: the hover selector outranks
@@ -379,26 +459,25 @@ body {
     [aria-expanded="true"],
     [aria-pressed="true"]
   ):hover {
-    background: var(--color-surface-container-high);
-    color: var(--color-on-surface);
+    background: var(--color-fill-hover);
+    color: var(--color-fg);
   }
 
-  .composer-chip:focus-visible,
+  /* `focus-within` rather than `focus`: a `<label>` wrapping a `<select>` is the
+   * element that is drawn, while the select is the one that is focused. */
   .composer-chip:has(:focus-visible) {
-    outline: none;
-    border-color: color-mix(in srgb, var(--composer-accent, var(--color-primary)) 45%, transparent);
-    background: var(--color-surface-container-high);
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   .composer-chip[aria-expanded="true"],
   .composer-chip[aria-pressed="true"] {
-    border-color: var(--composer-active-edge);
-    background: var(--composer-active-fill);
-    color: var(--composer-accent);
+    background: var(--color-fill-selected);
+    color: var(--color-fg);
   }
 
   /*
-   * The strip the chips sit in. Separators are a `::before` on later siblings
+   * The strip the chips sit in. Separators are a `::after` on earlier siblings
    * rather than interleaved elements, because half the chips render
    * conditionally from inside their own components — a JS interleave has to
    * predict which of them will return null and leaves a stray `·` whenever it
@@ -423,7 +502,7 @@ body {
   .composer-chip-row > *:not(:empty, .sr-only):has(~ *:not(:empty, .sr-only))::after {
     content: "·";
     margin-inline-start: 0.25rem;
-    color: color-mix(in srgb, var(--color-on-surface-variant) 45%, transparent);
+    color: var(--color-fg-subtle);
   }
 
   /*
@@ -443,7 +522,7 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--color-on-surface);
+    color: var(--color-fg);
   }
 
   /*
@@ -452,97 +531,35 @@ body {
    * The composer is the one surface that acts *as* the runner rather than as
    * the product, so its frame wears the runner's identity colour.
    * `--composer-accent` is set on the shell from the chat's runner — see
-   * `features/chat/lib/composer-accent.ts` — and every rule below reads it
-   * instead of `--color-primary`. A MangoStudio chat resolves it to the mango
-   * token, which *is* the primary, so the default composer is unchanged.
+   * `features/chat/lib/composer-accent.ts` — and the rules below read it
+   * instead of `--color-accent`. A MangoStudio chat resolves it to the mango
+   * token, which *is* the accent, so the default composer is unchanged.
    *
-   * The line is drawn at the frame and the status line. The dropdown panels
-   * these chips open keep the product's primary: they are transient, they
-   * belong to MangoStudio's own chrome rather than to the turn, and a
-   * selection tick that changes hue per chat reads as a bug.
+   * It is drawn at the frame's border while focused, the prompt, the caret and
+   * the runner's own chip. Send is always the product accent: one primary
+   * action, one colour, whoever is answering. The dropdown panels these chips
+   * open keep the product's accent: they are transient and belong to
+   * MangoStudio's own chrome rather than to the turn.
    */
   .composer-shell {
     --composer-accent: var(--color-agent-mango);
-    --composer-send-fill: var(--composer-accent);
     position: relative;
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--composer-edge);
-    border-radius: 0.75rem;
-    background: var(--color-surface-container-lowest);
-    transition:
-      border-color var(--duration-base) var(--ease-standard),
-      box-shadow var(--duration-base) var(--ease-standard);
-  }
-
-  /*
-   * ── One `color-mix()` per rule, and that is not a style preference ──
-   *
-   * The CSS bundler downlevels `color-mix()` into an opaque fallback plus an
-   * `@supports` override, and it re-emits **only the first** mixed declaration
-   * of each rule. Every mix after the first therefore ships fully opaque —
-   * which turned the status-line hairline into a solid bar and a pressed chip
-   * into a solid accent block with accent-coloured text on it. `check`, `test`
-   * and the build were all green through every one of those.
-   *
-   * So each derived tint gets its own rule. `tests/unit/stylesheet-downlevel.test.ts`
-   * asserts the built stylesheet keeps the alpha on all of them, because this
-   * is invisible from every other gate.
-   */
-  .composer-shell {
-    --composer-edge: color-mix(in srgb, var(--composer-accent) 34%, transparent);
-  }
-
-  .composer-shell {
-    --composer-edge-strong: color-mix(in srgb, var(--composer-accent) 58%, transparent);
-  }
-
-  .composer-shell {
-    --composer-ring: color-mix(in srgb, var(--composer-accent) 20%, transparent);
-  }
-
-  .composer-shell {
-    --composer-band: color-mix(in srgb, var(--composer-accent) 8%, transparent);
-  }
-
-  .composer-shell {
-    --composer-band-line: color-mix(in srgb, var(--composer-accent) 18%, transparent);
-  }
-
-  .composer-shell {
-    --composer-active-edge: color-mix(in srgb, var(--composer-accent) 40%, transparent);
-  }
-
-  .composer-shell {
-    --composer-active-fill: color-mix(in srgb, var(--composer-accent) 12%, transparent);
-  }
-
-  /* White-on-accent clears 4.5:1 at every light-theme accent once the fill is
-   * taken down a step; at full strength the mango lands at 4.3:1. The dark
-   * accents are all light enough to carry the near-black `--color-on-primary`
-   * as they are. */
-  [data-theme="light"] .composer-shell {
-    --composer-send-fill: color-mix(in srgb, var(--composer-accent) 88%, #000);
+    border: 1px solid var(--color-stroke);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    transition: border-color var(--duration-base) var(--ease-standard);
   }
 
   .composer-shell:focus-within,
   .composer-shell[data-dragging="true"] {
-    border-color: var(--composer-edge-strong);
-    box-shadow: 0 0 0 1px var(--composer-ring);
+    border-color: var(--composer-accent);
   }
 
-  /*
-   * The status line reads as a terminal's title bar: recessed, tinted toward
-   * the accent, closed off by a hairline of the same hue. The 8%/18% pair is
-   * measured off the inspiration screenshot, whose band is ~9% accent over its
-   * page ground.
-   */
+  /* The status line sits above the input, closed off by a hairline. */
   .composer-statusline {
-    background: var(--composer-band);
-    border-bottom: 1px solid var(--composer-band-line);
-    /* One pixel inside the shell's own radius, so the band's corners sit on
-     * the border rather than cutting across it. */
-    border-radius: 0.6875rem 0.6875rem 0 0;
+    border-bottom: 1px solid var(--color-stroke);
   }
 
   /*
@@ -553,7 +570,7 @@ body {
   .composer-prompt-mark {
     flex-shrink: 0;
     font-family: var(--font-mono);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     line-height: 1.25rem;
     color: var(--composer-accent);
     user-select: none;
@@ -567,23 +584,22 @@ body {
 
   /* The one value on the strip that names *who* is about to answer. */
   .composer-chip-runner {
-    color: var(--composer-accent, var(--color-on-surface));
+    color: var(--composer-accent, var(--color-fg));
   }
 
-  /* Status-line glyphs — folder, server, lock — take the runner's colour too. */
+  /* Status-line glyphs — folder, server, lock — read as secondary text. */
   .composer-chip-icon {
-    color: color-mix(in srgb, var(--composer-accent, var(--color-primary)) 80%, transparent);
+    color: var(--color-fg-muted);
   }
 
   /*
-   * The tool row under the input: `terminal-chip` in a shell dialect —
-   * fully rounded, transparent so the row reads as a footer rather than a
-   * toolbar, and lowercased the way a subcommand is written. The lowercase is
+   * The tool row under the input: a ghost button in the chip's mono dialect,
+   * lowercased the way a subcommand is written. The lowercase is
    * presentational only: the accessible name keeps its capital, so
    * `getByRole('button', { name: 'Capabilities' })` still finds it.
    */
   .composer-tool-chip {
-    border-radius: 9999px;
+    border-radius: var(--radius-sm);
     background: transparent;
     text-transform: lowercase;
     /* Geometry and the disabled treatment belong to the variant, not to each
@@ -591,10 +607,6 @@ body {
      * row's height could only be changed in three components at once. */
     height: 1.75rem;
     flex-shrink: 0;
-    transition:
-      color var(--duration-base) var(--ease-standard),
-      background-color var(--duration-base) var(--ease-standard),
-      border-color var(--duration-base) var(--ease-standard);
   }
 
   .composer-tool-chip:disabled {
@@ -602,20 +614,19 @@ body {
   }
 
   .composer-tool-chip:not(:disabled, [aria-expanded="true"], [aria-pressed="true"]):hover {
-    border-color: var(--color-outline-variant);
-    color: var(--color-on-surface);
+    background: var(--color-fill-hover);
+    color: var(--color-fg);
   }
 
   .composer-tool-chip[aria-expanded="true"],
   .composer-tool-chip[aria-pressed="true"] {
-    border-color: var(--composer-active-edge);
-    background: var(--composer-active-fill);
-    color: var(--composer-accent);
+    background: var(--color-fill-selected);
+    color: var(--color-fg);
   }
 
   .composer-drop-hint {
-    background: var(--composer-active-fill);
-    color: var(--composer-accent);
+    background: var(--color-accent-subtle);
+    color: var(--color-accent-fg);
   }
 }
 
@@ -650,15 +661,15 @@ body {
   background: transparent;
 }
 .app-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--color-outline-variant);
+  background: var(--color-stroke-strong);
   border-radius: 9999px;
 }
 .app-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--color-on-surface-variant);
+  background: var(--color-fg-muted);
 }
 .app-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: var(--color-outline-variant) transparent;
+  scrollbar-color: var(--color-stroke-strong) transparent;
 }
 
 /* ── Copy code button ── */
@@ -672,25 +683,25 @@ body {
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid var(--color-outline-variant);
-  border-radius: 0.375rem;
-  background: var(--color-surface-container-high);
-  color: var(--color-on-surface-variant);
+  border: 1px solid var(--color-stroke);
+  border-radius: var(--radius-sm);
+  background: var(--color-control);
+  color: var(--color-fg-muted);
   cursor: pointer;
   opacity: 0;
   transition:
-    opacity 0.15s ease,
-    background-color 0.15s ease,
-    color 0.15s ease;
+    opacity var(--duration-quick) var(--ease-standard),
+    background-color var(--duration-quick) var(--ease-standard),
+    color var(--duration-quick) var(--ease-standard);
 }
 
 pre:hover .copy-code-btn {
-  opacity: 0.7;
+  opacity: 1;
 }
 
 .copy-code-btn:hover {
-  opacity: 1;
-  background: var(--color-surface-container-highest);
+  background: var(--color-control-hover);
+  color: var(--color-fg);
 }
 
 .copy-code-btn--copied {
@@ -700,16 +711,13 @@ pre:hover .copy-code-btn {
 
 @media (hover: none) {
   .copy-code-btn {
-    opacity: 0.7;
+    opacity: 1;
   }
 }
 
-@keyframes skeleton-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.5;
   }
 }
 
@@ -805,9 +813,7 @@ pre:hover .copy-code-btn {
   top: 0;
   bottom: 0;
   width: 1px;
-  /* `--color-outline-variant` at 1px washes out against the chat surface; the
-   * rail has to read as a line without competing with the steps on it. */
-  background: color-mix(in srgb, var(--color-outline) 60%, transparent);
+  background: var(--color-stroke-strong);
 }
 
 .chat-timeline-item:first-child::before {
@@ -827,27 +833,25 @@ pre:hover .copy-code-btn {
   width: var(--timeline-dot-size);
   height: var(--timeline-dot-size);
   border-radius: 9999px;
-  background: var(--color-outline);
+  background: var(--color-fg-subtle);
   transform: translateY(-50%);
 }
 
-/* One `color-mix()` per rule: Tailwind's downlevelling only restates the first
- * mixed declaration of a rule, so a second one would ship fully opaque. */
 .chat-timeline-item--success::after {
-  background: color-mix(in srgb, var(--color-success) 75%, transparent);
+  background: var(--color-success);
 }
 
 .chat-timeline-item--error::after {
-  background: var(--color-error);
+  background: var(--color-danger);
 }
 
 .chat-timeline-item--active::after {
-  background: var(--color-primary);
+  background: var(--color-accent);
   animation: timeline-node-pulse 1.6s ease-in-out infinite;
 }
 
 .chat-timeline-item--muted::after {
-  background: color-mix(in srgb, var(--color-outline) 60%, transparent);
+  background: var(--color-stroke-strong);
 }
 
 /* A full-bleed marker (system event, provider hand-off) cuts the rail rather

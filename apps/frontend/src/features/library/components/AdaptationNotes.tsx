@@ -46,15 +46,15 @@ export function AdaptationNotes({
 
   return (
     <div
-      className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container/60 p-2.5"
+      className="space-y-2 rounded-lg border border-stroke bg-surface p-2.5"
       data-testid="adaptation-notes"
       data-resource-key={resourceKey}
       data-location-id={locationId}
     >
-      <p className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+      <p className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
         {l.adaptation.heading}
       </p>
-      <p className="text-[11px] text-on-surface-variant">
+      <p className="text-[11px] text-fg-muted">
         {formatMessage(l.adaptation.fromTo, {
           from: l.format[adaptation.fromFormat],
           to: l.format[adaptation.toFormat],
@@ -65,7 +65,7 @@ export function AdaptationNotes({
         {adaptation.availableStrategies.map((candidate) => (
           <label
             key={candidate}
-            className="flex cursor-pointer items-start gap-2 text-[11px] text-on-surface"
+            className="flex cursor-pointer items-start gap-2 text-[11px] text-fg"
           >
             <input
               type="radio"
@@ -73,18 +73,16 @@ export function AdaptationNotes({
               value={candidate}
               checked={strategy === candidate}
               onChange={() => onSelectStrategy(candidate)}
-              className="mt-0.5 size-3 accent-primary"
+              className="mt-0.5 size-3 accent-accent"
             />
             <span className="min-w-0">
               <span className="font-medium">{l.adaptation.strategy[candidate]}</span>
               {adaptation.recommendedStrategy === candidate && (
-                <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] text-primary">
+                <span className="ml-1.5 rounded-full bg-accent-subtle px-1.5 py-0.5 text-[9px] text-accent-fg">
                   {l.adaptation.recommended}
                 </span>
               )}
-              <span className="block text-on-surface-variant/70">
-                {l.adaptation.strategyHint[candidate]}
-              </span>
+              <span className="block text-fg-muted">{l.adaptation.strategyHint[candidate]}</span>
             </span>
           </label>
         ))}
@@ -95,11 +93,11 @@ export function AdaptationNotes({
           {notes.map((note) => (
             <li
               key={`${note.code}:${note.field ?? ''}:${note.message}`}
-              className="text-[11px] text-tertiary"
+              className="text-[11px] text-info"
             >
               <span className="font-medium">{l.adaptation.note[note.code]}</span>
               {note.field && <span className="font-mono"> {note.field}</span>}
-              <span className="text-on-surface-variant/70"> — {note.message}</span>
+              <span className="text-fg-muted"> — {note.message}</span>
             </li>
           ))}
         </ul>
@@ -112,7 +110,7 @@ export function AdaptationNotes({
       {strategy === 'agent' && (
         <label
           htmlFor={acknowledgeId}
-          className="flex cursor-pointer items-start gap-2 rounded-lg bg-error/5 p-2 text-[11px] text-on-surface"
+          className="flex cursor-pointer items-start gap-2 rounded-lg bg-danger-subtle p-2 text-[11px] text-fg"
         >
           <input
             id={acknowledgeId}
@@ -120,7 +118,7 @@ export function AdaptationNotes({
             checked={acknowledged}
             onChange={onToggleAcknowledged}
             data-testid="adaptation-acknowledge"
-            className="mt-0.5 size-3.5 accent-primary"
+            className="mt-0.5 size-3.5 accent-accent"
           />
           <span>{l.adaptation.acknowledge}</span>
         </label>

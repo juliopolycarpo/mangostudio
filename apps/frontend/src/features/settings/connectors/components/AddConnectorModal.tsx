@@ -96,11 +96,11 @@ export function AddConnectorModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-lg rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 flex flex-col max-h-[90vh] sm:max-h-[85vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
+      <div className="bg-surface w-full max-w-lg rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke flex flex-col max-h-[90vh] sm:max-h-[85vh]">
         <div className="space-y-2 mb-5 sm:mb-6">
-          <h3 className="text-xl font-bold text-on-surface">{s.addModalTitle}</h3>
-          <p className="text-sm text-on-surface-variant/70">
+          <h3 className="text-xl font-bold text-fg">{s.addModalTitle}</h3>
+          <p className="text-sm text-fg-muted">
             {isChatGpt ? s.chatgptAddModalDescription : s.addModalDescription}
           </p>
         </div>
@@ -108,7 +108,7 @@ export function AddConnectorModal({
         <div className="flex-1 overflow-y-auto hide-scrollbar pr-1 space-y-4 min-h-0">
           {/* Provider selector */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-on-surface-variant">{s.providerLabel}</span>
+            <span className="text-sm font-medium text-fg-muted">{s.providerLabel}</span>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {PROVIDER_OPTIONS.map(({ id }) => (
                 <button
@@ -125,8 +125,8 @@ export function AddConnectorModal({
                   }}
                   className={`min-h-11 py-2.5 px-3 rounded-xl border text-xs sm:text-sm font-semibold text-center leading-snug transition-all ${
                     form.provider === id
-                      ? 'bg-primary/10 border-primary text-primary'
-                      : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
+                      ? 'bg-accent-subtle border-accent text-accent-fg'
+                      : 'bg-control border-stroke text-fg hover:border-stroke'
                   }`}
                 >
                   {t.providers[id]}
@@ -145,26 +145,26 @@ export function AddConnectorModal({
           />
 
           {isChatGpt ? (
-            <div className="rounded-2xl border border-outline-variant/15 bg-surface-container-lowest p-4 space-y-3">
+            <div className="rounded-2xl border border-stroke bg-control p-4 space-y-3">
               <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-xl bg-primary/10 p-2 text-primary">
+                <div className="mt-0.5 rounded-xl bg-accent-subtle p-2 text-accent-fg">
                   <LogIn size={18} />
                 </div>
                 <div className="space-y-1">
-                  <p className="text-sm font-bold text-on-surface">{s.chatgptOAuthTitle}</p>
-                  <p className="text-xs leading-relaxed text-on-surface-variant/65">
+                  <p className="text-sm font-bold text-fg">{s.chatgptOAuthTitle}</p>
+                  <p className="text-xs leading-relaxed text-fg-muted">
                     {s.chatgptOAuthDescription}
                   </p>
                 </div>
               </div>
 
               {chatGptOAuth.isWaiting ? (
-                <div className="rounded-xl border border-primary/20 bg-primary/10 p-3 space-y-2">
-                  <p className="text-xs font-bold text-primary">{s.chatgptWaitingTitle}</p>
-                  <p className="text-xs leading-relaxed text-on-surface-variant/75">
+                <div className="rounded-xl border border-accent bg-accent-subtle p-3 space-y-2">
+                  <p className="text-xs font-bold text-accent-fg">{s.chatgptWaitingTitle}</p>
+                  <p className="text-xs leading-relaxed text-fg-muted">
                     {s.chatgptWaitingDescription}
                   </p>
-                  <p className="text-[11px] leading-relaxed text-on-surface-variant/55">
+                  <p className="text-[11px] leading-relaxed text-fg-subtle">
                     {s.chatgptRemoteAccessHint}
                   </p>
                   <Button
@@ -180,7 +180,7 @@ export function AddConnectorModal({
               ) : null}
 
               {chatGptOAuth.error ? (
-                <div className="flex items-start gap-2 rounded-xl border border-error/20 bg-error/10 p-3 text-xs text-error">
+                <div className="flex items-start gap-2 rounded-xl border border-danger bg-danger-subtle p-3 text-xs text-danger">
                   <TriangleAlert size={15} className="mt-0.5 shrink-0" />
                   <span>{chatGptOAuth.error}</span>
                 </div>
@@ -213,9 +213,7 @@ export function AddConnectorModal({
                   onChange={(e) => setForm({ ...form, organizationId: e.target.value })}
                   placeholder={s.organizationIdPlaceholder}
                 />
-                <p className="text-[10px] text-on-surface-variant/50 ml-1">
-                  {s.organizationIdHelper}
-                </p>
+                <p className="text-[10px] text-fg-subtle ml-1">{s.organizationIdHelper}</p>
               </div>
               <div className="flex flex-col gap-1">
                 <Input
@@ -226,17 +224,14 @@ export function AddConnectorModal({
                   onChange={(e) => setForm({ ...form, projectId: e.target.value })}
                   placeholder={s.projectIdPlaceholder}
                 />
-                <p className="text-[10px] text-on-surface-variant/50 ml-1">{s.projectIdHelper}</p>
+                <p className="text-[10px] text-fg-subtle ml-1">{s.projectIdHelper}</p>
               </div>
             </>
           )}
 
           {!isChatGpt && (
             <div className="flex flex-col gap-1.5">
-              <label
-                htmlFor="connector-apikey"
-                className="text-sm font-medium text-on-surface-variant"
-              >
+              <label htmlFor="connector-apikey" className="text-sm font-medium text-fg-muted">
                 {s.apiKeyLabel}
               </label>
               <div className="flex gap-2">
@@ -247,10 +242,10 @@ export function AddConnectorModal({
                   onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
                   className="
                   flex-1 rounded-xl px-4 py-2.5 text-sm
-                  bg-surface-container-high text-on-surface
-                  border border-outline-variant/20
-                  placeholder:text-on-surface/30
-                  focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20
+                  bg-surface text-fg
+                  border border-stroke
+                  placeholder:text-fg-subtle
+                  focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus
                   transition-colors
                 "
                   placeholder={s.apiKeyPlaceholder}
@@ -270,7 +265,7 @@ export function AddConnectorModal({
 
           {!isChatGpt && (
             <div className="space-y-3">
-              <span className="text-xs font-bold text-on-surface-variant uppercase ml-1">
+              <span className="text-xs font-bold text-fg-muted uppercase ml-1">
                 {s.saveToLabel}
               </span>
               <div className="grid grid-cols-1 gap-2">
@@ -281,15 +276,15 @@ export function AddConnectorModal({
                     onClick={() => setForm({ ...form, source: src.id })}
                     className={`flex items-start gap-4 p-4 rounded-2xl border text-left transition-all ${
                       form.source === src.id
-                        ? 'bg-primary/10 border-primary text-primary'
-                        : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
+                        ? 'bg-accent-subtle border-accent text-accent-fg'
+                        : 'bg-control border-stroke text-fg hover:border-stroke'
                     }`}
                   >
                     <div className="mt-1">{src.icon}</div>
                     <div className="space-y-0.5">
                       <div className="text-sm font-bold">{src.label}</div>
                       <div
-                        className={`text-[10px] ${form.source === src.id ? 'text-primary/70' : 'text-on-surface-variant/60'}`}
+                        className={`text-[10px] ${form.source === src.id ? 'text-accent-fg' : 'text-fg-muted'}`}
                       >
                         {src.desc}
                       </div>
@@ -302,7 +297,7 @@ export function AddConnectorModal({
         </div>
 
         {!isChatGpt && formError ? (
-          <p className="mt-4 text-xs text-error font-medium text-center shrink-0">{formError}</p>
+          <p className="mt-4 text-xs text-danger font-medium text-center shrink-0">{formError}</p>
         ) : null}
 
         <div className="flex gap-3 pt-4 sm:pt-5 shrink-0">

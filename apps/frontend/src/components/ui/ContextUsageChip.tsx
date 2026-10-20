@@ -67,7 +67,7 @@ export function ContextUsageChip({
         {hasRing ? (
           <ContextRing ratio={ratio} severity={severity} />
         ) : (
-          <span aria-hidden="true" className="tabular-nums text-[11px]">
+          <span aria-hidden="true" className="tabular-nums text-micro">
             {fallback}
           </span>
         )}
@@ -86,12 +86,12 @@ export function ContextUsageChip({
         // Not `.dropdown-panel`: that rule is unlayered, so its 1rem radius
         // outranks any Tailwind utility here and reads as a pill on a panel
         // this short.
-        className="pointer-events-none invisible absolute bottom-full right-0 z-50 mb-1.5 w-max max-w-[min(22rem,80vw)] rounded-lg border border-outline-variant/25 bg-surface-container-high px-2.5 py-2 opacity-0 shadow-lg transition-opacity duration-150 group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
+        className="pointer-events-none invisible absolute bottom-full right-0 z-50 mb-1.5 w-max max-w-[min(22rem,80vw)] rounded-md border border-stroke bg-surface-raised px-3 py-2 opacity-0 shadow-popover transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
       >
-        <span className="flex flex-col gap-0.5 font-mono text-[11px] leading-4 text-on-surface-variant tabular-nums">
+        <span className="flex flex-col gap-0.5 font-mono text-micro text-fg-muted tabular-nums">
           {lines.map((line) => (
             <span key={line.key} data-testid={line.testId}>
-              <span className="opacity-70">{`${line.label}: `}</span>
+              <span className="text-fg-subtle">{`${line.label}: `}</span>
               {line.value}
             </span>
           ))}

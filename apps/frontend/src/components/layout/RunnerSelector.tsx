@@ -170,23 +170,23 @@ export function RunnerSelector({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={labels.label}
-        className="flex h-9 max-w-full items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-3 text-sm font-medium text-on-surface transition-colors hover:border-primary/30 disabled:opacity-50"
+        className="flex h-9 max-w-full items-center gap-2 rounded-full border border-stroke bg-control px-3 text-sm font-medium text-fg transition-colors hover:border-accent disabled:opacity-50"
       >
         <StatusDot tone={availability.tone} />
         {availability.text ? <span className="sr-only">{availability.text}</span> : null}
         <span className="truncate">{activeLabel}</span>
-        <ChevronDown size={14} className="shrink-0 text-on-surface-variant" />
+        <ChevronDown size={14} className="shrink-0 text-fg-muted" />
       </button>
 
       {open ? (
         <div
           role="listbox"
           aria-label={labels.label}
-          className="absolute left-0 z-50 mt-2 max-h-[70vh] w-80 overflow-auto rounded-2xl border border-outline-variant/15 bg-surface-container-low p-2 shadow-2xl"
+          className="absolute left-0 z-50 mt-2 max-h-[70vh] w-80 overflow-auto rounded-2xl border border-stroke bg-surface p-2 shadow-2xl"
         >
           <GroupHeading>{labels.mangostudioGroup}</GroupHeading>
           {isAgentListLoading ? (
-            <p className="px-3 py-2 text-xs text-on-surface-variant/70">{labels.loading}</p>
+            <p className="px-3 py-2 text-xs text-fg-muted">{labels.loading}</p>
           ) : null}
           {selectableAgents.map((agent) => {
             const active = runner.kind === 'mangostudio' && runner.agentId === agent.id;
@@ -217,7 +217,7 @@ export function RunnerSelector({
 
           <GroupHeading>{labels.externalGroup}</GroupHeading>
           {externalAgents.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-on-surface-variant/70">{labels.noneDiscovered}</p>
+            <p className="px-3 py-2 text-xs text-fg-muted">{labels.noneDiscovered}</p>
           ) : null}
           {externalAgents.map((descriptor) => (
             <ExternalRow
@@ -252,9 +252,9 @@ export function RunnerSelector({
                 setOpen(false);
                 onBrowseSessions();
               }}
-              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high"
+              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-fg-muted transition-colors hover:bg-fill-hover"
             >
-              <History size={13} className="shrink-0 text-primary/80" />
+              <History size={13} className="shrink-0 text-accent-fg" />
               <span className="min-w-0 flex-1 truncate">{t.externalAgents.sessions.entry}</span>
             </button>
           ) : null}
@@ -266,7 +266,7 @@ export function RunnerSelector({
 
 function GroupHeading({ children }: { children: string }) {
   return (
-    <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+    <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-fg-muted">
       {children}
     </p>
   );
@@ -289,16 +289,16 @@ function RunnerRow({
       role="option"
       aria-selected={active}
       onClick={onSelect}
-      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-container-high"
+      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-fg transition-colors hover:bg-fill-hover"
     >
       <span className="min-w-0 flex-1 truncate">{name}</span>
       {forkLabel ? (
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
+        <span className="flex shrink-0 items-center gap-1 text-[10px] text-fg-muted">
           <CornerUpRight size={11} />
           {forkLabel}
         </span>
       ) : null}
-      {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
+      {active ? <Check size={14} className="shrink-0 text-accent-fg" /> : null}
     </button>
   );
 }
@@ -387,7 +387,7 @@ function ExternalRow({
           aria-selected={active}
           disabled={!selectable}
           onClick={() => onSelect(forks)}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors enabled:hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-fg transition-colors enabled:hover:bg-fill-hover disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span className="min-w-0 flex-1 truncate">{labels.target[descriptor.targetId]}</span>
           {descriptor.authState === 'signed-in' ? (
@@ -397,17 +397,17 @@ function ExternalRow({
             </span>
           ) : null}
           {selectable && descriptor.authState === 'unknown' ? (
-            <span className="shrink-0 text-[10px] text-on-surface-variant/70">
+            <span className="shrink-0 text-[10px] text-fg-muted">
               {labels.selector.authUnknown}
             </span>
           ) : null}
           {selectable && forks ? (
-            <span className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
+            <span className="flex shrink-0 items-center gap-1 text-[10px] text-fg-muted">
               <CornerUpRight size={11} />
               {labels.selector.continueInNewChat}
             </span>
           ) : null}
-          {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
+          {active ? <Check size={14} className="shrink-0 text-accent-fg" /> : null}
         </button>
         {descriptor.capabilities.accountUsage && selectable ? (
           <div className="shrink-0 pr-2">
@@ -417,24 +417,18 @@ function ExternalRow({
       </div>
 
       {explanation ? (
-        <p className="px-2 pb-2 text-[10px] leading-relaxed text-on-surface-variant/70">
-          {explanation}
-        </p>
+        <p className="px-2 pb-2 text-[10px] leading-relaxed text-fg-muted">{explanation}</p>
       ) : null}
 
       {/* The one refusal whose fix is an administrative change to a machine
           rather than a click. A one-line "this machine has not proven it keeps
           credentials separate" leaves the reader with nothing to do about it. */}
       {reason === 'isolation-unproven' ? (
-        <div className="mx-2 mb-2 space-y-1 rounded-xl border border-outline-variant/15 bg-surface-container-lowest px-2 py-2">
-          <p className="text-[10px] font-medium text-on-surface">{labels.isolation.title}</p>
-          <p className="text-[10px] leading-relaxed text-on-surface-variant/70">
-            {labels.isolation.why}
-          </p>
-          <p className="pt-1 text-[10px] font-medium text-on-surface">
-            {labels.isolation.nextStep}
-          </p>
-          <p className="text-[10px] leading-relaxed text-on-surface-variant/70">
+        <div className="mx-2 mb-2 space-y-1 rounded-xl border border-stroke bg-control px-2 py-2">
+          <p className="text-[10px] font-medium text-fg">{labels.isolation.title}</p>
+          <p className="text-[10px] leading-relaxed text-fg-muted">{labels.isolation.why}</p>
+          <p className="pt-1 text-[10px] font-medium text-fg">{labels.isolation.nextStep}</p>
+          <p className="text-[10px] leading-relaxed text-fg-muted">
             {labels.isolation.next[isolationFixFor(transportKind)]}
           </p>
         </div>

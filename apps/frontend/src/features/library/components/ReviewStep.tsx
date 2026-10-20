@@ -83,7 +83,7 @@ export function ReviewStep({
 
   return (
     <div className="space-y-4" data-testid="review-step">
-      <p className="text-on-surface text-sm" data-testid="review-summary">
+      <p className="text-fg text-sm" data-testid="review-summary">
         {formatMessage(l.review.summary, {
           files: String(summary.writes),
           backups: String(summary.backups),
@@ -109,12 +109,12 @@ export function ReviewStep({
 
       {kept.length > 0 && (
         <section className="space-y-1" data-testid="review-kept">
-          <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
             {l.skipReason['divergence-acknowledged']}
           </h3>
           <ul className="space-y-0.5">
             {kept.map((entry) => (
-              <li key={entry.resourceKey} className="text-on-surface-variant text-xs">
+              <li key={entry.resourceKey} className="text-fg-muted text-xs">
                 {entry.ref.slug}
               </li>
             ))}
@@ -161,11 +161,8 @@ function ReviewGroupSection({
   // destinations, and silence about them would read as an omission.
   if (group === 'noop') {
     return (
-      <details
-        className="rounded-xl border border-outline-variant/15 p-3"
-        data-testid="review-noop"
-      >
-        <summary className="cursor-pointer font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+      <details className="rounded-xl border border-stroke p-3" data-testid="review-noop">
+        <summary className="cursor-pointer font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
           {`${label} (${rows.length})`}
         </summary>
         <div className="mt-2">{body}</div>
@@ -175,7 +172,7 @@ function ReviewGroupSection({
 
   return (
     <section className="space-y-1.5" data-testid="review-group" data-group={group}>
-      <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+      <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
         {`${label} (${rows.length})`}
       </h3>
       {body}
@@ -209,7 +206,7 @@ function ReviewRow({
 
   return (
     <li
-      className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container p-2.5"
+      className="space-y-2 rounded-lg border border-stroke bg-surface p-2.5"
       data-testid="review-row"
       data-operation={write.operation}
       data-resource-key={write.resourceKey}
@@ -217,10 +214,8 @@ function ReviewRow({
       data-location-id={write.locationId}
     >
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="font-medium text-on-surface text-xs">
-          {entry?.ref.slug ?? write.resourceKey}
-        </span>
-        <span className="min-w-0 break-all font-mono text-[11px] text-on-surface-variant/70">
+        <span className="font-medium text-fg text-xs">{entry?.ref.slug ?? write.resourceKey}</span>
+        <span className="min-w-0 break-all font-mono text-[11px] text-fg-muted">
           {write.destination.path ?? write.locationId}
         </span>
       </div>
@@ -249,7 +244,7 @@ function ReviewRow({
       */}
       {write.operation === 'overwrite' && entry && winner && current && (
         <div className="space-y-1" data-testid="overwrite-diff">
-          <p className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+          <p className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
             {l.review.overwriteDiff}
           </p>
           {/*
@@ -277,7 +272,7 @@ function ReviewRow({
       )}
 
       {write.operation === 'noop' && current && (
-        <p className="text-[11px] text-on-surface-variant/60">
+        <p className="text-[11px] text-fg-muted">
           {formatMessage(l.destination.currentContent, { hash: `${hashPrefix(current)}…` })}
         </p>
       )}

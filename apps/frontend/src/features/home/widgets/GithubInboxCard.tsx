@@ -41,10 +41,10 @@ export function GithubInboxCard() {
               href={item.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block min-w-0 focus-visible:outline-2 focus-visible:outline-primary"
+              className="block min-w-0 focus-visible:outline-2 focus-visible:outline-focus"
             >
-              <span className="block truncate text-xs text-on-surface">{item.title}</span>
-              <span className="block truncate font-mono text-[10px] text-on-surface-variant/70">
+              <span className="block truncate text-xs text-fg">{item.title}</span>
+              <span className="block truncate font-mono text-[10px] text-fg-muted">
                 {formatMessage(t.home.github.row, {
                   repo: item.repository.nameWithOwner,
                   number: String(item.number),

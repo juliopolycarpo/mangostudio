@@ -75,12 +75,12 @@ export function GitSettingsPage({
 
   return (
     <div className="space-y-4">
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h2 className="text-lg font-bold text-on-surface">{labels.title}</h2>
-        <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h2 className="text-lg font-bold text-fg">{labels.title}</h2>
+        <p className="text-sm text-fg-muted">{labels.description}</p>
       </Card>
 
-      <Card variant="solid" className="space-y-5 p-4 sm:p-6">
+      <Card className="space-y-5 p-4 sm:p-6">
         <SettingToggle
           label={labels.signCommitsLabel}
           description={labels.signCommitsDescription}
@@ -95,18 +95,18 @@ export function GitSettingsPage({
         />
       </Card>
 
-      <Card variant="solid" className="space-y-5 p-4 sm:p-6">
+      <Card className="space-y-5 p-4 sm:p-6">
         <div className="space-y-1">
-          <h3 className="text-base font-bold text-on-surface">{commitMessageLabels.title}</h3>
-          <p className="text-sm text-on-surface-variant/70">{commitMessageLabels.description}</p>
-          <p className="text-xs text-on-surface-variant/60">{commitMessageLabels.dataNotice}</p>
+          <h3 className="text-base font-bold text-fg">{commitMessageLabels.title}</h3>
+          <p className="text-sm text-fg-muted">{commitMessageLabels.description}</p>
+          <p className="text-xs text-fg-muted">{commitMessageLabels.dataNotice}</p>
         </div>
 
         <div className="space-y-2">
-          <span className="block text-sm font-semibold text-on-surface">
+          <span className="block text-sm font-semibold text-fg">
             {commitMessageLabels.modelLabel}
           </span>
-          <span className="block text-xs text-on-surface-variant/60">
+          <span className="block text-xs text-fg-muted">
             {commitMessageLabels.modelDescription}
           </span>
           <Select
@@ -122,10 +122,10 @@ export function GitSettingsPage({
         </div>
 
         <label className="block space-y-2">
-          <span className="block text-sm font-semibold text-on-surface">
+          <span className="block text-sm font-semibold text-fg">
             {commitMessageLabels.promptLabel}
           </span>
-          <span className="block text-xs text-on-surface-variant/60">
+          <span className="block text-xs text-fg-muted">
             {commitMessageLabels.promptDescription}
           </span>
           <textarea
@@ -134,7 +134,7 @@ export function GitSettingsPage({
             onBlur={persistSystemPrompt}
             aria-label={commitMessageLabels.promptLabel}
             rows={8}
-            className="w-full resize-y rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-3 font-mono text-xs leading-5 text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+            className="w-full resize-y rounded-xl border border-stroke bg-control px-4 py-3 font-mono text-xs leading-5 text-fg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus"
           />
         </label>
         <Button
@@ -151,10 +151,10 @@ export function GitSettingsPage({
         </Button>
 
         <label className="block space-y-2">
-          <span className="block text-sm font-semibold text-on-surface">
+          <span className="block text-sm font-semibold text-fg">
             {commitMessageLabels.maxDiffLabel}
           </span>
-          <span className="block text-xs text-on-surface-variant/60">
+          <span className="block text-xs text-fg-muted">
             {commitMessageLabels.maxDiffDescription}
           </span>
           <input
@@ -166,7 +166,7 @@ export function GitSettingsPage({
             onChange={(event) => setMaxDiffKbDraft(event.target.value)}
             onBlur={persistMaxDiffKb}
             aria-label={commitMessageLabels.maxDiffLabel}
-            className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+            className="w-full rounded-xl border border-stroke bg-control px-4 py-2.5 text-sm text-fg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus"
           />
         </label>
       </Card>

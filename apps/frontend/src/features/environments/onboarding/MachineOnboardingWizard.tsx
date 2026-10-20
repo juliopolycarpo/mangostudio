@@ -88,7 +88,7 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus; a backdrop click closes the same way the X button does.
     <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-background/80 p-4 fade-in backdrop-blur-sm duration-200"
+      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-scrim p-4 fade-in duration-200"
       data-testid="machine-onboarding-wizard"
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return;
@@ -105,14 +105,14 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="max-h-full w-full max-w-lg space-y-5 overflow-y-auto rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8"
+        className="max-h-full w-full max-w-lg space-y-5 overflow-y-auto rounded-3xl border border-stroke bg-surface p-5 shadow-2xl sm:p-8"
       >
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <h3 id={titleId} className="font-bold text-lg text-on-surface">
+            <h3 id={titleId} className="font-bold text-lg text-fg">
               {labels.title}
             </h3>
-            <p className="text-on-surface-variant/60 text-xs">
+            <p className="text-fg-muted text-xs">
               {formatMessage(labels.progress, {
                 step: String(index + 1),
                 total: String(steps.length),
@@ -124,7 +124,7 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
             type="button"
             onClick={onClose}
             data-testid="machine-onboarding-close"
-            className="shrink-0 rounded-xl p-1.5 text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface"
+            className="shrink-0 rounded-xl p-1.5 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
             aria-label={labels.close}
           >
             <X size={16} />
@@ -138,10 +138,10 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
               aria-current={candidate === step ? 'step' : undefined}
               className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
                 position < index
-                  ? 'bg-primary/10 text-primary'
+                  ? 'bg-accent-subtle text-accent-fg'
                   : candidate === step
-                    ? 'bg-primary/15 text-primary'
-                    : 'bg-surface-container-lowest text-on-surface-variant/50'
+                    ? 'bg-accent-subtle text-accent-fg'
+                    : 'bg-control text-fg-subtle'
               }`}
             >
               {labels.steps[candidate]}
@@ -266,7 +266,7 @@ function StepBody(props: StepBodyProps) {
  */
 function MissingEnvironment({ message }: { readonly message: string }) {
   return (
-    <p className="text-error text-xs" role="alert">
+    <p className="text-danger text-xs" role="alert">
       {message}
     </p>
   );

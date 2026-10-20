@@ -38,14 +38,14 @@ export function CacheSettingsSection({
   };
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
+    <Card className="space-y-4 p-4 sm:p-6">
+      <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
         {s.sectionCache}
       </h3>
 
       {cachingSupported && (
         <div className="space-y-2">
-          <label htmlFor="cache-preference" className="text-sm text-on-surface">
+          <label htmlFor="cache-preference" className="text-sm text-fg">
             {s.cachePreference}
           </label>
           <Select
@@ -63,7 +63,7 @@ export function CacheSettingsSection({
 
       {/* Provider-side compaction */}
       <div className="flex items-center justify-between gap-4">
-        <label htmlFor="compaction-toggle" className="text-sm text-on-surface">
+        <label htmlFor="compaction-toggle" className="text-sm text-fg">
           {s.compaction}
         </label>
         <Checkbox

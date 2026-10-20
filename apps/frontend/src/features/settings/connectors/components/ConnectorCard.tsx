@@ -63,8 +63,8 @@ export function ConnectorCard({
 
   return (
     <div
-      className={`bg-surface-container-lowest border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 ${
-        c.needsReauth ? 'border-amber-500/30' : 'border-outline-variant/10'
+      className={`bg-control border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 ${
+        c.needsReauth ? 'border-amber-500/30' : 'border-stroke'
       }`}
     >
       <div className="flex items-start gap-4">
@@ -73,8 +73,8 @@ export function ConnectorCard({
             c.needsReauth
               ? 'bg-amber-500/10 text-amber-200'
               : c.configured
-                ? 'bg-primary/10 text-primary'
-                : 'bg-error/10 text-error/80'
+                ? 'bg-accent-subtle text-accent-fg'
+                : 'bg-danger-subtle text-danger'
           }`}
         >
           {c.needsReauth ? (
@@ -87,8 +87,8 @@ export function ConnectorCard({
         </div>
         <div className="space-y-0.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-bold text-on-surface">{c.name}</h3>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/20">
+            <h3 className="font-bold text-fg">{c.name}</h3>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface text-fg-muted border border-stroke">
               {t.providers[c.provider]}
             </span>
             {isReadOnlyShared && (
@@ -103,30 +103,28 @@ export function ConnectorCard({
             )}
           </div>
           <div className="flex items-center gap-2 text-xs">
-            <span className="flex items-center gap-1 text-on-surface-variant/60">
+            <span className="flex items-center gap-1 text-fg-muted">
               {c.source === 'bun-secrets' && <ShieldCheck size={12} />}
               {c.source === 'config-file' && <FileCode size={12} />}
               {c.source === 'environment' && <Database size={12} />}
               {c.source.replace('-', ' ')}
             </span>
-            <span className="text-outline-variant">•</span>
+            <span className="text-fg-subtle">•</span>
             {isChatGpt ? (
               <>
-                <span className="text-on-surface-variant/60">
+                <span className="text-fg-muted">
                   {s.chatgptSignedInAs.replace(
                     '{account}',
                     c.accountLabel ?? c.maskedSuffix ?? s.chatgptAccountUnknown
                   )}
                 </span>
-                <span className="text-outline-variant">•</span>
-                <span className="rounded-full border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 text-[10px] text-on-surface-variant">
+                <span className="text-fg-subtle">•</span>
+                <span className="rounded-full border border-stroke bg-surface px-2 py-0.5 text-[10px] text-fg-muted">
                   {s.chatgptPlanBadge.replace('{plan}', planLabel)}
                 </span>
               </>
             ) : (
-              <span className="font-mono text-on-surface-variant/60">
-                {c.maskedSuffix ?? '****'}
-              </span>
+              <span className="font-mono text-fg-muted">{c.maskedSuffix ?? '****'}</span>
             )}
           </div>
           {isChatGpt && c.needsReauth ? (
@@ -138,16 +136,14 @@ export function ConnectorCard({
             <ChatGptPromoChip connectorId={c.id} message={c.usage.promoMessage} />
           ) : null}
           {chatGptOAuth.error ? (
-            <p className="text-[11px] leading-relaxed text-error">{chatGptOAuth.error}</p>
+            <p className="text-[11px] leading-relaxed text-danger">{chatGptOAuth.error}</p>
           ) : null}
           {isDeprecated && (
             <p className="text-[11px] leading-relaxed text-amber-200/80">
               {s.deprecatedConnectorNote}
             </p>
           )}
-          {isReadOnlyShared && (
-            <p className="text-[10px] text-on-surface-variant/50">{s.managedExternally}</p>
-          )}
+          {isReadOnlyShared && <p className="text-[10px] text-fg-subtle">{s.managedExternally}</p>}
         </div>
       </div>
 
@@ -155,7 +151,7 @@ export function ConnectorCard({
         {isChatGpt && !c.needsReauth ? (
           <Link
             to="/settings/metrics"
-            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold text-on-surface/70 transition-all duration-200 hover:bg-surface-container-high hover:text-on-surface active:scale-95"
+            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold text-fg-muted transition-all duration-200 hover:bg-fill-hover hover:text-fg"
           >
             <BarChart3 size={15} />
             {s.chatgptSeeMetrics}
@@ -182,7 +178,7 @@ export function ConnectorCard({
           </Button>
         ) : null}
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           onClick={() => onConfigure(c)}
           title={s.configureModels}
@@ -191,11 +187,11 @@ export function ConnectorCard({
           <Settings size={18} />
         </Button>
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           onClick={() => onDelete(c)}
           title={isReadOnlyShared ? s.sharedDeleteBlocked : s.deleteConnector}
-          className="p-2 text-error/70 hover:text-error hover:bg-error/10 disabled:opacity-40 disabled:hover:bg-transparent"
+          className="p-2 text-danger hover:text-danger hover:bg-danger-subtle disabled:opacity-40 disabled:hover:bg-transparent"
           disabled={isReadOnlyShared}
         >
           <Trash2 size={18} />

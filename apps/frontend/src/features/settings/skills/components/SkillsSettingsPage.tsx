@@ -16,7 +16,7 @@ export function SkillsSettingsPage() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
+        <p className="text-sm text-fg-muted">{t.common.loading}</p>
       </div>
     );
   }
@@ -24,8 +24,8 @@ export function SkillsSettingsPage() {
   if (error || !sources) {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-error">{s.loadError}</p>
-        <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+        <p className="text-sm text-danger">{s.loadError}</p>
+        <Button variant="subtle" size="sm" onClick={() => void refetch()}>
           {t.common.retry}
         </Button>
       </div>
@@ -34,12 +34,12 @@ export function SkillsSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-on-surface-variant/60">{s.description}</p>
+      <p className="text-sm text-fg-muted">{s.description}</p>
 
       <SkillSourceToggles sources={sources} />
 
       {skills.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/60 text-center py-8">{s.noSkills}</p>
+        <p className="text-sm text-fg-muted text-center py-8">{s.noSkills}</p>
       ) : (
         <div className="space-y-3">
           {skills.map((skill) => (

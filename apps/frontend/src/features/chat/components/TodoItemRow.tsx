@@ -14,10 +14,10 @@ export function TodoItemRow({ todo }: TodoItemRowProps) {
       <span
         className={
           todo.status === 'completed'
-            ? 'text-on-surface-variant/60 line-through'
+            ? 'text-fg-muted line-through'
             : todo.status === 'in_progress'
-              ? 'font-medium text-on-surface'
-              : 'text-on-surface-variant'
+              ? 'font-medium text-fg'
+              : 'text-fg-muted'
         }
       >
         {todo.content}
@@ -33,7 +33,7 @@ function TodoStatusIcon({ status }: { status: TodoItem['status'] }) {
     return (
       <Check
         size={16}
-        className="mt-0.5 shrink-0 text-primary"
+        className="mt-0.5 shrink-0 text-accent-fg"
         aria-label={labels.statusCompleted}
       />
     );
@@ -42,7 +42,7 @@ function TodoStatusIcon({ status }: { status: TodoItem['status'] }) {
     return (
       <ChevronsRight
         size={16}
-        className="mt-0.5 shrink-0 text-primary"
+        className="mt-0.5 shrink-0 text-accent-fg"
         aria-label={labels.statusInProgress}
       />
     );
@@ -50,7 +50,7 @@ function TodoStatusIcon({ status }: { status: TodoItem['status'] }) {
   return (
     <Circle
       size={16}
-      className="mt-0.5 shrink-0 text-on-surface-variant/50"
+      className="mt-0.5 shrink-0 text-fg-subtle"
       aria-label={labels.statusPending}
     />
   );

@@ -4,10 +4,10 @@ import { cn } from '@/lib/utils';
 type EmptyStateTone = 'neutral' | 'success' | 'warning' | 'error';
 
 const toneStyles: Record<EmptyStateTone, string> = {
-  neutral: 'text-on-surface-variant',
+  neutral: 'text-fg-muted',
   success: 'text-success',
   warning: 'text-warning',
-  error: 'text-error',
+  error: 'text-danger',
 };
 
 interface EmptyStateProps {
@@ -38,8 +38,8 @@ export function EmptyState({
     >
       {icon ? <span className={toneStyles[tone]}>{icon}</span> : null}
       <div className="space-y-1">
-        <p className="text-sm font-semibold text-on-surface">{title}</p>
-        {hint ? <p className="text-xs leading-5 text-on-surface-variant">{hint}</p> : null}
+        <p className="text-sm font-medium text-fg">{title}</p>
+        {hint ? <p className="text-xs text-fg-muted">{hint}</p> : null}
       </div>
       {action}
     </div>

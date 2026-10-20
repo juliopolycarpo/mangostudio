@@ -20,7 +20,7 @@ export function TurnWorkingRow() {
         disclosable={false}
         glyph={<Ellipsis size={11} className="animate-pulse shrink-0" />}
       >
-        <span className="animate-pulse text-on-surface-variant">{t.chat.feed.statusWorking}</span>
+        <span className="animate-pulse text-fg-muted">{t.chat.feed.statusWorking}</span>
       </TimelineRow>
     </TimelineItem>
   );

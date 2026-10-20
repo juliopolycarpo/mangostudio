@@ -8,10 +8,10 @@
 export function StartupSpinner() {
   return (
     <div
-      className="min-h-screen bg-surface-dim flex items-center justify-center"
+      className="min-h-screen bg-canvas flex items-center justify-center"
       data-testid="startup-spinner"
     >
-      <div className="w-6 h-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      <div className="w-6 h-6 rounded-full border-2 border-accent border-t-transparent animate-spin" />
     </div>
   );
 }

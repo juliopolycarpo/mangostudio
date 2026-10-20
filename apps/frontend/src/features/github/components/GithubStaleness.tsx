@@ -35,14 +35,12 @@ export function GithubStaleness({ cachedAt, refreshing }: GithubStalenessProps) 
   const now = useNow(refreshing || cachedAt === null ? null : STALENESS_TICK_MS);
 
   if (refreshing) {
-    return (
-      <span className="text-[10px] text-on-surface-variant">{t.github.staleness.refreshing}</span>
-    );
+    return <span className="text-[10px] text-fg-muted">{t.github.staleness.refreshing}</span>;
   }
   if (cachedAt === null) return null;
 
   return (
-    <span className="text-[10px] text-on-surface-variant" title={new Date(cachedAt).toISOString()}>
+    <span className="text-[10px] text-fg-muted" title={new Date(cachedAt).toISOString()}>
       {formatMessage(t.github.staleness.updated, {
         relative: formatRelativeTime(cachedAt, locale, now),
       })}
@@ -67,7 +65,7 @@ export function GithubRefreshButton({
       disabled={refreshing}
       aria-label={t.github.actions.refresh}
       title={t.github.actions.refresh}
-      className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:cursor-wait focus-visible:outline-2 focus-visible:outline-primary"
+      className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg disabled:cursor-wait focus-visible:outline-2 focus-visible:outline-focus"
     >
       <RefreshCw size={13} className={refreshing ? 'animate-spin' : undefined} />
     </button>

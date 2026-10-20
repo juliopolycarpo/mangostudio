@@ -64,7 +64,7 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
   };
 
   return (
-    <div className="space-y-1.5 rounded-xl border border-outline-variant/15 bg-surface-container/35 p-3">
+    <div className="space-y-1.5 rounded-xl border border-stroke bg-surface p-3">
       <Button
         type="button"
         variant="secondary"
@@ -77,7 +77,7 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
         <ScanSearch size={14} aria-hidden="true" />
         {pending ? labels.running : labels.button}
       </Button>
-      <p className="text-[11px] leading-4 text-on-surface-variant">
+      <p className="text-[11px] leading-4 text-fg-muted">
         {hasChanges
           ? labels.hint.replace('{vendor}', t.externalAgents.target[targetId])
           : labels.noChanges}

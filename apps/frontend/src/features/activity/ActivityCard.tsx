@@ -69,7 +69,7 @@ export function ActivityCard({ limit, compact = false, className }: ActivityCard
       className={className}
       action={
         newCount > 0 ? (
-          <span className="micro-label text-primary/80">
+          <span className="micro-label text-accent-fg">
             {formatMessage(labels.newCount, { count: String(newCount) })}
           </span>
         ) : undefined

@@ -28,10 +28,10 @@ import { HubSkeletonLines } from './HubSkeletonLines';
 const HEALTH_ORDER: readonly RuntimeHealth[] = ['error', 'missing', 'warn', 'ok'];
 
 const COUNT_STYLES: Record<RuntimeHealth, string> = {
-  ok: 'text-primary',
+  ok: 'text-accent-fg',
   warn: 'text-warning',
-  missing: 'text-on-surface-variant',
-  error: 'text-error',
+  missing: 'text-fg-muted',
+  error: 'text-danger',
 };
 
 export function ToolchainHealthCard() {
@@ -54,7 +54,7 @@ export function ToolchainHealthCard() {
       action={
         <Link
           to="/environments/health"
-          className="micro-label text-primary/80 transition-colors hover:text-primary"
+          className="micro-label text-accent-fg transition-colors hover:text-accent-fg"
         >
           {labels.open}
         </Link>
@@ -62,27 +62,19 @@ export function ToolchainHealthCard() {
     >
       {!hasData ? <HubSkeletonLines /> : null}
 
-      {hasData && total === 0 ? (
-        <p className="text-xs text-on-surface-variant">{labels.empty}</p>
-      ) : null}
+      {hasData && total === 0 ? <p className="text-xs text-fg-muted">{labels.empty}</p> : null}
 
       {hasData && total > 0 ? (
         <>
           <ul className="grid grid-cols-4 gap-2" data-testid="home-health-rollup">
             {HEALTH_ORDER.map((health) => (
               <li key={health} className="min-w-0 space-y-0.5" data-health={health}>
-                <p className={`font-headline text-xl font-bold ${COUNT_STYLES[health]}`}>
-                  {counts[health]}
-                </p>
-                <p className="micro-label truncate text-on-surface-variant/60">
-                  {healthLabel(t, health)}
-                </p>
+                <p className={`text-xl font-bold ${COUNT_STYLES[health]}`}>{counts[health]}</p>
+                <p className="micro-label truncate text-fg-muted">{healthLabel(t, health)}</p>
               </li>
             ))}
           </ul>
-          {needsAttention === 0 ? (
-            <p className="text-xs text-on-surface-variant/70">{labels.allClear}</p>
-          ) : null}
+          {needsAttention === 0 ? <p className="text-xs text-fg-muted">{labels.allClear}</p> : null}
         </>
       ) : null}
     </SectionCard>

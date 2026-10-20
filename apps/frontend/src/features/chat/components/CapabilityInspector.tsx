@@ -46,8 +46,8 @@ const REASON_LABEL_KEY: Record<CapabilityReasonCode, keyof CapabilityLabels['rea
 };
 
 const STATE_DOT_CLASS: Record<CapabilityState, string> = {
-  enabled: 'bg-primary',
-  disabled: 'bg-outline-variant',
+  enabled: 'bg-accent',
+  disabled: 'bg-stroke',
   unavailable: 'bg-warning',
 };
 
@@ -108,18 +108,18 @@ export function CapabilityInspector({
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-outline-variant/20 bg-surface-container-high p-3 shadow-2xl space-y-3">
-          <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
+        <div className="absolute bottom-full left-0 z-40 mb-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-stroke bg-surface p-3 shadow-2xl space-y-3">
+          <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-fg-muted">
             <ListChecks size={12} />
             {labels.title}
           </p>
 
-          {!chatId && <p className="text-xs text-on-surface-variant/70">{labels.needsChat}</p>}
+          {!chatId && <p className="text-xs text-fg-muted">{labels.needsChat}</p>}
           {chatId && capabilitiesQuery.isLoading && (
-            <p className="text-xs text-on-surface-variant">{t.common.loading}</p>
+            <p className="text-xs text-fg-muted">{t.common.loading}</p>
           )}
           {chatId && capabilitiesQuery.isError && (
-            <p className="text-xs text-error" role="alert">
+            <p className="text-xs text-danger" role="alert">
               {labels.loadError}
             </p>
           )}
@@ -150,17 +150,17 @@ function CapabilityPanel({
 
   return (
     <>
-      <div className="space-y-0.5 text-[11px] text-on-surface-variant/70">
+      <div className="space-y-0.5 text-[11px] text-fg-muted">
         <p className="truncate">
-          {labels.modelLabel}: <span className="text-on-surface">{capabilities.model.modelId}</span>
+          {labels.modelLabel}: <span className="text-fg">{capabilities.model.modelId}</span>
         </p>
         <p className="truncate">
-          {labels.agentLabel}: <span className="text-on-surface">{capabilities.agent.name}</span>
+          {labels.agentLabel}: <span className="text-fg">{capabilities.agent.name}</span>
         </p>
         {capabilities.contextInfo && (
           <p>
             {labels.contextLabel}:{' '}
-            <span className="text-on-surface">
+            <span className="text-fg">
               {Math.round(capabilities.contextInfo.estimatedUsageRatio * 100)}%
             </span>
           </p>
@@ -200,7 +200,7 @@ function CapabilityPanel({
         manageTo="/settings/mcp"
       >
         {capabilities.mcpServers.length === 0 && (
-          <p className="px-2 text-[11px] text-on-surface-variant/60">{labels.mcpEmpty}</p>
+          <p className="px-2 text-[11px] text-fg-muted">{labels.mcpEmpty}</p>
         )}
         {capabilities.mcpServers.map((server) => (
           <McpServerRows
@@ -219,7 +219,7 @@ function CapabilityPanel({
         manageTo="/settings/skills"
       >
         {capabilities.skills.length === 0 && (
-          <p className="px-2 text-[11px] text-on-surface-variant/60">{labels.skillsEmpty}</p>
+          <p className="px-2 text-[11px] text-fg-muted">{labels.skillsEmpty}</p>
         )}
         {capabilities.skills.map((skill: CapabilitySkillEntry) => (
           <CapabilityRow
@@ -307,10 +307,10 @@ function CapabilitySection({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] font-medium text-on-surface-variant/50">
+        <p className="text-[10px] font-medium text-fg-subtle">
           {heading} · {countLabel}
         </p>
-        <Link to={manageTo} className="text-[10px] text-primary/80 hover:text-primary shrink-0">
+        <Link to={manageTo} className="text-[10px] text-accent-fg hover:text-accent-fg shrink-0">
           {manageLabel}
         </Link>
       </div>
@@ -346,26 +346,22 @@ function CapabilityRow({
       {avatar}
       <span className="min-w-0">
         <span
-          className={`block truncate text-xs ${
-            state === 'enabled' ? 'text-on-surface' : 'text-on-surface-variant/70'
-          }`}
+          className={`block truncate text-xs ${state === 'enabled' ? 'text-fg' : 'text-fg-muted'}`}
         >
           {title}
           <span className="sr-only"> · {labels[STATE_LABEL_KEY[state]]}</span>
-          {subtitle && <span className="text-on-surface-variant/50"> · {subtitle}</span>}
+          {subtitle && <span className="text-fg-subtle"> · {subtitle}</span>}
         </span>
         {reasonText && reasonManageTo && (
           <Link
             to={reasonManageTo}
-            className="block truncate text-[11px] text-primary/80 hover:text-primary"
+            className="block truncate text-[11px] text-accent-fg hover:text-accent-fg"
           >
             {reasonText}
           </Link>
         )}
         {reasonText && !reasonManageTo && (
-          <span className="block truncate text-[11px] text-on-surface-variant/60">
-            {reasonText}
-          </span>
+          <span className="block truncate text-[11px] text-fg-muted">{reasonText}</span>
         )}
       </span>
     </div>

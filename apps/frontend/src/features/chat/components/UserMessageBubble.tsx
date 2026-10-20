@@ -26,11 +26,11 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
   return (
     <>
       {msg.referenceImage && (
-        <div className="mb-2 max-w-[200px] rounded-xl overflow-hidden border border-outline-variant/20 shadow-sm">
+        <div className="mb-2 max-w-[200px] rounded-xl overflow-hidden border border-stroke shadow-sm">
           {referenceImageFailed ? (
-            <div className="w-full aspect-square bg-surface-container-high flex flex-col items-center justify-center text-on-surface-variant/50 p-4 text-center">
+            <div className="w-full aspect-square bg-surface flex flex-col items-center justify-center text-fg-subtle p-4 text-center">
               <ImageOff size={24} className="mb-2" />
-              <span className="text-[10px] font-label">{t.chat.feed.imageUnavailable}</span>
+              <span className="text-[10px]">{t.chat.feed.imageUnavailable}</span>
             </div>
           ) : (
             <ReservedAspectImage
@@ -50,9 +50,9 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
                 href={attachment.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2.5 py-1 text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
+                className="flex items-center gap-1.5 rounded-full border border-stroke bg-control px-2.5 py-1 text-[11px] text-fg-muted hover:text-fg transition-colors"
               >
-                <FileText size={12} className="shrink-0 text-primary/70" />
+                <FileText size={12} className="shrink-0 text-accent-fg" />
                 <span className="max-w-[12rem] truncate">{attachment.originalName}</span>
               </a>
             ))}
@@ -66,13 +66,13 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
           />
         </MessageBubble>
         {isImageTurn && (
-          <span className="flex items-center gap-1 text-[10px] font-bold text-primary/70 font-label px-1">
+          <span className="flex items-center gap-1 text-[10px] font-bold text-accent-fg px-1">
             <Image size={11} />
             {t.chat.feed.createImageBadge}
           </span>
         )}
       </div>
-      <span className="text-[10px] text-on-surface-variant font-label px-2">
+      <span className="text-[10px] text-fg-muted px-2">
         {formatClockTime(msg.timestamp, locale)}
       </span>
     </>

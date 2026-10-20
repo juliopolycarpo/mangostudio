@@ -19,8 +19,8 @@ interface HubProcessCardProps {
 function Row({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-4 text-sm">
-      <span className="text-on-surface-variant/70">{label}</span>
-      <span className="min-w-0 truncate text-right font-mono text-xs text-on-surface">{value}</span>
+      <span className="text-fg-muted">{label}</span>
+      <span className="min-w-0 truncate text-right font-mono text-xs text-fg">{value}</span>
     </div>
   );
 }
@@ -35,7 +35,7 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
       <div className="flex items-start justify-between gap-3">
         <div>
           <CardSectionLabel>{m.hub.title}</CardSectionLabel>
-          <p className="font-headline text-lg font-bold text-on-surface">
+          <p className="text-lg font-bold text-fg">
             {hub.running ? m.hub.running : m.hub.notRunning}
           </p>
         </div>
@@ -76,7 +76,7 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
         </div>
       )}
 
-      <div className="border-t border-outline-variant/15 pt-4">
+      <div className="border-t border-stroke pt-4">
         <MachineActionButton
           status={status}
           action="restart"

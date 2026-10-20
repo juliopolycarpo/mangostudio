@@ -54,13 +54,13 @@ export function Header({
   const { signOut, isSigningOut } = useSignOut();
 
   return (
-    <header className="bg-surface-dim flex justify-between items-center px-3 sm:px-4 md:px-6 py-3 md:py-4 w-full sticky top-0 z-40 border-b border-outline-variant/10">
-      <div className="flex items-center gap-2 sm:gap-3 md:gap-4 min-w-0 flex-1">
+    <header className="sticky top-0 z-40 flex h-12 w-full shrink-0 items-center justify-between border-b border-stroke bg-canvas px-2 sm:px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <Button
-          variant="ghost"
+          variant="subtle"
           size="icon"
           onClick={onMobileMenuToggle}
-          className="md:hidden text-on-surface shrink-0"
+          className="md:hidden shrink-0"
           aria-label={t.common.openMenu}
         >
           <Menu size={ICON_LG} />
@@ -82,54 +82,52 @@ export function Header({
           <div className="hidden min-w-0 flex-1 md:flex">{workspaceContext}</div>
         ) : null}
       </div>
-      <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
+      <div className="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
         {quotaPill}
         {/* The palette's discoverable half. The chord is the fast path, but
             Firefox and Safari both reserve mod+K for their own chrome, so a
             visible affordance is the only one every browser delivers. Below
             `sm` it collapses to the magnifier: the chip is a desktop promise. */}
         <Button
-          variant="secondary"
+          variant="subtle"
+          size="sm"
           onClick={onOpenCommandPalette}
           aria-label={t.commandPalette.open}
           data-testid="command-palette-trigger"
-          className="shrink-0 gap-2 px-2 font-medium text-on-surface-variant sm:px-3"
+          className="shrink-0 gap-2 px-2 text-fg-muted"
         >
           <Search size={ICON_MD} />
           <KbdHint keys={commandPaletteShortcutHint()} className="hidden md:inline-flex" />
         </Button>
         {currentPage === 'chat' && (
-          <Button
-            variant="secondary"
-            onClick={onNewChat}
-            className="px-3 sm:px-4 font-medium shrink-0"
-          >
+          <Button variant="subtle" size="sm" onClick={onNewChat} className="shrink-0">
             <Plus size={ICON_MD} />
             <span className="hidden sm:inline">{t.chat.newChat}</span>
           </Button>
         )}
         <Button
-          variant="secondary"
+          variant="subtle"
           size="icon"
           onClick={onNavigateToSettings}
-          className={`shrink-0 ${currentPage === 'settings' ? 'bg-primary/10 text-primary hover:bg-primary/15' : ''}`}
+          aria-current={currentPage === 'settings' ? 'page' : undefined}
+          className={`shrink-0 ${currentPage === 'settings' ? 'bg-fill-selected' : ''}`}
           title={t.settings.title}
         >
           <Settings size={ICON_MD} />
         </Button>
 
         {session?.user && (
-          <div className="flex items-center gap-2 sm:gap-3 ml-1 sm:ml-2 pl-2 sm:pl-4 border-l border-outline-variant/20 shrink-0">
-            <span className="text-sm font-medium text-on-surface hidden md:inline max-w-[120px] truncate">
+          <div className="ml-1 flex shrink-0 items-center gap-2 border-l border-stroke pl-3 sm:ml-2">
+            <span className="hidden max-w-32 truncate text-sm text-fg-muted md:inline">
               {session.user.name}
             </span>
             <Button
-              variant="secondary"
+              variant="subtle"
               size="sm"
               onClick={() => void signOut()}
               loading={isSigningOut}
               data-testid="logout-button"
-              className="font-medium shrink-0"
+              className="shrink-0"
             >
               <span className="hidden sm:inline">
                 {isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton}

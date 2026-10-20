@@ -51,7 +51,7 @@ export function ToolIdentityHeader({
           size={avatarSize}
         />
         <div className="min-w-0 space-y-1">
-          <h2 className="truncate font-bold text-lg text-on-surface">{identity.name}</h2>
+          <h2 className="truncate font-bold text-lg text-fg">{identity.name}</h2>
           {subtitle}
         </div>
       </div>

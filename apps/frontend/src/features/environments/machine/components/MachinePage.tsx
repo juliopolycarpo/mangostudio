@@ -67,9 +67,9 @@ export function MachinePage() {
 
   const header = (
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <p className="text-sm text-on-surface-variant/60">{m.description}</p>
+      <p className="text-sm text-fg-muted">{m.description}</p>
       <Button
-        variant="ghost"
+        variant="subtle"
         size="sm"
         onClick={() => void status.refetch()}
         loading={status.isFetching && Boolean(status.data)}
@@ -110,12 +110,12 @@ export function MachinePage() {
           so the notice is the banner's condition; the window adds a suffix. */}
       {notice && (
         <div
-          className="rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-on-surface"
+          className="rounded-2xl border border-accent bg-accent-subtle px-4 py-3 text-sm text-fg"
           data-testid="machine-notice"
         >
           {notice}
           {status.awaitingChange && status.error && (
-            <span className="text-on-surface-variant/70"> {m.reconnecting}</span>
+            <span className="text-fg-muted"> {m.reconnecting}</span>
           )}
         </div>
       )}

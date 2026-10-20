@@ -133,11 +133,11 @@ export function ExternalSessionPicker({
         aria-modal="true"
         tabIndex={-1}
         aria-label={labels.title}
-        className="flex max-h-[80vh] w-full max-w-xl flex-col gap-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-5 text-sm text-on-surface shadow-2xl outline-none"
+        className="flex max-h-[80vh] w-full max-w-xl flex-col gap-3 rounded-2xl border border-stroke bg-surface p-5 text-sm text-fg shadow-2xl outline-none"
       >
         <div className="space-y-1">
           <h2 className="text-base font-semibold">{labels.title}</h2>
-          <p className="text-xs leading-relaxed text-on-surface-variant">
+          <p className="text-xs leading-relaxed text-fg-muted">
             {labels.subtitle.replace('{environment}', environmentName)}
           </p>
         </div>
@@ -147,13 +147,11 @@ export function ExternalSessionPicker({
             type="button"
             aria-pressed={thisWorkspaceOnly}
             onClick={() => setThisWorkspaceOnly((value) => !value)}
-            className="flex w-fit items-center gap-2 rounded-full border border-outline-variant/20 px-3 py-1 text-xs text-on-surface-variant transition-colors hover:bg-surface-container-high"
+            className="flex w-fit items-center gap-2 rounded-full border border-stroke px-3 py-1 text-xs text-fg-muted transition-colors hover:bg-fill-hover"
           >
             <span
               className={`flex h-3.5 w-3.5 items-center justify-center rounded border ${
-                thisWorkspaceOnly
-                  ? 'border-primary bg-primary text-on-primary'
-                  : 'border-outline-variant/40'
+                thisWorkspaceOnly ? 'border-accent bg-accent text-on-accent' : 'border-stroke'
               }`}
             >
               {thisWorkspaceOnly ? <Check size={10} /> : null}
@@ -185,7 +183,7 @@ export function ExternalSessionPicker({
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high"
+            className="cursor-pointer rounded-xl border border-stroke px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-fill-hover"
           >
             {t.externalAgents.disclosure.close}
           </button>
@@ -217,23 +215,23 @@ function TargetGroup({
 
   return (
     <section className="space-y-1">
-      <h3 className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+      <h3 className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
         {t.externalAgents.target[targetId]}
       </h3>
 
       {!canList ? (
-        <p className="px-1 text-[11px] leading-relaxed text-on-surface-variant/70">
+        <p className="px-1 text-[11px] leading-relaxed text-fg-muted">
           {targetId === 'claude' ? labels.unsupportedClaude : labels.unsupported}
         </p>
       ) : state === undefined || state.status === 'loading' ? (
-        <p className="flex items-center gap-2 px-1 text-[11px] text-on-surface-variant/70">
+        <p className="flex items-center gap-2 px-1 text-[11px] text-fg-muted">
           <Loader2 size={12} className="animate-spin" />
           {labels.loading}
         </p>
       ) : state.status === 'failed' ? (
-        <p className="px-1 text-[11px] text-error/80">{labels.loadFailed}</p>
+        <p className="px-1 text-[11px] text-danger">{labels.loadFailed}</p>
       ) : state.page.sessions.length === 0 ? (
-        <p className="px-1 text-[11px] text-on-surface-variant/70">
+        <p className="px-1 text-[11px] text-fg-muted">
           {filtered ? labels.emptyInWorkspace : labels.empty}
         </p>
       ) : (
@@ -254,7 +252,7 @@ function TargetGroup({
             <button
               type="button"
               onClick={() => onLoadMore(state.page.nextCursor as string)}
-              className="flex items-center gap-1 px-1 py-1 text-[11px] text-on-surface-variant/70 transition-colors hover:text-on-surface"
+              className="flex items-center gap-1 px-1 py-1 text-[11px] text-fg-muted transition-colors hover:text-fg"
             >
               <RefreshCw size={11} />
               {labels.loadMore}
@@ -298,14 +296,14 @@ function SessionRow({
       type="button"
       onClick={onAdopt}
       disabled={disabled}
-      className="flex w-full flex-col items-start gap-0.5 rounded-xl px-2 py-2 text-left transition-colors enabled:hover:bg-surface-container-high disabled:opacity-60"
+      className="flex w-full flex-col items-start gap-0.5 rounded-xl px-2 py-2 text-left transition-colors enabled:hover:bg-fill-hover disabled:opacity-60"
     >
       {heading ? (
-        <span className="w-full truncate text-xs text-on-surface">{heading}</span>
+        <span className="w-full truncate text-xs text-fg">{heading}</span>
       ) : session.workspacePath ? null : (
-        <span className="w-full truncate text-xs text-on-surface-variant/70">{labels.noTitle}</span>
+        <span className="w-full truncate text-xs text-fg-muted">{labels.noTitle}</span>
       )}
-      <span className="flex w-full items-center gap-2 text-[10px] text-on-surface-variant/70">
+      <span className="flex w-full items-center gap-2 text-[10px] text-fg-muted">
         {session.workspacePath ? (
           <span className="min-w-0 flex-1 truncate">{session.workspacePath}</span>
         ) : null}

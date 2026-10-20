@@ -64,11 +64,11 @@ interface StatusPresentation {
 const STATUS_PRESENTATION: Readonly<Record<GitFileStatus, StatusPresentation>> = {
   modified: { glyph: 'M', labelKey: 'modified', color: 'text-warning' },
   added: { glyph: 'A', labelKey: 'added', color: 'text-success' },
-  deleted: { glyph: 'D', labelKey: 'deleted', color: 'text-error' },
-  renamed: { glyph: 'R', labelKey: 'renamed', color: 'text-primary' },
-  copied: { glyph: 'C', labelKey: 'copied', color: 'text-primary' },
-  untracked: { glyph: '?', labelKey: 'untracked', color: 'text-on-surface-variant' },
-  conflicted: { glyph: '!', labelKey: 'conflicted', color: 'text-error' },
+  deleted: { glyph: 'D', labelKey: 'deleted', color: 'text-danger' },
+  renamed: { glyph: 'R', labelKey: 'renamed', color: 'text-accent-fg' },
+  copied: { glyph: 'C', labelKey: 'copied', color: 'text-accent-fg' },
+  untracked: { glyph: '?', labelKey: 'untracked', color: 'text-fg-muted' },
+  conflicted: { glyph: '!', labelKey: 'conflicted', color: 'text-danger' },
   'type-changed': { glyph: 'T', labelKey: 'typeChanged', color: 'text-warning' },
 };
 
@@ -99,19 +99,19 @@ export function GitPanel({ chatId }: GitPanelProps) {
 
   return (
     <section aria-label={labels.title} className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-outline-variant/15 px-3">
-        <div className="min-w-0 flex-1 text-on-surface-variant">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke px-3">
+        <div className="min-w-0 flex-1 text-fg-muted">
           <RepositoryName state={stateQuery.data} />
         </div>
         <Button
           type="button"
-          variant="ghost"
+          variant="subtle"
           size="icon"
           onClick={() => void refresh()}
           aria-label={labels.refresh}
           title={labels.refresh}
           disabled={isFetching}
-          className="size-7 text-on-surface-variant disabled:cursor-wait focus-visible:outline-2 focus-visible:outline-primary"
+          className="size-7 text-fg-muted disabled:cursor-wait focus-visible:outline-2 focus-visible:outline-focus"
         >
           <RefreshCw size={ICON_SM} className={isFetching ? 'animate-spin' : undefined} />
         </Button>
@@ -121,11 +121,11 @@ export function GitPanel({ chatId }: GitPanelProps) {
           trigger={(triggerProps) => (
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="icon"
               aria-label={labels.menu.open}
               title={labels.menu.open}
-              className="size-7 text-on-surface-variant focus-visible:outline-2 focus-visible:outline-primary"
+              className="size-7 text-fg-muted focus-visible:outline-2 focus-visible:outline-focus"
               {...triggerProps}
             >
               <MoreHorizontal size={ICON_SM} />
@@ -187,7 +187,7 @@ function RepositoryName({ state }: { readonly state: GitRepoState | undefined })
   if (!state || (state.state !== 'repo' && state.state !== 'not-a-repo')) return null;
   const path = state.state === 'repo' ? state.root : state.workdir;
   return (
-    <p className="truncate font-mono text-[11px] text-on-surface-variant" title={path}>
+    <p className="truncate font-mono text-[11px] text-fg-muted" title={path}>
       {basename(path)}
     </p>
   );
@@ -268,7 +268,7 @@ function GitPanelContent({
               >
                 {initPending ? labels.initializing : labels.initialize}
               </Button>
-              {initError ? <p className="text-xs text-error">{labels.initializeFailed}</p> : null}
+              {initError ? <p className="text-xs text-danger">{labels.initializeFailed}</p> : null}
             </>
           }
         />
@@ -367,7 +367,7 @@ function RepositoryStatus({
         />
         {status.branch.upstream ? (
           <p
-            className="w-full truncate pl-6 font-mono text-[11px] text-on-surface-variant"
+            className="w-full truncate pl-6 font-mono text-[11px] text-fg-muted"
             title={status.branch.upstream}
           >
             {status.branch.upstream}
@@ -375,7 +375,7 @@ function RepositoryStatus({
         ) : null}
       </section>
 
-      <div className="grid grid-cols-2 rounded-xl bg-surface-container/60 p-1" role="tablist">
+      <div className="grid grid-cols-2 rounded-xl bg-surface p-1" role="tablist">
         {(['changes', 'history'] as const).map((tab) => (
           <button
             key={tab}
@@ -387,9 +387,7 @@ function RepositoryStatus({
               setDiffSelection(null);
             }}
             className={`cursor-pointer rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-              view === tab
-                ? 'bg-surface-container-highest text-on-surface shadow-sm'
-                : 'text-on-surface-variant hover:text-on-surface'
+              view === tab ? 'bg-fill-selected text-fg shadow-sm' : 'text-fg-muted hover:text-fg'
             }`}
           >
             {labels.navigation[tab]}
@@ -441,7 +439,7 @@ function RepositoryStatus({
           ) : (
             <div className="space-y-4">
               {status.conflicted.length > 0 ? (
-                <div className="rounded-xl border border-error/30 bg-error/10 px-3 py-2.5 text-[11px] leading-4 text-error">
+                <div className="rounded-xl border border-danger bg-danger-subtle px-3 py-2.5 text-[11px] leading-4 text-danger">
                   {labels.conflicts.hint}
                 </div>
               ) : null}
@@ -494,18 +492,18 @@ function RepositoryStatus({
           role="dialog"
           aria-modal="true"
           aria-labelledby="git-discard-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
         >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
             <div className="space-y-2">
-              <h3 id="git-discard-title" className="text-lg font-bold text-on-surface">
+              <h3 id="git-discard-title" className="text-lg font-bold text-fg">
                 {discardCopy(discardRequest, labels.discard).title}
               </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">
+              <p className="text-sm leading-5 text-fg-muted">
                 {discardCopy(discardRequest, labels.discard).hint}
               </p>
             </div>
-            <ul className="max-h-32 overflow-y-auto rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
+            <ul className="max-h-32 overflow-y-auto rounded-xl bg-control p-2 font-mono text-[11px]">
               {discardRequest
                 .flatMap((selection) => selection.paths)
                 .map((path) => (
@@ -616,7 +614,7 @@ function ChangeGroup({
     <section>
       <MicroLabel as="h3" className="mb-1.5 flex items-center gap-2 font-bold tracking-[0.12em]">
         <span>{title}</span>
-        <span className="rounded-full bg-surface-container-high px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
+        <span className="rounded-full bg-surface px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
           {changes.length}
         </span>
         <span className="ml-auto flex items-center gap-0.5">
@@ -670,7 +668,7 @@ function ChangeGroup({
           </GroupButton>
         </span>
       </MicroLabel>
-      <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
+      <ul className="overflow-hidden rounded-xl border border-stroke bg-control">
         {changes.map((change) => (
           <FileChangeRow
             key={`${change.status}:${change.oldPath ?? ''}:${change.path}`}
@@ -712,8 +710,8 @@ function GroupButton({
       disabled={disabled}
       className={`flex size-6 cursor-pointer items-center justify-center rounded tracking-normal transition-colors disabled:cursor-wait disabled:opacity-50 ${
         tone === 'danger'
-          ? 'text-on-surface-variant hover:bg-error/10 hover:text-error'
-          : 'text-on-surface-variant hover:bg-primary/10 hover:text-primary'
+          ? 'text-fg-muted hover:bg-danger-subtle hover:text-danger'
+          : 'text-fg-muted hover:bg-accent-hover hover:text-accent-fg'
       }`}
       {...props}
     >
@@ -750,7 +748,7 @@ function FileChangeRow({
     change.path
   );
   return (
-    <li className="group flex min-w-0 items-start gap-2 border-b border-outline-variant/10 px-2.5 py-2 last:border-b-0">
+    <li className="group flex min-w-0 items-start gap-2 border-b border-stroke px-2.5 py-2 last:border-b-0">
       <span
         className={`w-3 shrink-0 pt-px text-center font-mono text-[11px] font-bold ${presentation.color}`}
         title={statusLabel}
@@ -759,18 +757,18 @@ function FileChangeRow({
         {presentation.glyph}
       </span>
       <span className="sr-only">{statusLabel}</span>
-      <FileCode2 size={13} className="mt-0.5 shrink-0 text-on-surface-variant/70" />
+      <FileCode2 size={13} className="mt-0.5 shrink-0 text-fg-muted" />
       <button
         type="button"
         onClick={onDiff}
         aria-label={t.git.actions.viewDiff.replace('{path}', change.path)}
         title={change.path}
-        className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[11px] leading-4 text-on-surface hover:text-primary"
+        className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[11px] leading-4 text-fg hover:text-accent-fg"
       >
         {change.oldPath ? (
           <>
-            <span className="text-on-surface-variant line-through">{change.oldPath}</span>
-            <span className="px-1 text-on-surface-variant">→</span>
+            <span className="text-fg-muted line-through">{change.oldPath}</span>
+            <span className="px-1 text-fg-muted">→</span>
           </>
         ) : null}
         {change.path}
@@ -782,7 +780,7 @@ function FileChangeRow({
           title={discardLabel}
           disabled={pending}
           onClick={onDiscard}
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant opacity-60 transition-colors hover:bg-error/10 hover:text-error group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
+          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-fg-muted opacity-60 transition-colors hover:bg-danger-subtle hover:text-danger group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
         >
           {untracked ? <Trash2 size={12} /> : <RotateCcw size={12} />}
         </button>
@@ -793,7 +791,7 @@ function FileChangeRow({
         title={actionLabel}
         disabled={pending}
         onClick={onAction}
-        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant opacity-60 transition-colors hover:bg-surface-container-high hover:text-primary group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
+        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-fg-muted opacity-60 transition-colors hover:bg-fill-hover hover:text-accent-fg group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
       >
         {action === 'stage' ? <Plus size={13} /> : <Minus size={13} />}
       </button>

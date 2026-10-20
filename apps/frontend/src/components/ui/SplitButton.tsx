@@ -61,7 +61,7 @@ export function SplitButton({
             aria-label={menuLabel}
             title={menuLabel}
             disabled={menuDisabled}
-            className="h-full rounded-l-none border-l border-on-primary/25"
+            className="h-full rounded-l-none border-l border-accent-pressed"
             {...triggerProps}
           >
             <ChevronDown size={14} />

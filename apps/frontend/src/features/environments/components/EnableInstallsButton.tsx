@@ -29,7 +29,7 @@ export function EnableInstallsButton() {
   if (mutation.isSuccess) {
     const text = mutation.data.applied ? enable.success : enable.envOverride;
     return (
-      <p className="text-sm text-on-surface-variant" data-testid="enable-installs-result">
+      <p className="text-sm text-fg-muted" data-testid="enable-installs-result">
         {text}
       </p>
     );
@@ -47,7 +47,7 @@ export function EnableInstallsButton() {
         {enable.button}
       </Button>
       {mutation.isError && (
-        <p className="text-xs text-error" role="alert">
+        <p className="text-xs text-danger" role="alert">
           {resolveApiErrorMessage(mutation.error, enable.failed)}
         </p>
       )}
@@ -65,7 +65,7 @@ export function EnableInstallsButton() {
           }}
           onCancel={() => setConfirming(false)}
         >
-          <p className="text-sm text-on-surface-variant/70">{enable.threatModel}</p>
+          <p className="text-sm text-fg-muted">{enable.threatModel}</p>
         </ConfirmDialog>
       )}
     </div>

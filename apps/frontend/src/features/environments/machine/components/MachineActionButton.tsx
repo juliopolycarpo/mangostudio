@@ -46,7 +46,7 @@ export function MachineActionButton({
     return (
       <div className="space-y-2" data-testid={`${testId}-refused`}>
         {refusals.map((line) => (
-          <p key={line} className="text-sm text-on-surface-variant">
+          <p key={line} className="text-sm text-fg-muted">
             {line}
           </p>
         ))}

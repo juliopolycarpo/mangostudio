@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 
 /** The balloon body itself. One string, so the two callers cannot drift apart. */
 const BUBBLE_CLASS =
-  'px-5 py-3 rounded-2xl bg-surface-container-low text-on-surface border border-outline-variant/10 font-body chat-message-body leading-relaxed';
+  'px-5 py-3 rounded-2xl bg-surface text-fg border border-stroke chat-message-body leading-relaxed';
 
 interface MessageBubbleProps {
   children: ReactNode;

@@ -10,11 +10,11 @@ import type { OnboardingStepStatus } from '@mangostudio/shared/onboarding';
 import { useI18n } from '@/hooks/use-i18n';
 
 const TONE: Record<OnboardingStepStatus, string> = {
-  satisfied: 'bg-primary/15 text-primary',
-  skipped: 'bg-surface-container-highest text-on-surface-variant/70',
-  pending: 'bg-surface-container-highest text-on-surface-variant',
-  unknown: 'bg-surface-container-highest text-on-surface-variant/50',
-  unavailable: 'bg-surface-container-highest text-on-surface-variant/50',
+  satisfied: 'bg-accent-subtle text-accent-fg',
+  skipped: 'bg-fill-selected text-fg-muted',
+  pending: 'bg-fill-selected text-fg-muted',
+  unknown: 'bg-fill-selected text-fg-subtle',
+  unavailable: 'bg-fill-selected text-fg-subtle',
 };
 
 export function StepStatusChip({ status }: { readonly status: OnboardingStepStatus }) {
@@ -23,7 +23,7 @@ export function StepStatusChip({ status }: { readonly status: OnboardingStepStat
   return (
     <span
       data-status={status}
-      className={`shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 font-label font-semibold text-[10px] uppercase tracking-wider ${TONE[status]}`}
+      className={`shrink-0 whitespace-nowrap rounded-md px-1.5 py-0.5 font-semibold text-[10px] uppercase tracking-wider ${TONE[status]}`}
     >
       {t.onboarding.status[status]}
     </span>

@@ -115,19 +115,19 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <MatrixLegend />
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={matrix.rescan} disabled={matrix.isRescanning}>
+          <Button variant="subtle" size="sm" onClick={matrix.rescan} disabled={matrix.isRescanning}>
             {matrix.isRescanning ? l.matrix.rescanning : l.matrix.rescan}
           </Button>
           {selectedCount > 0 && (
             <>
-              <span className="text-on-surface-variant text-xs" data-testid="selected-count">
+              <span className="text-fg-muted text-xs" data-testid="selected-count">
                 {formatMessage(l.matrix.selectedCount, { count: String(selectedCount) })}
               </span>
-              <Button variant="ghost" size="sm" onClick={matrix.clearSelection}>
+              <Button variant="subtle" size="sm" onClick={matrix.clearSelection}>
                 {l.matrix.clearSelection}
               </Button>
               {candidates.isDetecting && (
-                <span className="text-on-surface-variant/60 text-xs" data-testid="detecting-agents">
+                <span className="text-fg-muted text-xs" data-testid="detecting-agents">
                   {l.locationSettings.detecting}
                 </span>
               )}

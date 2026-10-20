@@ -21,7 +21,7 @@ interface CreateApiKeyDialogProps {
 }
 
 const FIELD_CLASS =
-  'w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20';
+  'w-full rounded-xl border border-stroke bg-control px-4 py-2.5 text-sm text-fg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus';
 
 export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
   const { t } = useI18n();
@@ -88,19 +88,15 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
+      <div className="bg-surface w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke space-y-5">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <h3 className="text-xl font-bold text-on-surface">
-              {created ? reveal.title : labels.title}
-            </h3>
-            {!created && (
-              <p className="text-sm text-on-surface-variant/70">{scopeHint(t, scope)}</p>
-            )}
+            <h3 className="text-xl font-bold text-fg">{created ? reveal.title : labels.title}</h3>
+            {!created && <p className="text-sm text-fg-muted">{scopeHint(t, scope)}</p>}
           </div>
           <Button
-            variant="ghost"
+            variant="subtle"
             size="sm"
             aria-label={labels.cancelButton}
             disabled={createMutation.isPending}
@@ -112,12 +108,12 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
 
         {created ? (
           <div className="space-y-4">
-            <div className="flex items-start gap-3 rounded-2xl border border-warning/30 bg-warning/10 p-4">
+            <div className="flex items-start gap-3 rounded-2xl border border-warning bg-warning-subtle p-4">
               <KeyRound size={18} className="mt-0.5 shrink-0 text-warning" />
-              <p className="text-sm text-on-surface">{reveal.notice}</p>
+              <p className="text-sm text-fg">{reveal.notice}</p>
             </div>
             <code
-              className="block break-all rounded-2xl bg-surface-container-lowest px-4 py-3 font-mono text-xs text-on-surface border border-outline-variant/20"
+              className="block break-all rounded-2xl bg-control px-4 py-3 font-mono text-xs text-fg border border-stroke"
               data-testid="api-key-plaintext"
             >
               {created.key}
@@ -128,7 +124,7 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
                 {copied ? reveal.copied : reveal.copy}
               </Button>
             </div>
-            {copyFailed && <p className="text-xs text-error">{reveal.copyFailed}</p>}
+            {copyFailed && <p className="text-xs text-danger">{reveal.copyFailed}</p>}
             <div className="flex justify-end pt-2">
               <Button onClick={onClose}>{reveal.done}</Button>
             </div>
@@ -136,9 +132,7 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
         ) : (
           <div className="space-y-4">
             <label className="block space-y-2">
-              <span className="block text-sm font-semibold text-on-surface">
-                {labels.nameLabel}
-              </span>
+              <span className="block text-sm font-semibold text-fg">{labels.nameLabel}</span>
               <input
                 type="text"
                 value={name}
@@ -152,13 +146,11 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
                 aria-invalid={Boolean(nameError)}
                 className={FIELD_CLASS}
               />
-              {nameError && <span className="block text-xs text-error">{nameError}</span>}
+              {nameError && <span className="block text-xs text-danger">{nameError}</span>}
             </label>
 
             <div className="space-y-2">
-              <span className="block text-sm font-semibold text-on-surface">
-                {labels.scopeLabel}
-              </span>
+              <span className="block text-sm font-semibold text-fg">{labels.scopeLabel}</span>
               <Select
                 value={scope}
                 onChange={(value) => setScope(value as ApiKeyScope)}
@@ -171,10 +163,8 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
             </div>
 
             <label className="block space-y-2">
-              <span className="block text-sm font-semibold text-on-surface">
-                {labels.expiresLabel}
-              </span>
-              <span className="block text-xs text-on-surface-variant/60">
+              <span className="block text-sm font-semibold text-fg">{labels.expiresLabel}</span>
+              <span className="block text-xs text-fg-muted">
                 {formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
               </span>
               <input
@@ -191,10 +181,10 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
                 aria-invalid={Boolean(expiresError)}
                 className={FIELD_CLASS}
               />
-              {expiresError && <span className="block text-xs text-error">{expiresError}</span>}
+              {expiresError && <span className="block text-xs text-danger">{expiresError}</span>}
             </label>
 
-            {submitError && <p className="text-sm text-error">{submitError}</p>}
+            {submitError && <p className="text-sm text-danger">{submitError}</p>}
 
             <div className="flex gap-3 pt-2">
               <Button

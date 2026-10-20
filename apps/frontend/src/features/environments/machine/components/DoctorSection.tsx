@@ -19,7 +19,7 @@ function sortChecks(checks: readonly MachineCheck[]): MachineCheck[] {
 }
 
 function CheckIcon({ status }: { readonly status: MachineCheckStatus }) {
-  if (status === 'ok') return <CircleCheck size={16} className="mt-0.5 shrink-0 text-primary" />;
+  if (status === 'ok') return <CircleCheck size={16} className="mt-0.5 shrink-0 text-accent-fg" />;
   return <FindingIcon severity={status} />;
 }
 
@@ -33,7 +33,7 @@ export function DoctorSection() {
       <div className="flex items-baseline justify-between gap-3">
         <CardSectionLabel>{m.title}</CardSectionLabel>
         {doctor.data && (
-          <p className="text-xs text-on-surface-variant/70" data-testid="machine-doctor-summary">
+          <p className="text-xs text-fg-muted" data-testid="machine-doctor-summary">
             {doctor.data.failures === 0 && doctor.data.warnings === 0
               ? m.clear
               : formatMessage(m.summary, {
@@ -66,8 +66,8 @@ export function DoctorSection() {
             >
               <CheckIcon status={check.status} />
               <div className="min-w-0">
-                <span className="font-bold text-on-surface">{check.label}</span>
-                <span className="text-on-surface-variant"> — {check.detail}</span>
+                <span className="font-bold text-fg">{check.label}</span>
+                <span className="text-fg-muted"> — {check.detail}</span>
               </div>
             </li>
           ))}

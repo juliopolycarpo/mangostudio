@@ -34,12 +34,10 @@ const LOAD_OLDER_WITHIN_PX = 3 * ESTIMATED_ROW_HEIGHT_PX;
 function EmptyFeed() {
   const { t } = useI18n();
   return (
-    <div className="flex flex-col items-center justify-center h-full text-on-surface-variant/50 px-4">
+    <div className="flex flex-col items-center justify-center h-full text-fg-subtle px-4">
       <Sparkles size={48} className="mb-4 opacity-50" />
-      <p className="text-lg font-headline text-center">{t.chat.feed.emptyTitle}</p>
-      <p className="text-xs mt-2 text-on-surface-variant/40 text-center">
-        {t.chat.feed.emptySubtitle}
-      </p>
+      <p className="text-lg text-center">{t.chat.feed.emptyTitle}</p>
+      <p className="text-xs mt-2 text-fg-subtle text-center">{t.chat.feed.emptySubtitle}</p>
     </div>
   );
 }
@@ -209,7 +207,7 @@ export function ChatFeed({
           every message down when it appears and again when it goes. */}
       {older?.isLoading && (
         <div className="sticky top-0 z-10 flex h-0 justify-center pointer-events-none">
-          <output className="glass-elevated flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30">
+          <output className="glass-elevated flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-fg-muted border border-stroke">
             <Loader2 size={13} className="animate-spin" />
             {t.chat.feed.loadingOlder}
           </output>
@@ -250,7 +248,7 @@ export function ChatFeed({
             {...fadeRise}
             type="button"
             onClick={scrollToBottom}
-            className="glass-elevated sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30 cursor-pointer hover:border-outline-variant/50 hover:text-on-surface transition-colors duration-200"
+            className="glass-elevated sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-fg-muted border border-stroke cursor-pointer hover:border-stroke hover:text-fg transition-colors duration-200"
             title={t.chat.scrollToBottom}
           >
             <ArrowDown size={13} />

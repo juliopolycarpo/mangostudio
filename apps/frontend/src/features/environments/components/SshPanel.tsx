@@ -75,20 +75,20 @@ export function SshPanel({ environment }: SshPanelProps) {
 
   return (
     <section
-      className="space-y-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 p-3"
+      className="space-y-3 rounded-xl border border-stroke bg-control p-3"
       data-testid="ssh-panel"
     >
       <div className="flex items-start gap-2">
-        <Terminal size={14} className="mt-0.5 shrink-0 text-primary" />
+        <Terminal size={14} className="mt-0.5 shrink-0 text-accent-fg" />
         <div className="min-w-0 space-y-0.5">
-          <p className="font-semibold text-on-surface text-xs">{labels.title}</p>
-          <p className="text-[11px] text-on-surface-variant/70">{labels.description}</p>
+          <p className="font-semibold text-fg text-xs">{labels.title}</p>
+          <p className="text-[11px] text-fg-muted">{labels.description}</p>
         </div>
       </div>
 
       {environment.status.sshFailureReason ? (
         <p
-          className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant"
+          className="rounded-lg border border-warning bg-warning-subtle px-2.5 py-2 text-[11px] text-fg-muted"
           data-testid="ssh-failure-reason"
         >
           {labels.reason[environment.status.sshFailureReason]}
@@ -137,13 +137,13 @@ export function SshPanel({ environment }: SshPanelProps) {
           error={invalid === 'remoteRuntimePath' ? labels.dashInvalid : undefined}
           onChange={(event) => set({ remoteRuntimePath: event.target.value })}
         />
-        <p className="text-[11px] text-on-surface-variant/60">
+        <p className="text-[11px] text-fg-muted">
           {formatMessage(labels.runtimePathHint, { path: DEFAULT_SSH_RUNTIME_PATH })}
         </p>
       </div>
 
       {error ? (
-        <p className="text-[11px] text-error" role="alert">
+        <p className="text-[11px] text-danger" role="alert">
           {error}
         </p>
       ) : null}
@@ -169,9 +169,9 @@ function SshPreflight({ config }: { readonly config: SshEnvironmentConfig }) {
   const preflight = sshPreflightCommands(config);
 
   return (
-    <div className="space-y-2 rounded-lg border border-primary/35 bg-primary/5 p-2.5">
-      <p className="font-semibold text-[11px] text-on-surface">{labels.preflightTitle}</p>
-      <p className="text-[11px] text-on-surface-variant/70">{labels.preflightHint}</p>
+    <div className="space-y-2 rounded-lg border border-accent bg-accent-subtle p-2.5">
+      <p className="font-semibold text-[11px] text-fg">{labels.preflightTitle}</p>
+      <p className="text-[11px] text-fg-muted">{labels.preflightHint}</p>
       <CopyLine label={labels.preflightReach} value={preflight.reach} />
       <CopyLine label={labels.preflightRuntime} value={preflight.runtime} />
     </div>

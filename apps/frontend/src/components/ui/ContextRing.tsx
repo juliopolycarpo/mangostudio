@@ -12,11 +12,11 @@ interface ContextRingProps {
  * stays green.
  */
 const SEVERITY_STROKE: Record<ContextSeverity, string> = {
-  normal: 'stroke-primary',
-  info: 'stroke-primary',
+  normal: 'stroke-accent-fg',
+  info: 'stroke-accent-fg',
   warning: 'stroke-warning',
-  danger: 'stroke-error',
-  critical: 'stroke-error',
+  danger: 'stroke-danger',
+  critical: 'stroke-danger',
 };
 
 /**
@@ -58,7 +58,7 @@ export function ContextRing({ ratio, severity }: ContextRingProps) {
           // but a 1px arc, a chat under 15% of its window read as an empty gap
           // where the chip should be. The track is the thing that says "there
           // is a ring here" at every value, so it has to survive both surfaces.
-          className="stroke-on-surface/25"
+          className="stroke-fg-subtle"
           strokeWidth={stroke}
         />
         <circle
@@ -76,7 +76,7 @@ export function ContextRing({ ratio, severity }: ContextRingProps) {
       {/* The number carries the value at low percentages, where the arc is a
           dot; `on-surface` rather than the muted variant because 8px of muted
           text on a tinted band is not a number anyone reads. */}
-      <span className="absolute text-[8px] font-bold tabular-nums text-on-surface">{pct}</span>
+      <span className="absolute text-[8px] font-bold tabular-nums text-fg">{pct}</span>
     </div>
   );
 }

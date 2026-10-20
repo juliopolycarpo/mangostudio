@@ -65,7 +65,7 @@ export function ToolImageFields({
 
   return (
     <fieldset className="space-y-3">
-      <legend className="font-medium text-on-surface-variant text-sm">{labels.imageLabel}</legend>
+      <legend className="font-medium text-fg-muted text-sm">{labels.imageLabel}</legend>
 
       {/* Real radios rather than styled buttons: arrow-key navigation between
           the three modes comes free, and the group reads as one control. */}
@@ -73,10 +73,10 @@ export function ToolImageFields({
         {modes.map((option) => (
           <label
             key={option.value}
-            className={`flex-1 cursor-pointer rounded-xl border px-3 py-2 text-center text-xs transition-colors focus-within:ring-1 focus-within:ring-primary/40 ${
+            className={`flex-1 cursor-pointer rounded-xl border px-3 py-2 text-center text-xs transition-colors focus-within:ring-1 focus-within:ring-focus ${
               mode === option.value
-                ? 'border-primary/60 bg-primary/10 text-on-surface'
-                : 'border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-highest'
+                ? 'border-accent bg-accent-subtle text-fg'
+                : 'border-stroke text-fg-muted hover:bg-fill-hover'
             }`}
           >
             <input
@@ -106,17 +106,17 @@ export function ToolImageFields({
             <Button variant="secondary" onClick={() => fileInput.current?.click()}>
               {hasStoredUpload || file ? labels.imageReplaceFile : labels.imageChoose}
             </Button>
-            <span className="min-w-0 truncate text-on-surface-variant/60 text-xs">
+            <span className="min-w-0 truncate text-fg-muted text-xs">
               {file?.name ?? (hasStoredUpload ? labels.imageStoredFile : labels.imageNoFile)}
             </span>
           </div>
           {fileTooLarge ? (
-            <p className="text-error text-xs">{labels.imageFileTooLarge}</p>
+            <p className="text-danger text-xs">{labels.imageFileTooLarge}</p>
           ) : (
-            <p className="text-on-surface-variant/60 text-xs">{labels.imageFileHint}</p>
+            <p className="text-fg-muted text-xs">{labels.imageFileHint}</p>
           )}
           {/* Owner-specified: uploading is the user asserting a right they have. */}
-          <p className="text-on-surface-variant/60 text-xs">{labels.imageRightsNotice}</p>
+          <p className="text-fg-muted text-xs">{labels.imageRightsNotice}</p>
         </div>
       )}
 
@@ -135,13 +135,13 @@ export function ToolImageFields({
 
           <label
             htmlFor={cacheId}
-            className="flex cursor-pointer items-start gap-2 text-on-surface text-xs"
+            className="flex cursor-pointer items-start gap-2 text-fg text-xs"
           >
             <input
               id={cacheId}
               type="checkbox"
               checked={cache}
-              className="mt-0.5 cursor-pointer accent-primary"
+              className="mt-0.5 cursor-pointer accent-accent"
               onChange={(event) => onCacheChange(event.target.checked)}
             />
             <span>{labels.imageCacheLabel}</span>
@@ -151,7 +151,7 @@ export function ToolImageFields({
               changes with it rather than sitting underneath as fine print. */}
           <p
             data-testid="tool-image-url-notice"
-            className={`text-xs ${cache ? 'text-on-surface-variant/60' : 'text-warning'}`}
+            className={`text-xs ${cache ? 'text-fg-muted' : 'text-warning'}`}
           >
             {cache ? labels.imageCacheOnNotice : labels.imageCacheOffNotice}
           </p>

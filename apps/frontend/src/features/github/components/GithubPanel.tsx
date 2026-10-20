@@ -56,7 +56,7 @@ export function GithubPanel({ chatId, workdir }: GithubPanelProps) {
     <section
       data-testid={GITHUB_PANEL_TESTID}
       aria-label={t.github.title}
-      className="app-scrollbar h-full min-h-0 divide-y divide-outline-variant/10 overflow-y-auto"
+      className="app-scrollbar h-full min-h-0 divide-y divide-stroke overflow-y-auto"
     >
       <GithubInboxSection
         chatId={chatId}

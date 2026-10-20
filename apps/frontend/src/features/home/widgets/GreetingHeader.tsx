@@ -40,7 +40,7 @@ export function GreetingHeader({ userName, subtitle, now = new Date() }: Greetin
 
   return (
     <header className="space-y-1.5">
-      <h2 className="font-headline text-2xl font-bold tracking-tight text-on-surface sm:text-3xl">
+      <h2 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
         {name ? (
           // Split rather than interpolated into one string so the name can be
           // coloured without the locale file carrying markup.
@@ -49,7 +49,7 @@ export function GreetingHeader({ userName, subtitle, now = new Date() }: Greetin
           labels[ANONYMOUS_KEY[slot]]
         )}
       </h2>
-      <p className="text-sm text-on-surface-variant">{subtitle ?? labels.subtitle}</p>
+      <p className="text-sm text-fg-muted">{subtitle ?? labels.subtitle}</p>
     </header>
   );
 }
@@ -67,7 +67,7 @@ function GreetingWithName({ template, name }: { template: string; name: string }
   return (
     <>
       {template.slice(0, at)}
-      <span className="text-primary">{name}</span>
+      <span className="text-accent-fg">{name}</span>
       {template.slice(at + NAME_PLACEHOLDER.length)}
     </>
   );

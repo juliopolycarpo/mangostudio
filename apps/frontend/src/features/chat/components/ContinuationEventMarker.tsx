@@ -82,8 +82,8 @@ export function ContinuationEventMarker({
   const suffix = recovered ? t.chat.continuation.recovered : t.chat.continuation.notRecovered;
 
   const errorEvent = isError(reasonCode);
-  const toneClass = errorEvent ? 'text-error/80' : 'text-on-surface-variant/60';
-  const lineClass = errorEvent ? 'bg-error/30' : 'bg-outline-variant/20';
+  const toneClass = errorEvent ? 'text-danger' : 'text-fg-muted';
+  const lineClass = errorEvent ? 'bg-danger-subtle' : 'bg-stroke';
 
   return (
     <div className={`flex items-center gap-2 py-2 text-xs my-1 ${toneClass}`}>

@@ -44,7 +44,7 @@ export function ToolSettingsPage({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
+        <p className="text-sm text-fg-muted">{t.common.loading}</p>
       </div>
     );
   }
@@ -52,8 +52,8 @@ export function ToolSettingsPage({
   if (error) {
     return (
       <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-error">{s.loadError}</p>
-        <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+        <p className="text-sm text-danger">{s.loadError}</p>
+        <Button variant="subtle" size="sm" onClick={() => void refetch()}>
           {t.common.retry}
         </Button>
       </div>
@@ -63,15 +63,15 @@ export function ToolSettingsPage({
   return (
     <div className="space-y-6">
       {/* ── Execution section ── */}
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {s.executionTitle}
         </h3>
         <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
-          <h4 className="text-sm text-on-surface font-medium">{s.maxToolIterationsLabel}</h4>
-          <span className="text-sm font-medium text-on-surface">{hintText}</span>
+          <h4 className="text-sm text-fg font-medium">{s.maxToolIterationsLabel}</h4>
+          <span className="text-sm font-medium text-fg">{hintText}</span>
         </div>
-        <p className="text-sm text-on-surface-variant/60">{s.maxToolIterationsDescription}</p>
+        <p className="text-sm text-fg-muted">{s.maxToolIterationsDescription}</p>
         <div className="flex items-center gap-4">
           <input
             type="range"
@@ -94,9 +94,9 @@ export function ToolSettingsPage({
             aria-label={s.maxToolIterationsLabel}
             className="
               w-20 rounded-xl px-3 py-2 text-sm text-center
-              bg-surface-container-lowest text-on-surface
-              border border-outline-variant/20
-              focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20
+              bg-control text-fg
+              border border-stroke
+              focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus
               transition-colors
             "
           />
@@ -105,14 +105,14 @@ export function ToolSettingsPage({
 
       {/* ── Tool cards by category ── */}
       {descriptors.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/60 text-center py-8">{s.noTools}</p>
+        <p className="text-sm text-fg-muted text-center py-8">{s.noTools}</p>
       ) : (
         CATEGORIES.map((category) => {
           const tools = grouped[category];
           if (tools.length === 0) return null;
           return (
             <section key={category} className="space-y-3">
-              <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label px-1">
+              <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted px-1">
                 {s.categories[category]}
               </h3>
               <div className="space-y-3">

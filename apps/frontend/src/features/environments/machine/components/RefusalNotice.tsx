@@ -21,7 +21,7 @@ export function RefusalNotice({ reasonLine, command, testId }: RefusalNoticeProp
   const { t } = useI18n();
   return (
     <div className="space-y-2" {...(testId ? { 'data-testid': testId } : {})}>
-      {reasonLine && <p className="text-sm text-on-surface-variant">{reasonLine}</p>}
+      {reasonLine && <p className="text-sm text-fg-muted">{reasonLine}</p>}
       {command && <CopyLine label={t.environments.machine.actions.runInstead} value={command} />}
     </div>
   );

@@ -45,41 +45,35 @@ export function WorktreeAddForm({
     <form
       onSubmit={submit}
       aria-label={labels.addTitle}
-      className="space-y-2.5 rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40 p-2.5"
+      className="space-y-2.5 rounded-xl border border-stroke bg-control p-2.5"
     >
       <label className="block space-y-1">
-        <span className="text-[10px] font-semibold text-on-surface-variant">
-          {labels.pathLabel}
-        </span>
+        <span className="text-[10px] font-semibold text-fg-muted">{labels.pathLabel}</span>
         <input
           value={path}
           onChange={(event) => setPath(event.target.value)}
           placeholder={labels.pathPlaceholder}
-          className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-2.5 py-1.5 font-mono text-[11px] text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
+          className="w-full rounded-lg border border-stroke bg-control px-2.5 py-1.5 font-mono text-[11px] text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
         />
       </label>
-      <p className="text-[10px] leading-4 text-on-surface-variant/70">{labels.pathHint}</p>
+      <p className="text-[10px] leading-4 text-fg-muted">{labels.pathHint}</p>
 
       <label className="block space-y-1">
-        <span className="text-[10px] font-semibold text-on-surface-variant">
-          {labels.branchLabel}
-        </span>
+        <span className="text-[10px] font-semibold text-fg-muted">{labels.branchLabel}</span>
         <input
           value={branch}
           onChange={(event) => setBranch(event.target.value)}
           placeholder={labels.branchPlaceholder}
-          className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-2.5 py-1.5 font-mono text-[11px] text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
+          className="w-full rounded-lg border border-stroke bg-control px-2.5 py-1.5 font-mono text-[11px] text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
         />
       </label>
 
       <fieldset className="space-y-1">
-        <legend className="text-[10px] font-semibold text-on-surface-variant">
-          {labels.modeLabel}
-        </legend>
+        <legend className="text-[10px] font-semibold text-fg-muted">{labels.modeLabel}</legend>
         {MODES.map((option) => (
           <label
             key={option}
-            className="flex cursor-pointer items-center gap-2 text-[11px] text-on-surface-variant"
+            className="flex cursor-pointer items-center gap-2 text-[11px] text-fg-muted"
           >
             <input
               type="radio"
@@ -87,7 +81,7 @@ export function WorktreeAddForm({
               value={option}
               checked={mode === option}
               onChange={() => setMode(option)}
-              className="accent-primary"
+              className="accent-accent"
             />
             {option === 'new-branch' ? labels.modeNew : labels.modeExisting}
           </label>

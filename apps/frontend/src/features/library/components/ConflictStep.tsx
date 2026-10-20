@@ -34,7 +34,7 @@ export function ConflictStep({ preview, draft, unresolved, onResolve }: Conflict
 
   if (divergent.length === 0) {
     return (
-      <p className="text-on-surface-variant text-sm" data-testid="conflict-none">
+      <p className="text-fg-muted text-sm" data-testid="conflict-none">
         {l.conflict.description}
       </p>
     );
@@ -43,9 +43,9 @@ export function ConflictStep({ preview, draft, unresolved, onResolve }: Conflict
   return (
     <div className="space-y-4" data-testid="conflict-step">
       <div className="space-y-1">
-        <p className="text-on-surface text-sm">{l.conflict.description}</p>
+        <p className="text-fg text-sm">{l.conflict.description}</p>
         {unresolved.length > 0 && (
-          <p className="text-error text-xs" data-testid="unresolved-count">
+          <p className="text-danger text-xs" data-testid="unresolved-count">
             {formatMessage(l.conflict.unresolved, { count: String(unresolved.length) })}
           </p>
         )}
@@ -81,15 +81,15 @@ function ConflictEntry({
 
   return (
     <section
-      className="space-y-3 rounded-xl border border-outline-variant/15 bg-surface-container p-3"
+      className="space-y-3 rounded-xl border border-stroke bg-surface p-3"
       data-testid="conflict-entry"
       data-resource-key={entry.resourceKey}
       data-resolved={resolved}
     >
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-semibold text-on-surface text-sm">{entry.ref.slug}</h3>
+        <h3 className="font-semibold text-fg text-sm">{entry.ref.slug}</h3>
         {resolved && (
-          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+          <span className="rounded-full bg-accent-subtle px-2 py-0.5 text-[10px] text-accent-fg">
             {l.conflict.resolved}
           </span>
         )}
@@ -117,20 +117,20 @@ function ConflictEntry({
         one. The explanation matters: the divergence stops being flagged until
         one of the contents changes again, which is a commitment, not a snooze.
       */}
-      <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-outline-variant/15 bg-surface-container-high p-2.5">
+      <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-stroke bg-surface p-2.5">
         <input
           type="radio"
           name={`resolution:${entry.resourceKey}`}
           checked={choice.resolution === 'keep-per-location'}
           onChange={() => onResolve(entry.resourceKey, 'keep-per-location')}
           data-testid="keep-per-location"
-          className="mt-0.5 size-3.5 accent-primary"
+          className="mt-0.5 size-3.5 accent-accent"
         />
         <span className="min-w-0">
-          <span className="block font-medium text-on-surface text-xs">
+          <span className="block font-medium text-fg text-xs">
             {l.conflict.keepPerLocation.title}
           </span>
-          <span className="block text-[11px] text-on-surface-variant/70">
+          <span className="block text-[11px] text-fg-muted">
             {l.conflict.keepPerLocation.description}
           </span>
         </span>
@@ -161,7 +161,7 @@ function EditOption({
 
   if (entry.ref.kind === 'skill') {
     return (
-      <p className="text-[11px] text-on-surface-variant/60" data-testid="edit-unavailable">
+      <p className="text-[11px] text-fg-muted" data-testid="edit-unavailable">
         {l.conflict.edit.unavailable}
       </p>
     );
@@ -180,13 +180,11 @@ function EditOption({
             })
           }
           data-testid="edit-then-adopt"
-          className="mt-0.5 size-3.5 accent-primary"
+          className="mt-0.5 size-3.5 accent-accent"
         />
         <span className="min-w-0">
-          <span className="block font-medium text-on-surface text-xs">{l.conflict.edit.title}</span>
-          <span className="block text-[11px] text-on-surface-variant/70">
-            {l.conflict.edit.description}
-          </span>
+          <span className="block font-medium text-fg text-xs">{l.conflict.edit.title}</span>
+          <span className="block text-[11px] text-fg-muted">{l.conflict.edit.description}</span>
         </span>
       </label>
       {editing && (
@@ -201,10 +199,10 @@ function EditOption({
             placeholder={l.conflict.edit.placeholder}
             aria-label={l.conflict.edit.placeholder}
             rows={8}
-            className="app-scrollbar w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-2 font-mono text-[11px] text-on-surface outline-none focus:border-primary"
+            className="app-scrollbar w-full rounded-lg border border-stroke bg-control p-2 font-mono text-[11px] text-fg outline-none focus:border-focus"
           />
           {(choice.editedContent ?? '').trim().length === 0 && (
-            <p className="text-error text-[11px]">{l.conflict.edit.empty}</p>
+            <p className="text-danger text-[11px]">{l.conflict.edit.empty}</p>
           )}
         </>
       )}

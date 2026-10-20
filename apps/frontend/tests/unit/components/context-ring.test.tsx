@@ -18,10 +18,10 @@ describe('ContextRing', () => {
     expect(container.textContent).toContain('150');
   });
 
-  it('uses stroke-error for critical severity', () => {
+  it('uses stroke-danger for critical severity', () => {
     const { container } = render(<ContextRing ratio={0.3} severity="critical" />);
     const circle = container.querySelector('svg circle:last-child');
-    expect(circle?.getAttribute('class')).toContain('stroke-error');
+    expect(circle?.getAttribute('class')).toContain('stroke-danger');
   });
 
   it('uses stroke-warning for warning severity', () => {
@@ -30,16 +30,16 @@ describe('ContextRing', () => {
     expect(circle?.getAttribute('class')).toContain('stroke-warning');
   });
 
-  it('uses stroke-primary for other severities', () => {
+  it('uses stroke-accent-fg for other severities', () => {
     const { container } = render(<ContextRing ratio={0.3} severity="info" />);
     const circle = container.querySelector('svg circle:last-child');
-    expect(circle?.getAttribute('class')).toContain('stroke-primary');
+    expect(circle?.getAttribute('class')).toContain('stroke-accent-fg');
   });
 
-  it('uses stroke-primary for danger severity', () => {
+  it('uses stroke-accent-fg for danger severity', () => {
     const { container } = render(<ContextRing ratio={0.3} severity="danger" />);
     const circle = container.querySelector('svg circle:last-child');
-    expect(circle?.getAttribute('class')).toContain('stroke-error');
+    expect(circle?.getAttribute('class')).toContain('stroke-danger');
   });
 
   /**
@@ -52,8 +52,8 @@ describe('ContextRing', () => {
     const { container } = render(<ContextRing ratio={0.02} severity="normal" />);
 
     const track = container.querySelector('svg circle:first-of-type');
-    expect(track?.getAttribute('class')).toBe('stroke-on-surface/25');
-    expect(container.querySelector('span')?.className).toContain('text-on-surface');
+    expect(track?.getAttribute('class')).toBe('stroke-fg-subtle');
+    expect(container.querySelector('span')?.className).toContain('text-fg');
     expect(container.textContent).toContain('2');
   });
 });

@@ -75,14 +75,11 @@ export function StashSheet({
       role="dialog"
       aria-modal="true"
       aria-labelledby="git-stash-sheet-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
     >
-      <div className="flex max-h-[80vh] w-full max-w-md flex-col gap-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+      <div className="flex max-h-[80vh] w-full max-w-md flex-col gap-4 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
         <div className="flex items-center gap-2">
-          <h3
-            id="git-stash-sheet-title"
-            className="min-w-0 flex-1 text-lg font-bold text-on-surface"
-          >
+          <h3 id="git-stash-sheet-title" className="min-w-0 flex-1 text-lg font-bold text-fg">
             {labels.title}
           </h3>
           <button
@@ -90,7 +87,7 @@ export function StashSheet({
             aria-label={labels.close}
             title={labels.close}
             onClick={onClose}
-            className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface"
+            className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
           >
             <X size={15} />
           </button>
@@ -102,15 +99,15 @@ export function StashSheet({
             onChange={(event) => setMessage(event.target.value)}
             aria-label={labels.messageLabel}
             placeholder={labels.messagePlaceholder}
-            className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
+            className="w-full rounded-lg border border-stroke bg-control px-3 py-2 text-xs text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
           />
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-on-surface-variant">
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted">
             <input
               type="checkbox"
               checked={includeUntracked}
               onChange={(event) => setIncludeUntracked(event.target.checked)}
               aria-label={labels.includeUntracked}
-              className="accent-primary"
+              className="accent-accent"
             />
             {labels.includeUntracked}
           </label>
@@ -129,24 +126,20 @@ export function StashSheet({
 
         <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto">
           {stashesQuery.isLoading ? (
-            <p className="text-xs text-on-surface-variant">{labels.loading}</p>
+            <p className="text-xs text-fg-muted">{labels.loading}</p>
           ) : stashesQuery.error ? (
-            <p className="text-xs text-error">{labels.loadError}</p>
+            <p className="text-xs text-danger">{labels.loadError}</p>
           ) : stashesQuery.data?.stashes.length ? (
             <ul className="space-y-2">
               {stashesQuery.data.stashes.map((stash) => (
                 <li
                   key={stash.index}
-                  className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container-lowest/40 p-2.5"
+                  className="space-y-2 rounded-lg border border-stroke bg-control p-2.5"
                 >
                   <div className="min-w-0">
-                    <p className="break-words text-xs font-semibold text-on-surface">
-                      {stash.message}
-                    </p>
+                    <p className="break-words text-xs font-semibold text-fg">{stash.message}</p>
                     {stash.branch ? (
-                      <p className="truncate font-mono text-[10px] text-on-surface-variant">
-                        {stash.branch}
-                      </p>
+                      <p className="truncate font-mono text-[10px] text-fg-muted">{stash.branch}</p>
                     ) : null}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
@@ -177,7 +170,7 @@ export function StashSheet({
               ))}
             </ul>
           ) : (
-            <p className="text-xs text-on-surface-variant/70">{labels.empty}</p>
+            <p className="text-xs text-fg-muted">{labels.empty}</p>
           )}
         </div>
       </div>
@@ -187,15 +180,15 @@ export function StashSheet({
           role="dialog"
           aria-modal="true"
           aria-labelledby="git-stash-drop-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
         >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
             <div className="space-y-2">
-              <h3 id="git-stash-drop-title" className="text-lg font-bold text-on-surface">
+              <h3 id="git-stash-drop-title" className="text-lg font-bold text-fg">
                 {labels.dropTitle}
               </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">{labels.dropHint}</p>
-              <p className="break-words rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
+              <p className="text-sm leading-5 text-fg-muted">{labels.dropHint}</p>
+              <p className="break-words rounded-xl bg-control p-2 font-mono text-[11px]">
                 {dropRequest.message}
               </p>
             </div>
@@ -249,8 +242,8 @@ function StashAction({
       onClick={onClick}
       className={`inline-flex cursor-pointer items-center gap-1 rounded-full px-2 py-1 text-[10px] font-semibold transition-colors disabled:cursor-wait disabled:opacity-50 ${
         tone === 'danger'
-          ? 'bg-error/10 text-error hover:bg-error/20'
-          : 'bg-surface-container-high text-on-surface-variant hover:text-primary'
+          ? 'bg-danger-subtle text-danger hover:bg-danger-subtle'
+          : 'bg-surface text-fg-muted hover:text-accent-fg'
       }`}
     >
       {icon}

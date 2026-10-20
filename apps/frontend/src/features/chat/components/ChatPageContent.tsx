@@ -53,7 +53,7 @@ export function ChatPageContent({
 function ChatLoadingState() {
   return (
     <div className="flex flex-1 items-center justify-center">
-      <Loader2 className="size-8 animate-spin text-primary" />
+      <Loader2 className="size-8 animate-spin text-accent-fg" />
     </div>
   );
 }

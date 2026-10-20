@@ -18,10 +18,10 @@ export function TodoRailPanel({ todos }: TodoRailPanelProps) {
 
   return (
     <section aria-label={labels.title} className="app-scrollbar h-full overflow-y-auto p-4">
-      <div className="mb-4 rounded-2xl border border-outline-variant/15 bg-surface-container-lowest p-3">
+      <div className="mb-4 rounded-2xl border border-stroke bg-control p-3">
         <div className="mb-2 flex items-center justify-between gap-3">
-          <span className="text-xs font-semibold text-on-surface">{summaryLabel}</span>
-          <span className="font-mono text-[11px] text-on-surface-variant/60">{progress}%</span>
+          <span className="text-xs font-semibold text-fg">{summaryLabel}</span>
+          <span className="font-mono text-[11px] text-fg-muted">{progress}%</span>
         </div>
         <div
           role="progressbar"
@@ -29,15 +29,15 @@ export function TodoRailPanel({ todos }: TodoRailPanelProps) {
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={progress}
-          className="h-1.5 overflow-hidden rounded-full bg-surface-container-high"
+          className="h-1.5 overflow-hidden rounded-full bg-surface"
         >
           <div
-            className="h-full rounded-full bg-primary transition-[width] duration-300 motion-reduce:transition-none"
+            className="h-full rounded-full bg-accent transition-[width] duration-300 motion-reduce:transition-none"
             style={{ width: `${progress}%` }}
           />
         </div>
         {active ? (
-          <p className="mt-3 text-xs leading-5 text-on-surface-variant">
+          <p className="mt-3 text-xs leading-5 text-fg-muted">
             {labels.panelCurrent.replace('{task}', active.content)}
           </p>
         ) : null}

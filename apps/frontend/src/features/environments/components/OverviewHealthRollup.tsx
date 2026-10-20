@@ -19,10 +19,10 @@ import { CardSectionLabel, TOOL_CARD_SURFACE } from './ToolCard';
 const HEALTH_ORDER: readonly RuntimeHealth[] = ['error', 'missing', 'warn', 'ok'];
 
 const COUNT_STYLES: Record<RuntimeHealth, string> = {
-  ok: 'text-primary',
+  ok: 'text-accent-fg',
   warn: 'text-warning',
-  missing: 'text-on-surface-variant',
-  error: 'text-error',
+  missing: 'text-fg-muted',
+  error: 'text-danger',
 };
 
 export function OverviewHealthRollup() {
@@ -57,15 +57,13 @@ export function OverviewHealthRollup() {
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="health-rollup">
             {HEALTH_ORDER.map((health) => (
               <li key={health} className="space-y-0.5" data-health={health}>
-                <p className={`font-headline text-2xl font-bold ${COUNT_STYLES[health]}`}>
-                  {counts[health]}
-                </p>
+                <p className={`text-2xl font-bold ${COUNT_STYLES[health]}`}>{counts[health]}</p>
                 <CardSectionLabel>{healthLabel(t, health)}</CardSectionLabel>
               </li>
             ))}
           </ul>
           {counts.ok === total && (
-            <p className="mt-3 text-sm text-on-surface-variant/70">{e.overview.healthClear}</p>
+            <p className="mt-3 text-sm text-fg-muted">{e.overview.healthClear}</p>
           )}
         </div>
       )}

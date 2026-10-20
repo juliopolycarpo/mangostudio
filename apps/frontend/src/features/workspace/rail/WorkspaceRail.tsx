@@ -159,7 +159,7 @@ export function WorkspaceRail({
     return (
       <aside
         aria-label={t.workspace.sidePanelTitle}
-        className="relative flex h-full shrink-0 border-l border-outline-variant/15 bg-surface-container-low"
+        className="relative flex h-full shrink-0 border-l border-stroke bg-surface"
         style={{ width: collapsed ? COLLAPSED_RAIL_WIDTH : width }}
       >
         {!collapsed ? (
@@ -196,7 +196,7 @@ export function WorkspaceRail({
         onClick={() => setMobileOpen(true)}
         aria-label={t.workspace.sidePanelOpen}
         title={t.workspace.sidePanelOpen}
-        className="fixed bottom-24 right-3 z-30 flex size-11 items-center justify-center rounded-2xl border border-outline-variant/25 bg-surface-container-high text-on-surface shadow-xl transition-all hover:border-primary/40 hover:text-primary active:scale-95 motion-reduce:transition-none"
+        className="fixed bottom-24 right-3 z-30 flex size-11 items-center justify-center rounded-2xl border border-stroke bg-surface text-fg shadow-xl transition-all hover:border-accent hover:text-accent-fg motion-reduce:transition-none"
       >
         <PanelRightOpen size={19} />
       </button>
@@ -205,13 +205,13 @@ export function WorkspaceRail({
           <div
             aria-hidden="true"
             onClick={closeMobile}
-            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-40 bg-black/60"
           />
           <aside
             role="dialog"
             aria-modal="true"
             aria-label={t.workspace.sidePanelTitle}
-            className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,24rem)] border-l border-outline-variant/20 bg-surface-container-low shadow-2xl"
+            className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,24rem)] border-l border-stroke bg-surface shadow-2xl"
           >
             <PanelDock
               panels={availablePanels}
@@ -251,7 +251,7 @@ function PanelDock({
   return (
     <nav
       aria-label={navigationLabel}
-      className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-outline-variant/15 bg-surface-container-lowest py-2"
+      className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-stroke bg-control py-2"
     >
       {panels.map((panel) => {
         const Icon = panel.icon;
@@ -261,20 +261,20 @@ function PanelDock({
           <Button
             key={panel.id}
             type="button"
-            variant="ghost"
+            variant="subtle"
             size="icon"
             onClick={() => onSelect(panel.id)}
             aria-label={switchLabel.replace('{panel}', title)}
             aria-pressed={active}
             title={title}
-            className={`relative size-10 focus-visible:outline-2 focus-visible:outline-primary ${
+            className={`relative size-10 focus-visible:outline-2 focus-visible:outline-focus ${
               active
-                ? 'bg-primary/12 text-primary hover:bg-primary/15 hover:text-primary'
-                : 'text-on-surface-variant'
+                ? 'bg-accent-subtle text-accent-fg hover:bg-accent-hover hover:text-accent-fg'
+                : 'text-fg-muted'
             }`}
           >
             {active ? (
-              <span className="absolute -left-1 h-5 w-0.5 rounded-r-full bg-primary" />
+              <span className="absolute -left-1 h-5 w-0.5 rounded-r-full bg-accent" />
             ) : null}
             <Icon size={18} />
           </Button>

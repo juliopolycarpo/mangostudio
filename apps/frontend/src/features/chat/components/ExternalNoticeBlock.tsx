@@ -18,9 +18,9 @@ export interface ExternalNoticeBlockProps {
 }
 
 const TONE: Record<ExternalNoticePart['severity'], string> = {
-  info: 'border-outline-variant/30 bg-surface-container-low/40 text-on-surface-variant',
-  warning: 'border-warning/30 bg-warning/10 text-warning',
-  error: 'border-error/30 bg-error/5 text-error',
+  info: 'border-stroke bg-surface text-fg-muted',
+  warning: 'border-warning bg-warning-subtle text-warning',
+  error: 'border-danger bg-danger-subtle text-danger',
 };
 
 export function ExternalNoticeBlock({ part }: ExternalNoticeBlockProps) {

@@ -53,7 +53,7 @@ export interface BootstrapErrorPanelProps {
 }
 
 const PLACEMENT_CLASSES: Record<BootstrapErrorPlacement, string> = {
-  surface: 'flex min-h-screen items-center justify-center bg-surface-dim px-4',
+  surface: 'flex min-h-screen items-center justify-center bg-canvas px-4',
   content: 'flex h-full items-center justify-center px-4 py-8',
 };
 
@@ -83,15 +83,13 @@ export function BootstrapErrorPanel({
       <div
         role="alert"
         data-testid="bootstrap-error"
-        className="w-full max-w-md space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 text-center"
+        className="w-full max-w-md space-y-4 rounded-3xl border border-stroke bg-surface p-6 text-center"
       >
-        <TriangleAlert aria-hidden size={24} className="mx-auto text-error" />
-        <h1 className="font-headline font-bold text-lg text-on-surface">{s.title}</h1>
-        <p className="text-on-surface-variant text-sm">
-          {isRateLimited(error) ? s.rateLimited : s.lead}
-        </p>
+        <TriangleAlert aria-hidden size={24} className="mx-auto text-danger" />
+        <h1 className="font-bold text-lg text-fg">{s.title}</h1>
+        <p className="text-fg-muted text-sm">{isRateLimited(error) ? s.rateLimited : s.lead}</p>
         {failedItems.length > 0 ? (
-          <p data-testid="bootstrap-error-failed" className="text-on-surface-variant text-sm">
+          <p data-testid="bootstrap-error-failed" className="text-fg-muted text-sm">
             {formatMessage(s.failed, { items: formatList(failedItems, locale) })}
           </p>
         ) : null}
@@ -106,7 +104,7 @@ export function BootstrapErrorPanel({
           {s.retry}
         </Button>
         {detail ? (
-          <p className="break-words text-on-surface-variant/50 text-xs">
+          <p className="break-words text-fg-subtle text-xs">
             {formatMessage(s.detail, { message: detail })}
           </p>
         ) : null}

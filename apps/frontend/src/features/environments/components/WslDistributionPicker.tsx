@@ -31,7 +31,7 @@ export function WslDistributionPicker({
   const labels = t.environments.entities.add;
 
   if (distributions.length === 0) {
-    return <p className="text-on-surface-variant/70 text-xs">{labels.wslEmpty}</p>;
+    return <p className="text-fg-muted text-xs">{labels.wslEmpty}</p>;
   }
 
   return (
@@ -47,23 +47,21 @@ export function WslDistributionPicker({
               aria-pressed={active}
               onClick={() => onSelect(distribution.name)}
               className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
-                active
-                  ? 'border-primary/45 bg-primary/10'
-                  : 'border-outline-variant/20 hover:bg-surface-container-highest'
+                active ? 'border-accent bg-accent-subtle' : 'border-stroke hover:bg-fill-hover'
               } ${configured ? 'cursor-not-allowed opacity-55' : ''}`}
             >
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
-                  <span className="truncate font-semibold text-on-surface text-sm">
+                  <span className="truncate font-semibold text-fg text-sm">
                     {distribution.name}
                   </span>
                   {distribution.default ? (
-                    <span className="shrink-0 rounded bg-primary/12 px-1.5 py-0.5 font-medium text-[10px] text-primary">
+                    <span className="shrink-0 rounded bg-accent-subtle px-1.5 py-0.5 font-medium text-[10px] text-accent-fg">
                       {labels.wslDefault}
                     </span>
                   ) : null}
                 </span>
-                <span className="mt-0.5 block truncate text-on-surface-variant/65 text-xs">
+                <span className="mt-0.5 block truncate text-fg-muted text-xs">
                   {configured
                     ? formatMessage(labels.wslConfigured, {
                         id: distribution.environmentId ?? '',
@@ -71,7 +69,7 @@ export function WslDistributionPicker({
                     : `${distribution.state} · WSL ${distribution.wslVersion}`}
                 </span>
               </span>
-              {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
+              {active ? <Check size={14} className="shrink-0 text-accent-fg" /> : null}
             </button>
           </li>
         );

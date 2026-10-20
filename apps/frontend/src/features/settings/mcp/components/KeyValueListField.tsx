@@ -18,10 +18,10 @@ interface KeyValueListFieldProps {
 
 const inputClassName = `
   flex-1 min-w-0 rounded-xl px-3 py-2 text-sm
-  bg-surface-container-high text-on-surface
-  border border-outline-variant/20
-  placeholder:text-on-surface/30
-  focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20
+  bg-surface text-fg
+  border border-stroke
+  placeholder:text-fg-subtle
+  focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus
   transition-colors
 `.trim();
 
@@ -41,8 +41,8 @@ export function KeyValueListField({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-on-surface-variant">{label}</span>
-      {hint && <p className="text-xs text-on-surface-variant/60">{hint}</p>}
+      <span className="text-sm font-medium text-fg-muted">{label}</span>
+      {hint && <p className="text-xs text-fg-muted">{hint}</p>}
       <div className="space-y-2">
         {entries.map((entry, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: rows have no stable identity while being typed
@@ -64,7 +64,7 @@ export function KeyValueListField({
             />
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="sm"
               aria-label={s.removeEntry}
               onClick={() => onChange(entries.filter((_, i) => i !== index))}
@@ -76,7 +76,7 @@ export function KeyValueListField({
       </div>
       <Button
         type="button"
-        variant="ghost"
+        variant="subtle"
         size="sm"
         className="self-start"
         onClick={() => onChange([...entries, { key: '', value: '' }])}

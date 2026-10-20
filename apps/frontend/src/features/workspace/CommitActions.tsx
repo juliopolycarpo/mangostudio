@@ -167,7 +167,7 @@ export function CommitActions({
         title={generating ? commitLabels.generating : commitLabels.generate}
         disabled={!canGenerate || busy}
         onClick={onGenerate}
-        className="flex w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-surface-container-high text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-surface text-fg-muted transition-colors hover:bg-fill-hover hover:text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Sparkles size={14} className={generating ? 'animate-pulse' : undefined} />
       </button>

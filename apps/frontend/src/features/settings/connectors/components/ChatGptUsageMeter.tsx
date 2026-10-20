@@ -58,7 +58,7 @@ function UsageWindowBar({
       : s.chatgptPaceOnPace);
   return (
     <div className="space-y-1">
-      <div className="flex items-baseline justify-between gap-2 text-[10px] text-on-surface-variant/60">
+      <div className="flex items-baseline justify-between gap-2 text-[10px] text-fg-muted">
         <span>{windowLabel(window, fallbackLabel, s)}</span>
         <span>
           {s.chatgptUsageUsed.replace('{percent}', String(Math.round(percent)))}
@@ -82,10 +82,10 @@ function UsageWindowBar({
         aria-valuenow={Math.round(percent)}
         aria-valuemin={0}
         aria-valuemax={100}
-        className="h-1.5 overflow-hidden rounded-full bg-surface-container-high"
+        className="h-1.5 overflow-hidden rounded-full bg-surface"
       >
         <div
-          className={`h-full rounded-full ${percent >= 90 ? 'bg-error/80' : 'bg-primary/70'}`}
+          className={`h-full rounded-full ${percent >= 90 ? 'bg-danger' : 'bg-accent'}`}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -148,9 +148,7 @@ export function ChatGptUsageMeter({ usage }: { usage: ChatGptUsageSnapshot }) {
           now={now}
         />
       )}
-      {footer.length > 0 && (
-        <p className="text-[10px] text-on-surface-variant/50">{footer.join(' · ')}</p>
-      )}
+      {footer.length > 0 && <p className="text-[10px] text-fg-subtle">{footer.join(' · ')}</p>}
     </div>
   );
 }

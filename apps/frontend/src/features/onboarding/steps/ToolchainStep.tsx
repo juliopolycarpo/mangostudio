@@ -43,7 +43,7 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
         // A refused probe answers `[]`, exactly like a machine with neither
         // runtime on it. Drawing the list from that tells somebody who has Node
         // installed to install Node, and offers a button that would do it.
-        <p className="text-on-surface-variant text-sm" data-testid="onboarding-toolchain-failed">
+        <p className="text-fg-muted text-sm" data-testid="onboarding-toolchain-failed">
           {s.probeFailed}
         </p>
       ) : (
@@ -57,27 +57,23 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
                 key={id}
                 data-testid={`onboarding-runtime-${id}`}
                 data-ready={ready}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/60 px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stroke bg-control px-4 py-3"
               >
                 <span className="flex items-center gap-2.5">
                   {ready ? (
-                    <CircleCheck aria-hidden size={16} className="shrink-0 text-primary" />
+                    <CircleCheck aria-hidden size={16} className="shrink-0 text-accent-fg" />
                   ) : (
-                    <CircleAlert
-                      aria-hidden
-                      size={16}
-                      className="shrink-0 text-on-surface-variant/50"
-                    />
+                    <CircleAlert aria-hidden size={16} className="shrink-0 text-fg-subtle" />
                   )}
-                  <span className="font-semibold text-on-surface text-sm">{name}</span>
+                  <span className="font-semibold text-fg text-sm">{name}</span>
                 </span>
                 {ready ? (
-                  <span className="text-on-surface-variant/70 text-xs">
+                  <span className="text-fg-muted text-xs">
                     {runtime?.effective?.version ?? s.ready}
                   </span>
                 ) : (
                   <span className="flex items-center gap-3">
-                    <span className="text-on-surface-variant/70 text-xs">{s.missing}</span>
+                    <span className="text-fg-muted text-xs">{s.missing}</span>
                     <RecipeAction
                       step={installStep(recipes.data ?? [], id)}
                       action="install"

@@ -54,7 +54,7 @@ export function ErrorPart({
       ? t.externalAgents.openFailure.capacity
       : text;
   return (
-    <div className="max-w-2xl space-y-1.5 rounded-xl border border-error/20 bg-error/10 p-4 font-body text-sm text-error">
+    <div className="max-w-2xl space-y-1.5 rounded-xl border border-danger bg-danger-subtle p-4 text-sm text-danger">
       <p>{sentence}</p>
       {kind ? <span className="block font-mono text-[10px] opacity-70">{kind}</span> : null}
       {command ? <SignInCommand command={command} /> : null}

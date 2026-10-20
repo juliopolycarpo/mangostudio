@@ -31,8 +31,8 @@ export function Chip({
   const content = (
     <>
       {icon}
-      {label ? <span className="shrink-0 text-on-surface-variant/70">{label}:</span> : null}
-      <span className="truncate text-on-surface">{children}</span>
+      {label ? <span className="shrink-0 text-fg-muted">{label}:</span> : null}
+      <span className="truncate text-fg">{children}</span>
     </>
   );
 
@@ -45,7 +45,7 @@ export function Chip({
         title={title}
         aria-label={ariaLabel}
         className={cn(
-          'terminal-chip cursor-pointer transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-60',
+          'terminal-chip cursor-pointer transition-colors hover:bg-fill-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50',
           className
         )}
       >

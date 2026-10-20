@@ -42,7 +42,7 @@ export function ToolIdentityMenu({ identity, defaultName }: ToolIdentityMenuProp
             {...triggerProps}
             aria-label={formatMessage(labels.menu, { name: identity.name })}
             data-testid="tool-identity-menu"
-            className="cursor-pointer rounded-lg p-1.5 text-on-surface-variant/60 transition-colors hover:bg-surface-container-highest hover:text-on-surface"
+            className="cursor-pointer rounded-lg p-1.5 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
           >
             <MoreVertical size={16} />
           </button>

@@ -111,24 +111,24 @@ export function CoverageMatrix({
   return (
     <div
       ref={scrollRef}
-      className="app-scrollbar max-h-[60vh] overflow-auto rounded-2xl border border-outline-variant/15 bg-surface-container-high"
+      className="app-scrollbar max-h-[60vh] overflow-auto rounded-2xl border border-stroke bg-surface"
       data-testid="coverage-matrix"
     >
       <table className="w-full border-collapse text-sm">
-        <thead className="sticky top-0 z-10 bg-surface-container-high">
-          <tr className="border-outline-variant/15 border-b">
+        <thead className="sticky top-0 z-10 bg-surface">
+          <tr className="border-stroke border-b">
             <th scope="col" className="w-9 px-2 py-2">
               <input
                 type="checkbox"
                 checked={allSelected}
                 onChange={onToggleAll}
                 aria-label={l.matrix.selectAll}
-                className="size-3.5 accent-primary"
+                className="size-3.5 accent-accent"
               />
             </th>
             <th
               scope="col"
-              className="px-2 py-2 text-left font-label font-semibold text-[11px] text-on-surface-variant/70 uppercase tracking-wider"
+              className="px-2 py-2 text-left font-semibold text-[11px] text-fg-muted uppercase tracking-wider"
             >
               {l.matrix.resourceColumn}
             </th>
@@ -139,7 +139,7 @@ export function CoverageMatrix({
                   key={target.id}
                   scope="col"
                   data-target-id={target.id}
-                  className="px-2 py-2 text-center font-label font-semibold text-[11px] text-on-surface-variant/70 uppercase tracking-wider"
+                  className="px-2 py-2 text-center font-semibold text-[11px] text-fg-muted uppercase tracking-wider"
                 >
                   <span className="flex items-center justify-center gap-1.5">
                     <ToolAvatar
@@ -166,10 +166,10 @@ export function CoverageMatrix({
             const row = rows[virtualRow.index];
             if (row.kind === 'group') {
               return (
-                <tr key={row.key} className="bg-surface-container">
+                <tr key={row.key} className="bg-surface">
                   <td
                     colSpan={targets.length + 2}
-                    className="px-3 py-1.5 font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest"
+                    className="px-3 py-1.5 font-semibold text-[10px] text-fg-muted uppercase tracking-widest"
                   >
                     {row.label}
                   </td>
@@ -221,7 +221,7 @@ function ResourceRow({
 
   return (
     <tr
-      className="border-outline-variant/10 border-b last:border-b-0 hover:bg-surface-container-highest/50"
+      className="border-stroke border-b last:border-b-0 hover:bg-fill-hover"
       data-testid="matrix-row"
       data-resource-key={resource.key}
       data-divergence={resource.divergence}
@@ -233,7 +233,7 @@ function ResourceRow({
           checked={selected}
           onChange={() => onToggleSelected(resource.key)}
           aria-label={formatMessage(l.matrix.selectRow, { resource: resource.ref.slug })}
-          className="size-3.5 accent-primary"
+          className="size-3.5 accent-accent"
         />
       </td>
       <td className="min-w-0 px-2 py-1.5">
@@ -242,7 +242,7 @@ function ResourceRow({
           params={{ resourceKey: resource.key }}
           search={libraryEnvironmentSearch(environmentId)}
           aria-label={formatMessage(l.matrix.openDetail, { resource: resource.ref.slug })}
-          className="block truncate font-medium text-on-surface hover:text-primary"
+          className="block truncate font-medium text-fg hover:text-accent-fg"
         >
           {resource.ref.slug}
         </Link>
@@ -275,7 +275,7 @@ export function MatrixLegend() {
 
   return (
     <dl
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-on-surface-variant/70"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-fg-muted"
       aria-label={l.matrix.legend}
     >
       {LEGEND_ORDER.map((state) => (

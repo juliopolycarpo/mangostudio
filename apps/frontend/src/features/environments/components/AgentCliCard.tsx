@@ -46,7 +46,7 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
       testId="agent-cli-card"
       dataAttributes={{ 'data-target-id': status.targetId }}
       subtitle={
-        <p className="text-xs text-on-surface-variant/60">
+        <p className="text-xs text-fg-muted">
           {status.effective
             ? prefixedVersionLabel(t, status.effective.version)
             : e.agents.notInstalled}
@@ -98,10 +98,8 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
       }
     >
       <dl className="grid gap-2 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-4">
-        <dt className="text-on-surface-variant/60">{e.agents.configHomeLabel}</dt>
-        <dd className="min-w-0 break-all font-mono text-xs text-on-surface-variant">
-          {status.configHome}
-        </dd>
+        <dt className="text-fg-muted">{e.agents.configHomeLabel}</dt>
+        <dd className="min-w-0 break-all font-mono text-xs text-fg-muted">{status.configHome}</dd>
       </dl>
 
       <AgentAuthState status={status} />
@@ -118,12 +116,12 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
                 className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
                 data-testid="library-location"
               >
-                <span className="min-w-0 break-all font-mono text-on-surface-variant">
+                <span className="min-w-0 break-all font-mono text-fg-muted">
                   {location.path ?? location.id}
                 </span>
-                <span className="text-on-surface-variant/60">{locationState(e, location)}</span>
+                <span className="text-fg-muted">{locationState(e, location)}</span>
                 {location.entryCount !== undefined && (
-                  <span className="text-on-surface-variant/60">
+                  <span className="text-fg-muted">
                     {formatMessage(e.agents.locationEntries, {
                       count: String(location.entryCount),
                     })}

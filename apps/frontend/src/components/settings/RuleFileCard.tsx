@@ -45,15 +45,13 @@ export function RuleFileCard({
   labels,
 }: RuleFileCardProps) {
   return (
-    <div className="space-y-4 p-4 sm:p-5 bg-surface-container-lowest rounded-xl border border-outline-variant/10">
+    <div className="space-y-4 p-4 sm:p-5 bg-control rounded-xl border border-stroke">
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 space-y-1.5">
           {isFixed ? (
             <div>
-              <p className="text-sm font-medium text-on-surface">{setting.path}</p>
-              {setting.label && (
-                <p className="text-xs text-on-surface-variant/60">{setting.label}</p>
-              )}
+              <p className="text-sm font-medium text-fg">{setting.path}</p>
+              {setting.label && <p className="text-xs text-fg-muted">{setting.label}</p>}
             </div>
           ) : (
             <Input
@@ -66,7 +64,7 @@ export function RuleFileCard({
           )}
         </div>
         {!isFixed && onRemove && (
-          <Button variant="ghost" size="sm" onClick={onRemove} aria-label={labels.removeRule}>
+          <Button variant="subtle" size="sm" onClick={onRemove} aria-label={labels.removeRule}>
             {labels.removeRule}
           </Button>
         )}
@@ -83,7 +81,7 @@ export function RuleFileCard({
 
       {/* Injection Role */}
       <fieldset>
-        <legend className="text-sm font-medium text-on-surface-variant mb-2">
+        <legend className="text-sm font-medium text-fg-muted mb-2">
           {labels.injectionRoleLabel}
         </legend>
         <div className="flex gap-2" role="radiogroup" aria-label={labels.injectionRoleLabel}>
@@ -94,8 +92,8 @@ export function RuleFileCard({
                 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all
                 ${
                   setting.injectionRole === opt.value
-                    ? 'bg-primary text-on-primary shadow-sm'
-                    : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                    ? 'bg-accent text-on-accent shadow-sm'
+                    : 'bg-surface text-fg-muted hover:bg-fill-hover'
                 }
               `}
             >
@@ -115,9 +113,7 @@ export function RuleFileCard({
 
       {/* Send Frequency */}
       <fieldset>
-        <legend className="text-sm font-medium text-on-surface-variant mb-2">
-          {labels.frequencyLabel}
-        </legend>
+        <legend className="text-sm font-medium text-fg-muted mb-2">{labels.frequencyLabel}</legend>
         <div className="flex gap-2" role="radiogroup" aria-label={labels.frequencyLabel}>
           {frequencyOptions.map((opt) => (
             <label
@@ -126,8 +122,8 @@ export function RuleFileCard({
                 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all
                 ${
                   setting.sendFrequency === opt.value
-                    ? 'bg-primary text-on-primary shadow-sm'
-                    : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
+                    ? 'bg-accent text-on-accent shadow-sm'
+                    : 'bg-surface text-fg-muted hover:bg-fill-hover'
                 }
               `}
             >
@@ -144,9 +140,7 @@ export function RuleFileCard({
           ))}
         </div>
         {setting.sendFrequency === 'first-turn' && (
-          <p className="text-xs text-on-surface-variant/50 mt-1.5 ml-1">
-            {labels.frequencyFirstTurnHint}
-          </p>
+          <p className="text-xs text-fg-subtle mt-1.5 ml-1">{labels.frequencyFirstTurnHint}</p>
         )}
       </fieldset>
     </div>

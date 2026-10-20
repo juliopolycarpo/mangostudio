@@ -85,7 +85,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // one more step (`--block`), and it draws the same balloon a user gets.
     const bubbleItems = container.querySelectorAll('.chat-timeline-item--bubble');
     expect(bubbleItems).toHaveLength(1);
-    expect(bubbleItems[0]?.querySelector('.rounded-2xl.bg-surface-container-low')).not.toBeNull();
+    expect(bubbleItems[0]?.querySelector('.rounded-2xl.bg-surface')).not.toBeNull();
     expect(screen.getByText('Created /tmp/probe.txt.')).toBeInTheDocument();
   });
 

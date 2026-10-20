@@ -45,11 +45,11 @@ export function toolStatusTone(status: ToolExecutionStatus): TimelineTone {
 }
 
 const TONE_TEXT_CLASS: Record<TimelineTone, string> = {
-  neutral: 'text-on-surface',
-  muted: 'text-on-surface-variant/70',
-  active: 'text-primary',
+  neutral: 'text-fg',
+  muted: 'text-fg-muted',
+  active: 'text-accent-fg',
   success: 'text-success',
-  error: 'text-error',
+  error: 'text-danger',
 };
 
 /**

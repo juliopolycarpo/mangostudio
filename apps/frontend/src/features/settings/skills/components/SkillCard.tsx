@@ -47,22 +47,22 @@ export function SkillCard({ descriptor }: SkillCardProps) {
   const inactive = !descriptor.valid || descriptor.shadowed;
 
   return (
-    <Card variant="solid" className={`space-y-2 p-4 sm:p-6 ${inactive ? 'opacity-70' : ''}`}>
+    <Card className={`space-y-2 p-4 sm:p-6 ${inactive ? 'opacity-70' : ''}`}>
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h4 className="text-sm font-bold text-on-surface">{descriptor.name}</h4>
-            <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant">
+            <h4 className="text-sm font-bold text-fg">{descriptor.name}</h4>
+            <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-surface text-fg-muted">
               {s.sourceLabels[descriptor.source]}
             </span>
             {!descriptor.valid && (
-              <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-error/15 text-error">
+              <span className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-danger-subtle text-danger">
                 {s.invalidBadge}
               </span>
             )}
             {descriptor.shadowed && (
               <span
-                className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant/70"
+                className="text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-surface text-fg-muted"
                 title={s.shadowedHint}
               >
                 {s.shadowedBadge}
@@ -70,19 +70,13 @@ export function SkillCard({ descriptor }: SkillCardProps) {
             )}
           </div>
           {descriptor.description && (
-            <p className="text-xs text-on-surface-variant/70 leading-relaxed">
-              {descriptor.description}
-            </p>
+            <p className="text-xs text-fg-muted leading-relaxed">{descriptor.description}</p>
           )}
-          {descriptor.error && <p className="text-xs text-error">{descriptor.error}</p>}
-          <p className="text-[11px] text-on-surface-variant/50 font-mono break-all">
-            {descriptor.path}
-          </p>
+          {descriptor.error && <p className="text-xs text-danger">{descriptor.error}</p>}
+          <p className="text-[11px] text-fg-subtle font-mono break-all">{descriptor.path}</p>
         </div>
         <label className="flex items-center gap-2 shrink-0">
-          <span className="text-xs text-on-surface-variant">
-            {enabled ? s.enabled : s.disabled}
-          </span>
+          <span className="text-xs text-fg-muted">{enabled ? s.enabled : s.disabled}</span>
           <Checkbox
             checked={enabled}
             onChange={() => void handleToggle()}

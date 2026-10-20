@@ -72,7 +72,7 @@ export function LocationSettings() {
   return (
     <div className="space-y-4" data-testid="location-settings">
       {header}
-      <p className="text-on-surface-variant/60 text-sm">{l.locationSettings.description}</p>
+      <p className="text-fg-muted text-sm">{l.locationSettings.description}</p>
 
       {settings.groups.map((group) => (
         <SectionCard key={group.kind} label={l.kinds[group.kind]}>
@@ -108,13 +108,13 @@ function LocationRow({
   return (
     <li className="flex flex-wrap items-center justify-between gap-2">
       <div className="min-w-0 space-y-0.5">
-        <p className="truncate font-mono text-on-surface text-xs">{status.path ?? status.id}</p>
-        <p className="text-on-surface-variant/60 text-xs">{describeStatus(l, status)}</p>
+        <p className="truncate font-mono text-fg text-xs">{status.path ?? status.id}</p>
+        <p className="text-fg-muted text-xs">{describeStatus(l, status)}</p>
       </div>
 
       {location.locked ? (
         <span
-          className="inline-flex items-center gap-1.5 text-on-surface-variant/60 text-xs"
+          className="inline-flex items-center gap-1.5 text-fg-muted text-xs"
           title={l.locationSettings.alwaysOnHint}
         >
           <Lock size={12} aria-hidden="true" />

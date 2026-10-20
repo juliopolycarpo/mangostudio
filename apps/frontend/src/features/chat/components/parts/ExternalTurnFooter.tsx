@@ -57,7 +57,7 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
         <p
           role="status"
           data-conversation-reset={part.conversationReset}
-          className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+          className="rounded-xl border border-warning bg-warning-subtle px-3 py-2 text-xs text-warning"
         >
           {labels.conversationReset[part.conversationReset]}
         </p>
@@ -67,7 +67,7 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
           {fields.map(([label, value]) => (
             <span
               key={label}
-              className="rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 py-0.5 text-[10px] tabular-nums text-on-surface-variant"
+              className="rounded-full border border-stroke bg-control px-2 py-0.5 text-[10px] tabular-nums text-fg-muted"
             >
               {`${label} ${formatTokensCompact(value)}`}
             </span>
@@ -75,20 +75,20 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
         </div>
       ) : null}
       {part.error && presentedReason ? (
-        <div className="space-y-1.5 rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">
+        <div className="space-y-1.5 rounded-xl border border-danger bg-danger-subtle px-3 py-2 text-xs text-danger">
           <p>{externalUnavailableText(presentedReason, t, part.requiredVersion)}</p>
           {signIn?.command ? <SignInCommand command={signIn.command} /> : null}
           {part.remedy ? <ExternalRemedyLink remedy={part.remedy} /> : null}
         </div>
       ) : part.error ? (
-        <p className="rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">
+        <p className="rounded-xl border border-danger bg-danger-subtle px-3 py-2 text-xs text-danger">
           {/* The vendor's own code and message, inert and unflattened. */}
           <span className="font-mono">{part.error.code}</span>
           {` — ${part.error.message}`}
         </p>
       ) : null}
       {terminalNotice && !isStreaming ? (
-        <p className="text-xs text-on-surface-variant/70">{terminalNotice}</p>
+        <p className="text-xs text-fg-muted">{terminalNotice}</p>
       ) : null}
     </div>
   );

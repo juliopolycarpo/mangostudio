@@ -13,18 +13,18 @@ interface FileChangePreviewBodyProps {
 }
 
 const OP_TONES: Record<FileChangeFilePreview['op'], string> = {
-  create: 'bg-success/10 text-success',
-  overwrite: 'bg-primary/10 text-primary',
-  update: 'bg-primary/10 text-primary',
-  delete: 'bg-error/10 text-error',
-  move: 'bg-surface-container-high text-on-surface-variant',
+  create: 'bg-success-subtle text-success',
+  overwrite: 'bg-accent-subtle text-accent-fg',
+  update: 'bg-accent-subtle text-accent-fg',
+  delete: 'bg-danger-subtle text-danger',
+  move: 'bg-surface text-fg-muted',
 };
 
 const LINE_STYLES: Record<DiffPreviewLine['kind'], { row: string; gutter: string }> = {
-  add: { row: 'bg-success/10 text-success', gutter: '+' },
-  del: { row: 'bg-error/10 text-error', gutter: '-' },
-  context: { row: 'text-on-surface-variant/70', gutter: ' ' },
-  marker: { row: 'text-on-surface-variant/50', gutter: ' ' },
+  add: { row: 'bg-success-subtle text-success', gutter: '+' },
+  del: { row: 'bg-danger-subtle text-danger', gutter: '-' },
+  context: { row: 'text-fg-muted', gutter: ' ' },
+  marker: { row: 'text-fg-subtle', gutter: ' ' },
 };
 
 /**
@@ -43,7 +43,7 @@ export function FileChangePreviewBody({ preview }: FileChangePreviewBodyProps) {
   return (
     <div className="space-y-3">
       {preview.repeatCount !== undefined && (
-        <p className="text-on-surface-variant/60 text-[11px]">
+        <p className="text-fg-muted text-[11px]">
           {d.appliedCount.replace('{count}', String(preview.repeatCount))}
         </p>
       )}
@@ -93,25 +93,23 @@ function FileSection({
         >
           {opLabels[file.op]}
         </span>
-        <span className="min-w-0 truncate text-on-surface-variant">{file.path}</span>
+        <span className="min-w-0 truncate text-fg-muted">{file.path}</span>
         {file.movedTo && (
           <>
-            <ArrowRight size={9} className="shrink-0 text-on-surface-variant/40" />
-            <span className="min-w-0 truncate text-on-surface-variant">{file.movedTo}</span>
+            <ArrowRight size={9} className="shrink-0 text-fg-subtle" />
+            <span className="min-w-0 truncate text-fg-muted">{file.movedTo}</span>
           </>
         )}
         {file.added > 0 && <span className="shrink-0 text-[10px] text-success">+{file.added}</span>}
         {file.removed > 0 && (
-          <span className="shrink-0 text-[10px] text-error">-{file.removed}</span>
+          <span className="shrink-0 text-[10px] text-danger">-{file.removed}</span>
         )}
       </div>
       {file.op === 'overwrite' && (
-        <p className="mb-1 text-[10px] text-on-surface-variant/50 italic">
-          {d.previousContentHidden}
-        </p>
+        <p className="mb-1 text-[10px] text-fg-subtle italic">{d.previousContentHidden}</p>
       )}
       {lines.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border border-outline-variant/10 bg-surface-container-lowest/40">
+        <div className="overflow-x-auto rounded-lg border border-stroke bg-control">
           <table className="w-full border-collapse">
             <tbody>
               {lines.map((line, index) => (
@@ -131,7 +129,7 @@ function FileSection({
         </div>
       )}
       {hiddenCount > 0 && (
-        <p className="mt-1 text-[10px] text-on-surface-variant/50">
+        <p className="mt-1 text-[10px] text-fg-subtle">
           {d.truncated.replace('{count}', String(hiddenCount))}
         </p>
       )}

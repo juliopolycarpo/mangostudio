@@ -70,8 +70,8 @@ export function SystemEventMarker({ event, detail }: { event: string; detail?: s
   const { t } = useI18n();
   const { label, severity } = resolveLabel(event, detail, t);
 
-  const toneClass = severity === 'error' ? 'text-error/80' : 'text-on-surface-variant/60';
-  const lineClass = severity === 'error' ? 'bg-error/30' : 'bg-outline-variant/20';
+  const toneClass = severity === 'error' ? 'text-danger' : 'text-fg-muted';
+  const lineClass = severity === 'error' ? 'bg-danger-subtle' : 'bg-stroke';
 
   return (
     <div className={`flex items-center gap-2 py-2 text-xs my-1 ${toneClass}`}>

@@ -123,7 +123,7 @@ describe('external activity row', () => {
 
   it('colours the vendor tool name by the same outcome', () => {
     renderParts([turnPart(), activityPart({ name: 'commandExecution', status: 'failed' })]);
-    expect(screen.getByText('commandExecution').className).toContain('text-error');
+    expect(screen.getByText('commandExecution').className).toContain('text-danger');
   });
 
   // A row with nothing to open must not advertise a disclosure it cannot

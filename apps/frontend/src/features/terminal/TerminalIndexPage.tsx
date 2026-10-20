@@ -57,12 +57,10 @@ export function TerminalIndexPage() {
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4 sm:p-6 md:p-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="rounded-2xl bg-primary-container p-3 text-on-primary-container">
+          <div className="rounded-2xl bg-accent-subtle p-3 text-accent-fg">
             <TerminalSquare size={24} />
           </div>
-          <h1 className="font-headline text-2xl font-bold text-on-background sm:text-3xl">
-            {t.terminal.page.title}
-          </h1>
+          <h1 className="text-2xl font-bold text-fg sm:text-3xl">{t.terminal.page.title}</h1>
         </div>
         <EnvironmentSelector
           environmentId={environmentId}
@@ -73,9 +71,7 @@ export function TerminalIndexPage() {
       {unavailable ? <TerminalUnavailableNotice message={unavailableHint} /> : null}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-on-surface-variant">
-          {t.terminal.page.sessions}
-        </h2>
+        <h2 className="text-sm font-semibold text-fg-muted">{t.terminal.page.sessions}</h2>
         <Button
           type="button"
           variant="secondary"
@@ -90,18 +86,18 @@ export function TerminalIndexPage() {
       </div>
 
       {sessionsQuery.isSuccess && sessions.length === 0 ? (
-        <p className="text-sm text-on-surface-variant">{t.terminal.page.noSessions}</p>
+        <p className="text-sm text-fg-muted">{t.terminal.page.noSessions}</p>
       ) : (
-        <ul className="divide-y divide-outline-variant/10 rounded-2xl border border-outline-variant/15">
+        <ul className="divide-y divide-stroke rounded-2xl border border-stroke">
           {sessions.map((session) => (
             <li
               key={session.id}
               className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
             >
-              <span className="truncate text-on-surface">{session.title}</span>
+              <span className="truncate text-fg">{session.title}</span>
               <Button
                 type="button"
-                variant="ghost"
+                variant="subtle"
                 size="sm"
                 onClick={() => setActiveId(session.id)}
                 aria-pressed={session.id === activeId}
@@ -114,7 +110,7 @@ export function TerminalIndexPage() {
       )}
 
       {activeId ? (
-        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-outline-variant/15">
+        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-stroke">
           <Suspense fallback={null}>
             <LazyTerminalView key={activeId} sessionId={activeId} />
           </Suspense>

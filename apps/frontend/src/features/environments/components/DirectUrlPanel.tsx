@@ -77,14 +77,14 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
 
   return (
     <section
-      className="space-y-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 p-3"
+      className="space-y-3 rounded-xl border border-stroke bg-control p-3"
       data-testid="direct-url-panel"
     >
       <div className="flex items-start gap-2">
-        <KeyRound size={14} className="mt-0.5 shrink-0 text-primary" />
+        <KeyRound size={14} className="mt-0.5 shrink-0 text-accent-fg" />
         <div className="min-w-0 space-y-0.5">
-          <p className="font-semibold text-on-surface text-xs">{labels.title}</p>
-          <p className="text-[11px] text-on-surface-variant/70">{labels.description}</p>
+          <p className="font-semibold text-fg text-xs">{labels.title}</p>
+          <p className="text-[11px] text-fg-muted">{labels.description}</p>
         </div>
       </div>
 
@@ -98,11 +98,11 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
             setBaseUrl(event.target.value);
           }}
         />
-        <p className="text-[11px] text-on-surface-variant/60">{labels.baseUrlHint}</p>
+        <p className="text-[11px] text-fg-muted">{labels.baseUrlHint}</p>
       </div>
 
       {warnPlaintext ? (
-        <p className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant">
+        <p className="rounded-lg border border-warning bg-warning-subtle px-2.5 py-2 text-[11px] text-fg-muted">
           {labels.plaintextWarning}
         </p>
       ) : null}
@@ -117,14 +117,14 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
           placeholder={environment.hasRuntimeToken ? '••••••••' : undefined}
           onChange={(event) => setToken(event.target.value)}
         />
-        <p className="text-[11px] text-on-surface-variant/60">{labels.tokenHint}</p>
-        <p className="text-[11px] text-on-surface-variant/70">
+        <p className="text-[11px] text-fg-muted">{labels.tokenHint}</p>
+        <p className="text-[11px] text-fg-muted">
           {environment.hasRuntimeToken ? labels.tokenSet : labels.tokenMissing}
         </p>
       </div>
 
       {error ? (
-        <p className="text-[11px] text-error" role="alert">
+        <p className="text-[11px] text-danger" role="alert">
           {error}
         </p>
       ) : null}
@@ -139,8 +139,8 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
         {environment.hasRuntimeToken && trimmedToken ? labels.tokenRotate : labels.tokenSave}
       </Button>
 
-      <div className="space-y-2 rounded-lg border border-outline-variant/25 bg-surface-container-low/40 p-2.5">
-        <p className="font-semibold text-[11px] text-on-surface">{labels.stepServe}</p>
+      <div className="space-y-2 rounded-lg border border-stroke bg-surface p-2.5">
+        <p className="font-semibold text-[11px] text-fg">{labels.stepServe}</p>
         <CopyLine
           label={labels.stepServe}
           value={serveListenCommand(trimmedBaseUrl || initial.baseUrl)}
@@ -148,7 +148,7 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
         {serviceInstall ? (
           <>
             <CopyLine label={labels.stepService} value={serviceInstall} />
-            <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
+            <p className="text-[11px] text-fg-muted">{labels.serviceHint}</p>
           </>
         ) : null}
       </div>

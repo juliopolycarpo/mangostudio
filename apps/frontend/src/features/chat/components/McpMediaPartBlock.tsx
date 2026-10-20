@@ -24,36 +24,36 @@ export function McpMediaPartBlock({ part }: Props) {
         href={part.url}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex max-w-md items-center gap-3 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest px-4 py-3 transition-colors hover:bg-surface-container-high/50"
+        className="inline-flex max-w-md items-center gap-3 rounded-2xl border border-stroke bg-control px-4 py-3 transition-colors hover:bg-fill-hover"
       >
-        <FileText size={18} className="shrink-0 text-primary" />
+        <FileText size={18} className="shrink-0 text-accent-fg" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-medium text-on-surface">
+          <span className="block truncate text-xs font-medium text-fg">
             {part.uri ?? t.chat.feed.mcpResourceFile}
           </span>
-          <span className="block truncate text-[10px] text-on-surface-variant/60">
+          <span className="block truncate text-[10px] text-fg-muted">
             {t.chat.feed.mcpMediaSource.replace('{source}', sourceLabel)} · {part.mimeType}
           </span>
         </span>
-        <Download size={14} className="shrink-0 text-on-surface-variant/60" />
+        <Download size={14} className="shrink-0 text-fg-muted" />
       </a>
     );
   }
 
   if (loadError) {
     return (
-      <div className="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-outline-variant/10 bg-surface-container-low p-6 text-on-surface-variant/50">
+      <div className="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-stroke bg-surface p-6 text-fg-subtle">
         <ImageOff size={32} />
-        <span className="text-xs font-body">{t.chat.feed.imageUnavailable}</span>
+        <span className="text-xs">{t.chat.feed.imageUnavailable}</span>
       </div>
     );
   }
 
   return (
-    <div className="max-w-md overflow-hidden rounded-2xl border border-outline-variant/10 bg-surface-container-lowest shadow-sm">
+    <div className="max-w-md overflow-hidden rounded-2xl border border-stroke bg-control shadow-sm">
       <div className="flex items-center gap-2.5 px-4 py-2.5">
-        <Plug size={14} className="shrink-0 text-primary" />
-        <span className="flex-1 truncate text-left text-xs font-body text-on-surface-variant/70">
+        <Plug size={14} className="shrink-0 text-accent-fg" />
+        <span className="flex-1 truncate text-left text-xs text-fg-muted">
           {t.chat.feed.mcpMediaSource.replace('{source}', sourceLabel)}
         </span>
       </div>
@@ -61,7 +61,7 @@ export function McpMediaPartBlock({ part }: Props) {
         <ReservedAspectImage
           src={part.url}
           alt={t.chat.feed.mcpImageAlt}
-          className="bg-surface-container-high"
+          className="bg-surface"
           objectFit="contain"
           onLoadError={() => setLoadError(true)}
         />
@@ -72,7 +72,7 @@ export function McpMediaPartBlock({ part }: Props) {
               e.stopPropagation();
               triggerImageDownload(part.url, t.common.downloadFilenamePrefix);
             }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center bg-surface-container-highest/40 hover:bg-primary/20 text-on-surface transition-colors"
+            className="w-8 h-8 rounded-lg flex items-center justify-center bg-fill-selected hover:bg-accent-hover text-fg transition-colors"
             title={t.chat.feed.download}
           >
             <Download size={14} />

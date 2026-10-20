@@ -40,10 +40,10 @@ export function OverviewSection({
   return (
     <section className="space-y-3" data-testid={testId}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-headline text-lg font-bold text-on-surface">{title}</h2>
+        <h2 className="text-lg font-bold text-fg">{title}</h2>
         <Link
           to={to}
-          className="flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-on-surface-variant/70 transition-colors hover:bg-surface-container-high hover:text-primary"
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-accent-fg"
         >
           {formatMessage(t.environments.overview.open, { section: title })}
           <ChevronRight size={14} />

@@ -49,14 +49,14 @@ export function DeprecatedModelNotice({
           <div className="flex items-start gap-3">
             <TriangleAlert size={18} className="mt-0.5 shrink-0 text-amber-200" />
             <div className="space-y-1">
-              <p className="text-sm font-bold text-on-surface">
+              <p className="text-sm font-bold text-fg">
                 {labels.title.replace('{provider}', details.provider ?? '')}
               </p>
-              <p className="text-xs leading-relaxed text-on-surface-variant/75">
+              <p className="text-xs leading-relaxed text-fg-muted">
                 {labels.body.replace('{model}', details.modelId ?? '')}
               </p>
               {targetId && !runnerAvailable ? (
-                <p className="text-xs leading-relaxed text-on-surface-variant/75">
+                <p className="text-xs leading-relaxed text-fg-muted">
                   {labels.runnerUnavailable.replace('{target}', targetId)}
                 </p>
               ) : null}

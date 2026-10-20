@@ -76,18 +76,18 @@ export function LibraryDivergenceCard({
       ) : null}
 
       {summary.divergentCount > 1 ? (
-        <p className="text-xs text-on-surface-variant/70">
+        <p className="text-xs text-fg-muted">
           {formatMessage(labels.more, { count: String(summary.divergentCount - 1) })}
         </p>
       ) : null}
 
       {summary.singleTargetCount > 0 ? (
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-outline-variant/10 pt-3 text-xs text-on-surface-variant/70">
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-stroke pt-3 text-xs text-fg-muted">
           {formatMessage(labels.singleTarget, { count: String(summary.singleTargetCount) })}
           <Link
             to={kind === 'skill' ? '/environments/library/skills' : '/environments/library'}
             search={search}
-            className="text-primary/80 transition-colors hover:text-primary"
+            className="text-accent-fg transition-colors hover:text-accent-fg"
           >
             {labels.openLibrary}
           </Link>
@@ -145,16 +145,14 @@ function DivergenceBody({
   return (
     <div className="space-y-2.5">
       <p className="flex flex-wrap items-center gap-1.5">
-        <span className="terminal-chip h-6 max-w-full text-on-surface">
+        <span className="terminal-chip h-6 max-w-full text-fg">
           <span className="truncate">{resource.slug}</span>
         </span>
         {showKind ? (
-          <span className="micro-label text-on-surface-variant/60">
-            {t.library.kinds[resource.kind]}
-          </span>
+          <span className="micro-label text-fg-muted">{t.library.kinds[resource.kind]}</span>
         ) : null}
       </p>
-      <p className="text-sm leading-relaxed text-on-surface-variant">{body}</p>
+      <p className="text-sm leading-relaxed text-fg-muted">{body}</p>
       <div className="flex flex-wrap gap-2">
         {/* Both land on the resource page: propagation runs there, behind its
             own preview-and-confirm step. */}
@@ -162,7 +160,7 @@ function DivergenceBody({
           to="/environments/library/$resourceKey"
           params={{ resourceKey: resource.key }}
           search={search}
-          className="inline-flex items-center rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary transition-colors hover:bg-primary/20"
+          className="inline-flex items-center rounded-lg border border-accent bg-accent-subtle px-3 py-1.5 text-xs font-bold text-accent-fg transition-colors hover:bg-accent-hover"
         >
           {labels.propagate}
         </Link>
@@ -170,7 +168,7 @@ function DivergenceBody({
           to="/environments/library/$resourceKey"
           params={{ resourceKey: resource.key }}
           search={{ ...search, compare: true }}
-          className="inline-flex items-center rounded-lg border border-outline-variant/25 px-3 py-1.5 text-xs font-bold text-on-surface-variant transition-colors hover:border-outline-variant/50 hover:text-on-surface"
+          className="inline-flex items-center rounded-lg border border-stroke px-3 py-1.5 text-xs font-bold text-fg-muted transition-colors hover:border-stroke hover:text-fg"
         >
           {labels.viewDiff}
         </Link>

@@ -21,12 +21,10 @@ export function RerunSetupCard() {
   const progress = useOnboardingProgress();
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+    <Card className="space-y-4 p-4 sm:p-6">
       <div className="space-y-1">
-        <h3 className="font-label font-bold text-on-surface-variant/80 text-xs uppercase tracking-widest">
-          {s.title}
-        </h3>
-        <p className="text-on-surface-variant/60 text-sm">{s.description}</p>
+        <h3 className="font-bold text-fg-muted text-xs uppercase tracking-widest">{s.title}</h3>
+        <p className="text-fg-muted text-sm">{s.description}</p>
       </div>
       <Button
         variant="secondary"
@@ -47,7 +45,7 @@ export function RerunSetupCard() {
         {s.action}
       </Button>
       {progress.saveFailed ? (
-        <p className="text-error text-sm" data-testid="rerun-setup-failed">
+        <p className="text-danger text-sm" data-testid="rerun-setup-failed">
           {t.onboarding.saveFailed}
         </p>
       ) : null}

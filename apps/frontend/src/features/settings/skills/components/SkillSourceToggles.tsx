@@ -29,16 +29,16 @@ export function SkillSourceToggles({ sources }: SkillSourceTogglesProps) {
   const rescan = useRescanLibrary();
 
   return (
-    <Card variant="solid" className="space-y-3 p-4 sm:p-6">
+    <Card className="space-y-3 p-4 sm:p-6">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+          <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
             {s.sourcesTitle}
           </h3>
-          <p className="text-sm text-on-surface-variant/60">{s.sourcesDescription}</p>
+          <p className="text-sm text-fg-muted">{s.sourcesDescription}</p>
         </div>
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           loading={rescan.isPending}
           onClick={() => rescan.mutate()}
@@ -52,7 +52,7 @@ export function SkillSourceToggles({ sources }: SkillSourceTogglesProps) {
         </Button>
       </div>
       {rescan.isError && (
-        <p className="text-xs text-error" role="alert">
+        <p className="text-xs text-danger" role="alert">
           {s.refreshLibraryFailed}
         </p>
       )}
@@ -62,16 +62,14 @@ export function SkillSourceToggles({ sources }: SkillSourceTogglesProps) {
           return (
             <div key={source} className="flex items-start justify-between gap-4">
               <div className="space-y-0.5 min-w-0">
-                <h4 className="text-sm font-medium text-on-surface">{s.sourceLabels[source]}</h4>
-                <p className="text-[11px] text-on-surface-variant/50 font-mono break-all">
-                  {state.path}
-                </p>
+                <h4 className="text-sm font-medium text-fg">{s.sourceLabels[source]}</h4>
+                <p className="text-[11px] text-fg-subtle font-mono break-all">{state.path}</p>
                 {!state.exists && (
-                  <p className="text-xs text-on-surface-variant/60 italic">{s.sourceNotFound}</p>
+                  <p className="text-xs text-fg-muted italic">{s.sourceNotFound}</p>
                 )}
               </div>
               <label className="flex items-center gap-2 shrink-0">
-                <span className="text-xs text-on-surface-variant">
+                <span className="text-xs text-fg-muted">
                   {state.enabled ? s.enabled : s.disabled}
                 </span>
                 <Checkbox

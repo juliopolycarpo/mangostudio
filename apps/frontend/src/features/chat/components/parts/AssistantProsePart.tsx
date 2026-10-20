@@ -40,7 +40,7 @@ function AssistantProsePartComponent({ text, isStreaming, incomplete }: Assistan
         codeCopiedLabel={t.chat.codeCopied}
       />
       {incomplete ? (
-        <span className="mt-1 block text-xs italic text-on-surface-variant/50">
+        <span className="mt-1 block text-xs italic text-fg-subtle">
           {t.externalAgents.turn.incomplete}
         </span>
       ) : null}

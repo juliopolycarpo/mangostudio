@@ -41,7 +41,7 @@ export function InstallTrustToggle({ environment }: InstallTrustToggleProps) {
 
   return (
     <div className="space-y-1" data-testid="install-trust">
-      <label className="flex items-start gap-2 text-xs text-on-surface-variant">
+      <label className="flex items-start gap-2 text-xs text-fg-muted">
         <input
           type="checkbox"
           checked={environment.allowInstalls}
@@ -49,18 +49,18 @@ export function InstallTrustToggle({ environment }: InstallTrustToggleProps) {
           onChange={(event) => void toggle(event.target.checked)}
           aria-label={trust.label}
           data-testid="install-trust-toggle"
-          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent"
         />
         <span className="min-w-0">
-          <span className="flex items-center gap-1.5 font-semibold text-on-surface">
-            <ShieldCheck size={13} className="text-primary/80" aria-hidden="true" />
+          <span className="flex items-center gap-1.5 font-semibold text-fg">
+            <ShieldCheck size={13} className="text-accent-fg" aria-hidden="true" />
             {trust.label}
           </span>
-          <span className="mt-0.5 block text-on-surface-variant/65">{trust.hint}</span>
+          <span className="mt-0.5 block text-fg-muted">{trust.hint}</span>
         </span>
       </label>
       {error ? (
-        <p className="text-xs text-error" role="alert">
+        <p className="text-xs text-danger" role="alert">
           {error}
         </p>
       ) : null}

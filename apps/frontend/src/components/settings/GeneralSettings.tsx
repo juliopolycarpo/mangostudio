@@ -133,11 +133,11 @@ export function GeneralSettings({
   return (
     <div className="space-y-4">
       {/* ── Language ── */}
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {s.languageLabel}
         </h3>
-        <p className="text-sm text-on-surface-variant/60">{s.languageDescription}</p>
+        <p className="text-sm text-fg-muted">{s.languageDescription}</p>
         <Select
           id="language-select"
           value={locale}
@@ -147,26 +147,26 @@ export function GeneralSettings({
         />
       </Card>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+      <Card className="space-y-4 p-4 sm:p-6">
         <div className="space-y-1">
-          <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+          <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
             {workspace.settingsLabel}
           </h3>
-          <p className="text-sm text-on-surface-variant/60">{workspace.settingsDescription}</p>
+          <p className="text-sm text-fg-muted">{workspace.settingsDescription}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <button
             type="button"
             onClick={() => setWorkdirPickerOpen(true)}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2.5 text-left transition-colors hover:border-primary/35"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-stroke bg-control px-3 py-2.5 text-left transition-colors hover:border-accent"
             title={workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
           >
-            <FolderOpen size={17} className="shrink-0 text-primary/80" />
+            <FolderOpen size={17} className="shrink-0 text-accent-fg" />
             <span className="min-w-0 flex-1">
-              <span className="block font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/55">
+              <span className="block text-[10px] font-bold uppercase tracking-widest text-fg-subtle">
                 {workspace.defaultLabel}
               </span>
-              <span className="block truncate font-mono text-xs text-on-surface">
+              <span className="block truncate font-mono text-xs text-fg">
                 {workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
               </span>
             </span>
@@ -178,7 +178,7 @@ export function GeneralSettings({
             {workspaceSettings.defaultWorkdir ? (
               <Button
                 type="button"
-                variant="ghost"
+                variant="subtle"
                 onClick={() => setDefaultWorkdir('')}
                 aria-label={workspace.clearDefault}
                 title={workspace.clearDefault}
@@ -188,12 +188,10 @@ export function GeneralSettings({
             ) : null}
           </div>
         </div>
-        <div className="flex items-start justify-between gap-4 border-t border-outline-variant/15 pt-4">
+        <div className="flex items-start justify-between gap-4 border-t border-stroke pt-4">
           <div className="space-y-1">
-            <p className="text-sm font-medium text-on-surface">{workspace.restrictToolsLabel}</p>
-            <p className="text-sm text-on-surface-variant/60">
-              {workspace.restrictToolsDescription}
-            </p>
+            <p className="text-sm font-medium text-fg">{workspace.restrictToolsLabel}</p>
+            <p className="text-sm text-fg-muted">{workspace.restrictToolsDescription}</p>
           </div>
           <Checkbox
             checked={workspaceSettings.restrictToolsToWorkdir}
@@ -216,14 +214,14 @@ export function GeneralSettings({
         />
       </Card>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+      <Card className="space-y-4 p-4 sm:p-6">
         <div className="space-y-1">
-          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-fg-muted">
             {workspace.chatSidebarTitle}
           </h3>
-          <p className="text-sm text-on-surface-variant/60">{workspace.chatSidebarDescription}</p>
+          <p className="text-sm text-fg-muted">{workspace.chatSidebarDescription}</p>
         </div>
-        <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant/60">
+        <div className="flex items-center justify-between gap-3 text-xs text-fg-muted">
           <span>
             {workspace.chatSidebarWidth.replace(
               '{width}',
@@ -234,7 +232,7 @@ export function GeneralSettings({
             <button
               type="button"
               onClick={() => setChatSidebarWidth(CHAT_SIDEBAR_WIDTH_DEFAULT)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
             >
               <RotateCcw size={13} />
               {workspace.chatSidebarResetWidth}
@@ -243,15 +241,15 @@ export function GeneralSettings({
         </div>
       </Card>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+      <Card className="space-y-4 p-4 sm:p-6">
         <div className="space-y-1">
-          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-fg-muted">
             {workspace.sidePanelTitle}
           </h3>
-          <p className="text-sm text-on-surface-variant/60">{workspace.sidePanelDescription}</p>
+          <p className="text-sm text-fg-muted">{workspace.sidePanelDescription}</p>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest">
+        <div className="overflow-hidden rounded-2xl border border-stroke bg-control">
           {workspaceSettings.sidePanel.panelOrder.map((panelId, index) => {
             const Icon = panelIcons[panelId];
             const label = panelLabels[panelId];
@@ -259,24 +257,22 @@ export function GeneralSettings({
             return (
               <div
                 key={panelId}
-                className="flex items-center gap-3 border-b border-outline-variant/15 px-3 py-2.5 last:border-b-0"
+                className="flex items-center gap-3 border-b border-stroke px-3 py-2.5 last:border-b-0"
               >
                 <Checkbox
                   checked={isVisible}
                   onChange={(event) => setWorkspacePanelVisible(panelId, event.target.checked)}
                   aria-label={workspace.sidePanelShow.replace('{panel}', label)}
                 />
-                <Icon size={17} className="shrink-0 text-primary/80" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-on-surface">
-                  {label}
-                </span>
+                <Icon size={17} className="shrink-0 text-accent-fg" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{label}</span>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => moveWorkspacePanel(panelId, 'up')}
                     disabled={index === 0}
                     aria-label={workspace.sidePanelMoveUp.replace('{panel}', label)}
-                    className="flex size-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-25"
+                    className="flex size-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg disabled:opacity-25"
                   >
                     <ArrowUp size={15} />
                   </button>
@@ -285,7 +281,7 @@ export function GeneralSettings({
                     onClick={() => moveWorkspacePanel(panelId, 'down')}
                     disabled={index === workspaceSettings.sidePanel.panelOrder.length - 1}
                     aria-label={workspace.sidePanelMoveDown.replace('{panel}', label)}
-                    className="flex size-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-25"
+                    className="flex size-8 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg disabled:opacity-25"
                   >
                     <ArrowDown size={15} />
                   </button>
@@ -295,7 +291,7 @@ export function GeneralSettings({
           })}
         </div>
 
-        <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant/60">
+        <div className="flex items-center justify-between gap-3 text-xs text-fg-muted">
           <span>
             {workspace.sidePanelWidth.replace('{width}', String(workspaceSettings.sidePanel.width))}
           </span>
@@ -303,7 +299,7 @@ export function GeneralSettings({
             <button
               type="button"
               onClick={() => setWorkspacePanelWidth(WORKSPACE_PANEL_WIDTH_DEFAULT)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
             >
               <RotateCcw size={13} />
               {workspace.sidePanelResetWidth}
@@ -313,8 +309,8 @@ export function GeneralSettings({
       </Card>
 
       {/* ── Default Image Quality ── */}
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+      <Card className="space-y-3 p-4 sm:p-6">
+        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
           {s.imageQualityLabel}
         </h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -331,13 +327,13 @@ export function GeneralSettings({
         </div>
       </Card>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+      <Card className="space-y-4 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+            <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
               {s.multiAgentLabel}
             </h3>
-            <p className="text-sm text-on-surface-variant/60">{s.multiAgentDescription}</p>
+            <p className="text-sm text-fg-muted">{s.multiAgentDescription}</p>
           </div>
           <Checkbox
             checked={multiAgentSettings.enabled}
@@ -352,7 +348,7 @@ export function GeneralSettings({
               button, and a label wrapping a button names it through a path no
               static check can follow. `ariaLabel` says it outright. */}
           <div className="space-y-2">
-            <span className="text-sm font-semibold text-on-surface">{s.traceVisibilityLabel}</span>
+            <span className="text-sm font-semibold text-fg">{s.traceVisibilityLabel}</span>
             <Select
               value={multiAgentSettings.traceVisibility}
               onChange={(value) =>
@@ -397,11 +393,11 @@ export function GeneralSettings({
           <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
             <label
               htmlFor="subagent-timeout"
-              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+              className="text-xs uppercase tracking-widest font-bold text-fg-muted"
             >
               {s.timeoutLabel}
             </label>
-            <span className="text-sm font-medium text-on-surface">
+            <span className="text-sm font-medium text-fg">
               {s.secondsHint.replace(
                 '{value}',
                 String(Math.round(multiAgentSettings.timeoutMs / 1000))
@@ -422,13 +418,13 @@ export function GeneralSettings({
         </div>
       </Card>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+      <Card className="space-y-4 p-4 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+            <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
               {s.chatTitlesLabel}
             </h3>
-            <p className="text-sm text-on-surface-variant/60">{s.chatTitlesDescription}</p>
+            <p className="text-sm text-fg-muted">{s.chatTitlesDescription}</p>
           </div>
           <Checkbox
             checked={chatTitleSettings.autoRenameEnabled}
@@ -441,7 +437,7 @@ export function GeneralSettings({
         <div className="space-y-3">
           <label
             htmlFor="chat-title-strategy"
-            className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+            className="text-xs uppercase tracking-widest font-bold text-fg-muted"
           >
             {s.chatTitleSourceLabel}
           </label>
@@ -462,11 +458,11 @@ export function GeneralSettings({
           <div className="space-y-3">
             <label
               htmlFor="chat-title-model"
-              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+              className="text-xs uppercase tracking-widest font-bold text-fg-muted"
             >
               {s.chatTitleModelLabel}
             </label>
-            <p className="text-sm text-on-surface-variant/60">{s.chatTitleModelDescription}</p>
+            <p className="text-sm text-fg-muted">{s.chatTitleModelDescription}</p>
             <Select
               id="chat-title-model"
               value={chatTitleSettings.preferredModel}
@@ -486,18 +482,18 @@ export function GeneralSettings({
           <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
             <label
               htmlFor="chat-title-prefix-length"
-              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
+              className="text-xs uppercase tracking-widest font-bold text-fg-muted"
             >
               {s.chatTitlePrefixLengthLabel}
             </label>
-            <span className="text-sm font-medium text-on-surface">
+            <span className="text-sm font-medium text-fg">
               {s.chatTitlePrefixLengthHint.replace(
                 '{value}',
                 String(chatTitleSettings.promptPrefixLength)
               )}
             </span>
           </div>
-          <p className="text-sm text-on-surface-variant/60">{s.chatTitlePrefixLengthDescription}</p>
+          <p className="text-sm text-fg-muted">{s.chatTitlePrefixLengthDescription}</p>
           <input
             id="chat-title-prefix-length"
             type="range"
@@ -534,7 +530,7 @@ function NumberSetting({
 }) {
   return (
     <label className="block space-y-2">
-      <span className="text-sm font-semibold text-on-surface">{label}</span>
+      <span className="text-sm font-semibold text-fg">{label}</span>
       <input
         type="number"
         min={min}
@@ -542,7 +538,7 @@ function NumberSetting({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20 disabled:opacity-50"
+        className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus disabled:opacity-50"
       />
     </label>
   );

@@ -159,10 +159,10 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
         <section className="space-y-1" data-testid="effective-installation">
           <CardSectionLabel>{e.runtimes.effectiveLabel}</CardSectionLabel>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="font-mono text-base font-semibold text-on-surface">
+            <span className="font-mono text-base font-semibold text-fg">
               {versionLabel(t, effective.version)}
             </span>
-            <span className="min-w-0 break-all font-mono text-xs text-on-surface-variant/70">
+            <span className="min-w-0 break-all font-mono text-xs text-fg-muted">
               {effective.rawPath}
             </span>
             {runtimeId && (
@@ -174,7 +174,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
               />
             )}
           </div>
-          <p className="text-xs text-on-surface-variant/60">
+          <p className="text-xs text-fg-muted">
             {[
               effective.pathIndex !== undefined
                 ? formatMessage(e.runtimes.pathIndexLabel, {
@@ -195,7 +195,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
           </p>
         </section>
       ) : (
-        <p className="text-sm text-on-surface-variant/70">
+        <p className="text-sm text-fg-muted">
           {status.installations.length === 0
             ? formatMessage(e.runtimes.notInstalled, { runtime: name })
             : e.runtimes.noEffective}
@@ -204,10 +204,10 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
 
       {runtimeId && (processLine || toolchainSelection !== 'auto' || toolchain.isError) && (
         <section className="space-y-1.5" data-testid="toolchain-status">
-          {processLine && <p className="text-xs text-on-surface-variant/60">{processLine}</p>}
+          {processLine && <p className="text-xs text-fg-muted">{processLine}</p>}
           {toolchainSelection !== 'auto' && (
             <Button
-              variant="ghost"
+              variant="subtle"
               size="sm"
               loading={toolchain.isPending}
               onClick={resetToolchain}
@@ -216,7 +216,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
             </Button>
           )}
           {toolchain.isError && (
-            <p className="text-xs text-error" role="alert">
+            <p className="text-xs text-danger" role="alert">
               {resolveApiErrorMessage(toolchain.error, e.runtimes.toolchainUpdateFailed)}
             </p>
           )}
@@ -258,10 +258,10 @@ function runtimeSubtitle(
   return (
     <div className="space-y-0.5">
       {status.id === 'fnm' && (
-        <p className="text-xs text-on-surface-variant/60">{e.runtimes.nodeVersionManager}</p>
+        <p className="text-xs text-fg-muted">{e.runtimes.nodeVersionManager}</p>
       )}
       {groups.length > 0 && (
-        <p className="text-xs text-on-surface-variant/60">
+        <p className="text-xs text-fg-muted">
           {groups.length === 1
             ? e.runtimes.singleVersion
             : formatMessage(e.runtimes.versionCount, { count: String(groups.length) })}
@@ -291,7 +291,7 @@ function renderManagedElsewhere(
           manager: pathSourceManagerName(t, resolve, source),
         });
   return (
-    <p className="text-sm text-on-surface-variant/70" data-testid="node-managed-elsewhere">
+    <p className="text-sm text-fg-muted" data-testid="node-managed-elsewhere">
       {text}
     </p>
   );

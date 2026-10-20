@@ -29,8 +29,8 @@ function Row({
   return (
     <div className="flex items-start gap-2 text-sm">
       <div className="min-w-0">
-        <p className="text-on-surface-variant/70">{label}</p>
-        <p className="break-all font-mono text-xs text-on-surface" title={title}>
+        <p className="text-fg-muted">{label}</p>
+        <p className="break-all font-mono text-xs text-fg" title={title}>
           {value}
         </p>
       </div>
@@ -53,7 +53,7 @@ export function UpdateCard({ status, onUpgraded }: UpdateCardProps) {
         <Row label={m.channel} value={m.channelName[status.channel]} />
         <Row label={m.latest} value={updateLatestLabel(t, status)} title={status.check?.error} />
       </div>
-      <div className="border-t border-outline-variant/15 pt-4">
+      <div className="border-t border-stroke pt-4">
         <UpdateAction status={status} testId="machine-update-card-action" onUpgraded={onUpgraded} />
       </div>
     </section>

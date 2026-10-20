@@ -19,9 +19,7 @@ export function ModelToggleList({
 
   return (
     <div className="space-y-3">
-      <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
-        {title}
-      </h4>
+      <h4 className="text-[10px] uppercase tracking-widest font-bold text-fg-muted">{title}</h4>
       <div className="grid grid-cols-1 gap-2">
         {models.map((model) => (
           <ModelToggleRow
@@ -47,8 +45,8 @@ function ModelToggleRow({ model, isEnabled, onToggleModel }: ModelToggleRowProps
     <label
       className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
         isEnabled
-          ? 'bg-primary/10 border-primary/30'
-          : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
+          ? 'bg-accent-subtle border-accent'
+          : 'bg-control border-stroke hover:border-stroke'
       }`}
     >
       <Checkbox
@@ -58,10 +56,10 @@ function ModelToggleRow({ model, isEnabled, onToggleModel }: ModelToggleRowProps
         }}
       />
       <div className="space-y-0.5">
-        <div className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}>
+        <div className={`text-sm font-bold ${isEnabled ? 'text-accent-fg' : 'text-fg'}`}>
           {model.displayName}
         </div>
-        <div className="text-[10px] font-mono text-on-surface-variant/60">{model.modelId}</div>
+        <div className="text-[10px] font-mono text-fg-muted">{model.modelId}</div>
       </div>
     </label>
   );

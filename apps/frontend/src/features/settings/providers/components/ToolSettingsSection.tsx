@@ -29,8 +29,8 @@ export function ToolSettingsSection({
   const s = t.settings.providers;
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
+    <Card className="space-y-4 p-4 sm:p-6">
+      <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
         {s.sectionTools}
       </h3>
 
@@ -38,10 +38,10 @@ export function ToolSettingsSection({
       {toolUseSupported && (
         <div className="space-y-2">
           <div className="flex items-baseline justify-between">
-            <label htmlFor="tool-iterations" className="text-sm text-on-surface">
+            <label htmlFor="tool-iterations" className="text-sm text-fg">
               {s.maxToolIterations}
             </label>
-            <span className="text-xs text-on-surface-variant">{form.maxToolIterations ?? '—'}</span>
+            <span className="text-xs text-fg-muted">{form.maxToolIterations ?? '—'}</span>
           </div>
           <div className="flex items-center gap-3">
             <input
@@ -62,7 +62,7 @@ export function ToolSettingsSection({
               value={form.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT}
               onChange={(e) => onChange({ ...form, maxToolIterations: Number(e.target.value) })}
               aria-label={s.maxToolIterations}
-              className="w-24 rounded-xl px-3 py-2 text-sm text-center bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors"
+              className="w-24 rounded-xl px-3 py-2 text-sm text-center bg-control text-fg border border-stroke focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors"
             />
           </div>
         </div>
@@ -70,7 +70,7 @@ export function ToolSettingsSection({
 
       {/* Max output tokens */}
       <div className="space-y-1.5">
-        <label htmlFor="max-output-tokens" className="text-sm text-on-surface">
+        <label htmlFor="max-output-tokens" className="text-sm text-fg">
           {s.maxOutputTokens}
         </label>
         <input
@@ -90,14 +90,14 @@ export function ToolSettingsSection({
             '{limit}',
             String(maxOutputTokensLimit)
           )}
-          className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-high text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors"
+          className="w-full rounded-xl px-4 py-2.5 text-sm bg-surface text-fg border border-stroke placeholder:text-fg-subtle focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors"
         />
       </div>
 
       {/* Parallel tool calls */}
       {toolUseSupported && (
         <div className="flex items-center justify-between gap-4">
-          <label htmlFor="parallel-tool-calls" className="text-sm text-on-surface">
+          <label htmlFor="parallel-tool-calls" className="text-sm text-fg">
             {s.parallelToolCalls}
           </label>
           <Checkbox

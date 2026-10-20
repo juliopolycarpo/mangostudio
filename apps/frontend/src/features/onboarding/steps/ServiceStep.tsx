@@ -35,12 +35,12 @@ export function ServiceStep() {
         </div>
       ) : (
         <div
-          className="flex items-center gap-3 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/60 px-4 py-3"
+          className="flex items-center gap-3 rounded-2xl border border-stroke bg-control px-4 py-3"
           data-testid="onboarding-service-state"
           data-installed={status.service.installed}
         >
-          <Server aria-hidden size={16} className="shrink-0 text-primary" />
-          <span className="font-semibold text-on-surface text-sm">
+          <Server aria-hidden size={16} className="shrink-0 text-accent-fg" />
+          <span className="font-semibold text-fg text-sm">
             {status.service.installed ? s.installed : s.notInstalled}
           </span>
         </div>
@@ -64,7 +64,7 @@ export function ServiceStep() {
           {/* The machine surface already has a sentence for every refusal
               code, and they are the accurate ones — a terminal owning the
               process is a different fact from a browser on another computer. */}
-          <p className="text-on-surface-variant/70 text-sm">
+          <p className="text-fg-muted text-sm">
             {install.reason
               ? t.environments.machine.actions.reasons[install.reason]
               : t.environments.machine.actions.reasons.guard}

@@ -25,11 +25,11 @@ function GeneratingImagePlaceholder() {
   const { t } = useI18n();
   return (
     <div className="flex max-w-2xl flex-col gap-2 pl-4">
-      <span className="animate-pulse text-sm font-medium text-on-surface">
+      <span className="animate-pulse text-sm font-medium text-fg">
         {t.chat.feed.generatingImage}
       </span>
-      <div className="h-1 w-24 overflow-hidden rounded-full bg-surface-container-highest">
-        <div className="h-full w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate] bg-primary" />
+      <div className="h-1 w-24 overflow-hidden rounded-full bg-fill-selected">
+        <div className="h-full w-1/2 animate-[slide_1s_ease-in-out_infinite_alternate] bg-accent" />
       </div>
     </div>
   );
@@ -39,8 +39,8 @@ function GeneratingImagePlaceholder() {
 function NoResponseNotice() {
   const { t } = useI18n();
   return (
-    <div className="max-w-2xl pl-4 font-body text-sm leading-relaxed">
-      <span className="italic text-on-surface-variant/50">{t.chat.feed.noResponse}</span>
+    <div className="max-w-2xl pl-4 text-sm leading-relaxed">
+      <span className="italic text-fg-subtle">{t.chat.feed.noResponse}</span>
     </div>
   );
 }

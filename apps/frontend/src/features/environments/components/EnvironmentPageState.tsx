@@ -52,9 +52,9 @@ export function EnvironmentPageState({
         className={`flex flex-col items-center gap-3 ${padding}`}
         data-testid="environments-error"
       >
-        <p className="text-sm text-error">{t.environments.loadError}</p>
+        <p className="text-sm text-danger">{t.environments.loadError}</p>
         {onRetry && (
-          <Button variant="ghost" size="sm" onClick={onRetry}>
+          <Button variant="subtle" size="sm" onClick={onRetry}>
             {t.environments.actions.retry}
           </Button>
         )}
@@ -64,12 +64,12 @@ export function EnvironmentPageState({
 
   return (
     <div
-      className={`flex flex-col items-center gap-2 rounded-2xl border border-outline-variant/15 bg-surface-container-high text-center ${padding}`}
+      className={`flex flex-col items-center gap-2 rounded-2xl border border-stroke bg-surface text-center ${padding}`}
       data-testid="environments-empty"
     >
-      <PackageOpen size={28} className="text-on-surface-variant/50" />
-      {title && <p className="text-sm font-semibold text-on-surface">{title}</p>}
-      {hint && <p className="max-w-md text-sm text-on-surface-variant/60">{hint}</p>}
+      <PackageOpen size={28} className="text-fg-subtle" />
+      {title && <p className="text-sm font-semibold text-fg">{title}</p>}
+      {hint && <p className="max-w-md text-sm text-fg-muted">{hint}</p>}
     </div>
   );
 }

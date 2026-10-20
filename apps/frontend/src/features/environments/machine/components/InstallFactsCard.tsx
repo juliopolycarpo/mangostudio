@@ -25,8 +25,8 @@ function Fact({
     <div className="flex items-start gap-2 text-sm">
       {severity && <FindingIcon severity={severity} />}
       <div className="min-w-0">
-        <p className="text-on-surface-variant/70">{label}</p>
-        <p className="break-all font-mono text-xs text-on-surface">{value}</p>
+        <p className="text-fg-muted">{label}</p>
+        <p className="break-all font-mono text-xs text-fg">{value}</p>
       </div>
     </div>
   );

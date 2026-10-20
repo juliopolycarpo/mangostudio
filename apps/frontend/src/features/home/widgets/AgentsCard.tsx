@@ -40,7 +40,7 @@ interface AgentsCardProps {
 
 const UNAVAILABLE_DOT: Readonly<Record<'warning' | 'error', string>> = {
   warning: 'bg-warning',
-  error: 'bg-error',
+  error: 'bg-danger',
 };
 
 export function AgentsCard({
@@ -62,7 +62,7 @@ export function AgentsCard({
       action={
         <Link
           to="/environments/agents"
-          className="micro-label text-primary/80 transition-colors hover:text-primary"
+          className="micro-label text-accent-fg transition-colors hover:text-accent-fg"
         >
           {labels.manage}
         </Link>
@@ -71,7 +71,7 @@ export function AgentsCard({
       {external.isLoading ? <HubSkeletonLines /> : null}
 
       {!external.isLoading && external.agents.length === 0 ? (
-        <p className="text-xs text-on-surface-variant">{labels.empty}</p>
+        <p className="text-xs text-fg-muted">{labels.empty}</p>
       ) : null}
 
       {external.agents.length > 0 ? (
@@ -133,13 +133,13 @@ function AgentPill({
       {/* The harness name never truncates and the version always may: a vendor
           can report anything here (Claude answers `2.1.241 (Claude Code)`) and
           the pill was cutting "Claude Code" down to "Claude C…" to keep it. */}
-      <span className="shrink-0 text-on-surface">{name}</span>
+      <span className="shrink-0 text-fg">{name}</span>
       {descriptor.version ? (
-        <span className="min-w-0 truncate text-on-surface-variant/60">{descriptor.version}</span>
+        <span className="min-w-0 truncate text-fg-muted">{descriptor.version}</span>
       ) : null}
       {usage ? (
         <span
-          className="shrink-0 border-l border-outline-variant/20 pl-1.5 text-on-surface-variant/70"
+          className="shrink-0 border-l border-stroke pl-1.5 text-fg-muted"
           data-testid="hub-agent-sessions"
         >
           {usage}

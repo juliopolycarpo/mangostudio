@@ -44,7 +44,7 @@ export function FolderStep({ state, onChange, isSaving }: FolderStepProps) {
         <div className="space-y-1.5">
           <label
             htmlFor="onboarding-environment"
-            className="font-label font-semibold text-on-surface-variant text-xs uppercase tracking-wider"
+            className="font-semibold text-fg-muted text-xs uppercase tracking-wider"
           >
             {s.machineLabel}
           </label>
@@ -65,25 +65,23 @@ export function FolderStep({ state, onChange, isSaving }: FolderStepProps) {
               }))
             }
           />
-          <p className="text-on-surface-variant/60 text-xs">{s.machineHint}</p>
+          <p className="text-fg-muted text-xs">{s.machineHint}</p>
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/60 p-4">
+      <div className="rounded-2xl border border-stroke bg-control p-4">
         {state.workdir ? (
           <div className="space-y-1">
-            <p className="font-label text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
-              {s.selected}
-            </p>
+            <p className="text-[10px] text-fg-muted uppercase tracking-widest">{s.selected}</p>
             <code
               data-testid="onboarding-workdir"
-              className="block break-all font-mono text-on-surface text-xs"
+              className="block break-all font-mono text-fg text-xs"
             >
               {state.workdir}
             </code>
           </div>
         ) : (
-          <p className="text-on-surface-variant/70 text-sm">{s.empty}</p>
+          <p className="text-fg-muted text-sm">{s.empty}</p>
         )}
       </div>
 

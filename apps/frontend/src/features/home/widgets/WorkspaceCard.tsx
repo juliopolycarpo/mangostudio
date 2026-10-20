@@ -38,7 +38,7 @@ export function WorkspaceCard({ chatId, workdir, onChooseWorkdir }: WorkspaceCar
   return (
     <SectionCard label={labels.label} tone={cardTone(state)}>
       {folder ? (
-        <p className="truncate font-mono text-sm text-on-surface" title={workdir ?? undefined}>
+        <p className="truncate font-mono text-sm text-fg" title={workdir ?? undefined}>
           {folder}
         </p>
       ) : null}
@@ -48,16 +48,16 @@ export function WorkspaceCard({ chatId, workdir, onChooseWorkdir }: WorkspaceCar
       {state?.state === 'repo' ? <RepoLines status={state.status} /> : null}
 
       {state?.state === 'not-a-repo' ? (
-        <p className="text-xs text-on-surface-variant">{labels.notARepo}</p>
+        <p className="text-xs text-fg-muted">{labels.notARepo}</p>
       ) : null}
 
       {state?.state === 'git-unavailable' ? (
-        <p className="text-xs text-on-surface-variant">{labels.unavailable}</p>
+        <p className="text-xs text-fg-muted">{labels.unavailable}</p>
       ) : null}
 
       {!folder ? (
         <div className="space-y-2">
-          <p className="text-xs text-on-surface-variant">{labels.noWorkdir}</p>
+          <p className="text-xs text-fg-muted">{labels.noWorkdir}</p>
           {onChooseWorkdir ? (
             <Button variant="secondary" size="sm" onClick={onChooseWorkdir} className="gap-1.5">
               <FolderOpen size={13} />
@@ -87,14 +87,14 @@ function RepoLines({ status }: { status: Extract<GitRepoState, { state: 'repo' }
 
   return (
     <div className="space-y-1.5 font-mono text-xs">
-      <p className="flex min-w-0 items-center gap-1.5 text-on-surface-variant">
+      <p className="flex min-w-0 items-center gap-1.5 text-fg-muted">
         <GitBranch size={12} aria-hidden="true" className="shrink-0" />
-        <span className="truncate text-on-surface">
+        <span className="truncate text-fg">
           {branch.name ??
             formatMessage(labels.detached, { hash: branch.detachedAt?.slice(0, 7) ?? '' })}
         </span>
       </p>
-      <p className="text-on-surface-variant">
+      <p className="text-fg-muted">
         <span className={status.clean ? 'text-success' : 'text-warning'}>
           {status.clean
             ? labels.cleanTree

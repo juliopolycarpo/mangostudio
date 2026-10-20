@@ -17,9 +17,8 @@
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  font-family: var(--font-headline);
-  font-weight: 700;
-  color: var(--color-on-surface);
+  font-weight: 600;
+  color: var(--color-fg);
   margin-top: 1.25em;
   margin-bottom: 0.5em;
   line-height: 1.3;
@@ -71,18 +70,19 @@
 .markdown-content code {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.875em;
-  background: var(--color-surface-container-high);
+  background: var(--color-fill-selected);
   padding: 0.15em 0.4em;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 .markdown-content pre {
   position: relative;
   margin-top: 0.75em;
   margin-bottom: 0.75em;
-  background: var(--color-surface-container-highest);
+  background: var(--color-surface);
+  border: 1px solid var(--color-stroke);
   padding: 1em;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   overflow-x: auto;
 }
 
@@ -96,13 +96,12 @@
   position: absolute;
   top: 0.5em;
   right: 2.75em;
-  font-size: 0.7em;
+  font-size: max(var(--text-micro), 0.7em);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-on-surface-variant);
-  opacity: 0.4;
-  font-family: var(--font-label);
-  transition: opacity 0.15s ease;
+  letter-spacing: 0.06em;
+  color: var(--color-fg-subtle);
+  font-family: var(--font-mono);
+  transition: opacity var(--duration-quick) var(--ease-standard);
 }
 
 .markdown-content pre[data-lang]:hover::before {
@@ -117,16 +116,16 @@
 }
 
 .markdown-content blockquote {
-  border-left: 3px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+  border-left: 3px solid var(--color-stroke-strong);
   padding-left: 1em;
   margin-top: 0.5em;
   margin-bottom: 0.5em;
   font-style: italic;
-  color: var(--color-on-surface-variant);
+  color: var(--color-fg-muted);
 }
 
 .markdown-content a {
-  color: var(--color-primary);
+  color: var(--color-accent-fg);
   text-decoration: none;
 }
 .markdown-content a:hover {
@@ -142,21 +141,21 @@
 }
 .markdown-content th,
 .markdown-content td {
-  border: 1px solid var(--color-outline-variant);
+  border: 1px solid var(--color-stroke);
   padding: 0.5em 0.75em;
   text-align: left;
 }
 .markdown-content th {
-  background: var(--color-surface-container-high);
+  background: var(--color-fill-selected);
   font-weight: 600;
 }
 .markdown-content tr:nth-child(even) {
-  background: color-mix(in srgb, var(--color-surface-container-low) 50%, transparent);
+  background: var(--color-fill-hover);
 }
 
 .markdown-content hr {
   border: none;
-  border-top: 1px solid var(--color-outline-variant);
+  border-top: 1px solid var(--color-stroke);
   margin: 1em 0;
 }
 
@@ -190,7 +189,7 @@
   font-size: 0.85em;
 }
 .markdown-content--thinking .markdown-content pre {
-  background: color-mix(in srgb, var(--color-surface-container-highest) 60%, transparent);
+  background: var(--color-fill-selected);
 }
 .markdown-content--thinking .markdown-content pre.shiki {
   background: unset;
@@ -215,7 +214,7 @@
   vertical-align: text-bottom;
   /* Inherited from the block being streamed into, so a thought's caret is as
    * quiet as the prose it trails. */
-  background: var(--streaming-caret-color, var(--color-primary));
+  background: var(--streaming-caret-color, var(--color-accent));
   animation: var(--animate-blink);
 }
 
@@ -228,5 +227,5 @@
 }
 
 .markdown-content--thinking {
-  --streaming-caret-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  --streaming-caret-color: var(--color-fg-subtle);
 }

@@ -51,7 +51,7 @@ export function BranchPrTag({
   return (
     <span
       className={`shrink-0 font-mono text-[10px] ${
-        annotation.isMerged ? 'text-success' : 'text-on-surface-variant/70'
+        annotation.isMerged ? 'text-success' : 'text-fg-muted'
       }`}
       title={annotation.isMerged ? t.github.branchPr.merged : annotation.url}
     >

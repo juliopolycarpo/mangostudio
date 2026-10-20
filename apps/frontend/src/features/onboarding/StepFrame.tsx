@@ -20,11 +20,11 @@ export function StepFrame({ title, lead, hint, children }: StepFrameProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <h2 className="font-headline font-bold text-on-surface text-xl">{title}</h2>
-        <p className="text-on-surface-variant text-sm leading-relaxed">{lead}</p>
+        <h2 className="font-bold text-fg text-xl">{title}</h2>
+        <p className="text-fg-muted text-sm leading-relaxed">{lead}</p>
       </div>
       {children}
-      {hint ? <p className="text-on-surface-variant/60 text-xs leading-relaxed">{hint}</p> : null}
+      {hint ? <p className="text-fg-muted text-xs leading-relaxed">{hint}</p> : null}
     </div>
   );
 }

@@ -14,7 +14,7 @@ interface FindingListProps {
 }
 
 const SEVERITY_STYLES: Record<FindingSeverity, string> = {
-  fail: 'text-error',
+  fail: 'text-danger',
   warn: 'text-warning',
 };
 
@@ -55,7 +55,7 @@ export function FindingList({ findings, className = '' }: FindingListProps) {
         return (
           <li
             key={key}
-            className="flex items-start gap-2 text-sm text-on-surface-variant"
+            className="flex items-start gap-2 text-sm text-fg-muted"
             data-finding-code={finding.code}
           >
             <FindingIcon severity={findingSeverity(finding)} />
@@ -68,7 +68,7 @@ export function FindingList({ findings, className = '' }: FindingListProps) {
                     href={remedyLink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-primary underline"
+                    className="text-accent-fg underline"
                     data-testid="finding-remedy-link"
                   >
                     {remedyLink}

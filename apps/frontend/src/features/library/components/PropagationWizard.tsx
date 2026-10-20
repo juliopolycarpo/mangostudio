@@ -130,20 +130,20 @@ export function PropagationWizard({
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-6"
       data-testid="propagation-wizard"
     >
-      <div className="app-scrollbar flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-outline-variant/15 bg-surface-container-low sm:rounded-2xl">
-        <header className="flex items-start justify-between gap-3 border-outline-variant/15 border-b px-4 py-3">
+      <div className="app-scrollbar flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-stroke bg-surface sm:rounded-2xl">
+        <header className="flex items-start justify-between gap-3 border-stroke border-b px-4 py-3">
           <div className="min-w-0">
-            <h2 className="truncate font-bold text-on-surface text-sm">{title}</h2>
+            <h2 className="truncate font-bold text-fg text-sm">{title}</h2>
             <ol className="mt-1 flex flex-wrap gap-x-3 text-[11px]">
               {STEP_ORDER.map((step, index) => (
                 <li
                   key={step}
                   className={
                     index === stepIndex
-                      ? 'font-semibold text-primary'
+                      ? 'font-semibold text-accent-fg'
                       : index < stepIndex
-                        ? 'text-on-surface-variant'
-                        : 'text-on-surface-variant/40'
+                        ? 'text-fg-muted'
+                        : 'text-fg-subtle'
                   }
                 >
                   {stepLabel(l, step)}
@@ -155,7 +155,7 @@ export function PropagationWizard({
             type="button"
             onClick={onClose}
             aria-label={l.wizard.close}
-            className="shrink-0 rounded-lg p-1 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+            className="shrink-0 rounded-lg p-1 text-fg-muted hover:bg-fill-hover hover:text-fg"
           >
             <X size={16} />
           </button>
@@ -164,10 +164,10 @@ export function PropagationWizard({
         <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4">
           {wizard.isStale && (
             <div
-              className="mb-3 space-y-2 rounded-lg border border-error/30 bg-error/5 p-3"
+              className="mb-3 space-y-2 rounded-lg border border-danger bg-danger-subtle p-3"
               data-testid="stale-preview"
             >
-              <p className="text-error text-xs">{l.wizard.stale}</p>
+              <p className="text-danger text-xs">{l.wizard.stale}</p>
               <Button variant="secondary" size="sm" onClick={wizard.repreview}>
                 {l.wizard.restale}
               </Button>
@@ -223,8 +223,8 @@ export function PropagationWizard({
           )}
         </div>
 
-        <footer className="flex flex-wrap items-center justify-between gap-2 border-outline-variant/15 border-t px-4 py-3">
-          <div className="min-w-0 text-[11px] text-error">
+        <footer className="flex flex-wrap items-center justify-between gap-2 border-stroke border-t px-4 py-3">
+          <div className="min-w-0 text-[11px] text-danger">
             {wizard.step === 'review' && pendingAcks.length > 0 && (
               <span data-testid="acknowledge-required">{l.adaptation.acknowledgeRequired}</span>
             )}
@@ -239,7 +239,7 @@ export function PropagationWizard({
           <div className="flex items-center gap-2">
             {stepIndex > 0 && wizard.step !== 'result' && (
               <Button
-                variant="ghost"
+                variant="subtle"
                 size="sm"
                 onClick={() => wizard.setStep(STEP_ORDER[stepIndex - 1])}
               >

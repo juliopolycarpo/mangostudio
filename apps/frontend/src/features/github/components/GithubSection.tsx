@@ -44,7 +44,7 @@ export function GithubSection({
           type="button"
           onClick={onToggle}
           aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded text-left text-on-surface-variant transition-colors hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded text-left text-fg-muted transition-colors hover:text-fg focus-visible:outline-2 focus-visible:outline-focus"
         >
           <Chevron size={ICON_SM} className="shrink-0" aria-hidden="true" />
           <MicroLabel as="h3" className="min-w-0 truncate">

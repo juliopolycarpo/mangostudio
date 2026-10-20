@@ -23,9 +23,7 @@ export function LogsSettingsPage() {
             this component's, not the probe log's, and gating it behind that
             request only delays it. */}
         <ExternalAgentDiscoveryLog />
-        <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
-          {t.common.loading}
-        </Card>
+        <Card className="p-4 sm:p-6 text-sm text-fg-muted">{t.common.loading}</Card>
       </div>
     );
   }
@@ -33,9 +31,7 @@ export function LogsSettingsPage() {
   if (error) {
     return (
       <div className="space-y-4">
-        <Card variant="solid" className="p-4 sm:p-6 text-sm text-error">
-          {labels.failedToLoad}
-        </Card>
+        <Card className="p-4 sm:p-6 text-sm text-danger">{labels.failedToLoad}</Card>
         {/* Independent of the provider probe log: an unreachable metrics
             endpoint says nothing about how the agents were discovered. */}
         <ExternalAgentDiscoveryLog />
@@ -46,11 +42,11 @@ export function LogsSettingsPage() {
   return (
     <div className="space-y-4">
       <ExternalAgentDiscoveryLog />
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+      <Card className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
-            <h2 className="text-lg font-semibold text-on-surface">{labels.title}</h2>
-            <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
+            <h2 className="text-lg font-semibold text-fg">{labels.title}</h2>
+            <p className="text-sm text-fg-muted">{labels.description}</p>
           </div>
           <Button variant="secondary" size="sm" onClick={() => void refetch()} loading={isFetching}>
             {labels.refresh}
@@ -60,42 +56,38 @@ export function LogsSettingsPage() {
 
       {data?.entries.length ? (
         data.entries.map((entry) => (
-          <Card key={entry.id} variant="solid" className="space-y-3 p-4 sm:p-6">
+          <Card key={entry.id} className="space-y-3 p-4 sm:p-6">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-1">
-                <p className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
+                <p className="text-xs uppercase tracking-widest font-bold text-fg-muted">
                   {labels.eventKinds.probeTimeout}
                 </p>
-                <h3 className="text-base font-semibold text-on-surface">
-                  {t.providers[entry.provider]}
-                </h3>
-                <p className="text-sm text-on-surface">{entry.message}</p>
+                <h3 className="text-base font-semibold text-fg">{t.providers[entry.provider]}</h3>
+                <p className="text-sm text-fg">{entry.message}</p>
               </div>
-              <span className="text-xs text-on-surface-variant/60">
+              <span className="text-xs text-fg-muted">
                 {formatTimestamp(entry.timestamp, locale)}
               </span>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
-                <p className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+              <div className="rounded-xl bg-control px-4 py-3">
+                <p className="text-xs uppercase tracking-widest font-bold text-fg-muted">
                   {labels.providerLabel}
                 </p>
-                <p className="mt-1 text-sm text-on-surface">{t.providers[entry.provider]}</p>
+                <p className="mt-1 text-sm text-fg">{t.providers[entry.provider]}</p>
               </div>
-              <div className="rounded-xl bg-surface-container-lowest px-4 py-3">
-                <p className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/70 font-label">
+              <div className="rounded-xl bg-control px-4 py-3">
+                <p className="text-xs uppercase tracking-widest font-bold text-fg-muted">
                   {labels.operationLabel}
                 </p>
-                <p className="mt-1 text-sm text-on-surface">{operationLabels[entry.operation]}</p>
+                <p className="mt-1 text-sm text-fg">{operationLabels[entry.operation]}</p>
               </div>
             </div>
           </Card>
         ))
       ) : (
-        <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
-          {labels.empty}
-        </Card>
+        <Card className="p-4 sm:p-6 text-sm text-fg-muted">{labels.empty}</Card>
       )}
     </div>
   );

@@ -42,23 +42,21 @@ export function DiffViewer({
   return (
     <section
       aria-label={selection.title}
-      className="overflow-hidden rounded-xl border border-outline-variant/15"
+      className="overflow-hidden rounded-xl border border-stroke"
     >
-      <div className="flex items-center gap-2 border-b border-outline-variant/15 bg-surface-container/60 px-2 py-2">
+      <div className="flex items-center gap-2 border-b border-stroke bg-surface px-2 py-2">
         <button
           type="button"
           onClick={onClose}
           aria-label={t.git.diff.back}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-fg-muted hover:bg-fill-hover hover:text-fg"
         >
           <ArrowLeft size={14} />
         </button>
-        <FileDiff size={14} className="shrink-0 text-primary" />
+        <FileDiff size={14} className="shrink-0 text-accent-fg" />
         <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-[11px] font-semibold text-on-surface">
-            {selection.path}
-          </p>
-          <p className="text-[9px] uppercase tracking-wider text-on-surface-variant">
+          <p className="truncate font-mono text-[11px] font-semibold text-fg">{selection.path}</p>
+          <p className="text-[9px] uppercase tracking-wider text-fg-muted">
             {selection.commit
               ? selection.commit.slice(0, 8)
               : selection.staged
@@ -81,10 +79,10 @@ export function DiffViewer({
       ) : hunks.length === 0 ? (
         <DiffMessage icon={<FileDiff size={18} />}>{t.git.diff.empty}</DiffMessage>
       ) : (
-        <div className="app-scrollbar max-h-[34rem] overflow-auto bg-surface-container-lowest font-mono text-[10px] leading-4">
+        <div className="app-scrollbar max-h-[34rem] overflow-auto bg-control font-mono text-[10px] leading-4">
           {hunks.map((hunk) => (
             <div key={`${hunk.oldStart}:${hunk.newStart}:${hunk.header}`}>
-              <div className="sticky top-0 z-10 border-y border-primary/10 bg-primary/8 px-2 py-1 text-primary">
+              <div className="sticky top-0 z-10 border-y border-accent bg-accent-subtle px-2 py-1 text-accent-fg">
                 {hunk.header}
               </div>
               {hunk.lines.map((line) => (
@@ -119,21 +117,21 @@ const DiffLineRow = memo(function DiffLineRow({
     [line.content, language, theme]
   );
   const tone = {
-    addition: 'bg-success/10',
-    deletion: 'bg-error/10',
+    addition: 'bg-success-subtle',
+    deletion: 'bg-danger-subtle',
     context: '',
-    metadata: 'bg-surface-container text-on-surface-variant italic',
+    metadata: 'bg-surface text-fg-muted italic',
   }[line.type];
   const marker = line.type === 'addition' ? '+' : line.type === 'deletion' ? '-' : ' ';
   return (
     <div className={`flex min-w-max ${tone}`}>
-      <span className="w-8 shrink-0 select-none border-r border-outline-variant/10 px-1 text-right text-on-surface-variant/50">
+      <span className="w-8 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle">
         {line.oldLine ?? ''}
       </span>
-      <span className="w-8 shrink-0 select-none border-r border-outline-variant/10 px-1 text-right text-on-surface-variant/50">
+      <span className="w-8 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle">
         {line.newLine ?? ''}
       </span>
-      <span className="w-5 shrink-0 select-none text-center text-on-surface-variant">{marker}</span>
+      <span className="w-5 shrink-0 select-none text-center text-fg-muted">{marker}</span>
       {highlighted ? (
         <code className="min-w-0 whitespace-pre pr-3">
           {highlighted.map((token) => (
@@ -197,7 +195,7 @@ function DiffMessage({
   return (
     <div
       className={`flex min-h-32 flex-col items-center justify-center gap-2 px-4 text-center text-xs ${
-        tone === 'error' ? 'text-error' : 'text-on-surface-variant'
+        tone === 'error' ? 'text-danger' : 'text-fg-muted'
       }`}
     >
       {icon}

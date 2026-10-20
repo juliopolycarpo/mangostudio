@@ -8,10 +8,10 @@ import { type SettingsNavGroup, settingsNavGroups } from './settings-nav';
 
 // Router `Link` concatenates `className` with the matching state's className,
 // so the three class strings must stay disjoint: an idle colour in the base
-// would still be on the active link, fighting `text-primary` on stylesheet
+// would still be on the active link, fighting `text-accent-fg` on stylesheet
 // order alone.
 const LINK_BASE =
-  'block rounded-lg px-3 py-2 text-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
+  'block rounded-lg px-3 py-2 text-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus';
 /**
  * The hover fill is a translucent `on-surface` wash, not a surface token.
  *
@@ -23,9 +23,8 @@ const LINK_BASE =
  * near-white in dark and near-black in light, so an 8% wash of it always moves
  * away from whatever it sits on, in the direction that theme has room for.
  */
-const LINK_IDLE =
-  'font-medium text-on-surface-variant/70 hover:bg-on-surface/8 hover:text-on-surface';
-const LINK_ACTIVE = 'font-semibold text-primary bg-primary/12';
+const LINK_IDLE = 'font-medium text-fg-muted hover:bg-fill-hover hover:text-fg';
+const LINK_ACTIVE = 'font-semibold text-accent-fg bg-accent-subtle';
 
 /**
  * The list's own surface, so the column reads as one object against the page
@@ -44,7 +43,7 @@ const LINK_ACTIVE = 'font-semibold text-primary bg-primary/12';
  * room at the bottom; erring high only means the panel scrolls itself slightly
  * sooner than it strictly must.
  */
-const PANEL_SURFACE = 'bg-surface-container-highest/60 border border-outline-variant/20';
+const PANEL_SURFACE = 'bg-fill-selected border border-stroke';
 const PANEL_BASE = `app-scrollbar mt-2 rounded-2xl p-3 ${PANEL_SURFACE}`;
 const PANEL_DESKTOP = 'lg:mt-0 lg:block lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto';
 
@@ -58,7 +57,7 @@ const PANEL_DESKTOP = 'lg:mt-0 lg:block lg:max-h-[calc(100dvh-7rem)] lg:overflow
  * object and the rules as its internal seams — not as a table's gridlines.
  */
 const GROUP_BASE =
-  'space-y-1 border-t border-outline-variant/15 pt-4 mt-4 first:border-t-0 first:pt-0 first:mt-0';
+  'space-y-1 border-t border-stroke pt-4 mt-4 first:border-t-0 first:pt-0 first:mt-0';
 
 /**
  * Navigation for the settings surface: fifteen pages under five headings.
@@ -95,8 +94,8 @@ export function SettingsNav() {
         aria-expanded={open}
         aria-controls={listId}
         className={cn(
-          'flex w-full items-center justify-between gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-on-surface lg:hidden',
-          'transition-colors duration-200 hover:bg-on-surface/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+          'flex w-full items-center justify-between gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-fg lg:hidden',
+          'transition-colors duration-200 hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
           PANEL_SURFACE
         )}
       >

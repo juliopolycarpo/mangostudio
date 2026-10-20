@@ -34,25 +34,29 @@ export function NavItem({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'w-full rounded-lg transition-all duration-200',
+        'relative w-full rounded-sm transition-colors',
         horizontal
-          ? 'flex items-center gap-3 px-4 py-3 text-left'
-          : 'flex flex-col items-center justify-center gap-1 p-2 text-xs font-medium',
+          ? 'flex h-8 items-center gap-2 px-2 text-left text-sm'
+          : 'flex flex-col items-center justify-center gap-1 p-2 text-xs',
+        // The current page is a neutral fill plus a 3px accent bar on the leading
+        // edge — the NavigationView's own signal. The bar is what carries the
+        // colour; the fill alone would not survive a grayscale screen.
         active
-          ? 'text-primary bg-surface-container-high'
-          : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
+          ? cn(
+              'bg-fill-selected font-medium text-fg',
+              horizontal &&
+                'before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent'
+            )
+          : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
       )}
     >
       <Icon size={horizontal ? ICON_MD : ICON_LG} className="shrink-0" />
-      <span
-        className={cn('truncate', horizontal && 'font-label font-medium text-sm')}
-        title={horizontal ? undefined : label}
-      >
+      <span className="truncate" title={horizontal ? undefined : label}>
         {label}
       </span>
       {horizontal && badgeLabel ? (
         <span
-          className="ml-auto shrink-0 rounded-full bg-warning/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-warning"
+          className="ml-auto shrink-0 rounded-full bg-warning-subtle px-1.5 font-mono text-micro font-medium text-warning"
           data-testid="nav-item-badge"
         >
           {badgeLabel}

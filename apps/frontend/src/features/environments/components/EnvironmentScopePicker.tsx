@@ -27,11 +27,11 @@ export function EnvironmentScopePicker({
 
   return (
     <label
-      className="flex h-8 items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container-lowest pl-3 text-xs font-medium text-on-surface-variant transition-colors hover:border-primary/30 hover:text-on-surface"
+      className="flex h-8 items-center gap-2 rounded-full border border-stroke bg-control pl-3 text-xs font-medium text-fg-muted transition-colors hover:border-accent hover:text-fg"
       data-testid="environment-scope-picker"
       data-environment-id={environmentId}
     >
-      <Server size={13} className="shrink-0 text-primary/80" aria-hidden="true" />
+      <Server size={13} className="shrink-0 text-accent-fg" aria-hidden="true" />
       <span className="sr-only">{e.scope.label}</span>
       <select
         value={environmentId}

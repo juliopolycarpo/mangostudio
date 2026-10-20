@@ -156,16 +156,14 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
+      <div className="bg-surface w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke space-y-5">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h3 className="text-xl font-bold text-on-surface">{s.import.title}</h3>
-            <p className="mt-1 text-sm text-on-surface-variant/70">
-              {s.portability.importDescription}
-            </p>
+            <h3 className="text-xl font-bold text-fg">{s.import.title}</h3>
+            <p className="mt-1 text-sm text-fg-muted">{s.portability.importDescription}</p>
           </div>
-          <Button variant="ghost" size="sm" aria-label={s.cancelButton} onClick={onClose}>
+          <Button variant="subtle" size="sm" aria-label={s.cancelButton} onClick={onClose}>
             <X size={16} />
           </Button>
         </div>
@@ -195,7 +193,7 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
         )}
         {step.kind === 'summary' && <SummaryStep summary={step.summary} />}
 
-        {submitError && <p className="text-sm text-error">{submitError}</p>}
+        {submitError && <p className="text-sm text-danger">{submitError}</p>}
 
         <div className="flex gap-3 pt-2">
           {step.kind === 'source' && (
@@ -274,8 +272,8 @@ function SourceStep(props: SourceStepProps) {
             onClick={() => props.onSourceKind(kind)}
             className={`px-4 py-2 text-sm font-medium rounded-xl border transition-colors ${
               props.sourceKind === kind
-                ? 'bg-primary/10 border-primary/60 text-primary'
-                : 'bg-surface-container-high border-outline-variant/20 text-on-surface-variant hover:text-on-surface'
+                ? 'bg-accent-subtle border-accent text-accent-fg'
+                : 'bg-surface border-stroke text-fg-muted hover:text-fg'
             }`}
           >
             {labels[kind]}
@@ -285,7 +283,7 @@ function SourceStep(props: SourceStepProps) {
 
       {props.sourceKind === 'file' && (
         <div className="space-y-1.5">
-          <label htmlFor="mcp-import-file" className="text-sm font-medium text-on-surface-variant">
+          <label htmlFor="mcp-import-file" className="text-sm font-medium text-fg-muted">
             {s.portability.fileLabel}
           </label>
           <input
@@ -293,11 +291,9 @@ function SourceStep(props: SourceStepProps) {
             type="file"
             accept="application/json,.json"
             onChange={(event) => void props.onFile(event.target.files?.[0])}
-            className="block w-full rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface file:mr-3 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-primary"
+            className="block w-full rounded-xl border border-stroke px-3 py-2 text-sm text-fg file:mr-3 file:rounded-lg file:border-0 file:bg-accent-subtle file:px-3 file:py-1.5 file:text-accent-fg"
           />
-          <p className="text-xs text-on-surface-variant/60">
-            {props.fileName || s.portability.fileHint}
-          </p>
+          <p className="text-xs text-fg-muted">{props.fileName || s.portability.fileHint}</p>
         </div>
       )}
       {props.sourceKind === 'path' && (
@@ -309,12 +305,12 @@ function SourceStep(props: SourceStepProps) {
             onChange={(event) => props.onPath(event.target.value)}
             placeholder={s.import.pathPlaceholder}
           />
-          <p className="text-xs text-on-surface-variant/60">{s.import.pathHint}</p>
+          <p className="text-xs text-fg-muted">{s.import.pathHint}</p>
         </div>
       )}
       {props.sourceKind === 'json' && (
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="mcp-import-json" className="text-sm font-medium text-on-surface-variant">
+          <label htmlFor="mcp-import-json" className="text-sm font-medium text-fg-muted">
             {s.import.jsonLabel}
           </label>
           <textarea
@@ -323,7 +319,7 @@ function SourceStep(props: SourceStepProps) {
             onChange={(event) => props.onJson(event.target.value)}
             placeholder={s.import.jsonPlaceholder}
             rows={10}
-            className="rounded-xl px-3 py-2 text-sm font-mono bg-surface-container-high text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors resize-y"
+            className="rounded-xl px-3 py-2 text-sm font-mono bg-surface text-fg border border-stroke placeholder:text-fg-subtle focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors resize-y"
           />
         </div>
       )}
@@ -349,13 +345,11 @@ function PreviewStep({
   const { t } = useI18n();
   const s = t.settings.mcp;
   if (entries.length === 0) {
-    return (
-      <p className="py-6 text-center text-sm text-on-surface-variant/60">{s.import.emptyPreview}</p>
-    );
+    return <p className="py-6 text-center text-sm text-fg-muted">{s.import.emptyPreview}</p>;
   }
   return (
     <div className="space-y-3">
-      <h4 className="text-sm font-semibold uppercase tracking-wider text-on-surface-variant/70">
+      <h4 className="text-sm font-semibold uppercase tracking-wider text-fg-muted">
         {s.portability.reviewTitle}
       </h4>
       {entries.map((entry) => {
@@ -365,21 +359,18 @@ function PreviewStep({
           (candidate) => !candidate.replaceBlockedBySlug
         ).length;
         return (
-          <section
-            key={entry.key}
-            className="rounded-2xl border border-outline-variant/20 p-4 space-y-3"
-          >
+          <section key={entry.key} className="rounded-2xl border border-stroke p-4 space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-on-surface">{entry.name}</span>
+                  <span className="font-medium text-fg">{entry.name}</span>
                   {entry.transport && (
-                    <span className="rounded-full bg-surface-container-highest px-2 py-0.5 text-xs text-on-surface-variant">
+                    <span className="rounded-full bg-fill-selected px-2 py-0.5 text-xs text-fg-muted">
                       {s.transports[entry.transport]}
                     </span>
                   )}
                 </div>
-                <p className="truncate text-xs font-mono text-on-surface-variant/60">
+                <p className="truncate text-xs font-mono text-fg-muted">
                   {entry.slug} · {entry.command ?? entry.url ?? entry.key}
                 </p>
               </div>
@@ -398,15 +389,15 @@ function PreviewStep({
             </div>
 
             {entry.status === 'invalid' && entry.reason && (
-              <p className="flex items-center gap-2 text-xs text-error">
+              <p className="flex items-center gap-2 text-xs text-danger">
                 <AlertTriangle size={13} />
                 {s.import.reasons[entry.reason]}
               </p>
             )}
 
             {entry.conflicts.length > 0 ? (
-              <div className="rounded-xl bg-surface-container-low p-3 space-y-2">
-                <p className="text-xs font-semibold text-on-surface-variant">
+              <div className="rounded-xl bg-surface p-3 space-y-2">
+                <p className="text-xs font-semibold text-fg-muted">
                   {s.portability.conflictsTitle}
                 </p>
                 {entry.conflicts.map((candidate) => {
@@ -417,15 +408,15 @@ function PreviewStep({
                       )
                     : undefined;
                   return (
-                    <div key={candidate.serverId} className="text-xs text-on-surface-variant/80">
+                    <div key={candidate.serverId} className="text-xs text-fg-muted">
                       <div>
-                        <span className="font-medium text-on-surface">{candidate.name}</span>
+                        <span className="font-medium text-fg">{candidate.name}</span>
                         <span> ({candidate.slug}) · </span>
                         {candidate.keys.map((key) => s.portability.conflictKeys[key]).join(', ')}
                       </div>
                       {blockedMessage && (
                         <p
-                          className="mt-1 flex items-center gap-1.5 text-error"
+                          className="mt-1 flex items-center gap-1.5 text-danger"
                           title={blockedMessage}
                         >
                           <AlertTriangle size={12} />
@@ -437,14 +428,14 @@ function PreviewStep({
                 })}
               </div>
             ) : (
-              <p className="flex items-center gap-2 text-xs text-on-surface-variant/60">
-                <CheckCircle2 size={13} className="text-primary" />
+              <p className="flex items-center gap-2 text-xs text-fg-muted">
+                <CheckCircle2 size={13} className="text-accent-fg" />
                 {s.portability.noConflicts}
               </p>
             )}
 
             {state.decision === 'replace' && entry.conflicts.length > 1 && (
-              <div className="space-y-1.5 text-xs text-on-surface-variant">
+              <div className="space-y-1.5 text-xs text-fg-muted">
                 <span>{s.portability.replacementTargetLabel}</span>
                 <Select
                   // Choosing `replace` already picks the first *eligible*
@@ -479,7 +470,7 @@ function PreviewStep({
             )}
 
             {state.decision === 'copy' && entry.copyName && entry.copySlug && (
-              <p className="text-xs text-primary">
+              <p className="text-xs text-accent-fg">
                 {s.portability.copyIdentity
                   .replace('{name}', entry.copyName)
                   .replace('{slug}', entry.copySlug)}
@@ -487,11 +478,11 @@ function PreviewStep({
             )}
 
             {state.decision !== 'skip' && entry.secretReferences.length > 0 && (
-              <div className="space-y-2 border-t border-outline-variant/15 pt-3">
+              <div className="space-y-2 border-t border-stroke pt-3">
                 {entry.secretReferences.map((reference) =>
                   reference.required ? (
                     <div key={`${reference.kind}:${reference.name}`} className="space-y-1.5">
-                      <p className="text-xs text-on-surface-variant">
+                      <p className="text-xs text-fg-muted">
                         {s.portability.referenceSecretWarning.replace('{name}', reference.name)}
                       </p>
                       <input
@@ -513,17 +504,17 @@ function PreviewStep({
                             event.target.value
                           )
                         }
-                        className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-high px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none"
+                        className="w-full rounded-xl border border-stroke bg-surface px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none"
                       />
                     </div>
                   ) : (
                     <p
                       key={`${reference.kind}:${reference.name}`}
-                      className="flex items-center gap-2 text-xs text-on-surface-variant"
+                      className="flex items-center gap-2 text-xs text-fg-muted"
                     >
-                      <AlertTriangle size={13} className="text-tertiary" />
+                      <AlertTriangle size={13} className="text-info" />
                       {s.portability.literalSecretWarning.replace('{name}', reference.name)}
-                      <span className="rounded-full bg-tertiary/10 px-2 py-0.5 text-tertiary">
+                      <span className="rounded-full bg-info-subtle px-2 py-0.5 text-info">
                         {s.portability.redactedValue}
                       </span>
                     </p>
@@ -575,17 +566,14 @@ function SummaryStep({ summary }: { summary: McpPortabilityApplyResponse }) {
     s.summaryInvalid.replace('{count}', String(summary.invalid)),
   ];
   return (
-    <div className="rounded-2xl border border-primary/20 bg-primary/5 p-5">
-      <div className="flex items-center gap-2 text-primary">
+    <div className="rounded-2xl border border-accent bg-accent-subtle p-5">
+      <div className="flex items-center gap-2 text-accent-fg">
         <CheckCircle2 size={18} />
         <h4 className="font-semibold">{s.summaryTitle}</h4>
       </div>
       <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
         {values.map((value) => (
-          <li
-            key={value}
-            className="rounded-xl bg-surface-container-high px-3 py-2 text-xs text-on-surface-variant"
-          >
+          <li key={value} className="rounded-xl bg-surface px-3 py-2 text-xs text-fg-muted">
             {value}
           </li>
         ))}

@@ -46,26 +46,26 @@ export function ToolsStep({ environment, onContinue }: ToolsStepProps) {
 
   return (
     <div className="space-y-4" data-testid="onboarding-tools-step">
-      <p className="text-on-surface-variant/70 text-xs">{labels.toolsIntro}</p>
+      <p className="text-fg-muted text-xs">{labels.toolsIntro}</p>
 
       {!connected ? (
-        <p className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5 text-on-surface-variant/70 text-xs">
+        <p className="rounded-xl border border-stroke bg-control px-3 py-2.5 text-fg-muted text-xs">
           {labels.toolsDisconnected}
         </p>
       ) : runtimes.isPending || agents.isPending ? (
-        <p className="text-on-surface-variant/50 text-xs">{labels.toolsProbing}</p>
+        <p className="text-fg-subtle text-xs">{labels.toolsProbing}</p>
       ) : runtimes.isError || agents.isError ? (
-        <p className="text-error text-xs" role="alert">
+        <p className="text-danger text-xs" role="alert">
           {labels.toolsError}
         </p>
       ) : found.length === 0 ? (
-        <p className="text-on-surface-variant/70 text-xs">{labels.toolsNone}</p>
+        <p className="text-fg-muted text-xs">{labels.toolsNone}</p>
       ) : (
         <ul className="flex list-none flex-wrap gap-1.5" aria-label={labels.toolsIntro}>
           {found.map((name) => (
             <li
               key={name}
-              className="rounded-md border border-outline-variant/15 bg-surface-container-lowest px-2 py-1 font-mono text-[10px] text-on-surface-variant"
+              className="rounded-md border border-stroke bg-control px-2 py-1 font-mono text-[10px] text-fg-muted"
             >
               {name}
             </li>
@@ -73,9 +73,9 @@ export function ToolsStep({ environment, onContinue }: ToolsStepProps) {
         </ul>
       )}
 
-      <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5">
+      <div className="rounded-xl border border-stroke bg-control px-3 py-2.5">
         <InstallTrustToggle environment={environment} />
-        <p className="mt-1.5 text-on-surface-variant/60 text-xs">
+        <p className="mt-1.5 text-fg-muted text-xs">
           {formatMessage(labels.toolsInstallsNote, { name: environment.name })}
         </p>
       </div>

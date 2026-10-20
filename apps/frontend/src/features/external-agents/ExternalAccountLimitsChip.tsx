@@ -35,11 +35,7 @@ export function ExternalAccountLimitsChip({
   return (
     <span
       className={`inline-flex items-center gap-1 text-[10px] ${
-        tone === 'warn'
-          ? 'text-error'
-          : tone === 'ok'
-            ? 'text-on-surface-variant/70'
-            : 'text-on-surface-variant/50'
+        tone === 'warn' ? 'text-danger' : tone === 'ok' ? 'text-fg-muted' : 'text-fg-subtle'
       }`}
       data-testid="external-account-limits"
       data-verdict={verdict.kind}
@@ -55,7 +51,7 @@ export function ExternalAccountLimitsChip({
             event.stopPropagation();
             onRefresh();
           }}
-          className="rounded p-0.5 hover:bg-surface-container-high disabled:opacity-50"
+          className="rounded p-0.5 hover:bg-fill-hover disabled:opacity-50"
         >
           <RefreshCw size={10} className={refreshing ? 'animate-spin' : undefined} />
         </button>

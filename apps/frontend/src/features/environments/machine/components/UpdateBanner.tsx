@@ -40,7 +40,7 @@ export function UpdateBanner() {
 
   return (
     <div
-      className="flex flex-wrap items-center justify-between gap-3 border-b border-primary/20 bg-primary/5 px-4 py-2 text-sm text-on-surface"
+      className="flex flex-wrap items-center justify-between gap-3 border-b border-accent bg-accent-subtle px-4 py-2 text-sm text-fg"
       data-testid="machine-update-banner"
     >
       <div className="flex flex-wrap items-center gap-3">
@@ -52,7 +52,7 @@ export function UpdateBanner() {
         </p>
         <Link
           to="/environments/machine"
-          className="micro-label text-primary/80 transition-colors hover:text-primary"
+          className="micro-label text-accent-fg transition-colors hover:text-accent-fg"
         >
           {m.details}
         </Link>
@@ -60,7 +60,7 @@ export function UpdateBanner() {
       <div className="flex items-center gap-2">
         <UpdateAction status={data} testId="machine-update-banner-action" />
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           onClick={handleDismiss}
           aria-label={m.dismissAria}
