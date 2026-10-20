@@ -106,14 +106,6 @@ skip = [
   # already on syn 3. Not ours to fix — strum's move, not a dependency we control.
   { crate = "syn@2.0.119", reason = "strum_macros 0.28 (via jsonschema) hasn't moved to syn 3 yet" },
 
-  # tokio-tungstenite's `rustls-tls-webpki-roots` feature (needed for `connect`/`handshake`)
-  # drags in its own webpki-roots 0.26 and a default TLS connector we never call: PR#4 built the
-  # `Connector` explicitly with our own rustls `ClientConfig` and webpki-roots 1.0 root store,
-  # precisely so `ring` stays out of the process default (see the `rustls` dependency comment).
-  # Dropping tokio-tungstenite's default-TLS feature would remove this, but that is a transport
-  # code change, not a supply-chain one — left as a follow-up, not done here.
-  { crate = "webpki-roots@0.26.11", reason = "tokio-tungstenite's own default TLS connector, unused — we build ours explicitly, see the rustls dependency comment" },
-
   # reqwest (the runtime's MCP HTTP client) always enables hyper-util's `client-proxy`, which
   # still pins base64 0.22 for proxy basic-auth; everything else in the graph is on 0.23.
   { crate = "base64@0.22.1", reason = "hyper-util 0.1's client-proxy (always enabled by reqwest 0.13) has not moved to base64 0.23" },
