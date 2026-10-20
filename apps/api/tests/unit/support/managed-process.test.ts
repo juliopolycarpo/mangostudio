@@ -40,6 +40,35 @@ afterEach(async () => {
 });
 
 describe('createManagedProcessFixture', () => {
+  it('removes nested storage with shell metacharacters in the allocated path', async () => {
+    const fixture = await createFixture({ tempPrefix: 'mango-managed $; fixture-' });
+    await mkdir(join(fixture.tempDir, 'nested'), { recursive: true });
+    await writeFile(join(fixture.tempDir, 'nested', 'file'), '');
+    await fixture.cleanup();
+    await fixture.assertReleased();
+  });
+
+  it('accepts storage already removed before cleanup starts', async () => {
+    const fixture = await createFixture();
+    await rm(fixture.tempDir, { recursive: true });
+    await fixture.cleanup();
+    await fixture.assertReleased();
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'removes directory links without following them',
+    async () => {
+      const fixture = await createFixture();
+      const outside = await createFixture();
+      const retainedFile = join(outside.tempDir, 'retained');
+      await writeFile(retainedFile, '');
+      await symlink(outside.tempDir, join(fixture.tempDir, 'link'));
+      await fixture.cleanup();
+      expect(existsSync(retainedFile)).toBe(true);
+      await fixture.assertReleased();
+    }
+  );
+
   it.skipIf(process.platform !== 'linux')(
     'retains observed descendants and snapshot errors across failed and successful reads',
     async () => {
