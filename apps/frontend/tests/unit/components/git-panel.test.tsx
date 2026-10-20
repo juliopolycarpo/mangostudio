@@ -9,7 +9,7 @@ import type {
   GitWorktreeListResponse,
 } from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
@@ -611,9 +611,12 @@ describe('GitPanel', () => {
     expect(screen.getByText('Loading diff...')).toBeVisible();
     expect(screen.queryByRole('region', { name: 'View diff for src/panel.tsx' })).toBeNull();
 
-    expect(
-      await screen.findByRole('region', { name: 'View diff for src/panel.tsx' })
-    ).toBeVisible();
+    // Await the chunk itself: a cold import can exceed findByRole's deadline.
+    await act(async () => {
+      await import('../../../src/features/workspace/DiffViewer');
+    });
+
+    expect(screen.getByRole('region', { name: 'View diff for src/panel.tsx' })).toBeVisible();
   });
 
   it('opens a line-numbered worktree diff from a changed file', async () => {
@@ -637,8 +640,10 @@ describe('GitPanel', () => {
     render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
 
-    // `findByRole`: the viewer is behind a lazy import that resolves after the click.
-    const diff = await screen.findByRole('region', { name: 'View diff for src/panel.tsx' });
+    await act(async () => {
+      await import('../../../src/features/workspace/DiffViewer');
+    });
+    const diff = screen.getByRole('region', { name: 'View diff for src/panel.tsx' });
     expect(diff).toBeVisible();
     expect(diff).toHaveTextContent('old title');
     expect(diff).toHaveTextContent('new title');
@@ -677,7 +682,10 @@ describe('GitPanel', () => {
     expect(screen.getByRole('region', { name: 'Commit details' })).toBeVisible();
     expect(screen.getByText('1234567890abcdef')).toBeVisible();
     await user.click(screen.getByRole('button', { name: /src\/git\.ts/ }));
-    expect(await screen.findByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
+    await act(async () => {
+      await import('../../../src/features/workspace/DiffViewer');
+    });
+    expect(screen.getByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
   });
 
   it('commits staged changes from the split button and reports the short hash', async () => {
