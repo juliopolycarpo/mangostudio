@@ -252,6 +252,10 @@ recorded as a natural exit instead, with the same identity proof and a stable
 snapshot that no longer lists it. Final Job closure
 is containment and never establishes successful settlement. Full native
 censuses before and after each command reject unattributed compiler helpers.
+A Windows census is one PowerShell CIM query with a 30-second budget; a POSIX
+`ps` census has 10 seconds. A census that fails or reaches its budget is
+incomplete, and its error names the elapsed time and the last phase PowerShell
+reported on stderr.
 
 The producer installs its own frozen dependencies and seals its Windows helper
 checkout separately from the fresh tested source. Requests containing the inherited environment live outside uploaded

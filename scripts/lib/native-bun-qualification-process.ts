@@ -174,11 +174,40 @@ function validParentEdge(child: NativeProcess, parent: NativeProcess): boolean {
   return child.group !== null && parent.group !== null;
 }
 
-async function captureSnapshot(command: readonly string[]): Promise<string> {
+/** A `ps` census reads no WMI provider and normally returns well inside this budget. */
+export const POSIX_CENSUS_TIMEOUT_MS = 10_000;
+
+/**
+ * A PowerShell CIM census. Passing hosted `windows-latest` jobs took 1.3-9.9 s for one census
+ * under the full suite and two failed at a 10 s budget; idle, one takes about 1.4 s locally.
+ */
+export const WINDOWS_CENSUS_TIMEOUT_MS = 30_000;
+
+// Each marker goes to stderr as the script reaches it, so a census stopped at its budget
+// says whether PowerShell started, finished the CIM query, or was still writing rows.
+const WINDOWS_CENSUS_SCRIPT = [
+  "[Console]::Error.WriteLine('census: started')",
+  "$ErrorActionPreference = 'Stop'",
+  '$all = @(Get-CimInstance Win32_Process)',
+  "[Console]::Error.WriteLine('census: queried ' + $all.Count + ' processes')",
+  "$rows = @($all | Where-Object { $_.ProcessId -gt 0 } | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; parentPid = $_.ParentProcessId; created = $_.CreationDate.ToUniversalTime().ToString('o'); command = $_.CommandLine; name = $_.Name; executablePath = $_.ExecutablePath } })",
+  'ConvertTo-Json -InputObject $rows -Compress -Depth 3',
+].join('; ');
+
+/**
+ * Run one census command and return its stdout. A nonzero exit, including a stop at `timeoutMs`,
+ * is an incomplete census; the error names the elapsed time and what the command wrote to stderr.
+ * @example const text = await captureSnapshot(['ps', '-axo', 'pid=,ppid='], POSIX_CENSUS_TIMEOUT_MS);
+ */
+export async function captureSnapshot(
+  command: readonly string[],
+  timeoutMs: number
+): Promise<string> {
+  const started = performance.now();
   const child = Bun.spawn([...command], {
     stdout: 'pipe',
     stderr: 'pipe',
-    timeout: 10_000,
+    timeout: timeoutMs,
     env: { ...process.env, LC_ALL: 'C' },
   });
   const [out, error, code] = await Promise.all([
@@ -186,41 +215,57 @@ async function captureSnapshot(command: readonly string[]): Promise<string> {
     new Response(child.stderr).text(),
     child.exited,
   ]);
-  if (code !== 0)
-    throw new Error(
-      `Snapshot ${command[0]} exited ${code}: ${error}; expected a complete process census`
-    );
-  return out;
+  if (code === 0) return out;
+  const elapsedMs = Math.round(performance.now() - started);
+  const outcome =
+    elapsedMs >= timeoutMs
+      ? `stopped at its ${timeoutMs}ms budget after ${elapsedMs}ms (exit ${code})`
+      : `exited ${code} after ${elapsedMs}ms`;
+  throw new Error(
+    `Snapshot ${command[0]} ${outcome}: ${error.trim() || 'no stderr'}; expected a complete process census`
+  );
 }
+
+/** What a census reads from the host; tests replace each part with a named fake. */
+export interface NativeCensusHost {
+  readonly platform: NodeJS.Platform;
+  readonly findExecutable: (name: string) => string | null;
+  readonly capture: (command: readonly string[], timeoutMs: number) => Promise<string>;
+}
+
+const LIVE_CENSUS_HOST: NativeCensusHost = {
+  platform: process.platform,
+  findExecutable: (name) => Bun.which(name),
+  capture: captureSnapshot,
+};
 
 /**
  * Read native process identities. Linux adds /proc start ticks to avoid PID reuse within a second.
  * @example const processes = await snapshotNativeProcesses();
  */
-export async function snapshotNativeProcesses(): Promise<NativeProcess[]> {
-  if (process.platform === 'win32') {
-    const shell = Bun.which('pwsh.exe') ?? Bun.which('powershell.exe') ?? Bun.which('pwsh');
+export async function snapshotNativeProcesses(
+  host: NativeCensusHost = LIVE_CENSUS_HOST
+): Promise<NativeProcess[]> {
+  if (host.platform === 'win32') {
+    const shell =
+      host.findExecutable('pwsh.exe') ??
+      host.findExecutable('powershell.exe') ??
+      host.findExecutable('pwsh');
     if (!shell)
       throw new Error('Missing PowerShell; expected native CIM process census on Windows');
-    const script =
-      "$ErrorActionPreference = 'Stop'; $rows = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -gt 0 } | ForEach-Object { [pscustomobject]@{ pid = $_.ProcessId; parentPid = $_.ParentProcessId; created = $_.CreationDate.ToUniversalTime().ToString('o'); command = $_.CommandLine; name = $_.Name; executablePath = $_.ExecutablePath } }); ConvertTo-Json -InputObject $rows -Compress -Depth 3";
     return parseNativeProcesses(
-      await captureSnapshot([
-        shell,
-        '-NoLogo',
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        script,
-      ]),
+      await host.capture(
+        [shell, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_CENSUS_SCRIPT],
+        WINDOWS_CENSUS_TIMEOUT_MS
+      ),
       'win32'
     );
   }
   const processes = parseNativeProcesses(
-    await captureSnapshot(['ps', '-axo', 'pid=,ppid=,pgid=,lstart=,args=']),
-    process.platform
+    await host.capture(['ps', '-axo', 'pid=,ppid=,pgid=,lstart=,args='], POSIX_CENSUS_TIMEOUT_MS),
+    host.platform
   );
-  if (process.platform !== 'linux') return processes;
+  if (host.platform !== 'linux') return processes;
   const identities = await Promise.all(processes.map((row) => readLinuxProcessIdentity(row)));
   return identities.filter((row): row is NativeProcess => row !== null);
 }
