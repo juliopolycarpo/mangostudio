@@ -239,7 +239,32 @@ describe('spawn launcher', () => {
       ],
     });
 
+    // startError bounds reporting once a launch has failed; child startup has
+    // no such deadline, especially while other Windows workers are spawning.
+    await peer.exited;
     expect(await peer.startError()).toEqual({
+      exit: { code: 78, signal: null },
+      spawnErrorCode: undefined,
+      stderrLine: 'missing config',
+    });
+  });
+
+  it('reports a refused launch after its exit lands beyond the reporting grace', async () => {
+    const recording = new RecordingSpawn();
+    const peer = spawnPort({ argv: ['runtime'] }, recording.spawn);
+    recording.child.stderr.emit('data', Buffer.from('boot failed\nmissing config\n'));
+
+    // The process has written its diagnostic, but its exit event is still gated.
+    const beforeExit = await peer.startError(0);
+    expect(beforeExit).toEqual({
+      exit: undefined,
+      spawnErrorCode: undefined,
+      stderrLine: 'missing config',
+    });
+    recording.child.emit('exit', 78, null);
+    await peer.exited;
+
+    expect(await peer.startError(0)).toEqual({
       exit: { code: 78, signal: null },
       spawnErrorCode: undefined,
       stderrLine: 'missing config',
