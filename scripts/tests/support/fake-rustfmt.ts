@@ -28,14 +28,6 @@ if (!marker) {
 }
 const hang = process.env[HANG_ENV] === '1';
 
-if (hang && process.env[GRANDCHILD_ENV] !== '1') {
-  Bun.spawn([process.execPath, ...process.argv.slice(2)], {
-    env: { ...process.env, [MARKER_ENV]: grandchildMarker(marker), [GRANDCHILD_ENV]: '1' },
-    stdin: 'ignore',
-    stdout: 'ignore',
-    stderr: 'ignore',
-  });
-}
 writeFileSync(
   marker,
   JSON.stringify({
@@ -45,6 +37,15 @@ writeFileSync(
     startedAt: performance.timeOrigin + performance.now(),
   })
 );
+
+if (hang && process.env[GRANDCHILD_ENV] !== '1') {
+  Bun.spawn([process.execPath, ...process.argv.slice(2)], {
+    env: { ...process.env, [MARKER_ENV]: grandchildMarker(marker), [GRANDCHILD_ENV]: '1' },
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+}
 
 if (hang) {
   let beat = 0;

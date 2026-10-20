@@ -24,7 +24,7 @@ use rmcp::transport::streamable_http_client::SseError;
 use sse_stream::Sse;
 
 use super::elicitation_order::SchemaOrder;
-use super::http::{MAX_SSE_EVENT_BYTES, bounded_sse};
+use super::http::{MAX_SSE_EVENT_BYTES, bounded_sse, new_http_client};
 
 type Events = BoxStream<'static, Result<Sse, SseError>>;
 
@@ -66,7 +66,9 @@ impl LegacySse {
         headers: HashMap<HeaderName, HeaderValue>,
         order: Arc<SchemaOrder>,
     ) -> Result<Self, SseTransportError> {
-        let mut request = client
+        // Keep the long-lived event stream out of the POST client's connection pool.
+        let stream_client = new_http_client().map_err(SseTransportError)?;
+        let mut request = stream_client
             .get(url.clone())
             .header(reqwest::header::ACCEPT, EVENT_STREAM_MIME_TYPE);
         for (name, value) in &headers {
