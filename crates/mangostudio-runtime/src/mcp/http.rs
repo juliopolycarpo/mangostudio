@@ -82,10 +82,17 @@ type HttpResult<T> = Result<T, StreamableHttpError<HttpError>>;
 /// ```
 pub(crate) fn http_client() -> Result<reqwest::Client, String> {
     static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
-    CLIENT.get_or_init(build_client).clone()
+    CLIENT.get_or_init(new_http_client).clone()
 }
 
-fn build_client() -> Result<reqwest::Client, String> {
+/// Builds an independent HTTP client with the shared MCP TLS, proxy, and redirect policy.
+///
+/// # Example
+/// ```ignore
+/// let stream_client = new_http_client()?;
+/// let response = stream_client.get(url).send().await?;
+/// ```
+pub(crate) fn new_http_client() -> Result<reqwest::Client, String> {
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };
