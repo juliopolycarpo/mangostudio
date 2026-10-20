@@ -77,19 +77,26 @@ describe('useInstallStream', () => {
   });
 
   it('appends log events in order and stops on exit', async () => {
+    const { promise: stopped, resolve: onCancel } = Promise.withResolvers<void>();
     fetchMock.mockResolvedValue(
-      streamingResponse([
-        sse([
-          { type: 'log', stream: 'stdout', line: 'first', done: false },
-          { type: 'log', stream: 'stderr', line: 'second', done: false },
-        ]),
-        sse([EXIT_EVENT]),
-      ])
+      streamingResponse(
+        [
+          sse([
+            { type: 'log', stream: 'stdout', line: 'first', done: false },
+            { type: 'log', stream: 'stderr', line: 'second', done: false },
+          ]),
+          sse([EXIT_EVENT]),
+        ],
+        { keepOpen: true, onCancel }
+      )
     );
 
     const { result } = renderHook(() => useInstallStream({ runId: 'run-1' }));
 
-    await waitFor(() => expect(result.current.exit).not.toBeNull());
+    // Wait for the consumer to cancel the live body, then commit its final state.
+    // A wall-clock poll can expire before React commits on a loaded CI host.
+    await act(async () => stopped);
+    expect(result.current.exit).toEqual(EXIT_EVENT);
     expect(result.current.lines.map((line) => line.text)).toEqual(['first', 'second']);
     expect(result.current.lines[1]?.stream).toBe('stderr');
     expect(result.current.phase).toBe('finished');
