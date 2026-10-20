@@ -27,7 +27,11 @@
         "scripts/tests/support/fake-build-smoke-server.ts",
         "scripts/tests/support/fake-check-tool.ts",
         "scripts/tests/support/fake-rustfmt.ts",
-        "scripts/tests/support/fake-smoke-workflow-command.ts"
+        "scripts/tests/support/fake-smoke-workflow-command.ts",
+        "scripts/tests/support/fixture-command-main.ts",
+        "scripts/tests/support/archive-assets-fixture.ts",
+        "scripts/tests/support/holding-fixture-command.ts",
+        "scripts/tests/support/push-dist-repo-fixture.ts"
       ],
       "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"]
     },

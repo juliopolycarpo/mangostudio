@@ -333,16 +333,17 @@ namespace Mango.NativeImageCallerFakes {
         public readonly List<ImageAttempt> Diagnostics=new List<ImageAttempt>();
         public int QueryBudgetMilliseconds=2000;
         public IntPtr Open(uint pid) { IntPtr token=OpenOrder.Count>0?OpenOrder.Dequeue():new IntPtr(1); Events.Add("open:"+pid+":"+token); return token; }
-        private ImageQueryBudget NewImageBudget() { return new ImageQueryBudget(QueryBudgetMilliseconds,()=>Clock.Now); }
-        private bool Alive(IntPtr token) { return !Processes[token].Wait(0); }
-        private void ReleaseExited() {
+        public NativeQueryTrace LastTrace;
+        private ImageQueryBudget NewImageBudget() { var budget=new ImageQueryBudget(QueryBudgetMilliseconds,()=>Clock.Now); LastTrace=budget.Trace; return budget; }
+        private bool Alive(IntPtr token,ImageQueryBudget budget=null) { return !Processes[token].Wait(0); }
+        private void ReleaseExited(ImageQueryBudget budget=null) {
             var remove=new List<string>();
             foreach(var pair in held) if(!Alive(pair.Value.Handle)) { Win32.Close(ref pair.Value.Handle); remove.Add(pair.Key); }
             foreach(string identity in remove) held.Remove(identity);
         }
-        private Win32.Accounting Accounting() { Events.Add("complete-accounting"); return new Win32.Accounting {Active=Counts.Count>0?Counts.Dequeue():1,Total=2}; }
-        private uint[] ProcessList(out int bytes) { Events.Add("complete-list"); uint[] list=Lists.Count>0?Lists.Dequeue():new uint[]{42}; bytes=8+list.Length*IntPtr.Size; return list; }
-        private Member ReadState(IntPtr token,uint pid,string expected) { return Processes[token].Read(); }
+        private Win32.Accounting Accounting(ImageQueryBudget budget=null) { Events.Add("complete-accounting"); return new Win32.Accounting {Active=Counts.Count>0?Counts.Dequeue():1,Total=2}; }
+        private uint[] ProcessList(out int bytes,ImageQueryBudget budget=null) { Events.Add("complete-list"); uint[] list=Lists.Count>0?Lists.Dequeue():new uint[]{42}; bytes=8+list.Length*IntPtr.Size; return list; }
+        private Member ReadState(IntPtr token,uint pid,string expected,ImageQueryBudget budget=null) { return Processes[token].Read(); }
         private Member Attest(IntPtr token,uint pid,string expected,ImageQueryBudget budget,string image=null) { return Processes[token].Resolve(budget,Diagnostics,expected,image); }
         public Snapshot Run() { Win32.Fixture=this; return Query(); }
 '@
@@ -683,6 +684,19 @@ $startedChild.Dispose()
         Assert-NativeProbe ($failure -match 'Image query budget exhausted' -and $clock.Now -eq 25 -and $second.Queries -eq 1) 'a second member cannot reset or multiply the complete-query deadline'
         return @{ sameHandleExit = $exitEvidence; sharedBudgetMilliseconds = 25; elapsedMilliseconds = $clock.Now; attempts = @($attempts); nativeAPIInvocations = 0 }
     }
+    Invoke-NativeProbe 'native operation timing retains success and failure evidence' {
+        $clock = [Mango.NativeImageFakes.FakeClock]::new()
+        $budget = [Mango.NativeJobProbe.ImageQueryBudget]::new(2000, [Func[long]]{ return $clock.Now })
+        $trace = $budget.Trace
+        Assert-NativeProbe ($trace.StartedAt -eq $budget.StartedAt) 'native operation totals and image failures share one query-start identifier'
+        $scope = $trace.Measure('GetProcessTimes', '42:full-birth')
+        $scope.Dispose()
+        $scope = $trace.Measure('QueryFullProcessImageNameW', '43:full-birth')
+        $failure = $null
+        try { throw 'named native timing failure' } catch { $failure = $_.Exception.Message } finally { $scope.Dispose() }
+        Assert-NativeProbe ($trace.TicksPerSecond -gt 0 -and $trace.Operations.Count -eq 2 -and $trace.Operations[0].Calls -eq 1 -and $trace.Operations[1].Calls -eq 1 -and $trace.Operations[1].SlowestIdentity -eq '43:full-birth' -and $failure -eq 'named native timing failure') 'native timing records each completed scope and original failure with the full identity and monotonic tick scale'
+        return @{ operations = @($trace.Operations); ticksPerSecond = $trace.TicksPerSecond }
+    }
     Invoke-NativeProbe 'complete image query shares a bounded budget across healthy members' {
         $cases = [Collections.Generic.List[object]]::new()
         foreach ($cost in @(6000, 10000)) {
@@ -701,6 +715,7 @@ $startedChild.Dispose()
                 Assert-NativeProbe (-not $failure -and $snapshot.Stable -and -not $snapshot.Empty -and $snapshot.Members.Count -eq 2 -and $snapshot.Members[0].Identity -eq $first.Current.Identity -and $snapshot.Members[1].Identity -eq $second.Current.Identity -and $fixture.Clock.Now -eq 12000) "Invalid two-member attestation after $($fixture.Clock.Now)ms with error=$failure; expected complete stable snapshot of both exact identities within the shared budget"
             } else {
                 Assert-NativeProbe ($failure -match 'Image query budget exhausted after 20000ms at resolved image.*expected complete attestation within 20000ms' -and -not $snapshot -and $fixture.Clock.Now -eq 20000 -and $first.Queries -eq 1 -and $second.Queries -eq 1) 'two healthy members cannot reset the20000ms complete-query deadline or yield a partial snapshot'
+                Assert-NativeProbe (-not $fixture.LastTrace.Complete -and $fixture.LastTrace.ElapsedMilliseconds -eq 20000 -and $fixture.LastTrace.Assigned -eq 2 -and $fixture.LastTrace.Attested -eq 1) 'failed complete query retains elapsed time, assigned members and completed attestations without publishing a partial snapshot'
             }
             $cases.Add([pscustomobject]@{ queryCostMilliseconds = $cost; elapsedMilliseconds = $fixture.Clock.Now; snapshot = $snapshot; error = $failure; events = @($fixture.Events) })
         }
