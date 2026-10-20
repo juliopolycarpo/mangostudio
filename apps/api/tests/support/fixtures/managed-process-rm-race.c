@@ -2,6 +2,7 @@
 // Child-ENOENT reproduction mechanism: https://github.com/oven-sh/bun/pull/35800
 #define _GNU_SOURCE
 #include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

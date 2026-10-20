@@ -17,10 +17,13 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64' || !Bun.w
       directory = await mkdtemp(join(tmpdir(), 'mango-fixture-rm-race-'));
       tracer = join(directory, 'race');
       const source = new URL('../../support/fixtures/managed-process-rm-race.c', import.meta.url);
-      const compiler = Bun.spawn(['cc', fileURLToPath(source), '-o', tracer], {
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      const compiler = Bun.spawn(
+        ['cc', '-Wall', '-Wextra', '-Werror', fileURLToPath(source), '-o', tracer],
+        {
+          stdout: 'ignore',
+          stderr: 'pipe',
+        }
+      );
       const error = await new Response(compiler.stderr).text();
       expect(await compiler.exited, `native race tracer compilation: ${error}`).toBe(0);
     });
