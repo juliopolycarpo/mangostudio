@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fixtureChildEnvironment } from './support/child-supervision';
 import {
+  disposeFixtureJob,
   FIXTURE_COMMAND_TIMEOUT_MS,
   type FixtureChild,
   type FixtureCommandHost,
@@ -11,6 +12,25 @@ import {
   FixtureSettlementError,
   fixtureCommandHost,
 } from './support/fixture-command';
+import type { FixtureJob } from './support/fixture-windows-job';
+
+class FailedWindowsCensusJob implements FixtureJob {
+  readonly name = 'failed-census';
+  readonly events: string[] = [];
+  cleanupFails = false;
+  empty(): boolean {
+    this.events.push('census');
+    throw new Error('original member census unavailable');
+  }
+  stop(): void {
+    this.events.push('stop');
+    if (this.cleanupFails) throw new Error('termination request failed');
+  }
+  close(): void {
+    this.events.push('close');
+    if (this.cleanupFails) throw new Error('handle disposal failed');
+  }
+}
 
 class DelayedFixtureCommand implements FixtureCommandHost {
   stops = 0;
@@ -46,6 +66,21 @@ class DelayedFixtureCommand implements FixtureCommandHost {
   }
   close(): void {
     this.complete({ stdout: 'last output', stderr: '', exitCode: 1 });
+  }
+}
+
+class FailedWindowsCleanupCommand extends DelayedFixtureCommand {
+  constructor(readonly job: FailedWindowsCensusJob) {
+    super();
+  }
+  override start(): FixtureChild {
+    return {
+      completed: Promise.resolve().then(() => {
+        disposeFixtureJob(this.job);
+        return { stdout: '', stderr: '', exitCode: 0 };
+      }),
+      stop: () => this.job.stop(),
+    };
   }
 }
 
@@ -186,3 +221,22 @@ test(
   },
   FIXTURE_COMMAND_TIMEOUT_MS + 5_000 + 5_000
 );
+
+test('failed Windows census disposes handles after termination while retaining storage', async () => {
+  const job = new FailedWindowsCensusJob();
+  const commands = new FixtureCommands(new FailedWindowsCleanupCommand(job));
+  await expect(commands.run(['failed-census'], 'fixture')).rejects.toThrow(
+    'original member census unavailable'
+  );
+  expect(job.events).toEqual(['census', 'stop', 'close']);
+  await expect(commands.settle()).rejects.toThrow('remains unsettled; storage retained');
+});
+
+test('failed Windows census preserves its error when termination and disposal also fail', () => {
+  const job = new FailedWindowsCensusJob();
+  job.cleanupFails = true;
+  expect(() => disposeFixtureJob(job)).toThrow(
+    'original member census unavailable; cleanup errors: Error: termination request failed; Error: handle disposal failed'
+  );
+  expect(job.events).toEqual(['census', 'stop', 'close']);
+});

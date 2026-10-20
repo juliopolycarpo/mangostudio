@@ -1,12 +1,43 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { settleWorker } from '../../lib/test-worker-settle';
+import type { FixtureJob } from './fixture-windows-job';
 
 export const FIXTURE_COMMAND_TIMEOUT_MS = 15_000;
 export const FIXTURE_STOP_TIMEOUT_MS = 5_000;
 
 export class FixtureSettlementError extends Error {
   override name = 'FixtureSettlementError';
+}
+
+/** Dispose task-owned handles while retaining any unknown settlement as an error.
+ * @example disposeFixtureJob(job); // throws and retains storage when the census failed
+ */
+export function disposeFixtureJob(job: FixtureJob): void {
+  let failure: unknown;
+  const cleanupErrors: unknown[] = [];
+  try {
+    try {
+      if (!job.empty()) throw new Error('fixture Windows job remains nonempty; storage retained');
+    } catch (error) {
+      failure = error;
+      try {
+        job.stop();
+      } catch (stopError) {
+        cleanupErrors.push(stopError);
+      }
+    }
+  } finally {
+    try {
+      job.close();
+    } catch (closeError) {
+      cleanupErrors.push(closeError);
+    }
+  }
+  if (failure !== undefined || cleanupErrors.length)
+    throw new FixtureSettlementError(
+      `fixture Windows job settlement failed; storage retained: ${String(failure ?? 'native handle disposal failed')}${cleanupErrors.length ? `; cleanup errors: ${cleanupErrors.map(String).join('; ')}` : ''}`
+    );
 }
 
 interface CommandResult {
@@ -122,18 +153,7 @@ export const fixtureCommandHost: FixtureCommandHost = {
         throw error;
       })
       .finally(() => {
-        if (!job) return;
-        try {
-          if (!job.empty())
-            throw new FixtureSettlementError(
-              'fixture Windows job remains nonempty; storage retained'
-            );
-          job.close();
-        } catch (error) {
-          throw new FixtureSettlementError(
-            `fixture Windows job settlement failed; storage retained: ${String(error)}`
-          );
-        }
+        if (job) disposeFixtureJob(job);
       });
     return {
       completed,
