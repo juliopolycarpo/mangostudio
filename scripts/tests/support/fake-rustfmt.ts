@@ -38,10 +38,22 @@ if (hang && process.env[GRANDCHILD_ENV] !== '1') {
 }
 writeFileSync(
   marker,
-  JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), pid: process.pid })
+  JSON.stringify({
+    args: process.argv.slice(2),
+    cwd: process.cwd(),
+    pid: process.pid,
+    startedAt: performance.timeOrigin + performance.now(),
+  })
 );
 
 if (hang) {
   let beat = 0;
-  setInterval(() => writeFileSync(heartbeatPath(marker), String(++beat)), HEARTBEAT_MS);
+  setInterval(
+    () =>
+      writeFileSync(
+        heartbeatPath(marker),
+        JSON.stringify({ beat: ++beat, at: performance.timeOrigin + performance.now() })
+      ),
+    HEARTBEAT_MS
+  );
 }
