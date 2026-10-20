@@ -16,6 +16,9 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateRouteTree } from '../../scripts/routes';
 
+// Load the cold generator graph during collection, before per-test deadlines start.
+await import('@tanstack/router-generator');
+
 const FRONTEND_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const fixtureRoots: string[] = [];
 
