@@ -40,12 +40,16 @@ export interface TurboResult {
 export async function runTurbo(
   cwd: string,
   args: readonly string[],
-  extraEnv: Record<string, string> = {}
+  extraEnv: Record<string, string> = {},
+  capture?: (cmd: readonly string[], cwd: string, env: NodeJS.ProcessEnv) => Promise<TurboResult>
 ): Promise<TurboResult> {
+  const cmd = [join(ROOT_DIR, 'node_modules', '.bin', 'turbo'), ...args];
+  const env = { ...(process.env as Record<string, string>), ...extraEnv, ...QUIET_TURBO_ENV };
+  if (capture) return capture(cmd, cwd, env);
   const proc = Bun.spawn({
-    cmd: [join(ROOT_DIR, 'node_modules', '.bin', 'turbo'), ...args],
+    cmd,
     cwd,
-    env: { ...(process.env as Record<string, string>), ...extraEnv, ...QUIET_TURBO_ENV },
+    env,
     stdout: 'pipe',
     stderr: 'pipe',
   });

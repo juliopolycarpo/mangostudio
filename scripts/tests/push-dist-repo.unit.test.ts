@@ -4,13 +4,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   buildGitHubAuthHeader,
+  type PushDistRepoOptions,
   parseFileMappings,
   parsePushDistRepoArgs,
-  pushDistRepo,
   syncFilesIntoClone,
 } from '../release/push-dist-repo';
+import {
+  FIXTURE_COMMAND_TIMEOUT_MS,
+  FIXTURE_STOP_TIMEOUT_MS,
+  FixtureCommands,
+} from './support/fixture-command';
 
 const tempDirs: string[] = [];
+const commands = new FixtureCommands();
+const PUBLISH_TEST_TIMEOUT_MS = 3 * (FIXTURE_COMMAND_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS) + 5_000;
 const hostGitConfig = {
   global: process.env.GIT_CONFIG_GLOBAL,
   system: process.env.GIT_CONFIG_SYSTEM,
@@ -30,7 +37,8 @@ beforeEach(() => {
   process.env.GIT_CONFIG_SYSTEM = join(configDir, 'system.gitconfig');
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await commands.settle();
   if (hostGitConfig.global === undefined) delete process.env.GIT_CONFIG_GLOBAL;
   else process.env.GIT_CONFIG_GLOBAL = hostGitConfig.global;
   if (hostGitConfig.system === undefined) delete process.env.GIT_CONFIG_SYSTEM;
@@ -186,41 +194,57 @@ describe('syncFilesIntoClone', () => {
 });
 
 describe('pushDistRepo', () => {
-  test('pushes a bot commit with only the mapped file, then no-ops on re-run', async () => {
-    const remote = makeBareRemote();
-    const dir = makeTempDir();
-    const formulaPath = join(dir, 'mangostudio.rb');
-    writeFileSync(formulaPath, 'class Mangostudio < Formula\nend\n');
-    const mappings = [{ localPath: formulaPath, repoPath: 'Formula/mangostudio.rb' }];
-
-    const first = await pushDistRepo({
-      remoteUrl: remote,
-      message: 'mangostudio 0.1.0',
-      mappings,
-    });
-    expect(first).toBe('pushed');
-    expect(git(remote, 'show', 'HEAD:Formula/mangostudio.rb')).toContain('Mangostudio');
-    expect(git(remote, 'show', 'HEAD:Formula/other.rb')).toContain('Other');
-    expect(git(remote, 'log', '-1', '--format=%an %s')).toBe(
-      'github-actions[bot] mangostudio 0.1.0\n'
+  const publish = async (options: PushDistRepoOptions): Promise<string> => {
+    const result = await commands.run(
+      [
+        process.execPath,
+        join(import.meta.dir, 'support/push-dist-repo-fixture.ts'),
+        JSON.stringify(options),
+      ],
+      import.meta.dir
     );
+    expect(result.exitCode, result.stdout + result.stderr).toBe(0);
+    return result.stdout.trim();
+  };
+  test(
+    'pushes a bot commit with only the mapped file, then no-ops on re-run',
+    async () => {
+      const remote = makeBareRemote();
+      const dir = makeTempDir();
+      const formulaPath = join(dir, 'mangostudio.rb');
+      writeFileSync(formulaPath, 'class Mangostudio < Formula\nend\n');
+      const mappings = [{ localPath: formulaPath, repoPath: 'Formula/mangostudio.rb' }];
 
-    const headAfterFirst = git(remote, 'rev-parse', 'HEAD');
-    const second = await pushDistRepo({
-      remoteUrl: remote,
-      message: 'mangostudio 0.1.0',
-      mappings,
-    });
-    expect(second).toBe('up-to-date');
-    expect(git(remote, 'rev-parse', 'HEAD')).toBe(headAfterFirst);
+      const first = await publish({
+        remoteUrl: remote,
+        message: 'mangostudio 0.1.0',
+        mappings,
+      });
+      expect(first).toBe('pushed');
+      expect(git(remote, 'show', 'HEAD:Formula/mangostudio.rb')).toContain('Mangostudio');
+      expect(git(remote, 'show', 'HEAD:Formula/other.rb')).toContain('Other');
+      expect(git(remote, 'log', '-1', '--format=%an %s')).toBe(
+        'github-actions[bot] mangostudio 0.1.0\n'
+      );
 
-    writeFileSync(formulaPath, 'class Mangostudio < Formula\n  # 0.2.0\nend\n');
-    const third = await pushDistRepo({
-      remoteUrl: remote,
-      message: 'mangostudio 0.2.0',
-      mappings,
-    });
-    expect(third).toBe('pushed');
-    expect(git(remote, 'log', '-1', '--format=%s')).toBe('mangostudio 0.2.0\n');
-  });
+      const headAfterFirst = git(remote, 'rev-parse', 'HEAD');
+      const second = await publish({
+        remoteUrl: remote,
+        message: 'mangostudio 0.1.0',
+        mappings,
+      });
+      expect(second).toBe('up-to-date');
+      expect(git(remote, 'rev-parse', 'HEAD')).toBe(headAfterFirst);
+
+      writeFileSync(formulaPath, 'class Mangostudio < Formula\n  # 0.2.0\nend\n');
+      const third = await publish({
+        remoteUrl: remote,
+        message: 'mangostudio 0.2.0',
+        mappings,
+      });
+      expect(third).toBe('pushed');
+      expect(git(remote, 'log', '-1', '--format=%s')).toBe('mangostudio 0.2.0\n');
+    },
+    PUBLISH_TEST_TIMEOUT_MS
+  );
 });
