@@ -342,6 +342,7 @@ namespace Mango.NativeImageCallerFakes {
         }
         private Win32.Accounting Accounting() { Events.Add("complete-accounting"); return new Win32.Accounting {Active=Counts.Count>0?Counts.Dequeue():1,Total=2}; }
         private uint[] ProcessList(out int bytes) { Events.Add("complete-list"); uint[] list=Lists.Count>0?Lists.Dequeue():new uint[]{42}; bytes=8+list.Length*IntPtr.Size; return list; }
+        private Member ReadState(IntPtr token,uint pid,string expected) { return Processes[token].Read(); }
         private Member Attest(IntPtr token,uint pid,string expected,ImageQueryBudget budget,string image=null) { return Processes[token].Resolve(budget,Diagnostics,expected,image); }
         public Snapshot Run() { Win32.Fixture=this; return Query(); }
 '@
@@ -704,6 +705,27 @@ $startedChild.Dispose()
             $cases.Add([pscustomobject]@{ queryCostMilliseconds = $cost; elapsedMilliseconds = $fixture.Clock.Now; snapshot = $snapshot; error = $failure; events = @($fixture.Events) })
         }
         return @{ sharedBudgetMilliseconds = [Mango.NativeJobProbe.ImageQueryBudget]::MaximumMilliseconds; cases = @($cases); exactProductionQueryExtracted = $true; nativeAPIInvocations = 0 }
+    }
+    Invoke-NativeProbe 'retained members read one fresh image within the shared deadline' {
+        $fixture = [Mango.NativeImageCallerFakes.QueryFixture]::new()
+        $fixture.QueryBudgetMilliseconds = [Mango.NativeJobProbe.ImageQueryBudget]::MaximumMilliseconds
+        $first = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock)
+        $second = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock)
+        $second.Current = [Mango.NativeImageFakes.FakeImageProcess]::State(43, 134359891225276228, $true)
+        $fixture.Processes.Add([IntPtr]::new(1), $first); $fixture.Processes.Add([IntPtr]::new(2), $second)
+        $freshFirst = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock)
+        $freshSecond = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock); $freshSecond.Current = $second.Current
+        $fixture.Processes.Add([IntPtr]::new(3), $freshFirst); $fixture.Processes.Add([IntPtr]::new(4), $freshSecond)
+        foreach ($token in 1..4) { $fixture.OpenOrder.Enqueue([IntPtr]::new($token)) }
+        foreach ($round in 1..2) { $fixture.Lists.Enqueue([uint32[]]@(42, 43)); $fixture.Counts.Enqueue(2); $fixture.Counts.Enqueue(2) }
+        $initial = $fixture.Run()
+        Assert-NativeProbe ($initial.Stable -and $initial.Members.Count -eq 2) 'fixture starts with two retained exact members'
+        $first.QueryMilliseconds = 6000; $second.QueryMilliseconds = 6000
+        $freshFirst.QueryMilliseconds = 6000; $freshSecond.QueryMilliseconds = 6000
+        $snapshot = $null; $failure = $null
+        try { $snapshot = $fixture.Run() } catch { $failure = $_.Exception.ToString() }
+        Assert-NativeProbe (-not $failure -and $snapshot.Stable -and $snapshot.Members.Count -eq 2 -and $fixture.Clock.Now -eq 12000 -and $first.Queries -eq 2 -and $second.Queries -eq 2 -and $freshFirst.Queries -eq 0 -and $freshSecond.Queries -eq 0) "Invalid retained-member image query elapsed=$($fixture.Clock.Now)ms first=$($first.Queries) second=$($second.Queries) error=$failure; expected one fresh image per retained identity and complete stable snapshot within 20000ms"
+        return @{ elapsedMilliseconds = $fixture.Clock.Now; snapshot = $snapshot; firstQueries = $first.Queries; secondQueries = $second.Queries; exactProductionQueryExtracted = $true; nativeAPIInvocations = 0 }
     }
     Invoke-NativeProbe 'exact query caller refreshes complete accounting and never drops a still-present member' {
         $cases = [Collections.Generic.List[object]]::new()
