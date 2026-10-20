@@ -1,5 +1,6 @@
+import type { Pointer } from 'bun:ffi';
 import { expect, test } from 'bun:test';
-import { FixtureJobCoverage } from './support/fixture-windows-job';
+import { FixtureHandles, FixtureJobCoverage } from './support/fixture-windows-job';
 
 class BirthDuringTermination {
   total = 2;
@@ -42,3 +43,42 @@ test.each([
     expect(() => coverage.verify(2)).toThrow('fixture job census incomplete');
   }
 );
+
+class FailedMembershipNative {
+  readonly closed: Pointer[] = [];
+  readonly handle = 123 as Pointer;
+  open = (): Pointer => this.handle;
+  verify = (): void => {
+    throw new Error('IsProcessInJob unavailable');
+  };
+  close = (handle: Pointer): void => {
+    this.closed.push(handle);
+  };
+}
+
+test('membership verification failure still disposes the opened native handle', () => {
+  const native = new FailedMembershipNative();
+  const handles = new FixtureHandles(native.close);
+  expect(() => handles.acquire(native.open, native.verify)).toThrow('IsProcessInJob unavailable');
+  handles.close();
+  expect(native.closed).toEqual([native.handle]);
+});
+
+class FailedNativeDisposal extends FailedMembershipNative {
+  override verify = (): void => undefined;
+  override close = (handle: Pointer): void => {
+    this.closed.push(handle);
+    if (handle === this.handle) throw new Error('first CloseHandle failed');
+  };
+}
+
+test('native disposal attempts every owned handle when one close fails', () => {
+  const native = new FailedNativeDisposal();
+  const handles = new FixtureHandles(native.close);
+  handles.acquire(native.open, native.verify);
+  handles.acquire(() => 456 as Pointer, native.verify);
+  expect(() => handles.close()).toThrow('first CloseHandle failed');
+  expect(native.closed).toEqual([native.handle, 456 as Pointer]);
+  handles.close();
+  expect(native.closed).toHaveLength(2);
+});
