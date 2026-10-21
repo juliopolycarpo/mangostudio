@@ -9,9 +9,41 @@ import { useTheme } from '@/hooks/use-theme';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { highlightLineTokens, preloadCodeLanguages } from '@/lib/shiki';
 import { cn } from '@/lib/utils';
+import { FilePathLabel } from './components/FilePathLabel';
 import { IconButton } from './components/IconButton';
 import type { GitDiffInput } from './hooks/use-git-state';
 import { useGitDiff } from './hooks/use-git-state';
+
+/**
+ * How much of a syntax colour survives on an added or removed line; the rest is
+ * the foreground. Shiki's palettes are tuned for their own backgrounds, and a
+ * keyword or comment colour over the app's success/danger fill fell to 2.4:1 to
+ * 3.8:1. At half, the worst token of all four code themes clears 4.5:1 on both
+ * fills and still keeps its hue. Context lines sit on the canvas, so they keep
+ * the theme's colours untouched.
+ */
+const TINTED_TOKEN_SHARE = '50%';
+
+/**
+ * The code box scrolls sideways, and in a 280px rail it cuts a line at about 25
+ * characters. `app-scrollbar` draws a 4px thumb on a transparent track, which the
+ * platform's overlay scrollbar (macOS, Android, an emulated phone) hides the
+ * moment nobody is scrolling, so nothing said the lines continue. This is the
+ * treatment of `.markdown-table-scroll` (`styles/markdown-content.css`): a styled
+ * `::-webkit-scrollbar`, the one kind those engines draw at rest, with a track so
+ * the bar's extent shows, and the standard properties where the engine has no
+ * such pseudo (Firefox). It deliberately does not carry `app-scrollbar`: that
+ * class sets `scrollbar-width`, which makes Chromium ignore the pseudo-elements.
+ */
+const DIFF_SCROLL_CLASS = [
+  'overflow-auto',
+  '[&::-webkit-scrollbar]:size-1.5',
+  '[&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-fill-selected',
+  '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stroke-strong',
+  'hover:[&::-webkit-scrollbar-thumb]:bg-fg-muted',
+  'supports-[not(selector(::-webkit-scrollbar))]:[scrollbar-width:thin]',
+  'supports-[not(selector(::-webkit-scrollbar))]:[scrollbar-color:var(--color-stroke-strong)_var(--color-fill-selected)]',
+].join(' ');
 
 interface DiffSelection extends GitDiffInput {
   readonly title: string;
@@ -55,7 +87,7 @@ export function DiffViewer({
           <ArrowLeft size={ICON_SM} />
         </IconButton>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-xs font-medium text-fg">{selection.path}</p>
+          <FilePathLabel path={selection.path} />
           <p className={cn('text-micro text-fg-subtle', selection.commit && 'font-mono')}>
             {selection.commit
               ? selection.commit.slice(0, 8)
@@ -85,7 +117,9 @@ export function DiffViewer({
           className="min-h-32"
         />
       ) : (
-        <div className="@container app-scrollbar max-h-[34rem] overflow-auto bg-canvas font-mono text-xs">
+        <div
+          className={cn('@container max-h-[34rem] bg-canvas font-mono text-xs', DIFF_SCROLL_CLASS)}
+        >
           {hunks.map((hunk) => (
             <div key={`${hunk.oldStart}:${hunk.newStart}:${hunk.header}`}>
               <div
@@ -133,6 +167,7 @@ const DiffLineRow = memo(function DiffLineRow({
   }[line.type];
   // The gutter marker is what says added or removed; the fill only backs it up.
   const marker = line.type === 'addition' ? '+' : line.type === 'deletion' ? '-' : ' ';
+  const tinted = line.type === 'addition' || line.type === 'deletion';
   const markerTone =
     line.type === 'addition' ? 'text-success' : line.type === 'deletion' ? 'text-danger' : '';
   // In a narrow rail two 40px gutters leave the code about 24 characters, so
@@ -164,7 +199,7 @@ const DiffLineRow = memo(function DiffLineRow({
       {highlighted ? (
         <code className="min-w-0 whitespace-pre pr-3">
           {highlighted.map((token) => (
-            <span key={token.offset} style={{ color: token.color }}>
+            <span key={token.offset} style={{ color: tokenColor(token.color, tinted) }}>
               {token.content}
             </span>
           ))}
@@ -175,6 +210,11 @@ const DiffLineRow = memo(function DiffLineRow({
     </div>
   );
 });
+
+function tokenColor(color: string | undefined, tinted: boolean): string | undefined {
+  if (!color || !tinted) return color;
+  return `color-mix(in srgb, ${color} ${TINTED_TOKEN_SHARE}, var(--color-fg))`;
+}
 
 function inferLanguage(path: string): string | null {
   const extension = path.split('.').at(-1)?.toLowerCase();

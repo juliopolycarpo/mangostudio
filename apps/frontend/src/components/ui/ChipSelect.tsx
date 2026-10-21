@@ -15,10 +15,15 @@
  * from a form value.
  *
  * Opens upward by default: the composer sits at the foot of the viewport, which
- * is the same reason `ModelSelector` and `ThinkingToggle` do. A chip placed
- * near the top of the page — the environment chip in the header, or in a page's
- * title row — passes `placement="below"`, because an upward panel there opens
- * above the viewport and is clipped away entirely.
+ * is the same reason `ModelSelector` and `ThinkingToggle` do. Upward it is a
+ * `ComposerPopover`, so it docks where every other composer menu does — one 8px
+ * gap above the composer shell, left edge level with the chip — rather than 8px
+ * above the chip itself, which is the status line's own first row and put the
+ * panel on the shell's border. The wrapper is therefore not `relative` then.
+ * A chip placed near the top of the page — the environment chip in the header,
+ * or in a page's title row — passes `placement="below"`, because an upward
+ * panel there opens above the viewport and is clipped away entirely; that panel
+ * hangs off the chip's own wrapper.
  *
  * The rows are the same 14px / 12px pair `Select` and `Menu` draw, so two menus
  * opened from the same strip do not differ in type size.
@@ -26,7 +31,8 @@
 
 import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { type ReactNode, useId } from 'react';
+import { type ReactNode, useId, useRef } from 'react';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
@@ -36,6 +42,9 @@ export interface ChipSelectOption extends ListboxOption {
   /** A second line under the label — the vendor's reason, a hostname, a hint. */
   readonly description?: string;
 }
+
+/** A list taller than half the viewport scrolls, with the thin scrollbar rather than a hidden one. */
+const PANEL_SCROLL = 'app-scrollbar max-h-[50vh] overflow-y-auto p-1';
 
 /** Which side of the chip the listbox opens on. */
 type ChipSelectPlacement = 'above' | 'below';
@@ -84,6 +93,7 @@ export function ChipSelect({
   dataState,
 }: ChipSelectProps) {
   const listId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const {
     open,
     activeIndex,
@@ -94,20 +104,63 @@ export function ChipSelect({
     commit,
     handleKeyDown,
   } = useListboxSelect({ value, options, onChange, disabled });
-  const { popoverAbove, popoverBelow } = useMotionPresets();
-  // The panel travels in from the side it opens on, so the two go together.
+  const { popoverBelow } = useMotionPresets();
   const below = placement === 'below';
+
+  // The rows are the same whichever side the panel opens on.
+  const list = (
+    <div id={listId} role="listbox" aria-label={ariaLabel}>
+      {options.map((option, index) => {
+        const isSelected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            id={`${listId}-${index}`}
+            type="button"
+            role="option"
+            aria-selected={isSelected}
+            // Focus stays on the trigger and the cursor travels by
+            // `aria-activedescendant`, so the options must not also be
+            // their own tab stops.
+            tabIndex={-1}
+            disabled={option.disabled}
+            onClick={() => commit(option)}
+            onMouseEnter={() => setActiveIndex(index)}
+            className={cn(
+              'flex min-h-8 w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors',
+              'disabled:cursor-not-allowed disabled:opacity-50',
+              index === activeIndex && !option.disabled && 'bg-fill-hover',
+              isSelected && 'bg-fill-selected'
+            )}
+          >
+            <span className="min-w-0 flex-1">
+              <span className={cn('block truncate', isSelected ? 'font-medium' : '')}>
+                {option.label}
+              </span>
+              {option.description ? (
+                <span className="mt-0.5 block text-xs text-fg-muted">{option.description}</span>
+              ) : null}
+            </span>
+            {isSelected ? (
+              <Check size={ICON_MD} className="mt-0.5 shrink-0 text-accent-fg" />
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
     <div
       ref={containerRef}
-      className="relative flex items-center"
+      className={cn('flex items-center', below && 'relative')}
       onKeyDown={handleKeyDown}
       data-testid={testId}
       data-state={dataState}
     >
       <button
+        ref={triggerRef}
         type="button"
         role="combobox"
         disabled={disabled}
@@ -136,56 +189,26 @@ export function ChipSelect({
 
       <AnimatePresence>
         {open ? (
-          <motion.div
-            {...(below ? popoverBelow : popoverAbove)}
-            className={cn(
-              'dropdown-panel app-scrollbar absolute left-0 max-h-[50vh] overflow-y-auto p-1',
-              below ? 'top-full mt-1' : 'bottom-full mb-2',
-              panelClassName
-            )}
-          >
-            <div id={listId} role="listbox" aria-label={ariaLabel}>
-              {options.map((option, index) => {
-                const isSelected = option.value === value;
-                return (
-                  <button
-                    key={option.value}
-                    id={`${listId}-${index}`}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    // Focus stays on the trigger and the cursor travels by
-                    // `aria-activedescendant`, so the options must not also be
-                    // their own tab stops.
-                    tabIndex={-1}
-                    disabled={option.disabled}
-                    onClick={() => commit(option)}
-                    onMouseEnter={() => setActiveIndex(index)}
-                    className={cn(
-                      'flex min-h-8 w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors',
-                      'disabled:cursor-not-allowed disabled:opacity-50',
-                      index === activeIndex && !option.disabled && 'bg-fill-hover',
-                      isSelected && 'bg-fill-selected'
-                    )}
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className={cn('block truncate', isSelected ? 'font-medium' : '')}>
-                        {option.label}
-                      </span>
-                      {option.description ? (
-                        <span className="mt-0.5 block text-xs text-fg-muted">
-                          {option.description}
-                        </span>
-                      ) : null}
-                    </span>
-                    {isSelected ? (
-                      <Check size={ICON_MD} className="mt-0.5 shrink-0 text-accent-fg" />
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          </motion.div>
+          below ? (
+            <motion.div
+              {...popoverBelow}
+              className={cn(
+                'dropdown-panel absolute left-0 top-full mt-1',
+                PANEL_SCROLL,
+                panelClassName
+              )}
+            >
+              {list}
+            </motion.div>
+          ) : (
+            <ComposerPopover
+              animated
+              anchor={triggerRef}
+              className={cn(PANEL_SCROLL, panelClassName)}
+            >
+              {list}
+            </ComposerPopover>
+          )
         ) : null}
       </AnimatePresence>
     </div>

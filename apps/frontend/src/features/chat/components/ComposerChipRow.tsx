@@ -5,7 +5,9 @@
  *
  * Rendered as `key: value` chips separated by `·` rather than as a toolbar of
  * bordered chips, because that is what it is — a line you read left to right
- * before you type, whose parts happen to be clickable.
+ * before you type, whose parts happen to be clickable. The stylesheet draws the
+ * `·` (`.composer-chip-row`), and only from `sm` up: on a phone the strip wraps
+ * and each chip is a 44px target that separates itself.
  *
  * Below `sm` it collapses behind a summary chip. The alternative the plan
  * suggested — an overflow menu — puts half the controls two taps away on the
@@ -47,13 +49,6 @@ import { ContextBadge } from './ContextBadge';
 
 /** Shared empty list, so an absent catalog does not allocate per render. */
 const NO_MODELS: ModelOption[] = [];
-
-/**
- * On a phone the separators go. The strip wraps there, and a trailing `·` is
- * left at the end of a line with the next chip starting the one below, which
- * reads as a stray bullet; each chip is a 44px target and separates itself.
- */
-const PHONE_WITHOUT_SEPARATORS = 'max-sm:*:after:content-none';
 
 export interface ComposerChipRowProps {
   disabled?: boolean;
@@ -135,9 +130,7 @@ export function ComposerChipRow(props: ComposerChipRowProps) {
       {/* Fragments, not wrappers: `ExternalComposerControls` returns three
           chips, and a wrapper would make the strip's separators skip past two
           of them. */}
-      <div
-        className={`composer-chip-row ${PHONE_WITHOUT_SEPARATORS} ${expanded ? '' : 'max-sm:hidden'}`}
-      >
+      <div className={`composer-chip-row ${expanded ? '' : 'max-sm:hidden'}`}>
         {chips.map((chip) => (
           <Fragment key={chip.key}>{chip.node}</Fragment>
         ))}
@@ -256,7 +249,7 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
         // A nested strip, not a plain wrapper: these three read as `key: value`
         // exactly like the chips around them, and without the row class they
         // were the only run on the line with no `·` between them.
-        <span className={`composer-chip-row ${PHONE_WITHOUT_SEPARATORS}`}>
+        <span className="composer-chip-row">
           <ExternalComposerControls
             descriptor={props.externalDescriptor}
             model={props.externalModel}

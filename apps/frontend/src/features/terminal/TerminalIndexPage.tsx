@@ -1,6 +1,6 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { TerminalSquare } from 'lucide-react';
+import { TerminalSquare, X } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -9,11 +9,16 @@ import { useToast } from '@/components/ui/Toast';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import type { EnvironmentScopeSearch } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_LG } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+import { CloseTerminalDialog } from './CloseTerminalDialog';
 import { LazyTerminalView } from './LazyTerminalView';
 import { openFailureMessage } from './open-failure-message';
-import { useOpenTerminalMutation, useTerminalSessionsQuery } from './services/terminal-service';
+import {
+  useCloseTerminalMutation,
+  useOpenTerminalMutation,
+  useTerminalSessionsQuery,
+} from './services/terminal-service';
 import { TerminalUnavailableNotice } from './TerminalUnavailableNotice';
 import { useTerminalAvailability } from './use-terminal-availability';
 
@@ -30,6 +35,7 @@ export function TerminalIndexPage() {
   const search = useSearch({ strict: false }) as EnvironmentScopeSearch;
   const environmentId = search.environmentId ?? LOCAL_ENVIRONMENT_ID;
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [closingId, setClosingId] = useState<string | null>(null);
 
   const {
     unavailable,
@@ -44,9 +50,24 @@ export function TerminalIndexPage() {
   const showSessions = !(unavailable && sessions.length === 0);
   const noSessions = sessionsQuery.isSuccess && sessions.length === 0;
   const openMutation = useOpenTerminalMutation();
+  const closeMutation = useCloseTerminalMutation();
+  const closingSession = sessions.find((session) => session.id === closingId) ?? null;
+
+  function confirmClose(): void {
+    if (!closingId) return;
+    const id = closingId;
+    closeMutation.mutate(id, {
+      onSuccess: () => {
+        setClosingId(null);
+        setActiveId((current) => (current === id ? null : current));
+      },
+      onError: () => toast(t.terminal.closeFailed, 'error'),
+    });
+  }
 
   function changeEnvironment(nextEnvironmentId: string): void {
     setActiveId(null);
+    setClosingId(null);
     void navigate({
       to: '/terminal',
       search: {
@@ -127,22 +148,46 @@ export function TerminalIndexPage() {
                   <span className={cn('truncate text-fg', open && 'font-medium')}>
                     {session.title}
                   </span>
-                  {/* The same button either way, so focus stays on it: the open
-                      row's fill says which one is showing, and its action turns
-                      into the way to put it away. */}
-                  <Button
-                    type="button"
-                    variant="subtle"
-                    size="sm"
-                    onClick={() => setActiveId(open ? null : session.id)}
-                  >
-                    {open ? t.terminal.page.hide : t.terminal.page.openHere}
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {/* The same button either way, so focus stays on it: the open
+                        row's fill says which one is showing, and its action turns
+                        into the way to put it away. */}
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => setActiveId(open ? null : session.id)}
+                    >
+                      {open ? t.terminal.page.hide : t.terminal.page.openHere}
+                    </Button>
+                    {/* Ends the shell, which Hide does not. This page is the only
+                        surface that lists every session, so at the per-user cap
+                        it is the only place a session can be closed to make room. */}
+                    <Button
+                      type="button"
+                      variant="subtle-danger"
+                      size="icon-sm"
+                      onClick={() => setClosingId(session.id)}
+                      aria-label={t.terminal.closeSession}
+                      title={t.terminal.closeSession}
+                    >
+                      <X size={ICON_SM} />
+                    </Button>
+                  </div>
                 </li>
               );
             })}
           </ul>
         )
+      ) : null}
+
+      {closingSession ? (
+        <CloseTerminalDialog
+          session={closingSession}
+          isPending={closeMutation.isPending}
+          onConfirm={confirmClose}
+          onCancel={() => setClosingId(null)}
+        />
       ) : null}
 
       {activeId ? (

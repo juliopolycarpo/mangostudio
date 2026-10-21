@@ -19,10 +19,13 @@ describe('StartupSpinner', () => {
   it('is a named status, so a screen reader hears that the app is starting', () => {
     render(<StartupSpinner />);
 
+    // The status is the spinner itself: it carries the name, so the screen
+    // around it is a plain container and there is one live region, not two.
     const status = screen.getByRole('status');
-    expect(status).toBe(screen.getByTestId('startup-spinner'));
+    expect(screen.getByTestId('startup-spinner')).toContainElement(status);
     expect(status).toHaveTextContent('Loading…');
     expect(screen.getByText('Loading…')).toHaveClass('sr-only');
+    expect(screen.getAllByRole('status')).toHaveLength(1);
   });
 
   it('falls back to English while the stored language has not loaded', () => {

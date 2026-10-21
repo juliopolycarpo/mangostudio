@@ -59,10 +59,24 @@ describe('Header auth navigation', () => {
     const button = screen.getByTestId('logout-button');
     expect(button).toHaveAccessibleName('Sign out');
     expect(button).toHaveAttribute('title', 'Sign out');
-    // The label is one node (shown from `sm`), with the glyph for narrower
-    // screens beside it, never a second, sliced copy of the translated string.
+    // The label is one node, never a sliced copy of the translated string.
     expect(button.textContent).toBe('Sign out');
-    expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('offers Sign out in the account menu below md, where the button is not drawn', async () => {
+    const user = userEvent.setup();
+    mockSignOut.mockResolvedValue(undefined);
+    renderHeader();
+
+    expect(screen.getByTestId('logout-button')).toHaveClass('shrink-0');
+    expect(screen.getByTestId('logout-button').parentElement).toHaveClass('max-md:hidden');
+
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+    // Picking an item closes the menu.
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
   it('navigates to /login only once Better Auth clears the session', async () => {
@@ -132,19 +146,23 @@ describe('Header page controls', () => {
     }
   );
 
-  it('leaves New chat and Settings to the sidebar from md up, and keeps them for the phone', () => {
-    renderHeader({ currentPage: 'chat' });
-    // Both stay in the document: the sidebar is a slide-over below `md`.
+  it('keeps New chat for the phone, and folds search and Settings into the account menu', async () => {
+    const user = userEvent.setup();
+    const { props } = renderHeader({ currentPage: 'chat' });
+    // Stays in the document: the sidebar is a slide-over below `md`.
     expect(screen.getByRole('button', { name: 'New chat' })).toHaveClass('md:hidden');
-    const settings = screen.getByTitle('Settings');
-    expect(settings).toHaveClass('md:hidden');
-    // The palette trigger and the account block are not duplicated by the sidebar.
+    // The palette trigger and the account block are not duplicated by the sidebar,
+    // and they are drawn from `md` up only: the phone reaches them in the menu.
     expect(screen.getByTestId('command-palette-trigger')).not.toHaveClass('md:hidden');
-    expect(screen.getByTestId('logout-button')).not.toHaveClass('md:hidden');
-  });
+    expect(screen.getByTestId('command-palette-trigger')).toHaveClass('max-md:hidden');
+    expect(screen.queryByTitle('Settings')).not.toBeInTheDocument();
 
-  it('does not fill the Settings button for the page it opens', () => {
-    renderHeader({ currentPage: 'settings' });
-    expect(screen.getByTitle('Settings')).not.toHaveClass('bg-fill-selected');
+    await user.click(screen.getByTestId('account-menu-trigger'));
+    await user.click(screen.getByRole('menuitem', { name: 'Settings' }));
+    expect(props.onNavigateToSettings).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByTestId('account-menu-trigger'));
+    await user.click(screen.getByRole('menuitem', { name: 'Command palette' }));
+    expect(props.onOpenCommandPalette).toHaveBeenCalledTimes(1);
   });
 });

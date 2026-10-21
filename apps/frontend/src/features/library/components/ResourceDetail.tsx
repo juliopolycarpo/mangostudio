@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
@@ -151,7 +152,9 @@ export function ResourceDetail({
           </Link>
           {/* The name, not the `kind:name` id: the kind is stated once, on the
               line below, and a second page-level heading under the umbrella's
-              would outrank the page it sits in. */}
+              would outrank the page it sits in. It is a `text-base` section title;
+              the groups under it are micro-labels, as in the Backups page, so the
+              name is always the largest thing below the page's own title. */}
           <h2 className="font-semibold text-base text-fg">{resource.ref.slug}</h2>
           <p className="flex flex-wrap items-center gap-2 text-fg-muted text-sm">
             {l.kinds[resource.ref.kind]}
@@ -192,7 +195,7 @@ export function ResourceDetail({
       )}
 
       <section className="space-y-3">
-        <h3 className="font-semibold text-fg text-sm">{l.detail.contentHeading}</h3>
+        <MicroLabel as="h3">{l.detail.contentHeading}</MicroLabel>
         {groups.length === 0 ? (
           <p className="text-fg-muted text-sm">{l.detail.notFound}</p>
         ) : (
@@ -246,7 +249,7 @@ export function ResourceDetail({
       )}
 
       <section className="space-y-3">
-        <h3 className="font-semibold text-fg text-sm">{l.detail.coverageHeading}</h3>
+        <MicroLabel as="h3">{l.detail.coverageHeading}</MicroLabel>
         <CoverageList coverage={resource.coverage} locationLabel={locationLabel} />
         {targetsQuery.isError && <InlineNote tone="danger">{l.matrix.loadError}</InlineNote>}
       </section>

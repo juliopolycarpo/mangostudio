@@ -10,7 +10,7 @@ interface ComposerPopoverProps extends Omit<HTMLMotionProps<'div'>, 'ref'> {
    * vertical position belongs to the composer, not to the control.
    */
   readonly anchor?: RefObject<HTMLElement | null>;
-  /** Fade and rise in, the way `ChipSelect`'s panel does. A palette that follows typing stays still. */
+  /** Fade and rise in, the way every chip menu does. A palette that follows typing stays still. */
   readonly animated?: boolean;
 }
 
@@ -24,7 +24,8 @@ interface ComposerPopoverProps extends Omit<HTMLMotionProps<'div'>, 'ref'> {
  * instead, a status-line menu docked onto the shell's border (the chip is 7px
  * under it) while a tool-row menu covered the status line and the draft it sits
  * under: three relationships for one gesture. The wrapper around the trigger
- * therefore must not be `relative`.
+ * therefore must not be `relative`. `ChipSelect` opening upward docks here too, so
+ * the agent and effort menus sit level with the model and permission ones.
  *
  * `overflow`, padding and spacing stay with the call site: a list wants `p-1`, a
  * form wants `p-3`, and `.dropdown-panel` lives in the components layer, so a

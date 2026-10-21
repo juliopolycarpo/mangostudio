@@ -476,6 +476,21 @@ describe('sidebar shell', () => {
     expect(within(row).getByText('codex')).toHaveClass('pointer-coarse:sr-only');
   });
 
+  it('keeps rename and delete up on a touch screen for the open chat only', () => {
+    renderSidebar();
+    const open = screen.getByText('Plugin LSP TypeScript').closest('li') as HTMLElement;
+    const other = screen.getByText('sse-soak load test').closest('li') as HTMLElement;
+    // Two 44px buttons on every row took most of it and left a destructive one
+    // a tap away down the whole list; the other rows keep the title's width.
+    expect(within(open).getByTitle('Edit title').parentElement).toHaveClass('pointer-coarse:flex');
+    expect(within(other).getByTitle('Edit title').parentElement).not.toHaveClass(
+      'pointer-coarse:flex'
+    );
+    expect(within(other).getByTitle('Delete chat').parentElement).not.toHaveClass(
+      'pointer-coarse:flex'
+    );
+  });
+
   it('reads the runner as its dot alone below the width that has room for words, and in full from it', () => {
     // The default and the minimum: the title needs every character the word
     // would take. The word is still in the document either way — it is what the

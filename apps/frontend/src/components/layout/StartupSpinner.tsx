@@ -19,12 +19,10 @@ export function StartupSpinner() {
 
   return (
     <div
-      role="status"
       className="flex min-h-screen items-center justify-center bg-canvas"
       data-testid="startup-spinner"
     >
-      <Spinner size="md" />
-      {label ? <span className="sr-only">{label}</span> : null}
+      <Spinner size="md" label={label} />
     </div>
   );
 }

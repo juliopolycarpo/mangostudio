@@ -206,28 +206,24 @@ export function AddConnectorModal({
 
       {!isChatGpt && form.provider === 'openai' && (
         <>
-          <div className="space-y-1">
-            <Input
-              id="connector-organization-id"
-              label={s.organizationIdLabel}
-              type="text"
-              value={form.organizationId}
-              onChange={(e) => setForm({ ...form, organizationId: e.target.value })}
-              placeholder={s.organizationIdPlaceholder}
-            />
-            <p className="text-xs text-fg-muted">{s.organizationIdHelper}</p>
-          </div>
-          <div className="space-y-1">
-            <Input
-              id="connector-project-id"
-              label={s.projectIdLabel}
-              type="text"
-              value={form.projectId}
-              onChange={(e) => setForm({ ...form, projectId: e.target.value })}
-              placeholder={s.projectIdPlaceholder}
-            />
-            <p className="text-xs text-fg-muted">{s.projectIdHelper}</p>
-          </div>
+          <Input
+            id="connector-organization-id"
+            label={s.organizationIdLabel}
+            type="text"
+            value={form.organizationId}
+            onChange={(e) => setForm({ ...form, organizationId: e.target.value })}
+            placeholder={s.organizationIdPlaceholder}
+            hint={s.organizationIdHelper}
+          />
+          <Input
+            id="connector-project-id"
+            label={s.projectIdLabel}
+            type="text"
+            value={form.projectId}
+            onChange={(e) => setForm({ ...form, projectId: e.target.value })}
+            placeholder={s.projectIdPlaceholder}
+            hint={s.projectIdHelper}
+          />
         </>
       )}
 

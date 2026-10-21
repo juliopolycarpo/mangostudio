@@ -392,6 +392,39 @@ describe('runner pill availability', () => {
     expect(toneOf(pill)).toBe('error');
   });
 
+  // A healthy account's header must not open on red: absent and optional is
+  // neutral, fixable is warning, and error is kept for a fault.
+  it.each([
+    ['not-installed', 'neutral', /not installed on this machine/i],
+    ['runtime-unsupported', 'neutral', /cannot host it/i],
+    ['signed-out', 'warning', /installed, but signed out/i],
+    ['disclosure-required', 'warning', /third-party notice/i],
+    ['runtime-denied', 'warning', /has not allowed external agents/i],
+    ['installed-but-unusable', 'warning', /accepts none of the permissions/i],
+    ['environment-unreachable', 'error', /could not reach this machine/i],
+    ['isolation-unproven', 'error', /not proven it keeps credentials separate/i],
+  ] as const)('grades %s as %s and says why', (reason, tone, sentence) => {
+    const pill = renderPill({
+      externalAgents: [
+        descriptor({
+          unavailableReason: reason,
+          ...(reason === 'not-installed' ? { installed: false } : {}),
+        }),
+      ],
+    });
+    expect(toneOf(pill)).toBe(tone);
+    expect(within(pill).getByText(sentence)).toBeInTheDocument();
+    expect(within(pill).queryByText(/cannot run here/i)).toBeNull();
+  });
+
+  it('reads an untyped signed-out or absent agent the same way', () => {
+    const signedOut = renderPill({
+      externalAgents: [descriptor({ authState: 'signed-out' })],
+    });
+    expect(toneOf(signedOut)).toBe('warning');
+    expect(within(signedOut).getByText(/signed out/i)).toBeInTheDocument();
+  });
+
   // The sidebar badge already degrades this way; the pill must not be the one
   // surface that goes blank on a chat a newer build wrote.
   it('names a target this bundle has no label for instead of rendering blank', () => {

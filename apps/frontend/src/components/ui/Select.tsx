@@ -134,9 +134,8 @@ export function Select({
               // wrapper: these sit inside dialogs and panes that scroll, and an
               // absolute panel is clipped by them — which is the one thing the
               // platform popup this replaced never suffered from. The stacking
-              // comes from `.dropdown-panel` (`z-index: 100`, unlayered, so it
-              // beats any utility set here), which already clears the dialog
-              // and palette layers this opens over.
+              // comes from `.dropdown-panel` (`z-index: 100`), which already
+              // clears the dialog and palette layers this opens over.
               style={{
                 position: 'fixed',
                 top: position.top,

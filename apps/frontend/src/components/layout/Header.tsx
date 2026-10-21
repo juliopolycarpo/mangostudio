@@ -1,7 +1,8 @@
-import { LogOut, Menu, Plus, Search, Settings } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { LogOut, Menu as MenuIcon, Plus, Search, Settings, UserRound } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { KbdHint } from '@/components/ui/KbdHint';
+import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
 import { useSignOut } from '@/hooks/use-sign-out';
@@ -62,6 +63,13 @@ export function Header({
   const { t } = useI18n();
   const { signOut, isSigningOut } = useSignOut();
   const signOutLabel = isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton;
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  // Closes the menu before acting, so a palette or a page that opens in answer
+  // is not left under a menu that is still on screen.
+  const pick = (action: () => void) => {
+    setAccountMenuOpen(false);
+    action();
+  };
 
   return (
     <header className="sticky top-0 z-40 flex h-12 w-full shrink-0 items-center justify-between border-b border-stroke bg-canvas px-2 sm:px-4">
@@ -73,14 +81,14 @@ export function Header({
           className="md:hidden shrink-0"
           aria-label={t.common.openMenu}
         >
-          <Menu size={ICON_LG} />
+          <MenuIcon size={ICON_LG} />
         </Button>
         {/* `min-w-0` without `shrink-0`: the runner name is the one thing here
             long enough to push the right-hand controls off a 320px screen, and
-            the selector's own label already truncates. Pinning it against
-            shrinking made `min-w-0` inert and the header overflowed instead. */}
+            the selector's own label already truncates. Below `md` the right-hand
+            side is two buttons, so the name keeps almost the whole row. */}
         {RUNNER_PAGES.has(currentPage) && runnerSelector ? (
-          <div className="min-w-0 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
+          <div className="min-w-0">{runnerSelector}</div>
         ) : null}
         {/* `sm`, one step earlier than the breadcrumb: the machine is a choice
             worth keeping reachable on small screens now that the composer no
@@ -94,66 +102,93 @@ export function Header({
       </div>
       <div className="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
         {quotaPill}
-        {/* The palette's discoverable half. The chord is the fast path, but
-            Firefox and Safari both reserve mod+K for their own chrome, so a
-            visible affordance is the only one every browser delivers. Below
-            `sm` it collapses to the magnifier: the chip is a desktop promise. */}
-        <Button
-          variant="subtle"
-          size="sm"
-          onClick={onOpenCommandPalette}
-          aria-label={t.commandPalette.open}
-          data-testid="command-palette-trigger"
-          className="shrink-0 gap-2 px-2 text-fg-muted"
-        >
-          <Search size={ICON_MD} />
-          <KbdHint keys={commandPaletteShortcutHint()} className="hidden md:inline-flex" />
-        </Button>
-        {/* New chat and Settings are in the sidebar from `md` up, where it is
-            always on screen. Here they are the phone's way to either, because
-            there the sidebar is a slide-over behind the menu button. */}
+        {/* New chat is the phone's way to start one without opening the
+            slide-over; from `md` the sidebar carries it. */}
         {currentPage === 'chat' && (
           <Button variant="subtle" size="sm" onClick={onNewChat} className="shrink-0 md:hidden">
             <Plus size={ICON_MD} />
             <span className="hidden sm:inline">{t.chat.newChat}</span>
           </Button>
         )}
+
+        {/* Below `md` the palette, Settings and Sign out share one account menu:
+            five bare glyphs left the runner's name four letters, and a sign-out
+            button standing beside Settings is one mis-tap from ending the
+            session. Each item is a word, so none of them has to be guessed. */}
+        <div className="md:hidden">
+          <Menu
+            open={accountMenuOpen}
+            onOpenChange={setAccountMenuOpen}
+            trigger={(triggerProps) => (
+              <Button
+                variant="subtle"
+                size="icon"
+                aria-label={t.common.accountMenu}
+                title={t.common.accountMenu}
+                data-testid="account-menu-trigger"
+                {...triggerProps}
+              >
+                <UserRound size={ICON_MD} />
+              </Button>
+            )}
+          >
+            <MenuItem icon={<Search size={ICON_MD} />} onSelect={() => pick(onOpenCommandPalette)}>
+              {t.commandPalette.title}
+            </MenuItem>
+            <MenuItem
+              icon={<Settings size={ICON_MD} />}
+              onSelect={() => pick(onNavigateToSettings)}
+            >
+              {t.settings.title}
+            </MenuItem>
+            {session?.user ? (
+              <>
+                <MenuSeparator />
+                <MenuItem
+                  icon={<LogOut size={ICON_MD} />}
+                  disabled={isSigningOut}
+                  onSelect={() => pick(() => void signOut())}
+                >
+                  {signOutLabel}
+                </MenuItem>
+              </>
+            ) : null}
+          </Menu>
+        </div>
+
+        {/* From `md` up: the palette's discoverable half. The chord is the fast
+            path, but Firefox and Safari both reserve mod+K for their own chrome,
+            so a visible affordance is the only one every browser delivers.
+            `md`, 32px and 14px, the same as the Sign out beside it: a cluster
+            of one type size reads as one thing. */}
         <Button
           variant="subtle"
-          size="icon"
-          onClick={onNavigateToSettings}
-          aria-current={currentPage === 'settings' ? 'page' : undefined}
-          className="shrink-0 md:hidden"
-          title={t.settings.title}
+          size="md"
+          onClick={onOpenCommandPalette}
+          aria-label={t.commandPalette.open}
+          data-testid="command-palette-trigger"
+          className="shrink-0 gap-2 px-2 text-fg-muted max-md:hidden"
         >
-          <Settings size={ICON_MD} />
+          <Search size={ICON_MD} />
+          <KbdHint keys={commandPaletteShortcutHint()} />
         </Button>
 
         {session?.user && (
-          <div className="ml-1 flex shrink-0 items-center gap-2 border-l border-stroke pl-3 sm:ml-2">
-            <span className="hidden max-w-32 truncate text-sm text-fg-muted md:inline">
-              {session.user.name}
-            </span>
-            {/* One button for every width, so there is one `logout-button`: the
-                label from `sm` up, the glyph below it. The phone header used to
-                print the first four letters of the translated string, which
-                says "Sign" in English and breaks in any language that does not
-                put its first word first. The glyph steps aside while signing
-                out, because `Button` already shows its spinner there. */}
+          <div className="ml-2 flex shrink-0 items-center gap-2 border-l border-stroke pl-3 max-md:hidden">
+            <span className="max-w-32 truncate text-sm text-fg-muted">{session.user.name}</span>
+            {/* The one `logout-button`. Below `md` Sign out is an item of the
+                account menu instead, so this one is not drawn there. */}
             <Button
               variant="subtle"
-              size="sm"
+              size="md"
               onClick={() => void signOut()}
               loading={isSigningOut}
               aria-label={signOutLabel}
               title={signOutLabel}
               data-testid="logout-button"
-              className="shrink-0 max-sm:size-8 max-sm:p-0"
+              className="shrink-0"
             >
-              {isSigningOut ? null : (
-                <LogOut size={ICON_MD} className="sm:hidden" aria-hidden="true" />
-              )}
-              <span className="hidden sm:inline">{signOutLabel}</span>
+              {signOutLabel}
             </Button>
           </div>
         )}

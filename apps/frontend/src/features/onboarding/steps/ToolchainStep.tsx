@@ -47,7 +47,7 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
       {runtimes.isPending ? (
         <div className="flex justify-center py-6">
-          <Spinner size="md" />
+          <Spinner size="md" label={t.common.loading} />
         </div>
       ) : runtimes.isError ? (
         // A refused probe answers `[]`, exactly like a machine with neither
@@ -67,7 +67,7 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
                 key={id}
                 data-testid={`onboarding-runtime-${id}`}
                 data-ready={ready}
-                className="flex flex-wrap items-center justify-between gap-3 py-3"
+                className="flex flex-wrap items-center justify-between gap-3 px-3 py-3"
               >
                 <span className="flex items-center gap-2">
                   {ready ? (

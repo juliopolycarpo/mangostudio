@@ -72,8 +72,12 @@ describe('CoverageList', () => {
     const shadowed = row('mangostudio');
     expect(shadowed.children).toHaveLength(3);
     const details = shadowed.children[2] as HTMLElement;
-    expect(details).toHaveTextContent('via /home/dev/agents-skills');
-    expect(details).toHaveTextContent('also in /home/dev/claude-skills, identical');
+    expect(details).toHaveTextContent(en.library.detail.via);
+    expect(details).toHaveTextContent('/home/dev/agents-skills');
+    expect(details).toHaveTextContent(en.library.detail.alsoIn);
+    expect(details).toHaveTextContent('/home/dev/claude-skills');
+    // A badge, not a trailing word that can wrap onto a line of its own.
+    expect(within(details).getByText(en.library.detail.identical)).toBeInTheDocument();
 
     // No empty third cell: it would add a blank grid row on a phone.
     expect(row('codex').children).toHaveLength(2);
@@ -82,7 +86,7 @@ describe('CoverageList', () => {
 
   // The content cards above already set a path in mono; a section of the same
   // page that sets the same kind of text in the interface font disagrees with them.
-  it('sets each path in mono, and the words around it in the interface font', () => {
+  it('sets each path in mono on a line of its own, and the words around it in the interface font', () => {
     const { row } = renderCoverage();
 
     const details = row('mangostudio').children[2] as HTMLElement;
@@ -91,8 +95,9 @@ describe('CoverageList', () => {
       '/home/dev/agents-skills',
       '/home/dev/claude-skills',
     ]);
-    // The sentence keeps its own words, in its own order, around the path.
-    expect(details.querySelector('p')?.textContent).toBe('via /home/dev/agents-skills');
+    // A path is a block, so it never shares a line with the words that introduce it.
+    for (const path of paths) expect(path.className).toContain('block');
+    expect(details.querySelector('p')?.textContent).toBe(en.library.detail.via);
   });
 });
 

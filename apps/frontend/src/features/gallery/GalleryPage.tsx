@@ -60,7 +60,7 @@ export function GalleryPage() {
           ))}
 
           <div ref={loadMoreRef} className="col-span-full flex h-10 items-center justify-center">
-            {isFetchingNextPage && <Spinner size="md" />}
+            {isFetchingNextPage && <Spinner size="md" label={t.common.loading} />}
           </div>
         </div>
       )}

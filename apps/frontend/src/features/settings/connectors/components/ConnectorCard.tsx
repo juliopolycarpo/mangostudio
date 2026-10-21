@@ -19,7 +19,6 @@ import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
-import { cn } from '@/lib/utils';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import { formatPlan } from '../lib/format-plan';
 import { isReadOnlySharedConnector } from '../lib/shared-connector';
@@ -86,9 +85,10 @@ export function ConnectorCard({
 
   return (
     <Card padded={false} className="space-y-3 p-4">
-      {/* One row at every width: the actions belong to this connector, so they
-          stay on its right edge instead of dropping onto a row of their own. */}
-      <div className="flex items-start justify-between gap-2 sm:gap-4">
+      {/* Side by side from `sm`. Below it the actions take a row under the
+          metadata, so "Models" keeps its word instead of shrinking to a bare
+          glyph beside a trash can, and the name and badges keep the full width. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-sm font-semibold text-fg">{c.name}</h3>
@@ -131,32 +131,24 @@ export function ConnectorCard({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex items-center gap-1 sm:shrink-0">
           {isChatGpt && !c.needsReauth ? (
-            // Icon-only below `sm`: with its label this link and two buttons would
-            // leave the name and badges about a third of the card.
-            <Link
-              to="/settings/metrics"
-              aria-label={s.chatgptSeeMetrics}
-              className={cn(buttonClassName('subtle', 'icon'), 'sm:w-auto sm:px-3')}
-            >
-              <BarChart3 size={ICON_MD} />
-              <span className="hidden sm:inline">{s.chatgptSeeMetrics}</span>
+            <Link to="/settings/metrics" className={buttonClassName('subtle', 'sm')}>
+              <BarChart3 size={ICON_SM} aria-hidden="true" />
+              {s.chatgptSeeMetrics}
             </Link>
           ) : null}
           {/* The card's main operation is choosing its models, so it is named: a bare
-              gear reads as the connector's own settings. Icon-only below `sm`, as
-              the metrics link is, and the trash stays the only unlabelled action. */}
+              gear reads as the connector's own settings. */}
           <Button
             variant="secondary"
             size="sm"
             onClick={() => onConfigure(c)}
             title={s.configureModels}
             aria-label={s.configureModels}
-            className="max-sm:w-7 max-sm:px-0"
           >
             <ListChecks size={ICON_SM} aria-hidden="true" />
-            <span className="hidden sm:inline">{s.modelsButton}</span>
+            {s.modelsButton}
           </Button>
           <Button
             variant="subtle-danger"
@@ -165,6 +157,7 @@ export function ConnectorCard({
             title={isReadOnlyShared ? s.sharedDeleteBlocked : s.deleteConnector}
             aria-label={s.deleteConnector}
             disabled={isReadOnlyShared}
+            className="max-sm:ml-auto"
           >
             <Trash2 size={ICON_MD} />
           </Button>

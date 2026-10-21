@@ -115,7 +115,7 @@ describe('ToolCallBlock', () => {
     expect(screen.getByText('Bash').className).toContain('text-danger');
   });
 
-  it('colours the tool name by outcome', () => {
+  it('keeps a succeeded tool name neutral and lets the node carry the outcome', () => {
     const { container } = render(
       <ToolCallBlock
         name="list_directory"
@@ -125,7 +125,8 @@ describe('ToolCallBlock', () => {
       />
     );
 
-    expect(screen.getByText('List').className).toContain('text-success');
+    expect(screen.getByText('List').className).toContain('text-fg');
+    expect(screen.getByText('List').className).not.toContain('text-success');
     expect(container.querySelector('.chat-timeline-item--success')).toBeInTheDocument();
   });
 

@@ -8,6 +8,7 @@
 
 import { describe, expect, it, jest } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
+import userEvent from '@testing-library/user-event';
 import { MatrixFilters } from '../../../../src/features/library/components/MatrixFilters';
 import { DEFAULT_LIBRARY_FILTERS } from '../../../../src/features/library/format';
 import { render, screen } from '../../../support/harness/render';
@@ -47,16 +48,43 @@ describe('MatrixFilters', () => {
     expect(en.library.filters.anyLocation).not.toMatch(/location/i);
   });
 
-  // Four rows on a phone instead of six: the search and the location, whose
-  // options are whole paths, take a row each; the rest pair up.
-  it('lays the controls out in two columns on a phone', () => {
-    renderFilters();
+  // The matrix is the point of the page: on a phone only the search stays in
+  // view, and one button reveals the rest, counting what is set away from default.
+  it('folds every control but the search behind one Filters button on a phone', async () => {
+    const onChange = jest.fn();
+    const user = userEvent.setup();
+    render(
+      <MatrixFilters
+        filters={{ ...DEFAULT_LIBRARY_FILTERS, show: 'divergent', groupByLocation: true }}
+        targets={TARGETS}
+        locations={[location()]}
+        onChange={onChange}
+      />
+    );
 
-    const bar = screen.getByTestId('matrix-filters');
-    expect(bar.className).toContain('grid-cols-2');
-    expect(bar.querySelector('input[type="search"]')?.closest('.col-span-2')).not.toBeNull();
+    const toggle = screen.getByRole('button', { name: new RegExp(en.library.filters.toggle) });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('matrix-filters-count')).toHaveTextContent('2');
+
+    const panel = screen.getByTestId('matrix-filters-panel');
+    expect(toggle).toHaveAttribute('aria-controls', panel.id);
+    expect(panel.className).toContain('hidden');
+    // The search is outside the panel, so it never leaves the first row.
+    expect(panel.contains(document.querySelector('input[type="search"]'))).toBe(false);
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(panel.className).toContain('grid-cols-2');
+    expect(panel.className).not.toContain('hidden');
+    // The location, whose options are whole paths, takes a row of its own.
     expect(
       screen.getByRole('combobox', { name: en.library.filters.location }).closest('.col-span-2')
     ).not.toBeNull();
+  });
+
+  it('shows no count while every filter is at its default', () => {
+    renderFilters();
+
+    expect(screen.queryByTestId('matrix-filters-count')).toBeNull();
   });
 });

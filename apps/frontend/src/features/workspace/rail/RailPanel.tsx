@@ -36,7 +36,13 @@ interface RailPanelProps {
   readonly children: ReactNode;
 }
 
-/** Shared panel chrome so every rail occupant has the same title and exit affordance. */
+/**
+ * Shared panel chrome so every rail occupant has the same title and exit affordance.
+ *
+ * The header is 48px (`h-12`) with a `text-base` title, the app header's own
+ * height, so the two borders share one rhythm; `foundations.md` has no 44px step
+ * and gives `text-base` to section titles.
+ */
 export function RailPanel({
   title,
   closeLabel,
@@ -50,8 +56,8 @@ export function RailPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-stroke px-4">
-        <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-fg" title={title}>
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-stroke px-4">
+        <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-fg" title={title}>
           {title}
         </h2>
         <div className="flex shrink-0 items-center gap-1">

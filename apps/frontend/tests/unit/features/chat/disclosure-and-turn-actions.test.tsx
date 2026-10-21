@@ -4,7 +4,8 @@
  *
  * Tailwind wraps `hover:` and `group-hover:` in `@media (hover: hover)`, so a
  * control revealed only by hover is not merely hidden on a phone, it is
- * unreachable: a tool row with no sign it opens, a turn with no copy or revert.
+ * unreachable: a turn with no copy or revert. (A tool row's chevron no longer
+ * hides at all: a row that gives no sign it opens is a row nobody opens.)
  * happy-dom does not evaluate media queries, so these pin the classes that carry
  * the touch and keyboard reveal rather than the computed opacity.
  */
@@ -30,7 +31,7 @@ function chevronsIn(root: Element): SVGElement[] {
 }
 
 describe('TimelineRow disclosure chevron', () => {
-  it('stays out of the way for a pointer but is on show for touch and keyboard', () => {
+  it('is on show at rest for every input, in the quiet disclosure colour', () => {
     render(
       <TimelineRow expanded={false} onToggle={() => undefined}>
         Grep
@@ -39,10 +40,8 @@ describe('TimelineRow disclosure chevron', () => {
 
     const [chevron] = chevronsIn(screen.getByRole('button', { name: /Grep/ }));
     const classes = chevron?.getAttribute('class') ?? '';
-    expect(classes).toContain('opacity-0');
-    expect(classes).toContain('group-hover/row:opacity-100');
-    expect(classes).toContain('group-focus-visible/row:opacity-100');
-    expect(classes).toContain('pointer-coarse:opacity-100');
+    expect(classes).toContain('text-fg-subtle');
+    expect(classes).not.toContain('opacity-0');
   });
 
   it('is fully shown and turned over while the row is open', () => {

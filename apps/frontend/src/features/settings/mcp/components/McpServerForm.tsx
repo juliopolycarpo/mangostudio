@@ -186,6 +186,7 @@ export function McpServerForm({
           <EntryList
             label={s.argsLabel}
             addLabel={s.addArgument}
+            emptyLabel={s.noArguments}
             entries={state.args}
             onAdd={() => patch({ args: [...state.args, ''] })}
             onRemove={(index) => patch({ args: state.args.filter((_, i) => i !== index) })}
@@ -209,6 +210,7 @@ export function McpServerForm({
             label={s.envLabel}
             hint={s.envHint}
             addLabel={s.addVariable}
+            emptyLabel={s.noVariables}
             entries={state.env}
             onChange={(env) => patch({ env })}
           />
@@ -219,6 +221,7 @@ export function McpServerForm({
             label={s.secretEnvLabel}
             hint={s.secretEnvHint}
             addLabel={s.addSecretVariable}
+            emptyLabel={s.noSecretVariables}
             entries={state.secretEnv}
             onChange={(secretEnv) => patch({ secretEnv })}
             secretValues
@@ -241,6 +244,7 @@ export function McpServerForm({
             label={s.headersLabel}
             hint={s.headersHint}
             addLabel={s.addHeader}
+            emptyLabel={s.noHeaders}
             entries={state.headers}
             onChange={(headers) => patch({ headers })}
             secretValues

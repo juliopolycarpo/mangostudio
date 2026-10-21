@@ -91,26 +91,30 @@
   background: unset;
 }
 
+.markdown-content pre[data-lang] {
+  /* A labelled block gets a header row of its own: the label and the copy
+   * button sit in the 2.5rem above the first line of code, so a long first
+   * line can never run underneath either. An unlabelled snippet keeps the
+   * plain `1em` padding. */
+  padding-top: 2.5rem;
+}
+
 .markdown-content pre[data-lang]::before {
   content: attr(data-lang);
   position: absolute;
-  top: 0.5em;
-  /* Clear of the copy button, which is 28px wide at 0.5em of the block's own
-   * font size. The label's `em` is its 11px, the button's is the block's 14px,
-   * so `2.75em` landed about 5px short of the button's edge and `TS` sat half
-   * under it wherever the button is always shown (touch). `rem` does not move
-   * with either font size. */
-  right: 2.75rem;
+  /* The label's box is the copy button's (`.copy-code-btn`: a 0.5rem inset and
+   * 28px, in `rem` and `px` so neither moves with the block's font size), so
+   * the two share one vertical centre. The label takes the left of the row and
+   * the button the right. */
+  top: 0.5rem;
+  left: 1rem;
+  height: 28px;
+  line-height: 28px;
   font-size: max(var(--text-micro), 0.7em);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-fg-subtle);
   font-family: var(--font-mono);
-  transition: opacity var(--duration-quick) var(--ease-standard);
-}
-
-.markdown-content pre[data-lang]:hover::before {
-  opacity: 0;
 }
 
 .markdown-content pre code {

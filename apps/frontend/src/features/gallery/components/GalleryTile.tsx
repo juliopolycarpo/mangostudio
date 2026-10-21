@@ -41,9 +41,13 @@ interface GalleryTileProps {
  *   opening the image. `hover:` is gated to hover-capable pointers, so on touch
  *   the link never takes events and the tap reaches the image.
  *
- * The bar is a solid `surface-raised` strip rather than a veil over the image:
- * `scrim` is translucent, so the contrast of text laid on it would depend on
- * whichever picture happens to sit underneath.
+ * The bar is a `scrim-media` veil with `on-scrim-media` text. That pair exists
+ * for exactly this: the veil is dark enough that white text holds 4.5:1 over any
+ * picture under it, and the same in both themes, as the picture is. (The theme's
+ * `scrim` is not: it is translucent and light-tinted in the light theme, so text
+ * on it would have depended on whichever picture sits underneath, which is why
+ * this was a solid `surface-raised` strip before.) The download link draws its
+ * focus ring in `on-scrim-media` for the same reason the lightbox's controls do.
  *
  * // Usage: <GalleryTile item={item} onView={setSelectedImage} />
  */
@@ -75,8 +79,8 @@ export function GalleryTile({ item, onView, compact = false }: GalleryTileProps)
         ring on something invisible.
       */}
       {compact ? null : (
-        <div className="pointer-events-none absolute inset-x-px bottom-px flex items-start gap-3 rounded-b-sm border-t border-stroke bg-surface-raised p-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-          <p className="line-clamp-3 min-w-0 flex-1 text-sm text-fg">{item.prompt}</p>
+        <div className="pointer-events-none absolute inset-x-px bottom-px flex items-start gap-3 rounded-b-sm bg-scrim-media p-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          <p className="line-clamp-3 min-w-0 flex-1 text-sm text-on-scrim-media">{item.prompt}</p>
           {/* Icon-only, so the label is the only name a screen reader can read out. */}
           <a
             href={item.imageUrl}
@@ -86,7 +90,7 @@ export function GalleryTile({ item, onView, compact = false }: GalleryTileProps)
             aria-label={t.gallery.downloadImage}
             className={cn(
               buttonClassName('secondary', 'icon-sm'),
-              'pointer-events-none shrink-0 group-hover:pointer-events-auto group-focus-within:pointer-events-auto'
+              'pointer-events-none shrink-0 group-hover:pointer-events-auto group-focus-within:pointer-events-auto focus-visible:outline-on-scrim-media'
             )}
           >
             <Download size={ICON_MD} />

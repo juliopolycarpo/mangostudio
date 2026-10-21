@@ -8,10 +8,10 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';
 import type { SlashCommandEntry } from '../lib/slash-commands';
-import { ComposerPopover } from './ComposerPopover';
 
 interface Props {
   readonly entries: readonly SlashCommandEntry[];
@@ -114,7 +114,10 @@ export function SlashCommandMenu({
           onMouseMove={() => onHighlight(index)}
           className={cn(
             'flex cursor-pointer flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left transition-colors',
-            index === activeIndex ? 'bg-fill-selected' : 'hover:bg-fill-hover'
+            // The keyboard's row is the hover wash, as in every other menu:
+            // `fill-selected` is for the item that was chosen, and nothing here
+            // is until Enter.
+            index === activeIndex ? 'bg-fill-hover' : 'hover:bg-fill-hover'
           )}
         >
           <span className="flex items-baseline gap-2">

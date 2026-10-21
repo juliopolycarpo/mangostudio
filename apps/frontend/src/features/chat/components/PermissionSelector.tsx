@@ -39,14 +39,14 @@ import {
   externalPresetFor,
   externalPresetPair,
 } from '@mangostudio/shared/external-agents';
-import { AlertTriangle, Check, ChevronDown, Lock } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Shield } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
-import { ComposerPopover } from './ComposerPopover';
 
 export interface PermissionSelectorProps {
   configurations: readonly ExternalSupportedConfiguration[];
@@ -170,7 +170,7 @@ export function PermissionSelector({
         {unattended ? (
           <AlertTriangle size={ICON_SM} className="shrink-0 text-warning" />
         ) : (
-          <Lock size={ICON_SM} className="composer-chip-icon shrink-0" />
+          <Shield size={ICON_SM} className="composer-chip-icon shrink-0" />
         )}
         <span className="composer-chip-key text-fg-muted">{`${labels.modeKey}:`}</span>
         <span className={cn('composer-chip-value', unattended && 'text-warning')}>{modeName}</span>

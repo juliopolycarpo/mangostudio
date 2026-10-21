@@ -54,6 +54,36 @@ describe('Button disabled look', () => {
     expect(className).toContain(GREY_TEXT);
   });
 
+  // The verb of a destructive row action reads as destructive before anyone
+  // reaches for it: danger text at rest, and a danger wash once reached.
+  describe('subtle-danger', () => {
+    it('rests in danger text, not fg-muted', () => {
+      render(
+        <Button variant="subtle-danger" size="icon" aria-label="Delete">
+          x
+        </Button>
+      );
+
+      const tokens = screen.getByRole('button').className.split(' ');
+      expect(tokens).toContain('text-danger');
+      expect(tokens).not.toContain('text-fg-muted');
+    });
+
+    it.each(['hover', 'focus-visible', 'active'] as const)(
+      'fills with danger-subtle on %s',
+      (state) => {
+        render(
+          <Button variant="subtle-danger" size="icon" aria-label="Delete">
+            x
+          </Button>
+        );
+
+        const tokens = screen.getByRole('button').className.split(' ');
+        expect(tokens).toContain(`not-disabled:${state}:bg-danger-subtle`);
+      }
+    );
+  });
+
   it('marks a loading button busy so the grey selector leaves it alone', () => {
     render(
       <Button variant="primary" loading>

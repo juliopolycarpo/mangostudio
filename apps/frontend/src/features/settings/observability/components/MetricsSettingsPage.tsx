@@ -7,6 +7,7 @@ import type {
 import { useQuery } from '@tanstack/react-query';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
+import { Badge } from '@/components/ui/Badge';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -30,6 +31,8 @@ const BLOCK = 'space-y-3 border-t border-stroke pt-4 first:border-t-0 first:pt-0
  * probe-timeout counts below it end too. The cache name takes the rest.
  */
 function CacheMetricsTable(props: {
+  /** Names the table for a screen reader; the column headers name it for everyone else. */
+  caption: string;
   cacheLabel: string;
   cacheLabels: Record<ProviderCacheName, string>;
   hitRateLabel: string;
@@ -40,6 +43,7 @@ function CacheMetricsTable(props: {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
+        <caption className="sr-only">{props.caption}</caption>
         <thead>
           <tr className="text-left text-xs text-fg-muted">
             <th scope="col" className="whitespace-nowrap py-2 font-medium">
@@ -185,12 +189,14 @@ export function MetricsSettingsPage() {
             padded
             title={t.providers[providerMetrics.provider]}
             action={
-              <span className="text-sm text-fg-muted">
+              // A count with no weight is easy to miss when it is not zero, so it
+              // carries a tone: neutral while healthy, warning once a probe timed out.
+              <Badge variant={providerMetrics.totalProbeTimeouts > 0 ? 'warning' : 'neutral'}>
                 {labels.totalProbeTimeoutsLabel.replace(
                   '{value}',
                   String(providerMetrics.totalProbeTimeouts)
                 )}
-              </span>
+              </Badge>
             }
           >
             {providerMetrics.usage ? (
@@ -215,10 +221,8 @@ export function MetricsSettingsPage() {
             ) : null}
 
             <section className={BLOCK}>
-              <MicroLabel as="h4" className="block">
-                {labels.cacheSectionTitle}
-              </MicroLabel>
               <CacheMetricsTable
+                caption={labels.cacheSectionTitle}
                 cacheLabel={labels.cacheLabel}
                 cacheLabels={cacheLabels}
                 hitRateLabel={labels.hitRateLabel}

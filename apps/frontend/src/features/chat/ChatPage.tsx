@@ -8,7 +8,7 @@ import type {
 import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
 import type { ReasoningEffort } from '@mangostudio/shared/types';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
-import { type ComponentProps, useCallback, useMemo } from 'react';
+import { type ComponentProps, useCallback, useMemo, useState } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 import { WorkspaceRail } from '@/features/workspace/rail/WorkspaceRail';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
@@ -19,7 +19,6 @@ import { DeprecatedModelNotice } from './components/DeprecatedModelNotice';
 import { InputBar } from './components/InputBar';
 import { InterruptedTurnNotice } from './components/InterruptedTurnNotice';
 import { PinnedTodoPanel } from './components/PinnedTodoPanel';
-import { useChatDockHeight } from './hooks/use-chat-dock-height';
 import { useChatHasTurns } from './hooks/use-chat-has-turns';
 import { useChatContextControls, useChatPageMessages } from './hooks/use-chat-page-state';
 import { requestComposerFocus, setComposerDraft } from './lib/composer-draft-store';
@@ -199,14 +198,16 @@ export function ChatPage({
   const turnsHeldForModel = awaitingModel || autoContextActionDeferred;
   const turnsHeld = isContextActionPending || turnsHeldForModel;
   const railShowsTodos = workspaceSettings.sidePanel.visiblePanelIds.includes('todos');
-  // The rail's mobile trigger floats over the transcript, so it anchors to the
-  // top of everything under the transcript instead of a fixed offset the
-  // composer's height would outgrow.
-  const { hostRef, dockRef } = useChatDockHeight();
+  // Below `lg` the rail is a drawer, and its trigger is a chip in the composer's
+  // tool row. The composer owns the slot and the rail draws into it, so the
+  // transcript keeps the same edges as the composer instead of leaving a gutter
+  // for a button floating over it. State rather than a ref: the rail must
+  // re-render when the slot mounts.
+  const [railTriggerSlot, setRailTriggerSlot] = useState<HTMLElement | null>(null);
 
   return (
     <>
-      <div ref={hostRef} className="relative flex h-full min-h-0">
+      <div className="flex h-full min-h-0">
         <div className="flex min-w-0 flex-1 flex-col">
           <ChatPageContent
             chatId={chatId}
@@ -232,7 +233,7 @@ export function ChatPage({
                 : onSubmit
             }
           />
-          <div ref={dockRef} className="flex shrink-0 flex-col">
+          <div className="flex shrink-0 flex-col">
             {/* Only the notices scroll when they outgrow the dock. Two stacked
                 callouts are taller than a phone, and a dock that grows with them
                 pushes the composer off the screen; capped, the notices scroll in
@@ -303,6 +304,7 @@ export function ChatPage({
               onSelectedAgentIdChange={onSelectedAgentIdChange}
               hasTurns={hasTurns}
               workdir={workdir}
+              railTriggerSlotRef={setRailTriggerSlot}
               {...composer}
             />
           </div>
@@ -315,6 +317,7 @@ export function ChatPage({
             environmentId={environmentId}
             settings={workspaceSettings.sidePanel}
             onWidthChange={onWorkspacePanelWidthChange}
+            triggerSlot={railTriggerSlot}
           />
         ) : null}
       </div>

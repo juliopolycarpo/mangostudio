@@ -12,6 +12,7 @@ import type { PropagationBackupUsage } from '@mangostudio/shared/library';
 import { formatBytes } from '@/features/environments/format';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 
 /** "3 backups using 4 KiB." — with its own singular, since the repo has no plural rules. */
 export function formatBackupUsage(
@@ -32,14 +33,15 @@ interface BackupSummaryProps {
   >;
   /** Adds that the bounds apply to each machine on its own, for the page that groups by machine. */
   readonly perMachine?: boolean;
+  readonly className?: string;
 }
 
-export function BackupSummary({ usage, perMachine = false }: BackupSummaryProps) {
+export function BackupSummary({ usage, perMachine = false, className }: BackupSummaryProps) {
   const { t } = useI18n();
   const labels = t.library.backups;
 
   return (
-    <p className="text-fg-muted text-xs">
+    <p className={cn('text-fg-muted text-xs', className)}>
       {formatBackupUsage(labels, usage.setCount, usage.sizeBytes)}{' '}
       {formatMessage(labels.retention, {
         count: String(usage.retentionCount),

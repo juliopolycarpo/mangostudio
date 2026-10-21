@@ -21,7 +21,13 @@ export function UpdateCard({ status, onUpgraded }: UpdateCardProps) {
   const m = t.environments.machine.update;
 
   return (
-    <MachineCard title={m.title} testId="machine-update-card">
+    <MachineCard
+      title={m.title}
+      testId="machine-update-card"
+      footer={
+        <UpdateAction status={status} testId="machine-update-card-action" onUpgraded={onUpgraded} />
+      }
+    >
       <MachineFacts>
         <MachineFact
           label={m.installedVia}
@@ -34,9 +40,6 @@ export function UpdateCard({ status, onUpgraded }: UpdateCardProps) {
           title={status.check?.error}
         />
       </MachineFacts>
-      <div className="border-t border-stroke pt-4">
-        <UpdateAction status={status} testId="machine-update-card-action" onUpgraded={onUpgraded} />
-      </div>
     </MachineCard>
   );
 }

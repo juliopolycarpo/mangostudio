@@ -4,8 +4,8 @@
  *
  * Extracted because six steps sharing a heading rhythm is what makes the flow
  * read as one thing; each step then only owns what is genuinely its own. The
- * title is the screen's one `text-headline`: the wizard's own heading above it
- * is a page title, and this is the greeting for the step in front of the person.
+ * title is the screen's one `text-headline` and its one `h1`: the wizard's own
+ * line above the card is only the product's wordmark.
  */
 
 import type { ReactNode } from 'react';
@@ -22,7 +22,7 @@ export function StepFrame({ title, lead, hint, children }: StepFrameProps) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <h2 className="text-headline font-semibold text-fg">{title}</h2>
+        <h1 className="text-headline font-semibold text-fg">{title}</h1>
         <p className="text-sm text-fg-muted">{lead}</p>
       </div>
       {children}

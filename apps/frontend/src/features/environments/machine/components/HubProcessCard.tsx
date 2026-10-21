@@ -34,6 +34,18 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
         ) : null
       }
       testId="machine-hub-card"
+      footer={
+        <MachineActionButton
+          status={status}
+          action="restart"
+          label={m.actions.restart}
+          confirmTitle={m.actions.confirmRestartTitle}
+          confirmDescription={m.actions.confirmRestartDescription}
+          isPending={isRestarting}
+          onConfirm={onRestart}
+          testId="machine-restart"
+        />
+      }
     >
       {hub.running && (
         <MachineFacts>
@@ -61,19 +73,6 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
           <MachineFact label={m.hub.logFile} value={hub.logFile || m.hub.noLogFile} />
         </MachineFacts>
       )}
-
-      <div className="border-t border-stroke pt-4">
-        <MachineActionButton
-          status={status}
-          action="restart"
-          label={m.actions.restart}
-          confirmTitle={m.actions.confirmRestartTitle}
-          confirmDescription={m.actions.confirmRestartDescription}
-          isPending={isRestarting}
-          onConfirm={onRestart}
-          testId="machine-restart"
-        />
-      </div>
     </MachineCard>
   );
 }

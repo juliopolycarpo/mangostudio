@@ -36,7 +36,8 @@ a disabled `subtle` or `subtle-danger` button has no tile and only turns its tex
 
 A destructive action that is not the final confirmation — Remove, Revoke, Delete on a
 row — is `variant="subtle-danger"`: `danger` text at rest, a `danger-subtle` fill on
-hover and press. It is never a `subtle` button with a `text-danger` override, which
+hover and press. An icon-only one (a trash can) carries both an `aria-label` and a
+`title`, so the verb is discoverable. It is never a `subtle` button with a `text-danger` override, which
 loses the press state and hovers neutral beside its siblings.
 
 ### `SplitButton`
@@ -130,7 +131,8 @@ information ([decision 18](./decisions.md)).
 `KbdHint` is a 20px keycap (`rounded-xs`, `control` fill, mono 11px) for a shortcut,
 right-aligned where the action lives. The Return key is drawn as an icon
 (`<KbdHint keys={<ReturnKey />} />`), not as the `⏎` text glyph, which is hairline-thin
-at 11px and left the keycap looking empty. `MicroLabel` is the group heading: mono 11px,
+at 11px and left the keycap looking empty. The palette's footer draws its other keys the
+same way (`ArrowUpDown`, `ArrowRightToLine` at `ICON_SM`) and is not drawn on a coarse pointer. `MicroLabel` is the group heading: mono 11px,
 upper-case, `0.06em`, `fg-subtle` — the one place text is upper-cased.
 
 ### `Callout`
@@ -175,7 +177,8 @@ with its shortcut as a `KbdHint`. Chat rows and page entries share one inset (`p
 one icon slot, so a selected page's pill and accent bar sit on the same edges as a
 selected chat's and a page's label starts at the same x as a chat's title. A chat row adds
 a git glyph and a runner dot, and from 320px wide the mono runner name beside the dot; both
-yield to the rename and delete buttons on hover. Below 320px the dot stands alone, because
+yield to the rename and delete buttons on hover (on a coarse pointer, which has no hover,
+only the open chat's row shows them, so the other rows keep their width for the title). Below 320px the dot stands alone, because
 every character the metadata keeps is one the title loses (the name stays in the document,
 so search and screen readers still read it). Home and Gallery do not share a glyph family:
 a house and a grid, not two near-identical squares.
@@ -189,16 +192,23 @@ the navigation's mark — `fill-selected` and the 3px `accent` bar — and the o
 `control` (inside a card or a dialog) or `surface` (`onCanvas`, straight on the page) with
 a hover fill. The row is a `<label>` around a visually hidden radio, so the list is a real
 radio group inside a `role="radiogroup"` that names it: one tab stop, arrow keys move the
-choice, and a screen reader hears one choice rather than a set of toggles. Not for a short
-set of labels (`SettingsSegmented`) and not for a pick-several list (`CheckboxRow`).
+choice, and a screen reader hears one choice rather than a set of toggles. A choice that is
+listed but cannot be taken (`disabled`) stays readable at half strength with no hover. It is
+the only pick-one idiom: the add-environment dialog's "how do you reach it", the WSL
+distribution list, the container engine and the onboarding end state all use it, and the
+bordered check-mark tile they replaced no longer exists. Not for a short set of labels
+(`SettingsSegmented`: the consent profiles, the avatar mode) and not for a pick-several
+list (`CheckboxRow`).
 
 ### `Header`
 
 48px, `canvas`, a `stroke` bottom border. Left: the runner picker, on the pages where a
 chat starts or runs (Home and a chat) and nowhere else, then the workspace context.
-Right: the command palette and the account block. "New chat" and Settings are in the
-header only below `md`, where the sidebar that carries them is a slide-over; from `md` up
-the header does not repeat what the sidebar already shows. Every button is `subtle`;
+Right: the command palette and the account block (the name, then Sign out), both at the
+default `md` size so the cluster reads in one 14px size. Below `md` the sidebar is a slide-over,
+so the header keeps "New chat" and folds the palette, Settings and Sign out into one account
+`Menu` behind a single glyph; the runner's name keeps the row. From `md` up the header does not
+repeat what the sidebar already shows. Every button is `subtle`;
 there is no primary action in the header.
 
 ### `Menu`
@@ -278,7 +288,11 @@ code blocks are `surface` with a `stroke` border (Shiki keeps its own theme
 background); links are `accent-fg`; a blockquote's rule is `stroke-strong`, not an
 accent. A table sits in a `.markdown-table-scroll` wrapper that scrolls sideways
 when its columns need more than the bubble, and inline code in a cell never
-breaks at a hyphen. A code block's language label sits clear of the copy button (`2.75rem`
-from the edge, in a unit that does not move with either font size). The table wrapper
+breaks at a hyphen. A labelled code block has a 2.5rem header row above its first line: the
+language label sits at its left (1rem in) and the copy button at its right (0.5rem
+in), both in a 28px box at a 0.5rem top inset so they share one vertical centre. The
+label is always shown and never fades, because it never covers code. An unlabelled
+snippet keeps the plain `1em` padding. The label is positioned against the block, so
+it scrolls away with the code when a wide block is scrolled sideways. The table wrapper
 draws a thin always-visible scrollbar with a track, so a table cut off at its third column
 reads as scrollable.

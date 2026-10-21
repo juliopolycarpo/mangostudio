@@ -107,9 +107,8 @@ export const messages = {
       stateUnavailable: 'Indisponível',
       mcpEmpty: 'Nenhum servidor MCP configurado.',
       skillsEmpty: 'Nenhuma skill descoberta.',
-      modelLabel: 'Modelo',
-      agentLabel: 'Agente',
-      contextLabel: 'Uso de contexto',
+      showEnabled: 'Mostrar {count} ativas',
+      hideEnabled: 'Ocultar {count} ativas',
       manageTools: 'Configurar ferramentas',
       manageMcp: 'Configurar MCP',
       manageSkills: 'Configurar skills',
@@ -611,7 +610,7 @@ export const messages = {
         promptLabel: 'Prompt do sistema',
         promptDescription: 'Oriente o estilo e o conteúdo da mensagem gerada.',
         resetPrompt: 'Restaurar padrão',
-        maxDiffLabel: 'Tamanho máximo do diff (KB)',
+        maxDiffLabel: 'Tamanho máximo do diff',
         maxDiffDescription: 'Limite de conteúdo do diff enviado ao modelo, entre 16 e 512 KB.',
       },
     },
@@ -801,7 +800,7 @@ export const messages = {
       nameLabel: 'Nome',
       namePlaceholder: 'ex. Projeto pessoal',
       apiKeyLabel: 'Chave de API',
-      apiKeyPlaceholder: 'sk-…',
+      apiKeyPlaceholder: '••••••••••••••••',
       showApiKey: 'Mostrar chave de API',
       hideApiKey: 'Ocultar chave de API',
       saveToLabel: 'Salvar em',
@@ -958,6 +957,7 @@ export const messages = {
       reasoningEffort: 'Esforço de raciocínio',
       maxOutputTokens: 'Máx. tokens de saída',
       maxToolIterations: 'Máx. iterações de ferramentas',
+      maxToolIterationsHint: 'Substitui o valor global da página Ferramentas.',
       parallelToolCalls: 'Chamadas paralelas de ferramentas',
       compaction: 'Compactação pelo provedor',
       cachePreference: 'Preferência de cache de prompt',
@@ -967,7 +967,7 @@ export const messages = {
       capabilityThinking: 'Raciocínio',
       capabilityTools: 'Ferramentas',
       capabilityCaching: 'Cache',
-      maxOutputTokensPlaceholder: 'Padrão do provedor',
+      maxOutputTokensPlaceholder: 'Padrão',
       maxOutputTokensHint: 'De 1 a {limit}. Deixe vazio para usar o padrão do provedor.',
       deprecatedBadge: 'Legado',
       deprecatedNote:
@@ -1104,6 +1104,10 @@ export const messages = {
       addVariable: 'Adicionar variável',
       addSecretVariable: 'Adicionar variável secreta',
       addHeader: 'Adicionar cabeçalho',
+      noArguments: 'Nenhum argumento.',
+      noVariables: 'Nenhuma variável.',
+      noSecretVariables: 'Nenhuma variável secreta.',
+      noHeaders: 'Nenhum cabeçalho.',
       removeEntry: 'Remover',
       enabledLabel: 'Ativado',
       disabledLabel: 'Desativado',
@@ -1374,7 +1378,7 @@ export const messages = {
         empty: 'Nenhum agente externo foi descrito para este ambiente.',
         live: 'Consultado',
         cached: 'Do cache',
-        notReported: 'N\u00e3o informado por este adaptador',
+        notReported: 'Sem dados',
         attempts: '{count} tentativas',
       },
       eventKinds: {
@@ -1440,7 +1444,7 @@ export const messages = {
       'Escolha uma pasta no sistema de arquivos do servidor. As ferramentas de arquivo do agente resolvem caminhos relativos a partir desta pasta.',
     serverLabel: 'Servidor',
     home: 'Início',
-    roots: 'Raízes',
+    places: 'Locais',
     recent: 'Recentes',
     noRecent: 'Nenhuma pasta recente',
     manualPathLabel: 'Caminho do servidor',
@@ -1486,7 +1490,7 @@ export const messages = {
     sidePanelDescription:
       'Escolha quais painéis do workspace aparecem no modo Agente e organize a ordem deles.',
     widthLabel: 'Largura',
-    widthDefaultHint: 'Padrão: {width}px',
+    widthDefaultHint: 'Arraste a borda da barra lateral para alterar. Padrão: {width}px.',
     sidePanelResetWidth: 'Redefinir largura',
     sidePanelShow: 'Mostrar {panel}',
     sidePanelMoveUp: 'Mover {panel} para cima',
@@ -2055,6 +2059,7 @@ export const messages = {
     notFound: 'Esta sessão de terminal não existe mais.',
     refused: 'Esta sessão de terminal não pode ser aberta daqui.',
     openFailed: 'Não foi possível abrir um terminal. Tente novamente.',
+    closeFailed: 'Não foi possível fechar o terminal. Tente novamente.',
     exited: 'Processo encerrado com código {code}.',
     exitedBySignal: 'Processo encerrado por {signal}.',
     exitedConsentRevoked: 'Terminal fechado porque o acesso ao shell foi revogado.',
@@ -2099,6 +2104,7 @@ export const messages = {
     settingsNavigation: 'Navegação de configurações',
     openMenu: 'Abrir menu',
     closeMenu: 'Fechar menu',
+    accountMenu: 'Menu da conta',
     disclaimer: 'A IA pode cometer erros. Confira os resultados.',
     dismissToast: 'Fechar notificação',
     notifications: 'Notificações',
@@ -2262,6 +2268,8 @@ export const messages = {
       sortCoverage: 'Cobertura',
       sortModified: 'Modificação',
       groupByLocation: 'Agrupar por local',
+      // The phone's one button for every control but the search.
+      toggle: 'Filtros',
     },
     tooltip: {
       path: 'Caminho',
@@ -2281,8 +2289,10 @@ export const messages = {
       compare: 'Comparar {left} ↔ {right}',
       compareHide: 'Fechar comparação',
       compareSelect: 'Escolha duas versões para comparar.',
-      via: 'via {location}',
-      alsoIn: 'também em {locations}, idêntico',
+      // Introduz um caminho posto em linha própria abaixo, sem marcador.
+      via: 'via',
+      alsoIn: 'também em',
+      identical: 'idêntico',
       propagate: 'Propagar',
       remove: 'Remover',
       notFound: 'Este recurso não existe mais na biblioteca.',
@@ -2351,7 +2361,7 @@ export const messages = {
       description: 'Cada local marcado recebe uma escrita, com backup antes.',
       // A coisa mais útil que este passo tem a dizer: uma escrita pode cobrir
       // dois agentes, e marcar os dois locais cria uma segunda cópia à toa.
-      servesMultipleTargets: '{location} também atende {targets}',
+      servesMultipleTargets: 'Também atende {targets}',
       readOnly: 'Somente leitura',
       unwritableAction: 'Ver em Ambientes',
       none: 'Nenhum local aceita escrita para este tipo de recurso.',
@@ -2655,6 +2665,10 @@ export const messages = {
         runningLabel: 'Estado',
         running: 'Em execução',
         stopped: 'Parado',
+        // The card's state in one word opposite its title, so it never lacks a badge.
+        stateOn: 'Ligado',
+        stateOff: 'Desligado',
+        stateUnknown: 'Desconhecido',
         lingerLabel: 'Após o logout',
         lingerOn: 'Continua em execução',
         lingerOff: 'Para no logout',
@@ -3680,6 +3694,7 @@ export const messages = {
       unknownVersion: 'uma versão mais recente',
       continueInNewChat: 'Continuar em um novo chat',
       copyLoginCommand: 'Copiar comando de login',
+      signInHint: 'Execute isto em um terminal e tente novamente.',
       ownership: '{vendor} controla as próprias ferramentas e permissões.',
       unavailableHere: 'Este agente não pode rodar aqui agora.',
       /** O próximo passo sob `unavailableHere`, e sob um motivo sem nada para clicar. */
@@ -3777,7 +3792,6 @@ export const messages = {
       terms: 'Termos de serviço do {vendor}',
       privacy: 'Política de privacidade do {vendor}',
       required: 'Este agente precisa que o aviso seja aceito antes de rodar.',
-      manageTitle: 'Avisos de agentes de terceiros',
       manageDescription:
         'A CLI de um agente de terceiros mostra um aviso antes de receber uma conversa pela primeira vez. Os avisos que você aceitou aparecem aqui.',
       manageEmpty: 'Você ainda não aceitou nenhum agente externo.',
@@ -4186,7 +4200,6 @@ export const messages = {
   },
 
   onboarding: {
-    title: 'Boas-vindas ao MangoStudio',
     progress: 'Passo {step} de {total} · {name}',
     stepList: 'Passos da configuração',
     back: 'Voltar',
@@ -4257,7 +4270,7 @@ export const messages = {
       signedIn: 'Conectado',
       signedOut: 'Não conectado',
       // O comando abaixo é de um agente só; a linha diz qual.
-      signInHint: '{agent}: entre pelo terminal desta máquina e volte aqui.',
+      signInHint: 'Entre pelo terminal desta máquina e volte aqui.',
       selected: 'Selecionado',
       isolated:
         'Outra conta já está usando os logins de agente deste computador, então eles não são oferecidos aqui. Use um modelo, ou pule este passo e adicione uma máquina sua em Ambientes depois.',
@@ -4268,7 +4281,7 @@ export const messages = {
       hint: 'Opcional. Sem isso, o MangoStudio roda só enquanto o terminal que o iniciou continuar aberto.',
       installed: 'Instalado',
       notInstalled: 'Não instalado',
-      // Título quando o supervisor não pôde ser consultado e não há motivo codificado; a linha bruta fica abaixo.
+      // Título quando o supervisor não pôde ser consultado; o motivo codificado, se houver, e a linha bruta ficam abaixo.
       unreadable: 'Não foi possível verificar o serviço',
       install: 'Instalar o serviço',
       installing: 'Instalando…',

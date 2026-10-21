@@ -104,9 +104,12 @@ export function EdgeResizeHandle({
         // override the `inset-y-0` stretch and leave a 0px-tall, unhittable handle.
         className={`peer absolute inset-y-0 z-10 m-0 h-auto w-2 cursor-col-resize touch-none border-0 bg-transparent focus-visible:outline-none ${positionClass}`}
       />
+      {/* Drawn on hover and on keyboard focus only: at rest a pill on every
+          sidebar edge read as a stray scrollbar thumb, the only decorative
+          mark on the shell. The 8px hit area is there all the time. */}
       <span
         aria-hidden="true"
-        className={`pointer-events-none absolute top-1/2 z-10 h-12 w-1 -translate-y-1/2 rounded-xs bg-stroke transition-colors peer-hover:bg-stroke-strong peer-focus-visible:bg-focus ${positionClass}`}
+        className={`pointer-events-none absolute top-1/2 z-10 h-12 w-1 -translate-y-1/2 rounded-xs bg-stroke opacity-0 transition-[opacity,background-color] peer-hover:bg-stroke-strong peer-hover:opacity-100 peer-focus-visible:bg-focus peer-focus-visible:opacity-100 ${positionClass}`}
       />
     </>
   );

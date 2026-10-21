@@ -31,7 +31,9 @@ export function LibraryPageState({ variant, title, hint, onRetry }: LibraryPageS
         data-testid="library-loading"
         role={title ? 'status' : undefined}
       >
-        <Spinner size={title ? 'md' : 'lg'} />
+        {/* With a title the container is the status and the words are its name;
+            alone, the ring has to carry one. */}
+        <Spinner size={title ? 'md' : 'lg'} label={title ? undefined : t.common.loading} />
         {title && <p>{title}</p>}
       </div>
     );

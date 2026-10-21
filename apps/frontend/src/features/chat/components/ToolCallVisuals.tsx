@@ -50,14 +50,16 @@ const TONE_TEXT_CLASS: Record<TimelineTone, string> = {
   neutral: 'text-fg',
   muted: 'text-fg-muted',
   active: 'text-accent-fg',
-  success: 'text-success',
+  success: 'text-fg',
   error: 'text-danger',
 };
 
 /**
- * Text colour for a timeline tone, used for the tool name itself.
+ * Text colour for a timeline tone, used for the tool name itself. Success stays
+ * in the neutral foreground: the node and glyph already carry it, and only the
+ * exceptions (running, failed) tint the words.
  *
- * // Usage: toneTextClass('success') // => 'text-success'
+ * // Usage: toneTextClass('success') // => 'text-fg'
  */
 export function toneTextClass(tone: TimelineTone): string {
   return TONE_TEXT_CLASS[tone];

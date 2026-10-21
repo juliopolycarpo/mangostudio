@@ -196,6 +196,54 @@ describe('InputBar — chat-only composer', () => {
 });
 
 /**
+ * The footer says a vendor CLI controls its own tools and permissions, so the
+ * controls that steer MangoStudio's tools are not offered on its turns.
+ */
+describe('InputBar — tools that belong to MangoStudio', () => {
+  const EXTERNAL_RUNNER = { kind: 'external', targetId: 'codex' } as const;
+
+  it('offers the capability inspector and the image toggle to a MangoStudio runner', () => {
+    renderInputBar({
+      runner: { kind: 'mangostudio', agentId: 'default' },
+      onImageToolIntentChange: jest.fn(),
+    });
+
+    expect(screen.getByRole('button', { name: 'Capabilities' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create images' })).toBeInTheDocument();
+  });
+
+  it('offers neither to an external runner, and keeps the MCP menu', () => {
+    renderInputBar({ runner: EXTERNAL_RUNNER, onImageToolIntentChange: jest.fn() });
+
+    expect(screen.queryByRole('button', { name: 'Capabilities' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create images' })).toBeNull();
+    expect(screen.getByRole('button', { name: /MCP/i })).toBeInTheDocument();
+  });
+
+  it('drops an image intent left on in the chat the person came from', () => {
+    const onImageToolIntentChange = jest.fn();
+    renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      imageToolIntent: true,
+      onImageToolIntentChange,
+    });
+
+    expect(onImageToolIntentChange).toHaveBeenCalledWith(false);
+  });
+
+  it('leaves the intent alone on a MangoStudio runner', () => {
+    const onImageToolIntentChange = jest.fn();
+    renderInputBar({
+      runner: { kind: 'mangostudio', agentId: 'default' },
+      imageToolIntent: true,
+      onImageToolIntentChange,
+    });
+
+    expect(onImageToolIntentChange).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * A persisted external runner outlives the conditions that made it selectable.
  * The composer has to notice, because the descriptor is the only thing that
  * knows and nothing else in here reads it.

@@ -29,15 +29,30 @@ interface ChoiceRowProps
   readonly row?: RowData;
   /** A hairline around the row, for rows that stand on their own rather than inside a card. */
   readonly bordered?: boolean;
+  /**
+   * The type size of the row's first line, which the control lines up with. A row
+   * may run to three lines, and a control centred on them floats between two; it
+   * sits on the first line instead. `sm` (20px line) is the default, `xs` (16px)
+   * is a row that leads with a path.
+   */
+  readonly firstLine?: 'sm' | 'xs';
   readonly children: ReactNode;
 }
 
-export function ChoiceRow({ control, row, bordered = false, children, ...input }: ChoiceRowProps) {
+export function ChoiceRow({
+  control,
+  row,
+  bordered = false,
+  firstLine = 'sm',
+  children,
+  ...input
+}: ChoiceRowProps) {
+  const controlClass = firstLine === 'sm' ? 'mt-0.5' : undefined;
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is a checkbox or a radio picked by `control`, and either one is a child of this label.
     <label
       className={cn(
-        'flex items-center gap-3 rounded-sm px-3 py-2 transition-colors',
+        'flex items-start gap-3 rounded-sm px-3 py-2 transition-colors',
         bordered && 'border border-stroke',
         input.disabled
           ? 'cursor-not-allowed'
@@ -45,7 +60,11 @@ export function ChoiceRow({ control, row, bordered = false, children, ...input }
       )}
       {...row}
     >
-      {control === 'checkbox' ? <Checkbox {...input} /> : <Radio {...input} />}
+      {control === 'checkbox' ? (
+        <Checkbox className={controlClass} {...input} />
+      ) : (
+        <Radio className={controlClass} {...input} />
+      )}
       <span className="min-w-0 flex-1">{children}</span>
     </label>
   );

@@ -76,7 +76,7 @@ export function MessageParts({
               );
             case 'external_approval':
               return (
-                <TimelineItem key={`${part.requestId}-approval`} variant="block">
+                <TimelineItem key={`${part.requestId}-approval`} variant="card">
                   <ExternalApprovalCard part={part} chatId={chatId} />
                 </TimelineItem>
               );
@@ -91,7 +91,7 @@ export function MessageParts({
                 <TimelineItem
                   // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                   key={`${messageId}-notice-${idx}`}
-                  variant="block"
+                  variant="card"
                 >
                   <ExternalNoticeBlock part={part} />
                 </TimelineItem>
@@ -151,19 +151,19 @@ export function MessageParts({
               );
             case 'question':
               return (
-                <TimelineItem key={`${part.toolCallId}-question`} variant="block" tone="active">
+                <TimelineItem key={`${part.toolCallId}-question`} variant="card" tone="active">
                   <QuestionCard part={part} onSubmit={isStreaming ? undefined : onQuestionSubmit} />
                 </TimelineItem>
               );
             case 'mcp_elicitation':
               return (
-                <TimelineItem key={part.elicitationId} variant="block" tone="active">
+                <TimelineItem key={part.elicitationId} variant="card" tone="active">
                   <ElicitationCard part={part} />
                 </TimelineItem>
               );
             case 'todo':
               return (
-                <TimelineItem key={`${part.toolCallId}-todo`} variant="block">
+                <TimelineItem key={`${part.toolCallId}-todo`} variant="card">
                   <TodoListPart part={part} />
                 </TimelineItem>
               );
@@ -230,7 +230,7 @@ export function MessageParts({
                 <TimelineItem
                   // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                   key={`${messageId}-error-${idx}`}
-                  variant="block"
+                  variant="card"
                   tone="error"
                 >
                   <ErrorPart

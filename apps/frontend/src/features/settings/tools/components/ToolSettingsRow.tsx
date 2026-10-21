@@ -209,8 +209,8 @@ export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
       </SettingsRow>
 
       {hasParameters && (
-        // The rail says these belong to the tool above, which a parameter's
-        // label cannot: it is the same 14px/500 as the tool's own name.
+        // The rail says these belong to the tool above, and their names are a
+        // step smaller than the tool's own.
         <div className="mx-4 mb-4 space-y-4 border-l border-stroke pl-4">
           {descriptor.parameterDescriptors.map((pd) => {
             const qualityDisabled =

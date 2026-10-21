@@ -26,8 +26,11 @@ interface SettingsPageProps {
 export function SettingsPage({ title, description, actions, children }: SettingsPageProps) {
   return (
     <div className="space-y-8">
-      <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1 space-y-1">
+      {/* On a touch screen the 44px action button overflows its 28px line by 8px
+          each way, so when the actions wrap under the text the row gap pays for
+          that overflow and the button keeps its own 8px from the description. */}
+      <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 pointer-coarse:gap-y-4">
+        <div className="min-w-0 flex-1 basis-64 space-y-1">
           <h2 className="text-title font-semibold text-fg">{title}</h2>
           {description ? <p className="text-sm text-fg-muted">{description}</p> : null}
         </div>

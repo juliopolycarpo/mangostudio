@@ -574,7 +574,7 @@ function ChangeGroup({
           <Menu
             open={menuOpen}
             onOpenChange={setMenuOpen}
-            panelClassName="w-56"
+            panelClassName="w-max min-w-56 max-w-72"
             trigger={(triggerProps) => (
               <IconButton
                 label={t.git.actions.groupMenu.replace('{group}', title)}

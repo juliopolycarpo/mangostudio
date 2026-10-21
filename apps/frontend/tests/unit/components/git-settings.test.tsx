@@ -49,7 +49,7 @@ describe('GitSettingsPage', () => {
 
     expect(screen.getByText('Uses your Git config signing key — GPG or SSH.')).toBeInTheDocument();
     await user.click(screen.getByRole('switch', { name: 'Sign commits' }));
-    await user.click(screen.getByRole('switch', { name: 'Add Signed-off-by trailer' }));
+    await user.click(screen.getByRole('switch', { name: 'Add a Signed-off-by trailer' }));
 
     expect(setSignCommits).toHaveBeenCalledWith(true);
     expect(setSignOff).toHaveBeenCalledWith(false);
@@ -62,7 +62,7 @@ describe('GitSettingsPage', () => {
     fireEvent.blur(prompt);
     expect(setCommitMessageSystemPrompt).toHaveBeenLastCalledWith('Custom prompt');
 
-    const maxDiff = screen.getByRole('spinbutton', { name: 'Maximum diff size (KB)' });
+    const maxDiff = screen.getByRole('spinbutton', { name: 'Maximum diff size' });
     fireEvent.change(maxDiff, { target: { value: '200' } });
     fireEvent.blur(maxDiff);
     expect(setCommitMessageMaxDiffKb).toHaveBeenLastCalledWith(200);
@@ -88,7 +88,7 @@ describe('GitSettingsPage', () => {
 
     // "2" is below the minimum but is a valid prefix of "256"; clamping it mid-edit would
     // rewrite the field and make larger values impossible to type.
-    const maxDiff = screen.getByRole('spinbutton', { name: 'Maximum diff size (KB)' });
+    const maxDiff = screen.getByRole('spinbutton', { name: 'Maximum diff size' });
     fireEvent.change(maxDiff, { target: { value: '2' } });
     expect(maxDiff).toHaveValue(2);
     expect(setCommitMessageMaxDiffKb).not.toHaveBeenCalled();

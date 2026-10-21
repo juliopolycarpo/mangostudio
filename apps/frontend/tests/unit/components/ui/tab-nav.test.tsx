@@ -8,13 +8,40 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { TAB_CLASSES } from '@/components/ui/Tabs';
 import { render } from '../../../support/harness/render';
 import { LinkStub, routerWithLinkStub } from '../../../support/mocks/router';
 
-/** A link that, like the router's, marks the one that matches the current URL. */
-function CurrentAwareLink({ to, children, ...props }: { to: string; children?: ReactNode }) {
+/**
+ * A link that, like the router's, marks the one that matches the current URL
+ * `aria-current="page"` and dresses it in `activeProps`, every other one in
+ * `inactiveProps`. The router adds its own `aria-current` only to a match, so a
+ * tab forced current has to carry it in `inactiveProps`.
+ */
+function CurrentAwareLink({
+  to,
+  children,
+  className,
+  activeProps,
+  inactiveProps,
+  ...props
+}: {
+  to: string;
+  children?: ReactNode;
+  className?: string;
+  activeProps?: Record<string, unknown>;
+  inactiveProps?: Record<string, unknown>;
+}) {
+  const matched = to === '/environments/health';
+  const { className: stateClass, ...stateProps } = (matched ? activeProps : inactiveProps) ?? {};
   return (
-    <LinkStub to={to} aria-current={to === '/environments/health' ? 'page' : undefined} {...props}>
+    <LinkStub
+      to={to}
+      className={[className, stateClass].filter(Boolean).join(' ')}
+      {...stateProps}
+      {...(matched ? { 'aria-current': 'page' } : {})}
+      {...props}
+    >
       {children}
     </LinkStub>
   );
@@ -81,5 +108,65 @@ describe('TabNav', () => {
         scrolled.mock.calls.map(([element]) => (element as HTMLElement).textContent)
       ).toContain('Toolchains')
     );
+  });
+
+  // A resource's own page lives under none of the tabs, so the router lights
+  // none of them; the strip would say nothing about where the person is.
+  it('lights a tab the URL is not under when it is marked current', async () => {
+    const { TabNav } = await import('@/components/ui/TabNav');
+    render(
+      <TabNav
+        label="Library"
+        tabs={[
+          { to: '/environments/library/skills', label: 'Skills', current: true },
+          { to: '/environments/library/commands', label: 'Commands' },
+        ]}
+      />
+    );
+
+    const forced = screen.getByRole('link', { name: 'Skills' });
+    expect(forced).toHaveAttribute('aria-current', 'page');
+    expect(forced.className).toContain(TAB_CLASSES.active);
+    expect(forced.className).not.toContain(TAB_CLASSES.idle);
+
+    const other = screen.getByRole('link', { name: 'Commands' });
+    expect(other).not.toHaveAttribute('aria-current');
+    expect(other.className).toContain(TAB_CLASSES.idle);
+    expect(other.className).not.toContain(TAB_CLASSES.active);
+  });
+
+  it('brings a tab marked current into view like one the router matched', async () => {
+    const { TabNav } = await import('@/components/ui/TabNav');
+    render(
+      <TabNav
+        label="Library"
+        tabs={[
+          { to: '/environments/library/commands', label: 'Commands' },
+          { to: '/environments/library/settings', label: 'Settings', current: true },
+        ]}
+      />
+    );
+
+    expect(scrolled.mock.calls[0]?.[0]).toBe(screen.getByRole('link', { name: 'Settings' }));
+  });
+
+  it('moves the mark with `current` when the page changes kind', async () => {
+    const { TabNav } = await import('@/components/ui/TabNav');
+    const tabs = (current: 'skills' | 'commands') =>
+      [
+        { to: '/environments/library/skills', label: 'Skills', current: current === 'skills' },
+        {
+          to: '/environments/library/commands',
+          label: 'Commands',
+          current: current === 'commands',
+        },
+      ] as const;
+    const { rerender } = render(<TabNav label="Library" tabs={tabs('skills')} />);
+    expect(screen.getByRole('link', { name: 'Skills' })).toHaveAttribute('aria-current', 'page');
+
+    rerender(<TabNav label="Library" tabs={tabs('commands')} />);
+
+    expect(screen.getByRole('link', { name: 'Skills' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Commands' })).toHaveAttribute('aria-current', 'page');
   });
 });

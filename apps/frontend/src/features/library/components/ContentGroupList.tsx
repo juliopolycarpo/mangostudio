@@ -84,6 +84,7 @@ export function ContentGroupList({
           >
             <ChoiceRow
               control="radio"
+              firstLine="xs"
               name={`group:${group.locationIds.join('|')}`}
               checked={selectedHash === group.contentHash}
               onChange={() => onSelect(group.contentHash)}

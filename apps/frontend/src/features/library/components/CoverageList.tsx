@@ -9,10 +9,13 @@
  * two, so a long path wraps across the full width instead of beside the state.
  *
  * A path is technical content, so it is set in mono as it is in the content
- * cards above; the words around it stay in the interface font.
+ * cards above, each on a line of its own; the words that introduce it are the
+ * same 12px muted size, so nothing in the cell is larger than the path.
  */
 
 import type { LibraryCoverage, LibraryLocationId } from '@mangostudio/shared/library';
+import { Fragment } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { CoverageGlyph } from './CoverageCell';
 
@@ -46,22 +49,23 @@ export function CoverageList({ coverage, locationLabel }: CoverageListProps) {
             where they asked.
           */}
           {(entry.effectiveLocationId || entry.shadowedLocationIds.length > 0) && (
-            <div className="col-span-2 min-w-0 break-words text-fg-muted sm:col-span-1">
+            <div className="col-span-2 min-w-0 space-y-1.5 text-fg-muted text-xs sm:col-span-1">
               {entry.effectiveLocationId && (
-                <p>
-                  <PathMessage
-                    template={l.detail.via}
-                    path={locationLabel(entry.effectiveLocationId)}
-                  />
-                </p>
+                <div>
+                  <p>{l.detail.via}</p>
+                  <PathLine path={locationLabel(entry.effectiveLocationId)} />
+                </div>
               )}
               {entry.shadowedLocationIds.length > 0 && (
-                <p>
-                  <PathMessage
-                    template={l.detail.alsoIn}
-                    path={entry.shadowedLocationIds.map(locationLabel).join(', ')}
-                  />
-                </p>
+                <div>
+                  <p className="flex flex-wrap items-center gap-x-1.5">
+                    {l.detail.alsoIn}
+                    <Badge>{l.detail.identical}</Badge>
+                  </p>
+                  {entry.shadowedLocationIds.map((locationId) => (
+                    <PathLine key={locationId} path={locationLabel(locationId)} />
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -72,20 +76,23 @@ export function CoverageList({ coverage, locationLabel }: CoverageListProps) {
 }
 
 /**
- * A message with one path in it, the path in mono.
- *
- * `formatMessage` returns a string, which cannot carry a differently-styled
- * span, so the template is cut at its one placeholder instead. The placeholder
- * is `{location}` or `{locations}` — whichever the sentence uses — and the words
- * on either side keep the language's own order.
+ * One path on its own line, in mono. It may break after any `/` before it breaks
+ * inside a name, so `.claude/skills` is never cut as `.claude/skill` + `s`.
  */
-function PathMessage({ template, path }: { readonly template: string; readonly path: string }) {
-  const [before = '', after = ''] = template.split(/\{locations?\}/);
+function PathLine({ path }: { readonly path: string }) {
+  let offset = 0;
   return (
-    <>
-      {before}
-      <span className="break-all font-mono text-xs">{path}</span>
-      {after}
-    </>
+    <code className="block font-mono text-fg [overflow-wrap:anywhere]">
+      {path.split(/(?<=\/)/).map((segment) => {
+        const key = offset;
+        offset += segment.length;
+        return (
+          <Fragment key={key}>
+            {segment}
+            <wbr />
+          </Fragment>
+        );
+      })}
+    </code>
   );
 }

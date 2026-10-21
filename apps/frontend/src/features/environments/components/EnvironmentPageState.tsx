@@ -45,7 +45,7 @@ export function EnvironmentPageState({
         className={`flex items-center justify-center ${padding}`}
         data-testid="environments-loading"
       >
-        <Spinner size={size === 'page' ? 'lg' : 'md'} />
+        <Spinner size={size === 'page' ? 'lg' : 'md'} label={t.common.loading} />
       </div>
     );
   }

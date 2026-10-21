@@ -77,7 +77,7 @@ describe('AgentCliCard', () => {
     expect(screen.getByTestId('auth-state').className).not.toContain('bg-warning-subtle');
   });
 
-  // Path, state and count are columns shared by every row, so "writable" starts at
+  // Kind, path, state and count are columns shared by every row, so "writable" starts at
   // one x on each of them instead of wherever the path before it happened to end.
   it('lays the library locations out as columns that every row shares', () => {
     const status = agentCliStatus({
@@ -112,10 +112,14 @@ describe('AgentCliCard', () => {
 
     const rows = screen.getAllByTestId('library-location');
     expect(rows).toHaveLength(2);
-    // Three cells per row whether or not there is a count, so the columns line up.
-    for (const row of rows) expect(row.children).toHaveLength(3);
-    expect(rows[0].parentElement?.className).toContain('grid-cols-[minmax(0,1fr)_auto_auto]');
-    expect(rows[0].className).toContain('grid-cols-subgrid');
+    // Four cells per row (kind, path, state, count) whether or not there is a count,
+    // so the columns line up.
+    for (const row of rows) expect(row.children).toHaveLength(4);
+    expect(rows[0].parentElement?.className).toContain(
+      'sm:grid-cols-[5.5rem_minmax(0,1fr)_8rem_5rem]'
+    );
+    expect(rows[0].className).toContain('sm:grid-cols-subgrid');
+    expect(rows[0].textContent).toContain(en.library.kinds.skill);
   });
 
   it('reports a real signed-out verdict when the probe can see it', () => {

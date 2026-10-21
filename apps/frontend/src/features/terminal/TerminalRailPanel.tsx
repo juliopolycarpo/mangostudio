@@ -1,10 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { TerminalSquare } from 'lucide-react';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
+import { CloseTerminalDialog } from './CloseTerminalDialog';
 import { LazyTerminalView } from './LazyTerminalView';
 import { openFailureMessage } from './open-failure-message';
 import { SessionTabs } from './SessionTabs';
@@ -96,7 +98,10 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   function confirmClose(): void {
     if (!closingId) return;
     const id = closingId;
-    closeMutation.mutate(id, { onSuccess: () => setClosingId(null) });
+    closeMutation.mutate(id, {
+      onSuccess: () => setClosingId(null),
+      onError: () => toast(t.terminal.closeFailed, 'error'),
+    });
   }
 
   function popOut(id: string): void {
@@ -121,8 +126,12 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
 
   if (sessionsQuery.isSuccess && sessions.length === 0) {
     return (
+      // Top-anchored like the unavailable notice above, and with the page's
+      // icon: a title and a button floating mid-column in a tall empty dock read
+      // as a different empty state from `/terminal`'s.
       <EmptyState
-        className="h-full"
+        icon={<TerminalSquare size={ICON_LG} />}
+        className="justify-start pt-12"
         title={t.terminal.empty}
         hint={t.terminal.emptyHint}
         action={
@@ -167,12 +176,8 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
         ) : null}
       </div>
       {closingSession ? (
-        <ConfirmDialog
-          title={t.terminal.closeConfirmTitle}
-          description={t.terminal.closeConfirmDescription}
-          entityName={closingSession.title}
-          confirmLabel={t.terminal.closeSession}
-          cancelLabel={t.terminal.cancel}
+        <CloseTerminalDialog
+          session={closingSession}
           isPending={closeMutation.isPending}
           onConfirm={confirmClose}
           onCancel={() => setClosingId(null)}

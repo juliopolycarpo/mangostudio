@@ -71,6 +71,17 @@ describe('ToolCallGroupBlock', () => {
     expect(within(childRegion).getByText('args')).toBeInTheDocument();
   });
 
+  it('keeps the label of a clean run neutral', () => {
+    const { container } = render(
+      <ToolCallGroupBlock calls={[entry({ toolCallId: 't1' }), entry({ toolCallId: 't2' })]} />
+    );
+
+    const label = screen.getAllByText('Read')[0];
+    expect(label.className).toContain('text-fg');
+    expect(label.className).not.toContain('text-success');
+    expect(container.querySelector('.chat-timeline-item--success')).toBeInTheDocument();
+  });
+
   it('shows an error tone when any call failed', () => {
     const { container } = render(
       <ToolCallGroupBlock

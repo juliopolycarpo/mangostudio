@@ -99,9 +99,11 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
         ) : null
       }
     >
-      <dl className="grid items-baseline gap-2 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-4">
+      {/* The same first column and gap as the locations table below, at the same
+          12px, so the config path and the library paths start at one x. */}
+      <dl className="grid items-baseline gap-1 text-xs sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-x-4">
         <dt className="text-fg-muted">{e.agents.configHomeLabel}</dt>
-        <dd className="min-w-0 break-all font-mono text-xs text-fg-muted">{status.configHome}</dd>
+        <dd className="min-w-0 break-all font-mono text-fg-muted">{status.configHome}</dd>
       </dl>
 
       {/* What "unknown" means, in the open: the badge says it, this says why. */}
@@ -114,17 +116,22 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
       {status.locations.length > 0 && (
         <section className="space-y-2">
           <MicroLabel as="p">{e.agents.locations}</MicroLabel>
-          {/* Path, state, count: three columns shared by every row, so "writable" and
-              "4 entries" start at the same x on each of them. Each row takes the
-              columns over through a subgrid and stays a list item. */}
-          <ul className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 gap-y-1.5 text-xs">
+          {/* Kind, path, state, count: four columns shared by every row of every card,
+              fixed rather than sized to the widest string, so "writable" and "4 entries"
+              start at the same x in each of them (the cards stack). Each row takes the
+              columns over through a subgrid and stays a list item. The kind tells apart
+              locations that share a path (`.claude/settings.json` is both a setting
+              and a hook location). Below `sm` a row is a wrapped line: kind, state and
+              count first, the path on its own line under them. */}
+          <ul className="grid gap-y-1.5 text-xs sm:grid-cols-[5.5rem_minmax(0,1fr)_8rem_5rem] sm:gap-x-4">
             {status.locations.map((location) => (
               <li
                 key={location.id}
-                className="col-span-3 grid grid-cols-subgrid items-baseline"
+                className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 sm:col-span-4 sm:grid sm:grid-cols-subgrid"
                 data-testid="library-location"
               >
-                <span className="min-w-0 break-all font-mono text-fg-muted">
+                <span className="text-fg-muted">{t.library.kinds[location.kind]}</span>
+                <span className="order-last min-w-0 basis-full break-all font-mono text-fg-muted sm:order-none sm:basis-auto">
                   {location.path ?? location.id}
                 </span>
                 <span className="text-fg-muted">{locationState(e, location)}</span>

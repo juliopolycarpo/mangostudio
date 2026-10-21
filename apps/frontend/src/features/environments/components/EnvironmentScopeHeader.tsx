@@ -44,7 +44,7 @@ export function EnvironmentScopeHeader({
 
   return (
     <div className="flex min-h-7 flex-wrap items-center justify-between gap-2">
-      {description ? <p className="text-sm text-fg-muted">{description}</p> : null}
+      {description ? <p className="min-w-0 flex-1 text-sm text-fg-muted">{description}</p> : null}
       {hasControls ? (
         <div className="ml-auto flex items-center gap-2">
           {children}

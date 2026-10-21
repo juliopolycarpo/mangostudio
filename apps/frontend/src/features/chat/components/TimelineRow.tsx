@@ -13,7 +13,9 @@ interface TimelineRowProps {
   /**
    * Right-aligned qualifier ahead of the outcome: how many more calls a grouped
    * row stands for, e.g. `+2 more`. Quiet mono text like the rest of the cluster,
-   * not a pill of its own that takes the argument's room.
+   * not a pill of its own that takes the argument's room. Shown from `sm` up:
+   * the outcome beside it already says how much the group touched, the opened
+   * group lists every member, and on a phone the target is what the row is for.
    */
   count?: string | null;
   /** Right-aligned outcome, e.g. `12 items`. */
@@ -36,7 +38,7 @@ interface TimelineRowProps {
  * row is the thing you press, so it takes the clickable radius.
  */
 const ROW_CLASS =
-  'group/row -ml-1.5 flex min-h-(--timeline-row-height) w-full items-center gap-2 rounded-sm px-1.5 text-left text-xs transition-colors';
+  '-ml-1.5 flex min-h-(--timeline-row-height) w-full items-center gap-2 rounded-sm px-1.5 text-left text-xs transition-colors';
 
 /**
  * The single-line disclosure row every timeline step is built from.
@@ -63,16 +65,18 @@ export function TimelineRow({
   disclosable = true,
 }: TimelineRowProps) {
   // The cluster's parts, in reading order. A part draws its own leading
-  // separator, so hiding the duration on a phone takes its `·` with it instead
-  // of leaving one dangling at the end.
+  // separator, so hiding the count or the duration on a phone takes its `·` with
+  // it instead of leaving one dangling. Only the outcome stays on a phone: it is
+  // the one part the argument can spare the room for.
   const meta = [
-    count ? { key: 'count', text: count, onPhone: true } : null,
+    count ? { key: 'count', text: count, onPhone: false } : null,
     summary ? { key: 'summary', text: summary, onPhone: true } : null,
     duration ? { key: 'duration', text: duration, onPhone: false } : null,
   ].filter((part) => part !== null);
   const hasMeta = meta.length > 0;
-  // A row whose only meta is the duration has nothing left of the cluster on a
-  // phone, so the cluster goes and the chevron takes over its `ml-auto`.
+  // A row whose meta is only the count or the duration has nothing left of the
+  // cluster on a phone, so the cluster goes and the chevron takes over its
+  // `ml-auto`.
   const hasPhoneMeta = meta.some((part) => part.onPhone);
   const content = (
     <>
@@ -90,7 +94,18 @@ export function TimelineRow({
               key={part.key}
               className={cn('flex items-center gap-1.5', !part.onPhone && 'max-sm:hidden')}
             >
-              {index > 0 && <span aria-hidden="true">·</span>}
+              {index > 0 && (
+                <span
+                  aria-hidden="true"
+                  // Nothing visible precedes it on a phone when the earlier
+                  // parts are the ones hidden there.
+                  className={cn(
+                    !meta.slice(0, index).some((earlier) => earlier.onPhone) && 'max-sm:hidden'
+                  )}
+                >
+                  ·
+                </span>
+              )}
               <span>{part.text}</span>
             </span>
           ))}
@@ -119,19 +134,7 @@ export function TimelineRow({
       className={cn(ROW_CLASS, 'cursor-pointer hover:bg-fill-hover')}
     >
       {content}
-      <DisclosureChevron
-        expanded={expanded}
-        className={cn(
-          'transition-[opacity,transform]',
-          chevronEdge,
-          // A closed row keeps its chevron out of sight until the pointer or the
-          // keyboard is on it — but a touch screen has neither, and a row that
-          // gives no sign it opens is a row nobody opens. `hover:` is wrapped in
-          // `@media (hover: hover)`, so touch needs its own term.
-          !expanded &&
-            'opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 pointer-coarse:opacity-100'
-        )}
-      />
+      <DisclosureChevron expanded={expanded} className={chevronEdge} />
     </button>
   );
 }

@@ -1,4 +1,5 @@
 import { type FormEventHandler, type ReactNode, useCallback, useId, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { cn } from '@/lib/utils';
 
@@ -93,6 +94,12 @@ type DialogProps = DialogName & {
  * focus goes back to whatever opened it. A click on the backdrop closes the same
  * way — but only a press that began on the backdrop, so selecting text in a
  * field and letting go outside the panel does not discard the form.
+ *
+ * It mounts on `document.body`, not where it is written. `fixed inset-0` is
+ * relative to the nearest ancestor that has a transform, filter or `contain`
+ * (a page-transition wrapper, an `animate-in` panel), and a scrim inside one
+ * stopped short of the viewport edge, leaving a bright stripe under the dimmed
+ * page. Mounted at the root, every dialog covers the same viewport.
  *
  * Presentation and behaviour only: what the dialog says, and what its buttons
  * do, stays with the caller. Escape and the backdrop go through `onClose`, so a
@@ -201,7 +208,7 @@ export function Dialog({
     </>
   );
 
-  return (
+  return createPortal(
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop only dismisses; Escape, handled by the focus trap, is its keyboard equivalent.
     // biome-ignore lint/a11y/useKeyWithClickEvents: same — the key is Escape, on the document.
     <div
@@ -244,6 +251,7 @@ export function Dialog({
           sections
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

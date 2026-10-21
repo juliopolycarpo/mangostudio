@@ -15,8 +15,9 @@ import {
   shouldWarnPlaintextHttpRuntime,
   sshPreflightCommands,
 } from '@mangostudio/shared/environments';
-import { Check } from 'lucide-react';
+import { Cable, Container, Globe, KeyRound, Laptop, SquareTerminal } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useState } from 'react';
+import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
@@ -24,7 +25,7 @@ import { Input } from '@/components/ui/Input';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
-import { cn, resolveApiErrorMessage } from '@/lib/utils';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   type ContainerFormFields,
   containerFormToConfig,
@@ -40,7 +41,6 @@ import {
 import { isSshFormUsable, SSH_LEADING_DASH, sshFormToConfig, validateSshForm } from '../ssh-form';
 import { ContainerConfigFields } from './ContainerConfigFields';
 import { CopyLine } from './CopyLine';
-import { choiceClass } from './choice-class';
 import { WslDistributionPicker } from './WslDistributionPicker';
 
 /** Mirrors `EnvironmentIdSchema`; the server is still the authority. */
@@ -166,13 +166,27 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
     containerInvalid ||
     (kind === 'wsl' && !selectionOffered);
 
-  const choices: { readonly value: ReachabilityChoice; readonly label: string }[] = [
-    { value: 'stdio', label: labels.reachLocal },
-    ...(wslOffered ? [{ value: 'wsl' as const, label: labels.reachWsl }] : []),
-    ...(containerOffered ? [{ value: 'container' as const, label: labels.reachContainer }] : []),
-    { value: 'websocket', label: labels.reachPaired },
-    { value: 'http', label: labels.reachDirect },
-    { value: 'ssh', label: labels.reachSsh },
+  const choices: {
+    readonly value: ReachabilityChoice;
+    readonly label: string;
+    readonly icon: ReactNode;
+  }[] = [
+    { value: 'stdio', label: labels.reachLocal, icon: <Laptop size={ICON_MD} /> },
+    ...(wslOffered
+      ? [{ value: 'wsl' as const, label: labels.reachWsl, icon: <SquareTerminal size={ICON_MD} /> }]
+      : []),
+    ...(containerOffered
+      ? [
+          {
+            value: 'container' as const,
+            label: labels.reachContainer,
+            icon: <Container size={ICON_MD} />,
+          },
+        ]
+      : []),
+    { value: 'websocket', label: labels.reachPaired, icon: <Cable size={ICON_MD} /> },
+    { value: 'http', label: labels.reachDirect, icon: <Globe size={ICON_MD} /> },
+    { value: 'ssh', label: labels.reachSsh, icon: <KeyRound size={ICON_MD} /> },
   ];
   const hints: Record<ReachabilityChoice, string> = {
     stdio: labels.stdioHint,
@@ -289,18 +303,19 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
       <div className="space-y-4">
         <div className="space-y-2">
           {/* Real radios: one choice out of several, arrow keys between them,
-              announced as a group under its question. */}
+              announced as a group under its question. The current row wears the
+              navigation's mark (fill and 3px accent bar), as in every pick-one list. */}
           <fieldset className="min-w-0 space-y-2">
             <legend className="text-sm font-medium text-fg">{labels.reachLabel}</legend>
             <div className="grid gap-2">
               {choices.map((choice) => (
-                <ReachabilityOption
+                <PickOneRow
                   key={choice.value}
-                  groupName={reachGroupName}
-                  value={choice.value}
-                  active={kind === choice.value}
-                  label={choice.label}
+                  name={reachGroupName}
+                  checked={kind === choice.value}
                   onSelect={() => setKind(choice.value)}
+                  icon={choice.icon}
+                  title={choice.label}
                 />
               ))}
             </div>
@@ -335,42 +350,36 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
           }}
         />
 
-        <div className="space-y-1">
-          <Input
-            id="add-environment-id"
-            label={labels.idLabel}
-            value={effectiveId}
-            maxLength={ENVIRONMENT_ID_MAX_LENGTH}
-            error={idInvalid ? labels.idInvalid : undefined}
-            onChange={(event) => {
-              setIdEdited(true);
-              setId(event.target.value);
-            }}
-          />
-          {!idInvalid && <p className="text-xs text-fg-muted">{labels.idHint}</p>}
-        </div>
+        <Input
+          id="add-environment-id"
+          label={labels.idLabel}
+          value={effectiveId}
+          maxLength={ENVIRONMENT_ID_MAX_LENGTH}
+          error={idInvalid ? labels.idInvalid : undefined}
+          onChange={(event) => {
+            setIdEdited(true);
+            setId(event.target.value);
+          }}
+          hint={labels.idHint}
+        />
 
         {kind === 'stdio' ? (
           <OptionalFields label={labels.optional}>
-            <div className="space-y-1">
-              <Input
-                id="add-environment-binary-path"
-                label={labels.binaryPathLabel}
-                value={binaryPath}
-                onChange={(event) => setBinaryPath(event.target.value)}
-              />
-              <p className="text-xs text-fg-muted">{labels.binaryPathHint}</p>
-            </div>
+            <Input
+              id="add-environment-binary-path"
+              label={labels.binaryPathLabel}
+              value={binaryPath}
+              onChange={(event) => setBinaryPath(event.target.value)}
+              hint={labels.binaryPathHint}
+            />
 
-            <div className="space-y-1">
-              <Input
-                id="add-environment-cwd"
-                label={labels.cwdLabel}
-                value={cwd}
-                onChange={(event) => setCwd(event.target.value)}
-              />
-              <p className="text-xs text-fg-muted">{labels.cwdHint}</p>
-            </div>
+            <Input
+              id="add-environment-cwd"
+              label={labels.cwdLabel}
+              value={cwd}
+              onChange={(event) => setCwd(event.target.value)}
+              hint={labels.cwdHint}
+            />
           </OptionalFields>
         ) : null}
 
@@ -462,21 +471,19 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                 />
               </div>
 
-              <div className="space-y-1">
-                <Input
-                  id="add-environment-ssh-runtime-path"
-                  label={labels.sshRuntimePathLabel}
-                  placeholder={DEFAULT_SSH_RUNTIME_PATH}
-                  value={sshRuntimePath}
-                  error={
-                    sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
-                      ? labels.sshDashInvalid
-                      : undefined
-                  }
-                  onChange={(event) => setSshRuntimePath(event.target.value)}
-                />
-                <p className="text-xs text-fg-muted">{labels.sshRuntimePathHint}</p>
-              </div>
+              <Input
+                id="add-environment-ssh-runtime-path"
+                label={labels.sshRuntimePathLabel}
+                placeholder={DEFAULT_SSH_RUNTIME_PATH}
+                value={sshRuntimePath}
+                error={
+                  sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
+                    ? labels.sshDashInvalid
+                    : undefined
+                }
+                onChange={(event) => setSshRuntimePath(event.target.value)}
+                hint={labels.sshRuntimePathHint}
+              />
             </OptionalFields>
 
             {sshConfig.host ? (
@@ -519,43 +526,5 @@ function OptionalFields({
       </legend>
       {children}
     </fieldset>
-  );
-}
-
-function ReachabilityOption({
-  groupName,
-  value,
-  active,
-  label,
-  onSelect,
-}: {
-  readonly groupName: string;
-  readonly value: ReachabilityChoice;
-  readonly active: boolean;
-  readonly label: string;
-  readonly onSelect: () => void;
-}) {
-  return (
-    <label
-      className={cn(
-        'flex cursor-pointer items-center gap-2',
-        choiceClass(active),
-        // The radio is visually hidden, so the tile carries its focus mark.
-        'has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus'
-      )}
-    >
-      <input
-        type="radio"
-        name={groupName}
-        value={value}
-        checked={active}
-        className="sr-only"
-        onChange={onSelect}
-      />
-      <span className="min-w-0 flex-1">{label}</span>
-      {active ? (
-        <Check size={ICON_MD} aria-hidden="true" className="shrink-0 text-accent-fg" />
-      ) : null}
-    </label>
   );
 }

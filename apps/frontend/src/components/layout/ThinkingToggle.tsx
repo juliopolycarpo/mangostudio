@@ -35,7 +35,10 @@ export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: Th
   };
 
   return (
-    <div className="flex items-center gap-1">
+    // A strip of its own, like the external controls' one: the toggle and the
+    // effort chip beside it read as `key: value` chips on the status line, and
+    // the line draws its `·` between chips that are siblings in a row.
+    <div className="composer-chip-row">
       <button
         type="button"
         onClick={() => onToggle(!enabled)}
@@ -46,7 +49,8 @@ export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: Th
         className="composer-chip"
       >
         <Brain size={ICON_SM} className="shrink-0" />
-        <span>{t.thinking.enable}</span>
+        {/* The strip's dialect: its keys are lowercase (`model:`, `effort:`). */}
+        <span className="composer-chip-key">{t.thinking.enable}</span>
       </button>
 
       {/* Effort selector — only visible when reasoning is on */}

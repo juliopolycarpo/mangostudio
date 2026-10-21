@@ -6,11 +6,12 @@ import {
 } from '@mangostudio/shared/workspaces';
 import { PanelRightOpen } from 'lucide-react';
 import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_MD } from '@/lib/icon-sizes';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
 import { RailPanel } from './RailPanel';
 import { onRailPanelRequest } from './rail-panel-request';
@@ -26,6 +27,13 @@ interface WorkspaceRailProps {
   readonly environmentId?: string | null;
   readonly settings: WorkspacePanelSettings;
   readonly onWidthChange?: (width: number) => void;
+  /**
+   * Where the drawer's trigger is drawn below the desktop breakpoint: a slot in
+   * the composer's tool row, which the chat page owns. Null (the default) draws
+   * no trigger — the command palette still opens the drawer — rather than a
+   * button floating over the transcript.
+   */
+  readonly triggerSlot?: HTMLElement | null;
 }
 
 export function WorkspaceRail({
@@ -34,6 +42,7 @@ export function WorkspaceRail({
   environmentId = null,
   settings,
   onWidthChange,
+  triggerSlot = null,
 }: WorkspaceRailProps) {
   const { t } = useI18n();
   const todosQuery = useChatTodos(chatId);
@@ -191,26 +200,28 @@ export function WorkspaceRail({
 
   return (
     <>
-      {/* Floats over the transcript's lower corner, never over the composer: it
-          is anchored to the top of the chat's bottom dock, whose height
-          `ChatPage` publishes as `--chat-dock-height` on the row this sits in
-          (the row is `relative`). The fallback is a composer-sized guess for a
-          page that publishes nothing. */}
-      <Button
-        ref={mobileTriggerRef}
-        type="button"
-        variant="secondary"
-        size="icon"
-        onClick={() => setMobileOpen(true)}
-        aria-label={t.workspace.sidePanelOpen}
-        title={t.workspace.sidePanelOpen}
-        className="absolute right-3 bottom-[calc(var(--chat-dock-height,8rem)+0.75rem)] z-30 bg-surface-raised shadow-popover"
-      >
-        <PanelRightOpen size={ICON_MD} />
-      </Button>
+      {/* The trigger is a tool chip in the composer's own row, reached through
+          a portal into the slot the chat page hands down. It used to float over
+          the transcript's corner, which cost the transcript a gutter (`pr-16`)
+          that the composer and the notices did not share. */}
+      {triggerSlot
+        ? createPortal(
+            <button
+              ref={mobileTriggerRef}
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.workspace.sidePanelOpen}
+              title={t.workspace.sidePanelOpen}
+              className="composer-chip composer-tool-chip"
+            >
+              <PanelRightOpen size={ICON_SM} className="shrink-0" />
+            </button>,
+            triggerSlot
+          )
+        : null}
       {mobileOpen ? (
         <>
-          <div aria-hidden="true" onClick={closeMobile} className="fixed inset-0 z-40 bg-scrim" />
+          <div aria-hidden="true" onClick={closeMobile} className="fixed inset-0 z-[45] bg-scrim" />
           <aside
             role="dialog"
             aria-modal="true"

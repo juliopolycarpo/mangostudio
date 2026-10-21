@@ -17,7 +17,7 @@
  * behaviour is testable without a router, a query client or the app context.
  */
 
-import { Search, SearchX } from 'lucide-react';
+import { ArrowRightToLine, ArrowUpDown, Search, SearchX } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
   memo,
@@ -39,7 +39,7 @@ import { StatusDot } from '@/components/ui/StatusDot';
 import { onFocusTrapEngaged } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 import type { CommandItem } from './lib/command-item';
@@ -320,10 +320,15 @@ export const CommandPalette = memo(function CommandPalette({
           ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-xs text-fg-muted">
-          <FooterHint keys="↑↓" label={labels.hints.navigate} />
+        {/* Keyboard hints: a touch screen has neither arrows nor Tab, so the
+            footer is not drawn on a coarse pointer. The keys are icons, like
+            Return: `↑↓` and `⇥` as text glyphs render hairline-thin and about
+            half the size of the arrow beside them, which left the keycap
+            looking empty. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-xs text-fg-muted pointer-coarse:hidden">
+          <FooterHint keys={<ArrowUpDown size={ICON_SM} />} label={labels.hints.navigate} />
           <FooterHint keys={<ReturnKey />} label={labels.hints.run} />
-          <FooterHint keys="⇥" label={labels.hints.sections} />
+          <FooterHint keys={<ArrowRightToLine size={ICON_SM} />} label={labels.hints.sections} />
         </div>
       </motion.div>
     </div>

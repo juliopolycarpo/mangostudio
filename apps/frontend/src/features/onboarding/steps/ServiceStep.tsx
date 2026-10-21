@@ -39,17 +39,21 @@ function ServiceState({ service }: { readonly service: MachineStatus['service'] 
     return (
       <Callout
         tone="warning"
-        title={
-          service.errorCode
-            ? t.environments.machine.service.errors[service.errorCode]
-            : s.unreadable
-        }
+        title={s.unreadable}
         data-testid="onboarding-service-state"
         data-installed={service.installed}
       >
-        {/* A coded reason has a sentence in every locale; the line beneath is
+        {/* A short title, then the explanation as body text, like the other
+            warnings in the wizard: a Callout title is one line at weight 500, and
+            a three-line sentence in it read as the loudest thing on the step.
+            A coded reason has a sentence in every locale; the line beneath is
             whatever the supervisor printed, which no dictionary can hold. */}
-        <p className="break-all font-mono text-xs">{service.error}</p>
+        <div className="space-y-1">
+          {service.errorCode ? (
+            <p>{t.environments.machine.service.errors[service.errorCode]}</p>
+          ) : null}
+          <p className="break-all font-mono text-xs">{service.error}</p>
+        </div>
       </Callout>
     );
   }
@@ -76,7 +80,7 @@ export function ServiceStep() {
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
       {machine.isPending || !status ? (
         <div className="flex justify-center py-6">
-          <Spinner size="md" />
+          <Spinner size="md" label={t.common.loading} />
         </div>
       ) : (
         <ServiceState service={status.service} />

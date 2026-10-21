@@ -1,35 +1,17 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import type { ProviderType } from '@mangostudio/shared/types';
-import {
-  Activity,
-  Check,
-  ChevronDown,
-  Cpu,
-  Lock,
-  type LucideIcon,
-  Sparkles,
-  Zap,
-} from 'lucide-react';
+import { Check, ChevronDown, Lock } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { MicroLabel } from '@/components/ui/MicroLabel';
-import { ComposerPopover } from '@/features/chat/components/ComposerPopover';
 import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { getModelSelectorPlaceholder } from '../../utils/model-utils';
-
-/** A glyph by tier, drawn in the row's own colour — the shape tells flash from pro, not a hue. */
-function modelIcon(name: string): LucideIcon {
-  const low = name.toLowerCase();
-  if (low.includes('flash')) return Zap;
-  if (low.includes('pro')) return Cpu;
-  if (low.includes('lite')) return Activity;
-  return Sparkles;
-}
 
 interface ModelSelectorProps {
   activeModel: string;
@@ -140,7 +122,6 @@ export function ModelSelector({
                     const isSelected = activeModel === model.modelId && !isLocked;
                     const isPreview = model.modelId.includes('preview');
                     const showsReasoning = model.capabilities?.reasoning && !isLocked;
-                    const Icon = modelIcon(model.displayName);
                     return (
                       <button
                         type="button"
@@ -158,8 +139,12 @@ export function ModelSelector({
                           isSelected && 'bg-fill-selected'
                         )}
                       >
+                        {/* The one mark a row ever wears, and only when the chat's
+                            provider rules it out. The slot is held for every row so
+                            names keep one left edge; the provider heading already
+                            says who makes the model. */}
                         <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
-                          {isLocked ? <Lock size={ICON_MD} /> : <Icon size={ICON_MD} />}
+                          {isLocked ? <Lock size={ICON_MD} /> : null}
                         </span>
                         <span
                           className={cn(

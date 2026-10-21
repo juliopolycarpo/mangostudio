@@ -42,6 +42,14 @@ function splitPath(path: string): SplitPath {
  * of rows that all began `apps/frontend/src/compo…`. The full path is the
  * tooltip.
  *
+ * The directory is cut from the left, not the right: in a list every path shares
+ * its first segments (`apps/frontend/…`), so a right-hand cut leaves a column of
+ * identical prefixes, while the segment nearest the file is the one that differs.
+ * That is `dir="rtl"` on the clipping span, which moves the ellipsis to the left
+ * edge, with the text inside an isolated LTR `<bdi>` — a bare RTL run would
+ * reorder neutral characters, so `.github/workflows` would read
+ * `github/workflows.`.
+ *
  * A rename shows what changed: a different name is `old → new`, and a pure move
  * (same name) is `old dir → new dir`, each struck through on the old side.
  *
@@ -110,13 +118,17 @@ export function FilePathLabel({ path, oldPath, stacked = false, className }: Fil
         ) : null}
         <span className="max-w-full shrink-0 truncate text-fg">{to.name}</span>
         {moved ? (
-          <span className="min-w-0 truncate text-fg-subtle">
-            <span className="line-through">{from.dir || '.'}</span>
-            <span> → </span>
-            {to.dir || '.'}
+          <span dir="rtl" className="min-w-0 truncate text-left text-fg-subtle">
+            <bdi dir="ltr">
+              <span className="line-through">{from.dir || '.'}</span>
+              <span> → </span>
+              {to.dir || '.'}
+            </bdi>
           </span>
         ) : to.dir ? (
-          <span className="min-w-0 truncate text-fg-subtle">{to.dir}</span>
+          <span dir="rtl" className="min-w-0 truncate text-left text-fg-subtle">
+            <bdi dir="ltr">{to.dir}</bdi>
+          </span>
         ) : null}
       </span>
     </span>

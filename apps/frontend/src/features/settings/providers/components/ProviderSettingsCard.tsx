@@ -17,7 +17,8 @@ interface ProviderSettingsCardProps {
 /**
  * The card is a link's face, so the hover fill lives on the link's `group`: the
  * row answers the pointer with `fill-hover` and the chevron says it leads
- * somewhere. A list row is tighter than a section card, hence `p-4` at every width.
+ * somewhere. A list row is tighter than a section card, hence `p-4` at every width,
+ * and every row is at least 96px so a one-line summary and a two-line one keep one rhythm.
  */
 export function ProviderSettingsCard({ descriptor }: ProviderSettingsCardProps) {
   const { t } = useI18n();
@@ -36,7 +37,7 @@ export function ProviderSettingsCard({ descriptor }: ProviderSettingsCardProps) 
   return (
     <Card
       padded={false}
-      className="flex items-center gap-4 p-4 transition-colors group-hover:bg-fill-hover"
+      className="flex min-h-24 items-center gap-4 p-4 transition-colors group-hover:bg-fill-hover"
     >
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-center gap-2">

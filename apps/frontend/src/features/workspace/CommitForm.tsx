@@ -9,12 +9,15 @@ import { Textarea } from '@/components/ui/Textarea';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { CommitActions, useCommitActions } from './CommitActions';
 import { IconButton } from './components/IconButton';
 import { useGenerateCommitMessage, useGitHeadMessage } from './hooks/use-git-state';
 
 const AMEND_CONFIRMED_KEY = 'mangostudio.git.amend-confirmed';
+
+/** The subject line's soft limit is 72; the counter says so from here on. */
+const TITLE_COUNT_FROM = 50;
 
 export function CommitForm({
   chatId,
@@ -51,6 +54,8 @@ export function CommitForm({
   // not undone by a refetch of the same HEAD.
   const prefilledHash = useRef<string | null>(null);
   const headMessage = useGitHeadMessage(chatId, amend);
+
+  const showTitleCount = title.length >= TITLE_COUNT_FROM;
 
   const updateTitle = (value: string) => {
     titleRef.current = value;
@@ -159,7 +164,12 @@ export function CommitForm({
         </Callout>
       ) : null}
 
-      <div className="space-y-1">
+      {/*
+        The counter is the field's own trailing edge and appears only near the
+        limit. A row of its own showed `0/72` under an empty field for 20px of
+        a panel whose job is the file list below it.
+      */}
+      <div className="relative">
         <Input
           value={title}
           onChange={(event) => updateTitle(event.target.value)}
@@ -167,19 +177,23 @@ export function CommitForm({
           maxLength={72}
           aria-label={labels.titleLabel}
           placeholder={labels.titlePlaceholder}
+          className={cn(showTitleCount && 'pr-14')}
         />
-        <p className="text-right font-mono text-micro text-fg-subtle">
-          {labels.titleCount.replace('{count}', String(title.length))}
-        </p>
+        {showTitleCount ? (
+          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-micro text-fg-subtle">
+            {labels.titleCount.replace('{count}', String(title.length))}
+          </span>
+        ) : null}
       </div>
+      {/* Two lines at rest, three once it is being written in or holds text. */}
       <Textarea
         value={body}
         onChange={(event) => updateBody(event.target.value)}
         onKeyDown={handleShortcut}
         aria-label={labels.bodyLabel}
         placeholder={labels.bodyPlaceholder}
-        rows={3}
-        className="min-h-20 max-h-40"
+        rows={2}
+        className={cn('max-h-40 min-h-16 focus:min-h-24', body && 'min-h-24')}
       />
 
       <CommitActions

@@ -1,6 +1,7 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { Spinner } from '@/components/ui/Spinner';
 import { WorkspaceHub, type WorkspaceHubProps } from '@/features/home/WorkspaceHub';
+import { useI18n } from '@/hooks/use-i18n';
 import type { OlderMessages } from '../hooks/use-chat-page-state';
 import { ChatFeed } from './ChatFeed';
 
@@ -51,9 +52,10 @@ export function ChatPageContent({
 }
 
 function ChatLoadingState() {
+  const { t } = useI18n();
   return (
     <div className="flex flex-1 items-center justify-center">
-      <Spinner size="lg" />
+      <Spinner size="lg" label={t.common.loading} />
     </div>
   );
 }

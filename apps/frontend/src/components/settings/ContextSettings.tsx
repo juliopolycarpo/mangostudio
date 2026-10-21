@@ -52,9 +52,8 @@ export function ContextSettings({
 
   return (
     <SettingsPage title={s.title} description={s.description}>
-      <Callout tone="info">{s.keepHistory}</Callout>
-
-      <SettingsSection>
+      {/* A note about a card is that card's `notice`, so it sits with it. */}
+      <SettingsSection notice={<Callout tone="info">{s.keepHistory}</Callout>}>
         <SettingsRow label={s.behaviorLabel} hint={s.behaviorDescription} layout="field">
           <Select
             value={settings.compactionBehavior}

@@ -19,6 +19,8 @@ interface EntryListProps<T> {
    * the form, so this is its accessible name: three buttons all called "Add" say nothing.
    */
   readonly addLabel: string;
+  /** Said in `fg-subtle` while the list is empty, so a lone Add button is not all there is. */
+  readonly emptyLabel: string;
   /** The fields of one row, each in a `min-w-0 flex-1` box so the row shares its width. */
   readonly renderEntry: (entry: T, index: number) => ReactNode;
   readonly onAdd: () => void;
@@ -30,6 +32,7 @@ export function EntryList<T>({
   hint,
   entries,
   addLabel,
+  emptyLabel,
   renderEntry,
   onAdd,
   onRemove,
@@ -39,7 +42,9 @@ export function EntryList<T>({
 
   return (
     <SettingsField label={label} hint={hint}>
-      {entries.length > 0 && (
+      {entries.length === 0 ? (
+        <p className="text-xs text-fg-subtle">{emptyLabel}</p>
+      ) : (
         <div className="space-y-2">
           {entries.map((entry, index) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: rows have no stable identity while being typed

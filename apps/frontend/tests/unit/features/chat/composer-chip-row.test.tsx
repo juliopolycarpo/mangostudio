@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+import { join } from 'node:path';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen } from '@testing-library/react';
@@ -128,11 +129,30 @@ describe('ComposerChipRow — phone summary', () => {
     expect(screen.getByRole('button', { name: /Hide chat controls/ })).not.toHaveTextContent('62%');
   });
 
-  it('drops the separators on a phone so a wrapped line cannot end on a stray dot', () => {
-    const { container } = renderRow({ externalDescriptor: descriptor(openModel) });
+  // The `·` between chips is drawn by the stylesheet, and only from `sm` up: a
+  // phone wraps the strip, and a trailing dot left at the end of a line reads as
+  // a stray bullet. The rule is gated by its media query, not undone by a
+  // utility on each strip, so the markup carries nothing about it.
+  describe('separators', () => {
+    const stylesheet = Bun.file(join(import.meta.dir, '../../../../src/index.css')).text();
+    // The one rule that draws a `·`, inside the `sm` media query.
+    const GATED_SEPARATOR =
+      /@media \(width >= 40rem\)\s*\{\s*\.composer-chip-row[^{]*::after\s*\{[^}]*content:\s*"·"[^}]*\}\s*\}/;
 
-    expect(container.querySelector('.composer-chip-row')?.className).toContain(
-      'max-sm:*:after:content-none'
-    );
+    it('are drawn from sm up only, by the stylesheet', async () => {
+      const source = (await stylesheet).replace(/\/\*[\s\S]*?\*\//g, '');
+
+      expect(source).toMatch(GATED_SEPARATOR);
+      // Nowhere outside that block does a `.composer-chip-row` rule draw one.
+      expect(source.replace(GATED_SEPARATOR, '')).not.toMatch(/\.composer-chip-row[^{]*::after/);
+    });
+
+    it('are not left to a utility on the strip', () => {
+      const { container } = renderRow({ externalDescriptor: descriptor(openModel) });
+
+      for (const strip of container.querySelectorAll('.composer-chip-row')) {
+        expect(strip.className).not.toContain('content-none');
+      }
+    });
   });
 });

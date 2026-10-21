@@ -63,7 +63,10 @@ export function ExternalRunnerBlockedCallout({ descriptor }: ExternalRunnerBlock
   // One child or none: `Callout` draws its body wrapper for any truthy
   // `children`, and an array of two nulls is truthy.
   const body = loginCommand ? (
-    <SignInCommand command={loginCommand} className="max-w-xs" />
+    <div className="space-y-2">
+      <p>{t.externalAgents.selector.signInHint}</p>
+      <SignInCommand command={loginCommand} className="max-w-xs" />
+    </div>
   ) : suggestsAnotherRunner ? (
     t.externalAgents.selector.unavailableTryElsewhere
   ) : null;

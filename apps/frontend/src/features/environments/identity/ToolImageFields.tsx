@@ -9,13 +9,12 @@
 
 import type { ChangeEvent } from 'react';
 import { useId, useRef } from 'react';
+import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
-import { cn } from '@/lib/utils';
-import { choiceClass } from '../components/choice-class';
 
 export type ToolImageMode = 'monogram' | 'upload' | 'url';
 
@@ -73,29 +72,14 @@ export function ToolImageFields({
 
       {/* Real radios rather than styled buttons: arrow-key navigation between
           the three modes comes free, and the group reads as one control. */}
-      <div className="flex gap-2">
-        {modes.map((option) => (
-          <label
-            key={option.value}
-            className={cn(
-              'flex flex-1 cursor-pointer items-center justify-center',
-              choiceClass(mode === option.value),
-              // The radio is visually hidden, so the tile carries its focus mark.
-              'text-center has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus'
-            )}
-          >
-            <input
-              type="radio"
-              name={groupId}
-              value={option.value}
-              checked={mode === option.value}
-              className="sr-only"
-              onChange={() => onModeChange(option.value)}
-            />
-            {option.label}
-          </label>
-        ))}
-      </div>
+      <SettingsSegmented
+        kind="radio"
+        name={groupId}
+        ariaLabel={labels.imageLabel}
+        value={mode}
+        options={modes}
+        onChange={onModeChange}
+      />
 
       {mode === 'upload' && (
         <div className="space-y-2">

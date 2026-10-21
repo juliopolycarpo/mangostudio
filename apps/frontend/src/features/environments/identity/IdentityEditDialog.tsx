@@ -160,33 +160,29 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
       }
     >
       <div className="space-y-4">
-        <div className="space-y-1">
-          <Input
-            id="tool-identity-name"
-            label={labels.nameLabel}
-            value={name}
-            // The dialog exists to edit this field; opening it and landing
-            // outside the form is the keyboard user's version of a dead end.
-            autoFocus
-            maxLength={64}
-            placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <p className="text-xs text-fg-muted">{labels.nameHint}</p>
-        </div>
+        <Input
+          id="tool-identity-name"
+          label={labels.nameLabel}
+          value={name}
+          // The dialog exists to edit this field; opening it and landing
+          // outside the form is the keyboard user's version of a dead end.
+          autoFocus
+          maxLength={64}
+          placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
+          onChange={(event) => setName(event.target.value)}
+          hint={labels.nameHint}
+        />
 
-        <div className="space-y-1">
-          <Input
-            id="tool-identity-monogram"
-            label={labels.monogramLabel}
-            value={monogram}
-            maxLength={2}
-            placeholder={deriveMonogram(previewName)}
-            error={monogramInvalid ? labels.monogramInvalid : undefined}
-            onChange={(event) => setMonogram(event.target.value)}
-          />
-          {!monogramInvalid && <p className="text-xs text-fg-muted">{labels.monogramHint}</p>}
-        </div>
+        <Input
+          id="tool-identity-monogram"
+          label={labels.monogramLabel}
+          value={monogram}
+          maxLength={2}
+          placeholder={deriveMonogram(previewName)}
+          error={monogramInvalid ? labels.monogramInvalid : undefined}
+          onChange={(event) => setMonogram(event.target.value)}
+          hint={labels.monogramHint}
+        />
 
         <ToolImageFields
           mode={imageMode}

@@ -25,7 +25,6 @@ import {
 import { useI18n } from '@/hooks/use-i18n';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
-import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { StepFrame } from '../StepFrame';
@@ -46,7 +45,8 @@ const MANGOSTUDIO_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agent
 /**
  * The rows of a runner list: hairlines between them and above and below, the way
  * the toolchain step lists its runtimes — one list idiom in the wizard, not a
- * bordered box per row.
+ * bordered box per row. Rows inset their content by `px-3` here and there, so a
+ * dot and an icon share one left edge from step to step.
  */
 const RUNNER_LIST_CLASS = 'divide-y divide-stroke border-y border-stroke';
 
@@ -108,7 +108,7 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
         <MicroLabel as="p">{s.cliHeading}</MicroLabel>
         {external.isLoading ? (
           <div className="flex justify-center py-4">
-            <Spinner size="md" />
+            <Spinner size="md" label={t.common.loading} />
           </div>
         ) : external.isError ? (
           // A refused probe and a machine with no CLIs on it both arrive as an
@@ -175,15 +175,12 @@ function AgentOption({
       />
       {/* The command is the whole remedy, so it is shown rather than hidden
           behind a disabled control the user cannot learn anything from. It
-          belongs to this row alone — nested under it, indented to its text, and
-          naming the agent it signs in — because Codex may be listed above the
-          Claude Code row it is for. */}
+          belongs to this row alone — nested under it and indented to its text,
+          so the row names the agent and the hint need not — because Codex may
+          be listed above the Claude Code row it is for. */}
       {!selectable && agent.loginCommand ? (
         <div className="pr-3 pb-3 pl-8">
-          <CopyLine
-            label={formatMessage(s.signInHint, { agent: name })}
-            value={agent.loginCommand}
-          />
+          <CopyLine label={s.signInHint} value={agent.loginCommand} />
         </div>
       ) : null}
     </li>
@@ -195,11 +192,10 @@ function AgentOption({
  *
  * Two reasons it cannot be clicked, told apart because they look different: a
  * write is in flight (`busy`, over in a moment, so nothing about the row
- * changes), or the runner cannot be used at all (`unavailable`). The second is
- * drawn in the quieter text tokens rather than faded by opacity. Its
- * description is the reason ("Not signed in") and the one thing a person needs
- * to read here, so it has to stay legible; the row looks inactive because of
- * its colours and its cursor, not because everything in it is half-transparent.
+ * changes), or the runner cannot be used at all (`unavailable`). The second
+ * dims only the dot and shows the not-allowed cursor: the name stays `fg` and
+ * the description ("Not signed in") stays `fg-muted`, because that row is the
+ * one the person has to act on and a muted name made it read as switched off.
  */
 function RunnerOption({
   title,
@@ -241,16 +237,10 @@ function RunnerOption({
     >
       {/* Who this is, in the hue every other surface knows it by; the same in
           every state, so being unusable never replaces who is being described. */}
-      <StatusDot tone="neutral" className={dotClassName} />
+      <StatusDot tone="neutral" className={cn(dotClassName, unavailable && 'opacity-40')} />
       <span className="min-w-0 flex-1">
-        <span
-          className={cn('block text-sm font-medium', unavailable ? 'text-fg-muted' : 'text-fg')}
-        >
-          {title}
-        </span>
-        <span className={cn('block text-xs', unavailable ? 'text-fg-subtle' : 'text-fg-muted')}>
-          {description}
-        </span>
+        <span className="block text-sm font-medium text-fg">{title}</span>
+        <span className="block text-xs text-fg-muted">{description}</span>
       </span>
       {selected ? (
         <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-fg">

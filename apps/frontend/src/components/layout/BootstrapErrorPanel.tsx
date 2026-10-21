@@ -16,7 +16,7 @@
  */
 
 import { useRouter } from '@tanstack/react-router';
-import { TriangleAlert } from 'lucide-react';
+import { CircleX } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -84,7 +84,7 @@ export function BootstrapErrorPanel({
     <div className={PLACEMENT_CLASSES[placement]} data-placement={placement}>
       <div role="alert" data-testid="bootstrap-error" className="w-full max-w-md">
         <Card className="space-y-4 text-center">
-          <TriangleAlert aria-hidden size={ICON_LG} className="mx-auto text-danger" />
+          <CircleX aria-hidden size={ICON_LG} className="mx-auto text-danger" />
           <h1 className="text-title font-semibold text-fg">{s.title}</h1>
           <p className="text-sm text-fg-muted">{isRateLimited(error) ? s.rateLimited : s.lead}</p>
           {failedItems.length > 0 ? (

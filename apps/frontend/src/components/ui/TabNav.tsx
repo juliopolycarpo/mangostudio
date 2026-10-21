@@ -12,6 +12,13 @@ interface Tab {
    * them without this, which is the opposite of what a tab strip is for.
    */
   readonly exact?: boolean;
+  /**
+   * Lights the tab although the URL is not under its `to`: it is `aria-current`
+   * and wears the active look all the same. For a page that belongs to a tab
+   * without living under its path — a resource's own page, whose kind's tab is
+   * the one that says where the person is. The router lights none of them there.
+   */
+  readonly current?: boolean;
 }
 
 interface Props {
@@ -53,7 +60,7 @@ export function TabNav({ tabs, label }: Props) {
   return (
     <nav className={TAB_CLASSES.strip} aria-label={label}>
       <div ref={listRef} className={TAB_CLASSES.list}>
-        {tabs.map(({ to, label: tabLabel, exact = false, search }) => (
+        {tabs.map(({ to, label: tabLabel, exact = false, search, current = false }) => (
           <Link
             key={to}
             to={to}
@@ -61,7 +68,14 @@ export function TabNav({ tabs, label }: Props) {
             activeOptions={{ exact }}
             className={TAB_CLASSES.base}
             activeProps={{ className: TAB_CLASSES.active }}
-            inactiveProps={{ className: TAB_CLASSES.idle }}
+            // A forced tab is one the router calls inactive, so it is dressed
+            // through the inactive props: the router's own `aria-current` is only
+            // added to the links it matched.
+            inactiveProps={
+              current
+                ? { className: TAB_CLASSES.active, 'aria-current': 'page' }
+                : { className: TAB_CLASSES.idle }
+            }
           >
             <TabLabel>{tabLabel}</TabLabel>
           </Link>

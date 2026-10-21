@@ -17,6 +17,7 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
+import { Badge } from '@/components/ui/Badge';
 import {
   externalAgentSelectable,
   useExternalAgents,
@@ -54,33 +55,34 @@ export function ExternalAgentDiscoveryLog() {
             <SettingsRow
               key={agent.targetId}
               label={t.externalAgents.target[agent.targetId]}
-              aside={<span className="text-xs text-fg-muted">{summary(agent, labels)}</span>}
-              hint={
-                undetermined || agent.discovery ? (
-                  <>
-                    {undetermined ? (
-                      <span className="block">
-                        {t.externalAgents.selector.discoveryUndeterminedHint}
-                      </span>
-                    ) : null}
-                    {agent.discovery ? (
-                      <span className="block">
-                        {formatTimestamp(agent.discovery.probedAtMs, locale)}
-                        {agent.discovery.attempts > 1
-                          ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`
-                          : ''}
-                        {agent.discovery.failureCode ? ` · ${agent.discovery.failureCode}` : ''}
-                      </span>
-                    ) : null}
-                  </>
-                ) : undefined
+              aside={
+                <span className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+                  {agent.discovery ? (
+                    // The time and its footnotes sit beside the state, so a row with
+                    // a probe and a row without one are the same height.
+                    <span className="font-mono text-micro text-fg-muted tabular-nums">
+                      {formatTimestamp(agent.discovery.probedAtMs, locale)}
+                      {agent.discovery.attempts > 1
+                        ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`
+                        : ''}
+                      {agent.discovery.failureCode ? ` · ${agent.discovery.failureCode}` : ''}
+                    </span>
+                  ) : null}
+                  <Badge variant={stateVariant(agent)}>{summary(agent, labels)}</Badge>
+                </span>
               }
+              hint={undetermined ? t.externalAgents.selector.discoveryUndeterminedHint : undefined}
             />
           );
         })
       )}
     </SettingsSection>
   );
+}
+
+function stateVariant(agent: ExternalAgentDescriptor): 'neutral' | 'success' | 'info' {
+  if (!agent.discovery) return 'neutral';
+  return agent.discovery.source === 'cache' ? 'info' : 'success';
 }
 
 function summary(

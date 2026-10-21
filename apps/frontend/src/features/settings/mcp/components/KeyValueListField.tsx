@@ -12,6 +12,8 @@ interface KeyValueListFieldProps {
   hint?: string;
   /** The accessible name of the Add button, e.g. "Add variable". */
   addLabel: string;
+  /** What an empty list says ("No variables."). */
+  emptyLabel: string;
   entries: KeyValueEntry[];
   onChange: (entries: KeyValueEntry[]) => void;
   /** Masks the value column (used for write-only auth headers). */
@@ -22,6 +24,7 @@ export function KeyValueListField({
   label,
   hint,
   addLabel,
+  emptyLabel,
   entries,
   onChange,
   secretValues = false,
@@ -38,6 +41,7 @@ export function KeyValueListField({
       label={label}
       hint={hint}
       addLabel={addLabel}
+      emptyLabel={emptyLabel}
       entries={entries}
       onAdd={() => onChange([...entries, { key: '', value: '' }])}
       onRemove={(index) => onChange(entries.filter((_, i) => i !== index))}

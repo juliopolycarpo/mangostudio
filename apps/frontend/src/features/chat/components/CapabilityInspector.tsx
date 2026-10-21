@@ -19,7 +19,6 @@ import type {
   CapabilityToolEntry,
   ChatCapabilitiesResponse,
 } from '@mangostudio/shared/capabilities';
-import type { ModelOption } from '@mangostudio/shared/catalog';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
@@ -27,7 +26,7 @@ import { Link } from '@tanstack/react-router';
 import { ListChecks, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { Callout } from '@/components/ui/Callout';
-import { Chip } from '@/components/ui/Chip';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
@@ -39,7 +38,6 @@ import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import type { ChatCapabilitiesSelection } from '../hooks/use-chat-capabilities';
 import { chatCapabilitiesQueryOptions } from '../hooks/use-chat-capabilities';
-import { ComposerPopover } from './ComposerPopover';
 import { DisclosureChevron } from './DisclosureChevron';
 
 type CapabilityLabels = Messages['chat']['capabilities'];
@@ -90,13 +88,6 @@ interface CapabilityInspectorProps {
   disabled?: boolean;
   activeModel?: string | null;
   selectedAgentId?: string;
-  /**
-   * The composer's model list, for the name the status line already shows. The
-   * response names the model by id; without this the panel would print
-   * `claude-sonnet-4-5-20250929` two inches under a chip that says
-   * `Claude Sonnet 4.5`.
-   */
-  models?: readonly ModelOption[];
 }
 
 export function CapabilityInspector({
@@ -104,7 +95,6 @@ export function CapabilityInspector({
   disabled,
   activeModel,
   selectedAgentId,
-  models,
 }: CapabilityInspectorProps) {
   const { t } = useI18n();
   const labels = t.chat.capabilities;
@@ -156,11 +146,7 @@ export function CapabilityInspector({
             <Callout tone="danger" role="alert" title={labels.loadError} />
           )}
           {chatId && capabilitiesQuery.data && (
-            <CapabilityPanel
-              capabilities={capabilitiesQuery.data}
-              labels={labels}
-              models={models}
-            />
+            <CapabilityPanel capabilities={capabilitiesQuery.data} labels={labels} />
           )}
         </ComposerPopover>
       )}
@@ -184,11 +170,9 @@ function hasException(entries: ReadonlyArray<{ state: CapabilityState }>): boole
 function CapabilityPanel({
   capabilities,
   labels,
-  models,
 }: {
   capabilities: ChatCapabilitiesResponse;
   labels: CapabilityLabels;
-  models: readonly ModelOption[] | undefined;
 }) {
   const builtinTools = capabilities.tools.filter((tool) => tool.source === 'builtin');
   const mcpToolsByServer = new Map<string, CapabilityToolEntry[]>();
@@ -198,38 +182,23 @@ function CapabilityPanel({
     group.push(tool);
     mcpToolsByServer.set(tool.serverSlug, group);
   }
-  const modelId = capabilities.model.modelId;
-  const modelName = models?.find((option) => option.modelId === modelId)?.displayName ?? modelId;
   const mcpHasException =
     hasException(capabilities.mcpServers) ||
     hasException(capabilities.tools.filter((tool) => tool.source === 'mcp'));
 
   return (
-    <>
-      {/* The same `key: value` dialect as the status line the panel rose from. */}
-      <div className="flex flex-wrap gap-1.5">
-        <Chip label={labels.modelLabel} title={modelId} className="max-w-full">
-          {modelName}
-        </Chip>
-        <Chip label={labels.agentLabel} className="max-w-full">
-          {capabilities.agent.name}
-        </Chip>
-        {capabilities.contextInfo && (
-          <Chip label={labels.contextLabel}>
-            {Math.round(capabilities.contextInfo.estimatedUsageRatio * 100)}%
-          </Chip>
-        )}
-      </div>
-
-      <div className="divide-y divide-stroke">
-        <CapabilitySection
-          heading={labels.builtinsSection}
-          countLabel={enabledCountLabel(labels, builtinTools)}
-          manageLabel={labels.manageTools}
-          manageTo="/settings/tools"
-          defaultOpen={hasException(builtinTools)}
-        >
-          {exceptionsFirst(builtinTools).map((tool) => (
+    <div className="divide-y divide-stroke">
+      <CapabilitySection
+        heading={labels.builtinsSection}
+        countLabel={enabledCountLabel(labels, builtinTools)}
+        manageLabel={labels.manageTools}
+        manageTo="/settings/tools"
+        defaultOpen={hasException(builtinTools)}
+      >
+        <ExceptionsAndEnabled
+          entries={builtinTools}
+          labels={labels}
+          renderRow={(tool) => (
             <CapabilityRow
               key={tool.name}
               labels={labels}
@@ -241,49 +210,50 @@ function CapabilityPanel({
               })}
               reasonManageTo={reasonManageTo(tool.reason)}
             />
-          ))}
-        </CapabilitySection>
+          )}
+        />
+      </CapabilitySection>
 
-        <CapabilitySection
-          heading={labels.mcpSection}
-          countLabel={labels.toolCount.replace(
-            '{count}',
-            String(
-              capabilities.mcpServers.reduce(
-                (total, server) => total + server.effectiveToolCount,
-                0
-              )
-            )
-          )}
-          manageLabel={labels.manageMcp}
-          manageTo="/settings/mcp"
-          // An empty section is one line of text, and the line is the answer.
-          defaultOpen={mcpHasException || capabilities.mcpServers.length === 0}
-        >
-          {capabilities.mcpServers.length === 0 && (
-            <p className="px-2 text-xs text-fg-muted">{labels.mcpEmpty}</p>
-          )}
-          {exceptionsFirst(capabilities.mcpServers).map((server) => (
-            <McpServerRows
-              key={server.slug}
-              server={server}
-              tools={mcpToolsByServer.get(server.slug) ?? []}
-              labels={labels}
-            />
-          ))}
-        </CapabilitySection>
+      <CapabilitySection
+        heading={labels.mcpSection}
+        countLabel={labels.toolCount.replace(
+          '{count}',
+          String(
+            capabilities.mcpServers.reduce((total, server) => total + server.effectiveToolCount, 0)
+          )
+        )}
+        manageLabel={labels.manageMcp}
+        manageTo="/settings/mcp"
+        // An empty section is one line of text, and the line is the answer.
+        defaultOpen={mcpHasException || capabilities.mcpServers.length === 0}
+      >
+        {capabilities.mcpServers.length === 0 && (
+          <p className="px-2 text-xs text-fg-muted">{labels.mcpEmpty}</p>
+        )}
+        {exceptionsFirst(capabilities.mcpServers).map((server) => (
+          <McpServerRows
+            key={server.slug}
+            server={server}
+            tools={mcpToolsByServer.get(server.slug) ?? []}
+            labels={labels}
+          />
+        ))}
+      </CapabilitySection>
 
-        <CapabilitySection
-          heading={labels.skillsSection}
-          countLabel={enabledCountLabel(labels, capabilities.skills)}
-          manageLabel={labels.manageSkills}
-          manageTo="/settings/skills"
-          defaultOpen={hasException(capabilities.skills) || capabilities.skills.length === 0}
-        >
-          {capabilities.skills.length === 0 && (
-            <p className="px-2 text-xs text-fg-muted">{labels.skillsEmpty}</p>
-          )}
-          {exceptionsFirst(capabilities.skills).map((skill: CapabilitySkillEntry) => (
+      <CapabilitySection
+        heading={labels.skillsSection}
+        countLabel={enabledCountLabel(labels, capabilities.skills)}
+        manageLabel={labels.manageSkills}
+        manageTo="/settings/skills"
+        defaultOpen={hasException(capabilities.skills) || capabilities.skills.length === 0}
+      >
+        {capabilities.skills.length === 0 && (
+          <p className="px-2 text-xs text-fg-muted">{labels.skillsEmpty}</p>
+        )}
+        <ExceptionsAndEnabled
+          entries={capabilities.skills}
+          labels={labels}
+          renderRow={(skill: CapabilitySkillEntry) => (
             <CapabilityRow
               key={skill.key}
               labels={labels}
@@ -293,9 +263,63 @@ function CapabilityPanel({
               reasonText={reasonText(labels, skill.reason)}
               reasonManageTo={reasonManageTo(skill.reason)}
             />
-          ))}
-        </CapabilitySection>
-      </div>
+          )}
+        />
+      </CapabilitySection>
+    </div>
+  );
+}
+
+/**
+ * A flat group's rows: what needs explaining first, and the rest behind a line
+ * that counts them.
+ *
+ * A group that opened because three of its twenty-one rows are off would
+ * otherwise push every section under it out of the popover, and the sections
+ * are the part nobody scrolling for a row would find. The enabled rows are not
+ * dropped — the line opens them — so the panel still holds the exact effective
+ * set. A group with nothing to explain was opened by hand and lists all of it.
+ */
+function ExceptionsAndEnabled<Entry extends { state: CapabilityState }>({
+  entries,
+  labels,
+  renderRow,
+}: {
+  entries: readonly Entry[];
+  labels: CapabilityLabels;
+  renderRow: (entry: Entry) => React.ReactNode;
+}) {
+  const [showEnabled, setShowEnabled] = useState(false);
+  const bodyId = useId();
+  const exceptions = entries.filter((entry) => entry.state !== 'enabled');
+  const enabled = entries.filter((entry) => entry.state === 'enabled');
+  if (exceptions.length === 0) return enabled.map(renderRow);
+
+  const count = String(enabled.length);
+  return (
+    <>
+      {exceptions.map(renderRow)}
+      {enabled.length > 0 && (
+        <>
+          <button
+            type="button"
+            aria-expanded={showEnabled}
+            aria-controls={bodyId}
+            onClick={() => setShowEnabled((value) => !value)}
+            className="flex h-7 w-full cursor-pointer items-center gap-1 rounded-sm px-1 text-left text-xs text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
+          >
+            <DisclosureChevron expanded={showEnabled} />
+            <span className="truncate">
+              {formatMessage(showEnabled ? labels.hideEnabled : labels.showEnabled, { count })}
+            </span>
+          </button>
+          {showEnabled ? (
+            <div id={bodyId} className="space-y-0.5">
+              {enabled.map(renderRow)}
+            </div>
+          ) : null}
+        </>
+      )}
     </>
   );
 }

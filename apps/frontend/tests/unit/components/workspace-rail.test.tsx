@@ -61,6 +61,17 @@ function setDesktopMediaQuery(matches: boolean) {
   })) as unknown as typeof globalThis.matchMedia;
 }
 
+/**
+ * The slot the chat page's composer hands the rail below `lg`. A rail given none
+ * draws no trigger, so the mobile tests need a real element to portal into.
+ */
+function mountTriggerSlot(): HTMLElement {
+  const slot = document.createElement('span');
+  slot.dataset.testSlot = '';
+  document.body.appendChild(slot);
+  return slot;
+}
+
 function renderRail(overrides: Partial<React.ComponentProps<typeof WorkspaceRail>> = {}) {
   return render(
     <WorkspaceRail
@@ -79,6 +90,7 @@ describe('WorkspaceRail', () => {
   });
 
   afterEach(() => {
+    for (const slot of document.querySelectorAll('[data-test-slot]')) slot.remove();
     globalThis.matchMedia = harnessMatchMedia;
   });
 
@@ -173,7 +185,7 @@ describe('WorkspaceRail', () => {
   it('opens the same panels in a mobile slide-over', async () => {
     const user = userEvent.setup();
     setDesktopMediaQuery(false);
-    renderRail();
+    renderRail({ triggerSlot: mountTriggerSlot() });
 
     expect(screen.queryByRole('dialog', { name: 'Agent side panel' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Open agent side panel' }));
@@ -186,16 +198,25 @@ describe('WorkspaceRail', () => {
     expect(screen.getByRole('button', { name: 'Open agent side panel' })).toHaveFocus();
   });
 
-  it('anchors the mobile trigger to the chat dock instead of a fixed offset', () => {
+  it('draws the mobile trigger into the composer slot, and nowhere else', () => {
+    setDesktopMediaQuery(false);
+    const slot = mountTriggerSlot();
+    renderRail({ triggerSlot: slot });
+
+    // A tool chip beside the composer's other controls: nothing floats over the
+    // transcript, so the transcript keeps the composer's edges.
+    const trigger = screen.getByRole('button', { name: 'Open agent side panel' });
+    expect(slot).toContainElement(trigger);
+    expect(trigger.className).toContain('composer-tool-chip');
+    expect(trigger.className).not.toContain('absolute');
+    expect(trigger.className).not.toContain('fixed');
+  });
+
+  it('draws no trigger below lg when the page offers no slot', () => {
     setDesktopMediaQuery(false);
     renderRail();
 
-    // `ChatPage` publishes the height of the notices and composer under the
-    // transcript; a fixed `bottom-24` landed inside the composer, whatever its
-    // height. The fallback only serves a page that publishes nothing.
-    const trigger = screen.getByRole('button', { name: 'Open agent side panel' });
-    expect(trigger.className).toContain('bottom-[calc(var(--chat-dock-height,8rem)+0.75rem)]');
-    expect(trigger.className).not.toContain('fixed');
+    expect(screen.queryByRole('button', { name: 'Open agent side panel' })).not.toBeInTheDocument();
   });
 
   /**

@@ -35,7 +35,9 @@ interface SettingsRowProps {
 const LAYOUT: Record<SettingsRowLayout, { root: string; control: string }> = {
   inline: {
     root: 'flex items-center justify-between gap-4',
-    control: 'shrink-0',
+    // A flex box, not a text line: an inline-flex switch in a block wrapper sits on
+    // a line-height strut and rides a few pixels above the row's centre.
+    control: 'flex shrink-0 items-center',
   },
   field: {
     root: 'flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4',

@@ -177,8 +177,11 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
               {isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton}
             </Button>
           </div>
+          {/* A wordmark, not a heading: the step's own title is the screen's
+              one headline (and its `h1`), and a larger-looking "Welcome to…"
+              above it said the same words twice on the first step. */}
           <Logo className="mx-auto size-12" />
-          <h1 className="text-title font-semibold text-fg">{s.title}</h1>
+          <p className="text-sm font-medium text-fg-muted">{t.common.appName}</p>
         </header>
 
         <div className="grid gap-6 sm:grid-cols-[13rem_1fr]">

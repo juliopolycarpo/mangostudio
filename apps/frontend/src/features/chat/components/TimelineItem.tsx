@@ -8,14 +8,15 @@ import { cn } from '@/lib/utils';
  */
 export type TimelineTone = 'neutral' | 'muted' | 'active' | 'success' | 'error';
 
-type TimelineVariant = 'row' | 'block' | 'divider' | 'bubble';
+type TimelineVariant = 'row' | 'block' | 'card' | 'divider' | 'bubble';
 
 interface TimelineItemProps {
   children: ReactNode;
   tone?: TimelineTone;
   /**
-   * `row` is a single-line step (a tool call, a thought); `block` is prose or a
-   * card; `divider` is a full-bleed marker that cuts the rail instead of
+   * `row` is a single-line step (a tool call, a thought); `block` is a
+   * borderless block (an image, a steer); `card` is a bordered card or callout,
+   * whose node lines up with the card's heading rather than its corner; `divider` is a full-bleed marker that cuts the rail instead of
    * hanging off it; `bubble` cuts the rail the same way a divider does but
    * keeps block spacing, so what the turn *said* sits off the rail of what it
    * *did*.
@@ -34,6 +35,7 @@ const TONE_CLASS: Record<TimelineTone, string> = {
 const VARIANT_CLASS: Record<TimelineVariant, string> = {
   row: '',
   block: 'chat-timeline-item--block',
+  card: 'chat-timeline-item--card',
   divider: 'chat-timeline-item--divider',
   bubble: 'chat-timeline-item--bubble',
 };

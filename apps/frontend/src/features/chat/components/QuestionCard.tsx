@@ -1,8 +1,8 @@
 import { formatQuestionAnswers, type QuestionAnswer } from '@mangostudio/shared/questions';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useId, useState } from 'react';
-import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Chip } from '@/components/ui/Chip';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
@@ -94,7 +94,9 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
             className="space-y-2"
           >
             <div className="flex flex-wrap items-center gap-2">
-              {question.header && <Badge variant="neutral">{question.header}</Badge>}
+              {/* A category tag, not a status: the square chip, so the only round
+                  thing near the question is not mistaken for an outcome. */}
+              {question.header && <Chip>{question.header}</Chip>}
               <p id={`${idBase}-q${questionIndex}`} className="font-medium text-fg">
                 {question.question}
               </p>

@@ -197,6 +197,7 @@ export function ExternalApiSettingsPage({
                           variant="subtle-danger"
                           size="icon"
                           aria-label={`${s.revoke.confirmButton}: ${displayKeyName(t, apiKey.name)}`}
+                          title={s.revoke.confirmButton}
                           onClick={() => setKeyToRevoke(apiKey)}
                         >
                           <Trash2 size={ICON_MD} />

@@ -17,6 +17,7 @@ import { type ReactNode, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { Dialog } from '@/components/ui/Dialog';
 import { FIELD_CLASS } from '@/components/ui/Input';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -36,7 +37,6 @@ import {
   missingRequiredMcpArguments,
   serializeMcpPromptArguments,
 } from '../lib/mcp-prompt-args';
-import { ComposerPopover } from './ComposerPopover';
 
 interface McpComposerMenuProps {
   chatId: string | null;

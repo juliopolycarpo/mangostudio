@@ -42,8 +42,12 @@ function SignupPage() {
     setLoading(false);
   };
 
+  // Anchored to a fixed offset from the top rather than centred: a centred group
+  // moves when the card grows (the error notice, a longer field list), and the
+  // form jumps under the cursor of someone retyping. Here only the space below
+  // it changes, and both pages put the logo where the other does.
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-canvas px-4 py-8">
+    <div className="flex min-h-screen flex-col items-center justify-start gap-6 bg-canvas px-4 pb-8 pt-[18vh]">
       <Logo className="size-12" />
       <Card className="w-full max-w-sm rounded-lg">
         <form
@@ -85,23 +89,18 @@ function SignupPage() {
             {/* The requirement is a hint under the field, not part of its label:
                 the label names the field, and a placeholder is never the
                 instruction. */}
-            <div className="space-y-1">
-              <Input
-                type="password"
-                id="password"
-                name="password"
-                label={t.auth.passwordLabel}
-                aria-describedby="password-hint"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                minLength={8}
-                required
-              />
-              <p id="password-hint" className="text-xs text-fg-muted">
-                {t.auth.passwordHint}
-              </p>
-            </div>
+            <Input
+              type="password"
+              id="password"
+              name="password"
+              label={t.auth.passwordLabel}
+              hint={t.auth.passwordHint}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              minLength={8}
+              required
+            />
           </div>
 
           <Button type="submit" size="lg" loading={loading} className="w-full">

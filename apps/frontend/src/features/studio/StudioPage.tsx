@@ -8,8 +8,9 @@
  * the gallery has usually already cached — and its "View all" is the way on to
  * the gallery, so the page does not repeat what the sidebar already offers.
  *
- * Centred in a `max-w-6xl` column with Home's own gutters (`px-4 sm:px-6`), so
- * its heading starts at the same x as Home's and the gallery's.
+ * Centred in a `max-w-6xl` column with the gutter every self-scrolling page
+ * shares (`p-4 sm:p-6`, the gallery's and the terminal's), so its heading starts
+ * at the same x and y as theirs and does not jump when the sidebar switches page.
  */
 
 import type { GalleryItem } from '@mangostudio/shared/types';
@@ -19,6 +20,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { GalleryLightbox } from '@/features/gallery/components/GalleryLightbox';
@@ -36,8 +38,8 @@ export function StudioPage() {
   const [selectedImage, setSelectedImage] = useState<GalleryItem | null>(null);
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-6xl space-y-8 px-4 py-6 sm:px-6 sm:py-8">
+    <div className="h-full overflow-y-auto p-4 sm:p-6">
+      <div className="mx-auto w-full max-w-6xl space-y-8">
         <div className="min-w-0 space-y-1">
           <h1 className="text-title font-semibold text-fg">{t.studio.title}</h1>
           <p className="text-sm text-fg-muted">{t.studio.subtitle}</p>
@@ -94,10 +96,13 @@ function RecentImages({ onView }: { onView: (item: GalleryItem) => void }) {
   const items = data?.pages[0]?.items.slice(0, RECENT_LIMIT) ?? [];
 
   return (
-    <SectionCard
-      label={t.studio.recent.label}
-      action={
-        items.length > 0 ? (
+    // No card around the tiles: they are bordered and rounded themselves, and a
+    // card around them read as cards nested in a card. The heading row is the
+    // card's header without the card, on the canvas like the gallery's grid.
+    <section className="min-w-0 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <MicroLabel as="h2">{t.studio.recent.label}</MicroLabel>
+        {items.length > 0 ? (
           // `inline-flex items-center`: on a touch screen every link is a 44px
           // box, and a plain link in this header floated its text to the top of
           // it, a dozen pixels above the label it sits beside.
@@ -107,11 +112,10 @@ function RecentImages({ onView }: { onView: (item: GalleryItem) => void }) {
           >
             {t.studio.recent.viewAll}
           </Link>
-        ) : null
-      }
-    >
+        ) : null}
+      </div>
       <RecentStrip status={status} items={items} onView={onView} />
-    </SectionCard>
+    </section>
   );
 }
 
@@ -135,7 +139,7 @@ function RecentStrip({
 
   if (status === 'pending') {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-6">
         {Array.from({ length: RECENT_LIMIT }, (_, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
           <Skeleton key={index} className="aspect-square rounded-md" />
@@ -153,7 +157,7 @@ function RecentStrip({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-6">
       {items.map((item) => (
         <GalleryTile key={item.id} item={item} onView={onView} compact />
       ))}

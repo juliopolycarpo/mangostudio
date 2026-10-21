@@ -48,10 +48,9 @@ export function ConfirmDialog({
         <>
           {description}
           {entityName ? (
-            <>
-              <br />
-              <span className="font-medium text-fg">&ldquo;{entityName}&rdquo;</span>
-            </>
+            <span className="mt-2 block break-words font-medium text-fg">
+              &ldquo;{entityName}&rdquo;
+            </span>
           ) : null}
         </>
       }

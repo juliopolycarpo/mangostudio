@@ -114,9 +114,8 @@ export const messages: Messages = {
       stateUnavailable: 'Unavailable',
       mcpEmpty: 'No MCP servers configured.',
       skillsEmpty: 'No skills discovered.',
-      modelLabel: 'Model',
-      agentLabel: 'Agent',
-      contextLabel: 'Context usage',
+      showEnabled: 'Show {count} enabled',
+      hideEnabled: 'Hide {count} enabled',
       manageTools: 'Tool settings',
       manageMcp: 'MCP settings',
       manageSkills: 'Skill settings',
@@ -596,7 +595,7 @@ export const messages: Messages = {
       description: 'Configure how commits created from the repository panel are attributed.',
       signCommitsLabel: 'Sign commits',
       signCommitsDescription: 'Uses your Git config signing key — GPG or SSH.',
-      signOffLabel: 'Add Signed-off-by trailer',
+      signOffLabel: 'Add a Signed-off-by trailer',
       signOffDescription: 'Adds the configured Git identity as a DCO sign-off to each commit.',
       commitMessages: {
         title: 'Commit messages',
@@ -610,7 +609,7 @@ export const messages: Messages = {
         promptLabel: 'System prompt',
         promptDescription: 'Guide the style and content of the generated message.',
         resetPrompt: 'Reset to default',
-        maxDiffLabel: 'Maximum diff size (KB)',
+        maxDiffLabel: 'Maximum diff size',
         maxDiffDescription: 'Limits diff content sent to the model to between 16 and 512 KB.',
       },
     },
@@ -799,7 +798,7 @@ export const messages: Messages = {
       nameLabel: 'Name',
       namePlaceholder: 'e.g. Personal project',
       apiKeyLabel: 'API key',
-      apiKeyPlaceholder: 'sk-…',
+      apiKeyPlaceholder: '••••••••••••••••',
       showApiKey: 'Show API key',
       hideApiKey: 'Hide API key',
       saveToLabel: 'Save to',
@@ -955,6 +954,7 @@ export const messages: Messages = {
       reasoningEffort: 'Reasoning effort',
       maxOutputTokens: 'Max output tokens',
       maxToolIterations: 'Max tool iterations',
+      maxToolIterationsHint: 'Overrides the global value on the Tools page.',
       parallelToolCalls: 'Parallel tool calls',
       compaction: 'Provider-side compaction',
       cachePreference: 'Prompt cache preference',
@@ -964,7 +964,7 @@ export const messages: Messages = {
       capabilityThinking: 'Thinking',
       capabilityTools: 'Tools',
       capabilityCaching: 'Caching',
-      maxOutputTokensPlaceholder: 'Provider default',
+      maxOutputTokensPlaceholder: 'Default',
       maxOutputTokensHint: '1 to {limit}. Leave empty to use the provider default.',
       deprecatedBadge: 'Legacy',
       deprecatedNote:
@@ -1098,6 +1098,10 @@ export const messages: Messages = {
       addVariable: 'Add variable',
       addSecretVariable: 'Add secret variable',
       addHeader: 'Add header',
+      noArguments: 'No arguments.',
+      noVariables: 'No variables.',
+      noSecretVariables: 'No secret variables.',
+      noHeaders: 'No headers.',
       removeEntry: 'Remove',
       enabledLabel: 'Enabled',
       disabledLabel: 'Disabled',
@@ -1361,7 +1365,7 @@ export const messages: Messages = {
         empty: 'No external agents were described for this environment.',
         live: 'Probed',
         cached: 'From cache',
-        notReported: 'Not reported by this adapter',
+        notReported: 'No data',
         attempts: '{count} attempts',
       },
       eventKinds: {
@@ -1427,7 +1431,7 @@ export const messages: Messages = {
       'Choose a folder on the server filesystem. Agent file tools resolve relative paths from this folder.',
     serverLabel: 'Server',
     home: 'Home',
-    roots: 'Roots',
+    places: 'Places',
     recent: 'Recent',
     noRecent: 'No recent folders',
     manualPathLabel: 'Server path',
@@ -1473,7 +1477,7 @@ export const messages: Messages = {
     sidePanelDescription:
       'Choose which workspace panels appear in Agent mode and arrange their dock order.',
     widthLabel: 'Width',
-    widthDefaultHint: 'Default {width}px',
+    widthDefaultHint: 'Drag the sidebar edge to change it. Default {width}px.',
     sidePanelResetWidth: 'Reset width',
     sidePanelShow: 'Show {panel}',
     sidePanelMoveUp: 'Move {panel} up',
@@ -2042,6 +2046,7 @@ export const messages: Messages = {
     notFound: 'This terminal session no longer exists.',
     refused: 'This terminal session cannot be opened from here.',
     openFailed: 'Could not open a terminal. Try again.',
+    closeFailed: 'Could not close the terminal. Try again.',
     exited: 'Process exited with code {code}.',
     exitedBySignal: 'Process ended by {signal}.',
     exitedConsentRevoked: 'Terminal closed because shell access was revoked.',
@@ -2086,6 +2091,7 @@ export const messages: Messages = {
     settingsNavigation: 'Settings navigation',
     openMenu: 'Open menu',
     closeMenu: 'Close menu',
+    accountMenu: 'Account menu',
     disclaimer: 'AI can make mistakes. Double-check the results.',
     dismissToast: 'Dismiss toast',
     notifications: 'Notifications',
@@ -2255,6 +2261,8 @@ export const messages: Messages = {
       sortCoverage: 'Coverage',
       sortModified: 'Modified',
       groupByLocation: 'Group by location',
+      // The phone's one button for every control but the search.
+      toggle: 'Filters',
     },
     tooltip: {
       path: 'Path',
@@ -2274,8 +2282,10 @@ export const messages: Messages = {
       compare: 'Compare {left} ↔ {right}',
       compareHide: 'Close comparison',
       compareSelect: 'Pick two versions to compare.',
-      via: 'via {location}',
-      alsoIn: 'also in {locations}, identical',
+      // Introduces a path set on its own line below it, so no placeholder.
+      via: 'via',
+      alsoIn: 'also in',
+      identical: 'identical',
       propagate: 'Propagate',
       remove: 'Remove',
       notFound: 'This resource is no longer in the library.',
@@ -2343,7 +2353,7 @@ export const messages: Messages = {
       description: 'Every checked location takes one write, backed up first.',
       // The most useful thing this step can say: one write can cover two agents,
       // and checking both locations creates a second copy for no reason.
-      servesMultipleTargets: '{location} also serves {targets}',
+      servesMultipleTargets: 'Also serves {targets}',
       readOnly: 'Read-only',
       unwritableAction: 'See in Environments',
       none: 'No location accepts writes for this kind of resource.',
@@ -2668,6 +2678,10 @@ export const messages: Messages = {
         runningLabel: 'State',
         running: 'Running',
         stopped: 'Stopped',
+        // The card's state in one word opposite its title, so it never lacks a badge.
+        stateOn: 'On',
+        stateOff: 'Off',
+        stateUnknown: 'Unknown',
         lingerLabel: 'After logout',
         lingerOn: 'Keeps running',
         lingerOff: 'Stops at logout',
@@ -3693,6 +3707,7 @@ export const messages: Messages = {
       unknownVersion: 'a newer version',
       continueInNewChat: 'Continue in a new chat',
       copyLoginCommand: 'Copy login command',
+      signInHint: 'Run this in a terminal, then retry.',
       ownership: '{vendor} controls its own tools and permissions.',
       unavailableHere: 'This agent cannot run here right now.',
       /** The next step under `unavailableHere`, and under a reason with nothing to click. */
@@ -3804,7 +3819,6 @@ export const messages: Messages = {
       terms: "{vendor}'s terms of service",
       privacy: "{vendor}'s privacy policy",
       required: 'This agent needs its notice acknowledged before it can run.',
-      manageTitle: 'Third-party agent notices',
       manageDescription:
         'A third-party agent CLI shows a notice before it first receives a conversation. The ones you accepted are listed here.',
       manageEmpty: 'You have not acknowledged any external agent yet.',
@@ -4213,7 +4227,6 @@ export const messages: Messages = {
   },
 
   onboarding: {
-    title: 'Welcome to MangoStudio',
     progress: 'Step {step} of {total} · {name}',
     stepList: 'Setup steps',
     back: 'Back',
@@ -4285,7 +4298,7 @@ export const messages: Messages = {
       signedIn: 'Signed in',
       signedOut: 'Not signed in',
       // The command beneath it belongs to one agent; the line says which.
-      signInHint: '{agent}: sign in from a terminal on this machine, then come back.',
+      signInHint: 'Sign in from a terminal on this machine, then come back.',
       selected: 'Selected',
       isolated:
         'Another account is already using this computer’s agent sign-ins, so they are not offered to you here. Use a model instead, or skip this step and add a machine of your own from Environments afterwards.',
@@ -4296,7 +4309,7 @@ export const messages: Messages = {
       hint: 'Optional. Without it, MangoStudio runs only while the terminal that started it stays open.',
       installed: 'Installed',
       notInstalled: 'Not installed',
-      /** Title when the supervisor could not be asked and has no coded reason; the raw line sits beneath. */
+      /** Title when the supervisor could not be asked; the coded reason, when there is one, and the raw line sit beneath. */
       unreadable: 'Could not check the service',
       install: 'Install the service',
       installing: 'Installing…',

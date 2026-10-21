@@ -64,6 +64,21 @@ describe('GalleryTile', () => {
     expect(captionOf(container)).toHaveClass('group-focus-within:opacity-100');
   });
 
+  // The caption is text laid over the picture, so it is read against the media
+  // veil — dark enough for white text over any image — and not against a theme
+  // surface that happens to be solid.
+  it('lays the prompt on the media veil in on-scrim-media text', () => {
+    const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
+    const caption = captionOf(container);
+
+    expect(caption).toHaveClass('bg-scrim-media');
+    expect(caption).not.toHaveClass('bg-surface-raised');
+    expect(screen.getByText(TEST_ITEM.prompt)).toHaveClass('text-on-scrim-media');
+    expect(screen.getByRole('link', { name: /download image/i })).toHaveClass(
+      'focus-visible:outline-on-scrim-media'
+    );
+  });
+
   it('still reveals it on hover', () => {
     const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
 

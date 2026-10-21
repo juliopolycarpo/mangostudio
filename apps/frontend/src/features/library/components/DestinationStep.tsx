@@ -23,7 +23,7 @@ import type {
 } from '@mangostudio/shared/library';
 import { Link } from '@tanstack/react-router';
 import { Server } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -67,6 +67,14 @@ export function DestinationStep({
   const { t } = useI18n();
   const l = t.library;
   const machines = useMemo(() => destinationsByEnvironment(preview), [preview]);
+  // The reminder is for someone who emptied the list. On a screen nobody has
+  // touched, the intro line and the disabled Continue already say what is next,
+  // and a warning there is the only alarm-coloured thing in the dialog.
+  const [touched, setTouched] = useState(false);
+  const toggle = (environmentId: string, locationId: LibraryLocationId) => {
+    setTouched(true);
+    onToggle(environmentId, locationId);
+  };
 
   if (machines.length === 0) {
     return (
@@ -108,14 +116,14 @@ export function DestinationStep({
                   checked={draft.destinations.has(
                     destinationKey(destination.environmentId, destination.locationId)
                   )}
-                  onToggle={onToggle}
+                  onToggle={toggle}
                 />
               ))}
             </div>
           ))}
         </section>
       ))}
-      {draft.destinations.size === 0 && (
+      {touched && draft.destinations.size === 0 && (
         <InlineNote tone="warning" data-testid="no-destination-selected">
           {l.destination.noneSelected}
         </InlineNote>
@@ -139,11 +147,23 @@ function DestinationRow({
   const l = t.library;
   const blocked = destination.blockedReason !== undefined;
   const otherTargets = destination.targetIds.slice(1);
+  // Three facts at most, set apart by the product's `·` so they do not run into
+  // one phrase ("Markdown with frontmatter Holds c3aab8…").
+  const facts = [
+    l.format[destination.toFormat],
+    destination.currentContentHash
+      ? formatMessage(l.destination.currentContent, {
+          hash: `${hashPrefix(destination.currentContentHash)}…`,
+        })
+      : l.destination.empty,
+    ...(status?.access === 'read-only' ? [l.destination.readOnly] : []),
+  ];
 
   return (
     <ChoiceRow
       control="checkbox"
       bordered
+      firstLine="xs"
       row={{
         'data-testid': 'destination-row',
         'data-environment-id': destination.environmentId,
@@ -162,22 +182,11 @@ function DestinationRow({
         >
           {destination.path ?? destination.locationId}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-fg-muted text-xs">
-          <span>{l.format[destination.toFormat]}</span>
-          <span>
-            {destination.currentContentHash
-              ? formatMessage(l.destination.currentContent, {
-                  hash: `${hashPrefix(destination.currentContentHash)}…`,
-                })
-              : l.destination.empty}
-          </span>
-          {status?.access === 'read-only' && <span>{l.destination.readOnly}</span>}
-        </span>
+        <span className="block text-fg-muted text-xs">{facts.join(' · ')}</span>
 
         {otherTargets.length > 0 && (
           <InlineNote tone="info" data-testid="serves-multiple-targets">
             {formatMessage(l.destination.servesMultipleTargets, {
-              location: destination.path ?? destination.locationId,
               targets: otherTargets.map((targetId) => l.targets[targetId]).join(', '),
             })}
           </InlineNote>

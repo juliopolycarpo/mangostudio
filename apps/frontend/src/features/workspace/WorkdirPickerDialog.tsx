@@ -272,19 +272,17 @@ export function WorkdirPickerDialog({
       <div className="grid min-h-0 flex-1 sm:grid-cols-[14rem_minmax(0,1fr)]">
         <aside className="app-scrollbar hidden min-h-0 overflow-y-auto border-r border-stroke p-4 sm:block">
           <nav className="space-y-4" aria-label={s.title}>
+            {/* Home and the filesystem roots are one group: under a heading each
+                they were two one-row sections whose labels only restated the row
+                (`HOME` over “Home”). */}
             {listing.data ? (
-              <PathSection label={s.home}>
+              <PathSection label={s.places}>
                 <PathButton
                   icon={<Home size={ICON_MD} />}
                   label={s.home}
                   path={listing.data.home}
                   onClick={browse}
                 />
-              </PathSection>
-            ) : null}
-
-            {listing.data?.roots.length ? (
-              <PathSection label={s.roots}>
                 {listing.data.roots.map((root) => (
                   <PathButton
                     key={root}

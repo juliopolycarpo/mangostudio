@@ -49,17 +49,15 @@ export function WorktreeAddForm({
   return (
     <form onSubmit={submit} aria-label={labels.addTitle}>
       <Card padded={false} className="space-y-3 p-3">
-        <div className="space-y-1">
-          <Input
-            id={pathId}
-            label={labels.pathLabel}
-            value={path}
-            onChange={(event) => setPath(event.target.value)}
-            placeholder={labels.pathPlaceholder}
-            className="font-mono"
-          />
-          <p className="text-xs text-fg-muted">{labels.pathHint}</p>
-        </div>
+        <Input
+          id={pathId}
+          label={labels.pathLabel}
+          value={path}
+          onChange={(event) => setPath(event.target.value)}
+          placeholder={labels.pathPlaceholder}
+          className="font-mono"
+          hint={labels.pathHint}
+        />
 
         <Input
           id={branchId}

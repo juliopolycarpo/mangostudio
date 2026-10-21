@@ -7,7 +7,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
-import type { ModelOption } from '@mangostudio/shared/catalog';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
 import { screen, waitFor } from '@testing-library/react';
@@ -155,12 +154,19 @@ describe('CapabilityInspector', () => {
     await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
 
     await waitFor(() => {
-      expect(screen.getByText('Image generation')).toBeInTheDocument();
+      expect(screen.getByText('Bash')).toBeInTheDocument();
     });
 
-    // Model/agent summary and context usage come straight from the response.
-    expect(screen.getByText('gpt-test')).toBeInTheDocument();
-    expect(screen.getByText('42%')).toBeInTheDocument();
+    // The enabled row waits behind the section's fold, one press away.
+    expect(screen.queryByText('Image generation')).not.toBeInTheDocument();
+    // Built-in tools come first; the skills section folds its one enabled row too.
+    await userEvent.click(screen.getAllByRole('button', { name: 'Show 1 enabled' })[0]);
+    expect(screen.getByText('Image generation')).toBeInTheDocument();
+
+    // The status line under the composer already says model, agent and context,
+    // so the panel does not repeat them as chips.
+    expect(screen.queryByText('gpt-test')).not.toBeInTheDocument();
+    expect(screen.queryByText('42%')).not.toBeInTheDocument();
 
     // Disabled builtin renders its typed reason as a translated string.
     expect(screen.getByText('Bash')).toBeInTheDocument();
@@ -294,7 +300,7 @@ describe('CapabilityInspector', () => {
 
     const inspectorButton = screen.getByRole('button', { name: /capabilities/i });
     await userEvent.click(inspectorButton);
-    expect(await screen.findByText('Image generation')).toBeInTheDocument();
+    expect(await screen.findByText('Bash')).toBeInTheDocument();
     await userEvent.click(inspectorButton);
 
     scenario.respondWithJson('GET', capabilitiesPath, { body: disabledResponse });
@@ -315,11 +321,11 @@ describe('CapabilityInspector', () => {
   });
 
   describe('the quiet normal state', () => {
-    async function openWith(response: ChatCapabilitiesResponse, models?: ModelOption[]) {
+    async function openWith(response: ChatCapabilitiesResponse) {
       scenario.respondWithJson('GET', '/api/chats/chat-1/capabilities?model=gpt-test', {
         body: response,
       });
-      render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" models={models} />);
+      render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" />);
       await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
       await screen.findByText(/Built-in tools/);
     }
@@ -361,6 +367,7 @@ describe('CapabilityInspector', () => {
 
     it('marks only the rows that need explaining, and lists those first', async () => {
       await openWith(RESPONSE);
+      await userEvent.click(screen.getAllByRole('button', { name: 'Show 1 enabled' })[0]);
 
       const enabledRow = screen.getByText('Image generation').closest('div.flex');
       const disabledRow = screen.getByText('Bash').closest('div.flex');
@@ -374,20 +381,30 @@ describe('CapabilityInspector', () => {
       expect(order.at(-1)).toContain('Image generation');
     });
 
-    it('names the model the way the status line does, with the exact id one hover away', async () => {
-      await openWith(RESPONSE, [
-        {
-          modelId: 'gpt-test',
-          displayName: 'GPT Test',
-          resourceName: 'gpt-test',
-          supportedActions: ['text'],
-          provider: 'openai',
-        },
-      ]);
+    it('lists what needs explaining and folds the enabled rows behind a count', async () => {
+      await openWith(RESPONSE);
 
-      const model = screen.getByText('GPT Test');
-      expect(model.closest('[title]')).toHaveAttribute('title', 'gpt-test');
+      expect(screen.getByText('Bash')).toBeInTheDocument();
+      expect(screen.getByText('Todo')).toBeInTheDocument();
+      expect(screen.queryByText('Image generation')).not.toBeInTheDocument();
+
+      const [fold] = screen.getAllByRole('button', { name: 'Show 1 enabled' });
+      expect(fold).toHaveAttribute('aria-expanded', 'false');
+      await userEvent.click(fold);
+
+      expect(screen.getByRole('button', { name: 'Hide 1 enabled' })).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      );
+      expect(screen.getByText('Image generation')).toBeInTheDocument();
+    });
+
+    it('does not repeat the model, the agent or the context usage as chips', async () => {
+      await openWith(RESPONSE);
+
       expect(screen.queryByText('gpt-test')).not.toBeInTheDocument();
+      expect(screen.queryByText('Default')).not.toBeInTheDocument();
+      expect(screen.queryByText('42%')).not.toBeInTheDocument();
     });
   });
 });

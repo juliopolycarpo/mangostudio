@@ -126,6 +126,13 @@ describe('external activity row', () => {
     expect(screen.getByText('commandExecution').className).toContain('text-danger');
   });
 
+  it('leaves a completed vendor tool name neutral', () => {
+    renderParts([turnPart(), activityPart({ name: 'commandExecution', status: 'completed' })]);
+    const name = screen.getByText('commandExecution');
+    expect(name.className).toContain('text-fg');
+    expect(name.className).not.toContain('text-success');
+  });
+
   // Colour alone cannot be the difference between a call that failed and one
   // that was cancelled: they differ by glyph and by word, as on a native row.
   it('tells a failed call from a cancelled one by glyph and word, not by colour', () => {

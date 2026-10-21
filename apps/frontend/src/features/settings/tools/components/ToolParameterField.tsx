@@ -156,6 +156,7 @@ function PathListField({
               disabled={disabled}
               placeholder={s.pathPlaceholder}
               aria-label={ariaLabel}
+              className="font-mono text-xs"
             />
           </div>
           <Button variant="secondary" disabled={disabled || !newPath.trim()} onClick={handleAdd}>
@@ -194,6 +195,7 @@ function PathListField({
                       }
                     }}
                     aria-label={s.edit}
+                    className="font-mono text-xs"
                   />
                 </div>
               ) : (
@@ -221,6 +223,7 @@ function PathListField({
                     onClick={() => handleDelete(index)}
                     disabled={disabled}
                     aria-label={s.delete}
+                    title={s.delete}
                   >
                     <Trash2 size={ICON_SM} />
                   </Button>
@@ -286,6 +289,10 @@ export function ToolParameterField({
     return descriptor.description;
   }, [descriptor.name, descriptor.description, t]);
 
+  // A parameter belongs to the tool above it, so its name is a step down from the
+  // tool's own 14px/600: the same row anatomy, one size smaller.
+  const heading = <span className="text-xs">{label}</span>;
+
   const descriptorValue = value ?? descriptor.defaultValue ?? '';
 
   // Model selector: backed by the catalog, not static options
@@ -305,7 +312,7 @@ export function ToolParameterField({
     ];
     return (
       <SettingsRow
-        label={label}
+        label={heading}
         hint={description}
         htmlFor={`${fieldId}-model`}
         layout="field"
@@ -329,7 +336,7 @@ export function ToolParameterField({
       // The autosave makes this an immediate setting, so it is a switch. The
       // padding is the card's own: the row sits inside a tool's row.
       return (
-        <SettingsRow as="label" label={label} hint={description} className="p-0">
+        <SettingsRow as="label" label={heading} hint={description} className="p-0">
           <ToggleSwitch
             checked={Boolean(descriptorValue)}
             onChange={(e) => onChange(e.target.checked)}
@@ -342,7 +349,12 @@ export function ToolParameterField({
 
     case 'number': {
       return (
-        <SettingsRow label={label} hint={description} htmlFor={`${fieldId}-number`} className="p-0">
+        <SettingsRow
+          label={heading}
+          hint={description}
+          htmlFor={`${fieldId}-number`}
+          className="p-0"
+        >
           <Input
             id={`${fieldId}-number`}
             type="number"
@@ -362,7 +374,7 @@ export function ToolParameterField({
       const options = descriptor.options ?? [];
       return (
         <SettingsRow
-          label={label}
+          label={heading}
           hint={description}
           htmlFor={`${fieldId}-select`}
           layout="field"
@@ -386,7 +398,7 @@ export function ToolParameterField({
         ? descriptorValue.join('\n')
         : toSafeString(descriptorValue);
       return (
-        <SettingsField label={label} htmlFor={`${fieldId}-list`} hint={description}>
+        <SettingsField label={heading} htmlFor={`${fieldId}-list`} hint={description}>
           <Textarea
             id={`${fieldId}-list`}
             value={listValue}
@@ -406,7 +418,7 @@ export function ToolParameterField({
 
     case 'path_list': {
       return (
-        <SettingsField label={label}>
+        <SettingsField label={heading}>
           <PathListField
             value={descriptorValue}
             onChange={onChange}
@@ -421,7 +433,7 @@ export function ToolParameterField({
     default: {
       return (
         <SettingsRow
-          label={label}
+          label={heading}
           hint={description}
           htmlFor={`${fieldId}-text`}
           layout="field"

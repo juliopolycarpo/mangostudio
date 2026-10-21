@@ -9,21 +9,20 @@
 
 import type { ContainerDetection, ContainerEngine } from '@mangostudio/shared/environments';
 import { CONTAINER_MAX_MOUNTS } from '@mangostudio/shared/environments';
-import { Plus, X } from 'lucide-react';
+import { Container, Plus, X } from 'lucide-react';
+import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
-import { cn } from '@/lib/utils';
 import {
   type ContainerFormError,
   type ContainerFormFields,
   type ContainerMountIssue,
   emptyContainerMount,
 } from '../container-form';
-import { choiceClass } from './choice-class';
 
 const ENGINES: readonly ContainerEngine[] = ['docker', 'podman'];
 
@@ -83,27 +82,26 @@ export function ContainerConfigFields({
 
       <div className="space-y-1">
         <p className="text-sm font-medium text-fg">{labels.engineLabel}</p>
-        <div className="flex gap-2">
+        <div role="radiogroup" aria-label={labels.engineLabel} className="grid grid-cols-2 gap-2">
           {ENGINES.map((engine) => {
             const status = detection?.engines.find((entry) => entry.engine === engine);
             const unavailable = status !== undefined && !status.available;
             return (
-              <button
+              <PickOneRow
                 key={engine}
-                type="button"
-                aria-pressed={form.engine === engine}
-                onClick={() => onChange({ engine })}
-                className={cn('flex-1', choiceClass(form.engine === engine))}
-              >
-                <span>{labels.engine[engine]}</span>
-                <span className="mt-0.5 block text-xs font-normal text-fg-muted">
-                  {status?.available
+                name={`${idPrefix}-engine`}
+                checked={form.engine === engine}
+                onSelect={() => onChange({ engine })}
+                icon={<Container size={ICON_MD} />}
+                title={labels.engine[engine]}
+                description={
+                  status?.available
                     ? (status.version ?? labels.engineReady)
                     : unavailable
                       ? labels.engineUnavailable
-                      : ''}
-                </span>
-              </button>
+                      : undefined
+                }
+              />
             );
           })}
         </div>

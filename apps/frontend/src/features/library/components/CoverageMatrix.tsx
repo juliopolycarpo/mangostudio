@@ -308,7 +308,7 @@ function ResourceRow({
           params={{ resourceKey: resource.key }}
           search={libraryEnvironmentSearch(environmentId)}
           aria-label={formatMessage(l.matrix.openDetail, { resource: resource.ref.slug })}
-          className="block truncate font-medium text-fg hover:underline"
+          className="block break-words font-medium text-fg hover:underline"
         >
           {resource.ref.slug}
         </Link>

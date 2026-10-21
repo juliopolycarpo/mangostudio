@@ -926,6 +926,32 @@ describe('GitPanel', () => {
     expect(hooks.gitPush).not.toHaveBeenCalled();
   });
 
+  // The counter sits on the title field's trailing edge and only near the
+  // limit; a row of its own under an empty field cost the file list 20px.
+  it('shows the title length only once it nears the limit', async () => {
+    const user = userEvent.setup();
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    });
+
+    render(<Panel />);
+    const title = screen.getByRole('textbox', { name: 'Commit title' });
+
+    await user.type(title, 'Short');
+    expect(screen.queryByText('5/72')).not.toBeInTheDocument();
+
+    await user.clear(title);
+    await user.type(title, 'x'.repeat(50));
+    expect(screen.getByText('50/72')).toBeInTheDocument();
+  });
+
   it('commits with Ctrl+Enter from the message inputs', async () => {
     const user = userEvent.setup();
     hooks.commit.mockResolvedValue({ hash: 'abcdef1234567890', subject: 'Ship Git writes' });

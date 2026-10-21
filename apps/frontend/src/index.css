@@ -89,6 +89,13 @@
   /* The veil behind a dialog or the mobile sidebar. A flat tint, never a blur. */
   --color-scrim: #0000008c;
 
+  /* The pair for text laid over a picture. Unlike every colour above it is the
+   * same in both themes: a photograph is not themed, so the veil that makes
+   * words legible on it cannot be either. 70% black holds 4.5:1 for white text
+   * over a pure-white pixel (about 8.5:1), so it does not depend on the image. */
+  --color-scrim-media: #000000b3;
+  --color-on-scrim-media: #ffffff;
+
   /* Harness identity (runner dots, composer frame, badges). */
   --color-agent-mango: #f5a623;
   --color-agent-claude: #e0836a;
@@ -259,6 +266,10 @@
 
   --color-scrim: #1e1b1652;
 
+  /* Not themed: see the dark block. Restated so the light block lists every token. */
+  --color-scrim-media: #000000b3;
+  --color-on-scrim-media: #ffffff;
+
   --color-agent-mango: #a86400;
   --color-agent-claude: #b9553a;
   --color-agent-codex: #1f7a99;
@@ -379,8 +390,12 @@ body {
     border-radius: 9999px;
     background: var(--color-accent);
     /* Rings the thumb against the track it sits on, so the handle keeps an
-       edge at both ends of the travel where it overlaps the track's own. */
+       edge at both ends of the travel where it overlaps the track's own. The
+       outer hairline is the control's own stroke: the accent alone is under 3:1
+       on a light surface, and the thumb is the only mark of where the value
+       sits, so its edge has to clear 3:1 by itself. */
     border: 2px solid var(--color-surface);
+    box-shadow: 0 0 0 1px var(--color-stroke-strong);
   }
 
   .range-input::-moz-range-thumb {
@@ -390,6 +405,7 @@ body {
     border-radius: 9999px;
     background: var(--color-accent);
     border: 2px solid var(--color-surface);
+    box-shadow: 0 0 0 1px var(--color-stroke-strong);
   }
 
   .range-input:not(:disabled):hover::-webkit-slider-thumb {
@@ -519,11 +535,19 @@ body {
    * bullet nobody typed. `:has(~ …)` picks the last *non-empty* sibling rather
    * than `:last-child`, so a component that renders an empty wrapper does not
    * swallow the separator before it.
+   *
+   * From `sm` up only. A phone wraps the strip too, and a trailing `·` left at
+   * the end of a line with the next chip starting the one below reads as a
+   * stray bullet; each chip there is a 44px target and separates itself. The
+   * phone rule is the absence of this one rather than a second rule undoing
+   * it: this selector outranks any plain `content: none` written after it.
    */
-  .composer-chip-row > *:not(:empty, .sr-only):has(~ *:not(:empty, .sr-only))::after {
-    content: "·";
-    margin-inline-start: 0.25rem;
-    color: var(--color-fg-subtle);
+  @media (width >= 40rem) {
+    .composer-chip-row > *:not(:empty, .sr-only):has(~ *:not(:empty, .sr-only))::after {
+      content: "·";
+      margin-inline-start: 0.25rem;
+      color: var(--color-fg-subtle);
+    }
   }
 
   /*
@@ -718,8 +742,8 @@ body {
 
 .copy-code-btn {
   position: absolute;
-  top: 0.5em;
-  right: 0.5em;
+  top: 0.5rem;
+  right: 0.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -847,9 +871,18 @@ pre:hover .copy-code-btn {
   padding-block: var(--timeline-pad);
 }
 
-.chat-timeline-item--block {
+.chat-timeline-item--block,
+.chat-timeline-item--card {
   --timeline-pad: var(--timeline-block-gap);
   --timeline-dot-top: calc(var(--timeline-pad) + 0.6875rem);
+}
+
+/* A bordered card (question, to-do list, approval, error and notice callouts).
+ * Its first line sits one card padding below the item's top edge, so the node
+ * hangs from there — the padding plus half a line of the heading — instead of
+ * from the corner a bare block's first line would be at. */
+.chat-timeline-item--card {
+  --timeline-dot-top: calc(var(--timeline-pad) + 1.5rem);
 }
 
 /* Rail segment. Clipped to the dot on the outermost items so the line starts

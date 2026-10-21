@@ -37,6 +37,7 @@ import { SettingsSliderRow } from '@/components/settings/SettingsSliderRow';
 import { SettingToggle } from '@/components/settings/SettingToggle';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Chip } from '@/components/ui/Chip';
 import { FIELD_CLASS, Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { RerunSetupCard } from '@/features/onboarding/RerunSetupCard';
@@ -421,8 +422,8 @@ export function GeneralSettings({
 
 /**
  * A width the user sets by dragging an edge elsewhere, shown here as a value with
- * its way back. The reset slot keeps its place when the width is already the
- * default, so the value does not slide sideways when it stops being.
+ * its way back. The value is last and fixed-width, so it stays flush with the
+ * control edge; Reset grows in to its left only once the width is not the default.
  */
 function WidthRow({
   width,
@@ -445,18 +446,13 @@ function WidthRow({
       hint={workspace.widthDefaultHint.replace('{width}', String(defaultWidth))}
     >
       <div className="flex items-center gap-3">
-        <span className="font-mono text-xs text-fg-muted tabular-nums">{width}px</span>
-        <Button
-          type="button"
-          variant="subtle"
-          size="sm"
-          disabled={isDefault}
-          onClick={onReset}
-          className={cn(isDefault && 'invisible')}
-        >
-          <RotateCcw size={ICON_SM} />
-          {resetLabel}
-        </Button>
+        {isDefault ? null : (
+          <Button type="button" variant="subtle" size="sm" onClick={onReset}>
+            <RotateCcw size={ICON_SM} />
+            {resetLabel}
+          </Button>
+        )}
+        <Chip className="tabular-nums">{width}px</Chip>
       </div>
     </SettingsRow>
   );

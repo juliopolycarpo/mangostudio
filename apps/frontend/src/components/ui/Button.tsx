@@ -39,10 +39,13 @@ const variantStyles: Record<ButtonVariant, string> = {
   primary: `bg-accent text-on-accent not-disabled:hover:bg-accent-hover not-disabled:active:bg-accent-pressed ${DISABLED_TILE}`,
   secondary: `border border-stroke bg-control text-fg not-disabled:hover:bg-control-hover not-disabled:active:bg-control-pressed ${DISABLED_TILE}`,
   subtle: `text-fg not-disabled:hover:bg-fill-hover not-disabled:active:bg-fill-pressed ${DISABLED_TEXT}`,
-  // A destructive action that is not the final confirmation — "Remove" on a row,
-  // "Revoke" in a list. Quiet until hovered. A call site that sets its own
-  // `text-danger` is still greyed when disabled: the selector above outranks it.
-  'subtle-danger': `text-danger not-disabled:hover:bg-danger-subtle not-disabled:active:bg-danger-subtle ${DISABLED_TEXT}`,
+  // A destructive action that is not the final confirmation — "Remove" on a
+  // row, "Revoke" in a list. `danger` text at rest, so the verb reads as
+  // destructive before anyone reaches for it, and a `danger-subtle` fill once
+  // the pointer, the keyboard or a press arrives. Focus is `focus-visible`, not
+  // `focus`: a mouse click leaves a button focused, and the row would stay
+  // tinted after it. A disabled one is greyed: the selector above outranks it.
+  'subtle-danger': `text-danger not-disabled:hover:bg-danger-subtle not-disabled:focus-visible:bg-danger-subtle not-disabled:active:bg-danger-subtle ${DISABLED_TEXT}`,
   // Confirming something that deletes a user's files should not look like
   // confirming anything else.
   danger: `bg-danger-solid text-on-danger not-disabled:hover:brightness-110 ${DISABLED_TILE}`,

@@ -122,7 +122,7 @@ export function BackupList() {
 
   return (
     <div className="space-y-4" data-testid="backup-list">
-      <div className="space-y-1">
+      <div className="space-y-2">
         {/* Backups span every kind, so they are no tab of the strip above; this
             is the way back to where the sets came from. */}
         <Link
@@ -135,8 +135,14 @@ export function BackupList() {
         </Link>
         <h2 className="font-semibold text-base text-fg">{l.backups.title}</h2>
         <p className="text-fg-muted text-sm">{l.backups.description}</p>
-        <BackupSummary usage={usage} perMachine />
       </div>
+
+      {/* What the sets cost and the rule that trims them is a note in its own
+          right: stacked under the description at 4px it read as a fourth line of
+          the same block, and the page has two text levels, not three. */}
+      <Callout tone="neutral" data-testid="backup-usage-note">
+        <BackupSummary usage={usage} perMachine className="text-sm" />
+      </Callout>
 
       {usage.unreachableEnvironmentIds.length > 0 && (
         <Callout
@@ -285,11 +291,11 @@ function BackupRow({
     >
       {/*
         Key and value are two elements, not one run of words: "Origin Apply"
-        read as a phrase when only a gap divided the pairs. The key is quiet, the
-        value is the text, and a `·` after every pair but the last says where one
-        ends.
+        read as a phrase when only a gap divided the pairs. The key is a quiet
+        12px label with its colon, the value the 14px text, so the size step
+        itself says where one pair ends and the next begins.
       */}
-      <dl className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+      <dl className="flex flex-wrap gap-x-5 gap-y-1">
         <BackupFact label={l.backups.columnCreated} testId="backup-created">
           {formatRelativeTime(set.createdAtMs, locale)}
         </BackupFact>
@@ -443,7 +449,7 @@ function BackupRow({
   );
 }
 
-/** One `key value` pair of a backup row; the `·` between pairs is drawn by the pair itself. */
+/** One `key: value` pair of a backup row: a 12px label, then the 14px value. */
 function BackupFact({
   label,
   testId,
@@ -454,9 +460,9 @@ function BackupFact({
   readonly children: ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 gap-1.5 not-last:after:text-fg-subtle not-last:after:content-['·']">
-      <dt className="shrink-0 text-fg-subtle after:content-[':']">{label}</dt>
-      <dd className="min-w-0 text-fg" data-testid={testId}>
+    <div className="flex min-w-0 items-baseline gap-1.5">
+      <dt className="shrink-0 text-fg-subtle text-xs after:content-[':']">{label}</dt>
+      <dd className="min-w-0 text-fg text-sm" data-testid={testId}>
         {children}
       </dd>
     </div>

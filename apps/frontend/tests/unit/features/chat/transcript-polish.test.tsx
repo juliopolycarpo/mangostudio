@@ -174,6 +174,20 @@ describe('a tool row on a phone', () => {
     );
   });
 
+  it('drops "+N more" below sm and keeps the outcome without a leading separator', () => {
+    render(
+      <TimelineRow expanded={false} count="+2 more" summary="3 files">
+        Read
+      </TimelineRow>
+    );
+
+    expect(screen.getByText('+2 more').parentElement?.className).toContain('max-sm:hidden');
+    const outcome = screen.getByText('3 files').parentElement as HTMLElement;
+    expect(outcome.className).not.toContain('max-sm:hidden');
+    // Nothing visible precedes the outcome on a phone, so its `·` goes too.
+    expect(within(outcome).getByText('·').className).toContain('max-sm:hidden');
+  });
+
   it('carries "+N more" in the right-hand cluster of a group, not as a pill after the argument', () => {
     render(
       <ToolCallGroupBlock

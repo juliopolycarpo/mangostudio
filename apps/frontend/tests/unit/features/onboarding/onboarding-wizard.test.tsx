@@ -134,7 +134,7 @@ describe('OnboardingWizard', () => {
     render(<OnboardingWizard onDone={() => undefined} />);
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
         /runs coding agents on your own machine/i
       )
     );
@@ -189,7 +189,7 @@ describe('OnboardingWizard', () => {
     // Folder is satisfied — the environment exists and a path is stored — so
     // the toolchain is the first real question left.
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/toolchain/i)
     );
   });
 
@@ -237,7 +237,7 @@ describe('OnboardingWizard', () => {
     await userEvent.click(screen.getByTestId('onboarding-step-toolchain'));
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/toolchain/i)
     );
   });
 
@@ -315,10 +315,14 @@ describe('OnboardingWizard', () => {
 
     const row = await screen.findByTestId('onboarding-runner-codex');
     expect(row).toBeDisabled();
-    // No opacity anywhere: the status line is the one thing worth reading here.
+    // The row is not faded, and its name stays `fg`: the row the person has to
+    // act on must not read as switched off. Only the dot is dimmed, and the
+    // status line is the one thing worth reading here.
     expect(row.className).not.toContain('opacity');
+    expect(within(row).getByText('Codex')).toHaveClass('text-fg');
+    expect(row.querySelector('[data-tone]')).toHaveClass('opacity-40');
     const reason = within(row).getByText(en.onboarding.agents.signedOut);
-    expect(reason).toHaveClass('text-fg-subtle');
+    expect(reason).toHaveClass('text-fg-muted');
     expect(reason).not.toHaveClass('truncate');
   });
 
@@ -374,9 +378,13 @@ describe('OnboardingWizard', () => {
     const command = screen.getByText('claude auth login');
     expect(claude.closest('li')).toContainElement(command);
     expect(codex.closest('li')).not.toContainElement(command);
+    // The row names the agent, so the hint does not repeat it.
     expect(
-      screen.getByText(/^Claude Code: sign in from a terminal/, { exact: false })
+      within(claude.closest('li') as HTMLElement).getByText(/^Sign in from a terminal/)
     ).toBeInTheDocument();
+    expect(
+      within(codex.closest('li') as HTMLElement).queryByText(/sign in from a terminal/i)
+    ).toBeNull();
   });
 
   it('refuses a second skip while the first write is still open', async () => {
@@ -596,13 +604,13 @@ describe('OnboardingWizard', () => {
     });
     render(<OnboardingWizard onDone={() => undefined} />);
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/folder/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/folder/i)
     );
 
     await userEvent.click(screen.getByTestId('onboarding-skip-step'));
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/toolchain/i)
     );
     const put = scenario.fetchMock.mock.calls.find(
       (call) => String(call[1]?.method).toUpperCase() === 'PUT'
@@ -647,14 +655,14 @@ describe('OnboardingWizard', () => {
     render(<OnboardingWizard onDone={() => undefined} />);
     // Resume lands on the toolchain, the first step the machine cannot satisfy.
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/toolchain/i)
     );
     expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument();
 
     // The folder is done: the person can look at it, and Continue is the way on.
     await userEvent.click(screen.getByTestId('onboarding-step-folder'));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/folder/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/folder/i)
     );
     expect(screen.queryByTestId('onboarding-skip-step')).not.toBeInTheDocument();
     expect(screen.getByTestId('onboarding-continue')).toBeEnabled();
@@ -670,8 +678,10 @@ describe('OnboardingWizard', () => {
     expect(screen.getByTestId('onboarding-skip-all').parentElement).toBe(
       screen.getByTestId('logout-button').parentElement
     );
-    // One title in the header: the step's own headline says the rest.
-    expect(within(header).getAllByRole('heading')).toHaveLength(1);
+    // The header is a wordmark, not a heading: the step's own headline is the
+    // page's one `h1`.
+    expect(within(header).queryByRole('heading')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
   it('puts a way back to the folder step on the notice that says there is none', async () => {
@@ -692,7 +702,7 @@ describe('OnboardingWizard', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/folder/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/folder/i)
     );
   });
 

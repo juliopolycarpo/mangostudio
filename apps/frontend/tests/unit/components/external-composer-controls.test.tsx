@@ -136,9 +136,9 @@ describe('ExternalComposerControls effort picker', () => {
     const { props } = renderControls({ descriptor: descriptor(CODEX_MODELS) });
 
     const picker = screen.getByRole('combobox', { name: 'Reasoning effort' });
-    expect(picker).toHaveTextContent('effort:medium');
+    expect(picker).toHaveTextContent('effort:Medium');
     await user.click(picker);
-    await user.click(screen.getByRole('option', { name: 'high' }));
+    await user.click(screen.getByRole('option', { name: 'High' }));
 
     expect(props.onEffortChange).toHaveBeenCalledWith('high');
   });
@@ -147,6 +147,43 @@ describe('ExternalComposerControls effort picker', () => {
     renderControls({ descriptor: descriptor(CODEX_MODELS), model: 'gpt-5' });
 
     expect(screen.queryByRole('combobox', { name: 'Reasoning effort' })).toBeNull();
+  });
+});
+
+/**
+ * A vendor that sends bare ids still reads in the words MangoStudio's own menus
+ * use, so the two runners do not disagree about what `xhigh` or `opus` is called.
+ */
+describe('ExternalComposerControls labels without a displayName', () => {
+  const BARE_MODELS: ExternalAgentDescriptor['models'] = [
+    {
+      id: 'opus',
+      isDefault: true,
+      supportedReasoningEfforts: [{ id: 'low' }, { id: 'xhigh' }, { id: 'max' }],
+    },
+    { id: 'sonnet' },
+    { id: 'claude-3-7-sonnet' },
+  ];
+
+  it('sentence-cases model ids that are plain words and leaves versioned ids alone', async () => {
+    const user = userEvent.setup();
+    renderControls({ descriptor: descriptor(BARE_MODELS) });
+
+    const picker = screen.getByRole('combobox', { name: 'Agent model' });
+    expect(picker).toHaveTextContent('model:Opus');
+    await user.click(picker);
+    expect(screen.getByRole('option', { name: 'Sonnet' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'claude-3-7-sonnet' })).toBeInTheDocument();
+  });
+
+  it("names efforts the way MangoStudio's own effort menu does", async () => {
+    const user = userEvent.setup();
+    renderControls({ descriptor: descriptor(BARE_MODELS) });
+
+    await user.click(screen.getByRole('combobox', { name: 'Reasoning effort' }));
+    expect(screen.getByRole('option', { name: 'Low' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Extra high' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Maximum' })).toBeInTheDocument();
   });
 });
 

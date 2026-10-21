@@ -47,12 +47,13 @@ export function ExternalAgentSettingsPage() {
   };
 
   return (
-    <SettingsPage title={t.settings.tabs.externalAgents}>
-      {/* Withdrawing is only explained once there is something to withdraw. */}
-      <SettingsSection
-        title={labels.manageTitle}
-        description={disclosures.records.length > 0 ? labels.revokeHint : labels.manageDescription}
-      >
+    // Withdrawing is only explained once there is something to withdraw. The
+    // sentence is the page's description: one list needs no heading of its own.
+    <SettingsPage
+      title={t.settings.tabs.externalAgents}
+      description={disclosures.records.length > 0 ? labels.revokeHint : labels.manageDescription}
+    >
+      <SettingsSection>
         {/*
           Loading is its own state rather than an empty list. "You have not
           acknowledged any external agent yet" is a claim about this account, and

@@ -11,15 +11,15 @@
  */
 
 import type { CreateEnvironmentBody, Environment } from '@mangostudio/shared/environments';
-import { Check } from 'lucide-react';
-import { useId, useState } from 'react';
+import { Cable, KeyRound } from 'lucide-react';
+import { type ReactNode, useId, useState } from 'react';
+import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
-import { cn, resolveApiErrorMessage } from '@/lib/utils';
-import { choiceClass } from '../components/choice-class';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { useCreateEnvironmentMutation, useRuntimePairingQuery } from '../queries';
 import type { SshFormFields } from '../ssh-form';
 import { sshFormToConfig } from '../ssh-form';
@@ -131,9 +131,13 @@ export function EndStateStep({
     }
   };
 
-  const choices: readonly { readonly value: OnboardingEndState; readonly label: string }[] = [
-    { value: 'ssh', label: labels.endStateSsh },
-    { value: 'paired', label: labels.endStatePaired },
+  const choices: readonly {
+    readonly value: OnboardingEndState;
+    readonly label: string;
+    readonly icon: ReactNode;
+  }[] = [
+    { value: 'ssh', label: labels.endStateSsh, icon: <KeyRound size={ICON_MD} /> },
+    { value: 'paired', label: labels.endStatePaired, icon: <Cable size={ICON_MD} /> },
   ];
 
   return (
@@ -141,31 +145,19 @@ export function EndStateStep({
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium text-fg">{labels.endStateLabel}</legend>
         {/* Real radios rather than styled buttons: this is one choice out of
-            two, and arrow-key navigation and the announced group come free.
-            The input is hidden, so the tile wears the focus outline for it. */}
+            two, and arrow-key navigation and the announced group come free. The
+            current row wears the navigation's mark, as every pick-one list does. */}
         <div className="grid gap-2">
           {choices.map((choice) => (
-            <label
+            <PickOneRow
               key={choice.value}
-              className={cn(
-                choiceClass(endState === choice.value),
-                'flex cursor-pointer items-center justify-between gap-2 has-disabled:cursor-default has-disabled:opacity-50 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus'
-              )}
-            >
-              <input
-                type="radio"
-                name={groupId}
-                value={choice.value}
-                checked={endState === choice.value}
-                disabled={Boolean(existing)}
-                onChange={() => onEndState(choice.value)}
-                className="sr-only"
-              />
-              {choice.label}
-              {endState === choice.value ? (
-                <Check size={ICON_MD} className="shrink-0 text-accent-fg" aria-hidden="true" />
-              ) : null}
-            </label>
+              name={groupId}
+              checked={endState === choice.value}
+              disabled={Boolean(existing)}
+              onSelect={() => onEndState(choice.value)}
+              icon={choice.icon}
+              title={choice.label}
+            />
           ))}
         </div>
         <p className="text-xs text-fg-muted">

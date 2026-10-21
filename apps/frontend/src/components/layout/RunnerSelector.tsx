@@ -21,7 +21,10 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
-import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentDescriptor,
+  ExternalAgentUnavailableReason,
+} from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Check, ChevronDown, CornerUpRight, History } from 'lucide-react';
 import { useState } from 'react';
@@ -41,6 +44,40 @@ import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
+/**
+ * How loud the trigger's dot is for each reason an agent cannot take a turn,
+ * by the product's severity ladder: absent and optional is neutral, a thing the
+ * person can fix is warning, and error is for a fault. A healthy account that
+ * simply has not installed Codex must not open on a red dot in the header.
+ *
+ * Exhaustive on purpose: a reason added to the contract fails the build here
+ * instead of defaulting to a colour nobody chose.
+ */
+const UNAVAILABLE_TONE: Record<ExternalAgentUnavailableReason, StatusDotTone> = {
+  'not-installed': 'neutral',
+  'runtime-unsupported': 'neutral',
+  'signed-out': 'warning',
+  'disclosure-required': 'warning',
+  'version-unsupported': 'warning',
+  'installed-but-unusable': 'warning',
+  'runtime-denied': 'warning',
+  'environment-unreachable': 'error',
+  'isolation-unproven': 'error',
+};
+
+/**
+ * The reason a descriptor is unusable when it names none: discovery reports an
+ * agent that is not there, or is signed out, without a typed `unavailableReason`.
+ */
+function impliedUnavailableReason(
+  descriptor: ExternalAgentDescriptor
+): ExternalAgentUnavailableReason | undefined {
+  if (descriptor.unavailableReason) return descriptor.unavailableReason;
+  if (!descriptor.installed) return 'not-installed';
+  if (descriptor.authState === 'signed-out') return 'signed-out';
+  return undefined;
+}
 
 export interface RunnerSelectorProps {
   runner: ChatRunnerConfiguration;
@@ -138,13 +175,27 @@ export function RunnerSelector({
   // The unanswered-discovery arm comes first because a missing descriptor and a
   // refused one are indistinguishable here. Painting the refusal while the query
   // is still in flight told every reader "pick another agent" on every mount.
+  //
+  // An unusable agent grades by *why* (`UNAVAILABLE_TONE`) and says why, in the
+  // selector's own sentence for that reason. Only an agent the environment does
+  // not know at all, or one that names no reason, stays an error with the generic
+  // line: nothing says it is merely absent or fixable.
+  const unavailableReason = activeDescriptor
+    ? impliedUnavailableReason(activeDescriptor)
+    : undefined;
+  const unusable: { tone: StatusDotTone; text: string } = unavailableReason
+    ? {
+        tone: UNAVAILABLE_TONE[unavailableReason],
+        text: externalUnavailableText(unavailableReason, t, activeDescriptor?.requiredVersion),
+      }
+    : { tone: 'error', text: labels.unavailableHere };
   const availability: { tone: StatusDotTone; text: string | null } =
     runner.kind === 'mangostudio'
       ? { tone: 'accent', text: null }
       : !activeDescriptor && isExternalAgentListLoading
         ? { tone: 'neutral', text: labels.loading }
         : !activeUsable
-          ? { tone: 'error', text: labels.unavailableHere }
+          ? unusable
           : activeDescriptor?.discoveryState === 'undetermined'
             ? { tone: 'warning', text: labels.discoveryUndetermined }
             : activeDescriptor?.authState === 'signed-in'
@@ -450,7 +501,7 @@ function ExternalRow({
       {/* The vendor's own login command, with a copy button: the user has to run
           it on *that* machine, which MangoStudio cannot do for them. */}
       {signedOut && descriptor.loginCommand ? (
-        <SignInCommand command={descriptor.loginCommand} className="mb-2 px-2" />
+        <SignInCommand command={descriptor.loginCommand} className="mx-2 mb-2" />
       ) : null}
     </div>
   );

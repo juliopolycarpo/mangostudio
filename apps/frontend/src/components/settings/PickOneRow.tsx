@@ -18,6 +18,12 @@ interface PickOneRowProps {
    * list inside a card or a dialog, where the rows are `control` fields.
    */
   readonly onCanvas?: boolean;
+  /**
+   * A choice that is listed but cannot be taken (a distribution another
+   * environment already owns). It stays readable, loses its hover and cannot be
+   * focused, and the cursor says so.
+   */
+  readonly disabled?: boolean;
 }
 
 /**
@@ -44,20 +50,30 @@ export function PickOneRow({
   title,
   description,
   onCanvas = false,
+  disabled = false,
 }: PickOneRowProps) {
   return (
     <label
       className={cn(
-        'relative flex w-full cursor-pointer items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors',
+        'relative flex w-full items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors',
+        !disabled && 'cursor-pointer',
         'has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus',
         checked
           ? cn('bg-fill-selected', SELECTION_BAR)
           : onCanvas
-            ? 'bg-surface hover:bg-fill-hover'
-            : 'bg-control hover:bg-control-hover'
+            ? cn('bg-surface', !disabled && 'hover:bg-fill-hover')
+            : cn('bg-control', !disabled && 'hover:bg-control-hover'),
+        disabled && 'cursor-not-allowed opacity-50'
       )}
     >
-      <input type="radio" name={name} checked={checked} onChange={onSelect} className="sr-only" />
+      <input
+        type="radio"
+        name={name}
+        checked={checked}
+        disabled={disabled}
+        onChange={onSelect}
+        className="sr-only"
+      />
       <span className="shrink-0 text-fg-muted" aria-hidden="true">
         {icon}
       </span>

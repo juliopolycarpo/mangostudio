@@ -4,6 +4,7 @@ import { CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
 import {
   type CSSProperties,
   type DragEvent,
+  type RefCallback,
   useCallback,
   useEffect,
   useId,
@@ -98,6 +99,13 @@ interface Props extends Partial<ForwardedChipRowProps> {
   selectedAgentId?: string;
   /** Who runs the turn. Decides which of the two control sets renders at all. */
   runner?: ChatRunnerConfiguration;
+  /**
+   * Receives the empty slot at the end of the tool row. The workspace rail
+   * draws its drawer trigger into it below `lg`, so the control that opens the
+   * rail sits with the composer's other controls instead of floating over the
+   * transcript.
+   */
+  railTriggerSlotRef?: RefCallback<HTMLElement>;
   externalDescriptor?: ExternalAgentDescriptor;
 }
 
@@ -114,6 +122,7 @@ export function InputBar({
   selectedAgentId = 'default',
   runner,
   externalDescriptor,
+  railTriggerSlotRef,
   ...chipRow
 }: Props) {
   const { t } = useI18n();
@@ -129,6 +138,14 @@ export function InputBar({
   // The model moved here from the header, and it renders per runner: MangoStudio
   // always has a catalog, an external agent only when its vendor advertised one.
   const isExternalRunner = runner?.kind === 'external';
+
+  // The image toggle steers MangoStudio's own image tool, which a vendor CLI's
+  // turn never runs, so it is not drawn for an external runner. A toggle left on
+  // in the chat the person came from would otherwise ride into this one's first
+  // send, invisibly.
+  useEffect(() => {
+    if (isExternalRunner && imageToolIntent) onImageToolIntentChange?.(false);
+  }, [isExternalRunner, imageToolIntent, onImageToolIntentChange]);
 
   const handleAttachments = useCallback((attachments: ChatAttachment[]) => {
     if (attachments.length === 0) return;
@@ -582,20 +599,29 @@ export function InputBar({
                 onInsertPrompt={handleInsertPrompt}
                 onAttachments={handleAttachments}
               />
-              <CapabilityInspector
-                chatId={chatId}
-                disabled={disabled}
-                activeModel={activeModel}
-                selectedAgentId={selectedAgentId}
-                models={chipRow.activeModels}
-              />
-              {onImageToolIntentChange && (
+              {/* MangoStudio's own tool settings, and the image tool they gate, do
+                  not apply to a turn a vendor CLI runs (the line under the frame
+                  says so), so a runner that is not MangoStudio is not offered
+                  them. Prompts, resources and attachments from MCP are text
+                  and files for the prompt, which a vendor turn takes as well. */}
+              {!isExternalRunner && (
+                <CapabilityInspector
+                  chatId={chatId}
+                  disabled={disabled}
+                  activeModel={activeModel}
+                  selectedAgentId={selectedAgentId}
+                />
+              )}
+              {!isExternalRunner && onImageToolIntentChange && (
                 <ImageIntentToggle
                   active={imageToolIntent}
                   disabled={disabled}
                   onChange={onImageToolIntentChange}
                 />
               )}
+              {/* Empty until the workspace rail draws its trigger here; `contents`
+                  keeps an empty slot from taking a gap. */}
+              <span ref={railTriggerSlotRef} className="contents" />
             </div>
 
             <div className="flex shrink-0 items-center gap-2">

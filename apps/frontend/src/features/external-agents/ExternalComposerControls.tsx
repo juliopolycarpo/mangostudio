@@ -27,6 +27,7 @@ import type {
   ExternalApprovalRouting,
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
+import type { Messages } from '@mangostudio/shared/i18n';
 import { useEffect, useRef } from 'react';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { PermissionSelector } from '@/features/chat/components/PermissionSelector';
@@ -51,6 +52,47 @@ export interface ExternalComposerControlsProps {
     level: ExternalPermissionLevel;
     routing: ExternalApprovalRouting;
   }) => void;
+}
+
+/** The efforts MangoStudio's own menu already names, so both runners read the same words. */
+const KNOWN_EFFORT_LABELS = {
+  low: 'effortLow',
+  medium: 'effortMedium',
+  high: 'effortHigh',
+  xhigh: 'effortXHigh',
+  max: 'effortMax',
+} as const satisfies Record<string, keyof Messages['thinking']>;
+
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * What a vendor's model is called in the menu.
+ *
+ * A name the vendor gave wins. A missing one (or one that is just the id again)
+ * falls back to a sentence-case word, so `sonnet` reads `Sonnet` like the rest
+ * of the menus; a versioned id such as `gpt-5.1-codex` is an identifier, not a
+ * word, and is shown as sent.
+ */
+function modelLabel(candidate: { id: string; displayName?: string | undefined }): string {
+  if (candidate.displayName && candidate.displayName !== candidate.id) return candidate.displayName;
+  return /^[a-z]+$/.test(candidate.id) ? sentenceCase(candidate.id) : candidate.id;
+}
+
+/**
+ * What a reasoning effort is called in the menu: the vendor's name, else the
+ * words MangoStudio's own effort menu uses (`Low`, `Extra high`), else the id in
+ * sentence case.
+ */
+function effortLabel(
+  candidate: { id: string; displayName?: string | undefined },
+  t: Messages
+): string {
+  if (candidate.displayName && candidate.displayName !== candidate.id) return candidate.displayName;
+  const known = KNOWN_EFFORT_LABELS[candidate.id as keyof typeof KNOWN_EFFORT_LABELS];
+  if (known) return t.thinking[known];
+  return sentenceCase(candidate.id.replace(/[-_]+/g, ' '));
 }
 
 /** What the vendor advertised and did not mark `hidden`: the catalog the picker offers. */
@@ -95,6 +137,7 @@ export function ExternalComposerControls({
     models.find((candidate) => candidate.id === model) ??
     models.find((candidate) => candidate.isDefault);
   const efforts = selectedModel?.supportedReasoningEfforts ?? [];
+  const effortValue = effort ?? selectedModel?.defaultReasoningEffort ?? '';
 
   /**
    * A selection the refreshed catalog no longer offers is dropped, not merely
@@ -136,7 +179,7 @@ export function ExternalComposerControls({
           value={selectedModel?.id ?? ''}
           options={models.map((candidate) => ({
             value: candidate.id,
-            label: candidate.displayName ?? candidate.id,
+            label: modelLabel(candidate),
           }))}
           onChange={(next) => {
             onModelChange(next || null);
@@ -155,11 +198,14 @@ export function ExternalComposerControls({
 
       {efforts.length > 0 ? (
         <ChipSelect
-          value={effort ?? selectedModel?.defaultReasoningEffort ?? ''}
+          value={effortValue}
           options={efforts.map((candidate) => ({
             value: candidate.id,
-            label: candidate.displayName ?? candidate.id,
+            label: effortLabel(candidate, t),
           }))}
+          // A default the vendor did not list among the efforts still reads as a
+          // word rather than as its id.
+          placeholder={effortLabel({ id: effortValue }, t)}
           onChange={(next) => onEffortChange(next || null)}
           label={t.chat.input.effortLabel}
           ariaLabel={labels.model.effortLabel}

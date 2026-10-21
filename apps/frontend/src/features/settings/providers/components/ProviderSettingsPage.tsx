@@ -211,7 +211,6 @@ function ProviderSettingsEditor({
       <BackToProviders label={s.backToMenu} />
       <SettingsPage
         title={providerName}
-        description={s.perProviderSettings}
         actions={
           updateMutation.isPending ? (
             <div

@@ -348,10 +348,7 @@ describe('AddEnvironmentDialog WSL answer', () => {
 
     const list = await within(dialog).findByTestId('wsl-distribution-list');
     // The host says which distribution is default; nothing here is hardcoded.
-    expect(within(list).getByRole('button', { name: /Ubuntu-22\.04/ })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    );
+    expect(within(list).getByRole('radio', { name: /Ubuntu-22\.04/ })).toBeChecked();
     expect(within(dialog).getByRole('textbox', { name: labels.nameLabel })).toHaveValue(
       'Ubuntu-22.04'
     );
@@ -366,7 +363,7 @@ describe('AddEnvironmentDialog WSL answer', () => {
 
     await user.click(within(dialog).getByRole('radio', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
-    await user.click(within(list).getByRole('button', { name: /Debian/ }));
+    await user.click(within(list).getByRole('radio', { name: /Debian/ }));
     await user.click(within(dialog).getByRole('button', { name: labels.submit }));
 
     await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());
@@ -385,9 +382,9 @@ describe('AddEnvironmentDialog WSL answer', () => {
     await user.click(within(dialog).getByRole('radio', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
 
-    const configured = within(list).getByRole('button', { name: /docker-desktop/ });
+    const configured = within(list).getByRole('radio', { name: /docker-desktop/ });
     expect(configured).toBeDisabled();
-    expect(configured).toHaveTextContent('docker');
+    expect(configured.closest('label')).toHaveTextContent('docker');
   });
 
   it('refreshes the listing once a distribution has been claimed', async () => {
@@ -397,7 +394,7 @@ describe('AddEnvironmentDialog WSL answer', () => {
 
     await user.click(within(dialog).getByRole('radio', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
-    await user.click(within(list).getByRole('button', { name: /Debian/ }));
+    await user.click(within(list).getByRole('radio', { name: /Debian/ }));
     await user.click(within(dialog).getByRole('button', { name: labels.submit }));
 
     await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());

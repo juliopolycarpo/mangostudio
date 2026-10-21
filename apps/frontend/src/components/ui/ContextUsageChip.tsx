@@ -90,10 +90,12 @@ export function ContextUsageChip({
         // type into — and usage is the strip's last chip, so anchoring left
         // would push the panel off the right of the window.
         //
-        // Not `.dropdown-panel`: that rule is unlayered, so its 1rem radius
-        // outranks any Tailwind utility here and reads as a pill on a panel
-        // this short.
-        className="pointer-events-none invisible absolute bottom-full right-0 z-50 mb-1.5 w-max max-w-[min(22rem,80vw)] rounded-md border border-stroke bg-surface-raised px-3 py-2 opacity-0 shadow-popover transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
+        // `.dropdown-panel` is the surface (raised fill, hairline, 8px radius,
+        // popover shadow, the stacking), the same one every menu on this strip
+        // opens; what is spelt here is only where it sits and how it appears.
+        // Not `ComposerPopover`: that docks on the composer shell, and this
+        // panel belongs to its chip.
+        className="dropdown-panel pointer-events-none invisible absolute bottom-full right-0 mb-1.5 w-max max-w-[min(22rem,80vw)] px-3 py-2 opacity-0 transition-opacity group-focus-within:visible group-focus-within:opacity-100 group-hover:visible group-hover:opacity-100"
       >
         <span className="flex flex-col gap-0.5 font-mono text-micro text-fg-muted tabular-nums">
           {lines.map((line) => (

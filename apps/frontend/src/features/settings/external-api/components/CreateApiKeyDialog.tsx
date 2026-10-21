@@ -167,25 +167,21 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
         />
       </SettingsField>
 
-      <div className="space-y-1">
-        <Input
-          id="api-key-expires"
-          label={labels.expiresLabel}
-          type="number"
-          min={1}
-          max={API_KEY_EXPIRY_MAX_DAYS}
-          step={1}
-          value={expiresInDays}
-          onChange={(event) => {
-            setExpiresInDays(event.target.value);
-            if (expiresError) setExpiresError(null);
-          }}
-          error={expiresError ?? undefined}
-        />
-        <p className="text-xs text-fg-muted">
-          {formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
-        </p>
-      </div>
+      <Input
+        id="api-key-expires"
+        label={labels.expiresLabel}
+        type="number"
+        min={1}
+        max={API_KEY_EXPIRY_MAX_DAYS}
+        step={1}
+        value={expiresInDays}
+        onChange={(event) => {
+          setExpiresInDays(event.target.value);
+          if (expiresError) setExpiresError(null);
+        }}
+        error={expiresError ?? undefined}
+        hint={formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
+      />
     </Dialog>
   );
 }

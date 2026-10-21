@@ -103,3 +103,26 @@ describe('status text contrast', () => {
     }
   }
 });
+
+// Text laid over a picture. The veil cannot know what is under it, so the pair is
+// checked against the worst picture there is — a pure-white pixel — and must be
+// the same in both themes, because a photograph is not themed.
+describe('text over media', () => {
+  for (const theme of ['dark', 'light'] as const) {
+    it(`${theme} on-scrim-media clears ${FLOOR}:1 over scrim-media on a white pixel`, async () => {
+      const palette = (await themes())[theme];
+      const veiled = over(palette.get('scrim-media') ?? '', [255, 255, 255]);
+
+      expect(
+        contrast(parse(palette.get('on-scrim-media') ?? '').rgb, veiled)
+      ).toBeGreaterThanOrEqual(FLOOR);
+    });
+  }
+
+  it('is the same pair in both themes', async () => {
+    const { dark, light } = await themes();
+
+    expect(light.get('scrim-media')).toBe(dark.get('scrim-media'));
+    expect(light.get('on-scrim-media')).toBe(dark.get('on-scrim-media'));
+  });
+});

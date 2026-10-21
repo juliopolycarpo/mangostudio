@@ -220,26 +220,33 @@ function ConceptSection({ comparison }: { readonly comparison: ConceptComparison
     }
   }
 
+  // Said once per state, under the cards when there are some. A concept nothing
+  // detected anywhere has no cards, and a bare caption under its heading read as a
+  // gap beside the sections that do; the same lines sit in a card of their own.
+  const quietLines = (className: string) =>
+    [...quiet].map(([state, agents]) => (
+      <p key={state} className={className} data-testid="concept-quiet" data-state={state}>
+        {formatMessage(l.settings.undetectedLine[state], { agents: formatList(agents, locale) })}
+      </p>
+    ));
+
   return (
     <section className="space-y-3" data-testid="concept-section" data-concept={comparison.concept}>
       <h3 className="font-semibold text-base text-fg">{l.settings.concept[comparison.concept]}</h3>
-      {cards.length > 0 && (
-        <div className={CARD_GRID}>
-          {cards.map((entry) => (
-            <ConceptEntry key={entry.targetId} entry={entry} />
-          ))}
+      {cards.length > 0 ? (
+        <>
+          <div className={CARD_GRID}>
+            {cards.map((entry) => (
+              <ConceptEntry key={entry.targetId} entry={entry} />
+            ))}
+          </div>
+          {quietLines('text-fg-muted text-xs')}
+        </>
+      ) : (
+        <div className="space-y-1 rounded-md border border-stroke bg-surface p-4">
+          {quietLines('text-fg-muted text-sm')}
         </div>
       )}
-      {[...quiet].map(([state, agents]) => (
-        <p
-          key={state}
-          className="text-fg-muted text-xs"
-          data-testid="concept-quiet"
-          data-state={state}
-        >
-          {formatMessage(l.settings.undetectedLine[state], { agents: formatList(agents, locale) })}
-        </p>
-      ))}
     </section>
   );
 }

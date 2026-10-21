@@ -13,14 +13,13 @@ import type {
 } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CAPABILITY_KEYS, RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { useState } from 'react';
+import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Dialog } from '@/components/ui/Dialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { cn } from '@/lib/utils';
-import { choiceClass } from './choice-class';
 
 const PROFILES = [
   'full',
@@ -82,22 +81,19 @@ export function RuntimeConsentDialog({
         </>
       }
     >
-      <fieldset className="space-y-2">
+      {/* A disabled fieldset disables the segments inside it, so nothing moves
+          while the setup request is in flight. */}
+      <fieldset disabled={isPending} className="space-y-2 disabled:opacity-50">
         <legend className="text-sm font-medium text-fg">{labels.profileLabel}</legend>
-        <div className="flex flex-wrap gap-2">
-          {PROFILES.map((candidate) => (
-            <button
-              key={candidate}
-              type="button"
-              disabled={isPending}
-              aria-pressed={profile === candidate}
-              onClick={() => selectProfile(candidate)}
-              className={cn(choiceClass(profile === candidate), 'disabled:opacity-50')}
-            >
-              {t.environments.entities.permissions.profile[candidate]}
-            </button>
-          ))}
-        </div>
+        <SettingsSegmented
+          ariaLabel={labels.profileLabel}
+          value={profile}
+          options={PROFILES.map((candidate) => ({
+            value: candidate,
+            label: t.environments.entities.permissions.profile[candidate],
+          }))}
+          onChange={selectProfile}
+        />
       </fieldset>
 
       {profile === 'custom' ? (

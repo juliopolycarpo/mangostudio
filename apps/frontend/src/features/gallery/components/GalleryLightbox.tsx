@@ -8,6 +8,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
+import { cn } from '@/lib/utils';
 
 interface GalleryLightboxProps {
   /** The image on screen, or null for "closed" — the exit animation needs both. */
@@ -16,14 +17,23 @@ interface GalleryLightboxProps {
 }
 
 /**
- * The full image on a solid `canvas` page of its own, with its prompt, a way to
- * close it and a download link.
+ * The full image on a dark veil of its own, with its prompt, a way to close it
+ * and a download link.
  *
- * Solid, not the `scrim` a dialog sits on: that is a 55% (dark) or 32% (light)
- * veil, thin enough that the page behind an image viewer shows through at
- * two-thirds strength — on a phone the tile that was tapped reappeared above
- * and below the caption, so the screen read image, card, image. A viewer has
- * nothing to show of the page behind it.
+ * The ground is `scrim-media` laid twice, about 91% black. A single 70% veil
+ * (the `scrim` a dialog sits on is a 55% / 32% tint, thinner still) left the page
+ * behind readable: on a phone the tapped tile reappeared above and below the
+ * caption, and on a desktop the next row of tiles showed behind the buttons, so
+ * the screen still read image, card, image. `canvas` was solid and made the viewer
+ * a near-white sheet in the light theme, the wrong ground for a picture. Two
+ * layers of the one token give a ground that is nearly opaque and the same dark
+ * in both themes without a second token; it is also what the caption is read
+ * against, and white `on-scrim-media` text holds 4.5:1 over anything under it.
+ * The tile's caption bar keeps the single veil, since it sits on a picture.
+ *
+ * Both controls draw their focus ring in `on-scrim-media`: the global ring is
+ * the theme's `focus`, which in the light theme is a dark brown, and a dark ring
+ * on a dark veil is not a ring.
  *
  * Takes the selected item rather than owning it: the gallery grid and the
  * studio's recent strip both open this, and neither should have to reimplement
@@ -55,12 +65,15 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
           aria-modal="true"
           aria-label={t.gallery.lightboxLabel}
           // The overlay is the dialog rather than the panel inside it, so the
-          // close button in the caption card is part of the ring Tab cycles.
+          // close button in the caption row is part of the ring Tab cycles.
           tabIndex={-1}
           {...overlay}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas p-4 outline-none md:p-8"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-scrim-media p-4 outline-none md:p-8"
           onClick={onClose}
         >
+          {/* The second veil: it paints under the panel and takes no clicks, so
+              the backdrop click that closes the viewer reaches the root. */}
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-scrim-media" />
           <motion.div
             {...dialogPanel}
             className="relative flex max-h-full w-full max-w-5xl flex-col items-center"
@@ -72,8 +85,8 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
               className="max-h-[75vh] max-w-full rounded-lg object-contain"
               referrerPolicy="no-referrer"
             />
-            <div className="mt-4 flex w-full max-w-2xl flex-col gap-4 rounded-md border border-stroke bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="min-w-0 text-sm text-fg">{item.prompt}</p>
+            <div className="mt-4 flex w-full max-w-2xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="min-w-0 text-sm text-on-scrim-media">{item.prompt}</p>
               {/* Close first, the primary last, at natural width: the same footer
                   every dialog in the app ends in. It used to be pinned to the
                   window's corner, on top of the header's account button. */}
@@ -84,6 +97,7 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
                   size="icon"
                   aria-label={t.gallery.close}
                   title={t.gallery.close}
+                  className="focus-visible:outline-on-scrim-media"
                   onClick={onClose}
                 >
                   <X size={ICON_MD} />
@@ -93,7 +107,7 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
                   download={buildGeneratedImageFilename(t.common.downloadFilenamePrefix, item.id)}
                   target="_blank"
                   rel="noreferrer"
-                  className={buttonClassName('primary')}
+                  className={cn(buttonClassName('primary'), 'focus-visible:outline-on-scrim-media')}
                 >
                   <Download size={ICON_MD} />
                   {t.gallery.download}

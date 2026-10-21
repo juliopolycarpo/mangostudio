@@ -133,4 +133,19 @@ describe('EmptyState', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     expect(onAction).toHaveBeenCalledTimes(1);
   });
+
+  // components.md: the glyph is a step quieter than the title beside it. The
+  // title is `fg`, so a `fg-muted` icon read as the same grey as the hint.
+  it('draws a neutral icon in fg-subtle and a status icon in its status colour', () => {
+    render(
+      <>
+        <EmptyState icon={<svg data-testid="neutral-icon" />} title="Nothing here" />
+        <EmptyState icon={<svg data-testid="error-icon" />} title="Failed" tone="error" />
+      </>
+    );
+
+    expect(screen.getByTestId('neutral-icon').parentElement).toHaveClass('text-fg-subtle');
+    expect(screen.getByTestId('neutral-icon').parentElement).not.toHaveClass('text-fg-muted');
+    expect(screen.getByTestId('error-icon').parentElement).toHaveClass('text-danger');
+  });
 });

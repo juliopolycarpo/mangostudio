@@ -20,7 +20,7 @@ import { ToolIdentityMenu } from '@/features/environments/identity/ToolIdentityM
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useTestMcpServer, useUpdateMcpServer } from '../hooks/use-mcp-servers';
 import { McpServerResources } from './McpServerResources';
@@ -35,17 +35,20 @@ interface McpServerCardProps {
 interface StatusPresentation {
   readonly variant: NonNullable<ComponentProps<typeof Badge>['variant']>;
   readonly tone: StatusDotTone;
+  /** Overrides the tone's fill where the badge's colour has no dot tone of its own. */
+  readonly dotClassName?: string;
 }
 
 /**
  * Only the status badge wears a dot, so it never reads as the transport or
  * environment badge beside it. `connecting` is `info` rather than `neutral` for
  * the same reason, and it gets no pulse: the status is the last known state, not
- * work in flight.
+ * work in flight. `StatusDot` has no `info` tone, so the dot takes the badge's
+ * own colour through `dotClassName` and never reads as a second state.
  */
 const STATUS_PRESENTATION: Record<McpServerStatus, StatusPresentation> = {
   connected: { variant: 'success', tone: 'success' },
-  connecting: { variant: 'info', tone: 'neutral' },
+  connecting: { variant: 'info', tone: 'neutral', dotClassName: 'bg-info' },
   error: { variant: 'error', tone: 'error' },
   disconnected: { variant: 'neutral', tone: 'neutral' },
 };
@@ -125,7 +128,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               variant={status.variant}
               title={server.status === 'error' ? server.statusError : undefined}
             >
-              <StatusDot tone={status.tone} />
+              <StatusDot tone={status.tone} className={status.dotClassName} />
               {s.status[server.status]}
             </Badge>
             <Badge>{s.transports[server.transport]}</Badge>
@@ -151,7 +154,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
                 right edge, so a narrower word would slide this switch (and the Test
                 button before it) sideways and the switches of a list would zig-zag.
                 The slot is as wide for either word, in either language. */}
-            <div className="sm:w-32">
+            <div className="flex items-center sm:w-32">
               <Toggle
                 id={`mcp-server-enabled-${server.id}`}
                 label={server.enabled ? s.enabledLabel : s.disabledLabel}
@@ -166,16 +169,17 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               aria-label={s.editButton}
               onClick={() => onEdit(server)}
             >
-              <Pencil size={ICON_MD} />
+              <Pencil size={ICON_SM} />
             </Button>
             <ToolIdentityMenu identity={identity} defaultName={server.name} size="icon-sm" />
             <Button
               variant="subtle-danger"
               size="icon-sm"
               aria-label={s.deleteServer}
+              title={s.deleteServer}
               onClick={() => onDelete(server)}
             >
-              <Trash2 size={ICON_MD} />
+              <Trash2 size={ICON_SM} />
             </Button>
           </div>
         </div>

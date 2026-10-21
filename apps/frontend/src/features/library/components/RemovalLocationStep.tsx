@@ -141,11 +141,25 @@ function RemovalRow({
     removalKey(entry.resourceKey, location.environmentId, location.locationId)
   );
   const eliminatesGroup = eliminatesSelectedContentGroup(entry, location, draft);
+  const facts = [
+    ...(location.contentHash
+      ? [formatMessage(l.removal.version, { hash: `${hashPrefix(location.contentHash)}…` })]
+      : []),
+    ...(location.modifiedAtMs !== undefined
+      ? [
+          formatMessage(l.detail.modified, {
+            when: formatRelativeTime(location.modifiedAtMs, locale),
+          }),
+        ]
+      : []),
+    ...(location.operation === 'absent' ? [l.removal.absent] : []),
+  ];
 
   return (
     <ChoiceRow
       control="checkbox"
       bordered
+      firstLine="xs"
       row={{
         'data-testid': 'removal-row',
         'data-environment-id': location.environmentId,
@@ -167,23 +181,9 @@ function RemovalRow({
         >
           {location.path ?? location.locationId}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-fg-muted text-xs">
-          {location.contentHash && (
-            <span>
-              {formatMessage(l.removal.version, {
-                hash: `${hashPrefix(location.contentHash)}…`,
-              })}
-            </span>
-          )}
-          {location.modifiedAtMs !== undefined && (
-            <span>
-              {formatMessage(l.detail.modified, {
-                when: formatRelativeTime(location.modifiedAtMs, locale),
-              })}
-            </span>
-          )}
-          {location.operation === 'absent' && <span>{l.removal.absent}</span>}
-        </span>
+        {facts.length > 0 && (
+          <span className="block text-fg-muted text-xs">{facts.join(' · ')}</span>
+        )}
 
         {/*
           Divergent copies are not interchangeable, and the minority version is

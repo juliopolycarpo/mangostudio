@@ -33,7 +33,7 @@ interface Rule {
 /** A class token, with its variants, as Tailwind would scan it. */
 const VARIANTS = String.raw`(?:[\w\[\]=&>*\-.()]+:)*`;
 const COLOR_UTILS = `(?:bg|text|border(?:-[trblxy])?|ring|divide|outline|fill|stroke|from|via|to|shadow|decoration|accent|caret|placeholder)`;
-const SEMANTIC_COLORS = `(?:fg|fg-muted|fg-subtle|stroke|stroke-strong|canvas|sidebar|surface|surface-raised|control|control-hover|control-pressed|fill-hover|fill-pressed|fill-selected|accent|accent-hover|accent-pressed|accent-fg|accent-subtle|on-accent|focus|success|success-subtle|warning|warning-subtle|danger|danger-subtle|danger-solid|on-danger|info|info-subtle|scrim|agent-[a-z]+)`;
+const SEMANTIC_COLORS = `(?:fg|fg-muted|fg-subtle|stroke|stroke-strong|canvas|sidebar|surface|surface-raised|control|control-hover|control-pressed|fill-hover|fill-pressed|fill-selected|accent|accent-hover|accent-pressed|accent-fg|accent-subtle|on-accent|focus|success|success-subtle|warning|warning-subtle|danger|danger-subtle|danger-solid|on-danger|info|info-subtle|scrim|scrim-media|on-scrim-media|agent-[a-z]+)`;
 const edge = (body: string) =>
   new RegExp(String.raw`(?<![\w\-/])${VARIANTS}${body}(?![\w\-])`, 'g');
 
@@ -104,7 +104,7 @@ const RULES: readonly Rule[] = [
     ),
   },
   {
-    why: 'scrims are bg-scrim; a raw black or white overlay does not follow the theme',
+    why: 'scrims are bg-scrim (bg-scrim-media under text on a picture); a raw black or white overlay does not follow the theme',
     pattern: edge(String.raw`(?:bg|border|text|ring|from|via|to)-(?:black|white)(?:/\d+)?`),
   },
   {

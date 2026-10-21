@@ -239,10 +239,10 @@ export function Sidebar({
 
   return (
     <>
-      {/* Mobile overlay backdrop */}
+      {/* Mobile overlay backdrop. `z-[45]`: above the sticky header (`z-40`) so the veil covers it, below the drawer (`z-50`). */}
       {isMobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-scrim md:hidden"
+          className="fixed inset-0 z-[45] bg-scrim md:hidden"
           onClick={onMobileClose}
           aria-hidden="true"
         />
@@ -424,11 +424,16 @@ export function Sidebar({
                            * The badge yields the slot to the row actions on hover
                            * and on focus — but only where hovering is possible.
                            * On a coarse pointer there is no hover to reveal
-                           * anything, so the actions stay up, and each is a 44px
-                           * touch target: that is most of the row. What gives way
-                           * is the git badge, and the runner's name down to the
-                           * dot (still read aloud, and still what search matches).
-                           * The same name gives way on a sidebar narrower than
+                           * anything, so the actions of the open chat stay up,
+                           * and only that chat's: each is a 44px touch target,
+                           * and two of them on every row took most of it and
+                           * left a destructive button one tap away throughout
+                           * the list. The other rows keep the title's width and
+                           * the runner's dot; the git badge gives way, and the
+                           * runner's name down to the dot (still read aloud, and
+                           * still what search matches), and on the open chat the
+                           * badge gives its place to the actions. The same name
+                           * gives way on a sidebar narrower than
                            * `GIT_DETAIL_MIN_WIDTH`, where the dot beside the title
                            * is worth more characters of it than the word is.
                            *
@@ -437,7 +442,12 @@ export function Sidebar({
                            * rather than taking the whole row: the branch label
                            * truncates first, the runner chip never does.
                            */}
-                          <span className="flex min-w-0 max-w-[40%] shrink items-center gap-1.5 overflow-hidden pr-2 font-mono text-micro text-fg-subtle group-hover:hidden group-focus-within:hidden">
+                          <span
+                            className={cn(
+                              'flex min-w-0 max-w-[40%] shrink items-center gap-1.5 overflow-hidden pr-2 font-mono text-micro text-fg-subtle group-hover:hidden group-focus-within:hidden',
+                              isCurrent && 'pointer-coarse:hidden'
+                            )}
+                          >
                             {gitSummary ? (
                               <span className="flex min-w-0 pointer-coarse:hidden">
                                 <GitSummaryBadge
@@ -461,7 +471,12 @@ export function Sidebar({
                            * the select button is tabbable, so focusing it un-hides
                            * the buttons, which then enter the tab order.
                            */}
-                          <div className="hidden shrink-0 items-center gap-0.5 pr-1 group-hover:flex group-focus-within:flex pointer-coarse:flex">
+                          <div
+                            className={cn(
+                              'hidden shrink-0 items-center gap-0.5 pr-1 group-hover:flex group-focus-within:flex',
+                              isCurrent && 'pointer-coarse:flex'
+                            )}
+                          >
                             <button
                               type="button"
                               onClick={() => handleStartEdit(chat)}

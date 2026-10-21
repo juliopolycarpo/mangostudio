@@ -110,8 +110,9 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
         onToggle={() => setExpanded((v) => !v)}
         glyph={<StatusGlyph status={status} name={name} />}
         // `+N more` rides in the right-hand cluster, not as a pill after the
-        // argument: on a phone the pill and the cluster together left the hint
-        // about a dozen characters.
+        // argument, and the row drops it below `sm`: the outcome beside it
+        // already counts what the group touched, and the opened group lists every
+        // member, so on a phone the room goes to the target.
         count={moreCount > 0 ? moreLabel : null}
         summary={summary ? formatToolSummary(summary, t.tools.summary) : null}
         duration={duration === null ? null : formatToolDuration(duration)}

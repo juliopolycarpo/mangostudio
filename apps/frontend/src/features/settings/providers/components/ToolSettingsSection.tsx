@@ -37,7 +37,11 @@ export function ToolSettingsSection({
         // number field is the whole control. An unset value is shown as the
         // default and nothing here commits on blur: tabbing through the field
         // must not pin that default as an override.
-        <SettingsRow label={s.maxToolIterations} htmlFor="tool-iterations">
+        <SettingsRow
+          label={s.maxToolIterations}
+          hint={s.maxToolIterationsHint}
+          htmlFor="tool-iterations"
+        >
           <Input
             id="tool-iterations"
             type="number"

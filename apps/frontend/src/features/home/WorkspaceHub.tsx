@@ -49,8 +49,12 @@ export function WorkspaceHub({
 }: WorkspaceHubProps) {
   const cardGrid = useCardGrid();
   return (
+    // The hairline under the region is the scroll cue: the hub is taller than the
+    // space above the composer, so its last row is cut mid-glyph, and without an
+    // edge that cut reads as a rendering fault. With one, content ends at a
+    // visible frame, the way any clipped list does. No fade (decision 1).
     <div
-      className="app-scrollbar flex flex-1 flex-col overflow-y-auto px-4 py-8 sm:px-6"
+      className="app-scrollbar flex flex-1 scroll-pb-8 flex-col overflow-y-auto border-b border-stroke px-4 py-8 sm:px-6"
       data-testid="workspace-hub"
     >
       {/* `my-auto` inside a flex column centres a short hub in the space above

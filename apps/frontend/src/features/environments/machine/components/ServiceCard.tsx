@@ -50,6 +50,8 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
   const { service } = status;
   // The card's own notice says the supervisor could not be asked; the refusal under
   // it would only say so again, in less detail.
+  // A neutral word rather than no badge: a card that sometimes has one reads as broken.
+  const isOn = !service.error && service.installed && service.running;
   const alreadyStated = service.error ? (['service-unreadable'] as const) : undefined;
 
   return (
@@ -57,7 +59,40 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
       title={m.service.title}
       headline={service.installed ? m.service.installed : m.service.notInstalled}
       description={`${supervisorLabel(t, service.platform)} · ${service.unitName}`}
+      action={
+        <Badge variant={isOn ? 'success' : 'neutral'} data-testid="machine-service-state">
+          {service.error ? m.service.stateUnknown : isOn ? m.service.stateOn : m.service.stateOff}
+        </Badge>
+      }
       testId="machine-service-card"
+      footer={
+        service.installed ? (
+          <MachineActionButton
+            status={status}
+            action="uninstallService"
+            label={m.actions.uninstallService}
+            confirmTitle={m.actions.confirmUninstallTitle}
+            confirmDescription={m.actions.confirmUninstallDescription}
+            isPending={isPending}
+            onConfirm={onUninstall}
+            alreadyStated={alreadyStated}
+            testId="machine-service-uninstall"
+          />
+        ) : (
+          <MachineActionButton
+            status={status}
+            action="installService"
+            label={m.actions.installService}
+            confirmTitle={m.actions.confirmInstallTitle}
+            confirmDescription={m.actions.confirmInstallDescription}
+            variant="primary"
+            isPending={isPending}
+            onConfirm={onInstall}
+            alreadyStated={alreadyStated}
+            testId="machine-service-install"
+          />
+        )
+      }
     >
       <p className="text-sm text-fg-muted">{m.service.description}</p>
 
@@ -94,35 +129,6 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
           </MachineFacts>
         )
       )}
-
-      <div className="border-t border-stroke pt-4">
-        {service.installed ? (
-          <MachineActionButton
-            status={status}
-            action="uninstallService"
-            label={m.actions.uninstallService}
-            confirmTitle={m.actions.confirmUninstallTitle}
-            confirmDescription={m.actions.confirmUninstallDescription}
-            isPending={isPending}
-            onConfirm={onUninstall}
-            alreadyStated={alreadyStated}
-            testId="machine-service-uninstall"
-          />
-        ) : (
-          <MachineActionButton
-            status={status}
-            action="installService"
-            label={m.actions.installService}
-            confirmTitle={m.actions.confirmInstallTitle}
-            confirmDescription={m.actions.confirmInstallDescription}
-            variant="primary"
-            isPending={isPending}
-            onConfirm={onInstall}
-            alreadyStated={alreadyStated}
-            testId="machine-service-install"
-          />
-        )}
-      </div>
     </MachineCard>
   );
 }

@@ -27,6 +27,12 @@ interface MachineCardProps {
   readonly description?: string;
   /** A badge or button opposite the heading. */
   readonly action?: ReactNode;
+  /**
+   * The card's action, pinned to its foot under a hairline. Cards share a row of
+   * the grid and stretch to its height, so this is what puts one card's action on
+   * the same line as its neighbour's however short its body is.
+   */
+  readonly footer?: ReactNode;
   readonly testId: string;
   readonly children: ReactNode;
 }
@@ -36,11 +42,15 @@ export function MachineCard({
   headline,
   description,
   action,
+  footer,
   testId,
   children,
 }: MachineCardProps) {
   return (
-    <section className={cn(TOOL_CARD_SURFACE, 'space-y-4 p-4 sm:p-6')} data-testid={testId}>
+    <section
+      className={cn(TOOL_CARD_SURFACE, 'flex flex-col gap-4 p-4 sm:p-6')}
+      data-testid={testId}
+    >
       <header className="space-y-1">
         {/* As tall as the badge that sits opposite the title in some cards, so the
             headline starts on the same line whether or not this one has an action. */}
@@ -52,6 +62,7 @@ export function MachineCard({
         {description ? <p className="text-sm text-fg-muted">{description}</p> : null}
       </header>
       {children}
+      {footer ? <div className="mt-auto border-t border-stroke pt-4">{footer}</div> : null}
     </section>
   );
 }

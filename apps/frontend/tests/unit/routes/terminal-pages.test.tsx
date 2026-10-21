@@ -254,6 +254,57 @@ describe('/terminal route', () => {
     expect(within(rows[1]).getByRole('button', { name: 'Open here' })).toBeEnabled();
   });
 
+  // The cap is per user and only this page lists every session, so a row that
+  // can only be hidden leaves "maximum number of open terminals" with no way out.
+  it('closes a session from its row after a confirmation, and puts the open view away', async () => {
+    const user = userEvent.setup();
+    mockLocalEnvironment();
+    const listUrl = '/api/terminals?environmentId=local';
+    fetchScenario.respondWithJson('GET', listUrl, {
+      body: {
+        sessions: [
+          {
+            id: 'term-1',
+            environmentId: 'local',
+            chatId: null,
+            title: 'Terminal 1',
+            shell: 'bash',
+            cwd: null,
+            cols: 80,
+            rows: 24,
+            status: 'running',
+            attached: false,
+            createdAt: 1,
+            lastActivityAt: 1,
+          },
+        ],
+      },
+    });
+    fetchScenario.respondWithJson('DELETE', '/api/terminals/term-1', { status: 204 });
+
+    render(<TerminalIndexPage />);
+    const row = (await screen.findAllByRole('listitem'))[0];
+    await user.click(within(row).getByRole('button', { name: 'Open here' }));
+    expect(screen.getByTestId('terminal-view-stub')).toHaveTextContent('term-1');
+
+    await user.click(within(row).getByRole('button', { name: 'Close terminal' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Close this terminal?' });
+    expect(fetchScenario.fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(
+      false
+    );
+
+    fetchScenario.respondWithJson('GET', listUrl, { body: { sessions: [] } });
+    await user.click(within(dialog).getByRole('button', { name: 'Close terminal' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Close this terminal?' })).not.toBeInTheDocument()
+    );
+    expect(fetchScenario.fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(
+      true
+    );
+    expect(screen.queryByTestId('terminal-view-stub')).not.toBeInTheDocument();
+  });
+
   it('still lists the sessions that fill the per-user cap, refusing only a new one', async () => {
     fetchScenario.respondWithJson('GET', '/api/environments', {
       body: [{ id: 'local', name: 'Local', enabled: true, status: { state: 'connected' } }],

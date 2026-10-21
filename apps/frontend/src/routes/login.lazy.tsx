@@ -50,8 +50,12 @@ function LoginPage() {
     setLoading(false);
   };
 
+  // Anchored to a fixed offset from the top rather than centred: a centred group
+  // moves when the card grows (the error notice, a longer field list), and the
+  // form jumps under the cursor of someone retyping. Here only the space below
+  // it changes, and both pages put the logo where the other does.
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-canvas px-4 py-8">
+    <div className="flex min-h-screen flex-col items-center justify-start gap-6 bg-canvas px-4 pb-8 pt-[18vh]">
       <Logo className="size-12" />
       <Card className="w-full max-w-sm rounded-lg">
         <form
