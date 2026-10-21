@@ -106,7 +106,7 @@ describe('rankCommands', () => {
     // Matches "git" only as a substring of "digit" — the weakest tier that
     // still matches, so the navigate row below outscores it.
     item({ id: 's4', section: 'sessions', label: 'Refactoring the digit parser' }),
-    item({ id: 'a1', section: 'actions', label: 'New Chat' }),
+    item({ id: 'a1', section: 'actions', label: 'New chat' }),
     item({ id: 'n1', section: 'navigate', label: 'Settings · Git' }),
     item({ id: 'e1', section: 'environments', label: 'Local' }),
   ];

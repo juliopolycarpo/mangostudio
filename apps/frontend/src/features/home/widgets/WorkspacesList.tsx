@@ -112,6 +112,7 @@ function EmptyWorkspaces({ onNewChat }: { onNewChat: () => void }) {
     <EmptyState
       icon={<FolderGit2 size={ICON_LG} />}
       title={labels.empty}
+      hint={labels.emptyHint}
       action={
         <Button variant="secondary" size="sm" onClick={onNewChat}>
           <MessageSquarePlus size={ICON_SM} />

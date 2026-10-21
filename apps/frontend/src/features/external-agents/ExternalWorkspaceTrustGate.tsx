@@ -16,11 +16,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { trustExternalWorkspace } from '@/services/external-agent-service';
-import { ExternalDialog } from './ExternalDialog';
 import {
   type ExternalWorkspaceTrustRequest,
   onExternalWorkspaceTrustPrompt,
@@ -80,13 +79,12 @@ interface TrustDialogProps {
 function TrustDialog({ workspacePath, busy, onAccept, onCancel }: TrustDialogProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.workspaceTrust;
-  const dialogRef = useFocusTrap(onCancel);
 
   return (
-    <ExternalDialog
-      dialogRef={dialogRef}
-      label={labels.title}
+    <Dialog
       title={labels.title}
+      onClose={onCancel}
+      closeDisabled={busy}
       footer={
         <>
           <Button variant="secondary" onClick={onCancel} disabled={busy}>
@@ -109,6 +107,6 @@ function TrustDialog({ workspacePath, busy, onAccept, onCancel }: TrustDialogPro
       </ul>
 
       <Callout tone="warning">{labels.warning}</Callout>
-    </ExternalDialog>
+    </Dialog>
   );
 }

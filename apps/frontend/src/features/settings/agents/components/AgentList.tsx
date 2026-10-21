@@ -1,6 +1,7 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { Bot, User } from 'lucide-react';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 
@@ -70,9 +71,7 @@ function AgentListItem({ agent, active, onSelect }: AgentListItemProps) {
       aria-pressed={active}
       className={cn(
         'relative flex w-full cursor-pointer items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors',
-        active
-          ? 'bg-fill-selected before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent'
-          : 'bg-surface hover:bg-fill-hover'
+        active ? cn('bg-fill-selected', SELECTION_BAR) : 'bg-surface hover:bg-fill-hover'
       )}
     >
       <Icon size={ICON_MD} className="shrink-0 text-fg-muted" aria-hidden="true" />

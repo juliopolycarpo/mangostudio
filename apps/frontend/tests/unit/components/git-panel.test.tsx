@@ -608,7 +608,7 @@ describe('GitPanel', () => {
     // not a blank panel, is what's on screen at this point.
     fireEvent.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
 
-    expect(screen.getByText('Loading diff...')).toBeVisible();
+    expect(screen.getByText('Loading diff…')).toBeVisible();
     expect(screen.queryByRole('region', { name: 'View diff for src/panel.tsx' })).toBeNull();
 
     expect(
@@ -930,7 +930,7 @@ describe('GitPanel', () => {
     render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Stashes...' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Stashes…' }));
     const sheet = screen.getByRole('dialog', { name: 'Stashes' });
     expect(sheet).toBeVisible();
 
@@ -960,7 +960,7 @@ describe('GitPanel', () => {
     render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Stashes...' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Stashes…' }));
     await user.click(screen.getByRole('button', { name: 'Drop the stash Agent draft' }));
 
     expect(screen.getByRole('dialog', { name: 'Drop this stash?' })).toBeVisible();

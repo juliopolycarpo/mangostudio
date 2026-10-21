@@ -62,8 +62,6 @@ function ThemeCard({
   );
 }
 
-const PREVIEW_SENTENCE = 'The quick brown fox jumps over the lazy dog.';
-
 const DIFF_PREVIEW_MODE_I18N_KEYS = {
   expanded: 'modeExpanded',
   collapsed: 'modeCollapsed',
@@ -182,7 +180,7 @@ export function AppearanceSettings() {
           className="border-t border-stroke pt-4 leading-relaxed text-fg-muted"
           style={{ fontSize: 'var(--chat-font-size)' }}
         >
-          {PREVIEW_SENTENCE}
+          {s.fontSize.preview}
         </p>
       </SettingsSection>
 

@@ -3,6 +3,7 @@ import { ExternalLink, Pencil, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { FIELD_CLASS } from '@/components/ui/Input';
+import { Tabs } from '@/components/ui/Tabs';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
@@ -70,53 +71,32 @@ export function SessionTabs({
   }
 
   return (
-    <div
-      role="tablist"
-      aria-label={t.terminal.tabs}
-      className="flex items-center gap-1 overflow-x-auto border-b border-stroke px-2"
-    >
-      {sessions.map((session) => {
-        const active = session.id === activeId;
-        const editing = editingId === session.id;
-        return (
-          <div
-            key={session.id}
-            data-testid={`terminal-tab-${session.id}`}
-            className={cn(
-              'group relative flex h-9 shrink-0 items-center gap-1 rounded-t-sm px-2 text-sm transition-colors',
-              // The same mark as `TabNav`: the 2px accent rule is the only
-              // signal of the current tab, drawn on the strip's own divider.
-              active
-                ? 'font-medium text-fg after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent'
-                : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
-            )}
-          >
-            {editing ? (
-              <input
-                ref={editingInputRef}
-                value={draftTitle}
-                aria-label={t.terminal.renameLabel}
-                onChange={(event) => setDraftTitle(event.target.value)}
-                onBlur={commitEditing}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') commitEditing();
-                  if (event.key === 'Escape') setEditingId(null);
-                }}
-                className={cn(FIELD_CLASS, 'h-7 w-32 px-2')}
-              />
-            ) : (
-              <button
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => onSelect(session.id)}
-                onDoubleClick={() => startEditing(session)}
-                className="max-w-32 truncate"
-                title={session.title}
-              >
-                {session.title}
-              </button>
-            )}
+    <Tabs
+      label={t.terminal.tabs}
+      className="px-2"
+      tabs={sessions.map((session) => ({
+        id: session.id,
+        label: session.title,
+        title: session.title,
+        testId: `terminal-tab-${session.id}`,
+        onDoubleClick: () => startEditing(session),
+        editor:
+          editingId === session.id ? (
+            <input
+              ref={editingInputRef}
+              value={draftTitle}
+              aria-label={t.terminal.renameLabel}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onBlur={commitEditing}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitEditing();
+                if (event.key === 'Escape') setEditingId(null);
+              }}
+              className={cn(FIELD_CLASS, 'h-7 w-32 px-2')}
+            />
+          ) : undefined,
+        actions: (
+          <>
             <Button
               type="button"
               variant="subtle"
@@ -147,21 +127,25 @@ export function SessionTabs({
             >
               <X size={ICON_SM} />
             </Button>
-          </div>
-        );
-      })}
-      <Button
-        type="button"
-        variant="subtle"
-        size="icon"
-        onClick={onNew}
-        disabled={newSessionPending || newSessionDisabled}
-        aria-label={t.terminal.newSession}
-        title={newSessionDisabled && newSessionHint ? newSessionHint : t.terminal.newSession}
-        className="size-7 shrink-0"
-      >
-        <Plus size={ICON_MD} />
-      </Button>
-    </div>
+          </>
+        ),
+      }))}
+      active={activeId}
+      onSelect={onSelect}
+      trailing={
+        <Button
+          type="button"
+          variant="subtle"
+          size="icon"
+          onClick={onNew}
+          disabled={newSessionPending || newSessionDisabled}
+          aria-label={t.terminal.newSession}
+          title={newSessionDisabled && newSessionHint ? newSessionHint : t.terminal.newSession}
+          className="size-7 shrink-0"
+        >
+          <Plus size={ICON_MD} />
+        </Button>
+      }
+    />
   );
 }

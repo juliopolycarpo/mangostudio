@@ -25,6 +25,7 @@ import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { Logo } from '@/components/ui/Logo';
 import { Spinner } from '@/components/ui/Spinner';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
 import { useI18n } from '@/hooks/use-i18n';
@@ -163,10 +164,9 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                     onClick={() => setStep(candidate)}
                     className={cn(
                       'relative flex h-8 w-full items-center justify-between gap-2 rounded-sm px-3 text-left text-sm transition-colors',
-                      // The same current-item signal as the sidebar: a neutral
-                      // fill, and the 3px accent bar that carries the colour.
+                      // The same current-item signal as the sidebar.
                       candidate === step
-                        ? 'bg-fill-selected font-medium text-fg before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent'
+                        ? cn('bg-fill-selected font-medium text-fg', SELECTION_BAR)
                         : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
                     )}
                   >

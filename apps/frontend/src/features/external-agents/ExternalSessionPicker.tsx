@@ -31,13 +31,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Dialog } from '@/components/ui/Dialog';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Spinner } from '@/components/ui/Spinner';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { listExternalNativeSessions } from '@/services/external-agent-service';
-import { ExternalDialog } from './ExternalDialog';
 
 export interface ExternalSessionPickerProps {
   readonly environmentId: string;
@@ -74,7 +73,6 @@ export function ExternalSessionPicker({
 }: ExternalSessionPickerProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.sessions;
-  const dialogRef = useFocusTrap(onClose);
   const [thisWorkspaceOnly, setThisWorkspaceOnly] = useState(workspacePath !== undefined);
   const [states, setStates] = useState<Partial<Record<ExternalAgentTargetId, TargetState>>>({});
 
@@ -133,10 +131,9 @@ export function ExternalSessionPicker({
   }, [listableKey, load, reloadToken]);
 
   return (
-    <ExternalDialog
-      dialogRef={dialogRef}
-      label={labels.title}
+    <Dialog
       title={labels.title}
+      onClose={onClose}
       description={labels.subtitle.replace('{environment}', environmentName)}
       size="lg"
       footer={
@@ -173,7 +170,7 @@ export function ExternalSessionPicker({
           );
         })}
       </div>
-    </ExternalDialog>
+    </Dialog>
   );
 }
 

@@ -27,7 +27,7 @@ test('typing in the terminal panel runs a real command', async ({ page }) => {
   // second button with the same label.
   const railButton = page.getByRole('button', { name: 'Show Terminal panel' });
   if (!(await railButton.isVisible())) {
-    await page.getByRole('main').getByRole('button', { name: 'New Chat' }).click();
+    await page.getByRole('main').getByRole('button', { name: 'New chat' }).click();
     await dismissWorkdirPicker(page);
   }
   await expect(railButton).toBeVisible({ timeout: 15_000 });

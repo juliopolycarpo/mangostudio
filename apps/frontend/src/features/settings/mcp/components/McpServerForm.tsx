@@ -12,11 +12,11 @@ import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
-import { DialogFrame } from '@/features/settings/connectors/components/DialogFrame';
 import { useI18n } from '@/hooks/use-i18n';
 import {
   createEmptyFormState,
@@ -86,185 +86,181 @@ export function McpServerForm({
   const environmentLoading = environments.isPending && !environments.data;
 
   return (
-    <form onSubmit={handleSubmit}>
-      <DialogFrame
-        title={server ? s.editServer : s.addServer}
-        notice={submitError ? <Callout tone="danger">{submitError}</Callout> : undefined}
-        closeDisabled={isSaving}
-        onClose={onClose}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={onClose}>
-              {s.cancelButton}
-            </Button>
-            <Button type="submit" variant="primary" loading={isSaving}>
-              {isSaving ? s.savingButton : s.saveButton}
-            </Button>
-          </>
-        }
-      >
+    <Dialog
+      title={server ? s.editServer : s.addServer}
+      onSubmit={handleSubmit}
+      notice={submitError ? <Callout tone="danger">{submitError}</Callout> : undefined}
+      closeDisabled={isSaving}
+      onClose={onClose}
+      footer={
+        <>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {s.cancelButton}
+          </Button>
+          <Button type="submit" variant="primary" loading={isSaving}>
+            {isSaving ? s.savingButton : s.saveButton}
+          </Button>
+        </>
+      }
+    >
+      <Input
+        id="mcp-server-name"
+        label={s.nameLabel}
+        value={state.name}
+        onChange={(e) => patch({ name: e.target.value })}
+        placeholder={s.namePlaceholder}
+        error={errors.name}
+      />
+
+      <SettingsField label={s.slugLabel} htmlFor="mcp-server-slug" hint={s.slugHint}>
         <Input
-          id="mcp-server-name"
-          label={s.nameLabel}
-          value={state.name}
-          onChange={(e) => patch({ name: e.target.value })}
-          placeholder={s.namePlaceholder}
-          error={errors.name}
+          id="mcp-server-slug"
+          value={state.slug}
+          onChange={(e) => patch({ slug: e.target.value })}
+          placeholder={s.slugPlaceholder}
+          error={errors.slug}
         />
+      </SettingsField>
 
-        <SettingsField label={s.slugLabel} htmlFor="mcp-server-slug" hint={s.slugHint}>
+      <SettingsField label={s.transportLabel}>
+        <SettingsSegmented
+          ariaLabel={s.transportLabel}
+          value={state.transport}
+          options={TRANSPORTS.map((transport) => ({
+            value: transport,
+            label: s.transports[transport],
+          }))}
+          onChange={(transport) => patch({ transport })}
+        />
+      </SettingsField>
+
+      <SettingsField
+        label={s.environmentLabel}
+        htmlFor="mcp-server-environment"
+        hint={s.environmentHint}
+      >
+        <Select
+          id="mcp-server-environment"
+          value={state.environmentId}
+          onChange={(environmentId) => patch({ environmentId })}
+          ariaLabel={s.environmentLabel}
+          disabled={environmentLoading}
+          options={[
+            ...(environmentLoading
+              ? [{ value: state.environmentId, label: s.environmentsLoading }]
+              : []),
+            // An environment that vanished (or is not readable) still has to
+            // render, or editing an unrelated field would silently rehome
+            // the server to whichever option happened to come first.
+            ...(environments.data?.some((environment) => environment.id === state.environmentId) ===
+            false
+              ? [{ value: state.environmentId, label: state.environmentId }]
+              : []),
+            ...(environments.data ?? []).map((environment) => ({
+              value: environment.id,
+              label: environment.name,
+              disabled: !environment.enabled,
+            })),
+          ]}
+        />
+      </SettingsField>
+      {carriesSecrets ? (
+        <Callout tone="warning" title={s.remoteSecretNoticeTitle}>
+          {s.remoteSecretNotice.replace('{environment}', selectedEnvironmentName)}
+        </Callout>
+      ) : null}
+
+      {state.transport === 'stdio' ? (
+        <>
+          <Callout tone="warning">{s.stdioTrustWarning}</Callout>
+
           <Input
-            id="mcp-server-slug"
-            value={state.slug}
-            onChange={(e) => patch({ slug: e.target.value })}
-            placeholder={s.slugPlaceholder}
-            error={errors.slug}
+            id="mcp-server-command"
+            label={s.commandLabel}
+            value={state.command}
+            onChange={(e) => patch({ command: e.target.value })}
+            placeholder={s.commandPlaceholder}
+            error={errors.command}
           />
-        </SettingsField>
 
-        <SettingsField label={s.transportLabel}>
-          <SettingsSegmented
-            ariaLabel={s.transportLabel}
-            value={state.transport}
-            options={TRANSPORTS.map((transport) => ({
-              value: transport,
-              label: s.transports[transport],
-            }))}
-            onChange={(transport) => patch({ transport })}
-          />
-        </SettingsField>
-
-        <SettingsField
-          label={s.environmentLabel}
-          htmlFor="mcp-server-environment"
-          hint={s.environmentHint}
-        >
-          <Select
-            id="mcp-server-environment"
-            value={state.environmentId}
-            onChange={(environmentId) => patch({ environmentId })}
-            ariaLabel={s.environmentLabel}
-            disabled={environmentLoading}
-            options={[
-              ...(environmentLoading
-                ? [{ value: state.environmentId, label: s.environmentsLoading }]
-                : []),
-              // An environment that vanished (or is not readable) still has to
-              // render, or editing an unrelated field would silently rehome
-              // the server to whichever option happened to come first.
-              ...(environments.data?.some(
-                (environment) => environment.id === state.environmentId
-              ) === false
-                ? [{ value: state.environmentId, label: state.environmentId }]
-                : []),
-              ...(environments.data ?? []).map((environment) => ({
-                value: environment.id,
-                label: environment.name,
-                disabled: !environment.enabled,
-              })),
-            ]}
-          />
-        </SettingsField>
-        {carriesSecrets ? (
-          <Callout tone="warning" title={s.remoteSecretNoticeTitle}>
-            {s.remoteSecretNotice.replace('{environment}', selectedEnvironmentName)}
-          </Callout>
-        ) : null}
-
-        {state.transport === 'stdio' ? (
-          <>
-            <Callout tone="warning">{s.stdioTrustWarning}</Callout>
-
-            <Input
-              id="mcp-server-command"
-              label={s.commandLabel}
-              value={state.command}
-              onChange={(e) => patch({ command: e.target.value })}
-              placeholder={s.commandPlaceholder}
-              error={errors.command}
-            />
-
-            <EntryList
-              label={s.argsLabel}
-              entries={state.args}
-              onAdd={() => patch({ args: [...state.args, ''] })}
-              onRemove={(index) => patch({ args: state.args.filter((_, i) => i !== index) })}
-              renderEntry={(arg, index) => (
-                <div className="min-w-0 flex-1">
-                  <Input
-                    value={arg}
-                    onChange={(e) =>
-                      patch({
-                        args: state.args.map((a, i) => (i === index ? e.target.value : a)),
-                      })
-                    }
-                    placeholder={s.argPlaceholder}
-                    aria-label={`${s.argsLabel} ${index + 1}`}
-                  />
-                </div>
-              )}
-            />
-
-            <KeyValueListField
-              label={s.envLabel}
-              hint={s.envHint}
-              entries={state.env}
-              onChange={(env) => patch({ env })}
-            />
-
-            {server && (
-              <StoredNames names={server.secretEnvNames} srLabel={s.storedSecretEnvValue} />
+          <EntryList
+            label={s.argsLabel}
+            entries={state.args}
+            onAdd={() => patch({ args: [...state.args, ''] })}
+            onRemove={(index) => patch({ args: state.args.filter((_, i) => i !== index) })}
+            renderEntry={(arg, index) => (
+              <div className="min-w-0 flex-1">
+                <Input
+                  value={arg}
+                  onChange={(e) =>
+                    patch({
+                      args: state.args.map((a, i) => (i === index ? e.target.value : a)),
+                    })
+                  }
+                  placeholder={s.argPlaceholder}
+                  aria-label={`${s.argsLabel} ${index + 1}`}
+                />
+              </div>
             )}
-
-            <KeyValueListField
-              label={s.secretEnvLabel}
-              hint={s.secretEnvHint}
-              entries={state.secretEnv}
-              onChange={(secretEnv) => patch({ secretEnv })}
-              secretValues
-            />
-          </>
-        ) : (
-          <>
-            <Input
-              id="mcp-server-url"
-              label={s.urlLabel}
-              value={state.url}
-              onChange={(e) => patch({ url: e.target.value })}
-              placeholder={s.urlPlaceholder}
-              error={errors.url}
-            />
-
-            {server && <StoredNames names={server.headerNames} srLabel={s.storedHeaderValue} />}
-
-            <KeyValueListField
-              label={s.headersLabel}
-              hint={s.headersHint}
-              entries={state.headers}
-              onChange={(headers) => patch({ headers })}
-              secretValues
-            />
-          </>
-        )}
-
-        <SettingsField label={s.timeoutLabel} htmlFor="mcp-server-timeout" hint={s.timeoutHint}>
-          <Input
-            id="mcp-server-timeout"
-            type="number"
-            min={1}
-            value={state.timeoutMs}
-            onChange={(e) => patch({ timeoutMs: e.target.value })}
           />
-        </SettingsField>
 
-        <Toggle
-          id="mcp-server-enabled"
-          label={state.enabled ? s.enabledLabel : s.disabledLabel}
-          checked={state.enabled}
-          onChange={(e) => patch({ enabled: e.target.checked })}
+          <KeyValueListField
+            label={s.envLabel}
+            hint={s.envHint}
+            entries={state.env}
+            onChange={(env) => patch({ env })}
+          />
+
+          {server && <StoredNames names={server.secretEnvNames} srLabel={s.storedSecretEnvValue} />}
+
+          <KeyValueListField
+            label={s.secretEnvLabel}
+            hint={s.secretEnvHint}
+            entries={state.secretEnv}
+            onChange={(secretEnv) => patch({ secretEnv })}
+            secretValues
+          />
+        </>
+      ) : (
+        <>
+          <Input
+            id="mcp-server-url"
+            label={s.urlLabel}
+            value={state.url}
+            onChange={(e) => patch({ url: e.target.value })}
+            placeholder={s.urlPlaceholder}
+            error={errors.url}
+          />
+
+          {server && <StoredNames names={server.headerNames} srLabel={s.storedHeaderValue} />}
+
+          <KeyValueListField
+            label={s.headersLabel}
+            hint={s.headersHint}
+            entries={state.headers}
+            onChange={(headers) => patch({ headers })}
+            secretValues
+          />
+        </>
+      )}
+
+      <SettingsField label={s.timeoutLabel} htmlFor="mcp-server-timeout" hint={s.timeoutHint}>
+        <Input
+          id="mcp-server-timeout"
+          type="number"
+          min={1}
+          value={state.timeoutMs}
+          onChange={(e) => patch({ timeoutMs: e.target.value })}
         />
-      </DialogFrame>
-    </form>
+      </SettingsField>
+
+      <Toggle
+        id="mcp-server-enabled"
+        label={state.enabled ? s.enabledLabel : s.disabledLabel}
+        checked={state.enabled}
+        onChange={(e) => patch({ enabled: e.target.checked })}
+      />
+    </Dialog>
   );
 }
 

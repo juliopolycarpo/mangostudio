@@ -146,7 +146,7 @@ describe('Observability settings pages', () => {
     render(<MetricsSettingsPage />);
 
     await screen.findByText('OpenAI');
-    expect(screen.getByText('Cache Hit Rate')).toBeInTheDocument();
+    expect(screen.getByText('Cache hit rate')).toBeInTheDocument();
     expect(screen.getByText('SDK client')).toBeInTheDocument();
     expect(screen.getByText('80%')).toBeInTheDocument();
   });

@@ -4,9 +4,9 @@ import { useState } from 'react';
 import { CheckboxRow } from '@/components/settings/CheckboxRow';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Textarea } from '@/components/ui/Textarea';
 import { useToast } from '@/components/ui/Toast';
-import { DialogFrame } from '@/features/settings/connectors/components/DialogFrame';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -73,7 +73,7 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
   };
 
   return (
-    <DialogFrame
+    <Dialog
       title={s.portability.exportTitle}
       description={s.portability.exportDescription}
       closeDisabled={exportMutation.isPending}
@@ -153,6 +153,6 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
           ))}
         </ul>
       )}
-    </DialogFrame>
+    </Dialog>
   );
 }

@@ -13,8 +13,8 @@
 import type { InstallPreparation, InstallRecipePreview } from '@mangostudio/shared/environments';
 import { renderShellCommand } from '@mangostudio/shared/environments';
 import { Download, FolderPen, Globe, TerminalSquare, X } from 'lucide-react';
-import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -22,7 +22,6 @@ import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { chainStepLabel, formatBytes } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import type { InstallChainStep } from '../install-chain';
-import { DialogShell } from './DialogShell';
 
 interface InstallConfirmDialogProps {
   preparation: InstallPreparation;
@@ -43,16 +42,6 @@ export function InstallConfirmDialog({
   const { t } = useI18n();
   const s = t.environments.install;
   const { resolve } = useToolIdentities();
-
-  // Escape backs out of the dialog, as it does everywhere else in the app. A
-  // modal that gates running a command must not trap a keyboard user in it.
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onCancel]);
 
   // The prepared recipe is the authority on the step it describes: it alone
   // knows the installer that was actually downloaded.
@@ -77,11 +66,14 @@ export function InstallConfirmDialog({
       : s.confirmDescription;
 
   return (
-    <DialogShell
+    // Escape and the backdrop back out of the dialog, as they do everywhere
+    // else in the app: a modal that gates running a command must not trap a
+    // keyboard user in it.
+    <Dialog
       size="lg"
-      titleId="install-confirm-title"
       title={title}
       description={description}
+      onClose={onCancel}
       headerAction={
         <Button variant="subtle" size="icon" onClick={onCancel} aria-label={s.cancel}>
           <X size={ICON_MD} />
@@ -116,7 +108,7 @@ export function InstallConfirmDialog({
           <RecipeDetails recipe={recipe} />
         </div>
       ))}
-    </DialogShell>
+    </Dialog>
   );
 }
 

@@ -166,7 +166,7 @@ MangoStudio has a flexible multi-connector system for managing multiple API keys
 
 ### Supported Persistence Methods
 
-1. **OS Secret Store** — Native secure storage via `Bun.secrets`. Recommended for maximum security.
+1. **OS secret store** — Native secure storage via `Bun.secrets`. Recommended for maximum security.
 2. **config.toml** — Stores keys in `~/.mango/config.toml`. Ideal for sharing keys across instances or CLI tools.
 3. **.env file** — Adds variables to the `~/.mango/.env` file.
 

@@ -21,10 +21,9 @@ import { externalAgentVendor } from '@mangostudio/shared/external-agents';
 import { ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { Dialog } from '@/components/ui/Dialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
-import { DialogBody, DialogFooter, DialogFrame } from './DialogFrame';
 
 export interface ExternalDisclosureDialogProps {
   /**
@@ -59,87 +58,80 @@ export function ExternalDisclosureDialog({
   const labels = t.externalAgents.disclosure;
   const vendor = t.externalAgents.target[targetId];
   const links = externalAgentVendor(targetId);
-  const dialogRef = useFocusTrap(onCancel);
 
   return (
-    <DialogFrame
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
-      tabIndex={-1}
-      aria-label={labels.title.replace('{vendor}', vendor)}
-      className="max-w-lg text-sm text-fg outline-none"
-    >
-      <DialogBody>
-        <h2 className="text-title font-semibold">{labels.title.replace('{vendor}', vendor)}</h2>
-
-        <ul className="space-y-2 text-sm text-fg-muted">
-          <li>{labels.thirdParty.replace('{vendor}', vendor)}</li>
-          <li>{labels.dataFlow.replace('{vendor}', vendor)}</li>
-          <li>{labels.billing.replace('{vendor}', vendor)}</li>
-          <li>{labels.ownership.replace('{vendor}', vendor)}</li>
-          {/*
-            Claude only. It runs the machine's own hooks, skills, plugins and MCP
-            servers inside the turn — the one exposure a user cannot see from
-            anywhere in MangoStudio. Codex and Cursor read project files too, but
-            what each of them loads has not been characterized, and naming the
-            wrong sources for a vendor is worse than staying quiet.
-          */}
-          {targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
-        </ul>
-
-        <Callout tone="warning">{labels.autoExecution.replace('{vendor}', vendor)}</Callout>
-
-        {/*
-          The callout above says the level decides how much runs unattended.
-          Naming the level the chat is actually on turns that from a general
-          caution into something the user can check before agreeing.
-        */}
-        {permissionLevel ? (
-          <p className="text-xs text-fg-muted">
-            {labels.permissionNow.replace(
-              '{level}',
-              t.externalAgents.permission.levelName[permissionLevel]
-            )}
-          </p>
-        ) : null}
-
-        {/*
-          Linked, never summarized. Paraphrasing another company's terms would be
-          MangoStudio making a claim about obligations that are not its to state.
-        */}
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-          <a
-            href={links.termsUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="inline-flex items-center gap-1 text-accent-fg underline underline-offset-2"
-          >
-            {labels.terms.replace('{vendor}', vendor)}
-            <ExternalLink size={ICON_SM} className="shrink-0" aria-hidden="true" />
-          </a>
-          <a
-            href={links.privacyUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="inline-flex items-center gap-1 text-accent-fg underline underline-offset-2"
-          >
-            {labels.privacy.replace('{vendor}', vendor)}
-            <ExternalLink size={ICON_SM} className="shrink-0" aria-hidden="true" />
-          </a>
-        </p>
-      </DialogBody>
-
-      <DialogFooter>
-        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
-          {reviewOnly ? labels.close : labels.cancel}
-        </Button>
-        {reviewOnly ? null : (
-          <Button type="button" onClick={onAccept} loading={busy}>
-            {busy ? labels.accepting : labels.accept}
+    <Dialog
+      title={labels.title.replace('{vendor}', vendor)}
+      onClose={onCancel}
+      closeDisabled={busy}
+      footer={
+        <>
+          <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
+            {reviewOnly ? labels.close : labels.cancel}
           </Button>
-        )}
-      </DialogFooter>
-    </DialogFrame>
+          {reviewOnly ? null : (
+            <Button type="button" onClick={onAccept} loading={busy}>
+              {busy ? labels.accepting : labels.accept}
+            </Button>
+          )}
+        </>
+      }
+    >
+      <ul className="space-y-2 text-sm text-fg-muted">
+        <li>{labels.thirdParty.replace('{vendor}', vendor)}</li>
+        <li>{labels.dataFlow.replace('{vendor}', vendor)}</li>
+        <li>{labels.billing.replace('{vendor}', vendor)}</li>
+        <li>{labels.ownership.replace('{vendor}', vendor)}</li>
+        {/*
+          Claude only. It runs the machine's own hooks, skills, plugins and MCP
+          servers inside the turn — the one exposure a user cannot see from
+          anywhere in MangoStudio. Codex and Cursor read project files too, but
+          what each of them loads has not been characterized, and naming the
+          wrong sources for a vendor is worse than staying quiet.
+        */}
+        {targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
+      </ul>
+
+      <Callout tone="warning">{labels.autoExecution.replace('{vendor}', vendor)}</Callout>
+
+      {/*
+        The callout above says the level decides how much runs unattended.
+        Naming the level the chat is actually on turns that from a general
+        caution into something the user can check before agreeing.
+      */}
+      {permissionLevel ? (
+        <p className="text-xs text-fg-muted">
+          {labels.permissionNow.replace(
+            '{level}',
+            t.externalAgents.permission.levelName[permissionLevel]
+          )}
+        </p>
+      ) : null}
+
+      {/*
+        Linked, never summarized. Paraphrasing another company's terms would be
+        MangoStudio making a claim about obligations that are not its to state.
+      */}
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <a
+          href={links.termsUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex items-center gap-1 text-accent-fg underline underline-offset-2"
+        >
+          {labels.terms.replace('{vendor}', vendor)}
+          <ExternalLink size={ICON_SM} className="shrink-0" aria-hidden="true" />
+        </a>
+        <a
+          href={links.privacyUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex items-center gap-1 text-accent-fg underline underline-offset-2"
+        >
+          {labels.privacy.replace('{vendor}', vendor)}
+          <ExternalLink size={ICON_SM} className="shrink-0" aria-hidden="true" />
+        </a>
+      </p>
+    </Dialog>
   );
 }

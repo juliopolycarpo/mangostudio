@@ -78,7 +78,7 @@ export function AssistantImageTurn({ msg }: AssistantImageTurnProps) {
               <>
                 <img
                   src={imageUrl}
-                  alt="Generated"
+                  alt={t.chat.feed.generatedImageAlt}
                   className="size-full object-cover"
                   decoding="async"
                   onError={() => setImageFailed(true)}

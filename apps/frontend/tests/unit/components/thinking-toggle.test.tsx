@@ -36,7 +36,7 @@ describe('ThinkingToggle', () => {
   it('names an effort set outside the three it offers instead of rounding it down', () => {
     renderToggle({ effort: 'xhigh' });
 
-    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveTextContent('Extra High');
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveTextContent('Extra high');
   });
 
   it('reports a picked effort to the caller', async () => {

@@ -4,11 +4,11 @@ import { CloudDownload, CloudUpload } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
-import { WorkspaceDialog } from './components/WorkspaceDialog';
 import { readGitPanelPrefs } from './git-panel-prefs';
 import { useGitFetch, useGitPull, useGitPush } from './hooks/use-git-state';
 
@@ -152,10 +152,11 @@ export function RemoteActions({
       ) : null}
 
       {confirmForcePush ? (
-        <WorkspaceDialog
-          titleId="git-force-push-title"
+        <Dialog
+          size="sm"
           title={labels.forcePushConfirmTitle}
           description={labels.forcePushConfirmHint}
+          onClose={() => setConfirmForcePush(false)}
           footer={
             <>
               <Button type="button" variant="secondary" onClick={() => setConfirmForcePush(false)}>

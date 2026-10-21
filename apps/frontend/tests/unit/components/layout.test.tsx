@@ -33,7 +33,7 @@ describe('Layout', () => {
       </Layout>
     );
 
-    expect(screen.getByText('Mango Studio')).toBeInTheDocument();
+    expect(screen.getByText('MangoStudio')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /new chat/i })).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /gallery/i }).length).toBeGreaterThanOrEqual(1);
   });

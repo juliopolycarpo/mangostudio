@@ -121,7 +121,7 @@ export function PromptSettings({
         ))}
 
         {promptSettings.customRules.length === 0 && (
-          <EmptyState title={s.addRule} className="min-h-0" />
+          <EmptyState title={s.customRulesEmpty} className="min-h-0" />
         )}
       </SettingsSection>
     </SettingsPage>

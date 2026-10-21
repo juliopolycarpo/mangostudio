@@ -175,10 +175,10 @@ describe('AgentSettingsPage', () => {
 
     render(<AgentSettingsPage />);
 
-    await user.click(await screen.findByRole('button', { name: 'Create Agent' }));
+    await user.click(await screen.findByRole('button', { name: 'Create agent' }));
 
-    expect(screen.getByRole('heading', { name: 'New Agent' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('New Agent')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'New agent' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('New agent')).toBeInTheDocument();
   });
 
   it('starts a draft agent from the empty state action', async () => {
@@ -189,10 +189,10 @@ describe('AgentSettingsPage', () => {
     render(<AgentSettingsPage />);
 
     await screen.findByText('No agents yet');
-    await user.click(screen.getAllByRole('button', { name: 'Create Agent' })[1]);
+    await user.click(screen.getAllByRole('button', { name: 'Create agent' })[1]);
 
-    expect(screen.getByRole('heading', { name: 'New Agent' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('New Agent')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'New agent' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('New agent')).toBeInTheDocument();
   });
 
   it('invalidates cached capability projections after saving an agent', async () => {
@@ -248,7 +248,7 @@ describe('AgentToolPicker', () => {
 
     render(
       <AgentToolPicker
-        label="Allowed Tools"
+        label="Allowed tools"
         disabledLabel="No tools available."
         tools={TOOLS_RESPONSE.tools}
         selectedToolNames={['read_file']}

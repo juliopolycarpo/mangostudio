@@ -58,51 +58,57 @@ export function ConnectorCard({
     void chatGptOAuth.start({ name: c.name, connectorId: c.id, popup });
   };
 
+  const status = c.needsReauth
+    ? { Icon: TriangleAlert, tone: 'text-warning', label: s.statusNeedsSignIn }
+    : c.configured
+      ? { Icon: CircleCheck, tone: 'text-success', label: s.statusConnected }
+      : { Icon: CircleX, tone: 'text-danger', label: s.statusNotConfigured };
+  const sourceLabel = {
+    'bun-secrets': s.sources.bunSecrets,
+    'config-file': s.sources.configFile,
+    environment: s.sources.envFile,
+    none: s.sources.none,
+  }[c.source];
+
   return (
     <Card padded={false} className="space-y-3 p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          {/* The glyph is the status: a triangle when the sign-in has lapsed, a
-              tick when the connector works, a cross when it is not configured. */}
-          <span className="mt-0.5 shrink-0">
-            {c.needsReauth ? (
-              <TriangleAlert size={ICON_MD} className="text-warning" />
-            ) : c.configured ? (
-              <CircleCheck size={ICON_MD} className="text-success" />
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-sm font-semibold text-fg">{c.name}</h3>
+            <Badge>{t.providers[c.provider]}</Badge>
+            {isReadOnlyShared && <Badge>{s.sharedConnector}</Badge>}
+            {isDeprecated && <Badge variant="warning">{s.deprecatedBadge}</Badge>}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
+            {/* The glyph carries the tone and the word names it: colour alone is
+                  never the signal. */}
+            <span className="inline-flex items-center gap-1">
+              <status.Icon size={ICON_SM} className={status.tone} />
+              {status.label}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className="inline-flex items-center gap-1">
+              {c.source === 'bun-secrets' && <ShieldCheck size={ICON_SM} />}
+              {c.source === 'config-file' && <FileCode size={ICON_SM} />}
+              {c.source === 'environment' && <Database size={ICON_SM} />}
+              {sourceLabel}
+            </span>
+            <span aria-hidden="true">·</span>
+            {isChatGpt ? (
+              <>
+                <span>
+                  {s.chatgptSignedInAs.replace(
+                    '{account}',
+                    c.accountLabel ?? c.maskedSuffix ?? s.chatgptAccountUnknown
+                  )}
+                </span>
+                <span aria-hidden="true">·</span>
+                <Badge>{s.chatgptPlanBadge.replace('{plan}', planLabel)}</Badge>
+              </>
             ) : (
-              <CircleX size={ICON_MD} className="text-danger" />
+              <span className="font-mono">{c.maskedSuffix ?? '****'}</span>
             )}
-          </span>
-          <div className="min-w-0 space-y-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate text-sm font-semibold text-fg">{c.name}</h3>
-              <Badge>{t.providers[c.provider]}</Badge>
-              {isReadOnlyShared && <Badge>{s.sharedConnector}</Badge>}
-              {isDeprecated && <Badge variant="warning">{s.deprecatedBadge}</Badge>}
-            </div>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
-              <span className="inline-flex items-center gap-1">
-                {c.source === 'bun-secrets' && <ShieldCheck size={ICON_SM} />}
-                {c.source === 'config-file' && <FileCode size={ICON_SM} />}
-                {c.source === 'environment' && <Database size={ICON_SM} />}
-                {c.source.replace('-', ' ')}
-              </span>
-              <span aria-hidden="true">·</span>
-              {isChatGpt ? (
-                <>
-                  <span>
-                    {s.chatgptSignedInAs.replace(
-                      '{account}',
-                      c.accountLabel ?? c.maskedSuffix ?? s.chatgptAccountUnknown
-                    )}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                  <Badge>{s.chatgptPlanBadge.replace('{plan}', planLabel)}</Badge>
-                </>
-              ) : (
-                <span className="font-mono">{c.maskedSuffix ?? '****'}</span>
-              )}
-            </div>
           </div>
         </div>
 

@@ -12,15 +12,15 @@ import type {
   RuntimeConsentProfile,
 } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CAPABILITY_KEYS, RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Dialog } from '@/components/ui/Dialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
 import { choiceClass } from './choice-class';
-import { DialogShell } from './DialogShell';
 
 const PROFILES = [
   'full',
@@ -48,7 +48,6 @@ export function RuntimeConsentDialog({
 }: RuntimeConsentDialogProps) {
   const { t } = useI18n();
   const labels = t.environments.entities.runtime.consent;
-  const titleId = useId();
   const [profile, setProfile] = useState<RuntimeConsentProfile>(initialProfile);
   const [allow, setAllow] = useState<RuntimeCapabilityAllow>(
     initialAllow ?? RUNTIME_CONSENT_PRESETS[initialProfile === 'custom' ? 'none' : initialProfile]
@@ -60,11 +59,12 @@ export function RuntimeConsentDialog({
   };
 
   return (
-    <DialogShell
+    <Dialog
       testId="runtime-consent-dialog"
-      titleId={titleId}
       title={labels.title}
       description={formatMessage(labels.description, { name: machineName })}
+      onClose={onCancel}
+      closeDisabled={isPending}
       footer={
         <>
           <Button variant="secondary" onClick={onCancel} disabled={isPending}>
@@ -123,6 +123,6 @@ export function RuntimeConsentDialog({
       ) : null}
 
       <Callout tone="warning">{t.environments.entities.permissions.allowShellHonesty}</Callout>
-    </DialogShell>
+    </Dialog>
   );
 }

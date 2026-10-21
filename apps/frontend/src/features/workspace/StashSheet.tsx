@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
@@ -11,9 +12,9 @@ import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
+import { DialogCodeBlock } from './components/DialogBlocks';
 import { IconButton } from './components/IconButton';
 import { RowList } from './components/RowList';
-import { DialogCodeBlock, WorkspaceDialog } from './components/WorkspaceDialog';
 import {
   useGitStashes,
   useStashApply,
@@ -81,10 +82,9 @@ export function StashSheet({
 
   return (
     <>
-      <WorkspaceDialog
-        titleId="git-stash-sheet-title"
+      <Dialog
         title={labels.title}
-        size="md"
+        onClose={onClose}
         headerAction={
           <IconButton label={labels.close} onClick={onClose}>
             <X size={ICON_MD} />
@@ -161,13 +161,14 @@ export function StashSheet({
         ) : (
           <EmptyState title={labels.empty} className="min-h-24" />
         )}
-      </WorkspaceDialog>
+      </Dialog>
 
       {dropRequest ? (
-        <WorkspaceDialog
-          titleId="git-stash-drop-title"
+        <Dialog
+          size="sm"
           title={labels.dropTitle}
           description={labels.dropHint}
+          onClose={() => setDropRequest(null)}
           footer={
             <>
               <Button type="button" variant="secondary" onClick={() => setDropRequest(null)}>
@@ -185,7 +186,7 @@ export function StashSheet({
           }
         >
           <DialogCodeBlock className="break-words">{dropRequest.message}</DialogCodeBlock>
-        </WorkspaceDialog>
+        </Dialog>
       ) : null}
     </>
   );

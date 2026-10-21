@@ -13,11 +13,11 @@ import { StatusNote } from '@/components/settings/StatusNote';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FIELD_CLASS, Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
-import { DialogFrame } from '@/features/settings/connectors/components/DialogFrame';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { useApplyPortableMcpImport, usePreviewPortableMcpImport } from '../hooks/use-mcp-servers';
@@ -165,7 +165,7 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
   const busy = previewMutation.isPending || applyMutation.isPending;
 
   return (
-    <DialogFrame
+    <Dialog
       title={s.import.title}
       description={s.portability.importDescription}
       closeDisabled={busy}
@@ -231,7 +231,7 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
         />
       )}
       {step.kind === 'summary' && <SummaryStep summary={step.summary} />}
-    </DialogFrame>
+    </Dialog>
   );
 }
 

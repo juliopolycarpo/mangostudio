@@ -14,10 +14,11 @@
 
 import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { X } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -49,7 +50,6 @@ interface MachineOnboardingWizardProps {
 export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboardingWizardProps) {
   const { t } = useI18n();
   const labels = t.environments.onboarding;
-  const titleId = useId();
 
   const environments = useEnvironmentEntitiesQuery();
   const [createdId, setCreatedId] = useState<string | null>(environmentId ?? null);
@@ -90,94 +90,66 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus; a backdrop click closes the same way the X button does.
-    <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-scrim p-4 fade-in duration-200"
-      data-testid="machine-onboarding-wizard"
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
-        event.stopPropagation();
-        onClose();
-      }}
-      onClick={(event) => {
-        // Only the backdrop itself, never a bubbled click from the panel —
-        // this listener sits above every step's own buttons and inputs.
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-lg border border-stroke bg-surface-raised shadow-dialog"
-      >
-        <header className="shrink-0 space-y-4 px-6 pt-6">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 space-y-1">
-              <h3 id={titleId} className="text-title font-semibold text-fg">
-                {labels.title}
-              </h3>
-              <p className="text-sm text-fg-muted">
-                {formatMessage(labels.progress, {
-                  step: String(index + 1),
-                  total: String(steps.length),
-                  name: labels.steps[step],
-                })}
-              </p>
-            </div>
-            <Button
-              variant="subtle"
-              size="icon"
-              onClick={onClose}
-              data-testid="machine-onboarding-close"
-              aria-label={labels.close}
+    <Dialog
+      testId="machine-onboarding-wizard"
+      title={labels.title}
+      description={formatMessage(labels.progress, {
+        step: String(index + 1),
+        total: String(steps.length),
+        name: labels.steps[step],
+      })}
+      onClose={onClose}
+      headerAction={
+        <Button
+          variant="subtle"
+          size="icon"
+          onClick={onClose}
+          data-testid="machine-onboarding-close"
+          aria-label={labels.close}
+        >
+          <X size={ICON_MD} />
+        </Button>
+      }
+      // One segment per step: the finished ones in the control line, the
+      // current one in the accent, the rest in the hairline. The names are
+      // for assistive technology; the sentence above already names the
+      // current step for everyone else.
+      toolbar={
+        <ol className="flex list-none gap-1" aria-label={labels.title}>
+          {steps.map((candidate, position) => (
+            <li
+              key={candidate}
+              aria-current={candidate === step ? 'step' : undefined}
+              className={cn(
+                'h-1 flex-1 rounded-full',
+                position < index
+                  ? 'bg-stroke-strong'
+                  : candidate === step
+                    ? 'bg-accent'
+                    : 'bg-stroke'
+              )}
             >
-              <X size={ICON_MD} />
-            </Button>
-          </div>
-
-          {/* One segment per step: the finished ones in the control line, the
-              current one in the accent, the rest in the hairline. The names are
-              for assistive technology; the sentence above already names the
-              current step for everyone else. */}
-          <ol className="flex list-none gap-1" aria-label={labels.title}>
-            {steps.map((candidate, position) => (
-              <li
-                key={candidate}
-                aria-current={candidate === step ? 'step' : undefined}
-                className={cn(
-                  'h-1 flex-1 rounded-full',
-                  position < index
-                    ? 'bg-stroke-strong'
-                    : candidate === step
-                      ? 'bg-accent'
-                      : 'bg-stroke'
-                )}
-              >
-                <span className="sr-only">{labels.steps[candidate]}</span>
-              </li>
-            ))}
-          </ol>
-        </header>
-
-        <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-6">
-          <StepBody
-            step={step}
-            ssh={ssh}
-            endState={endState}
-            consent={consent}
-            environment={environment}
-            onSsh={setSsh}
-            onEndState={setEndState}
-            onConsent={setConsent}
-            onCreated={setCreatedId}
-            onAdvance={advance}
-            onGoTo={goTo}
-            onClose={onClose}
-          />
-        </div>
-      </div>
-    </div>
+              <span className="sr-only">{labels.steps[candidate]}</span>
+            </li>
+          ))}
+        </ol>
+      }
+    >
+      <StepBody
+        step={step}
+        ssh={ssh}
+        endState={endState}
+        consent={consent}
+        environment={environment}
+        onSsh={setSsh}
+        onEndState={setEndState}
+        onConsent={setConsent}
+        onCreated={setCreatedId}
+        onAdvance={advance}
+        onGoTo={goTo}
+        onClose={onClose}
+      />
+    </Dialog>
   );
 }
 

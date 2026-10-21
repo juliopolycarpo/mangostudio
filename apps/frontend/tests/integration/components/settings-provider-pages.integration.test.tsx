@@ -61,8 +61,8 @@ describe('ProviderSettingsPage integration', () => {
     render(<ProviderSettingsPage />);
 
     await screen.findByText('DeepSeek');
-    expect(screen.getByText('Reasoning & Thinking')).toBeInTheDocument();
-    expect(screen.getByText('Tool Configuration')).toBeInTheDocument();
+    expect(screen.getByText('Reasoning & thinking')).toBeInTheDocument();
+    expect(screen.getByText('Tool configuration')).toBeInTheDocument();
   });
 
   it('autosaves provider changes after editing', async () => {

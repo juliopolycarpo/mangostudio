@@ -152,7 +152,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // Only the part being streamed into carries the caret. Asking whether a
     // later *thinking* part existed kept the finished thought expanded and
     // pulsing — with its own caret — for the rest of the turn.
-    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Thinking…')).not.toBeInTheDocument();
     expect(screen.getByText('Thought')).toBeInTheDocument();
     expect(container.querySelectorAll('.markdown-content--streaming')).toHaveLength(1);
     expect(container.querySelector('.markdown-content--streaming')).toHaveTextContent(
@@ -173,7 +173,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    // ToolCallBlock in pending state shows "Calling..." label
+    // ToolCallBlock in pending state shows "Calling…" label
     const buttons = container.querySelectorAll('button');
     const toolButtons = Array.from(buttons).filter((btn) =>
       btn.textContent?.includes('calculator')
@@ -379,7 +379,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByText('Create Image')).toBeInTheDocument();
+    expect(screen.getByText('Create image')).toBeInTheDocument();
   });
 
   it('renders legacy assistant image messages with imageUrl and style params', async () => {
@@ -399,7 +399,10 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // goes stale the moment a turn is reloaded, so the turn's phase is derived
     // and only stated while it is still true.
     expect(screen.getByText('gpt-image-2')).toBeInTheDocument();
-    expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
+    expect(screen.getByAltText('Generated image')).toHaveAttribute(
+      'src',
+      '/images/generated-123.png'
+    );
     expect(screen.getByText(/Thought for/)).toBeInTheDocument();
     expect(screen.getByText('1K')).toBeInTheDocument();
   });
@@ -417,7 +420,10 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
+    expect(screen.getByAltText('Generated image')).toHaveAttribute(
+      'src',
+      '/images/generated-123.png'
+    );
   });
 
   it('shows an unavailable state when a generated image fails to load', async () => {
@@ -426,7 +432,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
     await flushAsyncRender();
-    fireEvent.error(screen.getByAltText('Generated'));
+    fireEvent.error(screen.getByAltText('Generated image'));
 
     expect(screen.getByText('Image no longer available')).toBeInTheDocument();
     expect(
@@ -456,7 +462,7 @@ describe('ChatFeed — generated_image part rendering', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByText('Generating image...')).toBeInTheDocument();
+    expect(screen.getByText('Generating image…')).toBeInTheDocument();
     expect(screen.getByText('a polar bear')).toBeInTheDocument();
   });
 

@@ -29,6 +29,7 @@ import { KbdHint } from '@/components/ui/KbdHint';
 import { Logo } from '@/components/ui/Logo';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useToast } from '@/components/ui/Toast';
 import type { ContextInfo } from '@/features/generation/types';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
@@ -335,7 +336,12 @@ export function Sidebar({
                     // makes presentational. Selection is its own button instead.
                     <li
                       key={chat.id}
-                      className={`group relative flex items-center rounded-sm transition-colors ${isCurrent ? 'bg-fill-selected font-medium text-fg before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent' : 'text-fg-muted hover:bg-fill-hover hover:text-fg'}`}
+                      className={cn(
+                        'group relative flex items-center rounded-sm transition-colors',
+                        isCurrent
+                          ? cn('bg-fill-selected font-medium text-fg', SELECTION_BAR)
+                          : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
+                      )}
                     >
                       {editing ? (
                         <div className={leadClassName}>

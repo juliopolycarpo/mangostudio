@@ -69,8 +69,8 @@ describe('ConnectorModelsModal', () => {
       />
     );
 
-    expect(screen.getByText('Text Models')).toBeInTheDocument();
-    expect(screen.getByText('Image Models')).toBeInTheDocument();
+    expect(screen.getByText('Text models')).toBeInTheDocument();
+    expect(screen.getByText('Image models')).toBeInTheDocument();
     expect(screen.queryByText('GPT 4.1')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('checkbox', { name: /gemini 2\.5 pro/i }));
@@ -94,7 +94,7 @@ describe('ConnectorModelsModal', () => {
       />
     );
 
-    fireEvent.change(screen.getByPlaceholderText('Search models by name or ID...'), {
+    fireEvent.change(screen.getByPlaceholderText('Search models by name or ID…'), {
       target: { value: 'pro' },
     });
 

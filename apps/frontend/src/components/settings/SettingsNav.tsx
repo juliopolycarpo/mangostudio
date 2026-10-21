@@ -3,6 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { FIELD_CLASS } from '@/components/ui/Input';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
@@ -14,11 +15,8 @@ import { type SettingsNavGroup, settingsNavGroups } from './settings-nav';
 // alone.
 const LINK_BASE = 'relative flex h-8 items-center rounded-sm px-3 text-sm transition-colors';
 const LINK_IDLE = 'text-fg-muted hover:bg-fill-hover hover:text-fg';
-// The current page is a neutral fill plus the 3px accent bar on the leading
-// edge, as in the app sidebar: the bar carries the colour, the fill alone
-// would not survive a grayscale screen.
-const LINK_ACTIVE =
-  'bg-fill-selected font-medium text-fg before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent';
+// The current page is a neutral fill plus the accent bar, as in the app sidebar.
+const LINK_ACTIVE = `bg-fill-selected font-medium text-fg ${SELECTION_BAR}`;
 
 /**
  * Below `lg` the list is a panel under the toggle; from `lg` it is bare, on the

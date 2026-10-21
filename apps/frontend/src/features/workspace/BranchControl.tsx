@@ -3,6 +3,7 @@ import type { GitBranchInfo } from '@mangostudio/shared/git';
 import { Check, ChevronDown, GitBranch, MoreHorizontal, Plus } from 'lucide-react';
 import { type FormEvent, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { FIELD_CLASS, Input } from '@/components/ui/Input';
 import { Menu, MenuItem } from '@/components/ui/Menu';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -11,8 +12,8 @@ import { BranchPrTag, useBranchPrAnnotations } from '@/features/github/component
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
+import { DialogCodeBlock, DialogPathList } from './components/DialogBlocks';
 import { IconButton } from './components/IconButton';
-import { DialogCodeBlock, DialogPathList, WorkspaceDialog } from './components/WorkspaceDialog';
 import {
   useCheckoutRemoteBranch,
   useCreateBranch,
@@ -149,6 +150,11 @@ export function BranchControl({
     } catch (error) {
       toast(resolveApiErrorMessage(error, labels.actionError), 'error');
     }
+  };
+
+  const closeRename = () => {
+    setRenameTarget(null);
+    setRenameValue('');
   };
 
   const remove = async (force: boolean) => {
@@ -321,20 +327,14 @@ export function BranchControl({
       </details>
 
       {renameTarget ? (
-        <WorkspaceDialog
-          titleId="git-branch-rename-title"
+        <Dialog
+          size="sm"
           title={labels.renameTitle.replace('{branch}', renameTarget)}
           onSubmit={(event) => void rename(event)}
+          onClose={closeRename}
           footer={
             <>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setRenameTarget(null);
-                  setRenameValue('');
-                }}
-              >
+              <Button type="button" variant="secondary" onClick={closeRename}>
                 {labels.renameCancel}
               </Button>
               <Button
@@ -354,18 +354,19 @@ export function BranchControl({
             placeholder={labels.createPlaceholder}
             className="font-mono"
           />
-        </WorkspaceDialog>
+        </Dialog>
       ) : null}
 
       {deleteTarget ? (
-        <WorkspaceDialog
-          titleId="git-branch-delete-title"
+        <Dialog
+          size="sm"
           title={
             deleteTarget.notMerged
               ? labels.deleteNotMergedTitle
               : labels.deleteTitle.replace('{branch}', deleteTarget.name)
           }
           description={deleteTarget.notMerged ? labels.deleteNotMergedHint : labels.deleteHint}
+          onClose={() => setDeleteTarget(null)}
           footer={
             <>
               <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
@@ -383,14 +384,15 @@ export function BranchControl({
           }
         >
           <DialogCodeBlock className="truncate">{deleteTarget.name}</DialogCodeBlock>
-        </WorkspaceDialog>
+        </Dialog>
       ) : null}
 
       {blockedSwitch ? (
-        <WorkspaceDialog
-          titleId="git-checkout-blocked-title"
+        <Dialog
+          size="sm"
           title={labels.checkoutBlockedTitle}
           description={labels.checkoutBlockedHint}
+          onClose={() => setBlockedSwitch(null)}
           footer={
             <>
               <Button type="button" variant="secondary" onClick={() => setBlockedSwitch(null)}>
@@ -410,7 +412,7 @@ export function BranchControl({
               <DialogPathList paths={blockedSwitch.paths} />
             </div>
           ) : null}
-        </WorkspaceDialog>
+        </Dialog>
       ) : null}
     </>
   );

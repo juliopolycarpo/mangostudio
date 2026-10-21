@@ -29,6 +29,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { DIALOG_SURFACE_CLASS } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { KbdHint } from '@/components/ui/KbdHint';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -250,7 +251,7 @@ export const CommandPalette = memo(function CommandPalette({
           if (event.target !== inputRef.current) event.preventDefault();
         }}
         {...dialogPanel}
-        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-stroke bg-surface-raised shadow-dialog"
+        className={cn('flex w-full max-w-2xl flex-col overflow-hidden', DIALOG_SURFACE_CLASS)}
         data-testid="command-palette"
       >
         <div className="flex h-12 items-center gap-3 border-b border-stroke px-4">

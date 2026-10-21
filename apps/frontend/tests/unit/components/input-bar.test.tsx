@@ -568,7 +568,7 @@ describe('InputBar — the runner it is dressed as', () => {
     renderInputBar({ runner: { kind: 'mangostudio', agentId: 'default' } });
     expect(screen.getByRole('textbox')).toHaveAttribute(
       'placeholder',
-      'Ask the AI model anything...'
+      'Ask the AI model anything…'
     );
   });
 });

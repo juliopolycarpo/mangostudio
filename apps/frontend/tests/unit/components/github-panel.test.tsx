@@ -142,7 +142,7 @@ describe('GithubPanel', () => {
           <GithubPanel chatId={CHAT_ID} workdir={WORKDIR} />
         </AppContext>
       );
-      expect(screen.getAllByText('Reading GitHub context...').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Reading GitHub context…').length).toBeGreaterThan(0);
       await flushAsyncRender();
     } finally {
       scenario.restore();

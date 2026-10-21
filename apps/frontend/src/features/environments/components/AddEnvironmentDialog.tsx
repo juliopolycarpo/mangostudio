@@ -15,9 +15,10 @@ import {
   shouldWarnPlaintextHttpRuntime,
   sshPreflightCommands,
 } from '@mangostudio/shared/environments';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -37,7 +38,6 @@ import { isSshFormUsable, SSH_LEADING_DASH, sshFormToConfig, validateSshForm } f
 import { ContainerConfigFields } from './ContainerConfigFields';
 import { CopyLine } from './CopyLine';
 import { choiceClass } from './choice-class';
-import { DialogShell } from './DialogShell';
 import { WslDistributionPicker } from './WslDistributionPicker';
 
 /** Mirrors `EnvironmentIdSchema`; the server is still the authority. */
@@ -81,7 +81,6 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
   const { t } = useI18n();
   const labels = t.environments.entities.add;
   const create = useCreateEnvironmentMutation();
-  const titleId = useId();
 
   const [kind, setKind] = useState<ReachabilityChoice>('stdio');
   const [name, setName] = useState('');
@@ -246,16 +245,11 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
   };
 
   return (
-    <DialogShell
+    <Dialog
       testId="add-environment-dialog"
-      titleId={titleId}
       title={labels.title}
       description={labels.description}
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
-        event.stopPropagation();
-        onClose();
-      }}
+      onClose={onClose}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -491,7 +485,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
           {error}
         </Callout>
       ) : null}
-    </DialogShell>
+    </Dialog>
   );
 }
 

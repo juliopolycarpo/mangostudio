@@ -8,14 +8,14 @@
  */
 
 import { normalizeMonogram, TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
-import { type KeyboardEvent, useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { ToolAvatar, type ToolImageDisplay } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { DialogShell } from '../components/DialogShell';
 import { deriveMonogram, type ResolvedToolIdentity } from './resolve';
 import { IMAGE_URL_PATTERN, ToolImageFields, type ToolImageMode } from './ToolImageFields';
 import { useSaveToolIdentity } from './use-tool-identities';
@@ -61,7 +61,6 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   const { t } = useI18n();
   const labels = t.environments.identity;
   const save = useSaveToolIdentity();
-  const titleId = useId();
 
   // Seeded from the stored overrides, never from the resolved values: a stored
   // monogram that happens to equal the derived one still has to come back as
@@ -128,19 +127,12 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
     );
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Escape') return;
-    event.stopPropagation();
-    onClose();
-  };
-
   return (
-    <DialogShell
+    <Dialog
       testId="identity-edit-dialog"
-      onKeyDown={handleKeyDown}
-      titleId={titleId}
+      onClose={onClose}
       title={formatMessage(labels.dialogTitle, { name: identity.name })}
-      titleClassName="truncate"
+      truncateTitle
       description={labels.preview}
       leading={
         <ToolAvatar
@@ -212,7 +204,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
       </div>
 
       {save.isError && <Callout tone="danger">{labels.saveFailed}</Callout>}
-    </DialogShell>
+    </Dialog>
   );
 }
 

@@ -126,7 +126,7 @@ describe('app settings pages integration', () => {
 
     const view = render(<PromptSettingsHarness />);
 
-    const textPrompt = await screen.findByLabelText('Default Text System Prompt');
+    const textPrompt = await screen.findByLabelText('Default text system prompt');
     await waitFor(() => {
       expect(textPrompt).toHaveValue('Initial prompt from API');
     });
@@ -168,7 +168,7 @@ describe('app settings pages integration', () => {
     render(<PromptSettingsHarness />);
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Default Text System Prompt')).toHaveValue(
+      expect(screen.getByLabelText('Default text system prompt')).toHaveValue(
         'Updated prompt from UI'
       );
     });
@@ -193,7 +193,7 @@ describe('app settings pages integration', () => {
 
     render(<GeneralSettingsHarness />);
 
-    await screen.findByText('Default Image Quality');
+    await screen.findByText('Default image quality');
 
     await user.click(screen.getByRole('button', { name: '4K' }));
 

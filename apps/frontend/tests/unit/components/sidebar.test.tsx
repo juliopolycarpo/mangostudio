@@ -195,7 +195,7 @@ describe('sidebar search', () => {
 describe('sidebar behaviors that must survive the overhaul', () => {
   it('starts a new chat from the CTA, whose accessible name stays clean of the shortcut', () => {
     const { props } = renderSidebar();
-    fireEvent.click(screen.getByRole('button', { name: 'New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(props.onNewChat).toHaveBeenCalledTimes(1);
   });
 

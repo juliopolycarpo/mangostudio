@@ -296,7 +296,7 @@ describe('composer slash palette', () => {
       const textbox = screen.getByRole('textbox');
       await user.type(textbox, '/auto');
 
-      expect(await screen.findByText('Looking for commands...')).toBeInTheDocument();
+      expect(await screen.findByText('Looking for commands…')).toBeInTheDocument();
       await user.keyboard('{Enter}');
 
       expect(onSubmit).not.toHaveBeenCalled();

@@ -18,8 +18,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Dialog } from '@/components/ui/Dialog';
 import { Spinner } from '@/components/ui/Spinner';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
@@ -97,67 +97,59 @@ function UpgradeProgress({
 }) {
   const { t } = useI18n();
   const m = t.environments.machine.update;
-  const dialogRef = useFocusTrap(() => {
-    if (isTerminal) onClose();
-  });
   const isRunning = stream.phase === 'connecting' || stream.phase === 'streaming';
   const currentStage = stream.stages.at(-1);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 animate-in fade-in duration-200">
+    <Dialog
+      ariaLabel={m.upgrade}
+      onClose={onClose}
+      // While the stream is live there is no way back: aborting the fetch only
+      // stops this tab from watching, so Escape and the backdrop wait for a
+      // terminal state, as the missing close control does.
+      closeDisabled={!isTerminal}
+      footer={
+        isTerminal ? (
+          <Button variant="secondary" onClick={onClose}>
+            {t.environments.install.close}
+          </Button>
+        ) : undefined
+      }
+    >
+      {isRunning && (
+        <header className="flex items-center gap-2">
+          <Spinner size="sm" />
+          <span className="text-sm font-medium text-fg">
+            {currentStage ? m.stage[currentStage.stage] : m.stage.resolve}
+          </span>
+        </header>
+      )}
+
       <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={m.upgrade}
-        tabIndex={-1}
-        className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-lg border border-stroke bg-surface-raised shadow-dialog outline-none"
+        className="app-scrollbar max-h-56 overflow-y-auto rounded-md border border-stroke bg-canvas p-3 font-mono text-xs leading-relaxed"
+        role="log"
+        aria-live="polite"
+        data-testid="upgrade-console"
       >
-        <div className="app-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
-          {isRunning && (
-            <header className="flex items-center gap-2">
-              <Spinner size="sm" />
-              <span className="text-sm font-medium text-fg">
-                {currentStage ? m.stage[currentStage.stage] : m.stage.resolve}
-              </span>
-            </header>
-          )}
-
-          <div
-            className="app-scrollbar max-h-56 overflow-y-auto rounded-md border border-stroke bg-canvas p-3 font-mono text-xs leading-relaxed"
-            role="log"
-            aria-live="polite"
-            data-testid="upgrade-console"
-          >
-            {stream.lines.length === 0 ? (
-              <p className="text-fg-subtle">…</p>
-            ) : (
-              stream.lines.map((line) => (
-                <div
-                  key={line.id}
-                  className={cn(
-                    'whitespace-pre-wrap break-all',
-                    line.stream === 'stderr' ? 'text-danger' : 'text-fg-muted'
-                  )}
-                >
-                  {line.text}
-                </div>
-              ))
-            )}
-          </div>
-
-          <UpgradeOutcome stream={stream} />
-        </div>
-
-        {isTerminal && (
-          <footer className="flex shrink-0 justify-end gap-2 border-t border-stroke bg-canvas px-6 py-4">
-            <Button variant="secondary" onClick={onClose}>
-              {t.environments.install.close}
-            </Button>
-          </footer>
+        {stream.lines.length === 0 ? (
+          <p className="text-fg-subtle">…</p>
+        ) : (
+          stream.lines.map((line) => (
+            <div
+              key={line.id}
+              className={cn(
+                'whitespace-pre-wrap break-all',
+                line.stream === 'stderr' ? 'text-danger' : 'text-fg-muted'
+              )}
+            >
+              {line.text}
+            </div>
+          ))
         )}
       </div>
-    </div>
+
+      <UpgradeOutcome stream={stream} />
+    </Dialog>
   );
 }
 

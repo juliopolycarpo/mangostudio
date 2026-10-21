@@ -39,7 +39,7 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
           ) : (
             <ReservedAspectImage
               src={msg.referenceImage}
-              alt="Reference"
+              alt={t.chat.feed.referenceImageAlt}
               onLoadError={() => setReferenceImageFailed(true)}
             />
           )}

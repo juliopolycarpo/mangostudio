@@ -13,10 +13,10 @@ describe('i18n provider-neutral copy', () => {
   });
 
   it('provides model selector placeholder labels', () => {
-    expect(en.models.loading).toBe('Loading models...');
+    expect(en.models.loading).toBe('Loading models…');
     expect(en.models.unavailable).toBe('Models unavailable');
     expect(en.models.noModelsAvailable).toBe('No models available');
-    expect(ptBR.models.loading).toBe('Carregando modelos...');
+    expect(ptBR.models.loading).toBe('Carregando modelos…');
     expect(ptBR.models.unavailable).toBe('Modelos indisponíveis');
     expect(ptBR.models.noModelsAvailable).toBe('Nenhum modelo disponível');
   });
@@ -33,12 +33,12 @@ describe('i18n provider-neutral copy', () => {
     expect(en.common.closeMenu).toBe('Close menu');
     expect(en.common.settingsNavigation).toBe('Settings navigation');
     expect(en.common.contextIndicator).toBe('Context usage indicator');
-    expect(en.common.mangoStudioLogo).toBe('Mango Studio Logo');
+    expect(en.common.mangoStudioLogo).toBe('MangoStudio logo');
     expect(ptBR.common.openMenu).toBe('Abrir menu');
     expect(ptBR.common.closeMenu).toBe('Fechar menu');
     expect(ptBR.common.settingsNavigation).toBe('Navegação de configurações');
     expect(ptBR.common.contextIndicator).toBe('Indicador de uso de contexto');
-    expect(ptBR.common.mangoStudioLogo).toBe('Logo do Mango Studio');
+    expect(ptBR.common.mangoStudioLogo).toBe('Logo do MangoStudio');
   });
 
   it('provides common action labels', () => {
@@ -58,14 +58,12 @@ describe('i18n provider-neutral copy', () => {
   });
 
   it('provides chat feed fallback labels', () => {
-    expect(en.chat.feed.neuralDiffusionPath).toBe('Using Neural Diffusion Path.');
-    expect(ptBR.chat.feed.neuralDiffusionPath).toBe('Usando Neural Diffusion Path.');
+    expect(en.chat.feed.neuralDiffusionPath).toBe('Using neural diffusion path.');
+    expect(ptBR.chat.feed.neuralDiffusionPath).toBe('Usando o caminho de difusão neural.');
   });
 
   it('provides provider settings labels', () => {
-    expect(en.settings.providers.reservedForFuture).toBe('Reserved for future settings');
     expect(en.settings.providers.maxOutputTokensPlaceholder).toContain('{limit}');
-    expect(ptBR.settings.providers.reservedForFuture).toBe('Reservado para configurações futuras');
     expect(ptBR.settings.providers.maxOutputTokensPlaceholder).toContain('{limit}');
   });
 

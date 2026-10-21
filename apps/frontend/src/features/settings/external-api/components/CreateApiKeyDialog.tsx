@@ -9,9 +9,9 @@ import { Check, Copy, KeyRound, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
-import { DialogFrame } from '@/features/settings/connectors/components/DialogFrame';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -92,7 +92,7 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
 
   if (created) {
     return (
-      <DialogFrame
+      <Dialog
         title={reveal.title}
         onClose={onClose}
         footer={<Button onClick={onClose}>{reveal.done}</Button>}
@@ -113,12 +113,12 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
           </Button>
         </div>
         {copyFailed && <Callout tone="danger">{reveal.copyFailed}</Callout>}
-      </DialogFrame>
+      </Dialog>
     );
   }
 
   return (
-    <DialogFrame
+    <Dialog
       title={labels.title}
       description={scopeHint(t, scope)}
       onClose={onClose}
@@ -195,6 +195,6 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
           {formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
         </p>
       </div>
-    </DialogFrame>
+    </Dialog>
   );
 }

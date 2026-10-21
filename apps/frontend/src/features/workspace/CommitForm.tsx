@@ -3,6 +3,7 @@ import { History, X } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { useToast } from '@/components/ui/Toast';
@@ -11,7 +12,6 @@ import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { CommitActions, useCommitActions } from './CommitActions';
 import { IconButton } from './components/IconButton';
-import { WorkspaceDialog } from './components/WorkspaceDialog';
 import { useGenerateCommitMessage, useGitHeadMessage } from './hooks/use-git-state';
 
 const AMEND_CONFIRMED_KEY = 'mangostudio.git.amend-confirmed';
@@ -197,10 +197,11 @@ export function CommitForm({
       {diffWasTruncated ? <Callout tone="info">{labels.truncatedNotice}</Callout> : null}
 
       {confirmAmend ? (
-        <WorkspaceDialog
-          titleId="git-amend-confirm-title"
+        <Dialog
+          size="sm"
           title={amendLabels.title}
           description={amendLabels.description}
+          onClose={() => setConfirmAmend(false)}
           footer={
             <>
               <Button type="button" variant="secondary" onClick={() => setConfirmAmend(false)}>
@@ -222,10 +223,11 @@ export function CommitForm({
       ) : null}
 
       {pendingSuggestion ? (
-        <WorkspaceDialog
-          titleId="git-commit-message-overwrite-title"
+        <Dialog
+          size="sm"
           title={overwriteLabels.title}
           description={overwriteLabels.description}
+          onClose={() => setPendingSuggestion(null)}
           footer={
             <>
               <Button type="button" variant="secondary" onClick={() => setPendingSuggestion(null)}>

@@ -24,10 +24,10 @@ describe('Settings Prompts Page — Integration', () => {
     const props = createDefaultProps();
     render(<PromptSettings {...props} />);
 
-    expect(screen.getByText('Default Text System Prompt')).toBeInTheDocument();
-    expect(screen.getByText('Default Image System Prompt')).toBeInTheDocument();
-    expect(screen.getByText('Rule Files')).toBeInTheDocument();
-    expect(screen.getByText('Custom Rules')).toBeInTheDocument();
+    expect(screen.getByText('Default text system prompt')).toBeInTheDocument();
+    expect(screen.getByText('Default image system prompt')).toBeInTheDocument();
+    expect(screen.getByText('Rule files')).toBeInTheDocument();
+    expect(screen.getByText('Custom rules')).toBeInTheDocument();
   });
 
   it('renders both fixed rule paths', () => {
@@ -42,7 +42,7 @@ describe('Settings Prompts Page — Integration', () => {
     const props = createDefaultProps();
     render(<PromptSettings {...props} />);
 
-    const textarea = screen.getByLabelText('Default Text System Prompt');
+    const textarea = screen.getByLabelText('Default text system prompt');
     fireEvent.change(textarea, { target: { value: 'Be concise.' } });
 
     expect(props.onTextSystemPromptChange).toHaveBeenCalledWith('Be concise.');
@@ -52,17 +52,17 @@ describe('Settings Prompts Page — Integration', () => {
     const props = createDefaultProps();
     render(<PromptSettings {...props} />);
 
-    const textarea = screen.getByLabelText('Default Image System Prompt');
+    const textarea = screen.getByLabelText('Default image system prompt');
     fireEvent.change(textarea, { target: { value: '4K cinematic.' } });
 
     expect(props.onImageSystemPromptChange).toHaveBeenCalledWith('4K cinematic.');
   });
 
-  it('adds a custom rule when clicking Add Rule', () => {
+  it('adds a custom rule when clicking Add rule', () => {
     const props = createDefaultProps();
     render(<PromptSettings {...props} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Rule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add rule' }));
 
     expect(props.onAddCustomRule).toHaveBeenCalledTimes(1);
   });

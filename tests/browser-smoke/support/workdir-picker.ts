@@ -10,7 +10,7 @@ import { expect, type Page } from '@playwright/test';
  *
  * A chat with no working directory opens it by itself (see
  * `use-runner-selection`), so one flow can meet it more than once: the landing
- * opens a chat, "New Chat" opens another, and each brings its own picker. The
+ * opens a chat, "New chat" opens another, and each brings its own picker. The
  * one that is still up when a spec reaches the rail covers it — the failure
  * reads as a click timing out on a button Playwright can see, with the modal's
  * `<header>` named as what intercepts the pointer events. So this is called

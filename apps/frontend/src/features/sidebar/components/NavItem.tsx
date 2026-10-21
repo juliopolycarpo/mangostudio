@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 
@@ -42,11 +43,7 @@ export function NavItem({
         // edge — the NavigationView's own signal. The bar is what carries the
         // colour; the fill alone would not survive a grayscale screen.
         active
-          ? cn(
-              'bg-fill-selected font-medium text-fg',
-              horizontal &&
-                'before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent'
-            )
+          ? cn('bg-fill-selected font-medium text-fg', horizontal && SELECTION_BAR)
           : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
       )}
     >

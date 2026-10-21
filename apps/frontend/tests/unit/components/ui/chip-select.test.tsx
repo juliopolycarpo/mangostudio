@@ -111,9 +111,9 @@ describe('ChipSelect', () => {
   });
 
   it('falls back to the placeholder when the value matches nothing yet', () => {
-    renderSelect({ value: 'env-7f3a', options: [], placeholder: 'Loading environments...' });
+    renderSelect({ value: 'env-7f3a', options: [], placeholder: 'Loading environments…' });
 
-    expect(trigger()).toHaveTextContent('Loading environments...');
+    expect(trigger()).toHaveTextContent('Loading environments…');
   });
 
   it('cannot be opened while disabled', async () => {

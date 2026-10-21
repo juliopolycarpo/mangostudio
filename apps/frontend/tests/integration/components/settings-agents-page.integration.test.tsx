@@ -80,7 +80,7 @@ describe('AgentSettingsPage integration', () => {
 
     render(<AgentSettingsPage />);
 
-    const systemPrompt = await screen.findByLabelText('System Prompt');
+    const systemPrompt = await screen.findByLabelText('System prompt');
     await user.clear(systemPrompt);
     await user.type(systemPrompt, 'Updated chat prompt.');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -102,10 +102,10 @@ describe('AgentSettingsPage integration', () => {
 
     render(<AgentSettingsPage />);
 
-    await user.click(await screen.findByRole('button', { name: 'Create Agent' }));
+    await user.click(await screen.findByRole('button', { name: 'Create agent' }));
     await user.clear(screen.getByLabelText('Name'));
     await user.type(screen.getByLabelText('Name'), 'Writer');
-    await user.type(screen.getByLabelText('File Slug'), 'writer');
+    await user.type(screen.getByLabelText('File slug'), 'writer');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(hasFetchCall('POST', '/api/settings/agents')).toBe(true));
@@ -142,7 +142,7 @@ describe('AgentSettingsPage integration', () => {
 
     render(<AgentSettingsPage />);
 
-    await user.click(await screen.findByRole('button', { name: 'Create Agent' }));
+    await user.click(await screen.findByRole('button', { name: 'Create agent' }));
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(

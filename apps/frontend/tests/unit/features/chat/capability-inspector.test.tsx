@@ -256,7 +256,9 @@ describe('CapabilityInspector', () => {
     await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent('Failed to load capabilities');
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Could not load capabilities. Try again.'
+      );
     });
     expect(screen.queryByText('boom')).not.toBeInTheDocument();
   });

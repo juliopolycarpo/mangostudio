@@ -105,6 +105,9 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText('My Key');
     expect(screen.getByText('****...1234')).toBeInTheDocument();
+    // The glyph never stands alone: the card says the state and where the key lives.
+    expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(screen.getByText('OS secret store')).toBeInTheDocument();
 
     expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -140,7 +143,7 @@ describe('ConnectorsSettings', () => {
     // Wait for the initial empty state to load
     await screen.findByText(/no connectors found/i);
 
-    // Open the add modal — pick the first "Add Connector" button (header button)
+    // Open the add modal — pick the first "Add connector" button (header button)
     const addButtons = screen.getAllByRole('button', { name: /add connector/i });
     await user.click(addButtons[0]);
 
@@ -148,14 +151,37 @@ describe('ConnectorsSettings', () => {
     const nameInput = screen.getByLabelText(/^name$/i);
     await user.type(nameInput, 'test-connector');
 
-    const apiKeyInput = screen.getByLabelText(/api key/i);
+    const apiKeyInput = screen.getByLabelText(/^api key$/i);
     await user.type(apiKeyInput, 'new-key-5678');
 
-    // Submit — the modal's submit button is the last "Add Connector" button in the DOM
+    // Submit — the modal's submit button is the last "Add connector" button in the DOM
     const allAddButtons = screen.getAllByRole('button', { name: /add connector/i });
     await user.click(allAddButtons[allAddButtons.length - 1]);
 
     await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
+  });
+
+  it('names the API key visibility toggle for what it does next', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+
+    withProviderSettings(fetchScenario).respondWithJson('GET', '/api/settings/connectors', {
+      body: { connectors: [] },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+    await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
+
+    const apiKeyInput = screen.getByLabelText(/^api key$/i);
+    expect(apiKeyInput).toHaveAttribute('type', 'password');
+
+    await user.click(screen.getByRole('button', { name: 'Show API key' }));
+    expect(apiKeyInput).toHaveAttribute('type', 'text');
+
+    await user.click(screen.getByRole('button', { name: 'Hide API key' }));
+    expect(apiKeyInput).toHaveAttribute('type', 'password');
   });
 
   it('submits DeepSeek connectors with an optional base URL', async () => {
@@ -189,7 +215,7 @@ describe('ConnectorsSettings', () => {
     await user.click(screen.getByRole('button', { name: /deepseek/i }));
     await user.type(screen.getByLabelText(/^name$/i), 'deepseek-connector');
     await user.type(screen.getByLabelText(/base url/i), 'https://api.deepseek.com');
-    await user.type(screen.getByLabelText(/api key/i), 'sk-deepseek-test-key');
+    await user.type(screen.getByLabelText(/^api key$/i), 'sk-deepseek-test-key');
     const allAddButtons = screen.getAllByRole('button', { name: /add connector/i });
     await user.click(allAddButtons[allAddButtons.length - 1]);
 

@@ -13,6 +13,7 @@ import { type ReactNode, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { FIELD_CLASS } from '@/components/ui/Input';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { getMcpPrompt, readMcpResource } from '@/features/settings/mcp/api';
@@ -30,7 +31,6 @@ import {
   serializeMcpPromptArguments,
 } from '../lib/mcp-prompt-args';
 import { ComposerPopover } from './ComposerPopover';
-import { DialogBody, DialogFooter, DialogFrame } from './DialogFrame';
 
 interface McpComposerMenuProps {
   chatId: string | null;
@@ -119,7 +119,7 @@ export function McpComposerMenu({
         title={labels.mcpMenuButton}
       >
         <Plug size={ICON_SM} className="shrink-0" />
-        <span className="hidden sm:inline">MCP</span>
+        <span className="hidden sm:inline">{t.tools.sources.mcp}</span>
       </button>
 
       {open && (
@@ -273,49 +273,45 @@ function McpPromptArgumentDialog({
   const missing = missingRequiredMcpArguments(prompt.arguments, values);
 
   return (
-    <DialogFrame>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (missing.length === 0) onSubmit(values);
-        }}
-      >
-        <DialogBody>
-          <div className="min-w-0 space-y-1">
-            <h3 className="text-title font-semibold text-fg">{labels.mcpPromptArgsTitle}</h3>
-            <p className="truncate font-mono text-xs text-fg-muted">{prompt.name}</p>
-          </div>
-
-          {prompt.arguments.map((argument) => (
-            <label key={argument.name} className="block space-y-1">
-              <span className="flex items-center gap-2 text-sm font-medium text-fg">
-                {argument.name}
-                {argument.required && <Badge variant="neutral">{labels.mcpArgRequired}</Badge>}
-              </span>
-              <input
-                type="text"
-                value={values[argument.name] ?? ''}
-                onChange={(event) =>
-                  setValues((current) => ({ ...current, [argument.name]: event.target.value }))
-                }
-                className={FIELD_CLASS}
-              />
-              {argument.description && (
-                <span className="block text-xs text-fg-muted">{argument.description}</span>
-              )}
-            </label>
-          ))}
-        </DialogBody>
-
-        <DialogFooter>
+    <Dialog
+      size="sm"
+      title={labels.mcpPromptArgsTitle}
+      description={<span className="block truncate font-mono text-xs">{prompt.name}</span>}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (missing.length === 0) onSubmit(values);
+      }}
+      onClose={onCancel}
+      footer={
+        <>
           <Button variant="secondary" type="button" onClick={onCancel}>
             {labels.mcpPromptCancel}
           </Button>
           <Button type="submit" loading={busy} disabled={missing.length > 0}>
             {labels.mcpPromptInsert}
           </Button>
-        </DialogFooter>
-      </form>
-    </DialogFrame>
+        </>
+      }
+    >
+      {prompt.arguments.map((argument) => (
+        <label key={argument.name} className="block space-y-1">
+          <span className="flex items-center gap-2 text-sm font-medium text-fg">
+            {argument.name}
+            {argument.required && <Badge variant="neutral">{labels.mcpArgRequired}</Badge>}
+          </span>
+          <input
+            type="text"
+            value={values[argument.name] ?? ''}
+            onChange={(event) =>
+              setValues((current) => ({ ...current, [argument.name]: event.target.value }))
+            }
+            className={FIELD_CLASS}
+          />
+          {argument.description && (
+            <span className="block text-xs text-fg-muted">{argument.description}</span>
+          )}
+        </label>
+      ))}
+    </Dialog>
   );
 }

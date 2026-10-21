@@ -2,11 +2,11 @@ import type { Connector } from '@mangostudio/shared/connectors';
 import { Zap } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { useChatGptResetRedeem } from '../hooks/use-chatgpt-reset-redeem';
-import { DialogFrame } from './DialogFrame';
 
 interface ChatGptResetCreditActionProps {
   connector: Connector;
@@ -61,7 +61,7 @@ export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptReset
       </Button>
 
       {isConfirmOpen && (
-        <DialogFrame
+        <Dialog
           size="sm"
           title={s.chatgptRedeemConfirmTitle}
           description={confirmBody}

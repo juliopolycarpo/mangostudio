@@ -31,7 +31,7 @@ function items(): CommandItem[] {
       badge: { label: 'codex', dotClassName: 'bg-agent-codex' },
       run: runs.session,
     },
-    { id: 'action:new-chat', section: 'actions', label: 'New Chat', run: runs.newChat },
+    { id: 'action:new-chat', section: 'actions', label: 'New chat', run: runs.newChat },
     {
       id: 'navigate:/gallery',
       section: 'navigate',
@@ -50,10 +50,10 @@ function items(): CommandItem[] {
 
 /** Any `useFocusTrap` consumer; this one is the cheapest to mount. */
 const confirmProps = {
-  title: 'Delete Connector',
+  title: 'Delete connector',
   description: 'Are you sure you want to delete',
   entityName: 'My OpenAI Key',
-  confirmLabel: 'Delete Connector',
+  confirmLabel: 'Delete connector',
   cancelLabel: 'Cancel',
   onConfirm: jest.fn(),
   onCancel: jest.fn(),
@@ -174,7 +174,7 @@ describe('command palette shell', () => {
     const headings = screen
       .getAllByRole('group')
       .map((group) => group.firstElementChild?.textContent);
-    expect(headings).toEqual(['Sessions', 'Actions', 'Go to', 'Environments']);
+    expect(headings).toEqual(['Chats', 'Actions', 'Go to', 'Environments']);
   });
 
   it('shows the session badge, folder and relative time on the row', () => {
@@ -190,7 +190,7 @@ describe('command palette keyboard', () => {
   it('moves the active row with the arrows and wraps at both ends', () => {
     renderPalette();
     fireEvent.keyDown(input(), { key: 'ArrowDown' });
-    expect(activeOptionLabel()).toContain('New Chat');
+    expect(activeOptionLabel()).toContain('New chat');
 
     fireEvent.keyDown(input(), { key: 'ArrowUp' });
     expect(activeOptionLabel()).toContain('Plugin LSP TypeScript');
@@ -203,7 +203,7 @@ describe('command palette keyboard', () => {
   it('jumps between sections on Tab and never lets focus leave the input', () => {
     renderPalette();
     fireEvent.keyDown(input(), { key: 'Tab' });
-    expect(activeOptionLabel()).toContain('New Chat');
+    expect(activeOptionLabel()).toContain('New chat');
 
     fireEvent.keyDown(input(), { key: 'Tab', shiftKey: true });
     expect(activeOptionLabel()).toContain('Plugin LSP TypeScript');
@@ -246,7 +246,7 @@ describe('command palette filtering', () => {
 
     expect(screen.getAllByRole('option')).toHaveLength(1);
     expect(screen.getByRole('option', { name: /Gallery/ })).toBeInTheDocument();
-    expect(screen.queryByText('Sessions')).not.toBeInTheDocument();
+    expect(screen.queryByText('Chats')).not.toBeInTheDocument();
   });
 
   it('finds a session by its folder, which the label never mentions', () => {
@@ -261,7 +261,7 @@ describe('command palette filtering', () => {
     expect(activeOptionLabel()).toContain('Local');
 
     fireEvent.change(input(), { target: { value: 'new' } });
-    expect(activeOptionLabel()).toContain('New Chat');
+    expect(activeOptionLabel()).toContain('New chat');
   });
 
   it('activates the best match anywhere, not the first row on screen', () => {
@@ -272,7 +272,7 @@ describe('command palette filtering', () => {
     expect(activeOptionLabel()).toContain('Gallery');
 
     fireEvent.change(input(), { target: { value: 'chat' } });
-    expect(activeOptionLabel()).toContain('New Chat');
+    expect(activeOptionLabel()).toContain('New chat');
   });
 
   it('offers the no-results state rather than an empty panel', () => {

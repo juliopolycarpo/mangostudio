@@ -27,7 +27,7 @@ Chaves de API para Gemini, OpenAI, Anthropic e DeepSeek suportam três métodos 
 
 1. **Variáveis de ambiente** em `~/.mango/.env` — prioridade mais alta, nunca versionadas.
 2. **config.toml** em `~/.mango/config.toml` — arquivo flat, nunca versionado.
-3. **OS Secret Store** via `Bun.secrets` — armazenamento nativo seguro do sistema operacional, recomendado para máxima segurança.
+3. **OS secret store** via `Bun.secrets` — armazenamento nativo seguro do sistema operacional, recomendado para máxima segurança.
 
 As chaves nunca são expostas ao frontend. A API resolve os secrets server-side e nunca os inclui nas responses.
 

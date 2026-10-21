@@ -4,13 +4,14 @@ import { Database, Eye, EyeOff, FileCode, LogIn, ShieldCheck } from 'lucide-reac
 import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import type { useConnectorForm } from '../hooks/use-connector-form';
-import { DialogFrame } from './DialogFrame';
 
 /**
  * Providers a new connector can be created for.
@@ -123,7 +124,7 @@ export function AddConnectorModal({
   );
 
   return (
-    <DialogFrame
+    <Dialog
       title={s.addModalTitle}
       description={isChatGpt ? s.chatgptAddModalDescription : s.addModalDescription}
       onClose={onClose}
@@ -247,6 +248,8 @@ export function AddConnectorModal({
               type="button"
               variant="secondary"
               size="icon"
+              aria-label={showKey ? s.hideApiKey : s.showApiKey}
+              title={showKey ? s.hideApiKey : s.showApiKey}
               aria-pressed={showKey}
               onClick={() => setShowKey(!showKey)}
             >
@@ -268,13 +271,11 @@ export function AddConnectorModal({
                   type="button"
                   aria-pressed={selected}
                   onClick={() => setForm({ ...form, source: src.id })}
-                  // The current choice is a neutral fill plus the accent bar on
-                  // the leading edge, as in the navigation: the bar carries the
-                  // colour, the fill alone would not survive a grayscale screen.
+                  // The current choice is marked as in the navigation.
                   className={cn(
                     'relative flex w-full cursor-pointer items-start gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors',
                     selected
-                      ? 'bg-fill-selected before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent'
+                      ? cn('bg-fill-selected', SELECTION_BAR)
                       : 'bg-control hover:bg-control-hover'
                   )}
                 >
@@ -289,6 +290,6 @@ export function AddConnectorModal({
           </div>
         </div>
       )}
-    </DialogFrame>
+    </Dialog>
   );
 }

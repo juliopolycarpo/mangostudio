@@ -17,7 +17,7 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // A chat with no working directory opens the folder picker by itself, and it
   // is a modal that swallows the clicks below. The landing may already have
   // opened a chat — and its picker — before this spec ran, so dismiss whatever
-  // is up before reaching for "New Chat" as well as after it.
+  // is up before reaching for "New chat" as well as after it.
   await dismissWorkdirPicker(page);
 
   // The rail only exists on the chat surface and only once a chat does.
@@ -25,7 +25,7 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // label, and an unscoped locator is a strict-mode violation that would kill
   // the spec before it reaches the panel. The chat header is a plain element
   // rather than a <header>, so it has no `banner` role to scope to.
-  await page.getByRole('main').getByRole('button', { name: 'New Chat' }).click();
+  await page.getByRole('main').getByRole('button', { name: 'New chat' }).click();
 
   // The new chat brings a picker of its own. Dismissing it is also what sets up
   // the one deterministic assertion further down: the chat stays unbound, so

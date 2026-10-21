@@ -11,8 +11,8 @@ import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
+import { Tabs } from '@/components/ui/Tabs';
 import { useToast } from '@/components/ui/Toast';
-import { PanelTabs } from '@/features/workspace/components/PanelTabs';
 import { gitWriteScopes, invalidateGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
@@ -124,7 +124,7 @@ export function GithubRepoSection({
     >
       {workdir ? (
         <div className="space-y-3">
-          <PanelTabs
+          <Tabs
             tabs={[
               { id: 'prs', label: t.github.panel.prs },
               { id: 'issues', label: t.github.panel.issues },

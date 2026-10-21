@@ -173,12 +173,11 @@ describe('HomePage', () => {
     const { scenario, props } = await renderDashboard();
     try {
       const user = userEvent.setup();
+      expect(await screen.findByText('No folders yet')).toBeInTheDocument();
       expect(
-        await screen.findByText(
-          'No folders yet. Start a chat and point it at a project to see it here.'
-        )
+        screen.getByText('Start a chat and point it at a project to see it here.')
       ).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'New Chat' }));
+      await user.click(screen.getByRole('button', { name: 'New chat' }));
       expect(props.onNewChat).toHaveBeenCalled();
     } finally {
       scenario.restore();
@@ -218,7 +217,7 @@ describe('HomePage', () => {
       expect(tiles[0]).toHaveTextContent('mango');
       expect(tiles[0]).toHaveTextContent('feat/lsp-plugin');
       expect(tiles[0]).toHaveTextContent('3 changed');
-      expect(tiles[0]).toHaveTextContent('2 session(s)');
+      expect(tiles[0]).toHaveTextContent('2 chat(s)');
       expect(tiles[1]).toHaveTextContent('lsp-store');
       expect(tiles[1]).toHaveTextContent('clean tree');
     } finally {
@@ -277,7 +276,7 @@ describe('HomePage', () => {
     try {
       const tile = await screen.findByTestId('workspace-tile');
       expect(tile).toHaveTextContent('notes');
-      expect(tile).toHaveTextContent('No session here yet');
+      expect(tile).toHaveTextContent('No chat here yet');
       // Nothing to resume: the tile offers only the way to start something.
       expect(screen.queryByRole('button', { name: /^Continue / })).toBeNull();
     } finally {

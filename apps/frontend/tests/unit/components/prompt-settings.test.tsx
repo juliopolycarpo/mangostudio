@@ -37,10 +37,10 @@ describe('PromptSettings', () => {
   it('renders the default prompts section with textareas', () => {
     renderPromptSettings();
 
-    expect(screen.getByText('Default Text System Prompt')).toBeInTheDocument();
-    expect(screen.getByText('Default Image System Prompt')).toBeInTheDocument();
-    expect(screen.getByLabelText('Default Text System Prompt')).toBeInTheDocument();
-    expect(screen.getByLabelText('Default Image System Prompt')).toBeInTheDocument();
+    expect(screen.getByText('Default text system prompt')).toBeInTheDocument();
+    expect(screen.getByText('Default image system prompt')).toBeInTheDocument();
+    expect(screen.getByLabelText('Default text system prompt')).toBeInTheDocument();
+    expect(screen.getByLabelText('Default image system prompt')).toBeInTheDocument();
   });
 
   it('renders fixed rule cards with correct paths', () => {
@@ -53,7 +53,7 @@ describe('PromptSettings', () => {
   it('calls onTextSystemPromptChange when text prompt changes', () => {
     const props = renderPromptSettings();
 
-    fireEvent.change(screen.getByLabelText('Default Text System Prompt'), {
+    fireEvent.change(screen.getByLabelText('Default text system prompt'), {
       target: { value: 'You are a helpful assistant.' },
     });
 
@@ -63,7 +63,7 @@ describe('PromptSettings', () => {
   it('calls onImageSystemPromptChange when image prompt changes', () => {
     const props = renderPromptSettings();
 
-    fireEvent.change(screen.getByLabelText('Default Image System Prompt'), {
+    fireEvent.change(screen.getByLabelText('Default image system prompt'), {
       target: { value: 'Generate cinematic images.' },
     });
 
@@ -76,7 +76,7 @@ describe('PromptSettings', () => {
     const enabledToggles = screen.getAllByRole('switch');
     expect(enabledToggles.length).toBeGreaterThanOrEqual(2);
 
-    const injectionRoleLabels = screen.getAllByText('Injection Role');
+    const injectionRoleLabels = screen.getAllByText('Injection role');
     expect(injectionRoleLabels.length).toBeGreaterThanOrEqual(2);
 
     const frequencyLabels = screen.getAllByText('Frequency');
@@ -93,13 +93,19 @@ describe('PromptSettings', () => {
   it('renders custom rules section', () => {
     renderPromptSettings();
 
-    expect(screen.getByText('Custom Rules')).toBeInTheDocument();
+    expect(screen.getByText('Custom rules')).toBeInTheDocument();
   });
 
-  it('calls onAddCustomRule when Add Rule button is clicked', () => {
+  it('says the custom rules list is empty instead of repeating the Add rule action', () => {
+    renderPromptSettings();
+
+    expect(screen.getByText('No custom rules yet')).toBeInTheDocument();
+  });
+
+  it('calls onAddCustomRule when Add rule button is clicked', () => {
     const props = renderPromptSettings();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Rule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add rule' }));
 
     expect(props.onAddCustomRule).toHaveBeenCalledTimes(1);
   });
@@ -156,7 +162,7 @@ describe('PromptSettings', () => {
   it('calls onUpdateRuleFile when injection role is changed', () => {
     const props = renderPromptSettings();
 
-    const userRadios = screen.getAllByText('Send as User Prompt');
+    const userRadios = screen.getAllByText('Send as user prompt');
     fireEvent.click(userRadios[0]);
 
     expect(props.onUpdateRuleFile).toHaveBeenCalledWith('agentsMd', { injectionRole: 'user' });

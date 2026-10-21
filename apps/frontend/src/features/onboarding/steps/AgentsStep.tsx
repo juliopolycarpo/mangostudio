@@ -15,6 +15,7 @@ import { Bot, Check, Sparkles } from 'lucide-react';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Spinner } from '@/components/ui/Spinner';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { CopyLine } from '@/features/environments/components/CopyLine';
 import {
   externalAgentSelectable,
@@ -190,10 +191,9 @@ function RunnerOption({
       onClick={onSelect}
       className={cn(
         'relative flex w-full items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-        // The chosen runner is the list's current item: a neutral fill and the
-        // 3px accent bar, the same signal the step list and the sidebar use.
+        // The chosen runner is the list's current item, marked as in the sidebar.
         selected
-          ? 'bg-fill-selected before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent'
+          ? cn('bg-fill-selected', SELECTION_BAR)
           : 'bg-control enabled:hover:bg-control-hover'
       )}
     >

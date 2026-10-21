@@ -21,9 +21,11 @@ import {
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { Spinner } from '@/components/ui/Spinner';
+import { Tabs } from '@/components/ui/Tabs';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
 import { useI18n } from '@/hooks/use-i18n';
@@ -33,11 +35,10 @@ import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
 import { CommitForm } from './CommitForm';
+import { DialogPathList } from './components/DialogBlocks';
 import { GroupHeading } from './components/GroupHeading';
 import { IconButton } from './components/IconButton';
-import { PanelTabs } from './components/PanelTabs';
 import { RowList } from './components/RowList';
-import { DialogPathList, WorkspaceDialog } from './components/WorkspaceDialog';
 import type { DiffSelection } from './DiffViewer';
 import { readGitPanelPrefs, writeGitPanelPrefs } from './git-panel-prefs';
 import {
@@ -370,7 +371,7 @@ function RepositoryStatus({
         ) : null}
       </section>
 
-      <PanelTabs
+      <Tabs
         tabs={viewTabs}
         active={view}
         onSelect={(next) => {
@@ -470,10 +471,11 @@ function RepositoryStatus({
       <BranchPrChip chatId={chatId} context={githubContext} />
 
       {discardRequest && discardText ? (
-        <WorkspaceDialog
-          titleId="git-discard-title"
+        <Dialog
+          size="sm"
           title={discardText.title}
           description={discardText.hint}
+          onClose={() => setDiscardRequest(null)}
           footer={
             <>
               <Button type="button" variant="secondary" onClick={() => setDiscardRequest(null)}>
@@ -491,7 +493,7 @@ function RepositoryStatus({
           }
         >
           <DialogPathList paths={discardRequest.flatMap((selection) => selection.paths)} />
-        </WorkspaceDialog>
+        </Dialog>
       ) : null}
     </div>
   );
