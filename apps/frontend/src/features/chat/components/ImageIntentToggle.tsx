@@ -29,7 +29,7 @@ export function ImageIntentToggle({
       disabled={disabled}
       aria-pressed={active}
       title={t.chat.input.createImagesHint}
-      className="terminal-chip composer-tool-chip"
+      className="composer-chip composer-tool-chip"
     >
       <Image size={ICON_SM} className="shrink-0" />
       <span className="hidden sm:inline">{t.chat.input.createImages}</span>

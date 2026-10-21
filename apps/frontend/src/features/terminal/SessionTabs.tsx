@@ -103,7 +103,7 @@ export function SessionTabs({
               size="icon"
               onClick={() => startEditing(session)}
               aria-label={t.terminal.rename}
-              className="size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              className="size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
             >
               <Pencil size={ICON_SM} />
             </Button>
@@ -113,7 +113,7 @@ export function SessionTabs({
               size="icon"
               onClick={() => onPopOut(session.id)}
               aria-label={t.terminal.popOut}
-              className="size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              className="size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
             >
               <ExternalLink size={ICON_SM} />
             </Button>

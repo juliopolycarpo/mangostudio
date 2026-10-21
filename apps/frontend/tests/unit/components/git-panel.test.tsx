@@ -11,6 +11,7 @@ import type {
 import type { GithubContext } from '@mangostudio/shared/github';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { RailPanel } from '../../../src/features/workspace/rail/RailPanel';
 import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
 import { render } from '../../support/harness/render';
@@ -208,6 +209,9 @@ beforeEach(() => {
  * The panel reads the app's runner to decide whether to offer the agent's own
  * review of the working tree. Only the fields that decision needs are supplied,
  * and the runner is MangoStudio's own — the review action has its own suite.
+ *
+ * Mounted in a `RailPanel`, as it is in the app: its refresh and overflow menu
+ * are drawn into that panel's header.
  */
 function Panel({ chatId = 'chat-1' }: { readonly chatId?: string }) {
   const app = {
@@ -219,7 +223,14 @@ function Panel({ chatId = 'chat-1' }: { readonly chatId?: string }) {
   };
   return (
     <AppContext value={app as never}>
-      <GitPanel chatId={chatId} />
+      <RailPanel
+        title="Repository"
+        closeMode="collapse"
+        closeLabel="Collapse agent side panel"
+        onClose={() => undefined}
+      >
+        <GitPanel chatId={chatId} />
+      </RailPanel>
     </AppContext>
   );
 }
@@ -240,7 +251,6 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    expect(screen.getByText('mangostudio')).toBeInTheDocument();
     expect(screen.getByText('feat/git-panel')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Push 2 commits' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pull 1 commits' })).toBeInTheDocument();
@@ -544,7 +554,14 @@ describe('GitPanel', () => {
     });
 
     render(<Panel />);
-    await user.click(screen.getByRole('button', { name: 'Discard everything in Changes' }));
+    // The bulk discard is in the group's menu, last, after the two narrower ones.
+    await user.click(screen.getByRole('button', { name: 'More actions in Changes' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Discard tracked changes',
+      'Delete untracked files',
+      'Discard everything in Changes',
+    ]);
+    await user.click(screen.getByRole('menuitem', { name: 'Discard everything in Changes' }));
 
     const dialog = screen.getByRole('dialog', { name: 'Discard changes and delete files?' });
     expect(dialog).toHaveTextContent('deletes untracked files from disk');
@@ -558,6 +575,58 @@ describe('GitPanel', () => {
       mode: 'tracked',
     });
     expect(hooks.discard).toHaveBeenNthCalledWith(2, { paths: ['notes.txt'], mode: 'untracked' });
+  });
+
+  // One kind in the group means one narrower item: "everything" would repeat it.
+  // The menu is always there, so the bulk discard has one home whatever the mix.
+  it('offers only the matching bulk discard for a group of one kind, with no standalone discard button', async () => {
+    const user = userEvent.setup();
+    hooks.discard.mockResolvedValue(undefined);
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [{ path: 'notes.txt', status: 'untracked' }],
+        conflicted: [],
+        clean: false,
+      },
+    });
+
+    render(<Panel />);
+    expect(screen.queryByRole('button', { name: /Discard everything in/ })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'More actions in Changes' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Delete untracked files',
+    ]);
+    await user.click(screen.getByRole('menuitem', { name: 'Delete untracked files' }));
+    await user.click(screen.getByRole('button', { name: 'Delete files' }));
+
+    expect(hooks.discard).toHaveBeenCalledWith({ paths: ['notes.txt'], mode: 'untracked' });
+  });
+
+  // One refresh, in the rail header beside the collapse chevron, and it reads
+  // everything the panel shows: the repository, GitHub and the worktrees.
+  it('refreshes the repository, GitHub and the worktrees from the one header button', async () => {
+    const user = userEvent.setup();
+    hooks.data = repoState();
+    hooks.refetch.mockResolvedValue(undefined);
+    hooks.githubRefetch.mockResolvedValue(undefined);
+    hooks.worktreesRefetch.mockResolvedValue(undefined);
+
+    render(<Panel />);
+
+    expect(screen.getAllByRole('button', { name: /refresh/i })).toHaveLength(1);
+    const header = screen.getByRole('banner');
+    await user.click(within(header).getByRole('button', { name: 'Refresh repository state' }));
+
+    expect(hooks.refetch).toHaveBeenCalledTimes(1);
+    expect(hooks.githubRefetch).toHaveBeenCalledTimes(1);
+    expect(hooks.worktreesRefetch).toHaveBeenCalledTimes(1);
+    // The overflow menu holds the panel's settings, not a second Refresh.
+    await user.click(within(header).getByRole('button', { name: 'More repository actions' }));
+    expect(screen.queryByRole('menuitem', { name: 'Refresh' })).toBeNull();
   });
 
   it('deletes a single untracked file after confirming', async () => {
@@ -809,12 +878,18 @@ describe('GitPanel', () => {
     await user.click(screen.getByRole('tab', { name: 'History' }));
     await user.click(screen.getByRole('button', { name: /Add the logo/ }));
 
-    // The directory gives way when the row is short; the name never does.
+    // The counts at the row's edge leave a side-by-side directory a few
+    // characters, so in a commit's file list the name is one line and the
+    // directory the line under it: neither is squeezed by the other.
     const source = within(
       screen.getByTitle('apps/frontend/src/features/workspace/RepositoryHistory.tsx')
     );
-    expect(source.getByText('RepositoryHistory.tsx')).toHaveClass('shrink-0');
-    expect(source.getByText('apps/frontend/src/features/workspace')).toHaveClass('truncate');
+    const name = source.getByText('RepositoryHistory.tsx');
+    const directory = source.getByText('apps/frontend/src/features/workspace');
+    expect(name.parentElement).toHaveClass('flex-col');
+    expect(name).toHaveClass('truncate');
+    expect(directory).toHaveClass('truncate');
+    expect(name.compareDocumentPosition(directory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('+12,000')).toBeVisible();
     expect(screen.getByText('\u22120')).toBeVisible();
     // No "+— -—": a binary file has no lines to count.

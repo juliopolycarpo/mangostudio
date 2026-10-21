@@ -18,6 +18,7 @@ import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SectionCard } from '@/components/ui/SectionCard';
 import {
   HEALTH_ORDER,
+  type HealthRollup,
   healthCountClass,
   healthLabel,
   healthRollup,
@@ -41,12 +42,11 @@ export function ToolchainHealthCard() {
 
   const counts = healthRollup([runtimes.data ?? [], agents.data ?? []]);
   const total = HEALTH_ORDER.reduce((sum, health) => sum + counts[health], 0);
-  const needsAttention = total - counts.ok;
 
   return (
     <SectionCard
       label={labels.label}
-      tone={cardTone(counts.error > 0, needsAttention > 0)}
+      tone={cardTone(counts, total)}
       action={
         <Link to="/environments/health" className={CARD_LINK_CLASS}>
           {labels.open}
@@ -71,14 +71,25 @@ export function ToolchainHealthCard() {
               </li>
             ))}
           </ul>
-          {needsAttention === 0 ? <p className="text-xs text-fg-muted">{labels.allClear}</p> : null}
+          {counts.ok === total ? <p className="text-xs text-fg-muted">{labels.allClear}</p> : null}
         </>
       ) : null}
     </SectionCard>
   );
 }
 
-function cardTone(hasError: boolean, hasAttention: boolean) {
-  if (hasError) return 'error' as const;
-  return hasAttention ? ('warning' as const) : ('success' as const);
+/**
+ * The header dot, read off the same buckets the tiles below it show.
+ *
+ * A fault is `error`; a thing the person can fix (`warn`, the tile that says
+ * "needs attention") is `warning`. A tool that is simply not installed is
+ * `neutral`, never amber: an optional CLI that was never there is not unwell,
+ * and a healthy landing page shows no amber (patterns.md, Status). Counting
+ * everything that is not `ok` painted the dot yellow over a "needs attention"
+ * tile that read 0.
+ */
+function cardTone(counts: HealthRollup, total: number) {
+  if (counts.error > 0) return 'error' as const;
+  if (counts.warn > 0) return 'warning' as const;
+  return total === 0 || counts.missing > 0 ? ('neutral' as const) : ('success' as const);
 }

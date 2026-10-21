@@ -15,6 +15,12 @@ function createDefaultProps() {
   };
 }
 
+/** The provider is a `Select`: open it, then pick the option by name. */
+async function pickProvider(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+  await user.click(screen.getByRole('combobox', { name: 'Provider' }));
+  await user.click(screen.getByRole('option', { name }));
+}
+
 function withProviderSettings(fetchScenario: ReturnType<typeof createFetchScenario>) {
   fetchScenario.respondWithJson('GET', '/api/settings/providers', {
     body: { providers: [] },
@@ -110,6 +116,37 @@ describe('ConnectorsSettings', () => {
     expect(screen.getByText('OS secret store')).toBeInTheDocument();
 
     expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  /** A bare gear reads as the connector's own settings; the card's main job is choosing models. */
+  it('names the models action on the card instead of leaving a bare gear', async () => {
+    const props = createDefaultProps();
+
+    fetchScenario.respondWithJson('GET', '/api/settings/connectors', {
+      body: {
+        connectors: [
+          {
+            id: 'conn-1',
+            name: 'My Key',
+            provider: 'gemini',
+            configured: true,
+            source: 'bun-secrets',
+            maskedSuffix: '****...1234',
+            updatedAt: 1700000000000,
+            lastValidatedAt: 1700000000000,
+            lastValidationError: null,
+            enabledModels: [],
+            userId: 'user-1',
+          },
+        ],
+      },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText('My Key');
+    const models = screen.getByRole('button', { name: 'Configure models' });
+    expect(models).toHaveTextContent('Models');
   });
 
   it('asks whether to delete, naming the consequence, before it deletes anything', async () => {
@@ -251,7 +288,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /deepseek/i }));
+    await pickProvider(user, /deepseek/i);
     await user.type(screen.getByLabelText(/^name$/i), 'deepseek-connector');
     await user.type(screen.getByLabelText(/base url/i), 'https://api.deepseek.com');
     await user.type(screen.getByLabelText(/^api key$/i), 'sk-deepseek-test-key');
@@ -288,7 +325,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await pickProvider(user, /chatgpt/i);
 
     expect(screen.getByText(/connect a chatgpt subscription in your browser/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^sign in with chatgpt$/i })).toBeInTheDocument();
@@ -320,7 +357,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await pickProvider(user, /chatgpt/i);
     await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
     await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
 
@@ -357,7 +394,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await pickProvider(user, /chatgpt/i);
     await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
     await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
 
@@ -394,7 +431,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await pickProvider(user, /chatgpt/i);
     await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
     await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
 

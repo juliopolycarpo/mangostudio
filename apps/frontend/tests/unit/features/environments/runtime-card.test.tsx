@@ -307,6 +307,24 @@ describe('RuntimeCard', () => {
       ).not.toBeInTheDocument();
     });
 
+    // The footer is for buttons. A sentence under them reads as the card's
+    // conclusion, so the note sits with the other notes about the install.
+    it('keeps the managed-elsewhere note out of the footer, with the notes above it', () => {
+      const status = runtimeStatus({
+        id: 'node',
+        installations: [
+          installation({ path: '/usr/bin/node', version: '20.11.0', effective: true }),
+        ],
+      });
+
+      render(<RuntimeCard status={status} recipes={NODE_CATALOG} />);
+
+      const note = screen.getByTestId('node-managed-elsewhere');
+      expect(note.closest('footer')).toBeNull();
+      expect(note.className).toContain('text-xs');
+      expect(note.parentElement).toHaveAttribute('data-testid', 'toolchain-status');
+    });
+
     it('reads its own full sentence, not the {manager} template, for a plain system install', () => {
       // "Managed by {manager}" cannot carry a bare "the system" without an
       // article in every locale ("por o sistema" is not Portuguese), so this

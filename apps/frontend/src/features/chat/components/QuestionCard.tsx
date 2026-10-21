@@ -1,6 +1,6 @@
 import { formatQuestionAnswers, type QuestionAnswer } from '@mangostudio/shared/questions';
 import type { MessagePart } from '@mangostudio/shared/types';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { SectionCard } from '@/components/ui/SectionCard';
@@ -33,6 +33,7 @@ const OPTION_LETTERS = ['a', 'b', 'c', 'd'];
 export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
   const { t } = useI18n();
   const labels = t.chat.question;
+  const idBase = useId();
   const [drafts, setDrafts] = useState<ReadonlyArray<QuestionAnswerDraft>>(() =>
     part.questions.map(() => ({ selectedLabels: [], freeText: '' }))
   );
@@ -80,7 +81,7 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
   return (
     <SectionCard
       label={interactive ? labels.title : labels.answered}
-      className="w-full max-w-2xl gap-4 text-sm text-fg"
+      className="w-full max-w-(--timeline-card-max) gap-4 text-sm text-fg"
     >
       {part.questions.map((question, questionIndex) => {
         const draft = drafts[questionIndex];
@@ -94,12 +95,26 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
           >
             <div className="flex flex-wrap items-center gap-2">
               {question.header && <Badge variant="neutral">{question.header}</Badge>}
-              <p className="font-medium text-fg">{question.question}</p>
+              <p id={`${idBase}-q${questionIndex}`} className="font-medium text-fg">
+                {question.question}
+              </p>
             </div>
             {question.allowMultiple && (
-              <p className="text-xs text-fg-muted">{labels.multiSelectHint}</p>
+              <p id={`${idBase}-q${questionIndex}-hint`} className="text-xs text-fg-muted">
+                {labels.multiSelectHint}
+              </p>
             )}
-            <div className="space-y-2">
+            {/* The options are one answer to the question above them, so they are
+                a group named by it (and described by the "select one or more"
+                line when that applies): a single-select and a multi-select no
+                longer sound the same. */}
+            <fieldset
+              aria-labelledby={`${idBase}-q${questionIndex}`}
+              aria-describedby={
+                question.allowMultiple ? `${idBase}-q${questionIndex}-hint` : undefined
+              }
+              className="min-w-0 space-y-2"
+            >
               {question.options.map((option, optionIndex) => (
                 <ChoiceButton
                   key={option.label}
@@ -116,14 +131,19 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
                   )}
                 </ChoiceButton>
               ))}
-            </div>
+            </fieldset>
             {interactive && (
               <Textarea
                 value={draft?.freeText ?? ''}
                 onChange={(event) => updateDraft(questionIndex, { freeText: event.target.value })}
                 placeholder={labels.ownAnswerPlaceholder}
                 rows={1}
-                className="min-h-8"
+                // One line that grows with what is typed, up to a cap. The
+                // resize grip is for a field that is meant to be dragged
+                // taller; on a one-row answer box it read as a stray glyph in
+                // the corner. Engines without `field-sizing` keep the single
+                // row and scroll inside it.
+                className="field-sizing-content max-h-40 min-h-8 resize-none"
               />
             )}
           </div>

@@ -30,7 +30,7 @@ export function OverviewHealthRollup() {
 
   return (
     <OverviewSection
-      title={e.tabs.health}
+      tab="health"
       to="/environments/health"
       testId="overview-health"
       isPending={(runtimes.isPending || agents.isPending) && !hasData}

@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import {
   displayKeyName,
@@ -97,7 +97,7 @@ export function ExternalApiSettingsPage({
             title={atCap ? atCapMessage : undefined}
             onClick={() => setCreateOpen(true)}
           >
-            <Plus size={ICON_MD} />
+            <Plus size={ICON_SM} />
             {s.createKey}
           </Button>
         }
@@ -126,27 +126,27 @@ export function ExternalApiSettingsPage({
             <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-stroke text-xs text-fg-muted">
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
                     {s.columns.name}
                   </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
                     {s.columns.scope}
                   </th>
                   {showKeyColumn && (
-                    <th scope="col" className="px-2 py-2 font-medium">
+                    <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
                       {s.columns.key}
                     </th>
                   )}
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
                     {s.columns.created}
                   </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
                     {s.columns.expires}
                   </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
                     {s.columns.lastUsed}
                   </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
                     <span className="sr-only">{s.columns.actions}</span>
                   </th>
                 </tr>
@@ -157,7 +157,7 @@ export function ExternalApiSettingsPage({
                   const inactive = !enabled || expired;
                   return (
                     <tr key={apiKey.id} className="border-b border-stroke last:border-b-0">
-                      <td className="px-2 py-3 align-baseline">
+                      <td className="px-2 py-3 align-baseline first:pl-0 last:pr-0">
                         <div className="space-y-1">
                           <span
                             className={cn('font-medium', inactive ? 'text-fg-muted' : 'text-fg')}
@@ -173,29 +173,30 @@ export function ExternalApiSettingsPage({
                           )}
                         </div>
                       </td>
-                      <td className="px-2 py-3 align-baseline">
+                      <td className="px-2 py-3 align-baseline first:pl-0 last:pr-0">
                         <Badge>{scopeLabel(t, apiKey.scope)}</Badge>
                       </td>
                       {showKeyColumn && (
-                        <td className="whitespace-nowrap px-2 py-3 align-baseline font-mono text-xs text-fg-muted">
+                        <td className="whitespace-nowrap px-2 py-3 align-baseline font-mono text-xs text-fg-muted first:pl-0 last:pr-0">
                           {formatKeyHint(apiKey.start)}
                         </td>
                       )}
-                      <td className="px-2 py-3 align-baseline text-fg-muted">
+                      <td className="px-2 py-3 align-baseline text-fg-muted first:pl-0 last:pr-0">
                         {formatApiKeyDate(apiKey.createdAt, locale, '—')}
                       </td>
-                      <td className="px-2 py-3 align-baseline text-fg-muted">
+                      <td className="px-2 py-3 align-baseline text-fg-muted first:pl-0 last:pr-0">
                         {formatApiKeyDate(apiKey.expiresAt, locale, s.neverExpires)}
                       </td>
-                      <td className="px-2 py-3 align-baseline text-fg-muted">
+                      <td className="px-2 py-3 align-baseline text-fg-muted first:pl-0 last:pr-0">
                         {formatApiKeyDate(apiKey.lastUsedAt, locale, s.neverUsed)}
                       </td>
-                      <td className="px-2 py-2 text-right align-top">
+                      {/* The cells above sit 12px down a 20px line, so 6px above the 32px
+                          button centres it on that first line, whatever else the row holds. */}
+                      <td className="px-2 py-1.5 text-right align-top first:pl-0 last:pr-0">
                         <Button
-                          variant="subtle"
+                          variant="subtle-danger"
                           size="icon"
                           aria-label={`${s.revoke.confirmButton}: ${displayKeyName(t, apiKey.name)}`}
-                          className="text-danger enabled:hover:bg-danger-subtle"
                           onClick={() => setKeyToRevoke(apiKey)}
                         >
                           <Trash2 size={ICON_MD} />

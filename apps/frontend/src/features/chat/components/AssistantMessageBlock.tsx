@@ -23,6 +23,8 @@ interface AssistantMessageBlockProps {
   onQuestionSubmit?: (prompt: string) => void;
   /** Resolved once per feed by `ChatFeed`, threaded down to every row. */
   toolIdentities: ToolIdentityResolver;
+  /** Catalog names by model id, resolved once per feed and read by the turn header. */
+  modelNames?: ReadonlyMap<string, string>;
 }
 
 /** What the block derives once and every child below it reads. */
@@ -32,16 +34,45 @@ interface DerivedTurn {
   isStreaming: boolean;
 }
 
+/** How a turn ended, as far as its own parts can say. */
+type TurnOutcome = 'completed' | 'failed' | 'stopped';
+
+/**
+ * A turn that carries an error part failed; one with an interrupted checkpoint
+ * was stopped partway. Anything else is a turn that finished.
+ */
+function turnOutcome(parts: readonly MessagePart[]): TurnOutcome {
+  if (parts.some((part) => part.type === 'error')) return 'failed';
+  if (parts.some((part) => part.type === 'turn_checkpoint' && part.status === 'interrupted')) {
+    return 'stopped';
+  }
+  return 'completed';
+}
+
 /**
  * The turn's own cost, closing it out below the last step rather than above the
  * first one — it is not knowable until the turn is over.
+ *
+ * It says how the turn ended as well as how long it took: "Responded in 12.8s"
+ * under a rate-limit error told the reader the turn above had succeeded.
  */
-function TurnCostRow({ generationTime }: { generationTime: string }) {
+function TurnCostRow({
+  generationTime,
+  outcome,
+}: {
+  generationTime: string;
+  outcome: TurnOutcome;
+}) {
   const { t } = useI18n();
+  const message = {
+    completed: t.chat.feed.respondedIn,
+    failed: t.chat.feed.failedAfter,
+    stopped: t.chat.feed.stoppedAfter,
+  }[outcome];
   return (
     <div className="flex w-fit items-center gap-1.5 pl-4 font-mono text-micro text-fg-subtle">
       <Sparkles size={ICON_SM} />
-      <span>{formatMessage(t.chat.feed.respondedIn, { time: generationTime })}</span>
+      <span>{formatMessage(message, { time: generationTime })}</span>
     </div>
   );
 }
@@ -82,7 +113,7 @@ function AssistantTurnSection({
         toolIdentities={toolIdentities}
       />
       {!isStreaming && msg.generationTime ? (
-        <TurnCostRow generationTime={msg.generationTime} />
+        <TurnCostRow generationTime={msg.generationTime} outcome={turnOutcome(parts)} />
       ) : null}
     </div>
   );
@@ -104,6 +135,7 @@ export function AssistantMessageBlock({
   fileCheckpoint,
   onQuestionSubmit,
   toolIdentities,
+  modelNames,
 }: AssistantMessageBlockProps) {
   const parts = useMemo(() => messagePartsFromMessage(msg), [msg]);
   const isStreaming = msg.isGenerating ?? false;
@@ -119,6 +151,7 @@ export function AssistantMessageBlock({
         chatId={chatId}
         fileCheckpoint={fileCheckpoint}
         toolIdentities={toolIdentities}
+        modelNames={modelNames}
       />
       <AssistantTurnSection
         msg={msg}

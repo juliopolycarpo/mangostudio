@@ -3,6 +3,8 @@
  * gutter, two callouts on a phone sat at different left edges and neither lined
  * up with the composer under them — so they share one row, on the composer
  * footer's own gutter ladder, in the column the transcript and the composer use.
+ * The step between them is below each one, so the transcript runs down to the
+ * first notice's edge instead of stopping a padding short of it.
  */
 
 import { describe, expect, it, jest } from 'bun:test';
@@ -106,12 +108,14 @@ const NOTICES: ReadonlyArray<readonly [string, () => HTMLElement]> = [
 describe('dock notices', () => {
   it.each(NOTICES)('puts the %s notice on the composer footer’s gutter ladder', (_name, show) => {
     const row = dockRow(show());
-    for (const token of ['px-3', 'sm:px-4', 'md:px-6', 'pt-3']) {
+    for (const token of ['px-3', 'sm:px-4', 'md:px-6', 'pb-3']) {
       expect(row.className.split(/\s+/)).toContain(token);
     }
-    // The guesses it replaced: a 24px phone gutter and a 16px top gap.
+    // The guesses it replaced: a 24px phone gutter and a 16px gap.
     expect(row.className.split(/\s+/)).not.toContain('px-6');
-    expect(row.className.split(/\s+/)).not.toContain('pt-4');
+    expect(row.className.split(/\s+/)).not.toContain('pb-4');
+    // No gap above: that strip of canvas is what the transcript was clipped at.
+    expect(row.className.split(/\s+/)).not.toContain('pt-3');
   });
 
   it('keeps the interrupted notice a live region as a whole', () => {

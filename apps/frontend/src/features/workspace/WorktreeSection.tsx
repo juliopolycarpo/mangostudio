@@ -1,6 +1,6 @@
 import type { GitWorktree } from '@mangostudio/shared/git';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -81,21 +81,13 @@ export function WorktreeSection({
 
   return (
     <section>
+      {/* The count only earns its badge once there is something to count: a lone
+          main worktree is every repository, and a "1" beside the title is noise.
+          The panel header's refresh also refetches this list. */}
       <GroupHeading
         title={labels.title}
-        count={worktrees.length > 0 ? worktrees.length : undefined}
+        count={worktrees.length > 1 ? worktrees.length : undefined}
       >
-        <IconButton
-          label={labels.refresh}
-          disabled={worktreesQuery.isFetching}
-          busy={worktreesQuery.isFetching}
-          onClick={() => void worktreesQuery.refetch()}
-        >
-          <RefreshCw
-            size={ICON_SM}
-            className={worktreesQuery.isFetching ? 'animate-spin' : undefined}
-          />
-        </IconButton>
         <IconButton
           label={labels.add}
           disabled={addMutation.isPending}
@@ -185,9 +177,10 @@ function WorktreeList({
   if (loading) {
     return <EmptyState icon={<Spinner />} title={labels.loading} className="min-h-24 py-4" />;
   }
-  // A repository always has a main worktree, so a single row means there is
-  // nothing here the panel did not already say at the top.
-  if (worktrees.length <= 1) return <EmptyState title={labels.empty} className="min-h-24 py-4" />;
+  // A repository always has a main worktree, so a single row is a standing fact
+  // and not an empty list. One quiet line: an `EmptyState` title is 14px in
+  // `fg` and outshouts the section's own micro-label.
+  if (worktrees.length <= 1) return <p className="text-xs text-fg-muted">{labels.empty}</p>;
 
   return (
     <RowList>

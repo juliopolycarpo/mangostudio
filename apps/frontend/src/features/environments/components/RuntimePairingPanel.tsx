@@ -103,11 +103,10 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
         </Button>
         {status?.token ? (
           <Button
-            variant="subtle"
+            variant="subtle-danger"
             size="sm"
             onClick={() => void runRevoke()}
             disabled={busy}
-            className="text-danger enabled:hover:bg-danger-subtle"
           >
             <Trash2 size={ICON_MD} />
             {labels.revoke}

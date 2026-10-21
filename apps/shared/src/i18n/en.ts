@@ -2,13 +2,12 @@ import type { Messages } from './types';
 
 export const messages: Messages = {
   auth: {
-    loginTitle: 'MangoStudio',
+    loginTitle: 'Sign in',
     signupTitle: 'Create account',
     emailLabel: 'Email',
     emailPlaceholder: 'you@email.com',
     passwordLabel: 'Password',
-    passwordPlaceholder: '••••••••',
-    signupPasswordLabel: 'Password (8 characters minimum)',
+    passwordHint: 'At least 8 characters',
     nameLabel: 'Name',
     namePlaceholder: 'Ada Lovelace',
     loginButton: 'Sign in',
@@ -19,8 +18,8 @@ export const messages: Messages = {
     signupLink: 'Create account',
     noAccount: "Don't have an account?",
     hasAccount: 'Already have an account?',
-    loginError: 'Login failed',
-    signupError: 'Account creation failed',
+    loginError: 'Could not sign in. Check your email and password, then try again.',
+    signupError: 'Could not create the account. Check the details and try again.',
     logoutButton: 'Sign out',
     logoutLoading: 'Signing out…',
     logoutError: 'Logout failed. Please try again.',
@@ -91,6 +90,8 @@ export const messages: Messages = {
         'Locked after the first turn — pick a runner in the header to continue in a new chat.',
       modelLabel: 'model',
       environmentLabel: 'env',
+      environmentLocked:
+        'Locked once the first turn starts — this chat keeps the environment it started on.',
       /**
        * The status line's key for reasoning effort. Short on purpose: the
        * picker's own `Reasoning effort` heading is too long for a strip that
@@ -157,8 +158,6 @@ export const messages: Messages = {
       modelFallback: 'AI model',
       modelStatus: '{status} with {model}',
       download: 'Download',
-      saveToGallery: 'Save to gallery',
-      regenerate: 'Regenerate',
       imageUnavailable: 'Image no longer available',
       imageUnavailableHint: 'The image was deleted, moved, or is not accessible yet.',
       generatedImageAlt: 'Generated image',
@@ -167,13 +166,14 @@ export const messages: Messages = {
       styleParams: 'Style parameters',
       thoughtFor: 'Thought for {time}',
       respondedIn: 'Responded in {time}',
+      failedAfter: 'Failed after {time}',
+      stoppedAfter: 'Stopped after {time}',
       noResponse: 'No response',
       neuralDiffusionPath: 'Using neural diffusion path.',
       createImageBadge: 'Create image',
       mcpImageAlt: 'Image returned by an MCP tool',
       mcpResourceFile: 'Resource file',
       mcpMediaSource: 'From {source}',
-      subagentTrace: 'Subagent trace',
       subagentPendingName: 'Subagent',
       subagentStatusCompleted: 'Completed',
       subagentStatusFailed: 'Failed',
@@ -229,6 +229,7 @@ export const messages: Messages = {
     },
     context: {
       label: 'Context',
+      title: 'Context is nearly full',
       tokens: '~{used} / {limit} tokens',
       modeStateful: 'Stateful',
       modeStatelessLoop: 'Stateless loop',
@@ -260,7 +261,7 @@ export const messages: Messages = {
       safeRead: 'Read-only',
       confirmationRequired: 'May change data',
       unknownSafety: 'Unknown safety',
-      failed: 'Failed',
+      failed: 'failed',
       resume: 'Resume turn',
       resuming: 'Resuming…',
       dismiss: 'Dismiss',
@@ -521,6 +522,13 @@ export const messages: Messages = {
       environmentConnected: '{name} reconnected',
       environmentDisconnected: '{name} disconnected',
       environmentError: '{name} could not connect',
+      // The short forms of an event's age, for a fixed-width column: "now", "5m", "2h".
+      timeNow: 'now',
+      timeMinutes: '{count}m',
+      timeHours: '{count}h',
+      timeDays: '{count}d',
+      timeMonths: '{count}mo',
+      timeYears: '{count}y',
     },
   },
 
@@ -531,11 +539,6 @@ export const messages: Messages = {
       label: 'Create images',
       description: 'Opens the chat with the image tool already on. Describe what you want.',
       action: 'Start in chat',
-    },
-    gallery: {
-      label: 'Gallery',
-      description: 'Everything this workspace has generated, newest first.',
-      action: 'Open gallery',
     },
     recent: {
       label: 'Recent',
@@ -565,7 +568,7 @@ export const messages: Messages = {
       errorRevertedToast: 'Could not save settings. Your last change was reverted.',
     },
     groups: {
-      general: 'General',
+      general: 'Preferences',
       models: 'Models & providers',
       agents: 'Agents & tools',
       integrations: 'Integrations',
@@ -627,16 +630,18 @@ export const messages: Messages = {
       providerCompactionDescription:
         'When supported, let the provider compact cursor-based state near your warning threshold.',
       warningThresholdLabel: 'Warning threshold',
-      warningThresholdDescription: 'Show compaction choices when context usage reaches this value.',
+      warningThresholdDescription:
+        'Show compaction choices when context usage reaches this percentage of the window.',
       dangerThresholdLabel: 'Danger threshold',
-      dangerThresholdDescription: 'Escalate the warning tone before the hard stop threshold.',
+      dangerThresholdDescription:
+        'Escalate the warning tone at this percentage of the window, before the hard stop.',
       hardStopThresholdLabel: 'Hard stop threshold',
-      hardStopThresholdDescription: 'Treat context pressure as critical at or above this value.',
+      hardStopThresholdDescription:
+        'Treat context pressure as critical at or above this percentage of the window.',
       summaryModelLabel: 'Preferred summary model',
       summaryModelDescription:
         'Use the current chat model or force a specific text model for summaries.',
       summaryModelCurrent: 'Use current chat model',
-      thresholdHint: '{value}% of context',
     },
     prompts: {
       defaultPromptsLabel: 'Default prompts',
@@ -656,7 +661,7 @@ export const messages: Messages = {
       injectionRoleUser: 'Send as user prompt',
       frequencyLabel: 'Frequency',
       frequencyFirstTurn: 'Send only in first prompt',
-      frequencyFirstTurnHint: 'Recommended',
+      frequencyHint: 'Sending once per chat is recommended.',
       frequencyEveryTurn: 'Send every time',
       addRule: 'Add rule',
       customRulesEmpty: 'No custom rules yet',
@@ -739,10 +744,6 @@ export const messages: Messages = {
       languageLabel: 'Language',
       languageDescription: 'User interface language',
       imageQualityLabel: 'Default image quality',
-      maxToolIterationsLabel: 'Max tool iterations',
-      maxToolIterationsDescription:
-        'Upper bound on how many tool-calling rounds the model may take in a single turn.',
-      maxToolIterationsHint: '{value} of 1000',
       chatTitlesLabel: 'Chat titles',
       chatTitlesDescription:
         'Automatically rename timestamped new chats from the first user prompt.',
@@ -773,7 +774,8 @@ export const messages: Messages = {
       secondsHint: '{value}s',
     },
     connectors: {
-      title: 'AI connectors',
+      title: 'Connectors',
+      description: 'The accounts and API keys MangoStudio uses to reach each provider.',
       addButton: 'Add connector',
       emptyTitle: 'No connectors found',
       emptyDescription: 'Add your first API key to start generating.',
@@ -919,6 +921,7 @@ export const messages: Messages = {
       imageModelsLabel: 'Image models',
       doneButton: 'Done',
       configureModels: 'Configure models',
+      modelsButton: 'Models',
       deleteConnector: 'Delete connector',
       statusConnected: 'Connected',
       statusNeedsSignIn: 'Needs sign-in',
@@ -941,7 +944,8 @@ export const messages: Messages = {
       backToMenu: 'Back to providers',
       sectionReasoning: 'Reasoning & thinking',
       sectionTools: 'Tool configuration',
-      sectionCache: 'Prompt caching',
+      sectionCache: 'Caching and compaction',
+      sectionCompaction: 'Compaction',
       saving: 'Saving…',
       saveError: 'Failed to save provider settings',
       loadError: 'Failed to load providers',
@@ -960,7 +964,8 @@ export const messages: Messages = {
       capabilityThinking: 'Thinking',
       capabilityTools: 'Tools',
       capabilityCaching: 'Caching',
-      maxOutputTokensPlaceholder: '1 – {limit}',
+      maxOutputTokensPlaceholder: 'Provider default',
+      maxOutputTokensHint: '1 to {limit}. Leave empty to use the provider default.',
       deprecatedBadge: 'Legacy',
       deprecatedNote:
         'MangoStudio no longer runs this provider. Runtime settings here do not affect turns — use the Cursor CLI runner in the chat runner selector instead.',
@@ -983,7 +988,6 @@ export const messages: Messages = {
       maxToolIterationsLabel: 'Max tool iterations',
       maxToolIterationsDescription:
         'Upper bound on how many tool-calling rounds the model may take in a single turn.',
-      maxToolIterationsHint: '{value} of 1000',
       executionTitle: 'Execution',
       autoModelOption: 'Auto (first available)',
       letAiDecideQualityLabel: 'Let AI decide quality',
@@ -1031,7 +1035,6 @@ export const messages: Messages = {
         save: 'Save',
         cancel: 'Cancel',
         pathPlaceholder: 'e.g. /home/user/projects',
-        noPaths: 'No paths configured.',
       },
     },
     mcp: {
@@ -1091,6 +1094,10 @@ export const messages: Messages = {
       keyPlaceholder: 'Name',
       valuePlaceholder: 'Value',
       addEntry: 'Add',
+      addArgument: 'Add argument',
+      addVariable: 'Add variable',
+      addSecretVariable: 'Add secret variable',
+      addHeader: 'Add header',
       removeEntry: 'Remove',
       enabledLabel: 'Enabled',
       disabledLabel: 'Disabled',
@@ -1256,6 +1263,7 @@ export const messages: Messages = {
       },
       createDialog: {
         title: 'Create API key',
+        description: 'A key lets a script or tool call this instance without a browser session.',
         nameLabel: 'Name',
         namePlaceholder: 'e.g. CI pipeline',
         nameRequired: 'Name is required',
@@ -1302,6 +1310,8 @@ export const messages: Messages = {
       shadowedBadge: 'Shadowed',
       shadowedHint:
         'A higher-priority source provides a skill with the same name, so this copy is inactive.',
+      shadowedNotice:
+        'Skills marked Shadowed share a name with a skill from a higher-priority source, so those copies are inactive.',
       loadError: 'Failed to load skills',
       noSkills: 'No skills installed.',
     },
@@ -1462,7 +1472,8 @@ export const messages: Messages = {
     sidePanelTitle: 'Agent side panel',
     sidePanelDescription:
       'Choose which workspace panels appear in Agent mode and arrange their dock order.',
-    sidePanelWidth: 'Current width: {width}px',
+    widthLabel: 'Width',
+    widthDefaultHint: 'Default {width}px',
     sidePanelResetWidth: 'Reset width',
     sidePanelShow: 'Show {panel}',
     sidePanelMoveUp: 'Move {panel} up',
@@ -1475,11 +1486,11 @@ export const messages: Messages = {
     sidePanelSwitch: 'Show {panel} panel',
     chatSidebarTitle: 'Chat sidebar',
     chatSidebarDescription: 'Drag the sidebar edge on desktop to show longer chat titles.',
-    chatSidebarWidth: 'Current width: {width}px',
     chatSidebarResetWidth: 'Reset sidebar width',
     chatSidebarResize: 'Resize chat sidebar',
     breadcrumbIn: 'in',
     breadcrumbDirty: 'Uncommitted changes',
+    breadcrumbDirtyShort: 'Modified',
   },
 
   sidebar: {
@@ -1561,7 +1572,6 @@ export const messages: Messages = {
       open: 'More repository actions',
       stash: 'Stashes…',
       prune: 'Prune stale branches',
-      refresh: 'Refresh',
     },
     branch: {
       menu: 'Change branch',
@@ -1786,7 +1796,6 @@ export const messages: Messages = {
       loading: 'Reading worktrees…',
       loadError: 'Could not read the worktrees of this repository.',
       empty: 'This repository has only its main worktree.',
-      refresh: 'Refresh worktrees',
       add: 'Add worktree',
       addTitle: 'New worktree',
       pathLabel: 'Worktree path',
@@ -1880,10 +1889,13 @@ export const messages: Messages = {
       'no-remote': 'This repository has no remote.',
       'not-a-github-remote': 'This repository does not have a GitHub remote.',
     },
+    // A hint that names a command to type does not spell it out: signing in puts
+    // the command in a copyable box under the sentence, and `{command}` marks the
+    // slot an inline command fills (see `GithubNotConnected`).
     connectionHint: {
-      'gh-not-installed': 'Install gh on that machine, then refresh.',
-      'not-authenticated': 'Run gh auth login on that machine, then refresh.',
-      'no-remote': 'Add a remote with git remote add origin, then refresh.',
+      'gh-not-installed': 'Install the GitHub CLI on that machine, then refresh.',
+      'not-authenticated': 'Run this on that machine, then refresh.',
+      'no-remote': 'Add a remote with {command} on that machine, then refresh.',
       'not-a-github-remote': 'The GitHub panel only reads repositories hosted on GitHub.',
     },
 
@@ -2053,8 +2065,8 @@ export const messages: Messages = {
     },
     page: {
       title: 'Terminal',
-      sessions: 'Sessions',
       openHere: 'Open here',
+      hide: 'Hide',
       noSessions: 'No terminals are open for this environment.',
     },
     commands: {
@@ -2069,13 +2081,14 @@ export const messages: Messages = {
     downloadFilenamePrefix: 'mangostudio',
     mangoStudioLogo: 'MangoStudio logo',
     retry: 'Retry',
-    noResultsFor: 'No results for "{query}"',
+    noResultsFor: 'No results for “{query}”',
     contextIndicator: 'Context usage indicator',
     settingsNavigation: 'Settings navigation',
     openMenu: 'Open menu',
     closeMenu: 'Close menu',
     disclaimer: 'AI can make mistakes. Double-check the results.',
     dismissToast: 'Dismiss toast',
+    notifications: 'Notifications',
   },
 
   library: {
@@ -2103,6 +2116,16 @@ export const messages: Messages = {
       setting: 'Setting',
       hook: 'Hook',
     },
+    // The same nouns inside a sentence ("Propagate skill gh"), where the label
+    // above would put a capital in the middle of it.
+    kindsInline: {
+      skill: 'skill',
+      subagent: 'subagent',
+      command: 'command',
+      instruction: 'instruction',
+      setting: 'setting',
+      hook: 'hook',
+    },
     // The raw contract state, used by the detail view's coverage list.
     coverage: {
       present: 'Present',
@@ -2126,9 +2149,10 @@ export const messages: Messages = {
       'only-here': 'Only here',
       incomparable: 'Cannot compare',
     },
-    // What a matrix cell prints beside its glyph. The column is a fraction of the
+    // What a matrix cell prints beside its glyph, and what the legend prints for
+    // the glyphs where a cell is a glyph alone. The column is a fraction of the
     // table, so the sentence-length `cellState` would not fit; that one stays on
-    // the legend, the tooltip and the accessible name.
+    // the accessible name, and `cellHint` is the sentence behind the tooltips.
     cellStateShort: {
       present: 'Present',
       absent: 'Absent',
@@ -2216,9 +2240,10 @@ export const messages: Messages = {
     filters: {
       search: 'Filter by name',
       target: 'Agent',
-      anyTarget: 'Any agent',
+      // The select's own label ("Agent:") already says what is being chosen.
+      anyTarget: 'Any',
       location: 'Location',
-      anyLocation: 'Any location',
+      anyLocation: 'Any',
       show: 'Show',
       showAll: 'Everything',
       showDivergent: 'Only divergent',
@@ -2275,8 +2300,9 @@ export const messages: Messages = {
     },
     wizard: {
       title: 'Propagate {count} resources',
-      titleOne: 'Propagate {resource}',
+      titleOne: 'Propagate {kind} {resource}',
       close: 'Close',
+      cancel: 'Cancel',
       back: 'Back',
       continue: 'Continue',
       stepConflict: 'Resolve conflicts',
@@ -2296,7 +2322,6 @@ export const messages: Messages = {
     conflict: {
       description:
         'These resources have more than one readable version. There is no canonical copy, so the choice is yours.',
-      none: 'No conflicts: every selected resource has one readable version, so there is nothing to choose.',
       resolved: 'Resolved',
       unresolved: '{count} resources still need a decision.',
       adopt: 'Use this version',
@@ -2412,7 +2437,7 @@ export const messages: Messages = {
     },
     removal: {
       title: 'Remove {count} resources',
-      titleOne: 'Remove {resource}',
+      titleOne: 'Remove {kind} {resource}',
       remove: 'Remove',
       removing: 'Removing…',
       stepLocations: 'Choose copies',
@@ -2551,6 +2576,12 @@ export const messages: Messages = {
         detected: 'Detected',
         'not-detected': 'Not configured',
         'not-applicable': 'Not applicable',
+      },
+      // One line for the agents that have nothing to compare, instead of a card
+      // each that only repeats the state.
+      undetectedLine: {
+        'not-detected': 'Not configured for {agents}',
+        'not-applicable': 'Not applicable to {agents}',
       },
       presentation: {
         redacted: 'Value withheld for safety',
@@ -2943,7 +2974,15 @@ export const messages: Messages = {
     overview: {
       description: 'What this machine can run agents with, and what needs attention.',
       // Each section is a summary of a tab, so its link says which one it opens.
-      open: 'Open {section}',
+      // A sentence per tab rather than a template around the tab's label: the
+      // label is capitalised for a tab strip, and a sentence is not.
+      open: {
+        runtimes: 'Open toolchains',
+        agents: 'Open agents',
+        health: 'Open health',
+        library: 'Open library',
+        machine: 'Open this machine',
+      },
       agentDetails: 'Details',
       agentsEmpty: 'No agent CLI was found on this machine.',
       agentsEmptyHint: 'MangoStudio can install one for you from the Agents tab.',
@@ -3766,7 +3805,11 @@ export const messages: Messages = {
       privacy: "{vendor}'s privacy policy",
       required: 'This agent needs its notice acknowledged before it can run.',
       manageTitle: 'Third-party agent notices',
+      manageDescription:
+        'A third-party agent CLI shows a notice before it first receives a conversation. The ones you accepted are listed here.',
       manageEmpty: 'You have not acknowledged any external agent yet.',
+      manageEmptyHint:
+        'A notice is recorded the first time you run Claude Code, Codex or Cursor from MangoStudio.',
       acknowledgedAt: 'Acknowledged {date}',
       revoke: 'Withdraw',
       revoking: 'Withdrawing…',
@@ -3818,8 +3861,8 @@ export const messages: Messages = {
       modeKey: 'mode',
       whatItCanDo: 'What it can do',
       whoApproves: 'Who approves',
-      unattendedLevelWarning: 'this agent can edit and run anything',
-      unattendedRoutingWarning: 'approvals answered without you',
+      unattendedLevelWarning: 'This agent can edit and run anything.',
+      unattendedRoutingWarning: 'Approvals are answered without you.',
       unsupportedGeneric: 'This agent does not offer this combination',
       levelName: {
         'read-only': 'Read only',
@@ -3841,7 +3884,7 @@ export const messages: Messages = {
       },
       /** Named choices, for people who should not have to learn the matrix. */
       advanced: 'Fine-tune',
-      presetHeading: 'How much should it bother you',
+      presetHeading: 'Mode',
       preset: {
         careful: {
           label: 'Careful',
@@ -3853,7 +3896,7 @@ export const messages: Messages = {
         },
         autonomous: {
           label: 'Autonomous',
-          description: 'Keeps going on its own, without stopping to ask.',
+          description: 'Keeps going on its own.',
         },
       },
       /** What each preset means for this vendor specifically. */
@@ -4033,9 +4076,9 @@ export const messages: Messages = {
     thought: 'Thought',
     withheld: 'Thought, reasoning not shared',
     toggle: 'View reasoning',
-    enable: 'Thinking',
-    enabled: 'Thinking enabled',
-    disabled: 'Thinking disabled',
+    enable: 'Reasoning',
+    enabled: 'Reasoning enabled',
+    disabled: 'Reasoning disabled',
     effort: 'Effort',
     effortLow: 'Low',
     effortMedium: 'Medium',
@@ -4171,8 +4214,6 @@ export const messages: Messages = {
 
   onboarding: {
     title: 'Welcome to MangoStudio',
-    subtitle:
-      'A few short steps and an agent will be answering inside your own project. Skip anything you already have.',
     progress: 'Step {step} of {total} · {name}',
     stepList: 'Setup steps',
     back: 'Back',
@@ -4187,7 +4228,7 @@ export const messages: Messages = {
       skipped: 'Skipped',
       pending: 'To do',
       unknown: 'Checking',
-      unavailable: 'Not here',
+      unavailable: 'Unavailable',
     },
     steps: {
       welcome: 'Welcome',
@@ -4243,9 +4284,9 @@ export const messages: Messages = {
         'No model provider is configured yet, so MangoStudio cannot answer on its own. Add a key under Settings \u2192 Providers once setup is done, or pick an agent CLI below.',
       signedIn: 'Signed in',
       signedOut: 'Not signed in',
-      signInHint: 'Sign in from a terminal on this machine, then come back.',
+      // The command beneath it belongs to one agent; the line says which.
+      signInHint: '{agent}: sign in from a terminal on this machine, then come back.',
       selected: 'Selected',
-      select: 'Use this',
       isolated:
         'Another account is already using this computer’s agent sign-ins, so they are not offered to you here. Use a model instead, or skip this step and add a machine of your own from Environments afterwards.',
     },
@@ -4276,6 +4317,8 @@ export const messages: Messages = {
       openChat: 'Open the chat',
       resume: 'This setup already started a chat. Sending again continues that one.',
       needsFolder: 'Choose a folder first, or skip that step.',
+      // Navigates to the folder step; it does not open the picker, so it says "go", not "choose".
+      goToFolder: 'Go to the folder step',
       summary: 'Sending to {runner} in {workdir}',
     },
     reenter: {

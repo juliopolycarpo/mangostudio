@@ -15,7 +15,6 @@ import { useId, useState } from 'react';
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { describeFinding } from '../format';
@@ -175,7 +174,7 @@ function HealthGroup({
               data-testid="health-entry"
               data-severity={entry.severity}
             >
-              <FindingIcon severity={entry.severity} size={ICON_MD} />
+              <FindingIcon severity={entry.severity} quiet={entry.quiet} size={ICON_MD} />
               <div className="min-w-0 flex-1 space-y-1">
                 <p className="text-sm font-medium text-fg">
                   {e.health.scope[entry.scope]} · {resolve(entry.scope, entry.subjectId).name}
@@ -188,7 +187,7 @@ function HealthGroup({
                 className={cn(buttonClassName('subtle', 'sm'), 'shrink-0')}
                 data-testid="health-entry-link"
               >
-                {formatMessage(e.overview.open, { section: e.tabs[fix.tab] })}
+                {e.overview.open[fix.tab]}
                 <ChevronRight size={ICON_SM} aria-hidden="true" />
               </Link>
             </li>

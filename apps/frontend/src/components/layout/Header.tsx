@@ -9,6 +9,15 @@ import { authClient } from '@/lib/auth-client';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { commandPaletteShortcutHint } from '@/lib/keyboard';
 
+/**
+ * The pages where a chat starts or runs, and so the only ones the runner picker
+ * means anything on: Home starts one with the runner it names, and the chat
+ * runs on it. Studio, Gallery, Terminal and the settings pages begin no chat, so
+ * a picker there would be a control with no effect. One explicit list rather
+ * than a `!== 'studio'` exception that the next page has to remember to extend.
+ */
+const RUNNER_PAGES: ReadonlySet<AppPage> = new Set<AppPage>(['home', 'chat']);
+
 export interface HeaderProps {
   currentPage: AppPage;
   onNewChat: () => void;
@@ -70,7 +79,7 @@ export function Header({
             long enough to push the right-hand controls off a 320px screen, and
             the selector's own label already truncates. Pinning it against
             shrinking made `min-w-0` inert and the header overflowed instead. */}
-        {currentPage !== 'studio' && runnerSelector ? (
+        {RUNNER_PAGES.has(currentPage) && runnerSelector ? (
           <div className="min-w-0 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
         ) : null}
         {/* `sm`, one step earlier than the breadcrumb: the machine is a choice
@@ -100,8 +109,11 @@ export function Header({
           <Search size={ICON_MD} />
           <KbdHint keys={commandPaletteShortcutHint()} className="hidden md:inline-flex" />
         </Button>
+        {/* New chat and Settings are in the sidebar from `md` up, where it is
+            always on screen. Here they are the phone's way to either, because
+            there the sidebar is a slide-over behind the menu button. */}
         {currentPage === 'chat' && (
-          <Button variant="subtle" size="sm" onClick={onNewChat} className="shrink-0">
+          <Button variant="subtle" size="sm" onClick={onNewChat} className="shrink-0 md:hidden">
             <Plus size={ICON_MD} />
             <span className="hidden sm:inline">{t.chat.newChat}</span>
           </Button>
@@ -111,7 +123,7 @@ export function Header({
           size="icon"
           onClick={onNavigateToSettings}
           aria-current={currentPage === 'settings' ? 'page' : undefined}
-          className={`shrink-0 ${currentPage === 'settings' ? 'bg-fill-selected' : ''}`}
+          className="shrink-0 md:hidden"
           title={t.settings.title}
         >
           <Settings size={ICON_MD} />

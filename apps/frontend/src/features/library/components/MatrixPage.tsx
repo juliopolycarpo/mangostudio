@@ -14,6 +14,7 @@ import { EnvironmentScopeNotice } from '@/features/environments/components/Envir
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import { useLibraryMatrix } from '../hooks/use-library-matrix';
 import { CoverageMatrix, MatrixLegend } from './CoverageMatrix';
@@ -89,7 +90,14 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         onChange={matrix.setFilters}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* From `xl` the legend is not drawn, so with nothing selected this row has
+          nothing in it and must not leave a gap of its own. */}
+      <div
+        className={cn(
+          'flex flex-wrap items-center justify-between gap-2',
+          selectedCount === 0 && 'xl:hidden'
+        )}
+      >
         <MatrixLegend />
         <div className="flex items-center gap-2">
           {selectedCount > 0 && (

@@ -47,6 +47,11 @@ interface FirstChatStepProps {
    * can take a minute a person must be able to leave.
    */
   readonly onWritingChange: (writing: boolean) => void;
+  /**
+   * Back to the folder step, from the notice that says this one has nowhere to
+   * work. Navigation only: it opens the step, not its picker.
+   */
+  readonly onGoToFolder: () => void;
 }
 
 export function FirstChatStep({
@@ -56,6 +61,7 @@ export function FirstChatStep({
   answered,
   onOpenChat,
   onWritingChange,
+  onGoToFolder,
 }: FirstChatStepProps) {
   const { t } = useI18n();
   const s = t.onboarding.chat;
@@ -154,7 +160,23 @@ export function FirstChatStep({
           {formatMessage(s.summary, { runner: runnerName, workdir: state.workdir })}
         </p>
       ) : (
-        <Callout tone="warning" data-testid="onboarding-chat-needs-folder">
+        // A notice the person can act on carries the action: the folder step is
+        // four Backs away on a phone, which has no step list to jump with.
+        <Callout
+          tone="warning"
+          data-testid="onboarding-chat-needs-folder"
+          action={
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="onboarding-chat-go-to-folder"
+              onClick={onGoToFolder}
+            >
+              {s.goToFolder}
+            </Button>
+          }
+        >
           {s.needsFolder}
         </Callout>
       )}
@@ -168,6 +190,9 @@ export function FirstChatStep({
           data-testid="onboarding-prompt"
           rows={3}
           maxLength={GENERATION_PROMPT_MAX_LENGTH}
+          // Nowhere to send it yet: a live field beside a disabled Send invites
+          // writing a message that has no place to go.
+          disabled={!state.workdir}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
         />

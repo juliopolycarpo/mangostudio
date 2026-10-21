@@ -4,12 +4,13 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+import type { UserServiceErrorCode } from '@mangostudio/shared/runtime-home';
 import { Badge } from '@/components/ui/Badge';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { supervisorLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';
-import { MachineCard } from './MachineCard';
+import { MachineCard, MachineFact, MachineFacts } from './MachineCard';
 
 interface ServiceCardProps {
   readonly status: MachineStatus;
@@ -17,6 +18,18 @@ interface ServiceCardProps {
   readonly onInstall: () => void;
   readonly onUninstall: () => void;
 }
+
+/**
+ * How loudly each reason the project itself raises should say it. Neither is a
+ * fault: the person can fix a session bus that is out of reach (open a desktop
+ * session, enable linger), which is a `warning`, and a machine with no systemd
+ * is a standing fact about it, which is `info`. Only a line the supervisor
+ * printed for itself, with no code, is an actual failure.
+ */
+const SERVICE_ERROR_TONE = {
+  'no-systemd': 'info',
+  'no-session-bus': 'warning',
+} as const satisfies Record<UserServiceErrorCode, 'info' | 'warning'>;
 
 /** A yes/no fact as a badge: the word carries it, and "no" is neutral rather than red. */
 function Flag({
@@ -35,6 +48,9 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
   const { t } = useI18n();
   const m = t.environments.machine;
   const { service } = status;
+  // The card's own notice says the supervisor could not be asked; the refusal under
+  // it would only say so again, in less detail.
+  const alreadyStated = service.error ? (['service-unreadable'] as const) : undefined;
 
   return (
     <MachineCard
@@ -50,7 +66,7 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
         // line is whatever the supervisor printed, which no dictionary can
         // hold, so it stays as the diagnostic beneath.
         <Callout
-          tone="danger"
+          tone={service.errorCode ? SERVICE_ERROR_TONE[service.errorCode] : 'danger'}
           title={service.errorCode ? m.service.errors[service.errorCode] : undefined}
           data-testid="machine-service-error"
         >
@@ -62,34 +78,20 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
         </Callout>
       ) : (
         service.installed && (
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
-            <div className="space-y-1">
-              <dt className="text-fg-muted">{m.service.enabledLabel}</dt>
-              <dd>
-                <Flag on={service.enabled} yes={m.service.enabled} no={m.service.disabled} />
-              </dd>
-            </div>
-            <div className="space-y-1">
-              <dt className="text-fg-muted">{m.service.runningLabel}</dt>
-              <dd>
-                <Flag on={service.running} yes={m.service.running} no={m.service.stopped} />
-              </dd>
-            </div>
+          <MachineFacts>
+            <MachineFact label={m.service.enabledLabel}>
+              <Flag on={service.enabled} yes={m.service.enabled} no={m.service.disabled} />
+            </MachineFact>
+            <MachineFact label={m.service.runningLabel}>
+              <Flag on={service.running} yes={m.service.running} no={m.service.stopped} />
+            </MachineFact>
             {service.linger !== undefined && (
-              <div className="space-y-1">
-                <dt className="text-fg-muted">{m.service.lingerLabel}</dt>
-                <dd>
-                  <Flag on={service.linger} yes={m.service.lingerOn} no={m.service.lingerOff} />
-                </dd>
-              </div>
+              <MachineFact label={m.service.lingerLabel}>
+                <Flag on={service.linger} yes={m.service.lingerOn} no={m.service.lingerOff} />
+              </MachineFact>
             )}
-            {service.execPath && (
-              <div className="col-span-full space-y-1">
-                <dt className="text-fg-muted">{m.service.runs}</dt>
-                <dd className="truncate font-mono text-xs text-fg">{service.execPath}</dd>
-              </div>
-            )}
-          </dl>
+            {service.execPath && <MachineFact label={m.service.runs} value={service.execPath} />}
+          </MachineFacts>
         )
       )}
 
@@ -103,6 +105,7 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
             confirmDescription={m.actions.confirmUninstallDescription}
             isPending={isPending}
             onConfirm={onUninstall}
+            alreadyStated={alreadyStated}
             testId="machine-service-uninstall"
           />
         ) : (
@@ -115,6 +118,7 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
             variant="primary"
             isPending={isPending}
             onConfirm={onInstall}
+            alreadyStated={alreadyStated}
             testId="machine-service-install"
           />
         )}

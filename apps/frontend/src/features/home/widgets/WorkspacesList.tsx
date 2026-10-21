@@ -212,7 +212,10 @@ function WorkspaceRow({ group, summary, onSelectChat, onNewChatInWorkdir }: Work
         </div>
       </div>
 
-      <div className="flex shrink-0 flex-wrap gap-2">
+      {/* Stacked below `sm`, the buttons start under the folder name rather than
+          under its icon — the same `pl-6` the facts above them keep. Beside the
+          content from `sm` there is nothing to align to. */}
+      <div className="flex shrink-0 flex-wrap gap-2 pl-6 sm:pl-0">
         {group.representativeChatId ? (
           <Button
             variant="secondary"

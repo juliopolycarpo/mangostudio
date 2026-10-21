@@ -1,15 +1,15 @@
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { Database, Eye, EyeOff, FileCode, LogIn, ShieldCheck } from 'lucide-react';
-import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
+import { PickOneRow } from '@/components/settings/PickOneRow';
+import { SettingsField } from '@/components/settings/SettingsField';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
-import { SELECTION_BAR } from '@/components/ui/selection-bar';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
-import { cn } from '@/lib/utils';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import type { useConnectorForm } from '../hooks/use-connector-form';
 
@@ -144,15 +144,17 @@ export function AddConnectorModal({
         </>
       }
     >
-      <div className="space-y-2">
-        <span className="block text-sm font-medium text-fg">{s.providerLabel}</span>
-        <SettingsSegmented
+      {/* Six providers and counting: a list this long is a `Select`, which also
+          keeps the dialog's first control one line tall however many are added. */}
+      <SettingsField label={s.providerLabel} htmlFor="connector-provider">
+        <Select
+          id="connector-provider"
           ariaLabel={s.providerLabel}
           value={form.provider}
           options={PROVIDERS.map((id) => ({ value: id, label: t.providers[id] }))}
-          onChange={selectProvider}
+          onChange={(value) => selectProvider(value as ProviderType)}
         />
-      </div>
+      </SettingsField>
 
       <Input
         id="connector-name"
@@ -260,35 +262,21 @@ export function AddConnectorModal({
       )}
 
       {!isChatGpt && (
-        <div className="space-y-2">
-          <span className="block text-sm font-medium text-fg">{s.saveToLabel}</span>
-          <div className="grid grid-cols-1 gap-2">
-            {sourceOptions.map((src) => {
-              const selected = form.source === src.id;
-              return (
-                <button
-                  key={src.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => setForm({ ...form, source: src.id })}
-                  // The current choice is marked as in the navigation.
-                  className={cn(
-                    'relative flex w-full cursor-pointer items-start gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors',
-                    selected
-                      ? cn('bg-fill-selected', SELECTION_BAR)
-                      : 'bg-control hover:bg-control-hover'
-                  )}
-                >
-                  <span className="mt-0.5 shrink-0 text-fg-muted">{src.icon}</span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-fg">{src.label}</span>
-                    <span className="block text-xs text-fg-muted">{src.desc}</span>
-                  </span>
-                </button>
-              );
-            })}
+        <SettingsField label={s.saveToLabel}>
+          <div role="radiogroup" aria-label={s.saveToLabel} className="grid grid-cols-1 gap-2">
+            {sourceOptions.map((src) => (
+              <PickOneRow
+                key={src.id}
+                name="connector-source"
+                checked={form.source === src.id}
+                onSelect={() => setForm({ ...form, source: src.id })}
+                icon={src.icon}
+                title={src.label}
+                description={src.desc}
+              />
+            ))}
           </div>
-        </div>
+        </SettingsField>
       )}
     </Dialog>
   );

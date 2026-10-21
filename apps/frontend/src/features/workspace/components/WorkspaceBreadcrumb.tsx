@@ -1,6 +1,8 @@
 /**
- * The header's cockpit line: `in <workdir basename> / <branch>`, with a quiet
- * warning dot while the tree is dirty.
+ * The header's cockpit line: `in <workdir basename> / <branch>`, with a warning
+ * dot and, from `md` up, the word "Modified" while the tree is dirty. A dot
+ * alone is a colour doing a word's job: pale yellow in dark, rust in light,
+ * unexplained to anyone who is not hovering it.
  *
  * Reads the same `git-state` query the workspace rail subscribes to, so when
  * the rail is open this costs nothing new; when it is closed, one cached query
@@ -99,9 +101,16 @@ export function WorkspaceBreadcrumbView({
         </>
       ) : null}
       {dirty ? (
-        <span className="flex shrink-0 items-center" title={t.workspace.breadcrumbDirty}>
+        // The full phrase stays the tooltip and the screen-reader text; the
+        // visible word is the short one, so the line still fits beside the
+        // branch. Below `md` there is no room for it and the dot stands with its
+        // tooltip, as before.
+        <span className="flex shrink-0 items-center gap-1.5" title={t.workspace.breadcrumbDirty}>
           <StatusDot tone="warning" />
           <span className="sr-only">{t.workspace.breadcrumbDirty}</span>
+          <span aria-hidden="true" className="hidden md:inline">
+            {t.workspace.breadcrumbDirtyShort}
+          </span>
         </span>
       ) : null}
     </span>

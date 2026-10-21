@@ -138,6 +138,8 @@ function AgentIdentitySection({ draft, labels, isNew, onDraftChange }: AgentIden
   const id = useId();
   return (
     <AgentEditorSection title={labels.sectionIdentity}>
+      {/* The short fields share a row and the sentence spans both columns: half
+          a row clipped the description mid-word and left a hole beside the role. */}
       <div className="grid gap-4 sm:grid-cols-2">
         <Input
           id={`${id}-name`}
@@ -153,12 +155,6 @@ function AgentIdentitySection({ draft, labels, isNew, onDraftChange }: AgentIden
             onChange={(event) => onDraftChange({ slug: event.target.value })}
           />
         )}
-        <Input
-          id={`${id}-description`}
-          label={labels.agentDescription}
-          value={draft.description}
-          onChange={(event) => onDraftChange({ description: event.target.value })}
-        />
         <SettingsField label={labels.role} htmlFor={`${id}-role`}>
           <Select
             id={`${id}-role`}
@@ -168,6 +164,14 @@ function AgentIdentitySection({ draft, labels, isNew, onDraftChange }: AgentIden
             options={ROLE_OPTIONS.map((role) => ({ value: role, label: labels.roles[role] }))}
           />
         </SettingsField>
+        <div className="sm:col-span-2">
+          <Input
+            id={`${id}-description`}
+            label={labels.agentDescription}
+            value={draft.description}
+            onChange={(event) => onDraftChange({ description: event.target.value })}
+          />
+        </div>
       </div>
     </AgentEditorSection>
   );

@@ -162,7 +162,7 @@ export function GitSettingsPage({
             value={maxDiffKbDraft}
             onChange={(event) => setMaxDiffKbDraft(event.target.value)}
             onBlur={persistMaxDiffKb}
-            className="w-24 text-center"
+            className="w-32 text-center"
           />
         </SettingsRow>
       </SettingsSection>

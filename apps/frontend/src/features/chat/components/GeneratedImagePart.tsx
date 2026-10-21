@@ -1,5 +1,5 @@
 import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared/types';
-import { Bookmark, Download, Image, ImageOff, Sparkles } from 'lucide-react';
+import { Download, Image, ImageOff, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -34,6 +34,11 @@ export function GeneratedImagePart({ part }: Props) {
 
   const modelLabel = part.modelName ?? null;
 
+  // The picture's card stays at 28rem rather than the timeline's card measure:
+  // its frame is a reserved square (the part carries no dimensions, and the
+  // only provider renders 1:1), so at 41rem a square would be 656px tall. The
+  // cards that hold text end where the prose bubble does; this one holds a
+  // picture and is sized by it.
   if (part.status === 'completed' && part.imageUrl && !loadError) {
     const imageUrl = part.imageUrl;
 
@@ -76,31 +81,18 @@ export function GeneratedImagePart({ part }: Props) {
                   objectFit="contain"
                   onLoadError={() => setLoadError(true)}
                 />
-                <ImageActionBar>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="subtle"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix);
-                      }}
-                      title={t.chat.feed.download}
-                    >
-                      <Download size={ICON_MD} />
-                    </Button>
-                    <Button
-                      variant="subtle"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix);
-                      }}
-                      title={t.chat.feed.saveToGallery}
-                    >
-                      <Bookmark size={ICON_MD} />
-                    </Button>
-                  </div>
+                <ImageActionBar className="justify-end">
+                  <Button
+                    variant="subtle"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix);
+                    }}
+                    title={t.chat.feed.download}
+                  >
+                    <Download size={ICON_MD} />
+                  </Button>
                 </ImageActionBar>
               </div>
             </motion.div>
@@ -116,7 +108,7 @@ export function GeneratedImagePart({ part }: Props) {
         icon={<ImageOff size={ICON_LG} />}
         title={t.chat.feed.imageUnavailable}
         action={modelLabel ? <Chip>{modelLabel}</Chip> : undefined}
-        className="max-w-md rounded-md border border-stroke bg-surface"
+        className="max-w-(--timeline-card-max) rounded-md border border-stroke bg-surface"
       />
     );
   }
@@ -131,7 +123,11 @@ export function GeneratedImagePart({ part }: Props) {
         : part.error;
     const meta = [modelLabel, generationTimeLabel].filter(Boolean).join(' · ');
     return (
-      <Callout tone="danger" title={t.chat.feed.imageGenerationFailed} className="max-w-md">
+      <Callout
+        tone="danger"
+        title={t.chat.feed.imageGenerationFailed}
+        className="max-w-(--timeline-card-max)"
+      >
         {errorDetail || meta ? (
           <div className="space-y-1">
             {errorDetail && <p className="leading-relaxed">{errorDetail}</p>}

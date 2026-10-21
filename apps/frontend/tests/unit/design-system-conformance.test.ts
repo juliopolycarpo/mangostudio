@@ -114,6 +114,11 @@ const RULES: readonly Rule[] = [
     ),
   },
   {
+    why: 'an EmptyState icon is ICON_LG from @/lib/icon-sizes (20px) — five settings pages drew a literal 24px, larger than components.md says',
+    sourceOnly: true,
+    pattern: /<EmptyState\b[^>]*?\bicon=\{<\w+\s+size=\{\d+\}/g,
+  },
+  {
     why: 'spacing steps are 0.5/1/1.5/2/3/4/5/6/8/12 — 10px and 14px paddings, gaps and margins are off the grid',
     pattern: edge(
       String.raw`-?(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|gap-x|gap-y|space-x|space-y)-(?:2\.5|3\.5)`

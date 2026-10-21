@@ -108,6 +108,12 @@ export function ToolCallBlock({
     [expanded, name, parsedResult, isError]
   );
 
+  const rawToggle = (
+    <Button variant="subtle" size="sm" onClick={() => setShowRaw((v) => !v)}>
+      {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
+    </Button>
+  );
+
   useEffect(() => {
     if (isError) setExpanded(true);
   }, [isError]);
@@ -142,16 +148,15 @@ export function ToolCallBlock({
 
       <TimelineDisclosure open={expanded}>
         <div className="app-scrollbar max-h-48 overflow-y-auto text-xs sm:max-h-72 md:max-h-96">
-          {preview !== null && (
-            <div className="flex h-8 items-center justify-end pr-1.5">
-              <Button variant="subtle" size="sm" onClick={() => setShowRaw((v) => !v)}>
-                {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
-              </Button>
-            </div>
+          {/* The toggle rides in the first file's header while the diff shows
+              (one band, not a bare button above a second one). The raw view has
+              no file header to carry it, so it keeps a row of its own. */}
+          {preview !== null && showRaw && (
+            <div className="flex h-8 items-center justify-end pr-1.5">{rawToggle}</div>
           )}
           {preview !== null && !showRaw && (
             <div className="border-t border-stroke bg-canvas p-3">
-              <FileChangePreviewBody preview={preview} />
+              <FileChangePreviewBody preview={preview} action={rawToggle} />
             </div>
           )}
           {(preview === null || showRaw) && Object.keys(args).length > 0 && (

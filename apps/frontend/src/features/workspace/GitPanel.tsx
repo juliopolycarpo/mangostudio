@@ -30,7 +30,6 @@ import { useToast } from '@/components/ui/Toast';
 import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
-import { workdirBasename } from '@/lib/paths';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
@@ -47,6 +46,7 @@ import {
   useDiscardPaths,
   useGitRealtimeInvalidation,
   useGitState,
+  useGitWorktrees,
   useInitRepo,
   useStagePaths,
   useUnstagePaths,
@@ -55,6 +55,7 @@ import { useGithubContext } from './hooks/use-github-context';
 import { LazyDiffViewer } from './LazyDiffViewer';
 import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
+import { RailPanelActions } from './rail/RailPanel';
 import { StashSheet } from './StashSheet';
 import { WorktreeSection } from './WorktreeSection';
 
@@ -89,12 +90,15 @@ export function GitPanel({ chatId }: GitPanelProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [stashOpen, setStashOpen] = useState(false);
   const [prefs, setPrefs] = useState(readGitPanelPrefs);
-  const isFetching = stateQuery.isFetching || githubQuery.isFetching;
   const isRepo = stateQuery.data?.state === 'repo';
+  // Read here as well as by the worktree section below: both observe one cache
+  // entry, and the header's refresh is the only refresh the panel has.
+  const worktreesQuery = useGitWorktrees(chatId, isRepo);
+  const isFetching = stateQuery.isFetching || githubQuery.isFetching || worktreesQuery.isFetching;
 
   const refresh = async () => {
     const requests: Array<Promise<unknown>> = [stateQuery.refetch()];
-    if (stateQuery.data?.state === 'repo') requests.push(githubQuery.refetch());
+    if (isRepo) requests.push(githubQuery.refetch(), worktreesQuery.refetch());
     await Promise.all(requests);
   };
 
@@ -106,10 +110,13 @@ export function GitPanel({ chatId }: GitPanelProps) {
 
   return (
     <section aria-label={labels.title} className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke px-4">
-        <div className="min-w-0 flex-1">
-          <RepositoryName state={stateQuery.data} />
-        </div>
+      {/*
+        Refresh and the overflow menu live in the rail's own header, beside the
+        collapse chevron. The repository's name used to sit in a bar of its own
+        here to hold them; the header already says which folder and branch the
+        chat is in, so the bar was a row of chrome for two buttons.
+      */}
+      <RailPanelActions>
         <IconButton
           label={labels.refresh}
           onClick={() => void refresh()}
@@ -139,18 +146,8 @@ export function GitPanel({ chatId }: GitPanelProps) {
           <MenuItem checked={prefs.pruneOnFetch} onSelect={togglePrune}>
             {labels.menu.prune}
           </MenuItem>
-          <MenuSeparator />
-          <MenuItem
-            disabled={isFetching}
-            onSelect={() => {
-              setMenuOpen(false);
-              void refresh();
-            }}
-          >
-            {labels.menu.refresh}
-          </MenuItem>
         </Menu>
-      </div>
+      </RailPanelActions>
 
       {/*
         No live region here: the file list re-renders on every refetch, and
@@ -175,16 +172,6 @@ export function GitPanel({ chatId }: GitPanelProps) {
         <StashSheet chatId={chatId} onClose={() => setStashOpen(false)} />
       ) : null}
     </section>
-  );
-}
-
-function RepositoryName({ state }: { readonly state: GitRepoState | undefined }) {
-  if (!state || (state.state !== 'repo' && state.state !== 'not-a-repo')) return null;
-  const path = state.state === 'repo' ? state.root : state.workdir;
-  return (
-    <p className="truncate font-mono text-xs text-fg-muted" title={path}>
-      {basename(path)}
-    </p>
   );
 }
 
@@ -570,13 +557,20 @@ function ChangeGroup({
       ? t.git.actions.stageAll.replace('{group}', title)
       : t.git.actions.unstageAll.replace('{group}', title);
   const selections = onDiscard ? splitDiscardSelections(changes) : [];
-  // The narrower variants only mean something once the group holds both kinds.
+  // "Everything" only means something once the group holds both kinds; with one
+  // kind it would repeat the item above it.
   const mixed = selections.length > 1;
 
   return (
     <section>
       <GroupHeading title={title} count={changes.length}>
-        {mixed && onDiscard ? (
+        {/*
+          The bulk discard lives in this menu and not beside the stage button: a
+          bare counter-clockwise arrow reads as "refresh" at rest and sat one
+          28px target from "+", the control a person reaches for most. The
+          destructive items come last, as every menu in the app orders them.
+        */}
+        {onDiscard ? (
           <Menu
             open={menuOpen}
             onOpenChange={setMenuOpen}
@@ -605,17 +599,21 @@ function ChangeGroup({
                   : t.git.discard.restoreAllButton}
               </MenuItem>
             ))}
+            {mixed ? (
+              <>
+                <MenuSeparator />
+                <MenuItem
+                  tone="danger"
+                  onSelect={() => {
+                    setMenuOpen(false);
+                    onDiscard(selections);
+                  }}
+                >
+                  {t.git.discard.discardAll.replace('{group}', title)}
+                </MenuItem>
+              </>
+            ) : null}
           </Menu>
-        ) : null}
-        {onDiscard ? (
-          <IconButton
-            label={t.git.discard.discardAll.replace('{group}', title)}
-            tone="danger"
-            disabled={pending}
-            onClick={() => onDiscard(selections)}
-          >
-            <RotateCcw size={ICON_SM} />
-          </IconButton>
         ) : null}
         <IconButton
           label={allLabel}
@@ -721,9 +719,4 @@ function changePaths(changes: readonly GitFileChange[]): string[] {
       changes.flatMap((change) => (change.oldPath ? [change.oldPath, change.path] : [change.path]))
     ),
   ];
-}
-
-/** Shared segment split; a path that is all separators falls back to itself. */
-function basename(path: string): string {
-  return workdirBasename(path) ?? path;
 }

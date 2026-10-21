@@ -1,7 +1,8 @@
 /**
  * NodeVersionTable: every LTS status maps to its badge, `unknown` stays neutral
  * without offering an upgrade, and a machine without nvm is offered the chain
- * that reaches a Node rather than an install the server would refuse.
+ * that reaches a Node rather than an install the server would refuse. The note
+ * that there is no manager and the button that fixes it are one line.
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
@@ -145,6 +146,18 @@ describe('NodeVersionTable', () => {
       ).not.toBeInTheDocument();
       expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/install'))).toHaveLength(
         0
+      );
+    });
+
+    it('puts the note and its button on one line, the note in the card’s small type', () => {
+      render(<NodeVersionTable status={status} recipes={[NVM_INSTALL_RECIPE, NODE_WITHOUT_NVM]} />);
+
+      const section = screen.getByTestId('node-version-table');
+      const note = section.querySelector('p') as HTMLElement;
+      expect(note.className).toContain('text-xs');
+      expect(section.className).toContain('flex');
+      expect(section).toContainElement(
+        screen.getByRole('button', { name: 'Install nvm, then Node.js' })
       );
     });
 

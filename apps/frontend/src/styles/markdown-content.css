@@ -95,7 +95,12 @@
   content: attr(data-lang);
   position: absolute;
   top: 0.5em;
-  right: 2.75em;
+  /* Clear of the copy button, which is 28px wide at 0.5em of the block's own
+   * font size. The label's `em` is its 11px, the button's is the block's 14px,
+   * so `2.75em` landed about 5px short of the button's edge and `TS` sat half
+   * under it wherever the button is always shown (touch). `rem` does not move
+   * with either font size. */
+  right: 2.75rem;
   font-size: max(var(--text-micro), 0.7em);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -141,6 +146,35 @@
   overflow-x: auto;
   margin-top: 0.75em;
   margin-bottom: 0.75em;
+}
+
+/* The cue that there is more to the right. A table cut off at its third column
+ * with no bar reads as a clipped table, and the platform's overlay scrollbar
+ * (macOS, Android, an emulated phone) is gone the moment nobody is scrolling.
+ * A styled `::-webkit-scrollbar` is the one kind those engines draw all the
+ * time, so this is written as that, with a track so the bar's extent shows at
+ * rest. Where the engine has no such pseudo (Firefox) the standard properties do
+ * the same job, as `.app-scrollbar` does. Not an edge fade: gradients are out
+ * of the contract. */
+.markdown-table-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.markdown-table-scroll::-webkit-scrollbar-track {
+  background: var(--color-fill-selected);
+  border-radius: 9999px;
+}
+.markdown-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-stroke-strong);
+  border-radius: 9999px;
+}
+.markdown-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fg-muted);
+}
+@supports not selector(::-webkit-scrollbar) {
+  .markdown-table-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-stroke-strong) var(--color-fill-selected);
+  }
 }
 .markdown-content table {
   width: 100%;

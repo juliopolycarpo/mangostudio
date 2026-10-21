@@ -124,6 +124,23 @@ describe('permission selector', () => {
     );
   });
 
+  it('writes the risk as a sentence, once, and names the group for the chip it hangs from', () => {
+    open(FULL_MATRIX);
+    // Sentence case with its full stop, like every other line in the panel — the
+    // one line about risk is not the one written like a fragment.
+    for (const warning of screen.getAllByText('This agent can edit and run anything.')) {
+      expect(warning).toHaveClass('text-fg');
+    }
+    // The group heading is the chip's own key (`mode:`), a noun, not a question.
+    expect(screen.getByText('Mode')).toBeInTheDocument();
+    expect(screen.queryByText(/how much should it bother you/i)).toBeNull();
+    // The risk is the warning's to carry: the preset's own line does not say
+    // "without stopping to ask" a second time.
+    expect(
+      screen.getByText(/^Keeps going on its own\. Claude acts without asking/)
+    ).toBeInTheDocument();
+  });
+
   it('moves the other axis to something composable rather than to an unsupported pair', () => {
     const { props } = openMatrix([
       { level: 'read-only', routing: 'user', supported: true, unattended: false },
@@ -322,5 +339,26 @@ describe('permission chip', () => {
     });
     expect(chip).toHaveTextContent('Default');
     expect(chip).not.toHaveTextContent('Balanced');
+  });
+});
+
+/**
+ * Every composer menu marks the chosen row the same way: a check in `accent-fg`
+ * after the label, on a `fill-selected` row. This one drew a leading column
+ * holding a check on the chosen row and a text glyph (`○`) on the others, which
+ * is a font character rather than an icon and renders differently per platform.
+ */
+describe('permission selected mark', () => {
+  it('marks the chosen row with a trailing check and gives the others no mark', () => {
+    open(FULL_MATRIX, { targetId: 'claude', level: 'read-only', routing: 'user' });
+
+    const chosen = screen.getByRole('button', { name: /Careful/ });
+    expect(chosen).toHaveAttribute('aria-pressed', 'true');
+    expect(chosen.className).toContain('bg-fill-selected');
+    expect(chosen.lastElementChild?.getAttribute('class')).toContain('lucide-check');
+
+    const other = screen.getByRole('button', { name: /Balanced/ });
+    expect(other.querySelector('.lucide-check')).toBeNull();
+    expect(document.body.textContent).not.toContain('○');
   });
 });

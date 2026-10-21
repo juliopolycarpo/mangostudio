@@ -240,7 +240,8 @@ describe('sidebar search', () => {
     renderSidebar();
     fireEvent.change(screen.getByLabelText('Search chats…'), { target: { value: 'zzz' } });
     await flushAsyncRender();
-    expect(screen.getByText('No results for "zzz"')).toBeInTheDocument();
+    // Typographic quotes, as the delete dialog quotes a chat's name.
+    expect(screen.getByText('No results for “zzz”')).toBeInTheDocument();
   });
 
   it('clears on Escape', async () => {
@@ -473,6 +474,56 @@ describe('sidebar shell', () => {
     );
     // The name stays for assistive tech and for the search that matches it.
     expect(within(row).getByText('codex')).toHaveClass('pointer-coarse:sr-only');
+  });
+
+  it('reads the runner as its dot alone below the width that has room for words, and in full from it', () => {
+    // The default and the minimum: the title needs every character the word
+    // would take. The word is still in the document either way — it is what the
+    // search matches and what a screen reader says.
+    const narrow = renderSidebar();
+    const narrowRow = screen.getByText('Plugin LSP TypeScript').closest('li') as HTMLElement;
+    expect(within(narrowRow).getByText('codex')).toHaveClass('sr-only');
+    expect(within(narrowRow).getByText('codex').previousElementSibling).toHaveAttribute(
+      'data-tone',
+      'neutral'
+    );
+    narrow.unmount();
+
+    renderSidebar({ width: 320 });
+    const wideRow = screen.getByText('Plugin LSP TypeScript').closest('li') as HTMLElement;
+    expect(within(wideRow).getByText('codex')).not.toHaveClass('sr-only');
+  });
+
+  it('stops the browser underlining the query as a misspelled word', () => {
+    renderSidebar();
+    const search = screen.getByLabelText('Search chats…');
+    expect(search).toHaveAttribute('spellcheck', 'false');
+    expect(search).toHaveAttribute('autocomplete', 'off');
+  });
+
+  it("lays the page entries on the chat list's inset, with their glyphs in the chat rows' slot", () => {
+    renderSidebar();
+    const settings = screen
+      .getAllByRole('button', { name: 'Settings' })
+      .find((button) => button.closest('[data-testid="mobile-shortcuts"]') === null) as HTMLElement;
+    // The same 12px inset as the chat list, so the pills share their edges…
+    expect(settings.parentElement).toHaveClass('px-3');
+    expect(settings.parentElement).not.toHaveClass('p-2');
+    // …and the same centred 20px slot, so labels and titles share their x.
+    const slot = settings.querySelector('svg')?.parentElement;
+    expect(slot).toHaveClass('size-5', 'shrink-0', 'justify-center');
+    expect(settings).toHaveClass('gap-2');
+  });
+
+  it('draws Home and Gallery with glyphs that cannot be mistaken for each other', () => {
+    renderSidebar();
+    const glyph = (name: string) =>
+      within(screen.getByTestId('mobile-shortcuts'))
+        .getByRole('button', { name })
+        .querySelector('svg');
+    expect(glyph('Home')).toHaveClass('lucide-house');
+    expect(glyph('Gallery')).toHaveClass('lucide-layout-grid');
+    expect(glyph('Studio')).toHaveClass('lucide-image');
   });
 
   it('caps a mobile shortcut label to its cell so a long one ends in an ellipsis', () => {

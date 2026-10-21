@@ -7,11 +7,13 @@
  * are there. The rows are three aligned columns from `sm` (agent, state, where
  * it is read from); below that the where drops to its own line under the first
  * two, so a long path wraps across the full width instead of beside the state.
+ *
+ * A path is technical content, so it is set in mono as it is in the content
+ * cards above; the words around it stay in the interface font.
  */
 
 import type { LibraryCoverage, LibraryLocationId } from '@mangostudio/shared/library';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
 import { CoverageGlyph } from './CoverageCell';
 
 interface CoverageListProps {
@@ -47,16 +49,18 @@ export function CoverageList({ coverage, locationLabel }: CoverageListProps) {
             <div className="col-span-2 min-w-0 break-words text-fg-muted sm:col-span-1">
               {entry.effectiveLocationId && (
                 <p>
-                  {formatMessage(l.detail.via, {
-                    location: locationLabel(entry.effectiveLocationId),
-                  })}
+                  <PathMessage
+                    template={l.detail.via}
+                    path={locationLabel(entry.effectiveLocationId)}
+                  />
                 </p>
               )}
               {entry.shadowedLocationIds.length > 0 && (
                 <p>
-                  {formatMessage(l.detail.alsoIn, {
-                    locations: entry.shadowedLocationIds.map(locationLabel).join(', '),
-                  })}
+                  <PathMessage
+                    template={l.detail.alsoIn}
+                    path={entry.shadowedLocationIds.map(locationLabel).join(', ')}
+                  />
                 </p>
               )}
             </div>
@@ -64,5 +68,24 @@ export function CoverageList({ coverage, locationLabel }: CoverageListProps) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * A message with one path in it, the path in mono.
+ *
+ * `formatMessage` returns a string, which cannot carry a differently-styled
+ * span, so the template is cut at its one placeholder instead. The placeholder
+ * is `{location}` or `{locations}` — whichever the sentence uses — and the words
+ * on either side keep the language's own order.
+ */
+function PathMessage({ template, path }: { readonly template: string; readonly path: string }) {
+  const [before = '', after = ''] = template.split(/\{locations?\}/);
+  return (
+    <>
+      {before}
+      <span className="break-all font-mono text-xs">{path}</span>
+      {after}
+    </>
   );
 }

@@ -19,7 +19,7 @@ function LoginPage() {
   const { redirect } = Route.useSearch();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [hasFailed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -34,13 +34,16 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
+    setFailed(false);
 
     await authClient.signIn.email(
       { email, password },
       {
-        onError: (ctx) => {
-          setError(ctx.error.message || t.auth.loginError);
+        // The server's sentence is English and says what its library thinks, not
+        // what to do. Whatever refused the request, the person gets the same
+        // translated line, in the page's language.
+        onError: () => {
+          setFailed(true);
         },
       }
     );
@@ -60,11 +63,7 @@ function LoginPage() {
         >
           <h1 className="text-title font-semibold text-fg">{t.auth.loginTitle}</h1>
 
-          {error && (
-            <Callout tone="danger" role="alert">
-              {error}
-            </Callout>
-          )}
+          {hasFailed && <Callout tone="danger" role="alert" title={t.auth.loginError} />}
 
           <div className="space-y-3">
             <Input
@@ -84,7 +83,6 @@ function LoginPage() {
               id="password"
               name="password"
               label={t.auth.passwordLabel}
-              placeholder={t.auth.passwordPlaceholder}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="current-password"
@@ -98,7 +96,7 @@ function LoginPage() {
 
           <p className="text-center text-sm text-fg-muted">
             {t.auth.noAccount}{' '}
-            <Link to="/signup" className="text-accent-fg hover:underline">
+            <Link to="/signup" className="text-accent-fg underline underline-offset-2">
               {t.auth.signupLink}
             </Link>
           </p>

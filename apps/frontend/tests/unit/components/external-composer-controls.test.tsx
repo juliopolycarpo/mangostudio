@@ -11,7 +11,10 @@ import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agent
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ExternalComposerControls } from '../../../src/features/external-agents/ExternalComposerControls';
+import {
+  ExternalComposerControls,
+  hasExternalComposerControls,
+} from '../../../src/features/external-agents/ExternalComposerControls';
 import { render } from '../../support/harness/render';
 
 function descriptor(
@@ -144,5 +147,48 @@ describe('ExternalComposerControls effort picker', () => {
     renderControls({ descriptor: descriptor(CODEX_MODELS), model: 'gpt-5' });
 
     expect(screen.queryByRole('combobox', { name: 'Reasoning effort' })).toBeNull();
+  });
+});
+
+/**
+ * The status line asks this before it draws a strip for the controls, so it has
+ * to say "nothing to draw" exactly when the component would draw nothing: a
+ * runner that is not installed answers no catalog and no permission pairs, and a
+ * strip around that was twelve pixels of padding and a hairline above the prompt.
+ */
+describe('hasExternalComposerControls', () => {
+  it('has nothing to draw for a descriptor with no catalog and no permission pairs', () => {
+    expect(hasExternalComposerControls(descriptor(undefined, { installed: false }))).toBe(false);
+    expect(hasExternalComposerControls(descriptor([]))).toBe(false);
+  });
+
+  it('has nothing to draw while the descriptor has not landed', () => {
+    expect(hasExternalComposerControls(undefined)).toBe(false);
+  });
+
+  it('does not count a catalog the vendor marked entirely hidden', () => {
+    expect(
+      hasExternalComposerControls(
+        descriptor([{ id: 'internal', displayName: 'Internal', hidden: true }])
+      )
+    ).toBe(false);
+  });
+
+  it('has a model picker to draw for a visible model', () => {
+    expect(hasExternalComposerControls(descriptor([{ id: 'gpt-5', displayName: 'GPT-5' }]))).toBe(
+      true
+    );
+  });
+
+  it('has the permission control to draw for a vendor with pairs but no catalog', () => {
+    expect(
+      hasExternalComposerControls(
+        descriptor(undefined, {
+          supportedConfigurations: [
+            { level: 'default', routing: 'user', supported: true, unattended: false },
+          ],
+        })
+      )
+    ).toBe(true);
   });
 });

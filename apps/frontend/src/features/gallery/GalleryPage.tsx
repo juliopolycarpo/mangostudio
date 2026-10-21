@@ -37,7 +37,7 @@ export function GalleryPage() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
-    <div className="flex h-full flex-col gap-6 overflow-y-auto p-4 sm:gap-8 sm:p-6 md:p-8">
+    <div className="flex h-full flex-col gap-6 overflow-y-auto p-4 sm:gap-8 sm:p-6">
       <h1 className="shrink-0 text-title font-semibold text-fg">{t.gallery.title}</h1>
 
       {status === 'pending' ? (

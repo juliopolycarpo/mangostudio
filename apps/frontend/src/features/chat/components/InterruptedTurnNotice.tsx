@@ -21,6 +21,13 @@ interface InterruptedTurnNoticeProps {
   readonly disabled: boolean;
   readonly onResume: (messageId: string, retryCallIds: string[]) => Promise<void>;
   readonly onDismiss: (messageId: string) => Promise<void>;
+  /**
+   * `secondary` while another notice above the composer already offers the
+   * region's one primary action (the context decision's "Compact and continue"):
+   * two accent buttons stacked over Send put three mango buttons within a
+   * thumb's reach, and none of them reads as the way forward.
+   */
+  readonly resumeVariant?: 'primary' | 'secondary';
 }
 
 type PendingAction = 'resume' | 'dismiss' | null;
@@ -31,6 +38,7 @@ export function InterruptedTurnNotice({
   disabled,
   onResume,
   onDismiss,
+  resumeVariant = 'primary',
 }: InterruptedTurnNoticeProps) {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -69,10 +77,9 @@ export function InterruptedTurnNotice({
 
   return (
     <ChatDockNotice role="status" aria-live="polite">
-      <Callout tone="warning" className="p-4">
+      <Callout tone="warning" title={t.chat.recovery.title} className="p-4">
         <div className="space-y-4">
           <div className="min-w-0 space-y-1">
-            <h2 className="text-sm font-semibold text-fg">{t.chat.recovery.title}</h2>
             <p className="text-sm">{reasonLabel(checkpoint.reasonCode, t.chat.recovery.reason)}</p>
             <p className="text-xs">{t.chat.recovery.detail}</p>
           </div>
@@ -101,7 +108,12 @@ export function InterruptedTurnNotice({
                       />
                     </span>
                     <span>{call.name}</span>
-                    {call.isError && <span>{t.chat.recovery.failed}</span>}
+                    {call.isError && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>{t.chat.recovery.failed}</span>
+                      </>
+                    )}
                   </span>
                 ))}
               </div>
@@ -154,6 +166,7 @@ export function InterruptedTurnNotice({
             </Button>
             <Button
               type="button"
+              variant={resumeVariant}
               size="sm"
               disabled={disabled || isPending}
               loading={pendingAction === 'resume'}

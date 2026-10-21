@@ -16,7 +16,7 @@ import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
-import { hashPrefix } from '../format';
+import { hashPrefix, resourceKeyLabel } from '../format';
 import { eliminatedGroups, lastCopyEntries, plannedRemovals, type RemovalDraft } from '../removal';
 
 interface RemovalConfirmStepProps {
@@ -46,7 +46,9 @@ export function RemovalConfirmStep({
       <ul className="space-y-2">
         {planned.map(({ entry, location }) => (
           <li key={`${entry.resourceKey}:${location.locationId}`} data-testid="removal-summary-row">
-            <span className="block text-fg text-sm">{entry.resourceKey}</span>
+            <span className="block text-fg text-sm">
+              {resourceKeyLabel(entry.resourceKey, l.kinds)}
+            </span>
             <span className="block break-all font-mono text-fg-muted text-micro">
               {location.path ?? location.locationId}
             </span>
@@ -60,7 +62,7 @@ export function RemovalConfirmStep({
             {eliminated.map(({ entry, location }) => (
               <li key={`${entry.resourceKey}:${location.locationId}`}>
                 {formatMessage(l.removal.eliminatesGroupRow, {
-                  resource: entry.resourceKey,
+                  resource: resourceKeyLabel(entry.resourceKey, l.kinds),
                   location: location.path ?? location.locationId,
                   hash: `${hashPrefix(location.contentHash ?? '')}…`,
                 })}
@@ -90,7 +92,9 @@ export function RemovalConfirmStep({
                   onChange={() => onToggleAcknowledgement(entry.resourceKey)}
                 />
                 <span>
-                  {formatMessage(l.removal.lastCopyAcknowledge, { resource: entry.resourceKey })}
+                  {formatMessage(l.removal.lastCopyAcknowledge, {
+                    resource: resourceKeyLabel(entry.resourceKey, l.kindsInline),
+                  })}
                 </span>
               </label>
             ))}

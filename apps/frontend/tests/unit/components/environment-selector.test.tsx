@@ -74,6 +74,59 @@ describe('EnvironmentSelector', () => {
     }
   });
 
+  it('opens its listbox below the chip, because the chip sits at the top of the page', async () => {
+    const scenario = createFetchScenario();
+    scenario.respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS }).install();
+
+    try {
+      const user = userEvent.setup();
+      render(<EnvironmentSelector environmentId="local" onEnvironmentChange={jest.fn()} />);
+
+      await user.click(
+        await screen.findByRole('combobox', { name: 'Select execution environment' })
+      );
+
+      // Anchored under the trigger. The upward default put the panel above the
+      // viewport, clipped away, so no environment could ever be chosen.
+      const panel = (await screen.findByRole('listbox')).parentElement as HTMLElement;
+      expect(panel.className).toContain('top-full');
+      expect(panel.className).not.toContain('bottom-full');
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it('states a locked environment as a fact instead of a faded control', async () => {
+    const scenario = createFetchScenario();
+    scenario.respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS }).install();
+
+    try {
+      const onEnvironmentChange = jest.fn();
+      render(
+        <EnvironmentSelector
+          environmentId="local"
+          locked
+          onEnvironmentChange={onEnvironmentChange}
+        />
+      );
+
+      const chip = screen.getByTestId('environment-selector');
+      await waitFor(() => expect(chip).toHaveAttribute('data-state', 'connected'));
+      // Nothing to open, and nothing that looks like it could be.
+      expect(screen.queryByRole('combobox')).toBeNull();
+      expect(chip).toHaveTextContent('env:Local');
+      // The reason follows the chip as text, and the connection state still describes it.
+      expect(chip).toHaveTextContent('Locked once the first turn starts');
+      const described = chip.querySelector('[aria-describedby]');
+      expect(described).not.toBeNull();
+      expect(described).toHaveAccessibleDescription('Connected');
+      // Full-strength text: the 50% fade is for a control that is off, not for a fact.
+      expect(chip.querySelector('[class*="opacity-50"]')).toBeNull();
+    } finally {
+      scenario.restore();
+    }
+  });
+
   it('refuses to open while disabled', async () => {
     const scenario = createFetchScenario();
     scenario.respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS }).install();

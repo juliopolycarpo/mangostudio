@@ -124,4 +124,38 @@ describe('ChipSelect', () => {
 
     expect(screen.queryByRole('listbox')).toBeNull();
   });
+
+  describe('placement', () => {
+    async function panelOf(overrides: Partial<React.ComponentProps<typeof ChipSelect>> = {}) {
+      const user = userEvent.setup();
+      renderSelect(overrides);
+      await user.click(trigger());
+      return screen.getByRole('listbox').parentElement as HTMLElement;
+    }
+
+    it('opens upward by default, for a chip at the foot of the viewport', async () => {
+      const panel = await panelOf();
+
+      expect(panel.className).toContain('bottom-full');
+      expect(panel.className).not.toContain('top-full');
+    });
+
+    it('opens downward when placed below, for a chip near the top of the page', async () => {
+      const panel = await panelOf({ placement: 'below' });
+
+      expect(panel.className).toContain('top-full');
+      expect(panel.className).not.toContain('bottom-full');
+    });
+  });
+
+  it('draws its rows at the menu size, with the description a step under it', async () => {
+    const user = userEvent.setup();
+    renderSelect({ options: [{ value: 'low', label: 'low', description: 'Fast and cheap' }] });
+
+    await user.click(trigger());
+
+    const option = screen.getByRole('option', { name: /low/ });
+    expect(option.className).toContain('text-sm');
+    expect(screen.getByText('Fast and cheap').className).toContain('text-xs');
+  });
 });

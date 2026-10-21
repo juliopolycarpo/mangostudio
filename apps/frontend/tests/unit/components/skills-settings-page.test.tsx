@@ -97,12 +97,16 @@ describe('SkillsSettingsPage', () => {
 
     expect(screen.getAllByText('pdf-tools')).toHaveLength(2);
     expect(screen.getByText('Shadowed')).toBeInTheDocument();
-    // The reason is on the row, not only in a tooltip a touch screen never shows.
+    // The reason is on the page, once, not only in a tooltip a touch screen never shows.
     expect(
       screen.getByText(
-        'A higher-priority source provides a skill with the same name, so this copy is inactive.'
+        'Skills marked Shadowed share a name with a skill from a higher-priority source, so those copies are inactive.'
       )
     ).toBeInTheDocument();
+    expect(screen.getByText('Shadowed')).toHaveAttribute(
+      'title',
+      'A higher-priority source provides a skill with the same name, so this copy is inactive.'
+    );
     // The list is a titled section of its own, not a headless second card.
     expect(screen.getByRole('heading', { name: 'Installed skills' })).toBeInTheDocument();
     expect(screen.getByText('Invalid')).toBeInTheDocument();

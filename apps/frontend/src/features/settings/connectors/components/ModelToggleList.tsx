@@ -1,5 +1,5 @@
 import type { ModelOption } from '@mangostudio/shared/catalog';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { CheckboxRow } from '@/components/settings/CheckboxRow';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 
 interface ModelToggleListProps {
@@ -25,38 +25,17 @@ export function ModelToggleList({
       </MicroLabel>
       <div className="grid grid-cols-1 gap-2">
         {models.map((model) => (
-          <ModelToggleRow
+          <CheckboxRow
             key={model.modelId}
-            model={model}
-            isEnabled={enabledModelIds.has(model.modelId)}
-            onToggleModel={onToggleModel}
+            label={model.displayName}
+            description={model.modelId}
+            checked={enabledModelIds.has(model.modelId)}
+            onChange={(checked) => {
+              void onToggleModel(model.modelId, checked);
+            }}
           />
         ))}
       </div>
     </div>
-  );
-}
-
-interface ModelToggleRowProps {
-  readonly model: ModelOption;
-  readonly isEnabled: boolean;
-  readonly onToggleModel: (modelId: string, checked: boolean) => void | Promise<void>;
-}
-
-/** The checkbox is the whole signal: a checked box is the accent, the row stays neutral. */
-function ModelToggleRow({ model, isEnabled, onToggleModel }: ModelToggleRowProps) {
-  return (
-    <label className="flex cursor-pointer items-center gap-3 rounded-sm border border-stroke bg-control px-3 py-2 transition-colors hover:bg-control-hover">
-      <Checkbox
-        checked={isEnabled}
-        onChange={(event) => {
-          void onToggleModel(model.modelId, event.target.checked);
-        }}
-      />
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-medium text-fg">{model.displayName}</span>
-        <span className="block truncate font-mono text-micro text-fg-muted">{model.modelId}</span>
-      </span>
-    </label>
   );
 }

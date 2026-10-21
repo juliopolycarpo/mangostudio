@@ -24,6 +24,14 @@ import { ICON_MD } from '@/lib/icon-sizes';
 import { StepFrame } from '../StepFrame';
 import { isRuntimeReady, PROJECT_RUNTIME_IDS } from '../use-onboarding-facts';
 
+/**
+ * The version as one list reads it: Node answers `v22.22.0` and Bun `1.4.2`, and
+ * two rows in one list should not wear two forms of the same fact.
+ */
+function plainVersion(version: string): string {
+  return version.replace(/^v(?=\d)/i, '');
+}
+
 export function ToolchainStep({ environmentId }: { readonly environmentId: string }) {
   const { t } = useI18n();
   const s = t.onboarding.toolchain;
@@ -71,7 +79,7 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
                 </span>
                 {ready ? (
                   <span className="text-xs text-fg-muted">
-                    {runtime?.effective?.version ?? s.ready}
+                    {plainVersion(runtime?.effective?.version ?? s.ready)}
                   </span>
                 ) : (
                   <span className="flex items-center gap-3">

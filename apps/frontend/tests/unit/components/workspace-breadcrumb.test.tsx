@@ -41,6 +41,17 @@ describe('WorkspaceBreadcrumbView', () => {
     expect(screen.getByText('Uncommitted changes')).toBeInTheDocument();
   });
 
+  // The dot alone is a colour doing a word's job; the word travels with it.
+  it('puts a word beside the dirty dot, and none when clean', () => {
+    const { rerender } = render(
+      <WorkspaceBreadcrumbView basename="repo" branch="main" dirty={true} />
+    );
+    expect(screen.getByText('Modified')).toBeInTheDocument();
+
+    rerender(<WorkspaceBreadcrumbView basename="repo" branch="main" dirty={false} />);
+    expect(screen.queryByText('Modified')).toBeNull();
+  });
+
   // The composer's dir chip is gone; this button is where changing the folder
   // lives now, offered only while the caller passes the handler.
   it('opens the workdir picker from the repo segment when a handler is given', async () => {

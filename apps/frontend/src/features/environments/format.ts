@@ -170,6 +170,17 @@ export function findingSeverity(finding: RuntimeFinding): FindingSeverity {
 }
 
 /**
+ * Whether the analyzer marked a finding `info`: detail that is not a problem —
+ * an optional tool that is simply not there, a stale install below a floor, a
+ * floor that belongs to a disabled consumer. It lands with the warnings (see
+ * {@link findingSeverity}) but is drawn without a warning's triangle, because
+ * "absent and optional" is neutral, not a thing to fix.
+ */
+export function isQuietFinding(finding: RuntimeFinding): boolean {
+  return finding.severity === 'info';
+}
+
+/**
  * The one finding a summary card leads with: worst severity first, and among
  * equals the one the probe reported first. A card with room for a single line
  * must spend it on the thing that actually stops the tool from working.
@@ -177,13 +188,15 @@ export function findingSeverity(finding: RuntimeFinding): FindingSeverity {
 export function worstFinding(findings: readonly RuntimeFinding[]): RuntimeFinding | undefined {
   let worst: RuntimeFinding | undefined;
   for (const finding of findings) {
-    if (worst === undefined) {
-      worst = finding;
-    } else if (findingSeverity(worst) === 'warn' && findingSeverity(finding) === 'fail') {
-      worst = finding;
-    }
+    if (worst === undefined || findingWeight(finding) > findingWeight(worst)) worst = finding;
   }
   return worst;
+}
+
+/** A failure outweighs a warning, and a warning outweighs informational detail. */
+function findingWeight(finding: RuntimeFinding): number {
+  if (findingSeverity(finding) === 'fail') return 2;
+  return isQuietFinding(finding) ? 0 : 1;
 }
 
 export type HealthRollup = Readonly<Record<RuntimeHealth, number>>;

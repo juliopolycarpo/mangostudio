@@ -21,6 +21,7 @@ import { Search, SearchX } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
   memo,
+  type ReactNode,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -31,7 +32,7 @@ import {
 } from 'react';
 import { DIALOG_SURFACE_CLASS } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { KbdHint } from '@/components/ui/KbdHint';
+import { KbdHint, ReturnKey } from '@/components/ui/KbdHint';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -321,7 +322,7 @@ export const CommandPalette = memo(function CommandPalette({
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-xs text-fg-muted">
           <FooterHint keys="↑↓" label={labels.hints.navigate} />
-          <FooterHint keys="⏎" label={labels.hints.run} />
+          <FooterHint keys={<ReturnKey />} label={labels.hints.run} />
           <FooterHint keys="⇥" label={labels.hints.sections} />
         </div>
       </motion.div>
@@ -350,7 +351,7 @@ function optionId(listId: string, item: CommandItem): string {
   return `${listId}-${item.id}`;
 }
 
-function FooterHint({ keys, label }: { keys: string; label: string }) {
+function FooterHint({ keys, label }: { keys: ReactNode; label: string }) {
   return (
     <span className="flex items-center gap-1.5">
       <KbdHint keys={keys} />
@@ -398,8 +399,11 @@ function CommandRow({
         />
       ) : null}
       <span className="truncate">{item.label}</span>
+      {/* Below `sm` the folder steps back like the timestamp does, for the same
+          reason: the label is what the reader scans for. Visually only; the words
+          stay in the accessibility tree and in what the search matches. */}
       {item.hint ? (
-        <span className="min-w-0 shrink truncate font-mono text-xs text-fg-subtle">
+        <span className="min-w-0 shrink truncate font-mono text-xs text-fg-subtle max-sm:sr-only">
           {item.hint}
         </span>
       ) : null}
@@ -407,13 +411,15 @@ function CommandRow({
         {item.badge ? (
           <span className="flex items-center gap-1.5 font-mono text-micro text-fg-subtle">
             <StatusDot tone="neutral" className={item.badge.dotClassName} />
-            {item.badge.label}
+            {/* The dot stays: it is the harness's identity at any width. */}
+            <span className="max-sm:sr-only">{item.badge.label}</span>
           </span>
         ) : null}
         {/* Hidden below `sm`, but only visually: on a 390px row the label, the
-            folder and the harness badge all truncate to fight over the space a
-            timestamp is taking, and the label is what the reader is scanning
-            for. The words stay in the accessibility tree at every width. */}
+            folder and the harness badge all truncate to fight over the space, and
+            the label is what the reader is scanning for. The timestamp, the folder
+            above and the badge's word all step back; the words stay in the
+            accessibility tree at every width. */}
         {item.meta ? (
           <span className="font-mono text-micro text-fg-subtle max-sm:sr-only">{item.meta}</span>
         ) : null}

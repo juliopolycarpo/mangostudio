@@ -122,9 +122,27 @@ describe('AgentSettingsPage', () => {
 
     render(<AgentSettingsPage />);
 
-    expect(await screen.findByRole('button', { name: /chat/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /default/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /researcher/i })).toBeInTheDocument();
+    expect(await screen.findByRole('radio', { name: /chat/i })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /default/i })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /researcher/i })).toBeInTheDocument();
+  });
+
+  /** Reset and Save answer the same question, so a clean editor disables both. */
+  it('disables Reset while there is nothing to undo, and enables it after an edit', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
+
+    render(<AgentSettingsPage />);
+
+    const prompt = await screen.findByLabelText('System prompt');
+    expect(screen.getByRole('button', { name: /reset/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    await user.type(prompt, ' more');
+
+    expect(screen.getByRole('button', { name: /reset/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 
   it('does not render markdown controls for built-in agents', async () => {
@@ -146,7 +164,7 @@ describe('AgentSettingsPage', () => {
 
     render(<AgentSettingsPage />);
 
-    await user.click(await screen.findByRole('button', { name: /researcher/i }));
+    await user.click(await screen.findByRole('radio', { name: /researcher/i }));
 
     expect(screen.getByRole('button', { name: 'Markdown' })).toBeInTheDocument();
     expect(screen.getByDisplayValue('/home/user/.mango/agents/researcher.md')).toBeInTheDocument();

@@ -17,7 +17,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { toolSettingsListQueryOptions } from '../../tools/queries';
 import {
@@ -149,7 +149,7 @@ export function AgentSettingsPage() {
       <SettingsPage {...page} actions={createAction}>
         <Card padded={false}>
           <EmptyState
-            icon={<Bot size={24} />}
+            icon={<Bot size={ICON_LG} />}
             title={labels.emptyStateTitle}
             hint={labels.emptyStateDescription}
             action={
@@ -169,6 +169,7 @@ export function AgentSettingsPage() {
       <AgentList
         agents={newAgent ? [newAgent, ...agents] : agents}
         selectedAgentId={selectedAgent?.id ?? null}
+        ariaLabel={labels.title}
         builtInAgentsTitle={labels.builtInAgents}
         userAgentsTitle={labels.userAgents}
         onSelect={(agentId) => {

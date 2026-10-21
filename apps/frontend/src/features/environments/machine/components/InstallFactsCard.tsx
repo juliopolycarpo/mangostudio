@@ -6,7 +6,7 @@
 import type { MachineStatus } from '@mangostudio/shared/machine';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
-import { MachineCard, MachineFact } from './MachineCard';
+import { MachineCard, MachineFact, MachineFacts } from './MachineCard';
 
 interface InstallFactsCardProps {
   readonly status: MachineStatus;
@@ -35,11 +35,11 @@ export function InstallFactsCard({ status }: InstallFactsCardProps) {
 
   return (
     <MachineCard title={m.install.title} testId="machine-install-card">
-      <div className="space-y-3">
+      {runtimeBinary.versionMatches === false && (
+        <Callout tone="warning">{m.runtime.versionMismatch}</Callout>
+      )}
+      <MachineFacts>
         <MachineFact label={m.runtime.title} value={runtimeValue} severity={runtimeSeverity} />
-        {runtimeBinary.versionMatches === false && (
-          <Callout tone="warning">{m.runtime.versionMismatch}</Callout>
-        )}
         <MachineFact
           label={m.hostSlot.title}
           value={
@@ -65,7 +65,7 @@ export function InstallFactsCard({ status }: InstallFactsCardProps) {
             ...(status.container ? [m.install.container] : []),
           ].join(' · ')}
         />
-      </div>
+      </MachineFacts>
     </MachineCard>
   );
 }

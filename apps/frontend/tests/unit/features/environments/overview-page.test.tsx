@@ -269,7 +269,7 @@ describe('OverviewPage', () => {
     // rather than a dead end.
     expect(
       within(agents).getByRole('link', {
-        name: en.environments.overview.open.replace('{section}', en.environments.tabs.agents),
+        name: en.environments.overview.open.agents,
       })
     ).toHaveAttribute('href', '/environments/agents');
   });

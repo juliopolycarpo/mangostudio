@@ -23,7 +23,8 @@ function SettingsSectionHeader({ title, description, action }: SettingsSectionHe
         <h3 className="text-base font-semibold text-fg">{title}</h3>
         {description ? <p className="text-sm text-fg-muted">{description}</p> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {/* The 24px line of the `text-base` title, centring the action on it. */}
+      {action ? <div className="flex h-6 shrink-0 items-center">{action}</div> : null}
     </div>
   );
 }

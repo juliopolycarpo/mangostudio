@@ -5,7 +5,8 @@
  * folder picker, the environment manager, the runner selector, the service
  * card, a chat. What this adds is an order, a reason for each step, and the
  * memory to leave and come back. Nothing is only reachable from here, which is
- * why skipping is offered on every step and costs nothing.
+ * why skipping costs nothing: any step that is still asking something can be
+ * skipped, and the whole run can be skipped from the header.
  *
  * Where the flow opens is derived, never remembered: `resumeOnboarding` reads
  * what the machine says now against what the person has answered, so a folder
@@ -106,6 +107,12 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
     (step === 'folder' && !state.workdir) ||
     (step === 'chat' && !!state.workdir && statuses.chat !== 'satisfied');
 
+  // Skipping a step is for a step that is asking something of the person and
+  // has not been answered. The welcome step asks nothing (Continue is "Get
+  // started"; skipping an introduction means nothing), and a satisfied one has
+  // nothing left to skip: offering it would only record "skipped" over "done".
+  const canSkipStep = step !== null && step !== 'welcome' && statuses[step] !== 'satisfied';
+
   const complete = async (destination?: string) => {
     await progress.update((current) => ({ ...current, completedAt: Date.now() }));
     onDone(destination);
@@ -141,8 +148,25 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
       <div className="mx-auto w-full max-w-3xl space-y-6">
         <header className="space-y-2 text-center">
           {/* The only page a not-yet-configured account can reach, so the way
-              back out of the wrong account has to be on it. */}
-          <div className="flex justify-end">
+              back out of the wrong account has to be on it. Skipping the whole
+              setup is the other account-level exit, so the two sit together
+              instead of one floating under a card whose height changes with
+              every step.
+
+              Guarded like Continue: both write the same record, and a second
+              click while the first write is open builds its update on the value
+              the first one has not replaced yet. */}
+          <div className="flex items-center justify-end gap-1">
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              data-testid="onboarding-skip-all"
+              disabled={isWriting}
+              onClick={() => void complete()}
+            >
+              {s.skipAll}
+            </Button>
             <Button
               variant="subtle"
               size="sm"
@@ -155,7 +179,6 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
           </div>
           <Logo className="mx-auto size-12" />
           <h1 className="text-title font-semibold text-fg">{s.title}</h1>
-          <p className="mx-auto max-w-xl text-sm text-fg-muted">{s.subtitle}</p>
         </header>
 
         <div className="grid gap-6 sm:grid-cols-[13rem_1fr]">
@@ -205,7 +228,10 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 <span className="text-sm text-fg-muted">{s.deciding}</span>
               </div>
             ) : (
-              <p className="font-mono text-micro text-fg-subtle">
+              // From `sm` up the step list beside the card already marks the current
+              // step; the line is for the phone, which has no list. Hidden rather
+              // than removed, so the card's `space-y` leaves no gap above the title.
+              <p className="font-mono text-micro text-fg-subtle sm:hidden">
                 {formatMessage(s.progress, {
                   step: String(index + 1),
                   total: String(ONBOARDING_STEP_IDS.length),
@@ -236,6 +262,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 answered={facts.chat === 'satisfied'}
                 onOpenChat={() => complete('/')}
                 onWritingChange={setStepWriting}
+                onGoToFolder={() => setStep('folder')}
               />
             ) : null}
 
@@ -264,15 +291,17 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                     {s.back}
                   </Button>
                 ) : null}
-                <Button
-                  variant="subtle"
-                  size="lg"
-                  data-testid="onboarding-skip-step"
-                  disabled={isWriting}
-                  onClick={() => void skipCurrent()}
-                >
-                  {s.skipStep}
-                </Button>
+                {canSkipStep ? (
+                  <Button
+                    variant="subtle"
+                    size="lg"
+                    data-testid="onboarding-skip-step"
+                    disabled={isWriting}
+                    onClick={() => void skipCurrent()}
+                  >
+                    {s.skipStep}
+                  </Button>
+                ) : null}
                 <Button
                   variant={stepOwnsPrimary ? 'secondary' : 'primary'}
                   size="lg"
@@ -292,23 +321,6 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             with a second copy of them written for this page. */}
         <ExternalWorkspaceTrustGate />
         <ExternalDisclosureGate />
-
-        <div className="text-center">
-          {/* Guarded like Continue: both write the same record, and a second
-              click while the first write is open builds its update on the value
-              the first one has not replaced yet. */}
-          <Button
-            type="button"
-            variant="subtle"
-            size="sm"
-            data-testid="onboarding-skip-all"
-            disabled={isWriting}
-            onClick={() => void complete()}
-            className="text-fg-muted"
-          >
-            {s.skipAll}
-          </Button>
-        </div>
       </div>
     </div>
   );

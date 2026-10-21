@@ -82,19 +82,16 @@ export function AgentEditorActionBar({
     <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-b-md border-t border-stroke bg-surface px-4 py-3 sm:px-6">
       <div>
         {isUserAgent && !isNew && (
-          <Button
-            type="button"
-            variant="subtle"
-            className="text-danger"
-            onClick={() => onDelete(draft)}
-          >
+          <Button type="button" variant="subtle-danger" onClick={() => onDelete(draft)}>
             <Trash2 size={ICON_MD} />
             {labels.delete}
           </Button>
         )}
       </div>
       <div className="flex gap-2">
-        <Button type="button" variant="secondary" onClick={onReset}>
+        {/* Reset answers the same question as Save — is there anything to undo? — so
+            the two are disabled together. */}
+        <Button type="button" variant="secondary" disabled={!dirty && !isNew} onClick={onReset}>
           <RotateCcw size={ICON_MD} />
           {labels.reset}
         </Button>

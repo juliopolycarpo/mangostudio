@@ -68,7 +68,7 @@ function AgentsOverview() {
 
   return (
     <OverviewSection
-      title={e.tabs.agents}
+      tab="agents"
       to="/environments/agents"
       testId="overview-agents"
       isPending={agents.isPending && !agents.data}
@@ -101,7 +101,7 @@ function ToolchainsOverview() {
 
   return (
     <OverviewSection
-      title={e.tabs.runtimes}
+      tab="runtimes"
       to="/environments/runtimes"
       testId="overview-toolchains"
       isPending={runtimes.isPending && !runtimes.data}

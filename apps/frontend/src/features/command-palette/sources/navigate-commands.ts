@@ -8,14 +8,7 @@
 
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { LinkProps } from '@tanstack/react-router';
-import {
-  Image,
-  LayoutDashboard,
-  LayoutGrid,
-  MessageSquare,
-  MonitorCog,
-  Settings,
-} from 'lucide-react';
+import { House, Image, LayoutGrid, MessageSquare, MonitorCog, Settings } from 'lucide-react';
 import { settingsNavGroups } from '@/components/settings/settings-nav';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { environmentNavEntries } from '@/features/environments/environments-nav';
@@ -33,7 +26,7 @@ export function navigateCommands({ t, navigate }: NavigateCommandParams): Comman
     keywords?: string;
   }> = [
     { to: '/', label: t.chat.sectionLabel, icon: MessageSquare },
-    { to: '/home', label: t.home.nav, icon: LayoutDashboard },
+    { to: '/home', label: t.home.nav, icon: House },
     { to: '/studio', label: t.studio.title, icon: Image },
     { to: '/gallery', label: t.gallery.title, icon: LayoutGrid },
     ...environmentNavEntries(t.environments.tabs).map((entry) => ({

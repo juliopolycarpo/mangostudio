@@ -29,8 +29,15 @@ describe('ThinkingToggle', () => {
   it('hides the effort chip until thinking is on', () => {
     renderToggle({ enabled: false });
 
-    expect(screen.getByRole('button', { name: 'Thinking' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reasoning' })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Effort' })).toBeNull();
+  });
+
+  // Both runners state effort as a key and a value (`effort: high`).
+  it('reads as a key and a value, like the external runner’s effort chip', () => {
+    renderToggle({ effort: 'medium' });
+
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveTextContent('effort:Medium');
   });
 
   it('names an effort set outside the three it offers instead of rounding it down', () => {
@@ -53,7 +60,7 @@ describe('ThinkingToggle', () => {
     const user = userEvent.setup();
     const { props } = renderToggle();
 
-    const toggle = screen.getByRole('button', { name: 'Thinking' });
+    const toggle = screen.getByRole('button', { name: 'Reasoning' });
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
     await user.click(toggle);
 

@@ -1,5 +1,5 @@
 import { ArrowRight } from 'lucide-react';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -10,9 +10,16 @@ import {
   type FileChangePreview,
   truncateDiffLines,
 } from './file-change-preview';
+import { abbreviatePath } from './ToolCallVisuals';
 
 interface FileChangePreviewBodyProps {
   preview: FileChangePreview;
+  /**
+   * A control for the card as a whole (the raw-arguments toggle), set at the
+   * right end of the first file's header rather than in a band of its own above
+   * it.
+   */
+  action?: ReactNode;
 }
 
 /**
@@ -40,9 +47,9 @@ const LINE_STYLES: Record<DiffPreviewLine['kind'], { row: string; gutter: string
  * Renders a computed file-change preview: one section per touched file with an
  * operation badge, +/- counts, and a capped, color-coded diff body.
  *
- * // Usage: <FileChangePreviewBody preview={preview} />
+ * // Usage: <FileChangePreviewBody preview={preview} action={<Button size="sm">Raw</Button>} />
  */
-export function FileChangePreviewBody({ preview }: FileChangePreviewBodyProps) {
+export function FileChangePreviewBody({ preview, action }: FileChangePreviewBodyProps) {
   const { t } = useI18n();
   const d = t.tools.diff;
   // The render budget is shared across files so a many-file patch cannot
@@ -68,6 +75,7 @@ export function FileChangePreviewBody({ preview }: FileChangePreviewBodyProps) {
             file={file}
             lines={lines}
             hiddenCount={hiddenCount}
+            action={index === 0 ? action : undefined}
           />
         );
       })}
@@ -79,10 +87,12 @@ function FileSection({
   file,
   lines,
   hiddenCount,
+  action,
 }: {
   file: FileChangeFilePreview;
   lines: DiffPreviewLine[];
   hiddenCount: number;
+  action?: ReactNode;
 }) {
   const { t } = useI18n();
   const d = t.tools.diff;
@@ -96,21 +106,29 @@ function FileSection({
 
   return (
     <div>
-      <div className="mb-1 flex flex-wrap items-center gap-2">
+      {/* One line: the path takes the slack and truncates (its full form is the
+          title), so the action at the right end never has to wrap onto a row of
+          its own. */}
+      <div className="mb-1 flex items-center gap-2">
         <Badge variant={OP_VARIANTS[file.op]} className="font-sans">
           {opLabels[file.op]}
         </Badge>
-        <span className="min-w-0 truncate text-fg-muted">{file.path}</span>
+        <span className="min-w-0 truncate text-fg-muted" title={file.path}>
+          {abbreviatePath(file.path) ?? file.path}
+        </span>
         {file.movedTo && (
           <>
             <ArrowRight size={ICON_SM} className="shrink-0 text-fg-subtle" />
-            <span className="min-w-0 truncate text-fg-muted">{file.movedTo}</span>
+            <span className="min-w-0 truncate text-fg-muted" title={file.movedTo}>
+              {abbreviatePath(file.movedTo) ?? file.movedTo}
+            </span>
           </>
         )}
         {file.added > 0 && <span className="shrink-0 text-micro text-success">+{file.added}</span>}
         {file.removed > 0 && (
           <span className="shrink-0 text-micro text-danger">-{file.removed}</span>
         )}
+        {action ? <span className="-my-1 ml-auto shrink-0">{action}</span> : null}
       </div>
       {file.op === 'overwrite' && (
         <p className="mb-1 text-micro italic text-fg-subtle">{d.previousContentHidden}</p>

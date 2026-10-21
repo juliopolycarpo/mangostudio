@@ -99,36 +99,39 @@ export function MachinePage() {
     <div className="space-y-4">
       {header}
 
-      {/* `awaitingChange` only ever follows a `setNotice` on the accepted path,
-          so the notice is the banner's condition; the window adds a suffix. */}
-      {notice && (
-        <Callout tone="info" title={notice} data-testid="machine-notice">
-          {status.awaitingChange && status.error ? m.reconnecting : null}
-        </Callout>
-      )}
+      {/* 24px between cards, as on the Toolchains and Agents tabs. */}
+      <div className="space-y-6">
+        {/* `awaitingChange` only ever follows a `setNotice` on the accepted path,
+            so the notice is the banner's condition; the window adds a suffix. */}
+        {notice && (
+          <Callout tone="info" title={notice} data-testid="machine-notice">
+            {status.awaitingChange && status.error ? m.reconnecting : null}
+          </Callout>
+        )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <HubProcessCard
-          status={status.data}
-          isRestarting={restart.isPending}
-          onRestart={onRestart}
-        />
-        <ServiceCard
-          status={status.data}
-          isPending={service.isPending}
-          onInstall={() => onService('install')}
-          onUninstall={() => onService('uninstall')}
-        />
+        <div className="grid gap-6 lg:grid-cols-2">
+          <HubProcessCard
+            status={status.data}
+            isRestarting={restart.isPending}
+            onRestart={onRestart}
+          />
+          <ServiceCard
+            status={status.data}
+            isPending={service.isPending}
+            onInstall={() => onService('install')}
+            onUninstall={() => onService('uninstall')}
+          />
+        </div>
+
+        {/* Nothing while the query is pending or failed: the update card is
+            extra context on top of a page that already works without it, not
+            something worth a loading state of its own. */}
+        {update.data && <UpdateCard status={update.data} onUpgraded={status.expectChange} />}
+
+        <InstallFactsCard status={status.data} />
+        <DoctorSection />
+        <LogTail />
       </div>
-
-      {/* Nothing while the query is pending or failed: the update card is
-          extra context on top of a page that already works without it, not
-          something worth a loading state of its own. */}
-      {update.data && <UpdateCard status={update.data} onUpgraded={status.expectChange} />}
-
-      <InstallFactsCard status={status.data} />
-      <DoctorSection />
-      <LogTail />
     </div>
   );
 }

@@ -610,7 +610,10 @@ describe('ChatFeed — generated_image part rendering', () => {
     await flushAsyncRender();
 
     expect(screen.getByText('Explore')).toBeInTheDocument();
-    expect(screen.getByText('Subagent trace')).toBeInTheDocument();
+    // The status pill carries the word; the card does not also announce what the
+    // tool row above it and its own chevron already say.
+    expect(screen.queryByText('Subagent trace')).not.toBeInTheDocument();
+    expect(screen.getByText('Completed')).toBeInTheDocument();
     expect(screen.getByText('I used Explore.')).toBeInTheDocument();
 
     // The disclosure state has to reach assistive technology, not just the chevron.

@@ -23,6 +23,10 @@ interface ChoiceButtonProps {
  * keeps full-strength text: the pick is the record, and fading it would make the
  * history harder to read, not the card more inert.
  *
+ * `aria-pressed` carries the pick for a screen reader, which the fill and the
+ * check do not. A card names its group (`role="group"`, labelled by the
+ * question), so a pressed button reads as one answer among its siblings.
+ *
  * // Usage: <ChoiceButton selected={picked} marker="a)" onClick={pick}>{label}</ChoiceButton>
  */
 export function ChoiceButton({
@@ -36,6 +40,7 @@ export function ChoiceButton({
   return (
     <button
       type="button"
+      aria-pressed={selected}
       disabled={disabled}
       onClick={onClick}
       className={cn(

@@ -15,14 +15,15 @@ import {
   shouldWarnPlaintextHttpRuntime,
   sshPreflightCommands,
 } from '@mangostudio/shared/environments';
-import { Check, ChevronRight } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { Check } from 'lucide-react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import {
   type ContainerFormFields,
@@ -84,7 +85,6 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
   const labels = t.environments.entities.add;
   const create = useCreateEnvironmentMutation();
   const reachGroupName = useId();
-  const newMachineHintId = useId();
 
   const [kind, setKind] = useState<ReachabilityChoice>('stdio');
   const [name, setName] = useState('');
@@ -256,6 +256,22 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
       onClose={onClose}
       footer={
         <>
+          {/* On the left, away from the actions: it leaves rather than selects.
+              The guided flow asks these same questions in an order that suits
+              somebody who has a bare machine and no environment yet, so it is
+              not one of the answers above and not a button of this form. The
+              ellipsis says a flow opens; what it walks through is the hover. */}
+          {onStartOnboarding ? (
+            <Button
+              variant="subtle"
+              onClick={onStartOnboarding}
+              title={labels.newMachineHint}
+              className="mr-auto"
+              data-testid="add-environment-onboarding"
+            >
+              {labels.reachNewMachine}
+            </Button>
+          ) : null}
           <Button variant="secondary" onClick={onClose}>
             {labels.cancel}
           </Button>
@@ -291,26 +307,6 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
           </fieldset>
           {/* Straight under the tiles: it explains the answer just picked. */}
           <Callout tone="neutral">{hints[kind]}</Callout>
-          {/* Last, and it leaves rather than selects: the guided flow asks
-              these same questions in an order that suits somebody who has a
-              bare machine and no environment yet. Not one of the radios. */}
-          {onStartOnboarding ? (
-            <div className="flex flex-col items-start gap-1">
-              <Button
-                variant="subtle"
-                size="sm"
-                onClick={onStartOnboarding}
-                aria-describedby={newMachineHintId}
-                data-testid="add-environment-onboarding"
-              >
-                {labels.reachNewMachine}
-                <ChevronRight size={ICON_SM} aria-hidden="true" />
-              </Button>
-              <p id={newMachineHintId} className="text-xs text-fg-subtle">
-                {labels.newMachineHint}
-              </p>
-            </div>
-          ) : null}
         </div>
 
         {kind === 'wsl' ? (
@@ -355,11 +351,11 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
         </div>
 
         {kind === 'stdio' ? (
-          <>
+          <OptionalFields label={labels.optional}>
             <div className="space-y-1">
               <Input
                 id="add-environment-binary-path"
-                label={`${labels.binaryPathLabel} · ${labels.optional}`}
+                label={labels.binaryPathLabel}
                 value={binaryPath}
                 onChange={(event) => setBinaryPath(event.target.value)}
               />
@@ -369,13 +365,13 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
             <div className="space-y-1">
               <Input
                 id="add-environment-cwd"
-                label={`${labels.cwdLabel} · ${labels.optional}`}
+                label={labels.cwdLabel}
                 value={cwd}
                 onChange={(event) => setCwd(event.target.value)}
               />
               <p className="text-xs text-fg-muted">{labels.cwdHint}</p>
             </div>
-          </>
+          </OptionalFields>
         ) : null}
 
         {kind === 'container' ? (
@@ -414,70 +410,74 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
 
         {kind === 'ssh' ? (
           <>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Input
-                id="add-environment-ssh-host"
-                label={labels.sshHostLabel}
-                value={sshHost}
-                error={
-                  sshHost.trim().length > 0 && SSH_LEADING_DASH.test(sshHost.trim())
-                    ? labels.sshDashInvalid
-                    : undefined
-                }
-                onChange={(event) => setSshHost(event.target.value)}
-              />
-              <Input
-                id="add-environment-ssh-user"
-                label={`${labels.sshUserLabel} · ${labels.optional}`}
-                value={sshUser}
-                error={
-                  sshUser.trim().length > 0 && SSH_LEADING_DASH.test(sshUser.trim())
-                    ? labels.sshDashInvalid
-                    : undefined
-                }
-                onChange={(event) => setSshUser(event.target.value)}
-              />
-              <Input
-                id="add-environment-ssh-port"
-                label={`${labels.sshPortLabel} · ${labels.optional}`}
-                inputMode="numeric"
-                placeholder="22"
-                value={sshPort}
-                error={
-                  sshPort.trim().length > 0 && sshFieldInvalid === 'port'
-                    ? labels.sshPortInvalid
-                    : undefined
-                }
-                onChange={(event) => setSshPort(event.target.value)}
-              />
-              <Input
-                id="add-environment-ssh-identity"
-                label={`${labels.sshIdentityFileLabel} · ${labels.optional}`}
-                value={sshIdentityFile}
-                error={
-                  sshIdentityFile.trim().length > 0 && SSH_LEADING_DASH.test(sshIdentityFile.trim())
-                    ? labels.sshDashInvalid
-                    : undefined
-                }
-                onChange={(event) => setSshIdentityFile(event.target.value)}
-              />
-            </div>
+            <Input
+              id="add-environment-ssh-host"
+              label={labels.sshHostLabel}
+              value={sshHost}
+              error={
+                sshHost.trim().length > 0 && SSH_LEADING_DASH.test(sshHost.trim())
+                  ? labels.sshDashInvalid
+                  : undefined
+              }
+              onChange={(event) => setSshHost(event.target.value)}
+            />
 
-            <div className="space-y-1">
-              <Input
-                id="add-environment-ssh-runtime-path"
-                label={`${labels.sshRuntimePathLabel} · ${labels.optional}`}
-                placeholder={DEFAULT_SSH_RUNTIME_PATH}
-                value={sshRuntimePath}
-                error={
-                  sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
-                    ? labels.sshDashInvalid
-                    : undefined
-                }
-                onChange={(event) => setSshRuntimePath(event.target.value)}
-              />
-              <p className="text-xs text-fg-muted">{labels.sshRuntimePathHint}</p>
-            </div>
+            <OptionalFields label={labels.optional}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  id="add-environment-ssh-user"
+                  label={labels.sshUserLabel}
+                  value={sshUser}
+                  error={
+                    sshUser.trim().length > 0 && SSH_LEADING_DASH.test(sshUser.trim())
+                      ? labels.sshDashInvalid
+                      : undefined
+                  }
+                  onChange={(event) => setSshUser(event.target.value)}
+                />
+                <Input
+                  id="add-environment-ssh-port"
+                  label={labels.sshPortLabel}
+                  inputMode="numeric"
+                  placeholder="22"
+                  value={sshPort}
+                  error={
+                    sshPort.trim().length > 0 && sshFieldInvalid === 'port'
+                      ? labels.sshPortInvalid
+                      : undefined
+                  }
+                  onChange={(event) => setSshPort(event.target.value)}
+                />
+                <Input
+                  id="add-environment-ssh-identity"
+                  label={labels.sshIdentityFileLabel}
+                  value={sshIdentityFile}
+                  error={
+                    sshIdentityFile.trim().length > 0 &&
+                    SSH_LEADING_DASH.test(sshIdentityFile.trim())
+                      ? labels.sshDashInvalid
+                      : undefined
+                  }
+                  onChange={(event) => setSshIdentityFile(event.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Input
+                  id="add-environment-ssh-runtime-path"
+                  label={labels.sshRuntimePathLabel}
+                  placeholder={DEFAULT_SSH_RUNTIME_PATH}
+                  value={sshRuntimePath}
+                  error={
+                    sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
+                      ? labels.sshDashInvalid
+                      : undefined
+                  }
+                  onChange={(event) => setSshRuntimePath(event.target.value)}
+                />
+                <p className="text-xs text-fg-muted">{labels.sshRuntimePathHint}</p>
+              </div>
+            </OptionalFields>
 
             {sshConfig.host ? (
               <div className="space-y-2">
@@ -498,6 +498,27 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
         </Callout>
       ) : null}
     </Dialog>
+  );
+}
+
+/**
+ * Fields the request does without. The heading says so once; a suffix on every
+ * label said it again four times over, in the label's own weight and colour.
+ */
+function OptionalFields({
+  label,
+  children,
+}: {
+  readonly label: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <fieldset className="min-w-0 space-y-3">
+      <legend className="mb-2">
+        <MicroLabel>{label}</MicroLabel>
+      </legend>
+      {children}
+    </fieldset>
   );
 }
 

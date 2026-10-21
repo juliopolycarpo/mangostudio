@@ -171,7 +171,7 @@ describe('ToolSettingsPage', () => {
     expect(timezoneInput).toBeInTheDocument();
   });
 
-  it('calls setMaxToolIterations when slider changes', async () => {
+  it('calls setMaxToolIterations when the number field changes', async () => {
     const user = userEvent.setup();
 
     fetchScenario.respondWithJson('GET', '/api/settings/tools', {
@@ -182,7 +182,7 @@ describe('ToolSettingsPage', () => {
 
     await screen.findByText('Current date and time');
 
-    const numberInput = screen.getAllByLabelText(/max tool iterations/i)[1];
+    const numberInput = screen.getByLabelText(/max tool iterations/i);
     await user.clear(numberInput);
     await user.type(numberInput, '15');
 

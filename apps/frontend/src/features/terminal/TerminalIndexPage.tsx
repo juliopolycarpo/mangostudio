@@ -1,12 +1,15 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useNavigate, useSearch } from '@tanstack/react-router';
+import { TerminalSquare } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useToast } from '@/components/ui/Toast';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import type { EnvironmentScopeSearch } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { LazyTerminalView } from './LazyTerminalView';
 import { openFailureMessage } from './open-failure-message';
@@ -39,6 +42,7 @@ export function TerminalIndexPage() {
   // the notice stands alone. With sessions open (the per-user cap is made of
   // them) the list stays reachable and only "New terminal" is refused.
   const showSessions = !(unavailable && sessions.length === 0);
+  const noSessions = sessionsQuery.isSuccess && sessions.length === 0;
   const openMutation = useOpenTerminalMutation();
 
   function changeEnvironment(nextEnvironmentId: string): void {
@@ -63,23 +67,20 @@ export function TerminalIndexPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4 sm:p-6 md:p-8">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
+      {/* One heading for one section: the page is its list, so a second
+          "Sessions" under the title only said the same thing again. The button
+          that adds to the list sits beside the machine it adds on. With nothing
+          open, the empty state below carries the action instead, and this one
+          is not drawn: two "New terminal" buttons for one request. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-title font-semibold text-fg">{t.terminal.page.title}</h1>
-        <EnvironmentSelector
-          environmentId={environmentId}
-          onEnvironmentChange={changeEnvironment}
-        />
-      </div>
-
-      {unavailable ? (
-        <TerminalUnavailableNotice message={unavailableHint} tone={unavailableTone} />
-      ) : null}
-
-      {showSessions ? (
-        <>
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-fg">{t.terminal.page.sessions}</h2>
+        <div className="flex items-center gap-2">
+          <EnvironmentSelector
+            environmentId={environmentId}
+            onEnvironmentChange={changeEnvironment}
+          />
+          {showSessions && !noSessions ? (
             <Button
               type="button"
               variant="secondary"
@@ -91,40 +92,57 @@ export function TerminalIndexPage() {
             >
               {t.terminal.newSession}
             </Button>
-          </div>
+          ) : null}
+        </div>
+      </div>
 
-          {sessionsQuery.isSuccess && sessions.length === 0 ? (
-            <p className="text-sm text-fg-muted">{t.terminal.page.noSessions}</p>
-          ) : (
-            <ul className="divide-y divide-stroke overflow-hidden rounded-md border border-stroke">
-              {sessions.map((session) => {
-                const open = session.id === activeId;
-                return (
-                  <li
-                    key={session.id}
-                    className={cn(
-                      'relative flex items-center justify-between gap-3 px-4 py-2 text-sm',
-                      open && cn('bg-fill-selected', SELECTION_BAR)
-                    )}
+      {unavailable ? (
+        <TerminalUnavailableNotice message={unavailableHint} tone={unavailableTone} />
+      ) : null}
+
+      {showSessions ? (
+        noSessions ? (
+          <EmptyState
+            icon={<TerminalSquare size={ICON_LG} />}
+            title={t.terminal.page.noSessions}
+            hint={t.terminal.emptyHint}
+            action={
+              <Button type="button" onClick={openNewSession} loading={openMutation.isPending}>
+                {t.terminal.newSession}
+              </Button>
+            }
+          />
+        ) : (
+          <ul className="divide-y divide-stroke overflow-hidden rounded-md border border-stroke">
+            {sessions.map((session) => {
+              const open = session.id === activeId;
+              return (
+                <li
+                  key={session.id}
+                  className={cn(
+                    'relative flex items-center justify-between gap-3 px-4 py-2 text-sm',
+                    open && cn('bg-fill-selected', SELECTION_BAR)
+                  )}
+                >
+                  <span className={cn('truncate text-fg', open && 'font-medium')}>
+                    {session.title}
+                  </span>
+                  {/* The same button either way, so focus stays on it: the open
+                      row's fill says which one is showing, and its action turns
+                      into the way to put it away. */}
+                  <Button
+                    type="button"
+                    variant="subtle"
+                    size="sm"
+                    onClick={() => setActiveId(open ? null : session.id)}
                   >
-                    <span className={cn('truncate text-fg', open && 'font-medium')}>
-                      {session.title}
-                    </span>
-                    <Button
-                      type="button"
-                      variant="subtle"
-                      size="sm"
-                      onClick={() => setActiveId(session.id)}
-                      aria-pressed={open}
-                    >
-                      {t.terminal.page.openHere}
-                    </Button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </>
+                    {open ? t.terminal.page.hide : t.terminal.page.openHere}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )
       ) : null}
 
       {activeId ? (

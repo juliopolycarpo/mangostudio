@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
-import { KbdHint } from '@/components/ui/KbdHint';
+import { KbdHint, ReturnKey } from '@/components/ui/KbdHint';
 import { Spinner } from '@/components/ui/Spinner';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
@@ -409,7 +409,10 @@ export function InputBar({
   };
 
   return (
-    <footer className="shrink-0 p-3 sm:p-4 md:p-6">
+    // No top padding: the transcript above runs down to the composer's own
+    // border (its scroller carries the gap), so the clip edge is a line the eye
+    // reads as an edge, not a cut through text 24px above the frame.
+    <footer className="shrink-0 px-3 pb-3 sm:px-4 sm:pb-4 md:px-6 md:pb-6">
       <div className={CHAT_COLUMN_CLASS}>
         {externalRunnerBlocked && <ExternalRunnerBlockedCallout descriptor={externalDescriptor} />}
 
@@ -584,6 +587,7 @@ export function InputBar({
                 disabled={disabled}
                 activeModel={activeModel}
                 selectedAgentId={selectedAgentId}
+                models={chipRow.activeModels}
               />
               {onImageToolIntentChange && (
                 <ImageIntentToggle
@@ -639,7 +643,7 @@ export function InputBar({
                   <span className="hidden sm:inline">{t.chat.input.send}</span>
                   <Send size={ICON_SM} className="sm:hidden" />
                   <KbdHint
-                    keys="⏎"
+                    keys={<ReturnKey />}
                     className="hidden border-current bg-transparent text-current sm:inline-flex"
                   />
                 </Button>
@@ -657,18 +661,25 @@ export function InputBar({
           ) : null}
         </form>
 
-        <p className="mt-2 text-center font-mono text-micro text-fg-subtle sm:mt-3">
+        {/* A sentence, so it is set in the interface font: mono is for keys,
+            paths and code. */}
+        <p className="mt-2 text-center text-xs text-fg-subtle sm:mt-3">
           {t.common.disclaimer}
           {/* The quiet line the user should never have to guess at: MangoStudio's
               own tool settings do not apply to a turn it is not running. It sits
               here rather than in the chip row so the composer keeps only the
-              controls you can act on. */}
+              controls you can act on. On a phone it takes its own line instead
+              of running on after a dangling separator. */}
           {isExternalRunner && externalDescriptor ? (
             <>
-              {' · '}
-              {formatMessage(t.externalAgents.selector.ownership, {
-                vendor: t.externalAgents.target[externalDescriptor.targetId],
-              })}
+              <span aria-hidden="true" className="max-sm:hidden">
+                {' · '}
+              </span>
+              <span className="max-sm:block">
+                {formatMessage(t.externalAgents.selector.ownership, {
+                  vendor: t.externalAgents.target[externalDescriptor.targetId],
+                })}
+              </span>
             </>
           ) : null}
         </p>

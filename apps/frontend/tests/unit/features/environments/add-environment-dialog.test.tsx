@@ -126,6 +126,34 @@ describe('AddEnvironmentDialog', () => {
     expect(within(dialog).getByTestId('add-environment-onboarding')).toBeInTheDocument();
   });
 
+  // Leaving for the guided flow is not a field of the form and not an answer to
+  // it, so it sits with the dialog's own actions, ahead of Cancel.
+  it('puts the guided setup in the footer, apart from the form', async () => {
+    const dialog = await openDialog();
+
+    const guided = within(dialog).getByTestId('add-environment-onboarding');
+    const footer = guided.closest('footer');
+    expect(footer).not.toBeNull();
+    expect(within(footer as HTMLElement).getByRole('button', { name: labels.cancel })).toBeTruthy();
+    expect(guided).toHaveTextContent(labels.reachNewMachine);
+    expect(guided).toHaveAttribute('title', labels.newMachineHint);
+  });
+
+  // The request does without these, which the heading says once rather than a
+  // suffix on every label.
+  it('groups the fields the request does without under one heading', async () => {
+    const dialog = await openDialog();
+
+    const optional = within(dialog).getByRole('group', { name: labels.optional });
+    expect(
+      within(optional).getByRole('textbox', { name: labels.binaryPathLabel })
+    ).toBeInTheDocument();
+    expect(within(optional).getByRole('textbox', { name: labels.cwdLabel })).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('textbox', { name: labels.nameLabel }).closest('fieldset')
+    ).toBeNull();
+  });
+
   it('derives an identifier from the name and creates the environment', async () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
@@ -198,14 +226,11 @@ describe('AddEnvironmentDialog', () => {
     await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'Build host');
     await user.type(
       within(dialog).getByRole('textbox', {
-        name: `${labels.binaryPathLabel} · ${labels.optional}`,
+        name: labels.binaryPathLabel,
       }),
       '/opt/mango/mangostudio-runtime'
     );
-    await user.type(
-      within(dialog).getByRole('textbox', { name: `${labels.cwdLabel} · ${labels.optional}` }),
-      '/srv/build'
-    );
+    await user.type(within(dialog).getByRole('textbox', { name: labels.cwdLabel }), '/srv/build');
     await user.click(within(dialog).getByRole('button', { name: labels.submit }));
 
     await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());
@@ -227,7 +252,7 @@ describe('AddEnvironmentDialog', () => {
     );
     await user.type(
       within(dialog).getByRole('textbox', {
-        name: `${labels.sshUserLabel} · ${labels.optional}`,
+        name: labels.sshUserLabel,
       }),
       'deploy'
     );
@@ -289,10 +314,7 @@ describe('AddEnvironmentDialog', () => {
       within(dialog).getByRole('textbox', { name: labels.sshHostLabel }),
       'build-01.internal'
     );
-    await user.type(
-      within(dialog).getByRole('textbox', { name: `${labels.sshPortLabel} · ${labels.optional}` }),
-      '22abc'
-    );
+    await user.type(within(dialog).getByRole('textbox', { name: labels.sshPortLabel }), '22abc');
 
     expect(within(dialog).getByRole('button', { name: labels.submit })).toBeDisabled();
   });
@@ -393,7 +415,7 @@ describe('AddEnvironmentDialog WSL answer', () => {
 
     expect(
       within(dialog).queryByRole('textbox', {
-        name: `${labels.binaryPathLabel} · ${labels.optional}`,
+        name: labels.binaryPathLabel,
       })
     ).toBeNull();
   });

@@ -297,14 +297,14 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
               {labels.edit}
             </Button>
             <Button
-              variant="subtle"
+              variant="subtle-danger"
               size="sm"
               onClick={() => {
                 setRemoveRuntime(false);
                 setRemoving(true);
               }}
               disabled={busy}
-              className="ml-auto text-danger enabled:hover:bg-danger-subtle"
+              className="ml-auto"
             >
               <Trash2 size={ICON_MD} />
               {labels.remove}

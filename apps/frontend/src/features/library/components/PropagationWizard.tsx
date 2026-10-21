@@ -1,6 +1,8 @@
 /**
  * The propagation flow: resolve conflicts → choose destinations → review →
- * apply, then a result panel with the backup handle and Undo.
+ * apply, then a result panel with the backup handle and Undo. The first step is
+ * only a step when something diverges; with one readable version of everything
+ * there is nothing to resolve, and the flow opens on the destinations.
  *
  * Each gate is closed for a reason the API also enforces, so the wizard never
  * lets a user spend effort on a request that would be refused: no continuing
@@ -22,6 +24,7 @@ import { Callout } from '@/components/ui/Callout';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { resourceTitle } from '../format';
 import { usePropagation } from '../hooks/use-propagation';
 import {
   isNoopApply,
@@ -46,7 +49,13 @@ interface PropagationWizardProps {
   readonly onClose: () => void;
 }
 
-const STEP_ORDER: readonly WizardStep[] = ['conflict', 'destinations', 'review', 'result'];
+const STEPS_WITH_CONFLICTS: readonly WizardStep[] = [
+  'conflict',
+  'destinations',
+  'review',
+  'result',
+];
+const STEPS_WITHOUT_CONFLICTS: readonly WizardStep[] = ['destinations', 'review', 'result'];
 
 export function PropagationWizard({
   resourceKeys,
@@ -106,10 +115,19 @@ export function PropagationWizard({
     [preview, wizard.draft]
   );
 
-  const stepIndex = STEP_ORDER.indexOf(wizard.step);
+  // A step that only says "nothing to choose" is not worth a stop. Until the
+  // preview lands the answer is assumed to be no, since that is the common one
+  // and the stepper then does not lose a segment when it arrives.
+  const needsConflictStep =
+    preview?.entries.some((entry) => entry.requiresWinnerSelection) ?? false;
+  const stepOrder = needsConflictStep ? STEPS_WITH_CONFLICTS : STEPS_WITHOUT_CONFLICTS;
+  // The controller opens on the conflict step; with none to settle that is
+  // the destinations.
+  const step = wizard.step === 'conflict' && !needsConflictStep ? 'destinations' : wizard.step;
+  const stepIndex = stepOrder.indexOf(step);
   const title =
     resourceKeys.length === 1
-      ? formatMessage(l.wizard.titleOne, { resource: resourceKeys[0] })
+      ? resourceTitle(l.wizard.titleOne, l.kindsInline, resourceKeys[0])
       : formatMessage(l.wizard.title, { count: String(resourceKeys.length) });
 
   // No candidate means no preview was ever requested, so every downstream step
@@ -118,9 +136,9 @@ export function PropagationWizard({
 
   const canContinue =
     hasDestinations &&
-    (wizard.step === 'conflict'
+    (step === 'conflict'
       ? unresolved.length === 0
-      : wizard.step === 'destinations'
+      : step === 'destinations'
         ? wizard.draft.destinations.size > 0
         : false);
 
@@ -131,18 +149,18 @@ export function PropagationWizard({
     <WizardFrame
       testId="propagation-wizard"
       title={title}
-      steps={STEP_ORDER.map((step) => stepLabel(l, step))}
+      steps={stepOrder.map((stepId) => stepLabel(l, stepId))}
       stepIndex={stepIndex}
       closeLabel={l.wizard.close}
       onClose={onClose}
       notes={
         <>
-          {wizard.step === 'review' && pendingAcks.length > 0 && (
+          {step === 'review' && pendingAcks.length > 0 && (
             <InlineNote tone="warning" data-testid="acknowledge-required">
               {l.adaptation.acknowledgeRequired}
             </InlineNote>
           )}
-          {wizard.step === 'review' && pendingAcks.length === 0 && nothingToDo && (
+          {step === 'review' && pendingAcks.length === 0 && nothingToDo && (
             <InlineNote tone="warning" data-testid="nothing-to-do">
               {l.review.nothingToDo}
             </InlineNote>
@@ -154,14 +172,17 @@ export function PropagationWizard({
       }
       actions={
         <>
-          {stepIndex > 0 && wizard.step !== 'result' && (
-            <Button variant="secondary" onClick={() => wizard.setStep(STEP_ORDER[stepIndex - 1])}>
-              {l.wizard.back}
+          {step !== 'result' && (
+            <Button
+              variant="secondary"
+              onClick={stepIndex > 0 ? () => wizard.setStep(stepOrder[stepIndex - 1]) : onClose}
+            >
+              {stepIndex > 0 ? l.wizard.back : l.wizard.cancel}
             </Button>
           )}
-          {wizard.step === 'result' ? (
+          {step === 'result' ? (
             <Button onClick={onClose}>{l.result.done}</Button>
-          ) : wizard.step === 'review' ? (
+          ) : step === 'review' ? (
             <Button
               onClick={wizard.apply}
               disabled={!canApply}
@@ -172,7 +193,7 @@ export function PropagationWizard({
             </Button>
           ) : (
             <Button
-              onClick={() => wizard.setStep(STEP_ORDER[stepIndex + 1])}
+              onClick={() => wizard.setStep(stepOrder[stepIndex + 1])}
               disabled={!canContinue}
               data-testid="continue-button"
             >
@@ -210,14 +231,14 @@ export function PropagationWizard({
           title={l.wizard.previewError}
           onRetry={wizard.repreview}
         />
-      ) : wizard.step === 'conflict' ? (
+      ) : step === 'conflict' ? (
         <ConflictStep
           preview={preview}
           draft={wizard.draft}
           unresolved={unresolved}
           onResolve={wizard.setResolution}
         />
-      ) : wizard.step === 'destinations' ? (
+      ) : step === 'destinations' ? (
         <DestinationStep
           preview={preview}
           draft={wizard.draft}
@@ -225,7 +246,7 @@ export function PropagationWizard({
           environmentName={environmentName}
           onToggle={wizard.toggleDestination}
         />
-      ) : wizard.step === 'review' ? (
+      ) : step === 'review' ? (
         <ReviewStep
           preview={preview}
           draft={wizard.draft}

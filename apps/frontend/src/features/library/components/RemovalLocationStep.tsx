@@ -86,7 +86,7 @@ export function RemovalLocationStep({
 
       {preview.entries.map((entry) => (
         <section key={entry.resourceKey} className="space-y-2" data-testid="removal-entry">
-          <h3 className="font-semibold text-fg text-sm">{entry.resourceKey}</h3>
+          <h3 className="font-semibold text-fg text-sm">{entry.ref.slug}</h3>
           {entry.locations.length === 0 ? (
             <p className="text-fg-muted text-sm">{l.removal.noLocations}</p>
           ) : (

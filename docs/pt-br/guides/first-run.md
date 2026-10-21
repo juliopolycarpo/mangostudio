@@ -76,9 +76,12 @@ terminou.
 
 ### Pular
 
-**Pular por enquanto** marca um passo como pulado e segue adiante. **Pular a
-configuração** registra o fluxo inteiro como concluído e leva você para a página
-que estava pedindo. Nenhum dos dois envia mensagem nem cria chat.
+**Pular por enquanto** marca um passo como pulado e segue adiante. Ele aparece
+num passo que ainda pergunta alguma coisa: não em **Boas-vindas**, que não
+pergunta nada, nem num passo que a máquina já satisfaz, onde **Continuar** é o
+caminho. **Pular a configuração**, no alto da página ao lado de **Sair**,
+registra o fluxo inteiro como concluído e leva você para a página que estava
+pedindo. Nenhum dos dois envia mensagem nem cria chat.
 
 Para refazer: **Configurações → Geral → Refazer a configuração**. Isso limpa o
 registro de progresso e mais nada — seus chats, seus logins de fornecedores e

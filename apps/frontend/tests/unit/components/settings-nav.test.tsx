@@ -33,8 +33,8 @@ const { settingsNavGroups } = await import('../../../src/components/settings/set
 
 /** Every settings page, as `[group heading, link label, href]`. */
 const PAGES: ReadonlyArray<readonly [string, string, string]> = [
-  ['General', 'General', '/settings/general'],
-  ['General', 'Appearance', '/settings/appearance'],
+  ['Preferences', 'General', '/settings/general'],
+  ['Preferences', 'Appearance', '/settings/appearance'],
   ['Models & providers', 'Providers', '/settings/providers'],
   ['Models & providers', 'Connectors', '/settings/connectors'],
   ['Models & providers', 'Prompts', '/settings/prompts'],

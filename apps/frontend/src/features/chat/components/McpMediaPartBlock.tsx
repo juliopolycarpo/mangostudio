@@ -49,7 +49,7 @@ export function McpMediaPartBlock({ part }: Props) {
       <EmptyState
         icon={<ImageOff size={ICON_LG} />}
         title={t.chat.feed.imageUnavailable}
-        className="max-w-md rounded-md border border-stroke bg-surface"
+        className="max-w-(--timeline-card-max) rounded-md border border-stroke bg-surface"
       />
     );
   }

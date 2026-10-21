@@ -1,9 +1,11 @@
 import type { GalleryItem } from '@mangostudio/shared/types';
 import { Download } from 'lucide-react';
+import { buttonClassName } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 interface GalleryTileProps {
   readonly item: GalleryItem;
@@ -82,7 +84,10 @@ export function GalleryTile({ item, onView, compact = false }: GalleryTileProps)
             target="_blank"
             rel="noreferrer"
             aria-label={t.gallery.downloadImage}
-            className="pointer-events-none inline-flex size-7 shrink-0 items-center justify-center rounded-sm border border-stroke bg-control text-fg transition-colors hover:bg-control-hover active:bg-control-pressed group-hover:pointer-events-auto group-focus-within:pointer-events-auto"
+            className={cn(
+              buttonClassName('secondary', 'icon-sm'),
+              'pointer-events-none shrink-0 group-hover:pointer-events-auto group-focus-within:pointer-events-auto'
+            )}
           >
             <Download size={ICON_MD} />
           </a>

@@ -4,16 +4,24 @@
  * First-class rather than tucked away: with forty skills across four targets,
  * finding the three that need attention *is* the task, and "show only
  * divergent" is the shortest path to it.
+ *
+ * Each select wears its question in front of it (`Show: Everything`), the
+ * product's `key: value` dialect: with only the value on screen, "Everything"
+ * and "Name" read as two unexplained settings. On a phone the controls pair up
+ * in two columns — four rows instead of six — and the location, whose options
+ * are whole paths, takes a row of its own so the end of the path, the part that
+ * tells `.claude/skills` from `.mango/skills`, stays readable.
  */
 
 import type { LibraryLocationStatus, LibraryTargetDescriptor } from '@mangostudio/shared/library';
 import { Search } from 'lucide-react';
-import { useId, useMemo } from 'react';
+import { type ReactNode, useId, useMemo } from 'react';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import type { LibraryFilters, LibraryShowFilter, LibrarySort } from '../format';
 
 interface MatrixFiltersProps {
@@ -67,8 +75,11 @@ export function MatrixFilters({ filters, targets, locations, onChange }: MatrixF
   );
 
   return (
-    <div className="flex flex-wrap items-center gap-2" data-testid="matrix-filters">
-      <div className="relative min-w-0 flex-1 sm:max-w-xs">
+    <div
+      className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center"
+      data-testid="matrix-filters"
+    >
+      <div className="relative col-span-2 min-w-0 sm:max-w-xs sm:flex-1">
         <Search
           size={ICON_SM}
           className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-fg-subtle"
@@ -84,51 +95,50 @@ export function MatrixFilters({ filters, targets, locations, onChange }: MatrixF
         />
       </div>
 
-      <label className="sr-only" htmlFor={showId}>
-        {l.filters.show}
-      </label>
-      <Select
-        id={showId}
-        className="w-full sm:w-48"
-        value={filters.show}
-        options={showOptions}
-        onChange={(value) => onChange({ show: value as LibraryShowFilter })}
-      />
+      <FilterField id={showId} label={l.filters.show}>
+        <Select
+          id={showId}
+          className="min-w-0 flex-1 sm:w-52 sm:flex-none"
+          value={filters.show}
+          options={showOptions}
+          onChange={(value) => onChange({ show: value as LibraryShowFilter })}
+        />
+      </FilterField>
 
-      <label className="sr-only" htmlFor={targetId}>
-        {l.filters.target}
-      </label>
-      <Select
-        id={targetId}
-        className="w-full sm:w-40"
-        value={filters.targetId}
-        options={targetOptions}
-        onChange={(value) => onChange({ targetId: value as LibraryFilters['targetId'] })}
-      />
+      <FilterField id={targetId} label={l.filters.target}>
+        <Select
+          id={targetId}
+          className="min-w-0 flex-1 sm:w-36 sm:flex-none"
+          value={filters.targetId}
+          options={targetOptions}
+          onChange={(value) => onChange({ targetId: value as LibraryFilters['targetId'] })}
+        />
+      </FilterField>
 
-      <label className="sr-only" htmlFor={locationId}>
-        {l.filters.location}
-      </label>
-      <Select
-        id={locationId}
-        className="w-full sm:w-56"
-        value={filters.locationId}
-        options={locationOptions}
-        onChange={(value) => onChange({ locationId: value })}
-      />
+      <FilterField id={locationId} label={l.filters.location} className="col-span-2">
+        <Select
+          id={locationId}
+          className="min-w-0 flex-1 sm:w-56 sm:flex-none"
+          value={filters.locationId}
+          options={locationOptions}
+          onChange={(value) => onChange({ locationId: value })}
+        />
+      </FilterField>
 
-      <label className="sr-only" htmlFor={sortId}>
-        {l.filters.sort}
-      </label>
-      <Select
-        id={sortId}
-        className="w-full sm:w-40"
-        value={filters.sort}
-        options={sortOptions}
-        onChange={(value) => onChange({ sort: value as LibrarySort })}
-      />
+      <FilterField id={sortId} label={l.filters.sort}>
+        <Select
+          id={sortId}
+          className="min-w-0 flex-1 sm:w-40 sm:flex-none"
+          value={filters.sort}
+          options={sortOptions}
+          onChange={(value) => onChange({ sort: value as LibrarySort })}
+        />
+      </FilterField>
 
-      <label htmlFor={groupId} className="flex cursor-pointer items-center gap-2 text-fg text-sm">
+      <label
+        htmlFor={groupId}
+        className="flex cursor-pointer items-center gap-2 text-fg text-sm pointer-coarse:min-h-11"
+      >
         <Checkbox
           id={groupId}
           checked={filters.groupByLocation}
@@ -136,6 +146,33 @@ export function MatrixFilters({ filters, targets, locations, onChange }: MatrixF
         />
         {l.filters.groupByLocation}
       </label>
+    </div>
+  );
+}
+
+/**
+ * One select with its question in front of it, as a `key: value` pair. The label
+ * is a real `<label>` for the select, so it names the control for assistive
+ * technology as well as for the eye; the colon is drawn by the stylesheet and is
+ * not part of the string the dictionaries own.
+ */
+function FilterField({
+  id,
+  label,
+  className,
+  children,
+}: {
+  readonly id: string;
+  readonly label: string;
+  readonly className?: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className={cn('flex min-w-0 items-center gap-2', className)}>
+      <label htmlFor={id} className="shrink-0 text-fg-muted text-xs after:content-[':']">
+        {label}
+      </label>
+      {children}
     </div>
   );
 }

@@ -7,6 +7,10 @@
  *
  * "Keep them different" is a real answer, not a dismissal: sometimes copies
  * *should* differ, and saying so is an outcome the system records.
+ *
+ * The wizard only stops here when something diverges. With one readable version
+ * of everything there is nothing to choose, and a step that says so is a screen
+ * the person has to click through for nothing.
  */
 
 import type { PropagationPreview, PropagationPreviewEntry } from '@mangostudio/shared/library';
@@ -34,14 +38,6 @@ export function ConflictStep({ preview, draft, unresolved, onResolve }: Conflict
   const { t } = useI18n();
   const l = t.library;
   const divergent = preview.entries.filter((entry) => entry.requiresWinnerSelection);
-
-  if (divergent.length === 0) {
-    return (
-      <p className="text-fg-muted text-sm" data-testid="conflict-none">
-        {l.conflict.none}
-      </p>
-    );
-  }
 
   return (
     <div className="space-y-4" data-testid="conflict-step">

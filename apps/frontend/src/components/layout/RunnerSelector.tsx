@@ -24,7 +24,7 @@ import type { EnvironmentTransportKind } from '@mangostudio/shared/environments'
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Check, ChevronDown, CornerUpRight, History } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -37,6 +37,7 @@ import {
   externalAgentSelectable,
   externalUnavailableText,
 } from '@/features/external-agents/useExternalAgents';
+import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
@@ -99,23 +100,7 @@ export function RunnerSelector({
   const { t } = useI18n();
   const labels = t.externalAgents.selector;
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  const { containerRef, triggerRef, onKeyDown } = useDismissable(open, () => setOpen(false));
 
   // Exactly the filter the composer's agent picker already applies: a subagent
   // is not something a chat can be handed to.
@@ -167,8 +152,10 @@ export function RunnerSelector({
               : { tone: 'warning', text: labels.authUnknown };
 
   return (
-    <div ref={containerRef} className="relative">
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    <div ref={containerRef} onKeyDown={onKeyDown} className="relative">
       <Button
+        ref={triggerRef}
         type="button"
         variant="subtle"
         disabled={disabled}
@@ -188,7 +175,7 @@ export function RunnerSelector({
         <div
           role="listbox"
           aria-label={labels.label}
-          className="absolute left-0 z-50 mt-1 max-h-[70vh] w-80 overflow-auto rounded-md border border-stroke bg-surface-raised p-1 shadow-popover"
+          className="dropdown-panel app-scrollbar absolute top-full left-0 mt-1 max-h-[70vh] w-80 overflow-y-auto p-1"
         >
           <GroupHeading>{labels.mangostudioGroup}</GroupHeading>
           {isAgentListLoading ? (
@@ -429,6 +416,18 @@ function ExternalRow({
             <ExternalAccountLimitsChipFor descriptor={descriptor} />
           </div>
         ) : null}
+        {/* The two remedies MangoStudio can act on. Both link into the surface
+            that already owns the install recipes rather than growing a second
+            install affordance here — `claude.install` and `claude.update` and
+            their Codex and Cursor equivalents live there, keyed by the same
+            target id. Every other remedy either has its own control below
+            (sign-in), its own panel above (isolation), or nothing to offer.
+            On the name's line, right-aligned, as "Continue in a new chat" is on
+            a usable row: a runner that is not installed is a name, the reason
+            under it, and the way out beside it, not three stacked lines. */}
+        {descriptor.remedy ? (
+          <ExternalRemedyLink remedy={descriptor.remedy} className="shrink-0 pr-2" />
+        ) : null}
       </div>
 
       {explanation ? (
@@ -446,16 +445,6 @@ function ExternalRow({
             {labels.isolation.next[isolationFixFor(transportKind)]}
           </p>
         </Callout>
-      ) : null}
-
-      {/* The two remedies MangoStudio can act on. Both link into the surface
-          that already owns the install recipes rather than growing a second
-          install affordance here — `claude.install` and `claude.update` and
-          their Codex and Cursor equivalents live there, keyed by the same
-          target id. Every other remedy either has its own control below
-          (sign-in), its own panel above (isolation), or nothing to offer. */}
-      {descriptor.remedy ? (
-        <ExternalRemedyLink remedy={descriptor.remedy} className="mb-2 px-2" />
       ) : null}
 
       {/* The vendor's own login command, with a copy button: the user has to run

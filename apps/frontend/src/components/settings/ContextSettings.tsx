@@ -27,10 +27,6 @@ interface ContextSettingsProps {
 const THRESHOLD_MIN = 50;
 const THRESHOLD_MAX = 99;
 
-function formatThreshold(value: number, hint: string): string {
-  return hint.replace('{value}', String(Math.round(value * 100)));
-}
-
 function toPercentValue(value: number): number {
   return Math.round(value * 100);
 }
@@ -92,12 +88,13 @@ export function ContextSettings({
         </SettingsRow>
       </SettingsSection>
 
+      {/* The number field beside each slider shows the value, and the hint says it
+          is a percentage, so the rows carry no readout of their own. */}
       <SettingsSection>
         <SettingsSliderRow
           id="context-warning-threshold"
           label={s.warningThresholdLabel}
           hint={s.warningThresholdDescription}
-          readout={formatThreshold(settings.warningThreshold, s.thresholdHint)}
           value={toPercentValue(settings.warningThreshold)}
           min={THRESHOLD_MIN}
           max={THRESHOLD_MAX}
@@ -108,7 +105,6 @@ export function ContextSettings({
           id="context-danger-threshold"
           label={s.dangerThresholdLabel}
           hint={s.dangerThresholdDescription}
-          readout={formatThreshold(settings.dangerThreshold, s.thresholdHint)}
           value={toPercentValue(settings.dangerThreshold)}
           min={THRESHOLD_MIN}
           max={THRESHOLD_MAX}
@@ -119,7 +115,6 @@ export function ContextSettings({
           id="context-hard-stop-threshold"
           label={s.hardStopThresholdLabel}
           hint={s.hardStopThresholdDescription}
-          readout={formatThreshold(settings.hardStopThreshold, s.thresholdHint)}
           value={toPercentValue(settings.hardStopThreshold)}
           min={THRESHOLD_MIN}
           max={THRESHOLD_MAX}

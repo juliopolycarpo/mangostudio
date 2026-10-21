@@ -1,6 +1,8 @@
 import type { ExternalAgentRemedy } from '@mangostudio/shared/external-agents';
 import { Link } from '@tanstack/react-router';
+import { buttonClassName } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
 
 interface ExternalRemedyLinkProps {
   /** The remedy the hub or the discovery descriptor named. */
@@ -16,6 +18,9 @@ interface ExternalRemedyLinkProps {
  * Every other remedy kind has its own control (the sign-in command) or nothing to offer, so this
  * renders nothing for them.
  *
+ * It is a `subtle` small button drawn on a router link, like any other row action, so
+ * its height, padding and hover are the system's rather than a hand-built copy of them.
+ *
  * // Usage: <ExternalRemedyLink remedy={descriptor.remedy} />
  */
 export function ExternalRemedyLink({ remedy, className }: ExternalRemedyLinkProps) {
@@ -25,7 +30,7 @@ export function ExternalRemedyLink({ remedy, className }: ExternalRemedyLinkProp
     <div className={className}>
       <Link
         to="/environments/agents"
-        className="inline-flex h-7 items-center gap-1 rounded-sm px-2 text-xs font-medium text-accent-fg transition-colors hover:bg-fill-hover"
+        className={cn(buttonClassName('subtle', 'sm'), 'w-fit text-accent-fg')}
       >
         {t.externalAgents.remedy[remedy.kind]}
       </Link>

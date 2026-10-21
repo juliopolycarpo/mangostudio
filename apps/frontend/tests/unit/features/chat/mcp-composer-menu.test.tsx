@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it, jest } from 'bun:test';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { McpComposerMenu } from '../../../../src/features/chat/components/McpComposerMenu';
 import { render } from '../../../support/harness/render';
@@ -178,5 +178,59 @@ describe('McpComposerMenu', () => {
       await screen.findByText('Your MCP servers expose no prompts or resources.')
     ).toBeInTheDocument();
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  // The form is a modal. It used to open over a menu that stayed up behind it,
+  // and a failed insert put its error into that hidden menu.
+  describe('a prompt that takes arguments', () => {
+    function withArgumentPrompt() {
+      scenario = createFetchScenario()
+        .respondWithJson('GET', '/api/mcp/servers', { body: { servers: [BASE_SERVER] } })
+        .respondWithJson('GET', '/api/mcp/servers/srv-1/prompts', {
+          body: {
+            prompts: [
+              {
+                name: 'review',
+                arguments: [{ name: 'pr', required: true, description: 'Pull request' }],
+              },
+            ],
+          },
+        })
+        .respondWithJson('GET', '/api/mcp/servers/srv-1/resources', UNSUPPORTED)
+        .install();
+    }
+
+    it('closes the menu behind the form it opens', async () => {
+      withArgumentPrompt();
+      renderMenu();
+      const user = await openMenu();
+
+      await user.click(await screen.findByRole('button', { name: /review/ }));
+
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+      expect(screen.queryByText('MCP prompts and resources')).toBeNull();
+    });
+
+    it('lets Escape close the form, not the menu, and says a failed insert in the form', async () => {
+      withArgumentPrompt();
+      scenario?.respondWithJson('POST', '/api/mcp/servers/srv-1/prompts/resolve', {
+        status: 502,
+        body: { code: 'BAD_GATEWAY', message: 'upstream down' },
+      });
+      renderMenu();
+      const user = await openMenu();
+      await user.click(await screen.findByRole('button', { name: /review/ }));
+      const dialog = await screen.findByRole('dialog');
+
+      await user.type(within(dialog).getByRole('textbox'), '42');
+      await user.click(within(dialog).getByRole('button', { name: 'Insert' }));
+
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+        'Could not insert the prompt. Try again.'
+      );
+
+      await user.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    });
   });
 });

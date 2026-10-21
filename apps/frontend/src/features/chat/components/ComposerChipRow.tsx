@@ -11,6 +11,11 @@
  * suggested — an overflow menu — puts half the controls two taps away on the
  * device where changing the model matters most; a single disclosure keeps
  * everything one tap from the surface and hides nothing permanently.
+ *
+ * The summary says what the controls underneath would say, so it gives way when
+ * they are showing: open, it keeps only the folder (the one fact the controls do
+ * not carry), and closed it also carries the context ring, the one figure that
+ * changes during a session.
  */
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
@@ -27,7 +32,12 @@ import { Fragment, type ReactNode, useState } from 'react';
 import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { ChipSelect } from '@/components/ui/ChipSelect';
-import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
+import { ContextRing } from '@/components/ui/ContextRing';
+import { LockedChip } from '@/components/ui/LockedChip';
+import {
+  ExternalComposerControls,
+  hasExternalComposerControls,
+} from '@/features/external-agents/ExternalComposerControls';
 import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
@@ -37,6 +47,13 @@ import { ContextBadge } from './ContextBadge';
 
 /** Shared empty list, so an absent catalog does not allocate per render. */
 const NO_MODELS: ModelOption[] = [];
+
+/**
+ * On a phone the separators go. The strip wraps there, and a trailing `·` is
+ * left at the end of a line with the next chip starting the one below, which
+ * reads as a stray bullet; each chip is a 44px target and separates itself.
+ */
+const PHONE_WITHOUT_SEPARATORS = 'max-sm:*:after:content-none';
 
 export interface ComposerChipRowProps {
   disabled?: boolean;
@@ -105,7 +122,10 @@ export function ComposerChipRow(props: ComposerChipRowProps) {
         aria-expanded={expanded}
         className="composer-chip min-w-0 flex-1 sm:hidden"
       >
-        <span className="composer-chip-value flex-1 text-left">{summaryText(props, t)}</span>
+        <span className="composer-chip-value flex-1 text-left">
+          {summaryText(props, t, expanded)}
+        </span>
+        {!expanded && props.contextInfo ? <SummaryContext info={props.contextInfo} /> : null}
         <ChevronDown size={ICON_SM} className={`shrink-0 ${expanded ? 'rotate-180' : ''}`} />
         <span className="sr-only">
           {expanded ? t.chat.input.hideControls : t.chat.input.showControls}
@@ -115,7 +135,9 @@ export function ComposerChipRow(props: ComposerChipRowProps) {
       {/* Fragments, not wrappers: `ExternalComposerControls` returns three
           chips, and a wrapper would make the strip's separators skip past two
           of them. */}
-      <div className={`composer-chip-row ${expanded ? '' : 'max-sm:hidden'}`}>
+      <div
+        className={`composer-chip-row ${PHONE_WITHOUT_SEPARATORS} ${expanded ? '' : 'max-sm:hidden'}`}
+      >
         {chips.map((chip) => (
           <Fragment key={chip.key}>{chip.node}</Fragment>
         ))}
@@ -129,40 +151,12 @@ interface Chip {
   readonly node: ReactNode;
 }
 
-/**
- * A `key: value` chip that states a fact instead of offering a choice.
- *
- * What the agent chip becomes once a chat has turns. The disabled select it used
- * to be dropped the whole chip to half opacity — the key to 2.4:1 against its
- * surface — and kept a chevron promising a menu that could not open, for a fact
- * (who is answering) that is information rather than a dead control. Without the
- * chevron, with the key and value at full strength, it reads the way the context
- * ring and the usage chips beside it do. No glyph of its own: the lock beside
- * `mode:` means a permission level, and a second one here would mean something
- * else on the same line.
- *
- * `title` is the hover explanation; the same sentence follows the chip as
- * screen-reader text because a tooltip on a plain element is not announced and
- * is not there at all on touch.
- */
-function LockedChip({
-  label,
-  value,
-  reason,
-}: {
-  readonly label: string;
-  readonly value: string;
-  readonly reason: string;
-}) {
+/** The collapsed summary's ring and figure; the full breakdown is in the chip it stands in for. */
+function SummaryContext({ info }: { info: ContextInfo }) {
   return (
-    // The wrapper mirrors `ChipSelect`'s, so the `·` the strip draws after its
-    // children sits beside this chip exactly where it sits beside a select.
-    <span className="relative flex items-center">
-      <span className="composer-chip max-w-[13rem] cursor-default" title={reason}>
-        <span className="composer-chip-key text-fg-muted">{`${label}:`}</span>
-        <span className="composer-chip-value">{value}</span>
-        <span className="sr-only">{reason}</span>
-      </span>
+    <span className="flex shrink-0 items-center gap-1 tabular-nums text-fg-muted">
+      <ContextRing ratio={info.estimatedUsageRatio} severity={info.severity} showValue={false} />
+      {`${Math.round(info.estimatedUsageRatio * 100)}%`}
     </span>
   );
 }
@@ -171,8 +165,16 @@ function LockedChip({
  * The narrow-screen stand-in: the two facts that decide what a turn will do.
  * Deliberately not every chip abbreviated — a summary nobody can read is worse
  * than a shorter one that is true.
+ *
+ * Expanded, the model chip is on screen right under it, so only the folder stays.
  */
-function summaryText(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['t']): string {
+function summaryText(
+  props: ComposerChipRowProps,
+  t: ReturnType<typeof useI18n>['t'],
+  expanded: boolean
+): string {
+  const folder = workdirLabel(props.workdir);
+  if (expanded) return folder ?? '';
   // `??` is not enough: `activeModel` is `''` before a catalog loads, and an
   // empty string is a value — the summary rendered as a bare "· folder".
   const model =
@@ -180,7 +182,6 @@ function summaryText(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>[
       ? props.externalModel
       : props.activeModels?.find((option) => option.modelId === props.activeModel)?.displayName) ||
     (props.isExternalRunner ? t.externalAgents.model.vendorDefault : t.models.loading);
-  const folder = workdirLabel(props.workdir);
   return folder ? `${model} · ${folder}` : model;
 }
 
@@ -237,8 +238,13 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
     });
   }
 
+  // Only when the controls have something to draw. Pushed regardless, an
+  // uninstalled runner (no catalog, no permission pairs) kept the strip alive
+  // around nothing: twelve pixels of padding and a hairline above the prompt,
+  // which read as a broken composer under the warning that explains it.
   if (
     props.isExternalRunner &&
+    hasExternalComposerControls(props.externalDescriptor) &&
     props.onExternalModelChange &&
     props.onExternalEffortChange &&
     props.onExternalSelectionGone &&
@@ -250,7 +256,7 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
         // A nested strip, not a plain wrapper: these three read as `key: value`
         // exactly like the chips around them, and without the row class they
         // were the only run on the line with no `·` between them.
-        <span className="composer-chip-row">
+        <span className={`composer-chip-row ${PHONE_WITHOUT_SEPARATORS}`}>
           <ExternalComposerControls
             descriptor={props.externalDescriptor}
             model={props.externalModel}

@@ -21,6 +21,8 @@ import type {
   ResourceKind,
   ValidLibraryInstance,
 } from '@mangostudio/shared/library';
+import { parseResourceKey } from '@mangostudio/shared/library';
+import { formatMessage } from '@/lib/i18n-format';
 
 /**
  * What one matrix cell says about one target.
@@ -56,6 +58,37 @@ export interface CoverageCell {
   readonly contentHash?: string;
   readonly path?: string;
   readonly modifiedAtMs?: number;
+}
+
+/**
+ * A resource key worded for a person: `skill:git-hygiene` is an internal id, and
+ * the kind in front of the name is what keeps `release` the skill apart from
+ * `release` the command. `kinds` is the label dictionary the caller wants — the
+ * capitalised `kinds` for a list, `kindsInline` for the middle of a sentence.
+ * A key that is not one (an id from a newer hub) is shown as it came.
+ *
+ * // Usage: resourceKeyLabel('skill:gh', t.library.kinds) // "Skill gh"
+ */
+export function resourceKeyLabel(key: string, kinds: Readonly<Record<ResourceKind, string>>) {
+  const ref = parseResourceKey(key);
+  return ref ? `${kinds[ref.kind]} ${ref.slug}` : key;
+}
+
+/**
+ * Fills a `{kind} {resource}` title template from a resource key, for the
+ * wizards' headings. A key that is not one has no kind to name, so the template
+ * keeps only the key rather than printing a gap where the kind would go.
+ *
+ * // Usage: resourceTitle(t.library.wizard.titleOne, t.library.kindsInline, 'skill:gh')
+ */
+export function resourceTitle(
+  template: string,
+  kinds: Readonly<Record<ResourceKind, string>>,
+  key: string
+): string {
+  const ref = parseResourceKey(key);
+  const parts = ref ? { kind: kinds[ref.kind], resource: ref.slug } : { kind: '', resource: key };
+  return formatMessage(template, parts).replace(/ {2,}/g, ' ');
 }
 
 /** First characters of a content hash — enough to tell two versions apart on screen. */

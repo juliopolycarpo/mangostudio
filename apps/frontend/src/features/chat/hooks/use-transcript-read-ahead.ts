@@ -89,7 +89,6 @@ export function useTranscriptReadAhead({
   }, [evaluate, isScrolling]);
 
   // A new chat starts as an idle reader, whatever the last one was doing.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `chatId` is the trigger
   useEffect(() => {
     scrollingUntilRef.current = 0;
   }, [chatId]);
@@ -98,7 +97,6 @@ export function useTranscriptReadAhead({
   // again whenever the loaded pages change, and when a fetch that was in the way
   // (a refetch on open, say) ends. Leaving (a switch, a stream
   // starting, unmount) cancels the one waiting to run.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `chatId`, `layout` and `busy` are what re-arm it
   useEffect(() => {
     if (!active) return;
     schedule();

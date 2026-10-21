@@ -108,3 +108,43 @@ describe('Header auth navigation', () => {
     expect(screen.getByTestId('logout-button')).toBeDisabled();
   });
 });
+
+describe('Header page controls', () => {
+  beforeEach(() => {
+    setTestSession({ user: { id: 'user-header', name: 'Test' } });
+  });
+
+  const runner = <span data-testid="runner-picker">runner</span>;
+
+  it.each(['home', 'chat'] as const)(
+    'offers the runner where a chat starts or runs: %s',
+    (page) => {
+      renderHeader({ currentPage: page, runnerSelector: runner });
+      expect(screen.getByTestId('runner-picker')).toBeInTheDocument();
+    }
+  );
+
+  it.each(['studio', 'gallery', 'terminal', 'settings', 'environments'] as const)(
+    'does not offer a runner that starts nothing: %s',
+    (page) => {
+      renderHeader({ currentPage: page, runnerSelector: runner });
+      expect(screen.queryByTestId('runner-picker')).not.toBeInTheDocument();
+    }
+  );
+
+  it('leaves New chat and Settings to the sidebar from md up, and keeps them for the phone', () => {
+    renderHeader({ currentPage: 'chat' });
+    // Both stay in the document: the sidebar is a slide-over below `md`.
+    expect(screen.getByRole('button', { name: 'New chat' })).toHaveClass('md:hidden');
+    const settings = screen.getByTitle('Settings');
+    expect(settings).toHaveClass('md:hidden');
+    // The palette trigger and the account block are not duplicated by the sidebar.
+    expect(screen.getByTestId('command-palette-trigger')).not.toHaveClass('md:hidden');
+    expect(screen.getByTestId('logout-button')).not.toHaveClass('md:hidden');
+  });
+
+  it('does not fill the Settings button for the page it opens', () => {
+    renderHeader({ currentPage: 'settings' });
+    expect(screen.getByTitle('Settings')).not.toHaveClass('bg-fill-selected');
+  });
+});

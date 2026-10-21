@@ -55,7 +55,7 @@ export function ErrorPart({
       ? t.externalAgents.openFailure.capacity
       : text;
   return (
-    <Callout tone="danger" className="max-w-2xl">
+    <Callout tone="danger" className="max-w-(--timeline-card-max)">
       <div className="space-y-1.5">
         <p className="text-fg">{sentence}</p>
         {kind ? <span className="block font-mono text-micro text-fg-subtle">{kind}</span> : null}

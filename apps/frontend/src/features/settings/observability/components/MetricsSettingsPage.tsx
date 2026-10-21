@@ -69,7 +69,13 @@ function CacheMetricsTable(props: {
                 {entry.misses}
               </td>
               <td className="whitespace-nowrap py-2 pl-4 text-right text-fg tabular-nums">
-                {formatPercent(entry.hitRate)}
+                {/* A cache nothing has asked yet has no rate. "0%" reads as a cache
+                    that always misses, which is a different thing to be told. */}
+                {entry.hits + entry.misses === 0 ? (
+                  <span className="text-fg-subtle">—</span>
+                ) : (
+                  formatPercent(entry.hitRate)
+                )}
               </td>
             </tr>
           ))}
@@ -222,22 +228,26 @@ export function MetricsSettingsPage() {
               />
             </section>
 
-            <section className={BLOCK}>
-              <MicroLabel as="h4" className="block">
-                {labels.probeSectionTitle}
-              </MicroLabel>
-              <ul className="divide-y divide-stroke">
-                {providerMetrics.probeTimeouts.map((entry) => (
-                  <li
-                    key={entry.operation}
-                    className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0"
-                  >
-                    <span className="text-fg">{operationLabels[entry.operation]}</span>
-                    <span className="font-medium text-fg tabular-nums">{entry.timeoutCount}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
+            {/* The heading already says "Probe timeouts: 0"; a breakdown of zeros under it
+                is the same fact once per operation, so a healthy provider shows none. */}
+            {providerMetrics.totalProbeTimeouts > 0 ? (
+              <section className={BLOCK}>
+                <MicroLabel as="h4" className="block">
+                  {labels.probeSectionTitle}
+                </MicroLabel>
+                <ul className="divide-y divide-stroke">
+                  {providerMetrics.probeTimeouts.map((entry) => (
+                    <li
+                      key={entry.operation}
+                      className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0"
+                    >
+                      <span className="text-fg">{operationLabels[entry.operation]}</span>
+                      <span className="font-medium text-fg tabular-nums">{entry.timeoutCount}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
           </SettingsSection>
         ))
       ) : (

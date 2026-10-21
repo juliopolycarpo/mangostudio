@@ -3,10 +3,16 @@
  */
 
 import type { RuntimeFinding } from '@mangostudio/shared/environments';
-import { CircleAlert, TriangleAlert } from 'lucide-react';
+import { CircleAlert, CircleDashed, TriangleAlert } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
-import { describeFinding, type FindingSeverity, findingSeverity, keyedFindings } from '../format';
+import {
+  describeFinding,
+  type FindingSeverity,
+  findingSeverity,
+  isQuietFinding,
+  keyedFindings,
+} from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 
 interface FindingListProps {
@@ -22,14 +28,23 @@ const SEVERITY_STYLES: Record<FindingSeverity, string> = {
 /**
  * The single place severity turns into a glyph and a colour, so the per-runtime
  * list and the health screen can never drift into disagreeing about it.
+ *
+ * `quiet` is a finding the analyzer called informational: a dashed, muted ring
+ * instead of the warning triangle, since an optional tool that is not there is
+ * neutral and a triangle asks for something to be done.
  */
 export function FindingIcon({
   severity,
   size = ICON_MD,
+  quiet = false,
 }: {
   severity: FindingSeverity;
   size?: number;
+  quiet?: boolean;
 }) {
+  if (quiet && severity === 'warn') {
+    return <CircleDashed size={size} className="mt-0.5 shrink-0 text-fg-muted" />;
+  }
   const Icon = severity === 'fail' ? CircleAlert : TriangleAlert;
   return <Icon size={size} className={`mt-0.5 shrink-0 ${SEVERITY_STYLES[severity]}`} />;
 }
@@ -65,7 +80,7 @@ export function FindingList({ findings, className = '' }: FindingListProps) {
             className="flex items-start gap-2 text-sm text-fg-muted"
             data-finding-code={finding.code}
           >
-            <FindingIcon severity={findingSeverity(finding)} />
+            <FindingIcon severity={findingSeverity(finding)} quiet={isQuietFinding(finding)} />
             <span className="min-w-0">
               {text}
               {remedyLink && (

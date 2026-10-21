@@ -1,16 +1,20 @@
 /**
  * The image side of the product, as a landing rather than a promise.
  *
- * Two ways in and a look at what came out: creating an image happens in the
+ * One way in and a look at what came out: creating an image happens in the
  * chat, where the model and its tools already live, so this hands over to the
  * composer instead of growing a second generation surface. The recent strip is
  * the gallery's own query and the gallery's own tiles — the first page, which
- * the gallery has usually already cached.
+ * the gallery has usually already cached — and its "View all" is the way on to
+ * the gallery, so the page does not repeat what the sidebar already offers.
+ *
+ * Centred in a `max-w-6xl` column with Home's own gutters (`px-4 sm:px-6`), so
+ * its heading starts at the same x as Home's and the gallery's.
  */
 
 import type { GalleryItem } from '@mangostudio/shared/types';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Image, ImagePlus, LayoutGrid } from 'lucide-react';
+import { Image, ImagePlus } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -33,16 +37,13 @@ export function StudioPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-5xl space-y-8 px-4 py-6 sm:px-8 sm:py-8">
+      <div className="mx-auto w-full max-w-6xl space-y-8 px-4 py-6 sm:px-6 sm:py-8">
         <div className="min-w-0 space-y-1">
           <h1 className="text-title font-semibold text-fg">{t.studio.title}</h1>
           <p className="text-sm text-fg-muted">{t.studio.subtitle}</p>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <GenerateCard />
-          <GalleryCard />
-        </div>
+        <GenerateCard />
 
         <RecentImages onView={setSelectedImage} />
       </div>
@@ -65,7 +66,7 @@ function GenerateCard() {
   const navigate = useNavigate();
 
   return (
-    <SectionCard label={t.studio.generate.label} className="justify-between">
+    <SectionCard label={t.studio.generate.label}>
       <p className="text-sm text-fg-muted">{t.studio.generate.description}</p>
       <Button
         onClick={() => {
@@ -77,23 +78,6 @@ function GenerateCard() {
         <ImagePlus size={ICON_MD} />
         {t.studio.generate.action}
       </Button>
-    </SectionCard>
-  );
-}
-
-function GalleryCard() {
-  const { t } = useI18n();
-
-  return (
-    <SectionCard label={t.studio.gallery.label} className="justify-between">
-      <p className="text-sm text-fg-muted">{t.studio.gallery.description}</p>
-      <Link
-        to="/gallery"
-        className="inline-flex h-8 items-center gap-2 self-start rounded-sm border border-stroke bg-control px-3 text-sm font-medium text-fg transition-colors hover:bg-control-hover active:bg-control-pressed"
-      >
-        <LayoutGrid size={ICON_MD} />
-        {t.studio.gallery.action}
-      </Link>
     </SectionCard>
   );
 }
@@ -114,7 +98,13 @@ function RecentImages({ onView }: { onView: (item: GalleryItem) => void }) {
       label={t.studio.recent.label}
       action={
         items.length > 0 ? (
-          <Link to="/gallery" className="text-xs font-medium text-accent-fg hover:underline">
+          // `inline-flex items-center`: on a touch screen every link is a 44px
+          // box, and a plain link in this header floated its text to the top of
+          // it, a dozen pixels above the label it sits beside.
+          <Link
+            to="/gallery"
+            className="inline-flex items-center text-xs font-medium text-accent-fg hover:underline"
+          >
             {t.studio.recent.viewAll}
           </Link>
         ) : null

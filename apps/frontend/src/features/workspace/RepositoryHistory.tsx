@@ -80,7 +80,14 @@ export function RepositoryHistory({
               <div className="flex items-start gap-2">
                 <GitCommitHorizontal size={ICON_SM} className="mt-0.5 shrink-0 text-fg-muted" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-fg">{commit.subject}</p>
+                  {/* Two lines, not one: the subject is what this list is scanned for,
+                      and a `refactor(frontend): ` prefix alone ate most of a truncated line. */}
+                  <p
+                    className="line-clamp-2 break-words text-sm font-medium text-fg"
+                    title={commit.subject}
+                  >
+                    {commit.subject}
+                  </p>
                   <div className="mt-1 flex items-center gap-2 text-xs text-fg-muted">
                     <span className="font-mono">{commit.shortHash}</span>
                     <span className="truncate">{commit.author}</span>
@@ -168,10 +175,12 @@ function CommitDetails({
                   title: t.git.diff.view.replace('{path}', file.path),
                 })
               }
-              className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-fill-hover"
+              className="flex min-h-10 w-full cursor-pointer items-center gap-2 px-3 py-1 text-left transition-colors hover:bg-fill-hover"
             >
               <FileCode2 size={ICON_SM} className="shrink-0 text-fg-muted" />
-              <FilePathLabel path={file.path} oldPath={file.oldPath} className="flex-1" />
+              {/* Stacked: the counts at the trailing edge leave a side-by-side
+                  directory a few characters, so it gets a line of its own. */}
+              <FilePathLabel stacked path={file.path} oldPath={file.oldPath} className="flex-1" />
               <FileCounts additions={file.additions} deletions={file.deletions} />
             </button>
           </li>

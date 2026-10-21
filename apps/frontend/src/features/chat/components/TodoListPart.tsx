@@ -17,7 +17,7 @@ export function TodoListPart({ part }: TodoListPartProps) {
   const summary = summarizeTodos(part.todos);
 
   return (
-    <div className="max-w-2xl rounded-md border border-stroke bg-surface p-4 text-sm text-fg">
+    <div className="max-w-(--timeline-card-max) rounded-md border border-stroke bg-surface p-4 text-sm text-fg">
       <div className="flex items-center gap-2">
         <ListTodo size={ICON_MD} className="text-fg-muted" />
         <span className="font-semibold">{labels.title}</span>

@@ -7,8 +7,8 @@ import {
   CircleX,
   Database,
   FileCode,
+  ListChecks,
   RefreshCw,
-  Settings,
   ShieldCheck,
   Trash2,
   TriangleAlert,
@@ -144,14 +144,19 @@ export function ConnectorCard({
               <span className="hidden sm:inline">{s.chatgptSeeMetrics}</span>
             </Link>
           ) : null}
+          {/* The card's main operation is choosing its models, so it is named: a bare
+              gear reads as the connector's own settings. Icon-only below `sm`, as
+              the metrics link is, and the trash stays the only unlabelled action. */}
           <Button
-            variant="subtle"
-            size="icon"
+            variant="secondary"
+            size="sm"
             onClick={() => onConfigure(c)}
             title={s.configureModels}
             aria-label={s.configureModels}
+            className="max-sm:w-7 max-sm:px-0"
           >
-            <Settings size={ICON_MD} />
+            <ListChecks size={ICON_SM} aria-hidden="true" />
+            <span className="hidden sm:inline">{s.modelsButton}</span>
           </Button>
           <Button
             variant="subtle-danger"
@@ -180,7 +185,7 @@ export function ConnectorCard({
                 s.chatgptReauthenticating
               ) : (
                 <>
-                  <RefreshCw size={ICON_MD} />
+                  <RefreshCw size={ICON_SM} />
                   {s.chatgptReauthenticate}
                 </>
               )}

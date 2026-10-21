@@ -14,7 +14,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_MD } from '@/lib/icon-sizes';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useProviderSettings, useUpdateProviderSettings } from '../hooks/use-provider-settings';
 import { CacheSettingsSection } from './CacheSettingsSection';
@@ -51,7 +51,7 @@ function BackToProviders({ label }: { label: string }) {
       to="/settings/providers"
       className="-ml-2 inline-flex h-7 items-center gap-1.5 rounded-sm px-2 text-xs font-medium text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
     >
-      <ArrowLeft size={ICON_MD} />
+      <ArrowLeft size={ICON_SM} />
       {label}
     </Link>
   );

@@ -14,6 +14,11 @@ interface EntryListProps<T> {
   readonly label: string;
   readonly hint?: string;
   readonly entries: readonly T[];
+  /**
+   * What the Add button adds ("Add argument"). The visible word is the same for every list on
+   * the form, so this is its accessible name: three buttons all called "Add" say nothing.
+   */
+  readonly addLabel: string;
   /** The fields of one row, each in a `min-w-0 flex-1` box so the row shares its width. */
   readonly renderEntry: (entry: T, index: number) => ReactNode;
   readonly onAdd: () => void;
@@ -24,6 +29,7 @@ export function EntryList<T>({
   label,
   hint,
   entries,
+  addLabel,
   renderEntry,
   onAdd,
   onRemove,
@@ -52,7 +58,14 @@ export function EntryList<T>({
           ))}
         </div>
       )}
-      <Button type="button" variant="subtle" size="sm" className="self-start" onClick={onAdd}>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        className="self-start"
+        aria-label={addLabel}
+        onClick={onAdd}
+      >
         <Plus size={ICON_SM} />
         {s.addEntry}
       </Button>

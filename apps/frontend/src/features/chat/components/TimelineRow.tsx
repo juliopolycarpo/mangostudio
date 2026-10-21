@@ -10,9 +10,19 @@ interface TimelineRowProps {
   glyph?: ReactNode;
   /** Left cluster: the tool name, its argument hint, any badges. */
   children: ReactNode;
+  /**
+   * Right-aligned qualifier ahead of the outcome: how many more calls a grouped
+   * row stands for, e.g. `+2 more`. Quiet mono text like the rest of the cluster,
+   * not a pill of its own that takes the argument's room.
+   */
+  count?: string | null;
   /** Right-aligned outcome, e.g. `12 items`. */
   summary?: string | null;
-  /** Right-aligned elapsed time, e.g. `33ms`. */
+  /**
+   * Right-aligned elapsed time, e.g. `33ms`. Shown from `sm` up: on a phone the
+   * cluster competes with the argument for the row, and the time is the least
+   * useful thing in it.
+   */
   duration?: string | null;
   /**
    * False for a row with nothing to open — it keeps the chevron's width so the
@@ -47,24 +57,48 @@ export function TimelineRow({
   onToggle,
   glyph,
   children,
+  count,
   summary,
   duration,
   disclosable = true,
 }: TimelineRowProps) {
-  const hasMeta = Boolean(summary) || Boolean(duration);
+  // The cluster's parts, in reading order. A part draws its own leading
+  // separator, so hiding the duration on a phone takes its `·` with it instead
+  // of leaving one dangling at the end.
+  const meta = [
+    count ? { key: 'count', text: count, onPhone: true } : null,
+    summary ? { key: 'summary', text: summary, onPhone: true } : null,
+    duration ? { key: 'duration', text: duration, onPhone: false } : null,
+  ].filter((part) => part !== null);
+  const hasMeta = meta.length > 0;
+  // A row whose only meta is the duration has nothing left of the cluster on a
+  // phone, so the cluster goes and the chevron takes over its `ml-auto`.
+  const hasPhoneMeta = meta.some((part) => part.onPhone);
   const content = (
     <>
       <span className="flex w-4 shrink-0 items-center justify-center">{glyph}</span>
       {children}
       {hasMeta && (
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-micro tabular-nums text-fg-subtle">
-          {summary && <span>{summary}</span>}
-          {summary && duration && <span aria-hidden="true">·</span>}
-          {duration && <span>{duration}</span>}
+        <span
+          className={cn(
+            'ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-micro tabular-nums text-fg-subtle',
+            !hasPhoneMeta && 'max-sm:hidden'
+          )}
+        >
+          {meta.map((part, index) => (
+            <span
+              key={part.key}
+              className={cn('flex items-center gap-1.5', !part.onPhone && 'max-sm:hidden')}
+            >
+              {index > 0 && <span aria-hidden="true">·</span>}
+              <span>{part.text}</span>
+            </span>
+          ))}
         </span>
       )}
     </>
   );
+  const chevronEdge = cn(!hasMeta && 'ml-auto', hasMeta && !hasPhoneMeta && 'max-sm:ml-auto');
 
   // The chevron's slot is held open either way — that is what keeps a row
   // resolving from running to done from nudging sideways as its status arrives.
@@ -72,7 +106,7 @@ export function TimelineRow({
     return (
       <div className={cn(ROW_CLASS, 'cursor-default')}>
         {content}
-        <span aria-hidden="true" className={cn('w-3.5 shrink-0', !hasMeta && 'ml-auto')} />
+        <span aria-hidden="true" className={cn('w-3.5 shrink-0', chevronEdge)} />
       </div>
     );
   }
@@ -89,7 +123,7 @@ export function TimelineRow({
         expanded={expanded}
         className={cn(
           'transition-[opacity,transform]',
-          !hasMeta && 'ml-auto',
+          chevronEdge,
           // A closed row keeps its chevron out of sight until the pointer or the
           // keyboard is on it — but a touch screen has neither, and a row that
           // gives no sign it opens is a row nobody opens. `hover:` is wrapped in

@@ -131,6 +131,18 @@ describe('ProviderSettingsMenu', () => {
     expect(screen.getByText('Anthropic')).toBeInTheDocument();
   });
 
+  it('says what the list of efforts is the list of', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/providers', {
+      body: MOCK_DESCRIPTORS,
+    });
+
+    render(<ProviderSettingsMenu />);
+
+    await screen.findByText('DeepSeek');
+    expect(screen.getByText('Reasoning effort: High, Maximum')).toBeInTheDocument();
+    expect(screen.getByText('Reasoning effort: Low, Medium, High')).toBeInTheDocument();
+  });
+
   it('renders capability badges for each provider', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/providers', {
       body: MOCK_DESCRIPTORS,

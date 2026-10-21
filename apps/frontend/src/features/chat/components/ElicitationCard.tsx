@@ -101,7 +101,7 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
           {labels.fromServer.replace('{server}', part.serverSlug)}
         </span>
       }
-      className="w-full max-w-2xl gap-4 text-sm text-fg"
+      className="w-full max-w-(--timeline-card-max) gap-4 text-sm text-fg"
     >
       <p className="whitespace-pre-wrap font-medium text-fg">{part.message}</p>
 

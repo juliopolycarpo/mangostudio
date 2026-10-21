@@ -231,24 +231,12 @@ export function GeneralSettings({
         title={workspace.chatSidebarTitle}
         description={workspace.chatSidebarDescription}
       >
-        <SettingsRow
-          label={workspace.chatSidebarWidth.replace(
-            '{width}',
-            String(workspaceSettings.chatSidebarWidth)
-          )}
-        >
-          {workspaceSettings.chatSidebarWidth !== CHAT_SIDEBAR_WIDTH_DEFAULT ? (
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              onClick={() => setChatSidebarWidth(CHAT_SIDEBAR_WIDTH_DEFAULT)}
-            >
-              <RotateCcw size={ICON_SM} />
-              {workspace.chatSidebarResetWidth}
-            </Button>
-          ) : null}
-        </SettingsRow>
+        <WidthRow
+          width={workspaceSettings.chatSidebarWidth}
+          defaultWidth={CHAT_SIDEBAR_WIDTH_DEFAULT}
+          resetLabel={workspace.chatSidebarResetWidth}
+          onReset={() => setChatSidebarWidth(CHAT_SIDEBAR_WIDTH_DEFAULT)}
+        />
       </SettingsSection>
 
       <SettingsSection
@@ -300,24 +288,12 @@ export function GeneralSettings({
             </SettingsRow>
           );
         })}
-        <SettingsRow
-          label={workspace.sidePanelWidth.replace(
-            '{width}',
-            String(workspaceSettings.sidePanel.width)
-          )}
-        >
-          {workspaceSettings.sidePanel.width !== WORKSPACE_PANEL_WIDTH_DEFAULT ? (
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              onClick={() => setWorkspacePanelWidth(WORKSPACE_PANEL_WIDTH_DEFAULT)}
-            >
-              <RotateCcw size={ICON_SM} />
-              {workspace.sidePanelResetWidth}
-            </Button>
-          ) : null}
-        </SettingsRow>
+        <WidthRow
+          width={workspaceSettings.sidePanel.width}
+          defaultWidth={WORKSPACE_PANEL_WIDTH_DEFAULT}
+          resetLabel={workspace.sidePanelResetWidth}
+          onReset={() => setWorkspacePanelWidth(WORKSPACE_PANEL_WIDTH_DEFAULT)}
+        />
       </SettingsSection>
 
       <SettingsSection title={s.multiAgentLabel} description={s.multiAgentDescription}>
@@ -443,6 +419,49 @@ export function GeneralSettings({
   );
 }
 
+/**
+ * A width the user sets by dragging an edge elsewhere, shown here as a value with
+ * its way back. The reset slot keeps its place when the width is already the
+ * default, so the value does not slide sideways when it stops being.
+ */
+function WidthRow({
+  width,
+  defaultWidth,
+  resetLabel,
+  onReset,
+}: {
+  width: number;
+  defaultWidth: number;
+  resetLabel: string;
+  onReset: () => void;
+}) {
+  const { t } = useI18n();
+  const workspace = t.workspace;
+  const isDefault = width === defaultWidth;
+
+  return (
+    <SettingsRow
+      label={workspace.widthLabel}
+      hint={workspace.widthDefaultHint.replace('{width}', String(defaultWidth))}
+    >
+      <div className="flex items-center gap-3">
+        <span className="font-mono text-xs text-fg-muted tabular-nums">{width}px</span>
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          disabled={isDefault}
+          onClick={onReset}
+          className={cn(isDefault && 'invisible')}
+        >
+          <RotateCcw size={ICON_SM} />
+          {resetLabel}
+        </Button>
+      </div>
+    </SettingsRow>
+  );
+}
+
 function NumberSetting({
   id,
   label,
@@ -470,7 +489,7 @@ function NumberSetting({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-24 text-center"
+        className="w-32 text-center"
       />
     </SettingsRow>
   );

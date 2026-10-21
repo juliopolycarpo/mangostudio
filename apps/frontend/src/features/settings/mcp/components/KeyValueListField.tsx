@@ -10,6 +10,8 @@ import { EntryList } from './EntryList';
 interface KeyValueListFieldProps {
   label: string;
   hint?: string;
+  /** The accessible name of the Add button, e.g. "Add variable". */
+  addLabel: string;
   entries: KeyValueEntry[];
   onChange: (entries: KeyValueEntry[]) => void;
   /** Masks the value column (used for write-only auth headers). */
@@ -19,6 +21,7 @@ interface KeyValueListFieldProps {
 export function KeyValueListField({
   label,
   hint,
+  addLabel,
   entries,
   onChange,
   secretValues = false,
@@ -34,6 +37,7 @@ export function KeyValueListField({
     <EntryList
       label={label}
       hint={hint}
+      addLabel={addLabel}
       entries={entries}
       onAdd={() => onChange([...entries, { key: '', value: '' }])}
       onRemove={(index) => onChange(entries.filter((_, i) => i !== index))}

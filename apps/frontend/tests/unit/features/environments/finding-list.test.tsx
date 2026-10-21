@@ -28,6 +28,24 @@ describe('FindingList', () => {
     expect(item.split(remedy).length - 1).toBe(1);
   });
 
+  // An optional tool that is not there is neutral: the triangle asks for something
+  // to be done, and a person who never installed Codex has nothing to do.
+  it('draws a finding the analyzer called informational without the warning triangle', () => {
+    const quiet: RuntimeFinding = {
+      code: 'cli-not-installed',
+      params: { targetId: 'codex' },
+      severity: 'info',
+    };
+    const loud: RuntimeFinding = { code: 'outdated-lts', params: { version: '18.19.0' } };
+
+    render(<FindingList findings={[quiet, loud]} />);
+
+    const [quietItem, loudItem] = screen.getAllByRole('listitem');
+    expect(quietItem.querySelector('.lucide-circle-dashed')).not.toBeNull();
+    expect(quietItem.querySelector('.lucide-triangle-alert, .lucide-circle-alert')).toBeNull();
+    expect(loudItem.querySelector('.lucide-triangle-alert')).not.toBeNull();
+  });
+
   it('renders a non-URL remedy as plain text, with no link', () => {
     const finding: RuntimeFinding = {
       code: 'prerequisite-missing',

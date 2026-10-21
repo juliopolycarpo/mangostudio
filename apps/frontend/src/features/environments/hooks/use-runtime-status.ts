@@ -22,7 +22,7 @@ import {
 } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { probeAgentCli, probeRuntime, probeVersionManager } from '../api';
-import { findingSeverity } from '../format';
+import { findingSeverity, isQuietFinding } from '../format';
 import {
   agentCliStatusesQueryOptions,
   environmentKeys,
@@ -159,9 +159,15 @@ export interface HealthEntry {
   readonly subjectId: string;
   readonly finding: RuntimeFinding;
   readonly severity: ReturnType<typeof findingSeverity>;
+  /** The analyzer called it informational: listed with the warnings, drawn without their glyph. */
+  readonly quiet: boolean;
 }
 
-const SEVERITY_RANK: Record<HealthEntry['severity'], number> = { fail: 0, warn: 1 };
+/** Fails first, then warnings, then the informational detail that can wait longest. */
+function healthRank(entry: HealthEntry): number {
+  if (entry.severity === 'fail') return 0;
+  return entry.quiet ? 2 : 1;
+}
 
 /**
  * Every finding across runtimes, version managers, and agent CLIs as one flat
@@ -192,6 +198,7 @@ export function useEnvironmentHealth(environmentId?: string, enabled = true) {
           subjectId,
           finding,
           severity: findingSeverity(finding),
+          quiet: isQuietFinding(finding),
         });
       });
     };
@@ -217,9 +224,7 @@ export function useEnvironmentHealth(environmentId?: string, enabled = true) {
     }
     for (const agent of agents.data ?? []) collect('agent', agent.targetId, agent.findings);
 
-    return collected.sort(
-      (left, right) => SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity]
-    );
+    return collected.sort((left, right) => healthRank(left) - healthRank(right));
   }, [runtimes.data, versionManagers.data, agents.data]);
 
   return {

@@ -197,11 +197,43 @@ describe('BackupList', () => {
       set({ backupId: LEGACY_ID, operation: 'unknown', resourceKeys: [], entryCount: 3 }),
     ]);
 
+    // The kind in front of each name, never the internal `kind:name` id: a skill
+    // and a command can both be called `release`.
     expect(within(rowFor(REMOVAL_ID)).getByTestId('backup-contents')).toHaveTextContent(
-      'skill:gh, skill:release'
+      `${en.library.kinds.skill} gh, ${en.library.kinds.skill} release`
     );
     expect(within(rowFor(LEGACY_ID)).getByTestId('backup-contents')).toHaveTextContent(
       en.library.backups.contentsUnknown.replace('{count}', '3')
+    );
+  });
+
+  // "Created 21 minutes ago Contents skill:release Size 911 B Origin Apply" ran
+  // together as one sentence: only a gap divided the pairs, and "Origin Apply"
+  // read as a phrase. A key and a value are two elements.
+  it('states each fact as a key and a value, not as one run of words', async () => {
+    await renderList([set()]);
+
+    const facts = rowFor(REMOVAL_ID).querySelector('dl') as HTMLElement;
+    expect([...facts.querySelectorAll('dt')].map((key) => key.textContent)).toEqual([
+      en.library.backups.columnCreated,
+      en.library.backups.columnContents,
+      en.library.backups.columnSize,
+      en.library.backups.columnOrigin,
+    ]);
+    // The value is its own element, free of the key's words.
+    const origin = within(rowFor(REMOVAL_ID)).getByTestId('backup-origin');
+    expect(origin.tagName).toBe('DD');
+    expect(origin.textContent).toBe(en.library.backups.origin.removal);
+  });
+
+  // A destructive row action is `subtle-danger`, which hovers and presses on a
+  // danger wash. A `subtle` button with a hand-added red hovered neutral beside
+  // its siblings and lost its pressed state.
+  it('draws Purge as the quiet destructive variant', async () => {
+    await renderList([set()]);
+
+    expect(within(rowFor(REMOVAL_ID)).getByTestId('purge-backup').className).toContain(
+      'hover:bg-danger-subtle'
     );
   });
 

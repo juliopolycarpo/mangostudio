@@ -100,8 +100,10 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
       : null;
   const uninstallStep = stepFor(runtimeUninstallRecipe(status, recipes));
 
-  const hasInstalledFooter =
-    Boolean(updateStep) || Boolean(managedElsewhere) || Boolean(uninstallStep);
+  // The footer is buttons only. A sentence about who manages the install is a
+  // note on the install, so it sits with the other notes above (see below) and
+  // does not close the card as though it were its conclusion.
+  const hasInstalledFooter = Boolean(updateStep) || Boolean(uninstallStep);
   const installStepValue = installStep(recipes, status.id);
 
   return (
@@ -137,7 +139,6 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
           ) : null
         ) : hasInstalledFooter ? (
           <>
-            {managedElsewhere}
             <RecipeAction
               step={updateStep}
               action="update"
@@ -204,9 +205,10 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
         </p>
       )}
 
-      {runtimeId && (processLine || toolchainSelection !== 'auto' || toolchain.isError) && (
+      {(processLine || managedElsewhere || toolchainSelection !== 'auto' || toolchain.isError) && (
         <section className="space-y-1.5" data-testid="toolchain-status">
           {processLine && <p className="text-xs text-fg-muted">{processLine}</p>}
+          {managedElsewhere}
           {toolchainSelection !== 'auto' && (
             <Button
               variant="subtle"
@@ -293,7 +295,7 @@ function renderManagedElsewhere(
           manager: pathSourceManagerName(t, resolve, source),
         });
   return (
-    <p className="text-sm text-fg-muted" data-testid="node-managed-elsewhere">
+    <p className="text-xs text-fg-muted" data-testid="node-managed-elsewhere">
       {text}
     </p>
   );

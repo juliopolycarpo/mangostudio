@@ -94,6 +94,20 @@ describe('/terminal route', () => {
     expect(await screen.findByText('No terminals are open for this environment.')).toBeVisible();
   });
 
+  // The same empty state the chat's rail panel draws: what is missing, how to
+  // get some, and the one button that does it. The header does not repeat it.
+  it('offers a single New terminal action, in the empty state, when nothing is open', async () => {
+    mockLocalEnvironment();
+
+    render(<TerminalIndexPage />);
+
+    expect(
+      await screen.findByText('Open one to run commands where this environment runs.')
+    ).toBeVisible();
+    expect(screen.getAllByRole('button', { name: 'New terminal' })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Sessions' })).toBeNull();
+  });
+
   function postCount(): number {
     return fetchScenario.fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST').length;
   }
@@ -223,18 +237,21 @@ describe('/terminal route', () => {
 
     await user.click(within(rows[1]).getByRole('button', { name: 'Open here' }));
 
-    // The selected fill (with the accent bar) is the sighted cue; aria-pressed
-    // is the assistive one, and the two must agree.
+    // The selected fill (with the accent bar) is the sighted cue, and the
+    // row's action says what it does now: it is the way to put the view away,
+    // not a second "Open here" with a pressed state nobody can see.
     expect(rows[1]).toHaveClass('bg-fill-selected');
-    expect(within(rows[1]).getByRole('button', { name: 'Open here' })).toHaveAttribute(
-      'aria-pressed',
-      'true'
+    expect(within(rows[1]).queryByRole('button', { name: 'Open here' })).toBeNull();
+    expect(within(rows[1]).getByRole('button', { name: 'Hide' })).not.toHaveAttribute(
+      'aria-pressed'
     );
     expect(rows[0]).not.toHaveClass('bg-fill-selected');
-    expect(within(rows[0]).getByRole('button', { name: 'Open here' })).toHaveAttribute(
-      'aria-pressed',
-      'false'
-    );
+    expect(within(rows[0]).getByRole('button', { name: 'Open here' })).toBeEnabled();
+
+    await user.click(within(rows[1]).getByRole('button', { name: 'Hide' }));
+
+    expect(rows[1]).not.toHaveClass('bg-fill-selected');
+    expect(within(rows[1]).getByRole('button', { name: 'Open here' })).toBeEnabled();
   });
 
   it('still lists the sessions that fill the per-user cap, refusing only a new one', async () => {

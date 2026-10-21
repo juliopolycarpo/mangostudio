@@ -6,7 +6,7 @@ interface SettingsPageProps {
   readonly title: string;
   /** What the page is for, in `fg-muted`. Omit when the title says it all. */
   readonly description?: string;
-  /** Page-level buttons (Add, Refresh), right-aligned on the title line. */
+  /** Page-level buttons (Add, Refresh) or a caption, right-aligned and centred on the title line. */
   readonly actions?: ReactNode;
   /** `SettingsSection`s, lists or states. They stack at `space-y-8`. */
   readonly children: ReactNode;
@@ -31,7 +31,10 @@ export function SettingsPage({ title, description, actions, children }: Settings
           <h2 className="text-title font-semibold text-fg">{title}</h2>
           {description ? <p className="text-sm text-fg-muted">{description}</p> : null}
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+        {/* The title's own line height, centring what it holds: a 44px touch
+            button or a 16px caption then overflows equally above and below, so
+            its centre is the title's centre at every size. */}
+        <div className="flex h-7 shrink-0 items-center gap-3">
           <SettingsSaveIndicator />
           {actions}
         </div>

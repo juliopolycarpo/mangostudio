@@ -45,7 +45,7 @@ describe('InputBar — chat-only composer', () => {
       onReasoningEffortChange: jest.fn(),
     });
 
-    expect(screen.queryByRole('button', { name: 'Thinking' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reasoning' })).toBeNull();
     unmount();
 
     renderInputBar({
@@ -54,7 +54,7 @@ describe('InputBar — chat-only composer', () => {
       onReasoningEffortChange: jest.fn(),
     });
 
-    expect(screen.getByRole('button', { name: 'Thinking' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reasoning' })).toBeInTheDocument();
   });
 
   const agents = [

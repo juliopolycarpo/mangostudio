@@ -18,13 +18,13 @@ function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [hasFailed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
+    setFailed(false);
 
     await authClient.signUp.email(
       { name, email, password },
@@ -32,8 +32,10 @@ function SignupPage() {
         onSuccess: () => {
           void navigate({ to: '/' });
         },
-        onError: (ctx) => {
-          setError(ctx.error.message || t.auth.signupError);
+        // The server's sentence is English and says what its library thinks, not
+        // what to do; see the sign-in page.
+        onError: () => {
+          setFailed(true);
         },
       }
     );
@@ -53,11 +55,7 @@ function SignupPage() {
         >
           <h1 className="text-title font-semibold text-fg">{t.auth.signupTitle}</h1>
 
-          {error && (
-            <Callout tone="danger" role="alert">
-              {error}
-            </Callout>
-          )}
+          {hasFailed && <Callout tone="danger" role="alert" title={t.auth.signupError} />}
 
           <div className="space-y-3">
             <Input
@@ -84,18 +82,26 @@ function SignupPage() {
               required
             />
 
-            <Input
-              type="password"
-              id="password"
-              name="password"
-              label={t.auth.signupPasswordLabel}
-              placeholder={t.auth.passwordPlaceholder}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
-              minLength={8}
-              required
-            />
+            {/* The requirement is a hint under the field, not part of its label:
+                the label names the field, and a placeholder is never the
+                instruction. */}
+            <div className="space-y-1">
+              <Input
+                type="password"
+                id="password"
+                name="password"
+                label={t.auth.passwordLabel}
+                aria-describedby="password-hint"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="new-password"
+                minLength={8}
+                required
+              />
+              <p id="password-hint" className="text-xs text-fg-muted">
+                {t.auth.passwordHint}
+              </p>
+            </div>
           </div>
 
           <Button type="submit" size="lg" loading={loading} className="w-full">
@@ -104,7 +110,7 @@ function SignupPage() {
 
           <p className="text-center text-sm text-fg-muted">
             {t.auth.hasAccount}{' '}
-            <Link to="/login" className="text-accent-fg hover:underline">
+            <Link to="/login" className="text-accent-fg underline underline-offset-2">
               {t.auth.loginLink}
             </Link>
           </p>

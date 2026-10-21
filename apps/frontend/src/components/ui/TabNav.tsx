@@ -1,6 +1,6 @@
 import { Link, type LinkProps } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
-import { TAB_CLASSES } from './Tabs';
+import { TAB_CLASSES, TabLabel } from './Tabs';
 
 interface Tab {
   readonly to: LinkProps['to'];
@@ -63,7 +63,7 @@ export function TabNav({ tabs, label }: Props) {
             activeProps={{ className: TAB_CLASSES.active }}
             inactiveProps={{ className: TAB_CLASSES.idle }}
           >
-            {tabLabel}
+            <TabLabel>{tabLabel}</TabLabel>
           </Link>
         ))}
       </div>

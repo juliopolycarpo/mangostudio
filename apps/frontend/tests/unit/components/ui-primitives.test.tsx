@@ -3,7 +3,7 @@ import { fireEvent, screen } from '@testing-library/react';
 import { Badge } from '../../../src/components/ui/Badge';
 import { Chip } from '../../../src/components/ui/Chip';
 import { EmptyState } from '../../../src/components/ui/EmptyState';
-import { KbdHint } from '../../../src/components/ui/KbdHint';
+import { KbdHint, ReturnKey } from '../../../src/components/ui/KbdHint';
 import { MicroLabel } from '../../../src/components/ui/MicroLabel';
 import { Skeleton } from '../../../src/components/ui/Skeleton';
 import { StatusDot } from '../../../src/components/ui/StatusDot';
@@ -93,6 +93,15 @@ describe('KbdHint', () => {
     const { container } = render(<KbdHint keys="⌘K" />);
     const kbd = container.querySelector('kbd');
     expect(kbd?.textContent).toBe('⌘K');
+  });
+
+  it('draws the Return key as an icon, hidden from the accessible name', () => {
+    const { container } = render(<KbdHint keys={<ReturnKey />} />);
+    const kbd = container.querySelector('kbd');
+    // An icon, not the thin `⏎` text glyph: there is no text to read.
+    expect(kbd?.querySelector('svg')).not.toBeNull();
+    expect(kbd?.textContent).toBe('');
+    expect(kbd?.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
   });
 });
 

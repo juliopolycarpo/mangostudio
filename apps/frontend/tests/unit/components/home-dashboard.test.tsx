@@ -275,6 +275,32 @@ describe('HomePage', () => {
     }
   });
 
+  it('lines the folder actions up under the folder name on a phone, and beside it from sm', async () => {
+    const { scenario } = await renderDashboard(
+      {},
+      { chats: [chat('chat-1', 'Latest', '/srv/projects/mango')] }
+    );
+    try {
+      const actions = (await screen.findByRole('button', { name: 'Continue Latest' }))
+        .parentElement;
+      expect(actions).toHaveClass('pl-6', 'sm:pl-0');
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it("keeps a card link's touch hit box from growing the header row it sits in", async () => {
+    const { scenario } = await renderDashboard();
+    try {
+      const link = await screen.findByRole('link', { name: 'Manage machines' });
+      // The 44px box a link gets on touch overhangs its text by 12px a side
+      // instead of making the 16px header row 44px tall.
+      expect(link).toHaveClass('inline-flex', 'items-center', 'pointer-coarse:-my-3');
+    } finally {
+      scenario.restore();
+    }
+  });
+
   it('shows a folder the picker remembers but nobody has opened yet', async () => {
     const { scenario } = await renderDashboard({ recentWorkdirs: ['/srv/projects/notes'] });
     try {
@@ -387,6 +413,57 @@ describe('HomePage', () => {
     } finally {
       scenario.restore();
     }
+  });
+
+  describe('the toolchain card dot reads the same buckets as its tiles', () => {
+    /** The presence dot in the card's heading, the one the tiles' own counts back up. */
+    async function toolchainDot(
+      runtimes: Array<{ id: string; health: string }>,
+      agentClis: Array<{ id: string; health: string }>
+    ) {
+      const { scenario } = await renderDashboard({}, {
+        runtimes: runtimes.map((entry) => ({ ...entry, installations: [], findings: [] })),
+        agentClis: agentClis.map((entry) => ({ ...entry, installations: [], findings: [] })),
+      } as never);
+      try {
+        const rollup = await screen.findByTestId('home-health-rollup');
+        const card = rollup.closest('section') as HTMLElement;
+        return card.querySelector('h3 [data-tone]')?.getAttribute('data-tone');
+      } finally {
+        scenario.restore();
+      }
+    }
+
+    it('is neutral when the only thing wrong is a CLI that is not installed', async () => {
+      // "Needs attention" reads 0 here; an amber dot over it said the opposite.
+      expect(
+        await toolchainDot(
+          [{ id: 'node', health: 'ok' }],
+          [
+            { id: 'codex', health: 'missing' },
+            { id: 'claude', health: 'missing' },
+          ]
+        )
+      ).toBe('neutral');
+    });
+
+    it('is a success when everything it reports is ready', async () => {
+      expect(
+        await toolchainDot([{ id: 'node', health: 'ok' }], [{ id: 'codex', health: 'ok' }])
+      ).toBe('success');
+    });
+
+    it('is a warning when something needs attention', async () => {
+      expect(
+        await toolchainDot([{ id: 'node', health: 'warn' }], [{ id: 'codex', health: 'missing' }])
+      ).toBe('warning');
+    });
+
+    it('is an error for a failed probe', async () => {
+      expect(
+        await toolchainDot([{ id: 'node', health: 'error' }], [{ id: 'codex', health: 'warn' }])
+      ).toBe('error');
+    });
   });
 
   it('annotates each agent with how much of the week it answered', async () => {

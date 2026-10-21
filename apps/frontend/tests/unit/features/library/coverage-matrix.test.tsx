@@ -238,8 +238,10 @@ describe('CoverageMatrix', () => {
     );
     render(<MatrixLegend />);
 
+    // The words the cells print themselves: the key is only drawn where the cells
+    // are glyphs alone, and the full sentence for each state is its tooltip.
     for (const state of ['present', 'absent', 'shadowed', 'divergent', 'only-here'] as const) {
-      expect(screen.getByText(en.library.cellState[state])).toBeInTheDocument();
+      expect(screen.getByText(en.library.cellStateShort[state])).toBeInTheDocument();
     }
   });
 });

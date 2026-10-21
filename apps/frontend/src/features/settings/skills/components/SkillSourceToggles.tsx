@@ -8,6 +8,7 @@ import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { RefreshCw } from 'lucide-react';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
+import { StatusNote } from '@/components/settings/StatusNote';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { ToggleSwitch } from '@/components/ui/Toggle';
@@ -69,7 +70,11 @@ export function SkillSourceToggles({ sources }: SkillSourceTogglesProps) {
                 <span className="block break-all font-mono text-micro text-fg-subtle">
                   {state.path}
                 </span>
-                {!state.exists && <span className="block">{s.sourceNotFound}</span>}
+                {!state.exists && (
+                  <StatusNote as="span" tone="warning">
+                    {s.sourceNotFound}
+                  </StatusNote>
+                )}
               </>
             }
           >

@@ -15,14 +15,20 @@
  * from a form value.
  *
  * Opens upward by default: the composer sits at the foot of the viewport, which
- * is the same reason `ModelSelector` and `ThinkingToggle` do.
+ * is the same reason `ModelSelector` and `ThinkingToggle` do. A chip placed
+ * near the top of the page — the environment chip in the header, or in a page's
+ * title row — passes `placement="below"`, because an upward panel there opens
+ * above the viewport and is clipped away entirely.
+ *
+ * The rows are the same 14px / 12px pair `Select` and `Menu` draw, so two menus
+ * opened from the same strip do not differ in type size.
  */
 
 import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { type ReactNode, useId } from 'react';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
-import { ICON_SM } from '@/lib/icon-sizes';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 
@@ -30,6 +36,9 @@ export interface ChipSelectOption extends ListboxOption {
   /** A second line under the label — the vendor's reason, a hostname, a hint. */
   readonly description?: string;
 }
+
+/** Which side of the chip the listbox opens on. */
+type ChipSelectPlacement = 'above' | 'below';
 
 export interface ChipSelectProps {
   readonly value: string;
@@ -49,6 +58,8 @@ export interface ChipSelectProps {
   readonly className?: string;
   readonly valueClassName?: string;
   readonly panelClassName?: string;
+  /** `above` for a chip at the foot of the viewport (the composer), `below` near the top of it. */
+  readonly placement?: ChipSelectPlacement;
   readonly testId?: string;
   readonly dataState?: string;
 }
@@ -68,6 +79,7 @@ export function ChipSelect({
   className,
   valueClassName,
   panelClassName = 'w-56',
+  placement = 'above',
   testId,
   dataState,
 }: ChipSelectProps) {
@@ -82,7 +94,9 @@ export function ChipSelect({
     commit,
     handleKeyDown,
   } = useListboxSelect({ value, options, onChange, disabled });
-  const { popoverAbove } = useMotionPresets();
+  const { popoverAbove, popoverBelow } = useMotionPresets();
+  // The panel travels in from the side it opens on, so the two go together.
+  const below = placement === 'below';
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
@@ -123,11 +137,10 @@ export function ChipSelect({
       <AnimatePresence>
         {open ? (
           <motion.div
-            {...popoverAbove}
+            {...(below ? popoverBelow : popoverAbove)}
             className={cn(
-              // Always opens upward: every chip sits on the composer's status
-              // strip at the foot of the viewport.
-              'dropdown-panel absolute left-0 bottom-full mb-2 max-h-[50vh] overflow-y-auto hide-scrollbar p-1',
+              'dropdown-panel app-scrollbar absolute left-0 max-h-[50vh] overflow-y-auto p-1',
+              below ? 'top-full mt-1' : 'bottom-full mb-2',
               panelClassName
             )}
           >
@@ -149,7 +162,7 @@ export function ChipSelect({
                     onClick={() => commit(option)}
                     onMouseEnter={() => setActiveIndex(index)}
                     className={cn(
-                      'flex min-h-8 w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-xs transition-colors',
+                      'flex min-h-8 w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors',
                       'disabled:cursor-not-allowed disabled:opacity-50',
                       index === activeIndex && !option.disabled && 'bg-fill-hover',
                       isSelected && 'bg-fill-selected'
@@ -160,13 +173,13 @@ export function ChipSelect({
                         {option.label}
                       </span>
                       {option.description ? (
-                        <span className="mt-0.5 block text-micro text-fg-muted">
+                        <span className="mt-0.5 block text-xs text-fg-muted">
                           {option.description}
                         </span>
                       ) : null}
                     </span>
                     {isSelected ? (
-                      <Check size={ICON_SM} className="mt-0.5 shrink-0 text-accent-fg" />
+                      <Check size={ICON_MD} className="mt-0.5 shrink-0 text-accent-fg" />
                     ) : null}
                   </button>
                 );

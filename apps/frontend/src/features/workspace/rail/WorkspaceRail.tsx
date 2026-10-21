@@ -177,6 +177,7 @@ export function WorkspaceRail({
           panels={availablePanels}
           panelTitles={panelTitles}
           activePanelId={activePanel.id}
+          collapsed={collapsed}
           navigationLabel={t.workspace.sidePanelNavigation}
           switchLabel={t.workspace.sidePanelSwitch}
           onSelect={selectPanel}
@@ -238,6 +239,13 @@ interface PanelDockProps {
   readonly panels: readonly RailPanelDefinition[];
   readonly panelTitles: Readonly<Record<WorkspacePanelId, string>>;
   readonly activePanelId: WorkspacePanelId;
+  /**
+   * The rail is folded down to this strip, so no panel is on screen. Every icon
+   * is idle then: the current-item mark (fill, accent bar, `aria-pressed`) says
+   * "this one is open", and showing it on a panel nothing displays reads as a
+   * selection the person never made — one that changed from chat to chat.
+   */
+  readonly collapsed?: boolean;
   readonly navigationLabel: string;
   readonly switchLabel: string;
   readonly onSelect: (panelId: WorkspacePanelId) => void;
@@ -247,6 +255,7 @@ function PanelDock({
   panels,
   panelTitles,
   activePanelId,
+  collapsed = false,
   navigationLabel,
   switchLabel,
   onSelect,
@@ -259,7 +268,7 @@ function PanelDock({
       {panels.map((panel) => {
         const Icon = panel.icon;
         const title = panelTitles[panel.id];
-        const active = panel.id === activePanelId;
+        const active = !collapsed && panel.id === activePanelId;
         return (
           <Button
             key={panel.id}

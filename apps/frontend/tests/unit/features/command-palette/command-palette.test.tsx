@@ -279,7 +279,22 @@ describe('command palette filtering', () => {
     renderPalette();
     fireEvent.change(input(), { target: { value: 'zzzqqq' } });
     expect(screen.queryAllByRole('option')).toHaveLength(0);
-    expect(screen.getByText('No results for "zzzqqq"')).toBeInTheDocument();
+    expect(screen.getByText('No results for “zzzqqq”')).toBeInTheDocument();
+  });
+
+  it('steps the folder, the runner word and the age back below sm, keeping the title and the dot', () => {
+    renderPalette();
+    const row = screen.getByRole('option', { name: /Plugin LSP TypeScript/ });
+    // Visually only: all three stay in the accessibility tree, and the search
+    // still matches the folder.
+    expect(within(row).getByText('mango-lsp-store')).toHaveClass('max-sm:sr-only');
+    expect(within(row).getByText('codex')).toHaveClass('max-sm:sr-only');
+    expect(within(row).getByText('an hour ago')).toHaveClass('max-sm:sr-only');
+    expect(within(row).getByText('codex').previousElementSibling).toHaveAttribute(
+      'data-tone',
+      'neutral'
+    );
+    expect(within(row).getByText('Plugin LSP TypeScript')).not.toHaveClass('max-sm:sr-only');
   });
 
   it('shows a skeleton while a source is still answering, without blocking the rest', () => {

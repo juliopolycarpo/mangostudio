@@ -16,6 +16,7 @@ import { Callout } from '@/components/ui/Callout';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { resourceTitle } from '../format';
 import { useRemoval } from '../hooks/use-removal';
 import { isEmptySelection, pendingAcknowledgements, type RemovalStep } from '../removal';
 import { InlineNote } from './InlineNote';
@@ -93,7 +94,7 @@ export function RemovalWizard({
   const stepIndex = STEP_ORDER.indexOf(wizard.step);
   const title =
     resourceKeys.length === 1
-      ? formatMessage(l.removal.titleOne, { resource: resourceKeys[0] })
+      ? resourceTitle(l.removal.titleOne, l.kindsInline, resourceKeys[0])
       : formatMessage(l.removal.title, { count: String(resourceKeys.length) });
 
   const hasLocations = locationIds.length > 0;
@@ -135,9 +136,12 @@ export function RemovalWizard({
       }
       actions={
         <>
-          {stepIndex > 0 && wizard.step !== 'result' && (
-            <Button variant="secondary" onClick={() => wizard.setStep(STEP_ORDER[stepIndex - 1])}>
-              {l.wizard.back}
+          {wizard.step !== 'result' && (
+            <Button
+              variant="secondary"
+              onClick={stepIndex > 0 ? () => wizard.setStep(STEP_ORDER[stepIndex - 1]) : onClose}
+            >
+              {stepIndex > 0 ? l.wizard.back : l.wizard.cancel}
             </Button>
           )}
           {wizard.step === 'result' ? (

@@ -365,7 +365,7 @@ describe('app settings pages integration', () => {
 
     render(<GeneralSettingsHarness />);
 
-    await screen.findByText('Current width: 420px');
+    await screen.findByText('420px');
     await user.click(await screen.findByLabelText('Show Repository'));
 
     await waitFor(() => {

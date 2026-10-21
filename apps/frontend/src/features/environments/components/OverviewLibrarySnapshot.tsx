@@ -38,7 +38,7 @@ export function OverviewLibrarySnapshot() {
 
   return (
     <OverviewSection
-      title={e.tabs.library}
+      tab="library"
       to="/environments/library"
       testId="overview-library"
       isPending={(resources.isPending || targets.isPending) && !hasData}

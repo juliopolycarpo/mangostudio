@@ -96,26 +96,6 @@ describe('ConflictStep', () => {
     expect(screen.getByText(en.library.conflict.keepPerLocation.description)).toBeInTheDocument();
   });
 
-  // A resource with one readable version is the commonest thing to propagate.
-  // The step it opens on must not claim there is a choice to make.
-  it('says there is nothing to choose when every resource has one version', async () => {
-    const single = preview([previewEntry()]);
-    const draft = initialDraft(single);
-
-    await renderWithRouter(
-      <ConflictStep
-        preview={single}
-        draft={draft}
-        unresolved={unresolvedEntries(single, draft)}
-        onResolve={() => undefined}
-      />
-    );
-
-    expect(screen.getByTestId('conflict-none')).toHaveTextContent(en.library.conflict.none);
-    expect(screen.queryByText(en.library.conflict.description)).not.toBeInTheDocument();
-    expect(screen.queryByTestId('conflict-entry')).not.toBeInTheDocument();
-  });
-
   it('does not offer editing a skill, which is a directory', async () => {
     const draft = initialDraft(divergentPreview);
 

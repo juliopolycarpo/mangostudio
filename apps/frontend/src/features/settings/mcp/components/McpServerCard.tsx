@@ -147,13 +147,19 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               {!testMutation.isPending && <RefreshCw size={ICON_SM} />}
               {testMutation.isPending ? s.testingButton : s.testButton}
             </Button>
-            <Toggle
-              id={`mcp-server-enabled-${server.id}`}
-              label={server.enabled ? s.enabledLabel : s.disabledLabel}
-              checked={server.enabled}
-              disabled={updateMutation.isPending}
-              onChange={(e) => handleToggleEnabled(e.target.checked)}
-            />
+            {/* "Enabled" and "Disabled" are different widths, and the cluster sits on the
+                right edge, so a narrower word would slide this switch (and the Test
+                button before it) sideways and the switches of a list would zig-zag.
+                The slot is as wide for either word, in either language. */}
+            <div className="sm:w-32">
+              <Toggle
+                id={`mcp-server-enabled-${server.id}`}
+                label={server.enabled ? s.enabledLabel : s.disabledLabel}
+                checked={server.enabled}
+                disabled={updateMutation.isPending}
+                onChange={(e) => handleToggleEnabled(e.target.checked)}
+              />
+            </div>
             <Button
               variant="subtle"
               size="icon-sm"
@@ -174,32 +180,33 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
           </div>
         </div>
 
-        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-          <p className="min-w-0 flex-1 basis-48 break-all font-mono text-xs text-fg-muted">
-            {server.transport === 'stdio'
-              ? [server.command, ...server.args].filter(Boolean).join(' ')
-              : server.url}
-          </p>
-          <div className="flex shrink-0 gap-1">
-            <Button
-              variant="subtle"
-              size="sm"
-              aria-expanded={toolsOpen}
-              onClick={() => setToolsOpen((open) => !open)}
-            >
-              {toolsOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
-              {toolsOpen ? s.hideTools : s.showTools}
-            </Button>
-            <Button
-              variant="subtle"
-              size="sm"
-              aria-expanded={resourcesOpen}
-              onClick={() => setResourcesOpen((open) => !open)}
-            >
-              {resourcesOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
-              {resourcesOpen ? s.resources.hide : s.resources.show}
-            </Button>
-          </div>
+        <p className="min-w-0 break-all font-mono text-xs text-fg-muted">
+          {server.transport === 'stdio'
+            ? [server.command, ...server.args].filter(Boolean).join(' ')
+            : server.url}
+        </p>
+        {/* What the command reveals sits under it, on the card's own left edge (the
+            button's 8px padding is pulled back), so the right column holds only the
+            row's actions. */}
+        <div className="-ml-2 flex flex-wrap gap-1 pt-1">
+          <Button
+            variant="subtle"
+            size="sm"
+            aria-expanded={toolsOpen}
+            onClick={() => setToolsOpen((open) => !open)}
+          >
+            {toolsOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
+            {toolsOpen ? s.hideTools : s.showTools}
+          </Button>
+          <Button
+            variant="subtle"
+            size="sm"
+            aria-expanded={resourcesOpen}
+            onClick={() => setResourcesOpen((open) => !open)}
+          >
+            {resourcesOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
+            {resourcesOpen ? s.resources.hide : s.resources.show}
+          </Button>
         </div>
       </div>
 

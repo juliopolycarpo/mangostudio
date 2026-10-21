@@ -80,7 +80,7 @@ describe('turn actions on the separator', () => {
     expect(REVEAL_TERMS).toContain('pointer-coarse:opacity-100');
   });
 
-  it('are revealed the same way on the copy button and on the timestamp', () => {
+  it('reveal the copy button on hover, focus and touch, and keep the timestamp on screen', () => {
     const msg = createMockMessage({ role: 'ai', modelName: 'gpt-5.2', isGenerating: false });
     const parts: MessagePart[] = [];
 
@@ -107,9 +107,43 @@ describe('turn actions on the separator', () => {
       for (const term of REVEAL_TERMS) expect(button.className).toContain(term);
     }
 
-    // The separator's timestamp is the one span in the row that carries the reveal.
-    const timestamp = document.querySelector('span.font-mono.text-micro');
-    expect(timestamp?.className).toContain('pointer-coarse:opacity-100');
+    // The timestamp is not an action: it is there at rest, as a user bubble's is,
+    // so the same fact is not on one side of the conversation and hidden on the other.
+    const timestamp = screen.getByText(/^\d{1,2}:\d{2}/);
+    expect(timestamp.className).not.toContain('opacity-0');
+    expect(timestamp.closest('[class*="opacity-0"]')).toBeNull();
+  });
+
+  // The cluster sits on top of the rule's right end instead of in the row, so
+  // the rule always reaches the column edge and revealing the buttons reflows
+  // nothing. At rest the buttons' backdrop is as invisible as they are.
+  it('hold the actions out of the row so the rule runs the whole width', () => {
+    const msg = createMockMessage({ role: 'ai', modelName: 'gpt-5.2', isGenerating: false });
+    const parts: MessagePart[] = [];
+
+    render(
+      <ToolIdentitiesProbe>
+        {(toolIdentities) => (
+          <TurnSeparator
+            msg={msg}
+            parts={parts}
+            status={deriveTurnStatus(parts, false)}
+            isImageTurn={false}
+            toolIdentities={toolIdentities}
+          />
+        )}
+      </ToolIdentitiesProbe>
+    );
+
+    const row = screen.getByTitle('Copy message').closest('.relative');
+    const cluster = screen.getByTitle('Copy message').closest('.absolute');
+    expect(row).not.toBeNull();
+    expect(cluster).not.toBeNull();
+    expect(cluster?.className).toContain('right-0');
+    // The rule is a sibling of the cluster's parent row's other children, never inside it.
+    const rule = row?.querySelector(':scope > .flex-1');
+    expect(rule).not.toBeNull();
+    expect(cluster?.contains(rule as Node)).toBe(false);
   });
 });
 

@@ -35,21 +35,21 @@ Rules that hold across all of them:
 
 ### Controls and interaction fills
 
-| Token             | Utility              | Dark        | Light       | Use                                                                                                                                        |
-| ----------------- | -------------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `control`         | `bg-control`         | `#2a2723`   | `#ffffff`   | Fill of text fields, Select triggers, secondary buttons, checkbox boxes.                                                                   |
-| `control-hover`   | `bg-control-hover`   | `#322f2a`   | `#f7f5f1`   | The same controls under the pointer.                                                                                                       |
-| `control-pressed` | `bg-control-pressed` | `#25221f`   | `#f0ede7`   | Secondary button while pressed.                                                                                                            |
-| `fill-hover`      | `bg-fill-hover`      | `#fff5e60f` | `#2a1e0a0d` | Hover for anything with no fill of its own: subtle buttons, menu items, sidebar rows, list rows.                                           |
-| `fill-pressed`    | `bg-fill-pressed`    | `#fff5e608` | `#2a1e0a08` | Pressed state of the `fill-hover` family.                                                                                                  |
-| `fill-selected`   | `bg-fill-selected`   | `#fff5e614` | `#2a1e0a12` | The current item in navigation and lists, an open chip, inline code. Neutral on purpose — the colour is carried by the `accent` indicator. |
+| Token             | Utility              | Dark        | Light       | Use                                                                                                                                                |
+| ----------------- | -------------------- | ----------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `control`         | `bg-control`         | `#2f2c27`   | `#ffffff`   | Fill of text fields, Select triggers, secondary buttons, checkbox boxes. One step above `surface-raised`, so a field in a dialog is still a field. |
+| `control-hover`   | `bg-control-hover`   | `#37342e`   | `#f7f5f1`   | The same controls under the pointer.                                                                                                               |
+| `control-pressed` | `bg-control-pressed` | `#2a2723`   | `#f0ede7`   | Secondary button while pressed.                                                                                                                    |
+| `fill-hover`      | `bg-fill-hover`      | `#fff5e60f` | `#2a1e0a0d` | Hover for anything with no fill of its own: subtle buttons, menu items, sidebar rows, list rows.                                                   |
+| `fill-pressed`    | `bg-fill-pressed`    | `#fff5e608` | `#2a1e0a08` | Pressed state of the `fill-hover` family.                                                                                                          |
+| `fill-selected`   | `bg-fill-selected`   | `#fff5e614` | `#2a1e0a12` | The current item in navigation and lists, an open chip, inline code. Neutral on purpose — the colour is carried by the `accent` indicator.         |
 
 ### Lines
 
 | Token           | Utility            | Dark      | Light     | Use                                                                                                                                                      |
 | --------------- | ------------------ | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stroke`        | `bg-stroke`        | `#35312b` | `#e3ded5` | Decorative hairline: card and surface borders, dividers, the sidebar edge, the header's bottom border.                                                   |
-| `stroke-strong` | `bg-stroke-strong` | `#807a6e` | `#8a8478` | The line that identifies a control: a field's bottom border, checkbox box, switch track, timeline rail. Clears 3:1 on `canvas`, `surface` and `control`. |
+| `stroke-strong` | `bg-stroke-strong` | `#857f73` | `#8a8478` | The line that identifies a control: a field's bottom border, checkbox box, switch track, timeline rail. Clears 3:1 on `canvas`, `surface` and `control`. |
 
 ### Text
 
@@ -57,7 +57,7 @@ Rules that hold across all of them:
 | ----------- | ---------------- | --------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `fg`        | `text-fg`        | `#ece7df` | `#1e1b16` | Primary text and active icons.                                                                                                          |
 | `fg-muted`  | `text-fg-muted`  | `#a8a196` | `#5a554c` | Secondary text, descriptions, the key half of a chip, resting icons. At least 5.2:1 on every surface.                                   |
-| `fg-subtle` | `text-fg-subtle` | `#979084` | `#6b655b` | Placeholders, timestamps, metadata, hints. At least 4.5:1 on every surface — the floor for text; never fade text with opacity below it. |
+| `fg-subtle` | `text-fg-subtle` | `#9c958a` | `#6b655b` | Placeholders, timestamps, metadata, hints. At least 4.5:1 on every surface — the floor for text; never fade text with opacity below it. |
 
 ### Accent (mango)
 
@@ -78,7 +78,7 @@ Rules that hold across all of them:
 | `success`        | `bg-success`        | `#4ade80`   | `#166534`   | Text and icon for success. Always with an icon or a word.                    |
 | `success-subtle` | `bg-success-subtle` | `#4ade801f` | `#15803d1a` | Fill of a success badge or callout.                                          |
 | `warning`        | `bg-warning`        | `#ffd166`   | `#92400e`   | Text and icon for attention. Always with an icon or a word.                  |
-| `warning-subtle` | `bg-warning-subtle` | `#ffd1661f` | `#b453091a` | Fill of a warning badge or callout.                                          |
+| `warning-subtle` | `bg-warning-subtle` | `#ffd1661f` | `#ffbf0029` | Fill of a warning badge or callout. Amber in both themes.                    |
 | `danger`         | `bg-danger`         | `#f87171`   | `#c42b1c`   | Text and icon for errors, and the status dot. Always with an icon or a word. |
 | `danger-subtle`  | `bg-danger-subtle`  | `#f871711f` | `#c42b1c14` | Fill of an error badge or callout; hover of a destructive menu item.         |
 | `danger-solid`   | `bg-danger-solid`   | `#c42b1c`   | `#c42b1c`   | Fill of the destructive button (delete, revoke). Always with `on-danger`.    |
@@ -90,6 +90,12 @@ Light `success` and `warning` are darker than a plain white page needs, because
 text in them is also read on its own tint over `canvas`, `sidebar` and `surface` (a
 badge, a diff line, a callout). `#166534` and `#92400e` keep 5:1 or better there;
 the brighter `#15803d` / `#b45309` fell to about 4:1 on the tint.
+
+The light `warning-subtle` is an amber wash (`#ffbf00` at 16%) rather than a thin copy of
+the `warning` text colour. At 10% that copy came out the same blush as `danger-subtle`
+over `canvas`, so a sign-in warning and a failure differed by their glyph alone; the amber
+reads yellow beside the pink danger wash and is lighter, so `fg-subtle` (4.9:1) and
+`accent-fg` (4.9:1) both clear 4.5:1 on it over `canvas`, and `warning` is 6.0:1.
 
 ### Overlay and identity
 
@@ -235,7 +241,10 @@ class bundles all of it for menus and listboxes.
   because a tile would read as the hovered or selected row. Other disabled controls
   drop to 50% opacity — except a disabled menu row whose name is information (a
   locked model, an unavailable runner): its name steps to `fg-muted` instead of
-  fading, and the reason sits beside it ([decision 17](./decisions.md)). A button
+  fading, and the reason sits beside it ([decision 17](./decisions.md)). A composer
+  chip that is *locked* because the chat has turns (the agent, the environment) is a
+  fact, not a disabled control: it keeps full-strength text and drops its chevron
+  ([decision 18](./decisions.md)); only a chip that is loading or failed fades. A button
   that is merely *loading* keeps its colour and shows the spinner (`aria-busy` tells
   the two apart).
 - **Selected** is a neutral fill, plus the 3px accent bar where a list has a
@@ -275,8 +284,8 @@ metrics.
 
 ## Layout
 
-- The sidebar is `size-sidebar`: 264px by default, user-resizable, `bg-sidebar`,
-  closed by a `stroke` border. Below `md` it becomes a slide-over with a `scrim`.
+- The sidebar is 256px by default (240px to 420px, resizable from its edge),
+  `bg-sidebar`, closed by a `stroke` border. Below `md` it becomes a slide-over with a `scrim`.
 - The header is `h-12` in every breakpoint. It carries the runner and workspace
   context on the left, the command palette and account actions on the right.
 - Reading surfaces (chat, settings) centre their content in a single column. The

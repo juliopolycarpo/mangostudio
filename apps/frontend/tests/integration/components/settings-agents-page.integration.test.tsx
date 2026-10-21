@@ -67,7 +67,7 @@ describe('AgentSettingsPage integration', () => {
 
     render(<AgentSettingsPage />);
 
-    expect(await screen.findByRole('button', { name: /default/i })).toBeInTheDocument();
+    expect(await screen.findByRole('radio', { name: /default/i })).toBeInTheDocument();
   });
 
   it('saves built-in agent edits', async () => {
@@ -122,7 +122,7 @@ describe('AgentSettingsPage integration', () => {
 
     render(<AgentSettingsPage />);
 
-    await user.click(await screen.findByRole('button', { name: /researcher/i }));
+    await user.click(await screen.findByRole('radio', { name: /researcher/i }));
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     await user.click(screen.getByRole('button', { name: 'Delete agent' }));
 

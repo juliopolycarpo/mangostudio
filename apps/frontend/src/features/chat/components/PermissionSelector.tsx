@@ -21,8 +21,8 @@
  * what they want to say is how much the agent should bother them. The matrix is
  * not removed — it is what anyone who does want the axes reaches for, and it is
  * what a stored custom pair is edited with. The disclosure lives inside this
- * component's own panel because the design system has no popover to nest, and
- * generalizing the hand-rolled one here is cheaper than adding one.
+ * component's own panel, on `ComposerPopover`, because the design system has no
+ * popover to nest.
  */
 
 import type {
@@ -40,10 +40,11 @@ import {
   externalPresetPair,
 } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, Check, ChevronDown, Lock } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_SM } from '@/lib/icon-sizes';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { ComposerPopover } from './ComposerPopover';
 
@@ -78,7 +79,7 @@ export function PermissionSelector({
   // made with are what should be on screen — telling that user their setting
   // vanished would be worse than showing one more control.
   const [showMatrix, setShowMatrix] = useState(selectedPreset === undefined);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { containerRef, triggerRef, onKeyDown } = useDismissable(open, () => setOpen(false));
 
   // Re-opened when a *later* pair turns out to be custom, because this
   // component instance outlives the chat it was mounted for: switching to a
@@ -88,15 +89,6 @@ export function PermissionSelector({
   useEffect(() => {
     if (selectedPreset === undefined) setShowMatrix(true);
   }, [selectedPreset]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [open]);
 
   // Only what the adapter returned. A level or routing it never mentioned is not
   // a choice this vendor has, so it is not a control.
@@ -163,8 +155,10 @@ export function PermissionSelector({
       : labels.levelName[level];
 
   return (
-    <div ref={containerRef} className="relative flex items-center">
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    <div ref={containerRef} onKeyDown={onKeyDown} className="flex items-center">
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
@@ -184,7 +178,10 @@ export function PermissionSelector({
       </button>
 
       {open ? (
-        <ComposerPopover className="max-h-[70vh] space-y-3 overflow-y-auto p-3">
+        <ComposerPopover
+          anchor={triggerRef}
+          className="app-scrollbar max-h-[70vh] space-y-3 overflow-y-auto p-3"
+        >
           {hasPresets ? (
             <Axis heading={labels.presetHeading}>
               {presets.map((preset) => (
@@ -333,16 +330,6 @@ function Option({
         selected ? 'bg-fill-selected' : 'enabled:hover:bg-fill-hover'
       )}
     >
-      {/* A fixed column, so the check and the empty circle sit on one axis down
-          the list. */}
-      <span
-        className={cn(
-          'mt-0.5 flex size-4 shrink-0 items-center justify-center',
-          selected ? 'text-accent-fg' : 'text-fg-muted'
-        )}
-      >
-        {selected ? <Check size={ICON_SM} /> : '○'}
-      </span>
       <span className="min-w-0 flex-1 space-y-0.5">
         {/* A refused pair is not faded: the reason under it is the thing to read.
             The name steps down a text colour instead. */}
@@ -363,6 +350,10 @@ function Option({
           </span>
         ) : null}
       </span>
+      {/* The selected mark every composer menu draws: a check in `accent-fg`,
+          trailing, on a `fill-selected` row. An unselected row carries nothing,
+          so a list never mixes an icon with a text glyph. */}
+      {selected ? <Check size={ICON_MD} className="mt-0.5 shrink-0 text-accent-fg" /> : null}
     </button>
   );
 }

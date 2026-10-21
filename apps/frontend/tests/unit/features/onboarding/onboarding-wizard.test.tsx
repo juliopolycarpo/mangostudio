@@ -322,11 +322,73 @@ describe('OnboardingWizard', () => {
     expect(reason).not.toHaveClass('truncate');
   });
 
+  it('draws the runners as one hairline list and names the agent a sign-in command is for', async () => {
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        agents: [
+          {
+            targetId: 'codex',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'determined',
+            authState: 'signed-in',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_790_000_000_000, attempts: 1 },
+          },
+          {
+            targetId: 'claude',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'determined',
+            authState: 'signed-out',
+            loginCommand: 'claude auth login',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_790_000_000_000, attempts: 1 },
+          },
+        ],
+      },
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-agents')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-agents'));
+
+    const claude = await screen.findByTestId('onboarding-runner-claude');
+    const codex = screen.getByTestId('onboarding-runner-codex');
+    // Rows divided by hairlines, the way the toolchain step lists its runtimes:
+    // no bordered box per runner.
+    for (const row of [claude, codex]) {
+      expect(row).not.toHaveClass('border');
+      expect(row).not.toHaveClass('bg-control');
+    }
+    expect(claude.closest('ul')).toHaveClass('divide-y', 'divide-stroke');
+    // Each is led by the runner's own hue.
+    expect(claude.querySelector('[data-tone]')).toHaveClass('bg-agent-claude');
+    expect(codex.querySelector('[data-tone]')).toHaveClass('bg-agent-codex');
+
+    // The command is nested under the one row it belongs to and says whose it is,
+    // although Codex is listed above it.
+    const command = screen.getByText('claude auth login');
+    expect(claude.closest('li')).toContainElement(command);
+    expect(codex.closest('li')).not.toContainElement(command);
+    expect(
+      screen.getByText(/^Claude Code: sign in from a terminal/, { exact: false })
+    ).toBeInTheDocument();
+  });
+
   it('refuses a second skip while the first write is still open', async () => {
     // Every write is built on the cached record, and nothing is cached until
     // the server answers: a second click during the first PUT would send the
     // state from before it, dropping the skip that is already in flight.
     hangEveryPut();
+    // Past the welcome step, which has nothing to skip: the first step that is
+    // still asking something is the folder.
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
 
     render(<OnboardingWizard onDone={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
@@ -353,6 +415,45 @@ describe('OnboardingWizard', () => {
       expect(screen.getByTestId('onboarding-toolchain-failed')).toBeInTheDocument()
     );
     expect(screen.queryByTestId('onboarding-runtime-node')).not.toBeInTheDocument();
+  });
+
+  it('prints every runtime version in one form, without the prefix Node reports', async () => {
+    const installation = (version: string) => ({
+      path: '/usr/bin/runtime',
+      rawPath: '/usr/bin/runtime',
+      version,
+      origin: 'path',
+      effective: true,
+    });
+    scenario.respondWithJson('GET', '/api/environments/runtimes', {
+      body: [
+        {
+          id: 'node',
+          health: 'ok',
+          installations: [],
+          findings: [],
+          effective: installation('v22.22.0'),
+        },
+        {
+          id: 'bun',
+          health: 'ok',
+          installations: [],
+          findings: [],
+          effective: installation('1.4.2'),
+        },
+      ],
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-step-toolchain')).toBeInTheDocument()
+    );
+    await userEvent.click(screen.getByTestId('onboarding-step-toolchain'));
+
+    const node = await screen.findByTestId('onboarding-runtime-node');
+    await waitFor(() => expect(node).toHaveTextContent('22.22.0'));
+    expect(node).not.toHaveTextContent('v22');
+    expect(screen.getByTestId('onboarding-runtime-bun')).toHaveTextContent('1.4.2');
   });
 
   it('refuses to open the folder picker while a write is still open', async () => {
@@ -404,18 +505,18 @@ describe('OnboardingWizard', () => {
 
   it('has nothing to go back to on the first step, and a Back control on every other', async () => {
     render(<OnboardingWizard onDone={() => undefined} />);
-    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('onboarding-continue')).toBeInTheDocument());
     expect(screen.queryByTestId('onboarding-back')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId('onboarding-skip-step'));
+    await userEvent.click(screen.getByTestId('onboarding-continue'));
 
     await waitFor(() => expect(screen.getByTestId('onboarding-back')).toBeEnabled());
   });
 
   it('draws the whole footer row at one height, so no border sits inside another button', async () => {
     render(<OnboardingWizard onDone={() => undefined} />);
-    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
-    await userEvent.click(screen.getByTestId('onboarding-skip-step'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-continue')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-continue'));
     await waitFor(() => expect(screen.getByTestId('onboarding-back')).toBeEnabled());
 
     for (const id of ['onboarding-back', 'onboarding-skip-step', 'onboarding-continue']) {
@@ -425,12 +526,16 @@ describe('OnboardingWizard', () => {
 
   it('names the step in the progress line, which is all a phone gets of the step list', async () => {
     render(<OnboardingWizard onDone={() => undefined} />);
-    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
-    expect(
-      screen.getByText(`Step 1 of 6 · ${en.onboarding.steps.welcome}`, { exact: false })
-    ).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('onboarding-continue')).toBeInTheDocument());
+    const welcomeLine = screen.getByText(`Step 1 of 6 · ${en.onboarding.steps.welcome}`, {
+      exact: false,
+    });
+    expect(welcomeLine).toBeInTheDocument();
+    // From `sm` up the step list beside the card says the same thing, so the
+    // line is for the phone alone.
+    expect(welcomeLine).toHaveClass('sm:hidden');
 
-    await userEvent.click(screen.getByTestId('onboarding-skip-step'));
+    await userEvent.click(screen.getByTestId('onboarding-continue'));
 
     await waitFor(() =>
       expect(
@@ -486,13 +591,18 @@ describe('OnboardingWizard', () => {
   });
 
   it('advances past a skipped step and remembers the skip', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
     render(<OnboardingWizard onDone={() => undefined} />);
-    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/folder/i)
+    );
 
     await userEvent.click(screen.getByTestId('onboarding-skip-step'));
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/folder/i)
+      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
     );
     const put = scenario.fetchMock.mock.calls.find(
       (call) => String(call[1]?.method).toUpperCase() === 'PUT'
@@ -500,6 +610,101 @@ describe('OnboardingWizard', () => {
     const body = JSON.parse(String(put?.[1]?.body)) as {
       profileSettings: { default: { onboarding: { skippedSteps: string[] } } };
     };
-    expect(body.profileSettings.default.onboarding.skippedSteps).toEqual(['welcome']);
+    expect(body.profileSettings.default.onboarding.skippedSteps).toEqual(['folder']);
+  });
+
+  it('offers no skip on the welcome step, which asks nothing', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-continue')).toBeInTheDocument());
+
+    expect(screen.getByTestId('onboarding-continue')).toHaveTextContent(
+      en.onboarding.welcome.action
+    );
+    expect(screen.queryByTestId('onboarding-skip-step')).not.toBeInTheDocument();
+  });
+
+  it('offers no skip on a step the machine already satisfies', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({
+        welcomeAcknowledged: true,
+        workdir: '/home/dev/project',
+        environmentId: 'local',
+      }),
+    });
+    scenario.respondWithJson('GET', '/api/environments', {
+      body: [
+        {
+          id: 'local',
+          name: 'Local',
+          kind: 'local',
+          transportKind: 'local',
+          status: { state: 'connected' },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+    render(<OnboardingWizard onDone={() => undefined} />);
+    // Resume lands on the toolchain, the first step the machine cannot satisfy.
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
+    );
+    expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument();
+
+    // The folder is done: the person can look at it, and Continue is the way on.
+    await userEvent.click(screen.getByTestId('onboarding-step-folder'));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/folder/i)
+    );
+    expect(screen.queryByTestId('onboarding-skip-step')).not.toBeInTheDocument();
+    expect(screen.getByTestId('onboarding-continue')).toBeEnabled();
+  });
+
+  it('keeps both account-level exits together in the header, off the card', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-skip-all')).toBeInTheDocument());
+
+    const header = screen.getByRole('banner');
+    expect(within(header).getByTestId('onboarding-skip-all')).toBeInTheDocument();
+    expect(within(header).getByTestId('logout-button')).toBeInTheDocument();
+    expect(screen.getByTestId('onboarding-skip-all').parentElement).toBe(
+      screen.getByTestId('logout-button').parentElement
+    );
+    // One title in the header: the step's own headline says the rest.
+    expect(within(header).getAllByRole('heading')).toHaveLength(1);
+  });
+
+  it('puts a way back to the folder step on the notice that says there is none', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-chat')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-chat'));
+
+    const notice = await screen.findByTestId('onboarding-chat-needs-folder');
+    // Nowhere to send a message yet, so the field does not invite one.
+    expect(screen.getByTestId('onboarding-prompt')).toBeDisabled();
+    expect(screen.getByTestId('onboarding-send-prompt')).toBeDisabled();
+
+    await userEvent.click(
+      within(notice).getByRole('button', { name: en.onboarding.chat.goToFolder })
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/folder/i)
+    );
+  });
+
+  it('lets the first message be written once there is a folder to send it in', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true, workdir: '/home/dev/project' }),
+    });
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-chat')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-chat'));
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-prompt')).toBeEnabled());
+    expect(screen.queryByTestId('onboarding-chat-needs-folder')).not.toBeInTheDocument();
   });
 });

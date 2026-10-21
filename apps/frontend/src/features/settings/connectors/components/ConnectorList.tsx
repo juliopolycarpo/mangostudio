@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_MD } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { USAGE_ALERT_THRESHOLDS, type UsageAlertThreshold } from '../lib/usage-alerts';
 import { ConnectorCard } from './ConnectorCard';
 
@@ -38,9 +38,10 @@ export function ConnectorList({
   return (
     <SettingsPage
       title={s.title}
+      description={s.description}
       actions={
         <Button variant="secondary" size="sm" onClick={onAddConnector}>
-          <Plus size={ICON_MD} />
+          <Plus size={ICON_SM} />
           {s.addButton}
         </Button>
       }
@@ -48,7 +49,7 @@ export function ConnectorList({
       {connectors.length === 0 ? (
         <Card padded={false}>
           <EmptyState
-            icon={<KeyRound size={24} />}
+            icon={<KeyRound size={ICON_LG} />}
             title={s.emptyTitle}
             hint={s.emptyDescription}
             action={

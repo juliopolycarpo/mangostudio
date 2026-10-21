@@ -9,21 +9,12 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatDuration } from '../../format';
 import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';
-import { MachineCard } from './MachineCard';
+import { MachineCard, MachineFact, MachineFacts } from './MachineCard';
 
 interface HubProcessCardProps {
   readonly status: MachineStatus;
   readonly isRestarting: boolean;
   readonly onRestart: () => void;
-}
-
-function Row({ label, value }: { readonly label: string; readonly value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 text-sm">
-      <span className="text-fg-muted">{label}</span>
-      <span className="min-w-0 truncate text-right font-mono text-xs text-fg">{value}</span>
-    </div>
-  );
 }
 
 export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCardProps) {
@@ -45,11 +36,11 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
       testId="machine-hub-card"
     >
       {hub.running && (
-        <div className="space-y-1.5">
-          {hub.url && <Row label={m.hub.url} value={hub.url} />}
-          {hub.pid !== undefined && <Row label={m.hub.pid} value={String(hub.pid)} />}
+        <MachineFacts>
+          {hub.url && <MachineFact label={m.hub.url} value={hub.url} />}
+          {hub.pid !== undefined && <MachineFact label={m.hub.pid} value={String(hub.pid)} />}
           {hub.launch && (
-            <Row
+            <MachineFact
               label={m.hub.launchLabel}
               value={
                 hub.serviceUnit
@@ -59,16 +50,16 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
             />
           )}
           {hub.uptimeMs !== undefined && (
-            <Row label={m.hub.uptime} value={formatDuration(hub.uptimeMs)} />
+            <MachineFact label={m.hub.uptime} value={formatDuration(hub.uptimeMs)} />
           )}
           {hub.version && (
-            <Row
+            <MachineFact
               label={m.hub.version}
               value={hub.buildSha ? `${hub.version} (${hub.buildSha.slice(0, 7)})` : hub.version}
             />
           )}
-          <Row label={m.hub.logFile} value={hub.logFile || m.hub.noLogFile} />
-        </div>
+          <MachineFact label={m.hub.logFile} value={hub.logFile || m.hub.noLogFile} />
+        </MachineFacts>
       )}
 
       <div className="border-t border-stroke pt-4">

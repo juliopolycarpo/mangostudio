@@ -208,3 +208,50 @@ per row: a `text-xs fg-muted` line at the head of the model list names the provi
 the chat is tied to, and the runner menu keeps the explanation line under each row.
 Every other disabled control (field, select, checkbox, switch, composer chip) keeps
 the 50% rule: a control that is off carries no information of its own.
+
+## 18. A chip locked by the chat's history states a fact; it does not fade
+
+**Status:** accepted · **Narrows:** 17, for the composer chips it lists, and the State bullet
+in `foundations.md`.
+
+Decision 17 left "composer chip" under the 50% rule, and the agent chip and the
+environment chip both followed it once a chat had turns. Sampled, the environment chip's
+`env:` key fell to 2.3:1 in light and its value to 3.3:1, and a chevron still promised a
+menu that could not open. But what the chip says — which machine this chat ran on, who
+answered it — is content, the same kind of information decision 17 protects in a menu row.
+It is not a control that happens to be off.
+
+**Consequence:** a chip whose answer is settled by the chat's first turn is a `LockedChip`
+(`components/ui/`): key in `fg-muted`, value in `fg`, no chevron, the reason as its `title`
+and as screen-reader text. `EnvironmentSelector` takes a `locked` flag (a fact) apart from
+`disabled` (loading or failed, which still fades). The 50% rule stays for a chip that is
+merely off.
+
+## 19. Dark `control` steps above `surface-raised`, and the text on it follows
+
+**Status:** accepted.
+
+Dark `control` (`#2a2723`) sat on `surface-raised` (`#282521`) at 1.03:1, so inside a dialog
+a field's fill and the dialog body were the same grey and the field read as an outline with
+an underline. On `surface` (General, Context) the same fill stepped visibly, which made
+dialogs look flatter than pages. The fill cannot be a translucent wash: it also sits over
+code blocks and under the copy button, and a floating or overlaid control must stay solid.
+
+**Consequence:** dark `control` is `#2f2c27` and `control-hover` `#37342e`, one step above the
+dialog body; `control-pressed` takes the old resting value, one step darker. A lighter fill
+costs the lines and text drawn on it, so dark `stroke-strong` rises to `#857f73` (3:1 on
+`control` and its hover) and dark `fg-subtle` to `#9c958a` (placeholders stay above 4.5:1 on
+`control`). Both only get lighter on a dark surface, so nothing else loses contrast.
+
+## 20. The light warning wash is amber
+
+**Status:** accepted.
+
+Light `warning-subtle` was the `warning` text colour at 10%, `#b453091a`. Over `canvas` that is
+RGB(239, 228, 216), against `danger-subtle`'s (242, 228, 223): a sign-in warning and a failure
+were the same blush, told apart only by a 16px glyph. Deepening the fill was not an option
+(`fg-subtle` on the band was 4.6:1, with no headroom).
+
+**Consequence:** the wash is amber, `#ffbf00` at 16% (`#ffbf0029`), which is both more yellow
+and lighter, so `fg-subtle`, `accent-fg` and the `warning` text all gain contrast on it. The dark
+theme was already a yellow wash.

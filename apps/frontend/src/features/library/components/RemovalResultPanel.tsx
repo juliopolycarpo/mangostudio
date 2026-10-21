@@ -13,6 +13,7 @@ import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+import { resourceKeyLabel } from '../format';
 import { InlineNote } from './InlineNote';
 import { ResultRow, ResultSection } from './ResultList';
 
@@ -63,7 +64,7 @@ export function RemovalResultPanel({
             <ResultRow
               key={`${removed.resourceKey}:${removed.locationId}`}
               outcome="done"
-              title={removed.resourceKey}
+              title={resourceKeyLabel(removed.resourceKey, l.kinds)}
               testId="removed-row"
             >
               <span className="block break-all font-mono text-fg-muted text-micro">
@@ -85,7 +86,7 @@ export function RemovalResultPanel({
             <ResultRow
               key={`${failure.resourceKey}:${failure.locationId}`}
               outcome="failed"
-              title={failure.resourceKey}
+              title={resourceKeyLabel(failure.resourceKey, l.kinds)}
               testId="failed-row"
             >
               <span className="block text-fg-muted text-xs">
@@ -102,7 +103,7 @@ export function RemovalResultPanel({
             <ResultRow
               key={`${kept.resourceKey}:${kept.locationId}`}
               outcome="kept"
-              title={kept.resourceKey}
+              title={resourceKeyLabel(kept.resourceKey, l.kinds)}
               testId="kept-row"
             >
               <span className="block text-fg-muted text-xs">

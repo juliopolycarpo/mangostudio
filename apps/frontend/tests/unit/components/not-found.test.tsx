@@ -36,4 +36,15 @@ describe('NotFound', () => {
     const back = screen.getByRole('link', { name: 'Back to MangoStudio' });
     expect(back).toHaveAttribute('href', '/');
   });
+
+  it("is the bootstrap failure page's anatomy: the logo, then a title-size heading in a card", async () => {
+    await renderUnmatched('/no/such/page');
+
+    const page = await screen.findByTestId('not-found');
+    // There is no shell on this page to name the product, so the page does.
+    expect(page.querySelector('img')).toHaveAttribute('alt', 'MangoStudio logo');
+    const heading = screen.getByRole('heading', { level: 1, name: 'Page not found' });
+    expect(heading).toHaveClass('text-title', 'font-semibold', 'text-fg');
+    expect(heading.closest('.bg-surface')).not.toBeNull();
+  });
 });

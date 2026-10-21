@@ -42,7 +42,7 @@ export function SubagentTracePart({ part }: SubagentTracePartProps) {
       : labels.subagentNoTools;
 
   return (
-    <div className="max-w-2xl overflow-hidden rounded-md border border-stroke bg-surface text-sm text-fg">
+    <div className="max-w-(--timeline-card-max) overflow-hidden rounded-md border border-stroke bg-surface text-sm text-fg">
       <button
         type="button"
         aria-expanded={expanded}
@@ -52,7 +52,6 @@ export function SubagentTracePart({ part }: SubagentTracePartProps) {
         <span className="min-w-0 flex-1 space-y-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-fg">{part.agentName}</span>
-            <Badge>{labels.subagentTrace}</Badge>
             <Badge variant={STATUS_VARIANT[part.status]}>{statusLabel}</Badge>
             <Badge>{toolCountLabel}</Badge>
           </span>

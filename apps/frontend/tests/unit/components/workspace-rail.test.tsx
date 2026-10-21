@@ -113,6 +113,31 @@ describe('WorkspaceRail', () => {
     expect(window.localStorage.getItem(railCollapsedStorageKey('chat-1'))).toBeNull();
   });
 
+  // The current-item mark says "this panel is open". Folded down to the dock,
+  // nothing is open, and a mark on whichever panel happened to be selected read
+  // as a choice the person never made.
+  it('marks the open panel in the dock, and no panel while the rail is collapsed', async () => {
+    const user = userEvent.setup();
+    renderRail();
+
+    const repository = screen.getByRole('button', { name: 'Show Repository panel' });
+    expect(repository).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Collapse agent side panel' }));
+
+    for (const button of screen.getAllByRole('button', { name: /^Show .* panel$/ })) {
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+    }
+    expect(repository).not.toHaveClass('bg-fill-selected');
+
+    // The icon the person presses next still opens that panel, and marks it.
+    await user.click(repository);
+    expect(screen.getByRole('button', { name: 'Show Repository panel' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+  });
+
   it('resizes from the keyboard and persists the clamped width', async () => {
     const user = userEvent.setup();
     const onWidthChange = jest.fn();

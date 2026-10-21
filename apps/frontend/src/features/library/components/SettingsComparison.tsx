@@ -9,6 +9,11 @@
  * Below the concepts sits the list of files those rows were read from, which is
  * where a subtree the snapshot deliberately never walked gets said out loud. The
  * comparison cannot say it: it keeps only the paths its concepts name.
+ *
+ * The cards are sized by how many there are, not by how many agents exist: a
+ * fixed number of columns left an empty one at the end of every row. And an
+ * agent with nothing to compare is one line under the cards, not a card of its
+ * own that only repeats the state.
  */
 
 import type {
@@ -24,6 +29,7 @@ import { Badge } from '@/components/ui/Badge';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatList, formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import {
   libraryLocationsQueryOptions,
@@ -32,6 +38,9 @@ import {
 } from '../queries';
 import { InlineNote } from './InlineNote';
 import { LibraryPageState } from './LibraryPageState';
+
+/** One row of cards that share the width between them, however many there are. */
+const CARD_GRID = 'grid grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-3';
 
 export function SettingsComparison() {
   const { t } = useI18n();
@@ -143,8 +152,8 @@ export function SettingsSourcePanel({
 
   return (
     <section className="space-y-3" data-testid="settings-sources">
-      <h3 className="font-semibold text-fg text-sm">{l.settings.sourceHeading}</h3>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <h3 className="font-semibold text-base text-fg">{l.settings.sourceHeading}</h3>
+      <div className={CARD_GRID}>
         {populated.map((snapshot) => (
           <div
             key={snapshot.targetId}
@@ -198,17 +207,39 @@ function SettingsSourceRow({
 }
 
 function ConceptSection({ comparison }: { readonly comparison: ConceptComparison }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const l = t.library;
+
+  const cards: ConceptComparisonEntry[] = [];
+  const quiet = new Map<'not-detected' | 'not-applicable', string[]>();
+  for (const entry of comparison.entries) {
+    if (entry.state !== 'detected' && entry.fields.length === 0) {
+      quiet.set(entry.state, [...(quiet.get(entry.state) ?? []), l.targets[entry.targetId]]);
+    } else {
+      cards.push(entry);
+    }
+  }
 
   return (
     <section className="space-y-3" data-testid="concept-section" data-concept={comparison.concept}>
-      <h3 className="font-semibold text-fg text-sm">{l.settings.concept[comparison.concept]}</h3>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {comparison.entries.map((entry) => (
-          <ConceptEntry key={entry.targetId} entry={entry} />
-        ))}
-      </div>
+      <h3 className="font-semibold text-base text-fg">{l.settings.concept[comparison.concept]}</h3>
+      {cards.length > 0 && (
+        <div className={CARD_GRID}>
+          {cards.map((entry) => (
+            <ConceptEntry key={entry.targetId} entry={entry} />
+          ))}
+        </div>
+      )}
+      {[...quiet].map(([state, agents]) => (
+        <p
+          key={state}
+          className="text-fg-muted text-xs"
+          data-testid="concept-quiet"
+          data-state={state}
+        >
+          {formatMessage(l.settings.undetectedLine[state], { agents: formatList(agents, locale) })}
+        </p>
+      ))}
     </section>
   );
 }

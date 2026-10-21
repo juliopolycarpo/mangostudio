@@ -143,9 +143,13 @@ function ToolIcon({ toolName, className }: { toolName: string; className?: strin
  * Abbreviates a path for inline display next to the tool label.
  * Replaces the home directory prefix with `~` and keeps it short.
  *
+ * Exported so the diff card names a file the way the row above it does: the row
+ * said `~/mangostudio/…` and the card under it `/home/user/mangostudio/…`, two
+ * spellings of one path inches apart.
+ *
  * // Usage: abbreviatePath('/home/ada/notes.md') // => '~/notes.md'
  */
-function abbreviatePath(rawPath: unknown): string | null {
+export function abbreviatePath(rawPath: unknown): string | null {
   if (typeof rawPath !== 'string' || rawPath.trim().length === 0) return null;
   let p = rawPath.trim();
   const homeMatch = p.match(/^\/home\/[^/]+/);

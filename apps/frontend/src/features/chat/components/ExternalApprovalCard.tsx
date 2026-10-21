@@ -94,7 +94,7 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
         decisionSource ?? (expired ? 'expired' : answeredOption ? 'user' : undefined),
         labels
       )}
-      className="w-full max-w-2xl text-sm text-fg"
+      className="w-full max-w-(--timeline-card-max) text-sm text-fg"
     >
       {/* Vendor text, rendered inert. */}
       <p className="whitespace-pre-wrap font-medium text-fg">{part.title}</p>

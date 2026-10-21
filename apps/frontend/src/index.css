@@ -45,22 +45,25 @@
   --color-surface: #1f1d1a;
   --color-surface-raised: #282521;
 
-  /* Controls and the neutral interaction fills drawn over any surface. */
-  --color-control: #2a2723;
-  --color-control-hover: #322f2a;
-  --color-control-pressed: #25221f;
+  /* Controls and the neutral interaction fills drawn over any surface. `control`
+   * sits one step above `surface-raised`, so a field in a dialog still reads as
+   * a field instead of an outline on the same grey; `control-pressed` is the
+   * old resting value, the one step darker. */
+  --color-control: #2f2c27;
+  --color-control-hover: #37342e;
+  --color-control-pressed: #2a2723;
   --color-fill-hover: #fff5e60f;
   --color-fill-pressed: #fff5e608;
   --color-fill-selected: #fff5e614;
 
   /* Lines: `stroke` divides, `stroke-strong` identifies a control (3:1). */
   --color-stroke: #35312b;
-  --color-stroke-strong: #807a6e;
+  --color-stroke-strong: #857f73;
 
   /* Text: all three clear 4.5:1 on every surface above. */
   --color-fg: #ece7df;
   --color-fg-muted: #a8a196;
-  --color-fg-subtle: #979084;
+  --color-fg-subtle: #9c958a;
 
   /* Mango. `accent` fills; `accent-fg` is the same hue as text or an icon. */
   --color-accent: #f5a623;
@@ -243,7 +246,10 @@
   --color-success: #166534;
   --color-success-subtle: #15803d1a;
   --color-warning: #92400e;
-  --color-warning-subtle: #b453091a;
+  /* An amber wash, not a thinned copy of the text colour: `warning` over its
+   * own 10% tint came out the same blush as `danger-subtle`, so a sign-in
+   * warning and a failure differed by their glyph alone. */
+  --color-warning-subtle: #ffbf0029;
   --color-danger: #c42b1c;
   --color-danger-subtle: #c42b1c14;
   --color-danger-solid: #c42b1c;
@@ -458,6 +464,14 @@ body {
       background-color var(--duration-quick) var(--ease-standard);
   }
 
+  /* The pointer says "this one does something". Without it a toggle chip with
+   * no value beside it (`thinking`) is indistinguishable from a static chip
+   * until the fill appears on hover — and the fill is the only other cue. A
+   * static chip is a `span` and keeps the arrow. */
+  .composer-chip:is(button, label, select):not(:disabled) {
+    cursor: pointer;
+  }
+
   /* `:not(…, [aria-*])` rather than source order: the hover selector outranks
    * a bare attribute one, so an open or pressed chip would drop back to the
    * neutral fill under the pointer. */
@@ -600,35 +614,41 @@ body {
   }
 
   /*
-   * The tool row under the input: a ghost button in the chip's mono dialect,
-   * lowercased the way a subcommand is written. The lowercase is
-   * presentational only: the accessible name keeps its capital, so
-   * `getByRole('button', { name: 'Capabilities' })` still finds it.
+   * The tool row under the input: the status line's own ghost chip, one step
+   * taller (28px) and lowercased the way a subcommand is written, so the
+   * composer speaks one dialect from top to bottom. Applied beside
+   * `.composer-chip`, which supplies the face, the hover and the open and
+   * pressed washes. The lowercase is presentational only: the accessible name
+   * keeps its capital, so `getByRole('button', { name: 'Capabilities' })`
+   * still finds it.
+   *
+   * Below `sm` the label is hidden and the chip is a bare glyph on a 44px
+   * square. A phone has no hover to say "button", so the hairline comes back
+   * there as the only affordance; from `sm` up the chip is borderless like its
+   * neighbours. The transparent border keeps the box the same size either side
+   * of the breakpoint. `justify-content: center` is what seats that lone glyph
+   * in the middle of the square instead of packed against its left edge.
+   *
+   * Geometry and the disabled treatment belong to the variant, not to each
+   * chip: three call sites were repeating the identical utility tail, so the
+   * row's height could only be changed in three components at once.
    */
   .composer-tool-chip {
-    border-radius: var(--radius-sm);
-    background: transparent;
-    text-transform: lowercase;
-    /* Geometry and the disabled treatment belong to the variant, not to each
-     * chip: three call sites were repeating the identical utility tail, so the
-     * row's height could only be changed in three components at once. */
+    justify-content: center;
     height: 1.75rem;
     flex-shrink: 0;
+    border: 1px solid transparent;
+    text-transform: lowercase;
+  }
+
+  @media (width < 40rem) {
+    .composer-tool-chip {
+      border-color: var(--color-stroke);
+    }
   }
 
   .composer-tool-chip:disabled {
     opacity: 0.5;
-  }
-
-  .composer-tool-chip:not(:disabled, [aria-expanded="true"], [aria-pressed="true"]):hover {
-    background: var(--color-fill-hover);
-    color: var(--color-fg);
-  }
-
-  .composer-tool-chip[aria-expanded="true"],
-  .composer-tool-chip[aria-pressed="true"] {
-    background: var(--color-fill-selected);
-    color: var(--color-fg);
   }
 
   /*
@@ -640,8 +660,7 @@ body {
    * falls back to the product accent for a chip drawn outside the shell.
    * Scoped to the leading glyph so a trailing mark keeps the text colour.
    */
-  .composer-chip[aria-pressed="true"] > svg:first-child,
-  .composer-tool-chip[aria-pressed="true"] > svg:first-child {
+  .composer-chip[aria-pressed="true"] > svg:first-child {
     color: var(--composer-accent, var(--color-accent-fg));
   }
 
@@ -677,6 +696,8 @@ body {
 /* App-styled thin scrollbar for panels (thinking block, settings, etc.) */
 .app-scrollbar::-webkit-scrollbar {
   width: 4px;
+  /* The same 4px for a scrollbar that runs sideways (tab strips, wide tables). */
+  height: 4px;
 }
 .app-scrollbar::-webkit-scrollbar-track {
   background: transparent;
@@ -807,6 +828,12 @@ pre:hover .copy-code-btn {
   --timeline-dot-size: 0.4375rem; /* 7px, so its centre lands on the rail */
   --timeline-indent: 1rem;
   --timeline-row-height: 1.5rem;
+  /* The width a card may take inside an item. The reading measure is 42rem
+   * (`max-w-2xl`, the prose bubble's) *from the column edge*, and an item
+   * pushes its content right by the indent — so a card capped at the full 42rem
+   * ended one indent past the bubble above or below it. Tool rows and tool
+   * output are not cards and keep the full column. */
+  --timeline-card-max: calc(42rem - var(--timeline-indent));
   display: flex;
   flex-direction: column;
 }

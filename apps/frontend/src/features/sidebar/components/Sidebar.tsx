@@ -6,8 +6,8 @@ import {
   CHAT_SIDEBAR_WIDTH_MIN,
 } from '@mangostudio/shared/workspaces';
 import {
+  House,
   Image,
-  LayoutDashboard,
   LayoutGrid,
   MessageSquare,
   MonitorCog,
@@ -48,9 +48,12 @@ import { GitSummaryBadge } from './GitSummaryBadge';
 import { NavItem } from './NavItem';
 
 /**
- * Below this the sidebar is a glyph per git badge; from here up it has room for
- * the branch name beside it. 264px (the default) and the 240px minimum are the
- * narrow case on purpose: a branch squeezed to "c…" is worse than none.
+ * Below this a chat row's metadata is two glyphs — the git badge's branch icon
+ * and the runner's dot; from here up it has room for the words beside them, the
+ * branch name and the runner's name. 264px (the default) and the 240px minimum
+ * are the narrow case on purpose: a branch squeezed to "c…" is worse than none,
+ * and every character the metadata keeps is one the chat title loses. The words
+ * stay in the document at every width, so search and screen readers read them.
  */
 const GIT_DETAIL_MIN_WIDTH = 320;
 
@@ -187,7 +190,7 @@ export function Sidebar({
   };
 
   const navPages = [
-    { page: 'home', icon: LayoutDashboard, label: t.home.nav },
+    { page: 'home', icon: House, label: t.home.nav },
     { page: 'studio', icon: Image, label: t.studio.title },
     { page: 'gallery', icon: LayoutGrid, label: t.gallery.title },
     { page: 'environments', icon: MonitorCog, label: t.environments.nav },
@@ -289,6 +292,10 @@ export function Sidebar({
           />
           <input
             type="text"
+            // A query is not prose: the squiggle under "codex" or a folder name
+            // reads as an error in a field that has none to report.
+            spellCheck={false}
+            autoComplete="off"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -421,6 +428,9 @@ export function Sidebar({
                            * touch target: that is most of the row. What gives way
                            * is the git badge, and the runner's name down to the
                            * dot (still read aloud, and still what search matches).
+                           * The same name gives way on a sidebar narrower than
+                           * `GIT_DETAIL_MIN_WIDTH`, where the dot beside the title
+                           * is worth more characters of it than the word is.
                            *
                            * Bounded to a share of the row, and allowed to shrink
                            * inside it, so a long branch gives way to the title
@@ -437,7 +447,14 @@ export function Sidebar({
                               </span>
                             ) : null}
                             <StatusDot tone="neutral" className={badge.dotClassName} />
-                            <span className="shrink-0 pointer-coarse:sr-only">{badge.label}</span>
+                            <span
+                              className={cn(
+                                'shrink-0 pointer-coarse:sr-only',
+                                liveWidth < GIT_DETAIL_MIN_WIDTH && 'sr-only'
+                              )}
+                            >
+                              {badge.label}
+                            </span>
                           </span>
                           {/*
                            * `group-focus-within` is what makes these reachable:
@@ -472,7 +489,9 @@ export function Sidebar({
           ))}
         </nav>
 
-        <div className="mt-auto hidden space-y-0.5 border-t border-stroke p-2 md:block">
+        {/* `px-3`, the chat list's own inset, so a selected page's pill and its
+            accent bar sit on the same two edges as a selected chat's. */}
+        <div className="mt-auto hidden space-y-0.5 border-t border-stroke px-3 py-2 md:block">
           {navPages.map(({ page, icon, label }) => (
             <NavItem
               key={page}

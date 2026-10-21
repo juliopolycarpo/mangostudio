@@ -7,7 +7,7 @@
 import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import { useI18n } from '@/hooks/use-i18n';
 import { installedViaManagerLabel, updateLatestLabel } from '../format';
-import { MachineCard, MachineFact } from './MachineCard';
+import { MachineCard, MachineFact, MachineFacts } from './MachineCard';
 import { UpdateAction } from './UpdateAction';
 
 interface UpdateCardProps {
@@ -22,7 +22,7 @@ export function UpdateCard({ status, onUpgraded }: UpdateCardProps) {
 
   return (
     <MachineCard title={m.title} testId="machine-update-card">
-      <div className="space-y-3">
+      <MachineFacts>
         <MachineFact
           label={m.installedVia}
           value={installedViaManagerLabel(t, status.installedVia.manager)}
@@ -33,7 +33,7 @@ export function UpdateCard({ status, onUpgraded }: UpdateCardProps) {
           value={updateLatestLabel(t, status)}
           title={status.check?.error}
         />
-      </div>
+      </MachineFacts>
       <div className="border-t border-stroke pt-4">
         <UpdateAction status={status} testId="machine-update-card-action" onUpgraded={onUpgraded} />
       </div>

@@ -206,6 +206,21 @@ describe('external availability states', () => {
     expect(link).toHaveAttribute('href', expect.stringContaining('/environments/agents'));
   });
 
+  // The remedy is on the name's line, beside the agent it fixes, the way a usable
+  // row puts "Continue in a new chat" there: the row is a name and a reason, not a
+  // name, a reason and a link stacked under them, indented a second time.
+  it('puts the remedy on the same line as the agent it is for', () => {
+    renderSelector({
+      externalAgents: [
+        descriptor({ unavailableReason: 'not-installed', remedy: { kind: 'install' } }),
+      ],
+    });
+
+    const link = screen.getByRole('link', { name: /Install this agent/i });
+    // The link sits in a wrapper of its own, and the wrapper in the row with the name.
+    expect(link.parentElement?.parentElement).toContainElement(codexOption());
+  });
+
   it('offers no action for a refusal nothing on this screen fixes', () => {
     // `runtime-unsupported` is the runtime lacking an adapter, so updating the
     // *agent* would not help. A button that does nothing is worse than none.

@@ -4,7 +4,6 @@ import {
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
 import { useEffect, useMemo, useState } from 'react';
-import { Badge } from '@/components/ui/Badge';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -110,12 +109,15 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
         expanded={expanded}
         onToggle={() => setExpanded((v) => !v)}
         glyph={<StatusGlyph status={status} name={name} />}
+        // `+N more` rides in the right-hand cluster, not as a pill after the
+        // argument: on a phone the pill and the cluster together left the hint
+        // about a dozen characters.
+        count={moreCount > 0 ? moreLabel : null}
         summary={summary ? formatToolSummary(summary, t.tools.summary) : null}
         duration={duration === null ? null : formatToolDuration(duration)}
       >
         <span className={cn('shrink-0 font-mono font-medium', toneTextClass(tone))}>{label}</span>
         {firstHint && <span className="truncate font-mono text-fg-muted">{firstHint}</span>}
-        {moreCount > 0 && <Badge>{moreLabel}</Badge>}
       </TimelineRow>
 
       {/* A group opens onto a nested rail, not onto a card. */}

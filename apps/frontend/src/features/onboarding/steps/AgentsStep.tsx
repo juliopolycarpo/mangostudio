@@ -11,10 +11,11 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQuery } from '@tanstack/react-query';
-import { Bot, Check, Sparkles } from 'lucide-react';
+import { Check } from 'lucide-react';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Spinner } from '@/components/ui/Spinner';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { CopyLine } from '@/features/environments/components/CopyLine';
 import {
@@ -23,7 +24,9 @@ import {
 } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
+import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { StepFrame } from '../StepFrame';
 
@@ -39,6 +42,13 @@ interface AgentsStepProps {
 }
 
 const MANGOSTUDIO_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' };
+
+/**
+ * The rows of a runner list: hairlines between them and above and below, the way
+ * the toolchain step lists its runtimes — one list idiom in the wizard, not a
+ * bordered box per row.
+ */
+const RUNNER_LIST_CLASS = 'divide-y divide-stroke border-y border-stroke';
 
 /**
  * Whether every agent here is refused for want of an isolated OS identity.
@@ -73,16 +83,20 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
 
   return (
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
-      <RunnerOption
-        title={t.library.targets.mangostudio}
-        description={s.modelDescription}
-        icon={<Sparkles aria-hidden size={ICON_MD} />}
-        selected={sameRunner(state.runner, MANGOSTUDIO_RUNNER)}
-        busy={isSaving}
-        unavailable={!catalog.isPending && !hasModel}
-        testId="onboarding-runner-mangostudio"
-        onSelect={() => choose(MANGOSTUDIO_RUNNER)}
-      />
+      <ul className={RUNNER_LIST_CLASS}>
+        <li>
+          <RunnerOption
+            title={t.library.targets.mangostudio}
+            description={s.modelDescription}
+            dotClassName={MANGO_IDENTITY.dotClass}
+            selected={sameRunner(state.runner, MANGOSTUDIO_RUNNER)}
+            busy={isSaving}
+            unavailable={!catalog.isPending && !hasModel}
+            testId="onboarding-runner-mangostudio"
+            onSelect={() => choose(MANGOSTUDIO_RUNNER)}
+          />
+        </li>
+      </ul>
 
       {!catalog.isPending && !hasModel ? (
         <Callout tone="warning" data-testid="onboarding-no-models">
@@ -114,15 +128,17 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
             {s.isolated}
           </Callout>
         ) : (
-          external.agents.map((agent) => (
-            <AgentOption
-              key={agent.targetId}
-              agent={agent}
-              busy={isSaving}
-              selected={sameRunner(state.runner, { kind: 'external', targetId: agent.targetId })}
-              onSelect={() => choose({ kind: 'external', targetId: agent.targetId })}
-            />
-          ))
+          <ul className={RUNNER_LIST_CLASS}>
+            {external.agents.map((agent) => (
+              <AgentOption
+                key={agent.targetId}
+                agent={agent}
+                busy={isSaving}
+                selected={sameRunner(state.runner, { kind: 'external', targetId: agent.targetId })}
+                onSelect={() => choose({ kind: 'external', targetId: agent.targetId })}
+              />
+            ))}
+          </ul>
         )}
       </div>
     </StepFrame>
@@ -143,13 +159,14 @@ function AgentOption({
   const { t } = useI18n();
   const s = t.onboarding.agents;
   const selectable = externalAgentSelectable(agent);
+  const name = t.library.targets[agent.targetId];
 
   return (
-    <div className="space-y-2">
+    <li>
       <RunnerOption
-        title={t.library.targets[agent.targetId]}
+        title={name}
         description={agent.authState === 'signed-out' ? s.signedOut : s.signedIn}
-        icon={<Bot aria-hidden size={ICON_MD} />}
+        dotClassName={agentIdentityTokens(agent.targetId).dotClass}
         selected={selected}
         busy={busy}
         unavailable={!selectable}
@@ -157,11 +174,19 @@ function AgentOption({
         onSelect={onSelect}
       />
       {/* The command is the whole remedy, so it is shown rather than hidden
-          behind a disabled control the user cannot learn anything from. */}
+          behind a disabled control the user cannot learn anything from. It
+          belongs to this row alone — nested under it, indented to its text, and
+          naming the agent it signs in — because Codex may be listed above the
+          Claude Code row it is for. */}
       {!selectable && agent.loginCommand ? (
-        <CopyLine label={s.signInHint} value={agent.loginCommand} />
+        <div className="pr-3 pb-3 pl-8">
+          <CopyLine
+            label={formatMessage(s.signInHint, { agent: name })}
+            value={agent.loginCommand}
+          />
+        </div>
       ) : null}
-    </div>
+    </li>
   );
 }
 
@@ -179,7 +204,7 @@ function AgentOption({
 function RunnerOption({
   title,
   description,
-  icon,
+  dotClassName,
   selected,
   busy = false,
   unavailable = false,
@@ -188,7 +213,8 @@ function RunnerOption({
 }: {
   readonly title: string;
   readonly description: string;
-  readonly icon: React.ReactNode;
+  /** The runner's identity hue, the dot the sidebar and the composer know it by. */
+  readonly dotClassName: string;
   readonly selected: boolean;
   readonly busy?: boolean;
   readonly unavailable?: boolean;
@@ -205,17 +231,17 @@ function RunnerOption({
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        'relative flex w-full items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors',
+        'relative flex w-full items-center gap-3 px-3 py-2 text-left transition-colors',
         // The chosen runner is the list's current item, marked as in the sidebar.
         selected
           ? cn('bg-fill-selected', SELECTION_BAR)
-          : cn('bg-control', !unavailable && 'enabled:hover:bg-control-hover'),
+          : !unavailable && 'enabled:hover:bg-fill-hover',
         unavailable && 'cursor-not-allowed'
       )}
     >
-      <span className={cn('shrink-0', unavailable ? 'text-fg-subtle' : 'text-fg-muted')}>
-        {icon}
-      </span>
+      {/* Who this is, in the hue every other surface knows it by; the same in
+          every state, so being unusable never replaces who is being described. */}
+      <StatusDot tone="neutral" className={dotClassName} />
       <span className="min-w-0 flex-1">
         <span
           className={cn('block text-sm font-medium', unavailable ? 'text-fg-muted' : 'text-fg')}

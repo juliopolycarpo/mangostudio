@@ -195,7 +195,9 @@ export function BranchControl({
           </span>
           <ChevronDown size={ICON_SM} className="shrink-0 text-fg-muted" />
         </summary>
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 min-w-64 rounded-md border border-stroke bg-surface-raised shadow-popover">
+        {/* `overflow-visible` undoes the panel's clip: the row menu below is
+            itself a panel and has to be able to leave this one. */}
+        <div className="dropdown-panel absolute top-full right-0 left-0 mt-1 min-w-64 overflow-visible">
           {/* Scrolling is dropped while a row menu is open so the popover is not clipped by this container. */}
           <div
             className={`max-h-64 p-1 ${

@@ -6,6 +6,7 @@ import { Sparkles } from 'lucide-react';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
+import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
@@ -34,7 +35,14 @@ export function SkillsSettingsPage() {
               <EmptyState icon={<Sparkles size={ICON_LG} />} title={s.noSkills} />
             </Card>
           ) : (
-            <SettingsSection title={s.installedTitle}>
+            <SettingsSection
+              title={s.installedTitle}
+              notice={
+                skills.some((skill) => skill.shadowed) ? (
+                  <Callout tone="info">{s.shadowedNotice}</Callout>
+                ) : undefined
+              }
+            >
               {skills.map((skill) => (
                 <SkillRow key={skill.key} descriptor={skill} />
               ))}

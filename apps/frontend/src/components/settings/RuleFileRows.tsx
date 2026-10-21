@@ -21,7 +21,7 @@ interface RuleFileRowsProps {
     injectionRoleUser: string;
     frequencyLabel: string;
     frequencyFirstTurn: string;
-    frequencyFirstTurnHint: string;
+    frequencyHint: string;
     frequencyEveryTurn: string;
     removeRule: string;
     rulePathLabel: string;
@@ -115,11 +115,9 @@ export function RuleFileRows({
         />
       </SettingsRow>
 
-      <SettingsRow
-        label={labels.frequencyLabel}
-        hint={setting.sendFrequency === 'first-turn' ? labels.frequencyFirstTurnHint : undefined}
-        layout="stacked"
-      >
+      {/* The hint does not depend on the choice: a line that came and went with it
+          moved the control up by a line under the pointer. */}
+      <SettingsRow label={labels.frequencyLabel} hint={labels.frequencyHint} layout="stacked">
         <SettingsSegmented
           kind="radio"
           name={`freq-${setting.id}`}

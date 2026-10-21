@@ -2,7 +2,7 @@ import type { GalleryItem } from '@mangostudio/shared/types';
 import { Download, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useRef } from 'react';
-import { Button } from '@/components/ui/Button';
+import { Button, buttonClassName } from '@/components/ui/Button';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
@@ -16,7 +16,14 @@ interface GalleryLightboxProps {
 }
 
 /**
- * The full image over the scrim, with its prompt and a download link.
+ * The full image on a solid `canvas` page of its own, with its prompt, a way to
+ * close it and a download link.
+ *
+ * Solid, not the `scrim` a dialog sits on: that is a 55% (dark) or 32% (light)
+ * veil, thin enough that the page behind an image viewer shows through at
+ * two-thirds strength — on a phone the tile that was tapped reappeared above
+ * and below the caption, so the screen read image, card, image. A viewer has
+ * nothing to show of the page behind it.
  *
  * Takes the selected item rather than owning it: the gallery grid and the
  * studio's recent strip both open this, and neither should have to reimplement
@@ -48,23 +55,12 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
           aria-modal="true"
           aria-label={t.gallery.lightboxLabel}
           // The overlay is the dialog rather than the panel inside it, so the
-          // close button in its corner is part of the ring Tab cycles.
+          // close button in the caption card is part of the ring Tab cycles.
           tabIndex={-1}
           {...overlay}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-scrim p-4 outline-none md:p-8"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-canvas p-4 outline-none md:p-8"
           onClick={onClose}
         >
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon"
-            aria-label={t.gallery.close}
-            className="absolute top-4 right-4"
-            onClick={onClose}
-          >
-            <X size={ICON_MD} />
-          </Button>
-
           <motion.div
             {...dialogPanel}
             className="relative flex max-h-full w-full max-w-5xl flex-col items-center"
@@ -76,18 +72,33 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
               className="max-h-[75vh] max-w-full rounded-lg object-contain"
               referrerPolicy="no-referrer"
             />
-            <div className="mt-4 flex w-full max-w-2xl flex-col gap-4 rounded-md border border-stroke bg-surface-raised p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-4 flex w-full max-w-2xl flex-col gap-4 rounded-md border border-stroke bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="min-w-0 text-sm text-fg">{item.prompt}</p>
-              <a
-                href={item.imageUrl}
-                download={buildGeneratedImageFilename(t.common.downloadFilenamePrefix, item.id)}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex h-8 shrink-0 items-center justify-center gap-2 self-start rounded-sm bg-accent px-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-hover active:bg-accent-pressed sm:self-auto"
-              >
-                <Download size={ICON_MD} />
-                {t.gallery.download}
-              </a>
+              {/* Close first, the primary last, at natural width: the same footer
+                  every dialog in the app ends in. It used to be pinned to the
+                  window's corner, on top of the header's account button. */}
+              <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="icon"
+                  aria-label={t.gallery.close}
+                  title={t.gallery.close}
+                  onClick={onClose}
+                >
+                  <X size={ICON_MD} />
+                </Button>
+                <a
+                  href={item.imageUrl}
+                  download={buildGeneratedImageFilename(t.common.downloadFilenamePrefix, item.id)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={buttonClassName('primary')}
+                >
+                  <Download size={ICON_MD} />
+                  {t.gallery.download}
+                </a>
+              </div>
             </div>
           </motion.div>
         </motion.div>

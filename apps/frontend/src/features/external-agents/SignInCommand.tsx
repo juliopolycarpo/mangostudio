@@ -24,9 +24,12 @@ export function SignInCommand({ command, className }: SignInCommandProps) {
   const { copy, copied } = useClipboard();
   return (
     <div className={cn('flex items-center gap-2', className)}>
-      <code className="min-w-0 flex-1 truncate rounded-md border border-stroke bg-canvas px-2 py-1 font-mono text-xs text-fg">
-        {command}
-      </code>
+      {/* As tall as the copy button beside it (and as tall as its 44px on a touch
+          screen), with the command centred in it: a field sized by its padding
+          came out a few pixels short of the button. */}
+      <div className="flex h-7 min-w-0 flex-1 items-center rounded-md border border-stroke bg-canvas px-2 pointer-coarse:h-11">
+        <code className="min-w-0 truncate font-mono text-xs text-fg">{command}</code>
+      </div>
       <Button
         variant="subtle"
         size="sm"

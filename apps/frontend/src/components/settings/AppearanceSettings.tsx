@@ -5,6 +5,7 @@ import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { SettingToggle } from '@/components/settings/SettingToggle';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useGlobalSettings } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import type { CodeThemeConfig, ThemeConfig } from '@/hooks/use-theme';
@@ -27,8 +28,10 @@ const THEME_I18N_KEYS = {
 
 /**
  * A code theme as a tile: a live sample of the theme above its name. The
- * current theme is the accent border plus a check, so selection is never the
- * colour alone.
+ * current theme is marked as the current item is everywhere else — a neutral
+ * fill and the accent bar on the caption's leading edge — plus a check and a
+ * firmer border, so selection is never the colour alone and the tile keeps one
+ * border width whether or not it is chosen.
  */
 function ThemeCard({
   themeId,
@@ -47,12 +50,17 @@ function ThemeCard({
       onClick={onClick}
       aria-pressed={selected}
       className={cn(
-        'cursor-pointer overflow-hidden rounded-sm border-2 text-left transition-colors',
-        selected ? 'border-accent' : 'border-stroke hover:border-stroke-strong'
+        'cursor-pointer overflow-hidden rounded-sm border text-left transition-colors',
+        selected ? 'border-stroke-strong' : 'border-stroke hover:border-stroke-strong'
       )}
     >
       <ThemePreviewSample themeId={themeId} />
-      <div className="flex items-center justify-between gap-2 bg-surface px-3 py-2 text-xs font-medium text-fg">
+      <div
+        className={cn(
+          'relative flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-fg',
+          selected ? cn('bg-fill-selected', SELECTION_BAR) : 'bg-surface'
+        )}
+      >
         {label}
         {selected ? (
           <Check size={ICON_SM} className="shrink-0 text-accent-fg" aria-hidden="true" />

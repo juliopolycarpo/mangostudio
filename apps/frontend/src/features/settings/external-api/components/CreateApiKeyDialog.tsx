@@ -5,8 +5,9 @@ import {
   type ApiKeyScope,
   type CreateApiKeyResponse,
 } from '@mangostudio/shared/api-keys';
-import { Check, Copy, KeyRound, X } from 'lucide-react';
+import { Check, Copy, KeyRound } from 'lucide-react';
 import { useState } from 'react';
+import { SettingsField } from '@/components/settings/SettingsField';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
@@ -15,7 +16,7 @@ import { Select } from '@/components/ui/Select';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_MD } from '@/lib/icon-sizes';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { scopeHint, scopeLabel } from '../format';
 import { useCreateApiKey } from '../hooks/use-api-key-mutations';
@@ -108,7 +109,7 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
         </code>
         <div>
           <Button variant="secondary" size="sm" onClick={() => void copy(created.key)}>
-            {copied ? <Check size={ICON_MD} /> : <Copy size={ICON_MD} />}
+            {copied ? <Check size={ICON_SM} /> : <Copy size={ICON_SM} />}
             {copied ? reveal.copied : reveal.copy}
           </Button>
         </div>
@@ -120,20 +121,9 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
   return (
     <Dialog
       title={labels.title}
-      description={scopeHint(t, scope)}
+      description={labels.description}
       onClose={onClose}
       closeDisabled={pending}
-      headerAction={
-        <Button
-          variant="subtle"
-          size="icon"
-          aria-label={labels.cancelButton}
-          disabled={pending}
-          onClick={onClose}
-        >
-          <X size={ICON_MD} />
-        </Button>
-      }
       notice={submitError ? <Callout tone="danger">{submitError}</Callout> : undefined}
       footer={
         <>
@@ -160,10 +150,8 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
         error={nameError ?? undefined}
       />
 
-      <div className="space-y-1">
-        <label htmlFor="api-key-scope" className="block text-sm font-medium text-fg">
-          {labels.scopeLabel}
-        </label>
+      {/* The hint belongs to the field it describes and follows the choice. */}
+      <SettingsField label={labels.scopeLabel} htmlFor="api-key-scope" hint={scopeHint(t, scope)}>
         <Select
           id="api-key-scope"
           value={scope}
@@ -174,7 +162,7 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
             label: scopeLabel(t, value),
           }))}
         />
-      </div>
+      </SettingsField>
 
       <div className="space-y-1">
         <Input

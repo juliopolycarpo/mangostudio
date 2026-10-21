@@ -100,6 +100,21 @@ describe('HealthPage', () => {
     }
   });
 
+  // An optional tool that is not there is neutral, not a warning: the triangle
+  // asks for something to be done, and there is nothing to do about a Codex the
+  // person never installed.
+  it('draws what can wait without the warning triangle, and what blocks with the alert', async () => {
+    installHealthScenario();
+
+    await renderWithRouter(<HealthPage />);
+
+    await waitFor(() => expect(screen.getAllByTestId('health-list')).toHaveLength(2));
+    const [needsAction, canWait] = screen.getAllByTestId('health-list') as HTMLElement[];
+    expect(needsAction.querySelector('.lucide-circle-alert')).not.toBeNull();
+    expect(canWait.querySelector('.lucide-triangle-alert')).toBeNull();
+    expect(canWait.querySelectorAll('.lucide-circle-dashed')).toHaveLength(2);
+  });
+
   // fnm is probed as a binary and as a version manager, and both raise the same
   // finding. One absent tool is one row.
   it('lists a tool the page probes twice once', async () => {

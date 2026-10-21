@@ -1,5 +1,5 @@
 import type { Message } from '@mangostudio/shared/chat';
-import { Bookmark, Download, ImageOff, Sparkles } from 'lucide-react';
+import { Download, ImageOff, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -9,15 +9,21 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { ImageActionBar } from './ImageActionBar';
+import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface AssistantImageTurnProps {
   msg: Message;
 }
 
 /**
- * Renders the right-hand column of a legacy image turn: style parameters, an
- * inline error message, or a neutral diffusion-path placeholder.
+ * What a legacy image turn says beside its picture: style parameters, or — when
+ * there is no picture — an inline error message or a neutral diffusion-path
+ * placeholder.
+ *
+ * Whether there is anything to say is decided once, by {@link hasImageTurnMeta},
+ * so the grid around it can drop its second column instead of leaving it empty.
  */
 function ImageTurnMeta({ msg }: AssistantImageTurnProps) {
   const { t } = useI18n();
@@ -44,9 +50,15 @@ function ImageTurnMeta({ msg }: AssistantImageTurnProps) {
   );
 }
 
+/** Whether {@link ImageTurnMeta} has a single thing to draw for this turn. */
+function hasImageTurnMeta(msg: Message): boolean {
+  return (msg.styleParams?.length ?? 0) > 0 || !msg.imageUrl;
+}
+
 /**
  * Legacy single-image generation result (predating `generated_image` parts):
- * shows the produced image with download/save actions plus the meta column.
+ * shows the produced image with its download action, plus the meta column when
+ * there is one.
  *
  * Usage: <AssistantImageTurn msg={msg} />
  */
@@ -55,59 +67,60 @@ export function AssistantImageTurn({ msg }: AssistantImageTurnProps) {
   // Local to this row so a broken image never re-renders the whole feed.
   const [imageFailed, setImageFailed] = useState(false);
   const imageUrl = msg.imageUrl;
+  // A picture with no style parameters has nothing to sit beside, and a second
+  // column of nothing left the picture hugging the left half of the row.
+  const showsMeta = hasImageTurnMeta(msg);
 
   return (
-    <div className="flex w-full flex-col gap-4">
+    // One indent in from the rail, like every other block of a turn.
+    <div className="flex w-full flex-col gap-4 pl-4">
       {msg.generationTime && (
         <div className="flex w-fit items-center gap-2 text-xs text-fg-muted">
           <Sparkles size={ICON_SM} />
           <span>{t.chat.feed.thoughtFor.replace('{time}', msg.generationTime)}</span>
         </div>
       )}
-      <div className="grid w-full grid-cols-1 items-start gap-6 md:grid-cols-2">
+      <div
+        className={cn(
+          'grid w-full grid-cols-1 items-start gap-6',
+          imageUrl && showsMeta && 'md:grid-cols-2'
+        )}
+      >
         {imageUrl && (
-          <div className="group relative aspect-[4/5] overflow-hidden rounded-md border border-stroke bg-surface">
+          // The same card a generated image part draws: a reserved frame the
+          // picture is fitted into, not a 4:5 crop that cut off its edges.
+          <div className="group relative max-w-md overflow-hidden rounded-md border border-stroke bg-surface">
             {imageFailed ? (
               <EmptyState
                 icon={<ImageOff size={ICON_LG} />}
                 title={t.chat.feed.imageUnavailable}
                 hint={t.chat.feed.imageUnavailableHint}
-                className="h-full"
+                className="aspect-square"
               />
             ) : (
               <>
-                <img
+                <ReservedAspectImage
                   src={imageUrl}
                   alt={t.chat.feed.generatedImageAlt}
-                  className="size-full object-cover"
-                  decoding="async"
-                  onError={() => setImageFailed(true)}
+                  className="bg-canvas"
+                  objectFit="contain"
+                  onLoadError={() => setImageFailed(true)}
                 />
-                <ImageActionBar>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="subtle"
-                      size="icon"
-                      onClick={() =>
-                        triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix)
-                      }
-                      title={t.chat.feed.download}
-                    >
-                      <Download size={ICON_MD} />
-                    </Button>
-                    <Button variant="subtle" size="icon" title={t.chat.feed.saveToGallery}>
-                      <Bookmark size={ICON_MD} />
-                    </Button>
-                  </div>
-                  <Button variant="secondary" size="sm">
-                    {t.chat.feed.regenerate}
+                <ImageActionBar className="justify-end">
+                  <Button
+                    variant="subtle"
+                    size="icon"
+                    onClick={() => triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix)}
+                    title={t.chat.feed.download}
+                  >
+                    <Download size={ICON_MD} />
                   </Button>
                 </ImageActionBar>
               </>
             )}
           </div>
         )}
-        <ImageTurnMeta msg={msg} />
+        {showsMeta && <ImageTurnMeta msg={msg} />}
       </div>
     </div>
   );

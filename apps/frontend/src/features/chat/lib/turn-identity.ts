@@ -15,7 +15,17 @@ import { deriveMonogram } from '@/features/environments/identity/resolve';
  */
 export type TurnIdentity =
   | { readonly kind: 'agent'; readonly targetId: ExternalAgentTargetId }
-  | { readonly kind: 'model'; readonly name: string; readonly monogram: string };
+  | {
+      readonly kind: 'model';
+      readonly name: string;
+      readonly monogram: string;
+      /**
+       * The id the turn stored, when it stored one. Kept beside the name so the
+       * exact value stays reachable (a tooltip) once the name is friendlier, and
+       * so a name that *is* the id can be told from one that was looked up.
+       */
+      readonly modelId: string | null;
+    };
 
 /** The `externalAgents.target` slice of the dictionary, passed in to stay i18n-free. */
 type TargetLabels = Record<ExternalAgentTargetId, string>;
@@ -48,18 +58,26 @@ function modelDisplayName(modelName: string, targets: TargetLabels): string {
  * key the API rejects and no user could ever edit. It gets a plain monogram
  * instead, derived from the same name the reader sees.
  *
- * Usage: deriveTurnIdentity(msg, parts, t.externalAgents.target, 'AI model')
+ * A model the catalog knows is named the way the composer names it
+ * (`Claude Sonnet 4.5`, not `claude-sonnet-4-5-20250929`); one it no longer
+ * lists keeps its stored id, which is all the transcript has left of it.
+ *
+ * Usage: deriveTurnIdentity(msg, parts, t.externalAgents.target, 'AI model', modelNames)
  */
 export function deriveTurnIdentity(
   msg: Message,
   parts: readonly MessagePart[],
   targets: TargetLabels,
-  fallbackName: string
+  fallbackName: string,
+  modelNames?: ReadonlyMap<string, string>
 ): TurnIdentity {
   const externalTurn = parts.find((part) => part.type === 'external_turn');
   if (externalTurn?.type === 'external_turn') {
     return { kind: 'agent', targetId: externalTurn.targetId };
   }
-  const name = msg.modelName ? modelDisplayName(msg.modelName, targets) : fallbackName;
-  return { kind: 'model', name, monogram: deriveMonogram(name) };
+  const modelId = msg.modelName ?? null;
+  const name = modelId
+    ? (modelNames?.get(modelId) ?? modelDisplayName(modelId, targets))
+    : fallbackName;
+  return { kind: 'model', name, monogram: deriveMonogram(name), modelId };
 }

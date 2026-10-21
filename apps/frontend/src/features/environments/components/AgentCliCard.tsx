@@ -56,6 +56,7 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
       actions={
         <>
           <HealthBadge health={status.health} />
+          <AgentAuthState status={status} />
           <ProbeButton
             isPending={probe.isPending}
             isError={probe.isError}
@@ -98,36 +99,42 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
         ) : null
       }
     >
-      <dl className="grid gap-2 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-4">
+      <dl className="grid items-baseline gap-2 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-4">
         <dt className="text-fg-muted">{e.agents.configHomeLabel}</dt>
         <dd className="min-w-0 break-all font-mono text-xs text-fg-muted">{status.configHome}</dd>
       </dl>
 
-      <AgentAuthState status={status} />
+      {/* What "unknown" means, in the open: the badge says it, this says why. */}
+      {status.authSignal === 'unknown' && (
+        <p className="text-xs text-fg-muted">{e.agents.authUnknownHint}</p>
+      )}
 
       <FindingList findings={status.findings} />
 
       {status.locations.length > 0 && (
         <section className="space-y-2">
           <MicroLabel as="p">{e.agents.locations}</MicroLabel>
-          <ul className="space-y-1.5">
+          {/* Path, state, count: three columns shared by every row, so "writable" and
+              "4 entries" start at the same x on each of them. Each row takes the
+              columns over through a subgrid and stays a list item. */}
+          <ul className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-x-4 gap-y-1.5 text-xs">
             {status.locations.map((location) => (
               <li
                 key={location.id}
-                className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
+                className="col-span-3 grid grid-cols-subgrid items-baseline"
                 data-testid="library-location"
               >
                 <span className="min-w-0 break-all font-mono text-fg-muted">
                   {location.path ?? location.id}
                 </span>
                 <span className="text-fg-muted">{locationState(e, location)}</span>
-                {location.entryCount !== undefined && (
-                  <span className="text-fg-muted">
-                    {formatMessage(e.agents.locationEntries, {
-                      count: String(location.entryCount),
-                    })}
-                  </span>
-                )}
+                <span className="text-fg-muted">
+                  {location.entryCount !== undefined
+                    ? formatMessage(e.agents.locationEntries, {
+                        count: String(location.entryCount),
+                      })
+                    : null}
+                </span>
               </li>
             ))}
           </ul>

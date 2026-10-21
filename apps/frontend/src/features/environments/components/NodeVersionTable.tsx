@@ -69,8 +69,13 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
 
   if (!status.installed) {
     return (
-      <section className="space-y-3" data-testid="node-version-table">
-        <p className="text-sm text-fg-muted">
+      // The note and the way out are one thought, so they share a line (and
+      // wrap together on a narrow card), in the card's own small type.
+      <section
+        className="flex flex-wrap items-center gap-x-3 gap-y-2"
+        data-testid="node-version-table"
+      >
+        <p className="text-xs text-fg-muted">
           {formatMessage(e.versions.managerMissing, { manager })}
         </p>
         {/* What the user wants here is a Node, not a version manager. The Node

@@ -1,5 +1,5 @@
 /**
- * The studio landing: two ways in, and the newest few images.
+ * The studio landing: one way in, and the newest few images.
  *
  * The gallery query is faked rather than fetched — what this covers is the
  * landing's own wiring (the image toggle it presses, the strip it caps) and not
@@ -84,12 +84,6 @@ describe('Studio landing', () => {
 
     expect(setImageToolIntent).toHaveBeenCalledWith(true);
     expect(navigateMock).toHaveBeenCalledWith({ to: '/' });
-  });
-
-  it('offers the gallery as the other way in', () => {
-    renderStudio();
-
-    expect(screen.getByRole('link', { name: /open gallery/i })).toHaveAttribute('href', '/gallery');
   });
 
   it('says so plainly when nothing has been generated', () => {

@@ -54,6 +54,7 @@ flat one, how to keep it there, and how to add a deliberate exception.
 - `font-bold` and friends, `uppercase`, `tracking-wide(r|st)`;
 - opacity modifiers on semantic colours, and raw `black` / `white` overlays;
 - `scale-*` and `transition-all`;
+- an `EmptyState` whose icon has a literal `size={24}` instead of `ICON_LG`;
 - `2.5` / `3.5` spacing steps.
 
 **Adding an exception.** Put the file and the rule's message in `ALLOWED` in the test,

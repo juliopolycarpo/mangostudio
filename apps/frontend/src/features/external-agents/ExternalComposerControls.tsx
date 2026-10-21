@@ -14,6 +14,12 @@
  * Model display uses `displayName` when the vendor gave one, and `hidden`
  * entries are left out. The old Cursor provider's mistake was flattening a rich
  * catalog into bare ids; nothing here asserts how many models there should be.
+ *
+ * A runner with neither a catalog nor a permission pair — one that is not
+ * installed, or whose descriptor has not landed — renders nothing visible at
+ * all, which is why {@link hasExternalComposerControls} sits in this file: the
+ * status line asks it before drawing a strip for these controls, and it must
+ * agree with what the component below will actually draw.
  */
 
 import type {
@@ -47,6 +53,28 @@ export interface ExternalComposerControlsProps {
   }) => void;
 }
 
+/** What the vendor advertised and did not mark `hidden`: the catalog the picker offers. */
+function visibleModels(descriptor: ExternalAgentDescriptor | undefined) {
+  return (descriptor?.models ?? []).filter((candidate) => candidate.hidden !== true);
+}
+
+/**
+ * Whether {@link ExternalComposerControls} has anything to draw for this runner.
+ *
+ * Decided from the descriptor's data alone, not from `installed`: the hub already
+ * answers `supportedConfigurations: []` and no models for a target that is not
+ * there, and a vendor that is there but advertises neither would be an empty strip
+ * all the same. An effort picker needs a visible model to belong to, so the
+ * efforts add nothing to the test.
+ */
+export function hasExternalComposerControls(
+  descriptor: ExternalAgentDescriptor | undefined
+): boolean {
+  return (
+    visibleModels(descriptor).length > 0 || (descriptor?.supportedConfigurations.length ?? 0) > 0
+  );
+}
+
 export function ExternalComposerControls({
   descriptor,
   model,
@@ -62,7 +90,7 @@ export function ExternalComposerControls({
   const { t } = useI18n();
   const labels = t.externalAgents;
 
-  const models = (descriptor?.models ?? []).filter((candidate) => candidate.hidden !== true);
+  const models = visibleModels(descriptor);
   const selectedModel =
     models.find((candidate) => candidate.id === model) ??
     models.find((candidate) => candidate.isDefault);

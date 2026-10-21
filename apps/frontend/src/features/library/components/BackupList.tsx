@@ -29,7 +29,7 @@ import type { PropagationBackupSet, PropagationUndo } from '@mangostudio/shared/
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Archive, ArrowLeft, Pin, Server, Timer, Trash2, Undo2 } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -40,6 +40,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { purgeBackup, undoPropagation } from '../api';
+import { resourceKeyLabel } from '../format';
 import { backupUsageQueryOptions, libraryKeys } from '../queries';
 import { BackupSummary, formatBackupUsage } from './BackupSummary';
 import { InlineNote } from './InlineNote';
@@ -282,38 +283,41 @@ function BackupRow({
       data-operation={set.operation}
       data-availability={set.availability}
     >
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-        <span className="text-fg" data-testid="backup-created">
-          <span className="text-fg-subtle">{l.backups.columnCreated} </span>
+      {/*
+        Key and value are two elements, not one run of words: "Origin Apply"
+        read as a phrase when only a gap divided the pairs. The key is quiet, the
+        value is the text, and a `·` after every pair but the last says where one
+        ends.
+      */}
+      <dl className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+        <BackupFact label={l.backups.columnCreated} testId="backup-created">
           {formatRelativeTime(set.createdAtMs, locale)}
-        </span>
+        </BackupFact>
         {/*
           Only the machine knows what a set holds, so a row assembled from the
           hub's index omits the cell entirely. Printing "0 entries" there would
           state as fact the one thing an index row cannot know.
         */}
         {set.availability === 'available' && (
-          <span className="text-fg" data-testid="backup-contents">
-            <span className="text-fg-subtle">{l.backups.columnContents} </span>
+          <BackupFact label={l.backups.columnContents} testId="backup-contents">
             {/*
               A v1 manifest carries no resource keys, so the row falls back to the
               entry count rather than printing an empty cell that reads as "this
-              backup holds nothing".
+              backup holds nothing". The kind stays in front of each name: a skill
+              and a command can both be called `release`.
             */}
             {set.resourceKeys.length > 0
-              ? set.resourceKeys.join(', ')
+              ? set.resourceKeys.map((key) => resourceKeyLabel(key, l.kinds)).join(', ')
               : formatMessage(l.backups.contentsUnknown, { count: String(set.entryCount) })}
-          </span>
+          </BackupFact>
         )}
-        <span className="text-fg-muted" data-testid="backup-size">
-          <span className="text-fg-subtle">{l.backups.columnSize} </span>
+        <BackupFact label={l.backups.columnSize} testId="backup-size">
           {formatBytes(set.sizeBytes)}
-        </span>
-        <span className="text-fg-muted" data-testid="backup-origin">
-          <span className="text-fg-subtle">{l.backups.columnOrigin} </span>
+        </BackupFact>
+        <BackupFact label={l.backups.columnOrigin} testId="backup-origin">
           {l.backups.origin[set.operation]}
-        </span>
-      </div>
+        </BackupFact>
+      </dl>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="break-all font-mono text-fg-subtle text-micro">{set.backupId}</span>
@@ -379,11 +383,10 @@ function BackupRow({
           </>
         ) : (
           <Button
-            variant="subtle"
+            variant="subtle-danger"
             size="sm"
             onClick={onConfirm}
             disabled={purgePending}
-            className="text-danger"
             data-testid="purge-backup"
           >
             <Trash2 size={ICON_MD} />
@@ -437,6 +440,26 @@ function BackupRow({
         </p>
       )}
     </li>
+  );
+}
+
+/** One `key value` pair of a backup row; the `·` between pairs is drawn by the pair itself. */
+function BackupFact({
+  label,
+  testId,
+  children,
+}: {
+  readonly label: string;
+  readonly testId: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 gap-1.5 not-last:after:text-fg-subtle not-last:after:content-['·']">
+      <dt className="shrink-0 text-fg-subtle after:content-[':']">{label}</dt>
+      <dd className="min-w-0 text-fg" data-testid={testId}>
+        {children}
+      </dd>
+    </div>
   );
 }
 

@@ -63,8 +63,11 @@ describe('i18n provider-neutral copy', () => {
   });
 
   it('provides provider settings labels', () => {
-    expect(en.settings.providers.maxOutputTokensPlaceholder).toContain('{limit}');
-    expect(ptBR.settings.providers.maxOutputTokensPlaceholder).toContain('{limit}');
+    // The range is the hint's job; the placeholder names what an empty field means.
+    expect(en.settings.providers.maxOutputTokensHint).toContain('{limit}');
+    expect(ptBR.settings.providers.maxOutputTokensHint).toContain('{limit}');
+    expect(en.settings.providers.maxOutputTokensPlaceholder).not.toContain('{limit}');
+    expect(ptBR.settings.providers.maxOutputTokensPlaceholder).not.toContain('{limit}');
   });
 
   it('provides ChatGPT connector OAuth labels', () => {

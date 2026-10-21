@@ -27,6 +27,7 @@ import {
   mcpServerPromptsQueryOptions,
   mcpServerResourcesQueryOptions,
 } from '@/features/settings/mcp/queries';
+import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -58,6 +59,7 @@ export function McpComposerMenu({
   const { t } = useI18n();
   const labels = t.chat.input;
   const [open, setOpen] = useState(false);
+  const { containerRef, triggerRef, onKeyDown } = useDismissable(open, () => setOpen(false));
   const [argumentForm, setArgumentForm] = useState<ArgumentFormState | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -86,6 +88,9 @@ export function McpComposerMenu({
 
   const handlePromptClick = (serverId: string, prompt: McpPromptDescriptor) => {
     if (prompt.arguments.length > 0) {
+      // The form is a modal: the menu behind it would be one more layer to
+      // dismiss, and the press that lands in the dialog is outside the menu.
+      setOpen(false);
       setArgumentForm({ serverId, prompt });
       return;
     }
@@ -108,46 +113,63 @@ export function McpComposerMenu({
   };
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((value) => !value);
-          setErrorText(null);
-        }}
-        disabled={disabled}
-        aria-expanded={open}
-        className="terminal-chip composer-tool-chip"
-        title={labels.mcpMenuButton}
-      >
-        <Plug size={ICON_SM} className="shrink-0" />
-        <span className="hidden sm:inline">{t.tools.sources.mcp}</span>
-      </button>
+    <>
+      {/* Not `relative`: the panel is anchored to the composer, not to this chip. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper. */}
+      <div ref={containerRef} onKeyDown={onKeyDown}>
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => {
+            setOpen((value) => !value);
+            setErrorText(null);
+          }}
+          disabled={disabled}
+          aria-expanded={open}
+          className="composer-chip composer-tool-chip"
+          title={labels.mcpMenuButton}
+        >
+          <Plug size={ICON_SM} className="shrink-0" />
+          <span className="hidden sm:inline">{t.tools.sources.mcp}</span>
+        </button>
 
-      {open && (
-        <ComposerPopover className="max-h-96 space-y-3 overflow-y-auto p-3">
-          <MicroLabel as="p">{labels.mcpMenuButton}</MicroLabel>
-          {errorText && <Callout tone="danger" role="alert" title={errorText} />}
-          <McpMenuCatalog
-            chatId={chatId}
-            busy={busy}
-            onPromptClick={handlePromptClick}
-            onResourceClick={(serverId, uri) => void handleResourceClick(serverId, uri)}
-          />
-        </ComposerPopover>
-      )}
+        {open && (
+          <ComposerPopover
+            anchor={triggerRef}
+            className="app-scrollbar max-h-96 space-y-3 overflow-y-auto p-3"
+          >
+            <MicroLabel as="p">{labels.mcpMenuButton}</MicroLabel>
+            {errorText && <Callout tone="danger" role="alert" title={errorText} />}
+            <McpMenuCatalog
+              chatId={chatId}
+              busy={busy}
+              onPromptClick={handlePromptClick}
+              onResourceClick={(serverId, uri) => void handleResourceClick(serverId, uri)}
+            />
+          </ComposerPopover>
+        )}
+      </div>
 
+      {/* Outside the wrapper above, so an Escape typed in the form closes the form
+          (the dialog's own listener) instead of being taken by the menu, and a
+          press in it is not read as a press on the menu. */}
       {argumentForm && (
         <McpPromptArgumentDialog
           prompt={argumentForm.prompt}
           busy={busy}
-          onCancel={() => setArgumentForm(null)}
+          // The menu is closed while the form is up, so a failed insert would
+          // have nowhere to say so but here.
+          errorText={errorText}
+          onCancel={() => {
+            setArgumentForm(null);
+            setErrorText(null);
+          }}
           onSubmit={(values) =>
             void insertResolvedPrompt(argumentForm.serverId, argumentForm.prompt, values)
           }
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -392,6 +414,7 @@ function McpEntryButton({
 interface McpPromptArgumentDialogProps {
   prompt: McpPromptDescriptor;
   busy: boolean;
+  errorText: string | null;
   onCancel: () => void;
   onSubmit: (values: Record<string, string>) => void;
 }
@@ -399,6 +422,7 @@ interface McpPromptArgumentDialogProps {
 function McpPromptArgumentDialog({
   prompt,
   busy,
+  errorText,
   onCancel,
   onSubmit,
 }: McpPromptArgumentDialogProps) {
@@ -417,6 +441,7 @@ function McpPromptArgumentDialog({
         if (missing.length === 0) onSubmit(values);
       }}
       onClose={onCancel}
+      notice={errorText ? <Callout tone="danger" role="alert" title={errorText} /> : undefined}
       footer={
         <>
           <Button variant="secondary" type="button" onClick={onCancel}>

@@ -30,7 +30,7 @@ export function ExternalSteerPartBlock({ part }: ExternalSteerPartBlockProps) {
   const rejected = part.status === 'rejected';
 
   return (
-    <div className="max-w-2xl space-y-2">
+    <div className="max-w-(--timeline-card-max) space-y-2">
       {/* The user's own words, so it wears the user's message: a `surface`
           balloon with a hairline. Whether it landed is the callout's job. */}
       <div className="rounded-lg border border-stroke bg-surface px-3 py-2 text-sm text-fg">

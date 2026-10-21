@@ -19,6 +19,8 @@ interface ChatMessageRowProps {
   onQuestionSubmit?: (prompt: string) => void;
   /** Resolved once per feed by `ChatFeed`; only an assistant row reads it. */
   toolIdentities: ToolIdentityResolver;
+  /** Catalog names by model id, resolved once per feed; only an assistant row reads it. */
+  modelNames?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -39,6 +41,7 @@ function ChatMessageRowComponent({
   fileCheckpoint,
   onQuestionSubmit,
   toolIdentities,
+  modelNames,
 }: ChatMessageRowProps) {
   const isImageTurn = isImageInteraction(message);
   const isUser = message.role === 'user';
@@ -81,6 +84,7 @@ function ChatMessageRowComponent({
             fileCheckpoint={fileCheckpoint}
             onQuestionSubmit={onQuestionSubmit}
             toolIdentities={toolIdentities}
+            modelNames={modelNames}
           />
         )}
       </div>

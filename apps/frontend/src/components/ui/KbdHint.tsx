@@ -1,8 +1,11 @@
+import { CornerDownLeft } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 
 interface KbdHintProps {
-  /** The shortcut as displayed: `⌘K`, `⏎`, `Esc`. */
-  keys: string;
+  /** The shortcut as displayed: `⌘K`, `Esc`, or a glyph drawn as an icon, like {@link ReturnKey}. */
+  keys: ReactNode;
   className?: string;
 }
 
@@ -16,8 +19,24 @@ export function KbdHint({ keys, className }: KbdHintProps) {
       )}
     >
       {/* Hidden from the accessible name: the shortcut hint must not rename the
-          button it sits in ("Send", not "Send ⏎"). */}
-      <span aria-hidden="true">{keys}</span>
+          button it sits in ("Send", not "Send ⏎"). A flex box so an icon is
+          centred on the keycap rather than sitting on a text baseline. */}
+      <span aria-hidden="true" className="flex items-center">
+        {keys}
+      </span>
     </kbd>
   );
+}
+
+/**
+ * The Return key as an icon.
+ *
+ * The `⏎` text glyph renders about 7px wide and hairline-thin at 11px mono, so
+ * a keycap holding it read as an empty rounded square — and on the accent fill
+ * its `border-current` outline was heavier than the glyph inside.
+ *
+ * // Usage: <KbdHint keys={<ReturnKey />} />
+ */
+export function ReturnKey() {
+  return <CornerDownLeft size={ICON_SM} />;
 }

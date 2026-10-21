@@ -4,6 +4,12 @@
  * optional headline answering "what state is it in", and the body below.
  * Six cards were each drawing this header by hand.
  *
+ * Every card states its facts the same way, `MachineFacts` of `MachineFact`
+ * rows: the name on the left, the value on the right, a hairline between. Two
+ * layouts on one page (a row here, a stacked pair there) made the cards look
+ * hand-built, and a stacked pair in a card as wide as the page left its value
+ * hugging the left edge with nothing to meet it.
+ *
  * // Usage: <MachineCard title={m.hub.title} headline={m.hub.running} testId="machine-hub-card">…</MachineCard>
  */
 
@@ -36,7 +42,9 @@ export function MachineCard({
   return (
     <section className={cn(TOOL_CARD_SURFACE, 'space-y-4 p-4 sm:p-6')} data-testid={testId}>
       <header className="space-y-1">
-        <div className="flex items-center justify-between gap-3">
+        {/* As tall as the badge that sits opposite the title in some cards, so the
+            headline starts on the same line whether or not this one has an action. */}
+        <div className="flex min-h-5 items-center justify-between gap-3">
           <MicroLabel as="h3">{title}</MicroLabel>
           {action}
         </div>
@@ -48,26 +56,38 @@ export function MachineCard({
   );
 }
 
-interface MachineFactProps {
-  readonly label: string;
-  readonly value: string;
-  /** A glyph before the fact when what it reports is wrong or worth a second look. */
-  readonly severity?: 'warn' | 'fail';
-  /** The release host's own text for a failed check — kept for a hover, not shown as the sentence. */
-  readonly title?: string;
+/** The facts of one card, a hairline between them. */
+export function MachineFacts({ children }: { readonly children: ReactNode }) {
+  return <dl className="divide-y divide-stroke">{children}</dl>;
 }
 
-/** One fact about the install: the name in prose, the value in mono underneath. */
-export function MachineFact({ label, value, severity, title }: MachineFactProps) {
+interface MachineFactProps {
+  readonly label: string;
+  /** The fact in mono, right-aligned. Left out when `children` is the fact (a badge). */
+  readonly value?: string;
+  /** A glyph before the label when what it reports is wrong or worth a second look. */
+  readonly severity?: 'warn' | 'fail';
+  /** The release host's own text for a failed check — kept for a hover on the value, not shown as the sentence. */
+  readonly title?: string;
+  /** A status that is better said as a word in a badge than as mono text. */
+  readonly children?: ReactNode;
+}
+
+/** One fact about the machine: the name in prose on the left, its value on the right. */
+export function MachineFact({ label, value, severity, title, children }: MachineFactProps) {
   return (
-    <div className="flex items-start gap-2 text-sm">
-      {severity ? <FindingIcon severity={severity} /> : null}
-      <div className="min-w-0">
-        <p className="text-fg-muted">{label}</p>
-        <p className="break-all font-mono text-xs text-fg" title={title}>
-          {value}
-        </p>
-      </div>
+    <div className="flex items-baseline justify-between gap-4 py-2 text-sm first:pt-0 last:pb-0">
+      <dt className="flex shrink-0 items-baseline gap-2 text-fg-muted">
+        {severity ? <FindingIcon severity={severity} /> : null}
+        {label}
+      </dt>
+      <dd className="min-w-0 text-right">
+        {children ?? (
+          <span className="break-all font-mono text-xs text-fg" title={title}>
+            {value}
+          </span>
+        )}
+      </dd>
     </div>
   );
 }

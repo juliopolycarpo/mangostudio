@@ -7,7 +7,7 @@ import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { getChatGptUsageHistory } from '../api';
 
 type ConnectorMessages = Messages['settings']['connectors'];
@@ -172,7 +172,7 @@ export function ChatGptUsageHistoryPanel({ connectorId }: { connectorId: string 
           tone="danger"
           action={
             <Button variant="subtle" size="sm" onClick={() => void historyQuery.refetch()}>
-              <RefreshCw size={ICON_MD} />
+              <RefreshCw size={ICON_SM} />
               {t.common.retry}
             </Button>
           }

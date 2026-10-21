@@ -10,14 +10,15 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence } from 'motion/react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { ComposerPopover } from '@/features/chat/components/ComposerPopover';
+import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
-import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 import { getModelSelectorPlaceholder } from '../../utils/model-utils';
 
@@ -48,8 +49,7 @@ export function ModelSelector({
   lockedProvider,
 }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const { popoverAbove } = useMotionPresets();
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { containerRef, triggerRef, onKeyDown } = useDismissable(isOpen, () => setIsOpen(false));
   const { t } = useI18n();
 
   const selectedModel = activeModels.find((m) => m.modelId === activeModel);
@@ -58,21 +58,6 @@ export function ModelSelector({
     unavailable: t.models.unavailable,
     noModelsAvailable: t.models.noModelsAvailable,
   });
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
 
   const handleToggle = () => {
     if (!isDisabled) setIsOpen(!isOpen);
@@ -109,12 +94,18 @@ export function ModelSelector({
       : null;
 
   return (
-    <div className="relative flex items-center" ref={containerRef}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    <div className="flex items-center" ref={containerRef} onKeyDown={onKeyDown}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={handleToggle}
         disabled={isDisabled}
-        aria-haspopup="listbox"
+        // `true`, not `listbox`: the panel is grouped (provider headings, a
+        // lock reason, badges, rows that cannot be chosen) and its rows are
+        // plain buttons, so promising a listbox's arrow-key model would be a
+        // claim nothing here keeps.
+        aria-haspopup="true"
         aria-expanded={isOpen}
         aria-label={t.chat.input.modelLabel}
         // The open state is styled off `aria-expanded` in `index.css`, so it
@@ -130,83 +121,70 @@ export function ModelSelector({
 
       <AnimatePresence>
         {isOpen && (
-          <motion.div
-            {...popoverAbove}
-            /* Upward: this control lives in the composer at the foot of the
-               viewport, and the downward panel it inherited from the header
-               opened off the bottom of the screen. The panel clips and the
-               list inside it scrolls, because `.dropdown-panel`'s own
-               `overflow: hidden` is unlayered and beats any utility set on it. */
-            className="dropdown-panel absolute bottom-full left-0 mb-2 w-80"
+          <ComposerPopover
+            animated
+            anchor={triggerRef}
+            className="app-scrollbar max-h-[60vh] space-y-1 overflow-y-auto p-1"
           >
-            <div className="hide-scrollbar max-h-[60vh] space-y-1 overflow-y-auto p-1">
-              {lockReason ? <p className="px-2 pt-1 text-xs text-fg-muted">{lockReason}</p> : null}
-              {Object.keys(groups).length === 0 ? (
-                <div className="px-2 py-2 text-sm text-fg-muted">{t.models.noModelsAvailable}</div>
-              ) : (
-                Object.entries(groups).map(([providerKey, models]) => (
-                  <div key={providerKey}>
-                    <MicroLabel as="div" className="px-2 pb-1 pt-2">
-                      {getProviderLabel(providerKey)}
-                    </MicroLabel>
-                    {models.map((model) => {
-                      const isLocked = lockedProvider != null && model.provider !== lockedProvider;
-                      const isSelected = activeModel === model.modelId && !isLocked;
-                      const isPreview = model.modelId.includes('preview');
-                      const showsReasoning = model.capabilities?.reasoning && !isLocked;
-                      const Icon = modelIcon(model.displayName);
-                      return (
-                        <button
-                          type="button"
-                          key={model.modelId}
-                          onClick={() => !isLocked && handleSelect(model.modelId)}
-                          disabled={isLocked}
+            {lockReason ? <p className="px-2 pt-1 text-xs text-fg-muted">{lockReason}</p> : null}
+            {Object.keys(groups).length === 0 ? (
+              <div className="px-2 py-2 text-sm text-fg-muted">{t.models.noModelsAvailable}</div>
+            ) : (
+              Object.entries(groups).map(([providerKey, models]) => (
+                <div key={providerKey}>
+                  <MicroLabel as="div" className="px-2 pb-1 pt-2">
+                    {getProviderLabel(providerKey)}
+                  </MicroLabel>
+                  {models.map((model) => {
+                    const isLocked = lockedProvider != null && model.provider !== lockedProvider;
+                    const isSelected = activeModel === model.modelId && !isLocked;
+                    const isPreview = model.modelId.includes('preview');
+                    const showsReasoning = model.capabilities?.reasoning && !isLocked;
+                    const Icon = modelIcon(model.displayName);
+                    return (
+                      <button
+                        type="button"
+                        key={model.modelId}
+                        onClick={() => !isLocked && handleSelect(model.modelId)}
+                        disabled={isLocked}
+                        className={cn(
+                          'flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left transition-colors',
+                          // A locked row is not faded: its name says which models
+                          // exist, and the line at the top says why they are out
+                          // of reach. The name steps down a text colour instead.
+                          isLocked
+                            ? 'cursor-not-allowed'
+                            : 'hover:bg-fill-hover active:bg-fill-pressed',
+                          isSelected && 'bg-fill-selected'
+                        )}
+                      >
+                        <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
+                          {isLocked ? <Lock size={ICON_MD} /> : <Icon size={ICON_MD} />}
+                        </span>
+                        <span
                           className={cn(
-                            'flex min-h-8 w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left transition-colors',
-                            // A locked row is not faded: its name says which models
-                            // exist, and the line at the top says why they are out
-                            // of reach. The name steps down a text colour instead.
-                            isLocked
-                              ? 'cursor-not-allowed'
-                              : 'hover:bg-fill-hover active:bg-fill-pressed',
-                            isSelected && 'bg-fill-selected'
+                            'min-w-0 flex-1 truncate text-sm',
+                            isLocked ? 'text-fg-muted' : 'text-fg',
+                            isSelected && 'font-medium'
                           )}
                         >
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
-                              {isLocked ? <Lock size={ICON_MD} /> : <Icon size={ICON_MD} />}
-                            </span>
-                            <div className="min-w-0">
-                              <div
-                                className={cn(
-                                  'truncate text-sm',
-                                  isLocked ? 'text-fg-muted' : 'text-fg',
-                                  isSelected && 'font-medium'
-                                )}
-                              >
-                                {model.displayName}
-                              </div>
-                              {isPreview || showsReasoning ? (
-                                <div className="mt-0.5 flex items-center gap-1">
-                                  {isPreview && <Badge variant="neutral">{t.models.preview}</Badge>}
-                                  {showsReasoning && (
-                                    <Badge variant="neutral">{t.thinking.reasoningBadge}</Badge>
-                                  )}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                          {isSelected && (
-                            <Check size={ICON_MD} className="shrink-0 text-accent-fg" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))
-              )}
-            </div>
-          </motion.div>
+                          {model.displayName}
+                        </span>
+                        {/* On the row's own line, ahead of the check: a badge on a
+                            second line made every reasoning model 22px taller than
+                            its neighbours and broke the list's rhythm. */}
+                        {isPreview && <Badge variant="neutral">{t.models.preview}</Badge>}
+                        {showsReasoning && (
+                          <Badge variant="neutral">{t.thinking.reasoningBadge}</Badge>
+                        )}
+                        {isSelected && <Check size={ICON_MD} className="shrink-0 text-accent-fg" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </ComposerPopover>
         )}
       </AnimatePresence>
     </div>

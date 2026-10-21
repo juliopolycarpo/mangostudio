@@ -1,13 +1,14 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { Bot, User } from 'lucide-react';
+import { PickOneRow } from '@/components/settings/PickOneRow';
 import { MicroLabel } from '@/components/ui/MicroLabel';
-import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { ICON_MD } from '@/lib/icon-sizes';
-import { cn } from '@/lib/utils';
 
 interface AgentListProps {
   readonly agents: ReadonlyArray<AgentProfile>;
   readonly selectedAgentId: string | null;
+  /** Names the choice for a screen reader: the rows alone do not say what they pick between. */
+  readonly ariaLabel: string;
   readonly builtInAgentsTitle: string;
   readonly userAgentsTitle: string;
   readonly onSelect: (agentId: string) => void;
@@ -16,6 +17,7 @@ interface AgentListProps {
 export function AgentList({
   agents,
   selectedAgentId,
+  ariaLabel,
   builtInAgentsTitle,
   userAgentsTitle,
   onSelect,
@@ -26,7 +28,7 @@ export function AgentList({
   ];
 
   return (
-    <div className="space-y-6">
+    <div role="radiogroup" aria-label={ariaLabel} className="space-y-6">
       {groups.map((group) =>
         group.agents.length > 0 ? (
           <section key={group.title} className="space-y-2">
@@ -58,31 +60,20 @@ interface AgentListItemProps {
 
 /**
  * The group heading already says whether an agent is built in or yours, so the
- * row carries only what tells two of them apart. The current one is the neutral
- * fill plus the 3px accent bar, as in the navigation.
+ * row carries only what tells two of them apart.
  */
 function AgentListItem({ agent, active, onSelect }: AgentListItemProps) {
   const Icon = agent.kind === 'builtin' ? Bot : User;
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={active}
-      className={cn(
-        'relative flex w-full cursor-pointer items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors',
-        active ? cn('bg-fill-selected', SELECTION_BAR) : 'bg-surface hover:bg-fill-hover'
-      )}
-    >
-      <Icon size={ICON_MD} className="shrink-0 text-fg-muted" aria-hidden="true" />
-      <span className="min-w-0 flex-1">
-        <span className={cn('block truncate text-sm text-fg', active && 'font-medium')}>
-          {agent.name}
-        </span>
-        <span className="block truncate text-xs text-fg-muted">
-          {agent.description || agent.id}
-        </span>
-      </span>
-    </button>
+    <PickOneRow
+      name="settings-agent"
+      checked={active}
+      onSelect={onSelect}
+      icon={<Icon size={ICON_MD} />}
+      title={agent.name}
+      description={agent.description || agent.id}
+      onCanvas
+    />
   );
 }

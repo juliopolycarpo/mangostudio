@@ -29,6 +29,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useExternalDisclosures } from '@/features/external-agents/useExternalDisclosures';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_LG } from '@/lib/icon-sizes';
 
 export function ExternalAgentSettingsPage() {
   const { t, locale } = useI18n();
@@ -47,7 +48,11 @@ export function ExternalAgentSettingsPage() {
 
   return (
     <SettingsPage title={t.settings.tabs.externalAgents}>
-      <SettingsSection title={labels.manageTitle} description={labels.revokeHint}>
+      {/* Withdrawing is only explained once there is something to withdraw. */}
+      <SettingsSection
+        title={labels.manageTitle}
+        description={disclosures.records.length > 0 ? labels.revokeHint : labels.manageDescription}
+      >
         {/*
           Loading is its own state rather than an empty list. "You have not
           acknowledged any external agent yet" is a claim about this account, and
@@ -60,7 +65,11 @@ export function ExternalAgentSettingsPage() {
             <span className="sr-only">{t.common.loading}</span>
           </div>
         ) : disclosures.records.length === 0 ? (
-          <EmptyState icon={<ShieldCheck size={24} />} title={labels.manageEmpty} />
+          <EmptyState
+            icon={<ShieldCheck size={ICON_LG} />}
+            title={labels.manageEmpty}
+            hint={labels.manageEmptyHint}
+          />
         ) : (
           disclosures.records.map((record) => (
             <DisclosureRow

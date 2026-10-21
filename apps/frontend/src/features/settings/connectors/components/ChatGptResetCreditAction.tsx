@@ -6,7 +6,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
-import { ICON_MD } from '@/lib/icon-sizes';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { useChatGptResetRedeem } from '../hooks/use-chatgpt-reset-redeem';
 
 interface ChatGptResetCreditActionProps {
@@ -62,7 +62,7 @@ export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptReset
         onClick={() => setIsConfirmOpen(true)}
         loading={isRedeeming}
       >
-        {isRedeeming ? null : <Zap size={ICON_MD} />}
+        {isRedeeming ? null : <Zap size={ICON_SM} />}
         {isRedeeming ? s.chatgptRedeeming : s.chatgptRedeemButton}
       </Button>
 

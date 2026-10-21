@@ -155,7 +155,11 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
         onRename={(id, title) => renameMutation.mutate({ id, body: { title } })}
         onPopOut={popOut}
       />
-      <div className="min-h-0 flex-1">
+      {/* `pl-2` on top of the view's own 8px inset: the panel's gutter is 16px
+          (the title above, the tab label), and the terminal text began 8px to
+          the left of it, the only edge in the dock that did not line up. The
+          wrapper paints `canvas` so the extra strip matches the view. */}
+      <div className="min-h-0 flex-1 bg-canvas pl-2">
         {activeId ? (
           <Suspense fallback={null}>
             <LazyTerminalView key={activeId} sessionId={activeId} onExit={refreshAfterExit} />

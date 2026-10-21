@@ -39,6 +39,21 @@ describe('GalleryLightbox', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // The close control lives in the caption card with the download link, not
+  // pinned to the window's corner, where it landed on the header's account
+  // button. A press on it is one close, not one for the button and one for the
+  // overlay behind it.
+  it('closes once from a button inside the panel', () => {
+    const onClose = jest.fn();
+    render(<GalleryLightbox item={ITEM} onClose={onClose} />);
+
+    const close = screen.getByRole('button', { name: 'Close image' });
+    expect(close.closest('[role="dialog"] > div')).not.toBeNull();
+    fireEvent.click(close);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('takes focus, so the keyboard is inside the overlay and not behind it', () => {
     render(<GalleryLightbox item={ITEM} onClose={jest.fn()} />);
 

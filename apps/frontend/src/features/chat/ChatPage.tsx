@@ -236,8 +236,10 @@ export function ChatPage({
             {/* Only the notices scroll when they outgrow the dock. Two stacked
                 callouts are taller than a phone, and a dock that grows with them
                 pushes the composer off the screen; capped, the notices scroll in
-                place and the composer stays where it is. */}
-            <div className="app-scrollbar max-h-[60dvh] overflow-y-auto">
+                place and the composer stays where it is. The cap is tighter on a
+                phone, where 60dvh of notice and the composer left about 75px of
+                transcript. */}
+            <div className="app-scrollbar max-h-[40dvh] overflow-y-auto sm:max-h-[60dvh]">
               {fallbackNotice && <ChatFallbackNotice notice={fallbackNotice} />}
               {modelUnavailable?.reason === 'provider-deprecated' ? (
                 <DeprecatedModelNotice
@@ -266,6 +268,9 @@ export function ChatPage({
                   disabled={disabled || isGenerating || turnsHeldForModel}
                   onResume={onResumeInterruptedTurn}
                   onDismiss={onDismissInterruptedTurn}
+                  // One primary action per dock: while the context decision is
+                  // up it holds it, and resuming is the quieter choice.
+                  resumeVariant={contextControls.requiresDecision ? 'secondary' : 'primary'}
                 />
               )}
             </div>

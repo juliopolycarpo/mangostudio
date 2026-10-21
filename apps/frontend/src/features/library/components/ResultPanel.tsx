@@ -18,6 +18,7 @@ import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+import { resourceKeyLabel } from '../format';
 import { InlineNote } from './InlineNote';
 import { ResultRow, ResultSection } from './ResultList';
 
@@ -58,7 +59,7 @@ export function ResultPanel({
             <ResultRow
               key={`${applied.environmentId}:${applied.resourceKey}:${applied.locationId}`}
               outcome="done"
-              title={applied.resourceKey}
+              title={resourceKeyLabel(applied.resourceKey, l.kinds)}
               testId="applied-row"
             >
               <span className="block break-all font-mono text-fg-muted text-micro">
@@ -94,7 +95,7 @@ export function ResultPanel({
             <ResultRow
               key={`${failure.environmentId}:${failure.resourceKey}:${failure.locationId}`}
               outcome="failed"
-              title={failure.resourceKey}
+              title={resourceKeyLabel(failure.resourceKey, l.kinds)}
               testId="failed-row"
             >
               <span className="block text-fg-muted text-xs">
@@ -113,7 +114,7 @@ export function ResultPanel({
               className="text-fg-muted text-sm"
               data-testid="skipped-row"
             >
-              {skipped.resourceKey} — {l.skipReason[skipped.reason]}
+              {resourceKeyLabel(skipped.resourceKey, l.kinds)} — {l.skipReason[skipped.reason]}
             </li>
           ))}
         </ResultSection>

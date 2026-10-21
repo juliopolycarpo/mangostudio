@@ -149,7 +149,10 @@ export function ResourceDetail({
             <ArrowLeft size={ICON_SM} aria-hidden="true" />
             {l.detail.back}
           </Link>
-          <h2 className="font-semibold text-fg text-title">{resource.key}</h2>
+          {/* The name, not the `kind:name` id: the kind is stated once, on the
+              line below, and a second page-level heading under the umbrella's
+              would outrank the page it sits in. */}
+          <h2 className="font-semibold text-base text-fg">{resource.ref.slug}</h2>
           <p className="flex flex-wrap items-center gap-2 text-fg-muted text-sm">
             {l.kinds[resource.ref.kind]}
             <Badge variant={DIVERGENCE_BADGE[resource.divergence]}>
@@ -189,7 +192,7 @@ export function ResourceDetail({
       )}
 
       <section className="space-y-3">
-        <h3 className="font-semibold text-base text-fg">{l.detail.contentHeading}</h3>
+        <h3 className="font-semibold text-fg text-sm">{l.detail.contentHeading}</h3>
         {groups.length === 0 ? (
           <p className="text-fg-muted text-sm">{l.detail.notFound}</p>
         ) : (
@@ -243,7 +246,7 @@ export function ResourceDetail({
       )}
 
       <section className="space-y-3">
-        <h3 className="font-semibold text-base text-fg">{l.detail.coverageHeading}</h3>
+        <h3 className="font-semibold text-fg text-sm">{l.detail.coverageHeading}</h3>
         <CoverageList coverage={resource.coverage} locationLabel={locationLabel} />
         {targetsQuery.isError && <InlineNote tone="danger">{l.matrix.loadError}</InlineNote>}
       </section>

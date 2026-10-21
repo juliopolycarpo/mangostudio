@@ -51,7 +51,7 @@ export function PromptSettings({
     injectionRoleUser: s.injectionRoleUser,
     frequencyLabel: s.frequencyLabel,
     frequencyFirstTurn: s.frequencyFirstTurn,
-    frequencyFirstTurnHint: s.frequencyFirstTurnHint,
+    frequencyHint: s.frequencyHint,
     frequencyEveryTurn: s.frequencyEveryTurn,
     removeRule: s.removeRule,
     rulePathLabel: s.rulePathLabel,

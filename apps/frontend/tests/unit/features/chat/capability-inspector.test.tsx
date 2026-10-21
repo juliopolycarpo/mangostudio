@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
+import type { ModelOption } from '@mangostudio/shared/catalog';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
 import { screen, waitFor } from '@testing-library/react';
@@ -311,5 +312,82 @@ describe('CapabilityInspector', () => {
       return new URL(url, 'http://localhost').pathname === '/api/chats/chat-1/capabilities';
     });
     expect(capabilityRequests).toHaveLength(2);
+  });
+
+  describe('the quiet normal state', () => {
+    async function openWith(response: ChatCapabilitiesResponse, models?: ModelOption[]) {
+      scenario.respondWithJson('GET', '/api/chats/chat-1/capabilities?model=gpt-test', {
+        body: response,
+      });
+      render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" models={models} />);
+      await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
+      await screen.findByText(/Built-in tools/);
+    }
+
+    const ALL_ON: ChatCapabilitiesResponse = {
+      ...RESPONSE,
+      tools: RESPONSE.tools.map((tool) => ({ ...tool, state: 'enabled', reason: undefined })),
+      mcpServers: RESPONSE.mcpServers.map((server) => ({
+        ...server,
+        state: 'enabled',
+        reason: undefined,
+        health: 'connected',
+      })),
+      skills: RESPONSE.skills.map((skill) => ({ ...skill, state: 'enabled', reason: undefined })),
+    };
+
+    it('collapses a section where everything is on to its count line', async () => {
+      await openWith(ALL_ON);
+
+      const builtins = screen.getByRole('button', { name: /Built-in tools/ });
+      expect(builtins).toHaveAttribute('aria-expanded', 'false');
+      expect(builtins).toHaveTextContent('3/3 enabled');
+      expect(screen.queryByText('Image generation')).not.toBeInTheDocument();
+
+      await userEvent.click(builtins);
+
+      expect(builtins).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByText('Image generation')).toBeInTheDocument();
+    });
+
+    it('opens by itself the section that holds something not enabled', async () => {
+      await openWith(RESPONSE);
+
+      expect(screen.getByRole('button', { name: /Built-in tools/ })).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      );
+    });
+
+    it('marks only the rows that need explaining, and lists those first', async () => {
+      await openWith(RESPONSE);
+
+      const enabledRow = screen.getByText('Image generation').closest('div.flex');
+      const disabledRow = screen.getByText('Bash').closest('div.flex');
+      // A dot is the signal; an enabled row has the space for one and no dot in it.
+      expect(enabledRow?.querySelector('[data-tone]')).toBeNull();
+      expect(disabledRow?.querySelector('[data-tone="neutral"]')).not.toBeNull();
+
+      const order = screen
+        .getAllByText(/Image generation|Bash|Todo/)
+        .map((node) => node.textContent);
+      expect(order.at(-1)).toContain('Image generation');
+    });
+
+    it('names the model the way the status line does, with the exact id one hover away', async () => {
+      await openWith(RESPONSE, [
+        {
+          modelId: 'gpt-test',
+          displayName: 'GPT Test',
+          resourceName: 'gpt-test',
+          supportedActions: ['text'],
+          provider: 'openai',
+        },
+      ]);
+
+      const model = screen.getByText('GPT Test');
+      expect(model.closest('[title]')).toHaveAttribute('title', 'gpt-test');
+      expect(screen.queryByText('gpt-test')).not.toBeInTheDocument();
+    });
   });
 });

@@ -70,16 +70,23 @@ function isPathListItemArray(value: unknown): value is PathListItem[] {
   return Array.isArray(value) && value.every(isPathListItem);
 }
 
+/**
+ * The hint belongs to the input that adds a path, so it sits directly under it
+ * and the paths already added hang below. The hint also says what an empty list
+ * means, so there is no separate "nothing here" line between the two.
+ */
 function PathListField({
   value,
   onChange,
   disabled,
   ariaLabel,
+  hint,
 }: {
   value: unknown;
   onChange: (value: unknown) => void;
   disabled: boolean;
   ariaLabel: string;
+  hint?: string;
 }) {
   const { t } = useI18n();
   const s = t.settings.tools.pathList;
@@ -133,31 +140,32 @@ function PathListField({
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-2">
-        <div className="min-w-0 flex-1">
-          <Input
-            type="text"
-            value={newPath}
-            onChange={(e) => setNewPath(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                handleAdd();
-              }
-            }}
-            disabled={disabled}
-            placeholder={s.pathPlaceholder}
-            aria-label={ariaLabel}
-          />
+      <div className="space-y-1">
+        <div className="flex gap-2">
+          <div className="min-w-0 flex-1">
+            <Input
+              type="text"
+              value={newPath}
+              onChange={(e) => setNewPath(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAdd();
+                }
+              }}
+              disabled={disabled}
+              placeholder={s.pathPlaceholder}
+              aria-label={ariaLabel}
+            />
+          </div>
+          <Button variant="secondary" disabled={disabled || !newPath.trim()} onClick={handleAdd}>
+            {s.add}
+          </Button>
         </div>
-        <Button variant="secondary" disabled={disabled || !newPath.trim()} onClick={handleAdd}>
-          {s.add}
-        </Button>
+        {hint ? <p className="text-xs text-fg-muted">{hint}</p> : null}
       </div>
 
-      {items.length === 0 ? (
-        <p className="py-2 text-sm text-fg-subtle">{s.noPaths}</p>
-      ) : (
+      {items.length > 0 ? (
         <ul className="space-y-1">
           {items.map((item, index) => (
             <li
@@ -221,7 +229,7 @@ function PathListField({
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -334,13 +342,7 @@ export function ToolParameterField({
 
     case 'number': {
       return (
-        <SettingsRow
-          label={label}
-          hint={description}
-          htmlFor={`${fieldId}-number`}
-          layout="field"
-          className="p-0"
-        >
+        <SettingsRow label={label} hint={description} htmlFor={`${fieldId}-number`} className="p-0">
           <Input
             id={`${fieldId}-number`}
             type="number"
@@ -350,6 +352,7 @@ export function ToolParameterField({
             value={descriptorValue === '' ? '' : Number(descriptorValue)}
             onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
             disabled={disabled}
+            className="w-32 text-center"
           />
         </SettingsRow>
       );
@@ -403,12 +406,13 @@ export function ToolParameterField({
 
     case 'path_list': {
       return (
-        <SettingsField label={label} hint={description}>
+        <SettingsField label={label}>
           <PathListField
             value={descriptorValue}
             onChange={onChange}
             disabled={disabled}
             ariaLabel={label}
+            hint={description}
           />
         </SettingsField>
       );

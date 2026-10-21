@@ -11,7 +11,7 @@ import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
-import { cn, resolveApiErrorMessage } from '@/lib/utils';
+import { resolveApiErrorMessage } from '@/lib/utils';
 import { DialogCodeBlock } from './components/DialogBlocks';
 import { IconButton } from './components/IconButton';
 import { RowList } from './components/RowList';
@@ -210,16 +210,12 @@ function StashAction({
   return (
     <Button
       type="button"
-      variant={tone === 'danger' ? 'subtle' : 'secondary'}
+      variant={tone === 'danger' ? 'subtle-danger' : 'secondary'}
       size="sm"
       aria-label={label}
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        tone === 'danger' &&
-          'text-danger enabled:hover:bg-danger-subtle enabled:active:bg-danger-subtle'
-      )}
     >
       {icon}
       {text}

@@ -17,6 +17,7 @@ import {
   describeFinding,
   findInstallRecipe,
   findingSeverity,
+  isQuietFinding,
   prefixedVersionLabel,
   worstFinding,
 } from '../format';
@@ -60,7 +61,12 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
             : e.agents.notInstalled}
         </p>
       }
-      actions={<HealthBadge health={status.health} />}
+      actions={
+        <>
+          <HealthBadge health={status.health} />
+          <AgentAuthState status={status} />
+        </>
+      }
       footer={
         <>
           <ProbeButton
@@ -87,8 +93,6 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
         </>
       }
     >
-      <AgentAuthState status={status} showHint={false} />
-
       <AgentPresenceChips targetId={status.targetId} environments={environments.data ?? []} />
 
       {/* One line for the worst finding, because a card with room for one has
@@ -99,7 +103,11 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
           data-testid="overview-agent-finding"
           data-finding-code={finding.code}
         >
-          <FindingIcon severity={findingSeverity(finding)} size={ICON_SM} />
+          <FindingIcon
+            severity={findingSeverity(finding)}
+            quiet={isQuietFinding(finding)}
+            size={ICON_SM}
+          />
           <p className="text-xs text-fg-muted">{describeFinding(t, finding, lookup)}</p>
         </div>
       )}

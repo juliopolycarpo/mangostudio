@@ -58,12 +58,15 @@ export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: Th
             label: effortLabels[candidate],
           }))}
           onChange={(next) => onEffortChange(next as ReasoningEffort)}
+          // `effort: medium`, the way the external runner's chip reads: both
+          // runners state this setting as a key and a value, in the same key.
+          label={t.chat.input.effortLabel}
           ariaLabel={t.thinking.effort}
           // An effort set from provider settings can sit outside the offered
           // three; the chip has to say which one it is rather than round it
           // down to the nearest thing in its own list.
           placeholder={effortLabels[effort]}
-          className="max-w-[9rem]"
+          className="max-w-[11rem]"
           panelClassName="w-40"
         />
       ) : null}

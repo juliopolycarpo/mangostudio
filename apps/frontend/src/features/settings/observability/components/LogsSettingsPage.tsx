@@ -1,5 +1,6 @@
 import type { ProviderProbeOperation } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
+import { RefreshCw } from 'lucide-react';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Badge } from '@/components/ui/Badge';
@@ -8,6 +9,7 @@ import { Callout } from '@/components/ui/Callout';
 import { Chip } from '@/components/ui/Chip';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { observabilityLogsQueryOptions } from '../queries';
 import { formatTimestamp } from '../utils';
 import { ExternalAgentDiscoveryLog } from './ExternalAgentDiscoveryLog';
@@ -28,6 +30,7 @@ export function LogsSettingsPage() {
       actions={
         isLoading || error ? null : (
           <Button variant="secondary" size="sm" onClick={() => void refetch()} loading={isFetching}>
+            {!isFetching && <RefreshCw size={ICON_SM} />}
             {labels.refresh}
           </Button>
         )

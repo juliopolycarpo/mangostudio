@@ -23,7 +23,8 @@ import { Select } from '@/components/ui/Select';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
-import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
+import { workdirLabel } from '@/lib/paths';
+import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
 import { IconButton } from './components/IconButton';
 import { useDirectoryListing, validateWorkspacePath } from './use-directory-listing';
 
@@ -248,8 +249,10 @@ export function WorkdirPickerDialog({
     >
       <form
         onSubmit={(event) => void handleManualBrowse(event)}
-        className="flex flex-col gap-2 border-b border-stroke px-4 py-3 sm:flex-row sm:items-end sm:px-6"
+        className="flex flex-col gap-2 border-b border-stroke px-6 py-3 sm:flex-row sm:items-end"
       >
+        {/* The one place the current folder is written: browsing a folder fills
+            this field, and typing a path then Enter (or Open) goes there. */}
         <div className="min-w-0 flex-1">
           <Input
             id={manualPathId}
@@ -267,7 +270,7 @@ export function WorkdirPickerDialog({
       </form>
 
       <div className="grid min-h-0 flex-1 sm:grid-cols-[14rem_minmax(0,1fr)]">
-        <aside className="app-scrollbar hidden min-h-0 overflow-y-auto border-r border-stroke p-3 sm:block">
+        <aside className="app-scrollbar hidden min-h-0 overflow-y-auto border-r border-stroke p-4 sm:block">
           <nav className="space-y-4" aria-label={s.title}>
             {listing.data ? (
               <PathSection label={s.home}>
@@ -300,7 +303,8 @@ export function WorkdirPickerDialog({
                   <PathButton
                     key={path}
                     icon={<Folder size={ICON_MD} />}
-                    label={path}
+                    label={workdirLabel(path) ?? path}
+                    detail={parentPath(path)}
                     path={path}
                     onClick={browse}
                   />
@@ -313,7 +317,7 @@ export function WorkdirPickerDialog({
         </aside>
 
         <main className="flex min-h-[20rem] min-w-0 flex-col">
-          <div className="flex items-center gap-2 border-b border-stroke px-4 py-3">
+          <div className="flex items-center justify-between gap-2 border-b border-stroke px-6 py-3">
             <IconButton
               label={s.parent}
               onClick={() => listing.data?.parent && browse(listing.data.parent)}
@@ -321,11 +325,6 @@ export function WorkdirPickerDialog({
             >
               <ArrowUp size={ICON_MD} />
             </IconButton>
-            <div className="flex h-8 min-w-0 flex-1 items-center rounded-sm border border-stroke bg-control px-3 font-mono text-xs text-fg-muted">
-              <span className="block truncate" title={listing.data?.path ?? manualPath}>
-                {listing.data?.path ?? manualPath}
-              </span>
-            </div>
             <Button
               type="button"
               variant="subtle"
@@ -355,19 +354,19 @@ export function WorkdirPickerDialog({
             ) : visibleEntries.length === 0 ? (
               <EmptyState title={s.empty} className="h-full min-h-48" />
             ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
+              // A list is a stack of rows with a hover wash, the way the rail beside
+              // it is drawn; a bordered button per folder made the heaviest pane in
+              // the app out of a directory listing.
+              <div className="space-y-0.5">
                 {visibleEntries.map((entry) => (
-                  <Button
+                  <PathButton
                     key={entry.path}
-                    type="button"
-                    variant="secondary"
-                    onClick={() => browse(entry.path)}
-                    className="min-w-0 justify-start"
-                    title={entry.path}
-                  >
-                    <Folder size={ICON_MD} className="shrink-0 text-fg-muted" />
-                    <span className="min-w-0 truncate">{entry.name}</span>
-                  </Button>
+                    icon={<Folder size={ICON_MD} />}
+                    label={entry.name}
+                    path={entry.path}
+                    onClick={browse}
+                    className="text-fg"
+                  />
                 ))}
               </div>
             )}
@@ -376,7 +375,7 @@ export function WorkdirPickerDialog({
       </div>
 
       {showRestrictToolsOverride && onRestrictToolsToWorkdirOverrideChange ? (
-        <div className="space-y-1 border-t border-stroke px-4 py-4 sm:px-6">
+        <div className="space-y-1 border-t border-stroke px-6 py-4">
           <label htmlFor={restrictToolsId} className="block text-sm font-medium text-fg">
             {s.restrictToolsChatOverrideLabel}
           </label>
@@ -422,26 +421,54 @@ function PathSection({ label, children }: { label: string; children: React.React
   );
 }
 
+/**
+ * The folder above a path, for the line under a name that is not enough alone
+ * (`/tmp/mangostudio-visual-1` and `-2` share a parent, so the parent is only
+ * worth showing dimmed). Null for a root-level path, which has no parent worth
+ * naming.
+ */
+function parentPath(path: string): string | null {
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return cut > 0 ? trimmed.slice(0, cut) : null;
+}
+
+/**
+ * One folder as a row: icon, its name, and optionally its parent path dimmed on
+ * a second line. The name comes first because it is the part that tells two
+ * folders apart — a path truncated at the end cut exactly that off.
+ */
 function PathButton({
   icon,
   label,
+  detail = null,
   path,
   onClick,
+  className,
 }: {
   icon: React.ReactNode;
   label: string;
+  /** The parent folder, shown under the name in `fg-subtle`. */
+  detail?: string | null;
   path: string;
   onClick: (path: string) => void;
+  className?: string;
 }) {
   return (
     <button
       type="button"
       onClick={() => onClick(path)}
-      className="flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
+      className={cn(
+        'flex min-h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 py-0.5 text-left text-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg',
+        className
+      )}
       title={path}
     >
       <span className="shrink-0">{icon}</span>
-      <span className="truncate">{label}</span>
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate">{label}</span>
+        {detail ? <span className="truncate text-xs text-fg-subtle">{detail}</span> : null}
+      </span>
     </button>
   );
 }

@@ -11,7 +11,11 @@ interface CalloutProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   icon?: ReactNode | null;
   /** One line that says what happened, in `fg` at weight 500. */
   title?: ReactNode;
-  /** A button or link that offers the way out. */
+  /**
+   * A button or link that offers the way out. One control at the 28px `sm`
+   * height (44px on a touch screen), which the wrapper centres on the first line
+   * of text rather than letting it set the height of the band.
+   */
   action?: ReactNode;
   children?: ReactNode;
 }
@@ -64,7 +68,11 @@ export function Callout({
         {title ? <p className="font-medium text-fg">{title}</p> : null}
         {children ? <div className="text-fg-muted">{children}</div> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {/* Negative margins take the control's height back to the line's 20px, so
+          it sits level with the title or the first line of the body instead of
+          riding four pixels low, and a single-line notice with an action is no
+          taller than one without. */}
+      {action ? <div className="-my-1 shrink-0 pointer-coarse:-my-3">{action}</div> : null}
     </div>
   );
 }

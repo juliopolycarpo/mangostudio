@@ -243,10 +243,22 @@ describe('PromptSettings', () => {
     });
   });
 
-  it('shows recommended hint when frequency is first-turn', () => {
+  it('says what is recommended whichever frequency is selected', () => {
     renderPromptSettings();
 
-    const hints = screen.getAllByText('Recommended');
+    const hints = screen.getAllByText('Sending once per chat is recommended.');
     expect(hints.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps the recommendation when every turn is selected, so the control does not jump', () => {
+    renderPromptSettings({
+      promptSettings: createPromptSettings({
+        agentsMd: { ...DEFAULT_PROMPT_SETTINGS.agentsMd, sendFrequency: 'every-turn' },
+        claudeMd: { ...DEFAULT_PROMPT_SETTINGS.claudeMd, sendFrequency: 'every-turn' },
+      }),
+    });
+
+    // A hint that came and went with the choice moved the control up a line under the pointer.
+    expect(screen.getAllByText('Sending once per chat is recommended.')).toHaveLength(2);
   });
 });

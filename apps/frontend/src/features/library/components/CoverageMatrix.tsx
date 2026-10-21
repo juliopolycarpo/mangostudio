@@ -8,6 +8,11 @@
  * Rows are virtualized from the start. Forty resources across four targets is
  * comfortable; three hundred is not, and retrofitting virtualization onto a
  * table people already rely on is worse than paying for it now.
+ *
+ * Where the agents do not fit, the table scrolls sideways under the checkbox and
+ * the resource name, which stay put: the comparison is across a row, and a row
+ * whose name has scrolled away answers nothing. The column that is cut off at
+ * the edge, and the scrollbar, are what say there is more.
  */
 
 import type {
@@ -29,6 +34,25 @@ import { libraryEnvironmentSearch } from '../queries';
 import { CoverageCell, CoverageGlyph } from './CoverageCell';
 
 const ROW_HEIGHT_PX = 40;
+
+/**
+ * The two leading columns, pinned to the left edge of the scroll container.
+ * `left-9` is the checkbox column's width (`w-9`). The divider after the resource
+ * is a pseudo-element, not a border: in a collapsed-border table a cell's border
+ * belongs to the grid and scrolls away instead of staying with the cell.
+ */
+const PINNED_CHECKBOX = 'sticky left-0 bg-surface';
+const PINNED_RESOURCE =
+  'sticky left-9 bg-surface before:absolute before:inset-y-0 before:right-0 before:w-px before:bg-stroke';
+
+/**
+ * A pinned cell is opaque, because the agent cells slide under it, and an opaque
+ * cell hides the row's own hover and selection wash. This draws the wash again
+ * on a pseudo-element behind the cell's content (`group` is on the row; the
+ * selected row adds `after:bg-fill-selected` itself).
+ */
+const PINNED_ROW_WASH =
+  'after:pointer-events-none after:absolute after:inset-0 after:-z-10 group-hover:after:bg-fill-hover';
 
 /** The selection checkbox (`w-9`) and the resource column (`w-48`), in rem. */
 const LEADING_COLUMNS_REM = 14.25;
@@ -135,14 +159,16 @@ export function CoverageMatrix({
       >
         <colgroup>
           <col className="w-9" />
-          <col className="w-48" />
+          {/* Narrower on a phone, where the pinned half of the table is most of the
+              screen and the agent column beside it has to be visibly cut off. */}
+          <col className="w-32 sm:w-48" />
           {targets.map((target) => (
             <col key={target.id} />
           ))}
         </colgroup>
         <thead className="sticky top-0 z-10 bg-surface">
           <tr className="border-stroke border-b">
-            <th scope="col" className="w-9 px-2 py-2">
+            <th scope="col" className={cn('w-9 px-2 py-2', PINNED_CHECKBOX)}>
               <Checkbox
                 checked={allSelected}
                 onChange={onToggleAll}
@@ -150,7 +176,13 @@ export function CoverageMatrix({
                 className="align-middle"
               />
             </th>
-            <th scope="col" className="px-2 py-2 text-left font-medium text-fg-muted text-xs">
+            <th
+              scope="col"
+              className={cn(
+                'px-2 py-2 text-left font-medium text-fg-muted text-xs',
+                PINNED_RESOURCE
+              )}
+            >
               {l.matrix.resourceColumn}
             </th>
             {targets.map((target) => {
@@ -240,7 +272,7 @@ function ResourceRow({
   return (
     <tr
       className={cn(
-        'border-stroke border-b last:border-b-0 hover:bg-fill-hover',
+        'group border-stroke border-b last:border-b-0 hover:bg-fill-hover',
         selected && 'bg-fill-selected'
       )}
       data-testid="matrix-row"
@@ -248,7 +280,14 @@ function ResourceRow({
       data-divergence={resource.divergence}
       style={{ height: ROW_HEIGHT_PX }}
     >
-      <td className="px-2 py-1.5">
+      <td
+        className={cn(
+          'px-2 py-1.5',
+          PINNED_CHECKBOX,
+          PINNED_ROW_WASH,
+          selected && 'after:bg-fill-selected'
+        )}
+      >
         <Checkbox
           checked={selected}
           onChange={() => onToggleSelected(resource.key)}
@@ -256,7 +295,14 @@ function ResourceRow({
           className="align-middle"
         />
       </td>
-      <td className="min-w-0 px-2 py-1.5">
+      <td
+        className={cn(
+          'min-w-0 px-2 py-1.5',
+          PINNED_RESOURCE,
+          PINNED_ROW_WASH,
+          selected && 'after:bg-fill-selected'
+        )}
+      >
         <Link
           to="/environments/library/$resourceKey"
           params={{ resourceKey: resource.key }}
@@ -288,22 +334,30 @@ const LEGEND_ORDER: readonly CoverageCellState[] = [
   'only-here',
 ];
 
-/** The glyph key, spelled out. A symbol nobody can decode is decoration. */
+/**
+ * The glyph key, spelled out. A symbol nobody can decode is decoration.
+ *
+ * Only where it is needed: from `xl` up the cells print the state's word beside
+ * the glyph, so a key above the table would say again what every row says, and
+ * it pushed the first row down by a band. Below `xl` the cells are glyphs alone
+ * and this is the way to read them. The words are the short ones the cells use;
+ * the full sentence for each state is its tooltip.
+ */
 export function MatrixLegend() {
   const { t } = useI18n();
   const l = t.library;
 
   return (
     <dl
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-fg-muted text-xs"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-fg-muted text-xs xl:hidden"
       aria-label={l.matrix.legend}
     >
       {LEGEND_ORDER.map((state) => (
-        <div key={state} className="flex items-center gap-1.5">
+        <div key={state} className="flex items-center gap-1.5" title={l.cellHint[state]}>
           <dt aria-hidden="true">
             <CoverageGlyph state={state} />
           </dt>
-          <dd>{l.cellState[state]}</dd>
+          <dd>{l.cellStateShort[state]}</dd>
         </div>
       ))}
     </dl>

@@ -55,18 +55,18 @@ export function SkillRow({ descriptor }: SkillRowProps) {
           <span>{descriptor.name}</span>
           <Badge>{s.sourceLabels[descriptor.source]}</Badge>
           {!descriptor.valid && <Badge variant="error">{s.invalidBadge}</Badge>}
-          {descriptor.shadowed && <Badge variant="warning">{s.shadowedBadge}</Badge>}
+          {/* The badge is the flag. Its reason is said once, above the list, for
+              touch screens that never show a tooltip; here it is the tooltip. */}
+          {descriptor.shadowed && (
+            <Badge variant="warning" title={s.shadowedHint}>
+              {s.shadowedBadge}
+            </Badge>
+          )}
         </span>
       }
       hint={
         <span className="block space-y-1">
           {descriptor.description && <span className="block">{descriptor.description}</span>}
-          {/* The badge is the flag; this is its reason, visible on touch too. */}
-          {descriptor.shadowed && (
-            <StatusNote as="span" tone="warning">
-              {s.shadowedHint}
-            </StatusNote>
-          )}
           {descriptor.error && (
             <StatusNote as="span" tone="danger">
               {descriptor.error}

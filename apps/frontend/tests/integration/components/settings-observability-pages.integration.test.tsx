@@ -195,6 +195,40 @@ describe('Observability settings pages', () => {
     expect(screen.getByText('~Tokens')).toBeInTheDocument();
   });
 
+  /** "0%" reads as a cache that always misses; a cache nothing has asked has no rate. */
+  it('shows a dash for a cache nobody has asked, and no breakdown of zero timeouts', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/metrics', {
+      body: {
+        generatedAt: 1_700_000_000_000,
+        providers: [
+          {
+            provider: 'openai',
+            totalProbeTimeouts: 0,
+            caches: [
+              { cacheName: 'sdk-client', hits: 4, misses: 1, hitRate: 0.8 },
+              { cacheName: 'prepared-runtime', hits: 0, misses: 0, hitRate: 0 },
+              { cacheName: 'provider-route', hits: 0, misses: 0, hitRate: 0 },
+            ],
+            probeTimeouts: [
+              { operation: 'healthcheck', timeoutCount: 0 },
+              { operation: 'model-list', timeoutCount: 0 },
+            ],
+          },
+        ],
+      },
+    });
+
+    render(<MetricsSettingsPage />);
+
+    await screen.findByText('OpenAI');
+    expect(screen.getByText('80%')).toBeInTheDocument();
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    // The heading already says "Probe timeouts: 0".
+    expect(screen.getByText('Probe timeouts: 0')).toBeInTheDocument();
+    expect(screen.queryByText('Probe timeouts by operation')).not.toBeInTheDocument();
+  });
+
   it('hides the usage row for providers that were never used', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/metrics', {
       body: {

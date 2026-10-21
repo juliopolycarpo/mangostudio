@@ -29,6 +29,7 @@ export function NavItem({
   onClick,
 }: NavItemProps) {
   const horizontal = orientation === 'horizontal';
+  const glyph = <Icon size={horizontal ? ICON_MD : ICON_LG} className="shrink-0" />;
   return (
     <button
       type="button"
@@ -47,7 +48,16 @@ export function NavItem({
           : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
       )}
     >
-      <Icon size={horizontal ? ICON_MD : ICON_LG} className="shrink-0" />
+      {/* The row's glyph sits in the same 20px centred slot a chat row's does, so
+          the label of a page and the title of a chat start on one x (the rail's
+          `px-3`, this row's `px-2`, the slot, the gap). */}
+      {horizontal ? (
+        <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center">
+          {glyph}
+        </span>
+      ) : (
+        glyph
+      )}
       {/* `max-w-full`: in the tile's column the label is as wide as its text
           however narrow the cell is, so "Environments" ran past its neighbours
           instead of ending in an ellipsis. */}

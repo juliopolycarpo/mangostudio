@@ -18,15 +18,39 @@ import { cn } from '@/lib/utils';
  * (`pb-px`) to keep that rule on the divider without cutting it. `base` pulls the
  * focus ring inwards (`-outline-offset-2`) for the same reason: an outline offset
  * outwards would be clipped by the list.
+ *
+ * `label` is the label's box (see {@link TabLabel}): the current tab is weight
+ * 500, which is about a pixel wider than 400, so without it every tab after the
+ * current one stepped sideways whenever the current one changed.
  */
 export const TAB_CLASSES = {
   strip: 'flex gap-1 border-b border-stroke',
   list: 'app-scrollbar -mb-px flex min-w-0 gap-1 overflow-x-auto pb-px',
   base: 'relative inline-flex h-9 shrink-0 cursor-pointer items-center rounded-t-sm px-3 text-sm whitespace-nowrap transition-colors -outline-offset-2',
+  label:
+    'flex min-w-0 flex-col text-center before:invisible before:block before:h-0 before:overflow-hidden before:font-medium before:content-[attr(data-label)]',
   idle: 'text-fg-muted hover:bg-fill-hover hover:text-fg',
   active:
     'font-medium text-fg after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-accent',
 } as const;
+
+/**
+ * A tab's text, sized for its heaviest weight.
+ *
+ * An invisible, zero-height copy of the label at weight 500 (`data-label` feeds
+ * the `::before`) sits in the same box as the real one, so the box is as wide as
+ * the label ever gets and the tab does not change width when it becomes the
+ * current one. The real text is its own inner span so it can still truncate.
+ * Nothing but the pseudo-element carries the copy: it is not text content, so it
+ * is neither read out nor found by a text query.
+ */
+export function TabLabel({ children }: { readonly children: string }) {
+  return (
+    <span data-label={children} className={TAB_CLASSES.label}>
+      <span className="truncate">{children}</span>
+    </span>
+  );
+}
 
 export interface TabItem<T extends string> {
   readonly id: T;
@@ -130,9 +154,9 @@ export function Tabs<T extends string>({
               onClick={() => onSelect(tab.id)}
               onDoubleClick={tab.onDoubleClick}
               data-testid={hasChrome ? undefined : tab.testId}
-              className={hasChrome ? 'max-w-32 truncate' : chrome}
+              className={hasChrome ? 'max-w-32' : chrome}
             >
-              {tab.label}
+              <TabLabel>{tab.label}</TabLabel>
             </button>
           );
           if (!hasChrome) return button;

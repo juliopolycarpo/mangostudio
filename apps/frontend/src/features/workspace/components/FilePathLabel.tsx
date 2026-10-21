@@ -5,6 +5,14 @@ interface FilePathLabelProps {
   readonly path: string;
   /** Where a rename or move came from, when the entry is one. */
   readonly oldPath?: string | null;
+  /**
+   * The name on one line and its directory on the line below, instead of side by
+   * side. For a row that also carries counts or badges at its trailing edge: in a
+   * 311px dock a long name plus `+10,826 −10,006` leaves the side-by-side
+   * directory a few characters, which reads as noise (`a…`) and fails at the one
+   * job a directory has, telling two `index.html` apart.
+   */
+  readonly stacked?: boolean;
   readonly className?: string;
 }
 
@@ -40,13 +48,48 @@ function splitPath(path: string): SplitPath {
  * Mono, because a path is technical content (`foundations.md`, Typography). The
  * caller sizes the cell with `className` (`flex-1` in a row of siblings).
  *
+ * `stacked` gives the directory its own line (see {@link FilePathLabelProps}).
+ * A rename then reads the new name on top and the old name struck through
+ * underneath, a pure move the old directory struck through and then the new one.
+ *
  * @example
  * <FilePathLabel path="apps/frontend/src/features/workspace/GitPanel.tsx" className="flex-1" />
  */
-export function FilePathLabel({ path, oldPath, className }: FilePathLabelProps) {
+export function FilePathLabel({ path, oldPath, stacked = false, className }: FilePathLabelProps) {
   const to = splitPath(path);
   const from = oldPath ? splitPath(oldPath) : null;
   const moved = from !== null && from.name === to.name;
+
+  if (stacked) {
+    const detail = moved ? (
+      <>
+        <span className="line-through">{from.dir || '.'}</span> → {to.dir || '.'}
+      </>
+    ) : from ? (
+      <>
+        <span className="line-through">{from.name}</span>
+        {to.dir ? ` · ${to.dir}` : null}
+      </>
+    ) : (
+      to.dir
+    );
+    return (
+      <span
+        title={oldPath ? `${oldPath} → ${path}` : path}
+        className={cn('flex min-w-0 flex-col font-mono text-xs', className)}
+      >
+        <span className="sr-only">{oldPath ? `${oldPath} → ${path}` : path}</span>
+        <span aria-hidden="true" className="truncate text-fg">
+          {to.name}
+        </span>
+        {detail ? (
+          <span aria-hidden="true" className="truncate text-micro text-fg-subtle">
+            {detail}
+          </span>
+        ) : null}
+      </span>
+    );
+  }
 
   return (
     <span

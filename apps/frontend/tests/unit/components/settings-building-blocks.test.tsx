@@ -6,6 +6,7 @@
 
 import { describe, expect, it, jest } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
+import { PickOneRow } from '../../../src/components/settings/PickOneRow';
 import { SettingsPage } from '../../../src/components/settings/SettingsPage';
 import { SettingsRow } from '../../../src/components/settings/SettingsRow';
 import { SettingsSection } from '../../../src/components/settings/SettingsSection';
@@ -35,6 +36,21 @@ describe('SettingsPage', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Add connector' })).toBeInTheDocument();
+  });
+
+  /**
+   * A 44px touch button (or a 16px caption) beside a 28px title only shares its
+   * centre if the slot is the title's own height and centres what it holds.
+   */
+  it('centres page actions on the title line, however tall they are', () => {
+    render(
+      <SettingsPage title="Connectors" actions={<button type="button">Add connector</button>}>
+        <p>body</p>
+      </SettingsPage>
+    );
+
+    const slot = screen.getByRole('button', { name: 'Add connector' }).parentElement;
+    expect(slot).toHaveClass('h-7', 'items-center');
   });
 });
 
@@ -164,6 +180,54 @@ describe('SettingsSegmented', () => {
   });
 });
 
+describe('PickOneRow', () => {
+  function renderRows(onSelect = jest.fn()) {
+    render(
+      <div role="radiogroup" aria-label="Save to">
+        <PickOneRow
+          name="source"
+          checked
+          onSelect={() => onSelect('secrets')}
+          icon={<svg aria-hidden="true" />}
+          title="Secure storage"
+          description="Native secure storage"
+        />
+        <PickOneRow
+          name="source"
+          checked={false}
+          onSelect={() => onSelect('file')}
+          icon={<svg aria-hidden="true" />}
+          title="Config file"
+          description="~/.mango/config.toml"
+        />
+      </div>
+    );
+    return onSelect;
+  }
+
+  it('is one choice among radios in a named group, not a set of toggles', () => {
+    renderRows();
+
+    expect(screen.getByRole('radiogroup', { name: 'Save to' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Secure storage/ })).toBeChecked();
+    expect(screen.getByRole('radio', { name: /Config file/ })).not.toBeChecked();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('reports the row that was picked and marks the current one', () => {
+    const onSelect = renderRows();
+
+    fireEvent.click(screen.getByRole('radio', { name: /Config file/ }));
+
+    expect(onSelect).toHaveBeenCalledWith('file');
+    // The current row wears the navigation's accent bar; the other does not.
+    const current = screen.getByRole('radio', { name: /Secure storage/ }).closest('label');
+    const other = screen.getByRole('radio', { name: /Config file/ }).closest('label');
+    expect(current).toHaveClass('bg-fill-selected');
+    expect(other).not.toHaveClass('bg-fill-selected');
+  });
+});
+
 describe('SettingsSliderRow', () => {
   it('shows the live readout and reports slider and number-field changes', () => {
     const onChange = jest.fn();
@@ -181,6 +245,8 @@ describe('SettingsSliderRow', () => {
     );
 
     expect(screen.getByText('60% of context')).toBeInTheDocument();
+    // Muted and tabular: the digits must not jitter while dragging.
+    expect(screen.getByText('60% of context')).toHaveClass('tabular-nums', 'text-fg-muted');
 
     fireEvent.change(screen.getByRole('slider', { name: 'Warning threshold' }), {
       target: { value: '70' },

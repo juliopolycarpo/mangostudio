@@ -12,7 +12,11 @@ import { describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import { ContentGroupList } from '../../../../src/features/library/components/ContentGroupList';
 import { CoverageList } from '../../../../src/features/library/components/CoverageList';
-import { libraryKindPath } from '../../../../src/features/library/format';
+import {
+  libraryKindPath,
+  resourceKeyLabel,
+  resourceTitle,
+} from '../../../../src/features/library/format';
 import { render, screen, within } from '../../../support/harness/render';
 import { fullCoverage, sourceGroup } from './fixtures';
 
@@ -74,6 +78,46 @@ describe('CoverageList', () => {
     // No empty third cell: it would add a blank grid row on a phone.
     expect(row('codex').children).toHaveLength(2);
     expect(row('cursor').children).toHaveLength(2);
+  });
+
+  // The content cards above already set a path in mono; a section of the same
+  // page that sets the same kind of text in the interface font disagrees with them.
+  it('sets each path in mono, and the words around it in the interface font', () => {
+    const { row } = renderCoverage();
+
+    const details = row('mangostudio').children[2] as HTMLElement;
+    const paths = [...details.querySelectorAll('.font-mono')];
+    expect(paths.map((path) => path.textContent)).toEqual([
+      '/home/dev/agents-skills',
+      '/home/dev/claude-skills',
+    ]);
+    // The sentence keeps its own words, in its own order, around the path.
+    expect(details.querySelector('p')?.textContent).toBe('via /home/dev/agents-skills');
+  });
+});
+
+describe('resource keys in words', () => {
+  // `skill:release` is an internal id; the kind in front of the name is what keeps
+  // it apart from `command:release`.
+  it('names a resource by its kind and its name, never the internal id', () => {
+    expect(resourceKeyLabel('skill:release', en.library.kinds)).toBe('Skill release');
+    expect(resourceKeyLabel('command:release', en.library.kinds)).toBe('Command release');
+  });
+
+  it('fills a title with the kind inside the sentence and the name after it', () => {
+    expect(resourceTitle(en.library.wizard.titleOne, en.library.kindsInline, 'skill:gh')).toBe(
+      'Propagate skill gh'
+    );
+    expect(
+      resourceTitle(en.library.removal.titleOne, en.library.kindsInline, 'subagent:planner')
+    ).toBe('Remove subagent planner');
+  });
+
+  it('keeps a key that is not one as it came, without a gap where the kind would be', () => {
+    expect(resourceKeyLabel('nonsense', en.library.kinds)).toBe('nonsense');
+    expect(resourceTitle(en.library.wizard.titleOne, en.library.kindsInline, 'nonsense')).toBe(
+      'Propagate nonsense'
+    );
   });
 });
 

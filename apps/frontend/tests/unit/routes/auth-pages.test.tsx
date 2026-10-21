@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 import { render, screen, waitFor } from '../../support/harness/render';
@@ -81,7 +82,25 @@ describe('auth routes', () => {
       { email: 'ada@example.com', password: 'hunter2-pass' },
       expect.objectContaining({ onError: expect.any(Function) })
     );
-    await screen.findByText('Bad credentials');
+    // The page's own sentence, in the page's language — not the server's "Bad
+    // credentials" — as the callout's title, which is the text colour of a label.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(en.auth.loginError);
+    expect(screen.getByText(en.auth.loginError)).toHaveClass('font-medium', 'text-fg');
+    expect(screen.queryByText('Bad credentials')).not.toBeInTheDocument();
+  });
+
+  it('names the sign-in page for what it does, under the logo that names the product', () => {
+    render(<LoginPage />);
+
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sign in');
+    expect(screen.getByRole('link', { name: en.auth.signupLink })).toHaveClass('underline');
+  });
+
+  it('leaves the password field empty-looking: no placeholder dressed as a value', () => {
+    render(<LoginPage />);
+
+    expect(screen.getByLabelText(/^password$/i)).not.toHaveAttribute('placeholder');
   });
 
   it('keeps the login submit button in a loading state until the request completes', async () => {
@@ -163,7 +182,19 @@ describe('auth routes', () => {
     await user.type(screen.getByLabelText(/password/i), 'hunter2-pass');
     await user.click(screen.getByRole('button', { name: /create account/i }));
 
-    await screen.findByText('Email already exists');
+    await screen.findByText(en.auth.signupError);
+    expect(screen.queryByText('Email already exists')).not.toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('states the password requirement as a hint under the field, not in its label', () => {
+    render(<SignupPage />);
+
+    const password = screen.getByLabelText(/^password$/i);
+    expect(password).not.toHaveAttribute('placeholder');
+    const hint = screen.getByText(en.auth.passwordHint);
+    expect(hint).toHaveClass('text-xs', 'text-fg-muted');
+    expect(password).toHaveAccessibleDescription(en.auth.passwordHint);
+    expect(screen.getByRole('link', { name: en.auth.loginLink })).toHaveClass('underline');
   });
 });

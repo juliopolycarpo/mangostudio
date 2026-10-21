@@ -88,9 +88,22 @@ describe('ExternalAgentSettingsPage', () => {
 
   /** Withdrawing is the safe direction, so it is never hidden behind a confirm. */
   it('warns that withdrawing stops a running turn', async () => {
-    respondWithDisclosures(fetchScenario, []);
+    respondWithDisclosures(fetchScenario, [
+      { targetId: 'claude', disclosureVersion: 1, acknowledgedAt: ACKNOWLEDGED_AT },
+    ]);
     render(<ExternalAgentSettingsPage />);
 
     expect(await screen.findByText(/stops any turn running now/i)).toBeInTheDocument();
+  });
+
+  /** There is nothing to withdraw yet, so the page says what the notices are and how one appears. */
+  it('explains the empty list instead of a Withdraw button nobody can see', async () => {
+    respondWithDisclosures(fetchScenario, []);
+    render(<ExternalAgentSettingsPage />);
+
+    expect(
+      await screen.findByText(/first time you run Claude Code, Codex or Cursor/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/stops any turn running now/i)).toBeNull();
   });
 });

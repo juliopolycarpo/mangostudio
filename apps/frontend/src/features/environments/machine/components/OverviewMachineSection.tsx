@@ -24,7 +24,7 @@ export function OverviewMachineSection() {
 
   return (
     <OverviewSection
-      title={e.tabs.machine}
+      tab="machine"
       to="/environments/machine"
       testId="overview-machine"
       isPending={status.isPending && !data}

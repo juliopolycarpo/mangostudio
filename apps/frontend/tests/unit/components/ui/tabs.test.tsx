@@ -70,6 +70,21 @@ describe('Tabs', () => {
       expect(tab('Changes').className).toContain(word);
   });
 
+  it('sizes every tab for its heaviest weight, so the current one does not shift the rest', () => {
+    render(<Harness initial="history" />);
+
+    // The idle tab and the current tab carry the same label box: a hidden copy
+    // at weight 500 that the pseudo-element draws from `data-label`.
+    for (const name of ['Changes', 'History', 'Stash']) {
+      const box = tab(name).querySelector('[data-label]');
+      expect(box?.getAttribute('data-label')).toBe(name);
+      expect(box?.className).toContain('before:font-medium');
+      expect(box?.className).toContain('before:invisible');
+    }
+    // The copy is not text: it is neither announced nor found by a text query.
+    expect(screen.getAllByText('History')).toHaveLength(1);
+  });
+
   it('selects a tab on click and reports its id', async () => {
     const user = userEvent.setup();
     const onSelect = jest.fn();

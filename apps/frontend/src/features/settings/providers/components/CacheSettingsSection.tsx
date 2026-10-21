@@ -1,5 +1,6 @@
 /**
- * Prompt caching and provider compaction section.
+ * Prompt caching and provider compaction section. A provider without caching
+ * keeps only the compaction switch, so the heading names what is actually there.
  */
 
 import type {
@@ -33,7 +34,7 @@ export function CacheSettingsSection({
   const s = t.settings.providers;
 
   return (
-    <SettingsSection title={s.sectionCache}>
+    <SettingsSection title={cachingSupported ? s.sectionCache : s.sectionCompaction}>
       {cachingSupported && (
         <SettingsRow label={s.cachePreference} layout="field">
           <Select

@@ -34,7 +34,7 @@ export function ExternalNoticeBlock({ part }: ExternalNoticeBlockProps) {
       role="status"
       data-severity={part.severity}
       tone={TONE[part.severity]}
-      className="max-w-2xl"
+      className="max-w-(--timeline-card-max)"
       title={
         <>
           {/* The glyph and fill carry the severity visually; the word is for

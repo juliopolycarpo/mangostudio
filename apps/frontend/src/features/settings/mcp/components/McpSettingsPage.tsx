@@ -14,7 +14,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   useAddMcpServer,
@@ -120,7 +120,7 @@ export function McpSettingsPage() {
         <SettingsLoadError message={s.loadError} onRetry={() => void refetch()} />
       ) : servers.length === 0 ? (
         <Card padded={false}>
-          <EmptyState icon={<Server size={24} />} title={s.empty} />
+          <EmptyState icon={<Server size={ICON_LG} />} title={s.empty} />
         </Card>
       ) : (
         <div className="space-y-3">

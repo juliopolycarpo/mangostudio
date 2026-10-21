@@ -661,12 +661,16 @@ export function useGitHeadMessage(chatId: string, enabled: boolean) {
  * the panel's manual refresh plus the `branches` invalidation cover both. The
  * stale window matches the rest of the panel's reads.
  *
+ * `enabled` is for a caller that holds the query before it knows there is a
+ * repository to ask about (the panel header, which refreshes it).
+ *
  * @example
  * const { data } = useGitWorktrees(chatId); // data?.worktrees
  */
-export function useGitWorktrees(chatId: string) {
+export function useGitWorktrees(chatId: string, enabled = true) {
   return useQuery({
     queryKey: gitWorktreeKeys.detail(chatId),
+    enabled,
     queryFn: async (): Promise<GitWorktreeListResponse> => {
       const { data, error } = await client.api.git.worktrees.get({ query: { chatId } });
       if (error) throw new ApiError(error.value);

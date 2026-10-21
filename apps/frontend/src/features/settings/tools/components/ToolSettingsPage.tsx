@@ -6,13 +6,15 @@ import type { ToolSettingsCategory } from '@mangostudio/shared/tool-settings';
 import { Wrench } from 'lucide-react';
 import { useMemo } from 'react';
 import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
-import { SettingsSliderRow } from '@/components/settings/SettingsSliderRow';
 import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { useToolSettings } from '../hooks/use-tool-settings';
 import { ToolSettingsRow } from './ToolSettingsRow';
 
@@ -44,8 +46,6 @@ export function ToolSettingsPage({
     return map;
   }, [descriptors]);
 
-  const hintText = s.maxToolIterationsHint.replace('{value}', String(maxToolIterations));
-
   return (
     <SettingsPage title={s.title} description={s.description}>
       {isLoading ? (
@@ -55,22 +55,28 @@ export function ToolSettingsPage({
       ) : (
         <>
           <SettingsSection title={s.executionTitle}>
-            <SettingsSliderRow
-              id="tool-max-iterations"
+            <SettingsRow
               label={s.maxToolIterationsLabel}
               hint={s.maxToolIterationsDescription}
-              readout={hintText}
-              value={maxToolIterations}
-              min={MAX_TOOL_ITERATIONS_MIN}
-              max={MAX_TOOL_ITERATIONS_MAX}
-              onChange={setMaxToolIterations}
-              withNumberInput
-            />
+              htmlFor="tool-max-iterations"
+            >
+              <Input
+                id="tool-max-iterations"
+                type="number"
+                min={MAX_TOOL_ITERATIONS_MIN}
+                max={MAX_TOOL_ITERATIONS_MAX}
+                step={1}
+                value={maxToolIterations}
+                onChange={(event) => setMaxToolIterations(Number(event.target.value))}
+                onBlur={(event) => setMaxToolIterations(Number(event.target.value))}
+                className="w-32 text-center"
+              />
+            </SettingsRow>
           </SettingsSection>
 
           {descriptors.length === 0 ? (
             <Card padded={false}>
-              <EmptyState icon={<Wrench size={24} />} title={s.noTools} />
+              <EmptyState icon={<Wrench size={ICON_LG} />} title={s.noTools} />
             </Card>
           ) : (
             CATEGORIES.map((category) => {

@@ -1,12 +1,11 @@
 export const messages = {
   auth: {
-    loginTitle: 'MangoStudio',
+    loginTitle: 'Entrar',
     signupTitle: 'Criar conta',
     emailLabel: 'Email',
     emailPlaceholder: 'seu@email.com',
     passwordLabel: 'Senha',
-    passwordPlaceholder: '••••••••',
-    signupPasswordLabel: 'Senha (mínimo 8 caracteres)',
+    passwordHint: 'Pelo menos 8 caracteres',
     nameLabel: 'Nome',
     namePlaceholder: 'Maria Silva',
     loginButton: 'Entrar',
@@ -17,8 +16,8 @@ export const messages = {
     signupLink: 'Criar conta',
     noAccount: 'Não tem conta?',
     hasAccount: 'Já tem conta?',
-    loginError: 'Erro ao fazer login',
-    signupError: 'Erro ao criar conta',
+    loginError: 'Não foi possível entrar. Confira o email e a senha e tente de novo.',
+    signupError: 'Não foi possível criar a conta. Confira os dados e tente de novo.',
     logoutButton: 'Sair',
     logoutLoading: 'Saindo…',
     logoutError: 'Erro ao sair. Tente novamente.',
@@ -84,6 +83,8 @@ export const messages = {
         'Bloqueado após o primeiro turno — escolha um runner no cabeçalho para continuar em um novo chat.',
       modelLabel: 'modelo',
       environmentLabel: 'env',
+      environmentLocked:
+        'Bloqueado quando o primeiro turno começa — este chat mantém o ambiente em que começou.',
       /**
        * A chave da linha de status para o esforço de raciocínio. Curta de
        * propósito: o título `Esforço de raciocínio` do seletor é longo demais
@@ -150,8 +151,6 @@ export const messages = {
       modelFallback: 'Modelo de IA',
       modelStatus: '{status} com {model}',
       download: 'Baixar',
-      saveToGallery: 'Salvar na galeria',
-      regenerate: 'Regenerar',
       imageUnavailable: 'Imagem não disponível',
       imageUnavailableHint: 'A imagem foi excluída, movida ou ainda não está acessível.',
       generatedImageAlt: 'Imagem gerada',
@@ -160,13 +159,14 @@ export const messages = {
       styleParams: 'Parâmetros de estilo',
       thoughtFor: 'Pensou por {time}',
       respondedIn: 'Respondeu em {time}',
+      failedAfter: 'Falhou após {time}',
+      stoppedAfter: 'Interrompido após {time}',
       noResponse: 'Sem resposta',
       neuralDiffusionPath: 'Usando o caminho de difusão neural.',
       createImageBadge: 'Criar imagem',
       mcpImageAlt: 'Imagem retornada por uma ferramenta MCP',
       mcpResourceFile: 'Arquivo de recurso',
       mcpMediaSource: 'De {source}',
-      subagentTrace: 'Trace de subagente',
       subagentPendingName: 'Subagente',
       subagentStatusCompleted: 'Concluído',
       subagentStatusFailed: 'Falhou',
@@ -222,6 +222,7 @@ export const messages = {
     },
     context: {
       label: 'Contexto',
+      title: 'O contexto está quase cheio',
       tokens: '~{used} / {limit} tokens',
       modeStateful: 'Stateful',
       modeStatelessLoop: 'Loop stateless',
@@ -253,7 +254,7 @@ export const messages = {
       safeRead: 'Somente leitura',
       confirmationRequired: 'Pode alterar dados',
       unknownSafety: 'Segurança desconhecida',
-      failed: 'Falhou',
+      failed: 'falhou',
       resume: 'Continuar turno',
       resuming: 'Continuando…',
       dismiss: 'Dispensar',
@@ -520,6 +521,13 @@ export const messages = {
       environmentConnected: '{name} reconectou',
       environmentDisconnected: '{name} desconectou',
       environmentError: '{name} não conseguiu conectar',
+      // As formas curtas da idade de um evento, para uma coluna de largura fixa: "agora", "5min", "2h".
+      timeNow: 'agora',
+      timeMinutes: '{count}min',
+      timeHours: '{count}h',
+      timeDays: '{count}d',
+      timeMonths: '{count}m',
+      timeYears: '{count}a',
     },
   },
 
@@ -530,11 +538,6 @@ export const messages = {
       label: 'Criar imagens',
       description: 'Abre o chat com a ferramenta de imagem já ligada. Descreva o que você quer.',
       action: 'Começar no chat',
-    },
-    gallery: {
-      label: 'Galeria',
-      description: 'Tudo que este espaço já gerou, do mais recente ao mais antigo.',
-      action: 'Abrir galeria',
     },
     recent: {
       label: 'Recentes',
@@ -565,7 +568,7 @@ export const messages = {
         'Não foi possível salvar as configurações. Sua última alteração foi revertida.',
     },
     groups: {
-      general: 'Geral',
+      general: 'Preferências',
       models: 'Modelos e provedores',
       agents: 'Agentes e ferramentas',
       integrations: 'Integrações',
@@ -629,17 +632,17 @@ export const messages = {
         'Quando disponível, deixe o provider compactar o estado com cursor perto do limite de aviso.',
       warningThresholdLabel: 'Limite de aviso',
       warningThresholdDescription:
-        'Mostrar ações de compactação quando o uso de contexto atingir este valor.',
+        'Mostrar ações de compactação quando o uso de contexto atingir esta porcentagem da janela.',
       dangerThresholdLabel: 'Limite de perigo',
-      dangerThresholdDescription: 'Intensificar o aviso antes de atingir o limite crítico.',
+      dangerThresholdDescription:
+        'Intensificar o aviso nesta porcentagem da janela, antes de atingir o limite crítico.',
       hardStopThresholdLabel: 'Limite crítico',
       hardStopThresholdDescription:
-        'Tratar a pressão de contexto como crítica neste valor ou acima dele.',
+        'Tratar a pressão de contexto como crítica nesta porcentagem da janela ou acima dela.',
       summaryModelLabel: 'Modelo preferido para resumo',
       summaryModelDescription:
         'Use o modelo atual do chat ou force um modelo de texto específico para os resumos.',
       summaryModelCurrent: 'Usar o modelo atual do chat',
-      thresholdHint: '{value}% do contexto',
     },
     prompts: {
       defaultPromptsLabel: 'Prompts padrão',
@@ -659,7 +662,7 @@ export const messages = {
       injectionRoleUser: 'Enviar como user prompt',
       frequencyLabel: 'Frequência',
       frequencyFirstTurn: 'Enviar apenas no primeiro prompt',
-      frequencyFirstTurnHint: 'Recomendado',
+      frequencyHint: 'Enviar uma vez por chat é o recomendado.',
       frequencyEveryTurn: 'Enviar sempre',
       addRule: 'Adicionar regra',
       customRulesEmpty: 'Nenhuma regra personalizada ainda',
@@ -742,10 +745,6 @@ export const messages = {
       languageLabel: 'Idioma',
       languageDescription: 'Idioma da interface do usuário',
       imageQualityLabel: 'Qualidade de imagem padrão',
-      maxToolIterationsLabel: 'Iterações máximas de ferramentas',
-      maxToolIterationsDescription:
-        'Limite máximo de rodadas de chamada de ferramentas que o modelo pode executar em um turno.',
-      maxToolIterationsHint: '{value} de 1000',
       chatTitlesLabel: 'Títulos dos chats',
       chatTitlesDescription:
         'Renomeie automaticamente novos chats com timestamp a partir do primeiro prompt do usuário.',
@@ -776,7 +775,8 @@ export const messages = {
       secondsHint: '{value}s',
     },
     connectors: {
-      title: 'Conectores de IA',
+      title: 'Conectores',
+      description: 'As contas e chaves de API que o MangoStudio usa para acessar cada provedor.',
       addButton: 'Adicionar conector',
       emptyTitle: 'Nenhum conector encontrado',
       emptyDescription: 'Adicione sua primeira chave de API para começar a gerar.',
@@ -923,6 +923,7 @@ export const messages = {
       imageModelsLabel: 'Modelos de imagem',
       doneButton: 'Concluído',
       configureModels: 'Configurar modelos',
+      modelsButton: 'Modelos',
       deleteConnector: 'Excluir conector',
       statusConnected: 'Conectado',
       statusNeedsSignIn: 'Requer novo login',
@@ -946,7 +947,8 @@ export const messages = {
       backToMenu: 'Voltar para provedores',
       sectionReasoning: 'Raciocínio',
       sectionTools: 'Configuração de ferramentas',
-      sectionCache: 'Cache de prompt',
+      sectionCache: 'Cache e compactação',
+      sectionCompaction: 'Compactação',
       saving: 'Salvando…',
       saveError: 'Falha ao salvar configurações do provedor',
       loadError: 'Falha ao carregar provedores',
@@ -965,7 +967,8 @@ export const messages = {
       capabilityThinking: 'Raciocínio',
       capabilityTools: 'Ferramentas',
       capabilityCaching: 'Cache',
-      maxOutputTokensPlaceholder: '1 – {limit}',
+      maxOutputTokensPlaceholder: 'Padrão do provedor',
+      maxOutputTokensHint: 'De 1 a {limit}. Deixe vazio para usar o padrão do provedor.',
       deprecatedBadge: 'Legado',
       deprecatedNote:
         'O MangoStudio não executa mais este provedor. As configurações aqui não afetam turnos — use o runner CLI do Cursor no seletor de runner do chat.',
@@ -988,7 +991,6 @@ export const messages = {
       maxToolIterationsLabel: 'Iterações máximas de ferramentas',
       maxToolIterationsDescription:
         'Limite máximo de rodadas de chamada de ferramentas que o modelo pode executar em um turno.',
-      maxToolIterationsHint: '{value} de 1000',
       executionTitle: 'Execução',
       autoModelOption: 'Automático (primeiro disponível)',
       letAiDecideQualityLabel: 'IA decide a qualidade',
@@ -1038,7 +1040,6 @@ export const messages = {
         save: 'Salvar',
         cancel: 'Cancelar',
         pathPlaceholder: 'ex. /home/usuario/projetos',
-        noPaths: 'Nenhum caminho configurado.',
       },
     },
     mcp: {
@@ -1099,6 +1100,10 @@ export const messages = {
       keyPlaceholder: 'Nome',
       valuePlaceholder: 'Valor',
       addEntry: 'Adicionar',
+      addArgument: 'Adicionar argumento',
+      addVariable: 'Adicionar variável',
+      addSecretVariable: 'Adicionar variável secreta',
+      addHeader: 'Adicionar cabeçalho',
       removeEntry: 'Remover',
       enabledLabel: 'Ativado',
       disabledLabel: 'Desativado',
@@ -1267,6 +1272,8 @@ export const messages = {
       },
       createDialog: {
         title: 'Criar chave de API',
+        description:
+          'Uma chave permite que um script ou ferramenta chame esta instância sem uma sessão de navegador.',
         nameLabel: 'Nome',
         namePlaceholder: 'ex. pipeline de CI',
         nameRequired: 'O nome é obrigatório',
@@ -1316,6 +1323,8 @@ export const messages = {
       shadowedBadge: 'Sombreada',
       shadowedHint:
         'Uma fonte de maior prioridade fornece uma skill com o mesmo nome, então esta cópia está inativa.',
+      shadowedNotice:
+        'As skills marcadas como Sombreada têm o mesmo nome de uma skill de uma fonte de maior prioridade, então essas cópias estão inativas.',
       loadError: 'Falha ao carregar skills',
       noSkills: 'Nenhuma skill instalada.',
     },
@@ -1476,7 +1485,8 @@ export const messages = {
     sidePanelTitle: 'Painel lateral do agente',
     sidePanelDescription:
       'Escolha quais painéis do workspace aparecem no modo Agente e organize a ordem deles.',
-    sidePanelWidth: 'Largura atual: {width}px',
+    widthLabel: 'Largura',
+    widthDefaultHint: 'Padrão: {width}px',
     sidePanelResetWidth: 'Redefinir largura',
     sidePanelShow: 'Mostrar {panel}',
     sidePanelMoveUp: 'Mover {panel} para cima',
@@ -1490,11 +1500,11 @@ export const messages = {
     chatSidebarTitle: 'Barra lateral de chats',
     chatSidebarDescription:
       'Arraste a borda da barra lateral no desktop para ver títulos de chat mais longos.',
-    chatSidebarWidth: 'Largura atual: {width}px',
     chatSidebarResetWidth: 'Redefinir largura da barra lateral',
     chatSidebarResize: 'Redimensionar barra lateral de chats',
     breadcrumbIn: 'em',
     breadcrumbDirty: 'Alterações não commitadas',
+    breadcrumbDirtyShort: 'Alterado',
   },
 
   sidebar: {
@@ -1578,7 +1588,6 @@ export const messages = {
       open: 'Mais ações do repositório',
       stash: 'Stashes…',
       prune: 'Remover branches obsoletas',
-      refresh: 'Atualizar',
     },
     branch: {
       menu: 'Mudar branch',
@@ -1802,7 +1811,6 @@ export const messages = {
       loading: 'Lendo as worktrees…',
       loadError: 'Não foi possível ler as worktrees deste repositório.',
       empty: 'Este repositório tem apenas a worktree principal.',
-      refresh: 'Atualizar worktrees',
       add: 'Adicionar worktree',
       addTitle: 'Nova worktree',
       pathLabel: 'Caminho da worktree',
@@ -1898,9 +1906,9 @@ export const messages = {
       'not-a-github-remote': 'Este repositório não tem um remoto no GitHub.',
     },
     connectionHint: {
-      'gh-not-installed': 'Instale o gh naquela máquina e atualize.',
-      'not-authenticated': 'Execute gh auth login naquela máquina e atualize.',
-      'no-remote': 'Adicione um remoto com git remote add origin e atualize.',
+      'gh-not-installed': 'Instale a CLI do GitHub naquela máquina e atualize.',
+      'not-authenticated': 'Execute isto naquela máquina e atualize.',
+      'no-remote': 'Adicione um remoto com {command} naquela máquina e atualize.',
       'not-a-github-remote': 'O painel do GitHub só lê repositórios hospedados no GitHub.',
     },
 
@@ -2070,8 +2078,8 @@ export const messages = {
     },
     page: {
       title: 'Terminal',
-      sessions: 'Sessões',
       openHere: 'Abrir aqui',
+      hide: 'Ocultar',
       noSessions: 'Nenhum terminal aberto para este ambiente.',
     },
     commands: {
@@ -2086,13 +2094,14 @@ export const messages = {
     downloadFilenamePrefix: 'mangostudio',
     mangoStudioLogo: 'Logo do MangoStudio',
     retry: 'Tentar novamente',
-    noResultsFor: 'Nenhum resultado para "{query}"',
+    noResultsFor: 'Nenhum resultado para “{query}”',
     contextIndicator: 'Indicador de uso de contexto',
     settingsNavigation: 'Navegação de configurações',
     openMenu: 'Abrir menu',
     closeMenu: 'Fechar menu',
     disclaimer: 'A IA pode cometer erros. Confira os resultados.',
     dismissToast: 'Fechar notificação',
+    notifications: 'Notificações',
   },
 
   library: {
@@ -2119,6 +2128,16 @@ export const messages = {
       instruction: 'Instrução',
       setting: 'Configuração',
       hook: 'Hook',
+    },
+    // Os mesmos substantivos dentro de uma frase ("Propagar skill gh"), onde o
+    // rótulo acima poria uma maiúscula no meio dela.
+    kindsInline: {
+      skill: 'skill',
+      subagent: 'subagente',
+      command: 'comando',
+      instruction: 'instrução',
+      setting: 'configuração',
+      hook: 'hook',
     },
     // Estado bruto do contrato, usado na lista de cobertura do detalhe.
     coverage: {
@@ -2228,9 +2247,10 @@ export const messages = {
     filters: {
       search: 'Filtrar por nome',
       target: 'Agente',
-      anyTarget: 'Qualquer agente',
+      // O rótulo do seletor ("Agente:") já diz o que está sendo escolhido.
+      anyTarget: 'Qualquer',
       location: 'Local',
-      anyLocation: 'Qualquer local',
+      anyLocation: 'Qualquer',
       show: 'Mostrar',
       showAll: 'Tudo',
       showDivergent: 'Só divergentes',
@@ -2288,8 +2308,9 @@ export const messages = {
     },
     wizard: {
       title: 'Propagar {count} recursos',
-      titleOne: 'Propagar {resource}',
+      titleOne: 'Propagar {kind} {resource}',
       close: 'Fechar',
+      cancel: 'Cancelar',
       back: 'Voltar',
       continue: 'Continuar',
       stepConflict: 'Resolver conflitos',
@@ -2309,7 +2330,6 @@ export const messages = {
     conflict: {
       description:
         'Estes recursos têm mais de uma versão legível. Não existe cópia canônica, então a escolha é sua.',
-      none: 'Nenhum conflito: cada recurso selecionado tem uma única versão legível, então não há o que escolher.',
       resolved: 'Resolvido',
       unresolved: '{count} recursos ainda precisam de uma decisão.',
       adopt: 'Usar esta versão',
@@ -2421,7 +2441,7 @@ export const messages = {
     },
     removal: {
       title: 'Remover {count} recursos',
-      titleOne: 'Remover {resource}',
+      titleOne: 'Remover {kind} {resource}',
       remove: 'Remover',
       removing: 'Removendo…',
       stepLocations: 'Escolher cópias',
@@ -2546,6 +2566,12 @@ export const messages = {
         detected: 'Detectado',
         'not-detected': 'Não configurado',
         'not-applicable': 'Não se aplica',
+      },
+      // Uma linha para os agentes sem nada a comparar, em vez de um cartão para
+      // cada um que só repete o estado.
+      undetectedLine: {
+        'not-detected': 'Não configurado para {agents}',
+        'not-applicable': 'Não se aplica a {agents}',
       },
       presentation: {
         redacted: 'Valor omitido por segurança',
@@ -2931,8 +2957,16 @@ export const messages = {
     checkedAt: 'Verificado às {time}',
     overview: {
       description: 'Com o que esta máquina roda agentes e o que precisa de atenção.',
-      // Cada seção resume uma aba, então o link diz qual delas abre.
-      open: 'Abrir {section}',
+      // Cada seção resume uma aba, então o link diz qual delas abre. Uma frase
+      // por aba, e não um modelo em volta do rótulo: o rótulo leva maiúscula na
+      // barra de abas, a frase não.
+      open: {
+        runtimes: 'Abrir toolchains',
+        agents: 'Abrir agentes',
+        health: 'Abrir diagnóstico',
+        library: 'Abrir biblioteca',
+        machine: 'Abrir esta máquina',
+      },
       agentDetails: 'Detalhes',
       agentsEmpty: 'Nenhuma CLI de agente foi encontrada nesta máquina.',
       agentsEmptyHint: 'O MangoStudio pode instalar uma para você pela aba Agentes.',
@@ -3744,7 +3778,11 @@ export const messages = {
       privacy: 'Política de privacidade do {vendor}',
       required: 'Este agente precisa que o aviso seja aceito antes de rodar.',
       manageTitle: 'Avisos de agentes de terceiros',
+      manageDescription:
+        'A CLI de um agente de terceiros mostra um aviso antes de receber uma conversa pela primeira vez. Os avisos que você aceitou aparecem aqui.',
       manageEmpty: 'Você ainda não aceitou nenhum agente externo.',
+      manageEmptyHint:
+        'Um aviso é registrado na primeira vez que você usa o Claude Code, o Codex ou o Cursor no MangoStudio.',
       acknowledgedAt: 'Aceito em {date}',
       revoke: 'Retirar',
       revoking: 'Retirando…',
@@ -3797,8 +3835,8 @@ export const messages = {
       modeKey: 'modo',
       whatItCanDo: 'O que ele pode fazer',
       whoApproves: 'Quem aprova',
-      unattendedLevelWarning: 'este agente pode editar e rodar qualquer coisa',
-      unattendedRoutingWarning: 'aprovações respondidas sem você',
+      unattendedLevelWarning: 'Este agente pode editar e rodar qualquer coisa.',
+      unattendedRoutingWarning: 'As aprovações são respondidas sem você.',
       unsupportedGeneric: 'Este agente não oferece esta combinação',
       levelName: {
         'read-only': 'Somente leitura',
@@ -3821,7 +3859,7 @@ export const messages = {
       },
       /** Escolhas nomeadas para quem não quer aprender a matriz. */
       advanced: 'Ajuste fino',
-      presetHeading: 'Quanto ele deve te incomodar',
+      presetHeading: 'Modo',
       preset: {
         careful: {
           label: 'Cauteloso',
@@ -3833,7 +3871,7 @@ export const messages = {
         },
         autonomous: {
           label: 'Autônomo',
-          description: 'Segue sozinho, sem parar para perguntar.',
+          description: 'Segue sozinho.',
         },
       },
       /** O que cada preset significa para este fornecedor especificamente. */
@@ -4010,7 +4048,7 @@ export const messages = {
     thought: 'Pensou',
     withheld: 'Pensou, raciocínio não compartilhado',
     toggle: 'Ver raciocínio',
-    enable: 'Raciocinar',
+    enable: 'Raciocínio',
     enabled: 'Raciocínio ativo',
     disabled: 'Raciocínio desativado',
     effort: 'Esforço',
@@ -4019,7 +4057,7 @@ export const messages = {
     effortHigh: 'Alto',
     effortXHigh: 'Extra alto',
     effortMax: 'Máximo',
-    reasoningBadge: 'Reasoning',
+    reasoningBadge: 'Raciocínio',
   },
 
   tools: {
@@ -4149,8 +4187,6 @@ export const messages = {
 
   onboarding: {
     title: 'Boas-vindas ao MangoStudio',
-    subtitle:
-      'Alguns passos curtos e um agente vai responder dentro do seu próprio projeto. Pule o que você já tem.',
     progress: 'Passo {step} de {total} · {name}',
     stepList: 'Passos da configuração',
     back: 'Voltar',
@@ -4165,7 +4201,7 @@ export const messages = {
       skipped: 'Pulado',
       pending: 'A fazer',
       unknown: 'Verificando',
-      unavailable: 'Não aqui',
+      unavailable: 'Indisponível',
     },
     steps: {
       welcome: 'Boas-vindas',
@@ -4220,9 +4256,9 @@ export const messages = {
         'Nenhum provider de modelo está configurado, então o MangoStudio não consegue responder sozinho. Adicione uma chave em Configura\u00e7\u00f5es \u2192 Providers depois da configura\u00e7\u00e3o, ou escolha uma CLI de agente abaixo.',
       signedIn: 'Conectado',
       signedOut: 'Não conectado',
-      signInHint: 'Entre pelo terminal desta máquina e volte aqui.',
+      // O comando abaixo é de um agente só; a linha diz qual.
+      signInHint: '{agent}: entre pelo terminal desta máquina e volte aqui.',
       selected: 'Selecionado',
-      select: 'Usar este',
       isolated:
         'Outra conta já está usando os logins de agente deste computador, então eles não são oferecidos aqui. Use um modelo, ou pule este passo e adicione uma máquina sua em Ambientes depois.',
     },
@@ -4253,6 +4289,8 @@ export const messages = {
       openChat: 'Abrir o chat',
       resume: 'Esta configuração já começou um chat. Enviar de novo continua nele.',
       needsFolder: 'Escolha uma pasta antes, ou pule aquele passo.',
+      // Leva ao passo da pasta; não abre o seletor, então diz "ir", não "escolher".
+      goToFolder: 'Ir para o passo da pasta',
       summary: 'Enviando para {runner} em {workdir}',
     },
     reenter: {

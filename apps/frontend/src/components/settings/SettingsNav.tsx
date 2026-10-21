@@ -50,6 +50,7 @@ export function SettingsNav() {
   const listId = useId();
   const groups = settingsNavGroups(t.settings);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const currentLabel = currentSettingsLabel(groups, pathname);
 
   // Closing on the links' own `onClick` is not enough: this nav is mounted by
   // the settings layout and only the page under it is swapped, so the command
@@ -70,8 +71,16 @@ export function SettingsNav() {
           'flex cursor-pointer items-center justify-between gap-2 text-left font-medium lg:hidden'
         )}
       >
-        <span className="truncate">
-          {currentSettingsLabel(groups, pathname) ?? t.settings.title}
+        {/* "Settings" in `fg-subtle` says this is a way to move around, not a first
+            form field. It is hidden from assistive technology because the landmark
+            above already says it, and the button is better named by its page. */}
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          {currentLabel ? (
+            <span aria-hidden="true" className="shrink-0 font-normal text-fg-subtle">
+              {t.settings.title}:
+            </span>
+          ) : null}
+          <span className="truncate">{currentLabel ?? t.settings.title}</span>
         </span>
         <ChevronDown size={ICON_MD} className="shrink-0 text-fg-muted" />
       </button>

@@ -208,7 +208,7 @@ function AuthenticatedLayout() {
             activePage === 'chat' && app.currentChatId && app.currentEnvironmentId ? (
               <EnvironmentSelector
                 environmentId={app.currentEnvironmentId}
-                disabled={app.isGenerating || chatHasTurns}
+                locked={app.isGenerating || chatHasTurns}
                 onEnvironmentChange={(environmentId) =>
                   app.updateChatEnvironment(app.currentChatId as string, environmentId)
                 }
