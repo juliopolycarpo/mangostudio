@@ -122,8 +122,11 @@ test('chat title stays visible beside a long Git branch and the runner badge', a
       `expected title width at 420 px: > ${minimum} px (its 240 px width) | received: ${maximum} px`
     ).toBeGreaterThan(minimum);
 
-    // Badge content is unchanged: the branch is still in the row, only clipped.
-    await expect(row.getByTitle(LONG_BRANCH, { exact: true })).toHaveText(LONG_BRANCH);
+    // Badge content is unchanged: the branch is still named in the row, in the
+    // badge's tooltip and its screen-reader copy, whatever is drawn beside the glyph.
+    const badge = row.getByTestId('git-summary-badge');
+    expect(await badge.getAttribute('title')).toContain(LONG_BRANCH);
+    await expect(badge).toContainText(LONG_BRANCH);
   } finally {
     await useDefaultWidth();
     await page.request.delete(`/api/chats/${chatId}`);

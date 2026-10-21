@@ -32,7 +32,7 @@ export function ToolchainAction({ path, selected, isPending, onSelect }: Toolcha
 
   return (
     <Button
-      variant="ghost"
+      variant="subtle"
       size="sm"
       loading={isPending}
       onClick={() => onSelect(path)}

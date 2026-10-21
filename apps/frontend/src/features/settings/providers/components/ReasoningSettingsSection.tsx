@@ -6,9 +6,10 @@ import type {
   ReasoningPolicy,
   UpdateProviderRuntimeSettingsBody,
 } from '@mangostudio/shared/provider-settings';
-import type { ReasoningEffort } from '@mangostudio/shared/types';
-import { Card } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
+import { SettingToggle } from '@/components/settings/SettingToggle';
 import { useI18n } from '@/hooks/use-i18n';
 import { EFFORT_DISPLAY_ORDER, EFFORT_LABEL_KEYS } from '../constants';
 
@@ -26,48 +27,32 @@ export function ReasoningSettingsSection({
   const { t } = useI18n();
   const s = t.settings.providers;
 
-  const supportedSet = new Set<ReasoningEffort>(policy.supportedEfforts);
+  const efforts = EFFORT_DISPLAY_ORDER.filter((effort) =>
+    policy.supportedEfforts.includes(effort)
+  ).map((effort) => ({
+    value: effort,
+    label: t.thinking[EFFORT_LABEL_KEYS[effort] as keyof typeof t.thinking],
+  }));
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant">
-        {s.sectionReasoning}
-      </h3>
-
-      {/* Thinking toggle */}
+    <SettingsSection title={s.sectionReasoning}>
       {policy.thinkingToggleSupported && (
-        <div className="flex items-center justify-between gap-4">
-          <label htmlFor="thinking-toggle" className="text-sm text-on-surface">
-            {s.thinkingEnabled}
-          </label>
-          <Checkbox
-            id="thinking-toggle"
-            checked={form.thinkingEnabled ?? false}
-            onChange={(e) => onChange({ ...form, thinkingEnabled: e.target.checked })}
-          />
-        </div>
+        <SettingToggle
+          label={s.thinkingEnabled}
+          description={s.thinkingEnabledHint}
+          checked={form.thinkingEnabled ?? false}
+          onChange={(thinkingEnabled) => onChange({ ...form, thinkingEnabled })}
+        />
       )}
 
-      {/* Reasoning effort */}
-      <div className="space-y-2">
-        <span className="text-sm text-on-surface">{s.reasoningEffort}</span>
-        <div className="flex flex-wrap gap-2">
-          {EFFORT_DISPLAY_ORDER.filter((e) => supportedSet.has(e)).map((effort) => (
-            <button
-              key={effort}
-              type="button"
-              onClick={() => onChange({ ...form, reasoningEffort: effort })}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
-                (form.reasoningEffort ?? policy.defaultEffort) === effort
-                  ? 'bg-primary text-on-primary'
-                  : 'bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest'
-              }`}
-            >
-              {t.thinking[EFFORT_LABEL_KEYS[effort] as keyof typeof t.thinking]}
-            </button>
-          ))}
-        </div>
-      </div>
-    </Card>
+      <SettingsRow label={s.reasoningEffort} hint={s.reasoningEffortHint} layout="stacked">
+        <SettingsSegmented
+          ariaLabel={s.reasoningEffort}
+          value={form.reasoningEffort ?? policy.defaultEffort}
+          options={efforts}
+          onChange={(reasoningEffort) => onChange({ ...form, reasoningEffort })}
+        />
+      </SettingsRow>
+    </SettingsSection>
   );
 }

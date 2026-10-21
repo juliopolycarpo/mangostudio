@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import {
   API_KEY_MAX_PER_USER,
+  API_KEY_PREFIX,
   type ApiKeySummary,
   type CreateApiKeyResponse,
 } from '@mangostudio/shared/api-keys';
@@ -93,6 +94,38 @@ describe('ExternalApiSettingsPage', () => {
     expect(screen.getByText('mango_abc…')).toBeInTheDocument();
   });
 
+  it('hides the key column while no key has a hint that tells it apart', async () => {
+    // Keys created before the hint carried random characters store the bare prefix.
+    respondWithKeys(fetchScenario, [
+      { ...SAMPLE_KEY, id: 'key-old-1', start: API_KEY_PREFIX },
+      { ...SAMPLE_KEY, id: 'key-old-2', name: 'Backup job', start: null },
+    ]);
+
+    render(
+      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={jest.fn()} />
+    );
+
+    expect(await screen.findByText('CI pipeline')).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Key' })).not.toBeInTheDocument();
+    expect(screen.queryByText(`${API_KEY_PREFIX}…`)).not.toBeInTheDocument();
+  });
+
+  it('shows a dash for a legacy key once another key has a hint', async () => {
+    respondWithKeys(fetchScenario, [
+      SAMPLE_KEY,
+      { ...SAMPLE_KEY, id: 'key-old', name: 'Legacy job', start: API_KEY_PREFIX },
+    ]);
+
+    render(
+      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={jest.fn()} />
+    );
+
+    expect(await screen.findByText('Legacy job')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Key' })).toBeInTheDocument();
+    expect(screen.getByText('mango_abc…')).toBeInTheDocument();
+    expect(screen.queryByText(`${API_KEY_PREFIX}…`)).not.toBeInTheDocument();
+  });
+
   it('marks rows inactive when the toggle is off', async () => {
     respondWithKeys(fetchScenario, [SAMPLE_KEY]);
 
@@ -119,7 +152,7 @@ describe('ExternalApiSettingsPage', () => {
       />
     );
 
-    await user.click(await screen.findByRole('checkbox', { name: /enable external api access/i }));
+    await user.click(await screen.findByRole('switch', { name: /enable external api access/i }));
     expect(setExternalApiEnabled).toHaveBeenCalledWith(true);
   });
 
@@ -217,6 +250,10 @@ describe('ExternalApiSettingsPage', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: /revoke: ci pipeline/i }));
+    // The title is the question; the body names the consequence and the key.
+    const dialog = screen.getByRole('dialog', { name: 'Revoke this API key?' });
+    expect(dialog).toHaveTextContent('Requests that present it stop working immediately.');
+    expect(dialog).toHaveTextContent('CI pipeline');
     await user.click(screen.getByRole('button', { name: /^revoke$/i }));
 
     await waitFor(() => {

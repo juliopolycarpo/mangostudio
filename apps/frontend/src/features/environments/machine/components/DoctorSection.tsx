@@ -1,16 +1,22 @@
 /**
- * The doctor rows, exactly as the CLI prints them: label, badge, detail.
+ * The doctor rows, as the CLI prints them: a status glyph, the label, the detail.
  * Worst first, since the reason to open the list is at its top.
  */
 
-import type { MachineCheck, MachineCheckStatus } from '@mangostudio/shared/machine';
+import type {
+  MachineCheck,
+  MachineCheckStatus,
+  MachineDoctorReport,
+} from '@mangostudio/shared/machine';
 import { CircleCheck } from 'lucide-react';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import { FindingIcon } from '../../components/FindingList';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { useMachineDoctor } from '../queries';
+import { MachineCard } from './MachineCard';
 
 const ORDER: Record<MachineCheckStatus, number> = { fail: 0, warn: 1, ok: 2 };
 
@@ -19,8 +25,16 @@ function sortChecks(checks: readonly MachineCheck[]): MachineCheck[] {
 }
 
 function CheckIcon({ status }: { readonly status: MachineCheckStatus }) {
-  if (status === 'ok') return <CircleCheck size={16} className="mt-0.5 shrink-0 text-primary" />;
+  if (status === 'ok') {
+    return <CircleCheck size={ICON_MD} className="mt-0.5 shrink-0 text-success" />;
+  }
   return <FindingIcon severity={status} />;
+}
+
+/** The worst thing the doctor found, as the badge's tone. */
+function summaryVariant(doctor: MachineDoctorReport): 'error' | 'warning' | 'success' {
+  if (doctor.failures > 0) return 'error';
+  return doctor.warnings > 0 ? 'warning' : 'success';
 }
 
 export function DoctorSection() {
@@ -29,21 +43,22 @@ export function DoctorSection() {
   const doctor = useMachineDoctor();
 
   return (
-    <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-doctor">
-      <div className="flex items-baseline justify-between gap-3">
-        <CardSectionLabel>{m.title}</CardSectionLabel>
-        {doctor.data && (
-          <p className="text-xs text-on-surface-variant/70" data-testid="machine-doctor-summary">
+    <MachineCard
+      title={m.title}
+      testId="machine-doctor"
+      action={
+        doctor.data ? (
+          <Badge variant={summaryVariant(doctor.data)} data-testid="machine-doctor-summary">
             {doctor.data.failures === 0 && doctor.data.warnings === 0
               ? m.clear
               : formatMessage(m.summary, {
                   warnings: String(doctor.data.warnings),
                   failures: String(doctor.data.failures),
                 })}
-          </p>
-        )}
-      </div>
-
+          </Badge>
+        ) : null
+      }
+    >
       {doctor.isPending && !doctor.data ? (
         <EnvironmentPageState variant="loading" size="section" />
       ) : doctor.error && !doctor.data ? (
@@ -66,13 +81,13 @@ export function DoctorSection() {
             >
               <CheckIcon status={check.status} />
               <div className="min-w-0">
-                <span className="font-bold text-on-surface">{check.label}</span>
-                <span className="text-on-surface-variant"> — {check.detail}</span>
+                <span className="font-medium text-fg">{check.label}</span>
+                <span className="text-fg-muted"> — {check.detail}</span>
               </div>
             </li>
           ))}
         </ul>
       )}
-    </section>
+    </MachineCard>
   );
 }

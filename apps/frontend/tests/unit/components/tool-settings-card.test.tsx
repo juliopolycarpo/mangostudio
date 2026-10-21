@@ -1,5 +1,5 @@
 /**
- * Unit tests for ToolSettingsCard reconciling a descriptor that changed under
+ * Unit tests for ToolSettingsRow reconciling a descriptor that changed under
  * it. The settings realtime channel refetches this list on any tool write,
  * including one made in another tab, so the card is handed descriptors it did
  * not ask for.
@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
-import { ToolSettingsCard } from '../../../src/features/settings/tools/components/ToolSettingsCard';
+import { ToolSettingsRow } from '../../../src/features/settings/tools/components/ToolSettingsRow';
 import { act, fireEvent, render, screen } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
@@ -37,7 +37,7 @@ function withTimezone(timezone: string): ToolSettingsDescriptor {
   return { ...DESCRIPTOR, parameters: { timezone } };
 }
 
-describe('ToolSettingsCard', () => {
+describe('ToolSettingsRow', () => {
   const fetchScenario = createFetchScenario();
 
   function countToolWrites(): number {
@@ -58,12 +58,12 @@ describe('ToolSettingsCard', () => {
   });
 
   it('adopts a remote parameter change instead of saving the stale one back', async () => {
-    const { rerender } = render(<ToolSettingsCard descriptor={DESCRIPTOR} />);
+    const { rerender } = render(<ToolSettingsRow descriptor={DESCRIPTOR} />);
 
     expect(screen.getByDisplayValue('UTC')).toBeInTheDocument();
 
     useFakeTimers();
-    rerender(<ToolSettingsCard descriptor={withTimezone('Europe/Lisbon')} />);
+    rerender(<ToolSettingsRow descriptor={withTimezone('Europe/Lisbon')} />);
 
     await act(async () => {
       await advanceTimersByTimeAsync(400);
@@ -81,13 +81,13 @@ describe('ToolSettingsCard', () => {
       body: withTimezone('America/Sao_Paulo'),
     });
 
-    const { rerender } = render(<ToolSettingsCard descriptor={DESCRIPTOR} />);
+    const { rerender } = render(<ToolSettingsRow descriptor={DESCRIPTOR} />);
 
     useFakeTimers();
     fireEvent.change(screen.getByDisplayValue('UTC'), {
       target: { value: 'America/Sao_Paulo' },
     });
-    rerender(<ToolSettingsCard descriptor={withTimezone('Europe/Lisbon')} />);
+    rerender(<ToolSettingsRow descriptor={withTimezone('Europe/Lisbon')} />);
 
     await act(async () => {
       await advanceTimersByTimeAsync(400);
@@ -100,18 +100,18 @@ describe('ToolSettingsCard', () => {
   });
 
   it('adopts a remote enablement change', async () => {
-    const { rerender } = render(<ToolSettingsCard descriptor={DESCRIPTOR} />);
+    const { rerender } = render(<ToolSettingsRow descriptor={DESCRIPTOR} />);
 
-    expect(screen.getByRole('checkbox')).toBeChecked();
+    expect(screen.getByRole('switch')).toBeChecked();
 
     useFakeTimers();
-    rerender(<ToolSettingsCard descriptor={{ ...DESCRIPTOR, enabled: false }} />);
+    rerender(<ToolSettingsRow descriptor={{ ...DESCRIPTOR, enabled: false }} />);
 
     await act(async () => {
       await advanceTimersByTimeAsync(400);
     });
 
-    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(screen.getByRole('switch')).not.toBeChecked();
     expect(countToolWrites()).toBe(0);
   });
 });

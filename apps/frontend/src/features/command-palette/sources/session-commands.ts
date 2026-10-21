@@ -8,6 +8,7 @@
 
 import type { Chat } from '@mangostudio/shared/chat';
 import { MessageSquare } from 'lucide-react';
+import { chatTitleLabel } from '@/features/chat/lib/chat-title';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { chatSearchText } from '@/features/sidebar/lib/filter-chats';
 import { type RunnerBadgeLabels, runnerBadge } from '@/features/sidebar/lib/runner-badge';
@@ -17,6 +18,8 @@ import { workdirBasename } from '@/lib/paths';
 export interface SessionCommandParams {
   readonly chats: readonly Chat[];
   readonly badgeLabels: RunnerBadgeLabels;
+  /** What a chat nobody has named yet is called (`t.chat.untitled`). */
+  readonly untitledLabel: string;
   readonly locale: string;
   /** Passed in rather than read, so the relative times a test asserts are fixed. */
   readonly nowMs: number;
@@ -26,6 +29,7 @@ export interface SessionCommandParams {
 export function sessionCommands({
   chats,
   badgeLabels,
+  untitledLabel,
   locale,
   nowMs,
   onSelect,
@@ -37,8 +41,9 @@ export function sessionCommands({
       return {
         id: `session:${chat.id}`,
         section: 'sessions' as const,
-        label: chat.title,
+        label: chatTitleLabel(chat.title, untitledLabel),
         hint: workdirBasename(chat.workdir) ?? undefined,
+        hintIsPath: true,
         meta: formatRelativeTime(chat.updatedAt, locale, nowMs),
         keywords: chatSearchText(chat, () => badge.label),
         icon: MessageSquare,

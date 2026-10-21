@@ -72,7 +72,7 @@ describe('SetupChecklist', () => {
     expect(hubService).toHaveAttribute('data-setup-status', 'todo');
     expect(
       within(hubService).getByRole('link', {
-        name: en.environments.overview.open.replace('{section}', en.environments.tabs.machine),
+        name: en.environments.overview.open.machine,
       })
     ).toHaveAttribute('href', '/environments/machine');
   });

@@ -165,7 +165,7 @@ describe('Add Environment reachability picker', () => {
     await user.click(screen.getByRole('button', { name: addLabels.trigger }));
 
     const dialog = await screen.findByTestId('add-environment-dialog');
-    await user.click(within(dialog).getByRole('tab', { name: addLabels.reachPaired }));
+    await user.click(within(dialog).getByRole('radio', { name: addLabels.reachPaired }));
     await user.type(within(dialog).getByRole('textbox', { name: addLabels.nameLabel }), 'Workshop');
     await user.click(within(dialog).getByRole('button', { name: addLabels.submit }));
 

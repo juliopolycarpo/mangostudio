@@ -9,30 +9,45 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/shared/library';
-import { useQueries, useQueryClient } from '@tanstack/react-query';
+import { useQueries } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
-import { formatBytes, hashPrefix, validInstances } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { hashPrefix, libraryKindPath, validInstances } from '../format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import {
   libraryEnvironmentSearch,
-  libraryKeys,
   libraryLocationsQueryOptions,
   libraryResourceQueryOptions,
   libraryTargetsQueryOptions,
 } from '../queries';
 import { ContentGroupList } from './ContentGroupList';
+import { CoverageList } from './CoverageList';
+import { InlineNote } from './InlineNote';
 import { InstanceDiff } from './InstanceDiff';
 import { LibraryPageState } from './LibraryPageState';
 import { PropagationWizard } from './PropagationWizard';
 import { RemovalWizard } from './RemovalWizard';
+
+/** Copies that differ, or cannot be compared, are the ones worth a second look. */
+const DIVERGENCE_BADGE: Readonly<
+  Record<LibraryResource['divergence'], 'neutral' | 'success' | 'warning'>
+> = {
+  single: 'neutral',
+  uniform: 'success',
+  divergent: 'warning',
+  'not-comparable': 'neutral',
+  incomparable: 'warning',
+};
 
 export function ResourceDetail({
   resourceKey,
@@ -45,11 +60,10 @@ export function ResourceDetail({
    */
   readonly initialCompare?: boolean;
 }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const l = t.library;
   const scope = useEnvironmentScope();
   const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;
-  const queryClient = useQueryClient();
   const [comparing, setComparing] = useState(initialCompare);
   const [propagating, setPropagating] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -85,159 +99,125 @@ export function ResourceDetail({
   );
   const candidates = useCandidateLocations(locations, resource?.ref.kind);
 
-  // No description: the library section layout already renders the subtitle
-  // directly above the tab strip this page sits under.
-  const header = (
-    <EnvironmentScopeHeader
-      scope={scope}
-      onRefresh={() => {
-        void resourceQuery.refetch();
-        void locationsQuery.refetch();
-        void queryClient.invalidateQueries({
-          queryKey: libraryKeys.contents(resourceKey, scope.environmentId),
-        });
-      }}
-    />
-  );
-
   if (scope.environment && !scope.permitsLibrary) {
     return (
-      <div className="space-y-4">
-        {header}
-        <EnvironmentScopeNotice
-          environment={scope.environment}
-          reason="not-permitted"
-          surface="library"
-        />
-      </div>
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="not-permitted"
+        surface="library"
+      />
     );
   }
 
-  if (resourceQuery.isPending) {
-    return (
-      <div className="space-y-4">
-        {header}
-        <LibraryPageState variant="loading" />
-      </div>
-    );
-  }
+  if (resourceQuery.isPending) return <LibraryPageState variant="loading" />;
   if (resourceQuery.error || !resource) {
-    return (
-      <div className="space-y-4">
-        {header}
-        {scope.environment && !scope.isConnected ? (
-          <EnvironmentScopeNotice
-            environment={scope.environment}
-            reason="disconnected"
-            surface="library"
-          />
-        ) : (
-          <LibraryPageState
-            variant="error"
-            title={l.detail.notFound}
-            onRetry={() => void resourceQuery.refetch()}
-          />
-        )}
-      </div>
+    return scope.environment && !scope.isConnected ? (
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="disconnected"
+        surface="library"
+      />
+    ) : (
+      <LibraryPageState
+        variant="error"
+        title={l.detail.notFound}
+        onRetry={() => void resourceQuery.refetch()}
+      />
     );
   }
 
   if (!isLocal && scope.environment && !scope.isConnected) {
     return (
-      <div className="space-y-4">
-        {header}
-        <EnvironmentScopeNotice
-          environment={scope.environment}
-          reason="disconnected"
-          surface="library"
-        />
-      </div>
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="disconnected"
+        surface="library"
+      />
     );
   }
 
   const invalid = resource.instances.filter((instance) => !instance.valid);
 
   return (
-    <div className="space-y-5" data-testid="resource-detail" data-resource-key={resource.key}>
-      {header}
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <Link
-            to={kindTab(resource)}
-            search={libraryEnvironmentSearch(scope.environmentId)}
-            className="inline-flex items-center gap-1.5 text-on-surface-variant text-xs hover:text-on-surface"
-          >
-            <ArrowLeft size={12} />
-            {l.detail.back}
-          </Link>
-          <h2 className="font-bold text-lg text-on-surface">{resource.key}</h2>
-          <p className="text-on-surface-variant/60 text-xs">
-            {`${l.kinds[resource.ref.kind]} · ${l.divergence[resource.divergence]}`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {candidates.isDetecting && (
-            <span className="text-on-surface-variant/60 text-xs" data-testid="detecting-agents">
-              {l.locationSettings.detecting}
-            </span>
-          )}
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setRemoving(true)}
-            disabled={!candidates.isResolved}
-            data-testid="remove-resource"
-          >
-            {l.detail.remove}
-          </Button>
-          <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
-            {l.detail.propagate}
-          </Button>
-        </div>
-      </header>
+    <div className="space-y-6" data-testid="resource-detail" data-resource-key={resource.key}>
+      {/* The way back sits on its own line above the header, so the actions
+          stay beside the name they act on — or wrap under it on a phone —
+          rather than sharing a line with a 12px link. */}
+      <div className="space-y-3">
+        <Link
+          to={libraryKindPath(resource.ref.kind)}
+          search={libraryEnvironmentSearch(scope.environmentId)}
+          className="inline-flex items-center gap-1.5 text-fg-muted text-xs hover:text-fg"
+        >
+          <ArrowLeft size={ICON_SM} aria-hidden="true" />
+          {l.detail.back}
+        </Link>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            {/* The name, not the `kind:name` id: the kind is stated once, on the
+                line below, and a second page-level heading under the umbrella's
+                would outrank the page it sits in. It is a `text-base` section
+                title; the groups under it are micro-labels, as in the Backups
+                page, so the name is always the largest thing below the page's
+                own title. */}
+            <h2 className="font-semibold text-base text-fg">{resource.ref.slug}</h2>
+            <p className="flex flex-wrap items-center gap-2 text-fg-muted text-sm">
+              {l.kinds[resource.ref.kind]}
+              <Badge variant={DIVERGENCE_BADGE[resource.divergence]}>
+                {l.divergence[resource.divergence]}
+              </Badge>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {candidates.isDetecting && (
+              <span className="text-fg-muted text-xs" data-testid="detecting-agents">
+                {l.locationSettings.detecting}
+              </span>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => setRemoving(true)}
+              disabled={!candidates.isResolved}
+              data-testid="remove-resource"
+            >
+              {l.detail.remove}
+            </Button>
+            <Button onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
+              {l.detail.propagate}
+            </Button>
+          </div>
+        </header>
+      </div>
 
       {resource.divergence === 'not-comparable' && (
-        <p className="text-on-surface-variant text-xs" data-testid="not-comparable">
+        <Callout tone="neutral" data-testid="not-comparable">
           {l.detail.notComparable}
-        </p>
+        </Callout>
       )}
       {resource.divergence === 'incomparable' && (
-        <p className="text-on-surface-variant text-xs" data-testid="incomparable">
+        <Callout tone="warning" data-testid="incomparable">
           {l.detail.incomparable}
-        </p>
+        </Callout>
       )}
 
-      <section className="space-y-2">
-        <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
-          {l.detail.contentHeading}
-        </h3>
+      <section className="space-y-3">
+        <MicroLabel as="h3">{l.detail.contentHeading}</MicroLabel>
         {groups.length === 0 ? (
-          <p className="text-on-surface-variant text-xs">{l.detail.notFound}</p>
+          <p className="text-fg-muted text-sm">{l.detail.notFound}</p>
         ) : (
-          <ContentGroupList
-            groups={groups}
-            locationLabel={locationLabel}
-            renderMeta={(group) =>
-              [
-                formatMessage(l.detail.copies, { count: String(group.instanceCount) }),
-                formatMessage(l.detail.modified, {
-                  when: formatRelativeTime(group.newestModifiedAtMs, locale),
-                }),
-                formatBytes(group.sizeBytes),
-              ].join(' · ')
-            }
-          />
+          <ContentGroupList groups={groups} locationLabel={locationLabel} />
         )}
 
         {groups.length >= 2 && resource.divergence !== 'incomparable' && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <Button variant="secondary" size="sm" onClick={() => setComparing((open) => !open)}>
               {comparing
                 ? l.detail.compareHide
-                : formatMessage(l.detail.compare, {
-                    left: `${hashPrefix(groups[0].contentHash)}…`,
-                    right: `${hashPrefix(groups[1].contentHash)}…`,
-                  })}
+                : compareLabel(
+                    l.detail.compare,
+                    hashPrefix(groups[0].contentHash),
+                    hashPrefix(groups[1].contentHash)
+                  )}
             </Button>
             {comparing && (
               <InstanceDiff
@@ -255,66 +235,30 @@ export function ResourceDetail({
                 environmentId={scope.environmentId}
               />
             )}
-            {groups.length > 2 && (
-              <p className="text-[11px] text-on-surface-variant/60">{l.detail.compareSelect}</p>
-            )}
+            {groups.length > 2 && <p className="text-fg-muted text-xs">{l.detail.compareSelect}</p>}
           </div>
         )}
       </section>
 
       {invalid.length > 0 && (
-        <ul className="space-y-1" data-testid="invalid-instances">
-          {invalid.map((instance) => (
-            <li key={instance.locationId} className="text-[11px] text-error">
-              {formatMessage(l.detail.invalidInstance, {
-                location: locationLabel(instance.locationId),
-              })}
-              {instance.valid === false && ` — ${l.invalidReason[instance.invalidReason]}`}
-            </li>
-          ))}
-        </ul>
+        <Callout tone="danger" data-testid="invalid-instances">
+          <ul className="space-y-1">
+            {invalid.map((instance) => (
+              <li key={instance.locationId}>
+                {formatMessage(l.detail.invalidInstance, {
+                  location: locationLabel(instance.locationId),
+                })}
+                {instance.valid === false && ` — ${l.invalidReason[instance.invalidReason]}`}
+              </li>
+            ))}
+          </ul>
+        </Callout>
       )}
 
-      <section className="space-y-2">
-        <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
-          {l.detail.coverageHeading}
-        </h3>
-        <ul className="space-y-1.5">
-          {resource.coverage.map((coverage) => (
-            <li
-              key={coverage.targetId}
-              className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
-              data-testid="coverage-row"
-              data-target-id={coverage.targetId}
-              data-state={coverage.state}
-            >
-              <span className="w-28 shrink-0 font-medium text-on-surface">
-                {l.targets[coverage.targetId]}
-              </span>
-              <span className="text-on-surface-variant">{l.coverage[coverage.state]}</span>
-              {coverage.effectiveLocationId && (
-                <span className="text-on-surface-variant/60">
-                  {formatMessage(l.detail.via, {
-                    location: locationLabel(coverage.effectiveLocationId),
-                  })}
-                </span>
-              )}
-              {/*
-                A location is only reported as a shadow here — the matrix keeps
-                that as an implementation detail until someone asks, and this is
-                where they asked.
-              */}
-              {coverage.shadowedLocationIds.length > 0 && (
-                <span className="text-on-surface-variant/60">
-                  {formatMessage(l.detail.alsoIn, {
-                    locations: coverage.shadowedLocationIds.map(locationLabel).join(', '),
-                  })}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-        {targetsQuery.isError && <p className="text-[11px] text-error">{l.matrix.loadError}</p>}
+      <section className="space-y-3">
+        <MicroLabel as="h3">{l.detail.coverageHeading}</MicroLabel>
+        <CoverageList resource={resource} locationLabel={locationLabel} />
+        {targetsQuery.isError && <InlineNote tone="danger">{l.matrix.loadError}</InlineNote>}
       </section>
 
       {propagating && (
@@ -338,23 +282,27 @@ export function ResourceDetail({
   );
 }
 
-/** Which tab this resource lives under, for the back link. */
-function kindTab(resource: LibraryResource) {
-  // Exhaustive on purpose: a `default` here sends a kind nobody wired up to the
-  // skills tab, which looks like a working back link and is not one.
-  switch (resource.ref.kind) {
-    case 'skill':
-      return '/environments/library/skills' as const;
-    case 'subagent':
-      return '/environments/library/subagents' as const;
-    case 'command':
-      return '/environments/library/commands' as const;
-    case 'instruction':
-      return '/environments/library/instructions' as const;
-    case 'setting':
-    case 'hook':
-      return '/environments/library/settings' as const;
-  }
+/**
+ * The compare button's label with its two hash prefixes in mono, as the version
+ * rows above it print them: the template is split at its placeholders, so the
+ * words stay in the interface font and only the identifiers change face.
+ *
+ * // Usage: compareLabel(l.detail.compare, '44ef9a', 'c3d457') // Compare 44ef9a… ↔ c3d457…
+ */
+function compareLabel(template: string, left: string, right: string): ReactNode[] {
+  const hashes: Readonly<Record<string, string>> = { '{left}': left, '{right}': right };
+  return template
+    .split(/(\{left\}|\{right\})/)
+    .filter((part) => part.length > 0)
+    .map((part) =>
+      part in hashes ? (
+        <span key={part} className="font-mono text-xs">
+          {hashes[part]}…
+        </span>
+      ) : (
+        part
+      )
+    );
 }
 
 /**

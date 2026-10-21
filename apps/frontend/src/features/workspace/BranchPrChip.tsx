@@ -1,6 +1,7 @@
 import type { GithubContext } from '@mangostudio/shared/github';
 import { useQuery } from '@tanstack/react-query';
 import { GitPullRequest } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { GithubPrBadge } from '@/features/github/components/GithubPrBadge';
 import { checkChipStatus } from '@/features/github/lib/check-status';
@@ -48,14 +49,15 @@ export function BranchPrChip({ chatId, context }: BranchPrChipProps) {
   const checks = checkChipStatus(summary);
 
   return (
-    <button
+    <Button
       type="button"
+      variant="secondary"
       onClick={() => requestRailPanel('github')}
       title={t.github.panel.open}
-      className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-outline-variant/15 bg-surface-container/35 px-3 py-2 text-left transition-colors hover:border-primary/30 focus-visible:outline-2 focus-visible:outline-primary"
+      className="w-full min-w-0 justify-start"
     >
-      <GitPullRequest size={ICON_SM} className="shrink-0 text-primary" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate text-xs text-on-surface">
+      <GitPullRequest size={ICON_SM} className="shrink-0 text-fg-muted" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-left">
         {formatMessage(t.github.panel.branchChip, {
           number: String(pr.number),
           status: t.github.chip[checks.labelKey],
@@ -63,6 +65,6 @@ export function BranchPrChip({ chatId, context }: BranchPrChipProps) {
       </span>
       <StatusDot tone={checks.tone} />
       <GithubPrBadge state={pr.state} draft={pr.isDraft} />
-    </button>
+    </Button>
   );
 }

@@ -1,11 +1,50 @@
 import { type GitDiffLine, parseGitDiff } from '@mangostudio/shared/git';
-import { AlertTriangle, ArrowLeft, FileDiff, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, FileDiff } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { highlightLineTokens, preloadCodeLanguages } from '@/lib/shiki';
+import { cn } from '@/lib/utils';
+import { FilePathLabel } from './components/FilePathLabel';
+import { IconButton } from './components/IconButton';
 import type { GitDiffInput } from './hooks/use-git-state';
 import { useGitDiff } from './hooks/use-git-state';
+import { shortHash } from './short-hash';
+
+/**
+ * How much of a syntax colour survives on an added or removed line; the rest is
+ * the foreground. Shiki's palettes are tuned for their own backgrounds, and a
+ * keyword or comment colour over the app's success/danger fill fell to 2.4:1 to
+ * 3.8:1. At half, the worst token of all four code themes clears 4.5:1 on both
+ * fills and still keeps its hue. Context lines sit on the canvas, so they keep
+ * the theme's colours untouched.
+ */
+const TINTED_TOKEN_SHARE = '50%';
+
+/**
+ * The code box scrolls sideways, and in a 280px rail it cuts a line at about 25
+ * characters. `app-scrollbar` draws a 4px thumb on a transparent track, which the
+ * platform's overlay scrollbar (macOS, Android, an emulated phone) hides the
+ * moment nobody is scrolling, so nothing said the lines continue. This is the
+ * treatment of `.markdown-table-scroll` (`styles/markdown-content.css`): a styled
+ * `::-webkit-scrollbar`, the one kind those engines draw at rest, with a track so
+ * the bar's extent shows, and the standard properties where the engine has no
+ * such pseudo (Firefox). It deliberately does not carry `app-scrollbar`: that
+ * class sets `scrollbar-width`, which makes Chromium ignore the pseudo-elements.
+ */
+const DIFF_SCROLL_CLASS = [
+  'overflow-auto',
+  '[&::-webkit-scrollbar]:size-1.5',
+  '[&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-fill-selected',
+  '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-stroke-strong',
+  'hover:[&::-webkit-scrollbar-thumb]:bg-fg-muted',
+  'supports-[not(selector(::-webkit-scrollbar))]:[scrollbar-width:thin]',
+  'supports-[not(selector(::-webkit-scrollbar))]:[scrollbar-color:var(--color-stroke-strong)_var(--color-fill-selected)]',
+].join(' ');
 
 interface DiffSelection extends GitDiffInput {
   readonly title: string;
@@ -42,25 +81,20 @@ export function DiffViewer({
   return (
     <section
       aria-label={selection.title}
-      className="overflow-hidden rounded-xl border border-outline-variant/15"
+      className="overflow-hidden rounded-md border border-stroke bg-surface"
     >
-      <div className="flex items-center gap-2 border-b border-outline-variant/15 bg-surface-container/60 px-2 py-2">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t.git.diff.back}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
-        >
-          <ArrowLeft size={14} />
-        </button>
-        <FileDiff size={14} className="shrink-0 text-primary" />
+      <div className="flex h-10 items-center gap-2 border-b border-stroke px-2">
+        <IconButton label={t.git.diff.back} onClick={onClose}>
+          <ArrowLeft size={ICON_SM} />
+        </IconButton>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-[11px] font-semibold text-on-surface">
-            {selection.path}
-          </p>
-          <p className="text-[9px] uppercase tracking-wider text-on-surface-variant">
+          <FilePathLabel path={selection.path} />
+          <p
+            className={cn('text-micro text-fg-subtle', selection.commit && 'font-mono')}
+            title={selection.commit}
+          >
             {selection.commit
-              ? selection.commit.slice(0, 8)
+              ? shortHash(selection.commit)
               : selection.staged
                 ? t.git.diff.staged
                 : t.git.diff.worktree}
@@ -69,27 +103,38 @@ export function DiffViewer({
       </div>
 
       {query.isLoading ? (
-        <DiffMessage icon={<LoaderCircle size={18} className="animate-spin" />}>
-          {t.git.diff.loading}
-        </DiffMessage>
+        <EmptyState icon={<Spinner />} title={t.git.diff.loading} className="min-h-32" />
       ) : query.error ? (
-        <DiffMessage icon={<AlertTriangle size={18} />} tone="error">
-          {t.git.diff.loadError}
-        </DiffMessage>
+        <div className="p-3">
+          <Callout tone="danger" title={t.git.diff.loadError} />
+        </div>
       ) : query.data?.binary ? (
-        <DiffMessage icon={<FileDiff size={18} />}>{t.git.diff.binary}</DiffMessage>
+        <EmptyState
+          icon={<FileDiff size={ICON_LG} />}
+          title={t.git.diff.binary}
+          className="min-h-32"
+        />
       ) : hunks.length === 0 ? (
-        <DiffMessage icon={<FileDiff size={18} />}>{t.git.diff.empty}</DiffMessage>
+        <EmptyState
+          icon={<FileDiff size={ICON_LG} />}
+          title={t.git.diff.empty}
+          className="min-h-32"
+        />
       ) : (
-        <div className="app-scrollbar max-h-[34rem] overflow-auto bg-surface-container-lowest font-mono text-[10px] leading-4">
+        <div
+          className={cn('@container max-h-[34rem] bg-canvas font-mono text-xs', DIFF_SCROLL_CLASS)}
+        >
           {hunks.map((hunk) => (
             <div key={`${hunk.oldStart}:${hunk.newStart}:${hunk.header}`}>
-              <div className="sticky top-0 z-10 border-y border-primary/10 bg-primary/8 px-2 py-1 text-primary">
+              <div
+                title={hunk.header}
+                className="sticky top-0 z-10 truncate border-y border-stroke bg-surface px-2 py-1 text-fg-muted"
+              >
                 {hunk.header}
               </div>
-              {hunk.lines.map((line) => (
+              {hunk.lines.map((line, index) => (
                 <DiffLineRow
-                  key={`${line.type}:${line.oldLine ?? ''}:${line.newLine ?? ''}:${line.content}`}
+                  key={diffLineKey(hunk.lines, index)}
                   line={line}
                   language={highlightReady ? language : null}
                   theme={resolvedCodeTheme}
@@ -119,25 +164,46 @@ const DiffLineRow = memo(function DiffLineRow({
     [line.content, language, theme]
   );
   const tone = {
-    addition: 'bg-success/10',
-    deletion: 'bg-error/10',
+    addition: 'bg-success-subtle',
+    deletion: 'bg-danger-subtle',
     context: '',
-    metadata: 'bg-surface-container text-on-surface-variant italic',
+    metadata: 'text-fg-muted italic',
   }[line.type];
+  // The gutter marker is what says added or removed; the fill only backs it up.
   const marker = line.type === 'addition' ? '+' : line.type === 'deletion' ? '-' : ' ';
+  const tinted = line.type === 'addition' || line.type === 'deletion';
+  const markerTone =
+    line.type === 'addition' ? 'text-success' : line.type === 'deletion' ? 'text-danger' : '';
+  // In a narrow rail two 40px gutters leave the code about 24 characters, so
+  // the viewer keeps one: the new number, or the old one on a line that has no
+  // new number (a deletion). Both stay in the markup; the container query only
+  // decides which of the two is drawn, so the wide layout is untouched.
+  const hasNewLine = line.newLine !== undefined;
   return (
-    <div className={`flex min-w-max ${tone}`}>
-      <span className="w-8 shrink-0 select-none border-r border-outline-variant/10 px-1 text-right text-on-surface-variant/50">
+    <div className={cn('flex min-w-max', tone)}>
+      <span
+        className={cn(
+          'w-10 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle',
+          hasNewLine && '@max-sm:hidden'
+        )}
+      >
         {line.oldLine ?? ''}
       </span>
-      <span className="w-8 shrink-0 select-none border-r border-outline-variant/10 px-1 text-right text-on-surface-variant/50">
+      <span
+        className={cn(
+          'w-10 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle',
+          !hasNewLine && '@max-sm:hidden'
+        )}
+      >
         {line.newLine ?? ''}
       </span>
-      <span className="w-5 shrink-0 select-none text-center text-on-surface-variant">{marker}</span>
+      <span className={cn('w-5 shrink-0 select-none text-center font-medium', markerTone)}>
+        {marker}
+      </span>
       {highlighted ? (
         <code className="min-w-0 whitespace-pre pr-3">
           {highlighted.map((token) => (
-            <span key={token.offset} style={{ color: token.color }}>
+            <span key={token.offset} style={{ color: tokenColor(token.color, tinted) }}>
               {token.content}
             </span>
           ))}
@@ -148,6 +214,24 @@ const DiffLineRow = memo(function DiffLineRow({
     </div>
   );
 });
+
+/**
+ * A row's key: its numbers and content, which are unique within a hunk for every
+ * line that has a number. A `\ No newline at end of file` marker has none, and
+ * a hunk where both sides lack the final newline carries two identical ones, so
+ * a marker is keyed by the line it annotates.
+ */
+function diffLineKey(lines: readonly GitDiffLine[], index: number): string {
+  const line = lines[index];
+  if (!line) return String(index);
+  if (line.type === 'metadata' && index > 0) return `${diffLineKey(lines, index - 1)}:meta`;
+  return `${line.type}:${line.oldLine ?? ''}:${line.newLine ?? ''}:${line.content}`;
+}
+
+function tokenColor(color: string | undefined, tinted: boolean): string | undefined {
+  if (!color || !tinted) return color;
+  return `color-mix(in srgb, ${color} ${TINTED_TOKEN_SHARE}, var(--color-fg))`;
+}
 
 function inferLanguage(path: string): string | null {
   const extension = path.split('.').at(-1)?.toLowerCase();
@@ -182,27 +266,6 @@ function inferLanguage(path: string): string | null {
         yml: 'yaml',
       } as const
     )[extension ?? ''] ?? null
-  );
-}
-
-function DiffMessage({
-  icon,
-  tone = 'neutral',
-  children,
-}: {
-  readonly icon: React.ReactNode;
-  readonly tone?: 'neutral' | 'error';
-  readonly children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`flex min-h-32 flex-col items-center justify-center gap-2 px-4 text-center text-xs ${
-        tone === 'error' ? 'text-error' : 'text-on-surface-variant'
-      }`}
-    >
-      {icon}
-      <p>{children}</p>
-    </div>
   );
 }
 

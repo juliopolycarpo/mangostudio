@@ -54,6 +54,31 @@ describe('Header auth navigation', () => {
     expect(screen.getByTestId('logout-button')).toBeInTheDocument();
   });
 
+  it('names the sign-out button in full and prints no clipped copy of it', () => {
+    renderHeader();
+    const button = screen.getByTestId('logout-button');
+    expect(button).toHaveAccessibleName('Sign out');
+    expect(button).toHaveAttribute('title', 'Sign out');
+    // The label is one node, never a sliced copy of the translated string.
+    expect(button.textContent).toBe('Sign out');
+  });
+
+  it('offers Sign out in the account menu below md, where the button is not drawn', async () => {
+    const user = userEvent.setup();
+    mockSignOut.mockResolvedValue(undefined);
+    renderHeader();
+
+    expect(screen.getByTestId('logout-button')).toHaveClass('shrink-0');
+    expect(screen.getByTestId('logout-button').parentElement).toHaveClass('max-md:hidden');
+
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
+    // Picking an item closes the menu.
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
   it('navigates to /login only once Better Auth clears the session', async () => {
     const user = userEvent.setup();
     mockSignOut.mockResolvedValue(undefined);
@@ -95,5 +120,61 @@ describe('Header auth navigation', () => {
     renderHeader();
     await user.click(screen.getByTestId('logout-button'));
     expect(screen.getByTestId('logout-button')).toBeDisabled();
+  });
+});
+
+describe('Header page controls', () => {
+  beforeEach(() => {
+    setTestSession({ user: { id: 'user-header', name: 'Test' } });
+  });
+
+  const runner = <span data-testid="runner-picker">runner</span>;
+
+  it.each(['home', 'chat'] as const)(
+    'offers the runner where a chat starts or runs: %s',
+    (page) => {
+      renderHeader({ currentPage: page, runnerSelector: runner });
+      expect(screen.getByTestId('runner-picker')).toBeInTheDocument();
+    }
+  );
+
+  it.each(['studio', 'gallery', 'terminal', 'settings', 'environments'] as const)(
+    'does not offer a runner that starts nothing: %s',
+    (page) => {
+      renderHeader({ currentPage: page, runnerSelector: runner });
+      expect(screen.queryByTestId('runner-picker')).not.toBeInTheDocument();
+    }
+  );
+
+  it.each(['home', 'chat', 'studio', 'settings'] as const)(
+    'keeps New chat for the phone on every page: %s',
+    async (page) => {
+      const user = userEvent.setup();
+      const { props } = renderHeader({ currentPage: page });
+      const newChat = screen.getByRole('button', { name: 'New chat' });
+      expect(newChat).toHaveClass('md:hidden');
+      await user.click(newChat);
+      expect(props.onNewChat).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('keeps New chat for the phone, and folds search and Settings into the account menu', async () => {
+    const user = userEvent.setup();
+    const { props } = renderHeader({ currentPage: 'chat' });
+    // Stays in the document: the sidebar is a slide-over below `md`.
+    expect(screen.getByRole('button', { name: 'New chat' })).toHaveClass('md:hidden');
+    // The palette trigger and the account block are not duplicated by the sidebar,
+    // and they are drawn from `md` up only: the phone reaches them in the menu.
+    expect(screen.getByTestId('command-palette-trigger')).not.toHaveClass('md:hidden');
+    expect(screen.getByTestId('command-palette-trigger')).toHaveClass('max-md:hidden');
+    expect(screen.queryByTitle('Settings')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('account-menu-trigger'));
+    await user.click(screen.getByRole('menuitem', { name: 'Settings' }));
+    expect(props.onNavigateToSettings).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByTestId('account-menu-trigger'));
+    await user.click(screen.getByRole('menuitem', { name: 'Command palette' }));
+    expect(props.onOpenCommandPalette).toHaveBeenCalledTimes(1);
   });
 });

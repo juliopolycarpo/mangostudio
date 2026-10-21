@@ -1,10 +1,10 @@
 import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
-import { AlertTriangle, CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
+import { CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
 import {
   type CSSProperties,
   type DragEvent,
-  type ReactNode,
+  type RefCallback,
   useCallback,
   useEffect,
   useId,
@@ -13,16 +13,19 @@ import {
   useState,
 } from 'react';
 import { Button } from '@/components/ui/Button';
-import { KbdHint } from '@/components/ui/KbdHint';
+import { Callout } from '@/components/ui/Callout';
+import { KbdHint, ReturnKey } from '@/components/ui/KbdHint';
+import { Spinner } from '@/components/ui/Spinner';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { steerExternalTurn } from '@/services/external-agent-service';
 import { filesFromClipboard, useComposerAttachments } from '../hooks/use-composer-attachments';
 import { useComposerDraft } from '../hooks/use-composer-draft';
 import { usePromptHistory } from '../hooks/use-prompt-history';
 import { useSlashCommands } from '../hooks/use-slash-commands';
+import { CHAT_COLUMN_CLASS } from '../lib/chat-column';
 import { COMPOSER_ACCENT_PROPERTY, composerAccent } from '../lib/composer-accent';
 import { onComposerFocusRequest } from '../lib/composer-draft-store';
 import {
@@ -34,6 +37,7 @@ import {
 } from '../lib/slash-commands';
 import { CapabilityInspector } from './CapabilityInspector';
 import { ComposerChipRow, type ComposerChipRowProps } from './ComposerChipRow';
+import { ExternalRunnerBlockedCallout } from './ExternalRunnerBlockedCallout';
 import { ImageIntentToggle } from './ImageIntentToggle';
 import { McpComposerMenu } from './McpComposerMenu';
 import { SlashCommandMenu } from './SlashCommandMenu';
@@ -95,6 +99,13 @@ interface Props extends Partial<ForwardedChipRowProps> {
   selectedAgentId?: string;
   /** Who runs the turn. Decides which of the two control sets renders at all. */
   runner?: ChatRunnerConfiguration;
+  /**
+   * Receives the empty slot at the end of the tool row. The workspace rail
+   * draws its drawer trigger into it below `lg`, so the control that opens the
+   * rail sits with the composer's other controls instead of floating over the
+   * transcript.
+   */
+  railTriggerSlotRef?: RefCallback<HTMLElement>;
   externalDescriptor?: ExternalAgentDescriptor;
 }
 
@@ -111,6 +122,7 @@ export function InputBar({
   selectedAgentId = 'default',
   runner,
   externalDescriptor,
+  railTriggerSlotRef,
   ...chipRow
 }: Props) {
   const { t } = useI18n();
@@ -126,6 +138,14 @@ export function InputBar({
   // The model moved here from the header, and it renders per runner: MangoStudio
   // always has a catalog, an external agent only when its vendor advertised one.
   const isExternalRunner = runner?.kind === 'external';
+
+  // The image toggle steers MangoStudio's own image tool, which a vendor CLI's
+  // turn never runs, so it is not drawn for an external runner. A toggle left on
+  // in the chat the person came from would otherwise ride into this one's first
+  // send, invisibly.
+  useEffect(() => {
+    if (isExternalRunner && imageToolIntent) onImageToolIntentChange?.(false);
+  }, [isExternalRunner, imageToolIntent, onImageToolIntentChange]);
 
   const handleAttachments = useCallback((attachments: ChatAttachment[]) => {
     if (attachments.length === 0) return;
@@ -160,9 +180,10 @@ export function InputBar({
   const externalUnavailableReason = externalDescriptor?.unavailableReason;
   // `disclosure-required` is checked on top of `externalAgentSelectable`, which
   // deliberately leaves it selectable so the *selector* can route the user into
-  // the notice. There is no such route from here: the turn-start gate refuses
-  // the send with a 403 nothing on this screen handles, so a composer that
-  // stayed enabled would accept a message and lose it to a bare error.
+  // the notice. Here the route is the blocked notice's own "Read the notice"
+  // action: the composer stays locked until the acknowledgement is stored and
+  // the refreshed descriptor no longer names the reason, rather than accepting a
+  // message the turn-start gate would refuse with a 403.
   const externalRunnerBlocked =
     isExternalRunner &&
     (!externalDescriptor ||
@@ -406,33 +427,26 @@ export function InputBar({
   };
 
   return (
-    <footer className="shrink-0 p-3 sm:p-4 md:p-6">
-      <div className="mx-auto w-full max-w-4xl">
-        {externalRunnerBlocked && (
-          // Named, not just disabled: "install it", "sign in", "wake that
-          // machine" and "wait for discovery" are four different things to do,
-          // and a composer that goes quiet without saying which leaves the user
-          // clicking Send at nothing.
-          <ComposerNotice tone="warning">
-            {externalUnavailableReason
-              ? `${t.externalAgents.unavailable[externalUnavailableReason]} — ${t.externalAgents.selector.unavailableHere}`
-              : t.externalAgents.selector.unavailableHere}
-          </ComposerNotice>
+    // No top padding of its own: the dock above it opens on one 8px band
+    // (`ChatPage`), and the transcript's scroller carries the at-rest gap, so
+    // the clip edge sits one grid step above the composer's border rather than
+    // a cut through text 24px above the frame.
+    <footer className="shrink-0 px-3 pb-3 sm:px-4 sm:pb-4 md:px-6 md:pb-6">
+      <div className={CHAT_COLUMN_CLASS}>
+        {externalRunnerBlocked && <ExternalRunnerBlockedCallout descriptor={externalDescriptor} />}
+
+        {steerError && <Callout tone="danger" role="status" className="mb-2" title={steerError} />}
+
+        {uploads.error && (
+          <Callout tone="danger" role="status" className="mb-2" title={uploads.error} />
         )}
 
-        {steerError && <ComposerNotice tone="error">{steerError}</ComposerNotice>}
-
-        {uploads.error && <ComposerNotice tone="error">{uploads.error}</ComposerNotice>}
-
         {(pendingAttachments.length > 0 || uploads.uploading.length > 0) && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
+          <div className="mb-2 flex flex-wrap gap-2">
             {pendingAttachments.map((attachment) => (
-              <span
-                key={attachment.id}
-                className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2.5 py-1 text-[11px] text-on-surface-variant"
-              >
-                <FileText size={12} className="composer-chip-icon shrink-0" />
-                <span className="max-w-[12rem] truncate">{attachment.originalName}</span>
+              <span key={attachment.id} className="terminal-chip">
+                <FileText size={ICON_SM} className="shrink-0" />
+                <span className="max-w-[12rem] truncate text-fg">{attachment.originalName}</span>
                 <button
                   type="button"
                   onClick={() =>
@@ -440,24 +454,20 @@ export function InputBar({
                       current.filter((pending) => pending.id !== attachment.id)
                     )
                   }
-                  className="text-on-surface-variant/60 hover:text-on-surface"
+                  className="flex shrink-0 cursor-pointer items-center rounded-xs transition-colors hover:text-fg"
                   aria-label={t.chat.input.removeAttachment}
                 >
-                  <X size={12} />
+                  <X size={ICON_SM} />
                 </button>
               </span>
             ))}
             {uploads.uploading.map((name) => (
-              <span
-                key={name}
-                role="status"
-                className="flex items-center gap-1.5 rounded-full border border-outline-variant/20 px-2.5 py-1 text-[11px] text-on-surface-variant/70"
-              >
-                <span className="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent" />
+              <div key={name} role="status" className="terminal-chip">
+                <Spinner size="sm" className="shrink-0" />
                 <span className="max-w-[12rem] truncate">
                   {formatMessage(t.chat.input.attachUploading, { name })}
                 </span>
-              </span>
+              </div>
             ))}
           </div>
         )}
@@ -482,7 +492,7 @@ export function InputBar({
           // The whole frame reads this one property; nothing below hard-codes a
           // colour. See `lib/composer-accent.ts`.
           style={{ [COMPOSER_ACCENT_PROPERTY]: composerAccent(runner) } as CSSProperties}
-          className="composer-shell shadow-2xl"
+          className="composer-shell"
         >
           <ComposerChipRow
             {...CHIP_ROW_DEFAULTS}
@@ -499,17 +509,7 @@ export function InputBar({
               box grows under it, the way a shell prompt does. The padding
               moved onto this row so the two share a text box and stay on the
               same baseline. */}
-          <div className="relative flex items-start gap-2 px-3 py-2.5">
-            {slashOpen && (
-              <SlashCommandMenu
-                entries={slashMatches}
-                activeIndex={slashActiveIndex}
-                listId={slashListId}
-                pending={slashPending}
-                onSelect={completeSlashCommand}
-                onHighlight={setSlashIndex}
-              />
-            )}
+          <div className="flex items-start gap-2 px-3 py-3">
             <span
               aria-hidden="true"
               className={`composer-prompt-mark ${inputDisabled ? 'opacity-50' : ''}`}
@@ -571,10 +571,27 @@ export function InputBar({
               }}
               disabled={inputDisabled}
               style={{ maxHeight: `${TEXTAREA_MAX_HEIGHT_PX}px` }}
-              className="app-scrollbar composer-input min-w-0 flex-1 resize-none bg-transparent p-0 font-body text-sm leading-5 text-on-surface outline-none placeholder:text-on-surface-variant/40 disabled:opacity-60"
+              // No outline of its own: the shell's border is the focus indicator
+              // (`.composer-shell:focus-within`), in the runner's colour.
+              className="app-scrollbar composer-input min-w-0 flex-1 resize-none bg-transparent p-0 text-sm leading-5 text-fg outline-none placeholder:text-fg-subtle disabled:opacity-50"
               placeholder={placeholder}
             />
           </div>
+
+          {/* A child of the frame, not of the input row: it rises over the whole
+              composer (status line included) and takes its width, instead of
+              hanging from the row and covering the chips it is meant to sit
+              above. `.composer-shell` is the positioned ancestor. */}
+          {slashOpen && (
+            <SlashCommandMenu
+              entries={slashMatches}
+              activeIndex={slashActiveIndex}
+              listId={slashListId}
+              pending={slashPending}
+              onSelect={completeSlashCommand}
+              onHighlight={setSlashIndex}
+            />
+          )}
 
           <div className="flex items-end justify-between gap-2 px-2 pb-2">
             <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -584,72 +601,78 @@ export function InputBar({
                 onInsertPrompt={handleInsertPrompt}
                 onAttachments={handleAttachments}
               />
-              <CapabilityInspector
-                chatId={chatId}
-                disabled={disabled}
-                activeModel={activeModel}
-                selectedAgentId={selectedAgentId}
-              />
-              {onImageToolIntentChange && (
+              {/* MangoStudio's own tool settings, and the image tool they gate, do
+                  not apply to a turn a vendor CLI runs (the line under the frame
+                  says so), so a runner that is not MangoStudio is not offered
+                  them. Prompts, resources and attachments from MCP are text
+                  and files for the prompt, which a vendor turn takes as well. */}
+              {!isExternalRunner && (
+                <CapabilityInspector
+                  chatId={chatId}
+                  disabled={disabled}
+                  activeModel={activeModel}
+                  selectedAgentId={selectedAgentId}
+                />
+              )}
+              {!isExternalRunner && onImageToolIntentChange && (
                 <ImageIntentToggle
                   active={imageToolIntent}
                   disabled={disabled}
                   onChange={onImageToolIntentChange}
                 />
               )}
+              {/* Empty until the workspace rail draws its trigger here; `contents`
+                  keeps an empty slot from taking a gap. */}
+              <span ref={railTriggerSlotRef} className="contents" />
             </div>
 
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex shrink-0 items-center gap-2">
               {isGenerating && (
                 <Button
                   type="button"
                   variant="secondary"
+                  size="sm"
                   onClick={onStop}
                   title={t.chat.input.stop}
-                  className={`text-xs hover:bg-error/20 hover:text-error shrink-0 ${
-                    showSteerAffordance ? 'size-9 p-0' : 'h-9 gap-1.5 px-3'
-                  }`}
+                  className="shrink-0"
                 >
                   {!showSteerAffordance && (
                     <span className="hidden sm:inline">{t.chat.input.stop}</span>
-                  )}{' '}
-                  <Square size={12} />
+                  )}
+                  <Square size={ICON_SM} />
                 </Button>
               )}
               {/* Same button, different meaning while a steerable turn runs — see
-                  docs/architecture/external-agents.md's steering section. Distinct
-                  styling so nobody reads it as an ordinary send. */}
+                  docs/architecture/external-agents.md's steering section. Secondary
+                  rather than primary so nobody reads it as an ordinary send: Send is
+                  the product accent, and steering only ever happens on a vendor CLI. */}
               {showSteerAffordance ? (
                 <Button
                   type="submit"
-                  variant="ghost"
+                  variant="secondary"
+                  size="sm"
                   disabled={!chatId || steering || !prompt.trim()}
                   title={t.externalAgents.steer.buttonHint}
-                  // Steering only ever happens on a vendor CLI, so the one
-                  // colour it must not be is MangoStudio's.
-                  style={{ borderColor: 'var(--composer-accent)', color: 'var(--composer-accent)' }}
-                  className="h-9 shrink-0 gap-1.5 rounded-full border-2 px-3.5 text-xs hover:bg-surface-container-high"
+                  className="shrink-0"
                 >
-                  <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
-                  <CornerDownRight size={ICON_SM} className="sm:hidden" />
-                  <CornerDownRight size={ICON_MD} className="hidden sm:block" />
+                  <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>
+                  <CornerDownRight size={ICON_SM} />
                 </Button>
               ) : !isGenerating ? (
+                // Always the product accent, whoever is answering: one primary
+                // action, one colour. The runner shows on the frame, the prompt
+                // mark, the caret and its chip — not here.
                 <Button
                   type="submit"
+                  size="sm"
                   disabled={disabled || cannotSubmit || !prompt.trim()}
-                  className="h-9 shrink-0 gap-1.5 rounded-full px-3.5 text-xs shadow-none hover:brightness-110 hover:opacity-100"
-                  // A flat fill rather than the mango gradient: the gradient
-                  // names the product, and this button belongs to whoever runs
-                  // the turn. The light theme darkens it a step — see the
-                  // `--composer-send-fill` rules in `index.css`.
-                  style={{ background: 'var(--composer-send-fill)' }}
+                  className="shrink-0"
                 >
-                  <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
+                  <span className="hidden sm:inline">{t.chat.input.send}</span>
                   <Send size={ICON_SM} className="sm:hidden" />
                   <KbdHint
-                    keys="⏎"
-                    className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-primary/90"
+                    keys={<ReturnKey />}
+                    className="hidden border-current bg-transparent text-current sm:inline-flex"
                   />
                 </Button>
               ) : null}
@@ -659,58 +682,37 @@ export function InputBar({
           {dragging ? (
             <span
               aria-hidden="true"
-              className="composer-drop-hint pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl font-mono text-xs"
+              className="composer-drop-hint pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg font-mono text-xs"
             >
               {t.chat.input.dropHint}
             </span>
           ) : null}
         </form>
 
-        <p className="mt-2 text-center font-mono text-[10px] text-on-surface-variant/40 sm:mt-3">
+        {/* A sentence, so it is set in the interface font: mono is for keys,
+            paths and code. */}
+        <p className="mt-2 text-center text-xs text-fg-subtle sm:mt-3">
           {t.common.disclaimer}
           {/* The quiet line the user should never have to guess at: MangoStudio's
               own tool settings do not apply to a turn it is not running. It sits
               here rather than in the chip row so the composer keeps only the
-              controls you can act on. */}
+              controls you can act on. On a phone it takes its own line instead
+              of running on after a dangling separator. */}
           {isExternalRunner && externalDescriptor ? (
             <>
-              {' · '}
-              {formatMessage(t.externalAgents.selector.ownership, {
-                vendor: t.externalAgents.target[externalDescriptor.targetId],
-              })}
+              <span aria-hidden="true" className="max-sm:hidden">
+                {' · '}
+              </span>
+              <span className="max-sm:block">
+                {formatMessage(t.externalAgents.selector.ownership, {
+                  vendor: t.externalAgents.target[externalDescriptor.targetId],
+                })}
+              </span>
             </>
           ) : null}
         </p>
       </div>
     </footer>
-  );
-}
-
-const NOTICE_TONE_CLASS = {
-  warning: 'text-warning',
-  error: 'text-error',
-} as const;
-
-/**
- * A one-line problem above the composer: the runner cannot start a turn, a
- * steer was refused, an upload failed. One component because the three read as
- * one strip and had drifted into three copies of the same class string.
- */
-function ComposerNotice({
-  tone,
-  children,
-}: {
-  tone: keyof typeof NOTICE_TONE_CLASS;
-  children: ReactNode;
-}) {
-  return (
-    <p
-      role="status"
-      className={`mb-2 flex items-center gap-1.5 text-[11px] ${NOTICE_TONE_CLASS[tone]}`}
-    >
-      <AlertTriangle size={12} className="shrink-0" />
-      {children}
-    </p>
   );
 }
 

@@ -67,10 +67,6 @@ function isNodeOutdated(status: RuntimeStatus | undefined): boolean {
   );
 }
 
-function openLinkLabel(t: Messages, section: string): string {
-  return formatMessage(t.environments.overview.open, { section });
-}
-
 function gitRemedy(
   t: Messages,
   recipes: readonly InstallRecipePreview[],
@@ -154,7 +150,7 @@ function nodeRemedy(
   return {
     kind: 'link',
     to: '/environments/runtimes',
-    label: openLinkLabel(t, t.environments.tabs.runtimes),
+    label: t.environments.overview.open.runtimes,
   };
 }
 
@@ -199,7 +195,7 @@ function agentRow(t: Messages, agents: readonly AgentCliStatus[]): SetupRow {
       : {
           kind: 'link',
           to: '/environments/agents',
-          label: openLinkLabel(t, t.environments.tabs.agents),
+          label: t.environments.overview.open.agents,
         },
   };
 }
@@ -216,7 +212,7 @@ function hubServiceRow(t: Messages, machine: MachineStatus | undefined): SetupRo
       : {
           kind: 'link',
           to: '/environments/machine',
-          label: openLinkLabel(t, t.environments.tabs.machine),
+          label: t.environments.overview.open.machine,
         },
   };
 }

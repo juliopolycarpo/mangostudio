@@ -94,15 +94,64 @@ afterEach(() => {
 });
 
 describe('AddEnvironmentDialog', () => {
-  it('hides the WSL tab on a host that has no WSL', async () => {
+  it('hides the WSL answer on a host that has no WSL', async () => {
     const dialog = await openDialog();
 
-    expect(within(dialog).getByRole('tab', { name: labels.reachLocal })).toBeInTheDocument();
-    expect(within(dialog).queryByRole('tab', { name: labels.reachWsl })).toBeNull();
+    expect(within(dialog).getByRole('radio', { name: labels.reachLocal })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('radio', { name: labels.reachWsl })).toBeNull();
     // Every other answer is host-independent: only WSL depends on what this
     // machine has.
-    expect(within(dialog).getByRole('tab', { name: labels.reachDirect })).toBeInTheDocument();
-    expect(within(dialog).getByRole('tab', { name: labels.reachSsh })).toBeInTheDocument();
+    expect(within(dialog).getByRole('radio', { name: labels.reachDirect })).toBeInTheDocument();
+    expect(within(dialog).getByRole('radio', { name: labels.reachSsh })).toBeInTheDocument();
+  });
+
+  // One question, one answer: a radio group under its legend, not a strip of
+  // tabs with no panel behind them.
+  it('offers the answers as one radio group with the chosen one checked', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    const group = within(dialog).getByRole('group', { name: labels.reachLabel });
+    expect(within(dialog).queryByRole('tablist')).toBeNull();
+    expect(within(group).getByRole('radio', { name: labels.reachLocal })).toBeChecked();
+
+    await user.click(within(group).getByRole('radio', { name: labels.reachSsh }));
+
+    expect(within(group).getByRole('radio', { name: labels.reachSsh })).toBeChecked();
+    expect(within(group).getByRole('radio', { name: labels.reachLocal })).not.toBeChecked();
+    // The explanation of the answer sits with the tiles, and the guided flow
+    // is an action beside them rather than one more answer.
+    expect(within(dialog).getByText(labels.sshHint)).toBeInTheDocument();
+    expect(within(group).queryByTestId('add-environment-onboarding')).toBeNull();
+    expect(within(dialog).getByTestId('add-environment-onboarding')).toBeInTheDocument();
+  });
+
+  // Leaving for the guided flow is not a field of the form and not an answer to
+  // it, so it sits with the dialog's own actions, ahead of Cancel.
+  it('puts the guided setup in the footer, apart from the form', async () => {
+    const dialog = await openDialog();
+
+    const guided = within(dialog).getByTestId('add-environment-onboarding');
+    const footer = guided.closest('footer');
+    expect(footer).not.toBeNull();
+    expect(within(footer as HTMLElement).getByRole('button', { name: labels.cancel })).toBeTruthy();
+    expect(guided).toHaveTextContent(labels.reachNewMachine);
+    expect(guided).toHaveAttribute('title', labels.newMachineHint);
+  });
+
+  // The request does without these, which the heading says once rather than a
+  // suffix on every label.
+  it('groups the fields the request does without under one heading', async () => {
+    const dialog = await openDialog();
+
+    const optional = within(dialog).getByRole('group', { name: labels.optional });
+    expect(
+      within(optional).getByRole('textbox', { name: labels.binaryPathLabel })
+    ).toBeInTheDocument();
+    expect(within(optional).getByRole('textbox', { name: labels.cwdLabel })).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('textbox', { name: labels.nameLabel }).closest('fieldset')
+    ).toBeNull();
   });
 
   it('derives an identifier from the name and creates the environment', async () => {
@@ -151,7 +200,7 @@ describe('AddEnvironmentDialog', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachDirect }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachDirect }));
     await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'LAN box');
     await user.type(
       within(dialog).getByRole('textbox', { name: labels.directBaseUrlLabel }),
@@ -177,14 +226,11 @@ describe('AddEnvironmentDialog', () => {
     await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'Build host');
     await user.type(
       within(dialog).getByRole('textbox', {
-        name: `${labels.binaryPathLabel} · ${labels.optional}`,
+        name: labels.binaryPathLabel,
       }),
       '/opt/mango/mangostudio-runtime'
     );
-    await user.type(
-      within(dialog).getByRole('textbox', { name: `${labels.cwdLabel} · ${labels.optional}` }),
-      '/srv/build'
-    );
+    await user.type(within(dialog).getByRole('textbox', { name: labels.cwdLabel }), '/srv/build');
     await user.click(within(dialog).getByRole('button', { name: labels.submit }));
 
     await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());
@@ -198,7 +244,7 @@ describe('AddEnvironmentDialog', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachSsh }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachSsh }));
     await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'Build host');
     await user.type(
       within(dialog).getByRole('textbox', { name: labels.sshHostLabel }),
@@ -206,7 +252,7 @@ describe('AddEnvironmentDialog', () => {
     );
     await user.type(
       within(dialog).getByRole('textbox', {
-        name: `${labels.sshUserLabel} · ${labels.optional}`,
+        name: labels.sshUserLabel,
       }),
       'deploy'
     );
@@ -227,7 +273,7 @@ describe('AddEnvironmentDialog', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachSsh }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachSsh }));
     expect(within(dialog).queryByText(labels.sshPreflightReach)).toBeNull();
 
     await user.type(
@@ -247,7 +293,7 @@ describe('AddEnvironmentDialog', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachSsh }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachSsh }));
     await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'Build host');
     await user.type(
       within(dialog).getByRole('textbox', { name: labels.sshHostLabel }),
@@ -262,16 +308,13 @@ describe('AddEnvironmentDialog', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachSsh }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachSsh }));
     await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'Build host');
     await user.type(
       within(dialog).getByRole('textbox', { name: labels.sshHostLabel }),
       'build-01.internal'
     );
-    await user.type(
-      within(dialog).getByRole('textbox', { name: `${labels.sshPortLabel} · ${labels.optional}` }),
-      '22abc'
-    );
+    await user.type(within(dialog).getByRole('textbox', { name: labels.sshPortLabel }), '22abc');
 
     expect(within(dialog).getByRole('button', { name: labels.submit })).toBeDisabled();
   });
@@ -292,7 +335,7 @@ describe('AddEnvironmentDialog', () => {
   });
 });
 
-describe('AddEnvironmentDialog WSL tab', () => {
+describe('AddEnvironmentDialog WSL answer', () => {
   beforeEach(() => {
     scenario.respondWithJson('GET', '/api/environments/wsl', { body: WSL });
   });
@@ -301,14 +344,11 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachWsl }));
 
     const list = await within(dialog).findByTestId('wsl-distribution-list');
     // The host says which distribution is default; nothing here is hardcoded.
-    expect(within(list).getByRole('button', { name: /Ubuntu-22\.04/ })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    );
+    expect(within(list).getByRole('radio', { name: /Ubuntu-22\.04/ })).toBeChecked();
     expect(within(dialog).getByRole('textbox', { name: labels.nameLabel })).toHaveValue(
       'Ubuntu-22.04'
     );
@@ -321,9 +361,9 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
-    await user.click(within(list).getByRole('button', { name: /Debian/ }));
+    await user.click(within(list).getByRole('radio', { name: /Debian/ }));
     await user.click(within(dialog).getByRole('button', { name: labels.submit }));
 
     await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());
@@ -339,12 +379,12 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
 
-    const configured = within(list).getByRole('button', { name: /docker-desktop/ });
+    const configured = within(list).getByRole('radio', { name: /docker-desktop/ });
     expect(configured).toBeDisabled();
-    expect(configured).toHaveTextContent('docker');
+    expect(configured.closest('label')).toHaveTextContent('docker');
   });
 
   it('refreshes the listing once a distribution has been claimed', async () => {
@@ -352,9 +392,9 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const dialog = await openDialog();
     await waitFor(() => expect(wslRequestCount()).toBe(1));
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
-    await user.click(within(list).getByRole('button', { name: /Debian/ }));
+    await user.click(within(list).getByRole('radio', { name: /Debian/ }));
     await user.click(within(dialog).getByRole('button', { name: labels.submit }));
 
     await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());
@@ -364,15 +404,15 @@ describe('AddEnvironmentDialog WSL tab', () => {
     await waitFor(() => expect(wslRequestCount()).toBe(2));
   });
 
-  it('drops the stdio-only fields while the WSL tab is open', async () => {
+  it('drops the stdio-only fields while the WSL answer is chosen', async () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
+    await user.click(within(dialog).getByRole('radio', { name: labels.reachWsl }));
 
     expect(
       within(dialog).queryByRole('textbox', {
-        name: `${labels.binaryPathLabel} · ${labels.optional}`,
+        name: labels.binaryPathLabel,
       })
     ).toBeNull();
   });

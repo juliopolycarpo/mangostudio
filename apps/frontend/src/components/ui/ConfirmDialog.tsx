@@ -1,12 +1,12 @@
-import { Trash2 } from 'lucide-react';
-import { type ReactNode, useCallback, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/Button';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { Dialog } from '@/components/ui/Dialog';
 
 interface ConfirmDialogProps {
   readonly title: string;
   readonly description: string;
-  readonly entityName: string;
+  /** The thing the question is about, quoted under the sentence. Omit when the title names it. */
+  readonly entityName?: string;
   readonly confirmLabel: string;
   readonly cancelLabel: string;
   readonly isPending?: boolean;
@@ -19,12 +19,13 @@ interface ConfirmDialogProps {
 /**
  * Destructive-confirm overlay used by settings delete/revoke flows.
  *
- * The keyboard contract is the shared one the vendor dialogs already use: focus
- * moves in, Tab cycles the dialog's own controls — the two buttons plus anything
- * `children` contributes — instead of walking into the page behind them, Escape
- * cancels, and focus goes back to whatever opened it. A dialog gating a delete
- * is the last place a keyboard user should be able to tab straight past onto the
- * control it is gating.
+ * A `Dialog` at its smallest size, so the keyboard contract is the shared one:
+ * focus lands on "Cancel" — the safe answer to a question that deletes
+ * something — Tab cycles the dialog's own controls (the two buttons plus
+ * anything `children` contributes) instead of walking into the page behind
+ * them, Escape and a click on the backdrop cancel, and focus goes back to
+ * whatever opened it. While the request is in flight there is nothing to take
+ * back yet, so Escape and the backdrop wait, as the disabled Cancel does.
  *
  * Usage: <ConfirmDialog title={…} description={…} entityName={name} … />
  */
@@ -39,59 +40,34 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  // Read through refs so the escape handler's identity never changes: the trap
-  // re-registers its listener and re-focuses the dialog whenever it does, which
-  // on a dialog that re-renders while pending would keep yanking focus off the
-  // button the user is on.
-  const onCancelRef = useRef(onCancel);
-  onCancelRef.current = onCancel;
-  const isPendingRef = useRef(isPending);
-  isPendingRef.current = isPending;
-  const handleEscape = useCallback(() => {
-    // The same rule the disabled Cancel button follows: a request is in flight,
-    // and there is nothing to take back yet.
-    if (isPendingRef.current) return;
-    onCancelRef.current();
-  }, []);
-  const dialogRef = useFocusTrap(handleEscape);
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        className="bg-surface-container-high w-full max-w-sm rounded-2xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5 sm:space-y-6 outline-none"
-      >
-        <div className="space-y-2 text-center">
-          <div className="p-4 bg-error/10 rounded-full w-fit mx-auto text-error mb-2">
-            <Trash2 size={32} />
-          </div>
-          <h3 className="text-xl font-bold text-on-surface">{title}</h3>
-          <p className="text-sm text-on-surface-variant/70">
-            {description} <br />
-            <span className="text-on-surface font-bold">&ldquo;{entityName}&rdquo;</span>
-          </p>
-        </div>
-
-        {children}
-
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onCancel} className="flex-1" disabled={isPending}>
+    <Dialog
+      size="sm"
+      title={title}
+      description={
+        <>
+          {description}
+          {entityName ? (
+            <span className="mt-2 block break-words font-medium text-fg">
+              &ldquo;{entityName}&rdquo;
+            </span>
+          ) : null}
+        </>
+      }
+      onClose={onCancel}
+      closeDisabled={isPending}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel} disabled={isPending} autoFocus>
             {cancelLabel}
           </Button>
-          <Button
-            variant="primary"
-            loading={isPending}
-            onClick={onConfirm}
-            className="flex-1 bg-error hover:bg-error/80 shadow-error/20"
-          >
+          <Button variant="danger" loading={isPending} onClick={onConfirm}>
             {confirmLabel}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {children}
+    </Dialog>
   );
 }

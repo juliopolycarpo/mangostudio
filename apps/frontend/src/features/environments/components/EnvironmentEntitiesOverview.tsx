@@ -1,11 +1,19 @@
-import type { Environment, EnvironmentConnectionState } from '@mangostudio/shared/environments';
+import type { Environment } from '@mangostudio/shared/environments';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import { Cable, Check, Pencil, Plus, Server, Trash2, Unplug, X } from 'lucide-react';
 import { useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Chip } from '@/components/ui/Chip';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { FIELD_CLASS } from '@/components/ui/Input';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { toolchainSummary } from '../format';
 import { useRuntimeStatuses } from '../hooks/use-runtime-status';
 import { MachineOnboardingWizard } from '../onboarding/MachineOnboardingWizard';
@@ -22,21 +30,14 @@ import { AddEnvironmentDialog } from './AddEnvironmentDialog';
 import { ContainerPanel } from './ContainerPanel';
 import { CopyLine } from './CopyLine';
 import { DirectUrlPanel } from './DirectUrlPanel';
+import { EntityPanel } from './EntityPanel';
 import { EnvironmentPageState } from './EnvironmentPageState';
+import { ENVIRONMENT_STATE_TONE } from './environment-status-tone';
 import { InstallTrustToggle } from './InstallTrustToggle';
 import { RuntimeLifecyclePanel } from './RuntimeLifecyclePanel';
 import { RuntimePairingPanel } from './RuntimePairingPanel';
 import { SshPanel } from './SshPanel';
-
-const STATUS_RAIL: Record<EnvironmentConnectionState, string> = {
-  connected: 'bg-primary',
-  connecting: 'bg-warning animate-pulse',
-  disconnected: 'bg-outline-variant/45',
-  error: 'bg-error',
-};
-
-/** A binary handoff reads as a live operation, not as the outage it looks like. */
-const UPDATING_RAIL = 'bg-warning animate-pulse';
+import { TOOL_CARD_SURFACE } from './ToolCard';
 
 export function EnvironmentEntitiesOverview() {
   const { t } = useI18n();
@@ -47,22 +48,14 @@ export function EnvironmentEntitiesOverview() {
   return (
     <section className="space-y-3" data-testid="overview-environments">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="font-headline text-lg font-bold text-on-surface">
-            {t.environments.entities.title}
-          </h2>
-          <p className="mt-0.5 text-sm text-on-surface-variant/60">
-            {t.environments.entities.description}
-          </p>
+        <div className="space-y-0.5">
+          <h2 className="text-base font-semibold text-fg">{t.environments.entities.title}</h2>
+          <p className="text-sm text-fg-muted">{t.environments.entities.description}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setAdding(true)}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15"
-        >
-          <Plus size={13} />
+        <Button variant="secondary" size="sm" onClick={() => setAdding(true)}>
+          <Plus size={ICON_MD} />
           {t.environments.entities.add.trigger}
-        </button>
+        </Button>
       </div>
 
       {adding ? (
@@ -86,7 +79,7 @@ export function EnvironmentEntitiesOverview() {
           onRetry={() => void environments.refetch()}
         />
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {(environments.data ?? []).map((environment) => (
             <EnvironmentEntityCard key={environment.id} environment={environment} />
           ))}
@@ -161,188 +154,170 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
 
   return (
     <article
-      className="relative overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-low p-4 shadow-sm"
+      className={cn(TOOL_CARD_SURFACE, 'space-y-3 p-4')}
       data-testid="environment-entity-card"
       data-environment-id={environment.id}
     >
-      <span
-        aria-hidden="true"
-        className={`absolute inset-y-0 left-0 w-1 ${updating ? UPDATING_RAIL : STATUS_RAIL[state]}`}
-      />
-      <div className="space-y-3 pl-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-2.5">
-            <span className="mt-0.5 rounded-xl bg-surface-container-high p-2 text-primary">
-              <Server size={16} />
-            </span>
-            <div className="min-w-0">
-              {editing ? (
-                <label className="block">
-                  <span className="sr-only">{labels.nameLabel}</span>
-                  <input
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    onKeyDown={(event) => {
-                      // The field sits outside a form, so Enter and Escape have
-                      // to be bound here to reach the Save and Cancel buttons.
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        if (!busy) void saveName();
-                      } else if (event.key === 'Escape') {
-                        event.preventDefault();
-                        cancelEditing();
-                      }
-                    }}
-                    className="h-8 w-full rounded-lg border border-primary/35 bg-surface-container-lowest px-2 text-sm font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary/25"
-                  />
-                </label>
-              ) : (
-                <h3 className="truncate font-headline text-base font-bold text-on-surface">
-                  {environment.name}
-                </h3>
-              )}
-              <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-on-surface-variant/65">
-                <span>{labels.transport[environment.transportKind]}</span>
-                {environment.transportKind === 'container' ? (
-                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
-                    {labels.container.badge}
-                  </span>
-                ) : null}
-                {environment.virtual ? <span>{labels.virtual}</span> : null}
-                {!environment.enabled ? <span>{labels.disabled}</span> : null}
-                {environment.status.offlineRuntimeCache ? (
-                  <span
-                    className="rounded-full bg-tertiary/10 px-1.5 py-0.5 font-semibold text-tertiary"
-                    title={labels.offlineCacheHint}
-                  >
-                    {labels.offlineCache}
-                  </span>
-                ) : null}
-              </p>
-            </div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2">
+          <Server size={ICON_MD} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden="true" />
+          <div className="min-w-0">
+            {editing ? (
+              <label className="block">
+                <span className="sr-only">{labels.nameLabel}</span>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  onKeyDown={(event) => {
+                    // The field sits outside a form, so Enter and Escape have
+                    // to be bound here to reach the Save and Cancel buttons.
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      if (!busy) void saveName();
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      cancelEditing();
+                    }
+                  }}
+                  className={FIELD_CLASS}
+                />
+              </label>
+            ) : (
+              <h3 className="truncate text-sm font-semibold text-fg">{environment.name}</h3>
+            )}
+            {/* The plain facts read as one phrase joined by " · ", the way inline
+                metadata is joined across this area; a badge is kept only for a
+                state that needs a pill. */}
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
+              <span>
+                {[
+                  labels.transport[environment.transportKind],
+                  ...(environment.virtual ? [labels.virtual] : []),
+                  ...(environment.enabled ? [] : [labels.disabled]),
+                ].join(' · ')}
+              </span>
+              {environment.transportKind === 'container' ? (
+                <Badge>{labels.container.badge}</Badge>
+              ) : null}
+              {environment.status.offlineRuntimeCache ? (
+                <Badge variant="info" title={labels.offlineCacheHint}>
+                  {labels.offlineCache}
+                </Badge>
+              ) : null}
+            </p>
           </div>
-          <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-            {updating
-              ? labels.status.updating
-              : environment.status.pullingImage
-                ? labels.status.pulling
-                : environment.status.boundElsewhere
-                  ? labels.status.boundElsewhere
-                  : labels.status[state]}
-          </span>
         </div>
+        <span className="flex shrink-0 items-center gap-2 text-xs text-fg-muted">
+          {/* A binary handoff reads as a live operation, not as the outage it looks like. */}
+          <StatusDot
+            tone={updating ? 'warning' : ENVIRONMENT_STATE_TONE[state]}
+            pulse={updating || state === 'connecting'}
+          />
+          {updating
+            ? labels.status.updating
+            : environment.status.pullingImage
+              ? labels.status.pulling
+              : environment.status.boundElsewhere
+                ? labels.status.boundElsewhere
+                : labels.status[state]}
+        </span>
+      </div>
 
-        {environment.status.boundElsewhere ? (
-          <p
-            className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant"
-            data-testid="environment-bound-elsewhere"
-          >
-            {labels.boundElsewhereHint}
-          </p>
+      {environment.status.boundElsewhere ? (
+        <Callout tone="warning" data-testid="environment-bound-elsewhere">
+          {labels.boundElsewhereHint}
+        </Callout>
+      ) : null}
+
+      {environment.status.localFailureReason ? (
+        <Callout tone="warning" data-testid="local-failure-reason">
+          {labels.local.reason[environment.status.localFailureReason]}
+        </Callout>
+      ) : null}
+
+      <CapabilityChips environment={environment} />
+
+      <ToolchainSummaryLine environment={environment} />
+
+      <RuntimeRelease environment={environment} />
+
+      <PermissionsRow environment={environment} />
+
+      <RuntimeLifecyclePanel environment={environment} />
+
+      {environment.transportKind === 'websocket' ? (
+        <RuntimePairingPanel environmentId={environment.id} />
+      ) : null}
+
+      {environment.transportKind === 'http' ? <DirectUrlPanel environment={environment} /> : null}
+
+      {environment.transportKind === 'ssh' ? <SshPanel environment={environment} /> : null}
+
+      {environment.transportKind === 'container' ? (
+        <ContainerPanel environment={environment} />
+      ) : null}
+
+      <InstallTrustToggle environment={environment} />
+
+      {actionError ? (
+        <Callout tone="danger" role="alert">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2 border-t border-stroke pt-3">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => void runConnectionAction()}
+          disabled={busy || state === 'connecting' || !environment.enabled}
+        >
+          {state === 'connected' ? <Unplug size={ICON_MD} /> : <Cable size={ICON_MD} />}
+          {state === 'connected' ? labels.disconnect : labels.connect}
+        </Button>
+
+        {!environment.virtual && editing ? (
+          <>
+            <Button variant="secondary" size="sm" onClick={() => void saveName()} disabled={busy}>
+              <Check size={ICON_MD} />
+              {labels.save}
+            </Button>
+            <Button variant="subtle" size="sm" onClick={cancelEditing} disabled={busy}>
+              <X size={ICON_MD} />
+              {labels.cancel}
+            </Button>
+          </>
         ) : null}
 
-        {environment.status.localFailureReason ? (
-          <p
-            className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant"
-            data-testid="local-failure-reason"
-          >
-            {labels.local.reason[environment.status.localFailureReason]}
-          </p>
+        {!environment.virtual && !editing ? (
+          <>
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => {
+                setName(environment.name);
+                setEditing(true);
+              }}
+              disabled={busy}
+            >
+              <Pencil size={ICON_MD} />
+              {labels.edit}
+            </Button>
+            <Button
+              variant="subtle-danger"
+              size="sm"
+              onClick={() => {
+                setRemoveRuntime(false);
+                setRemoving(true);
+              }}
+              disabled={busy}
+              className="ml-auto"
+            >
+              <Trash2 size={ICON_MD} />
+              {labels.remove}
+            </Button>
+          </>
         ) : null}
-
-        <CapabilityChips environment={environment} />
-
-        <ToolchainSummaryLine environment={environment} />
-
-        <RuntimeRelease environment={environment} />
-
-        <PermissionsRow environment={environment} />
-
-        <RuntimeLifecyclePanel environment={environment} />
-
-        {environment.transportKind === 'websocket' ? (
-          <RuntimePairingPanel environmentId={environment.id} />
-        ) : null}
-
-        {environment.transportKind === 'http' ? <DirectUrlPanel environment={environment} /> : null}
-
-        {environment.transportKind === 'ssh' ? <SshPanel environment={environment} /> : null}
-
-        {environment.transportKind === 'container' ? (
-          <ContainerPanel environment={environment} />
-        ) : null}
-
-        <InstallTrustToggle environment={environment} />
-
-        {actionError ? (
-          <p className="text-xs text-error" role="alert">
-            {actionError}
-          </p>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-1.5 border-t border-outline-variant/15 pt-3">
-          <button
-            type="button"
-            onClick={() => void runConnectionAction()}
-            disabled={busy || state === 'connecting' || !environment.enabled}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15 disabled:opacity-45"
-          >
-            {state === 'connected' ? <Unplug size={13} /> : <Cable size={13} />}
-            {state === 'connected' ? labels.disconnect : labels.connect}
-          </button>
-
-          {!environment.virtual && editing ? (
-            <>
-              <button
-                type="button"
-                onClick={() => void saveName()}
-                disabled={busy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-primary hover:bg-primary/10 disabled:opacity-45"
-              >
-                <Check size={13} />
-                {labels.save}
-              </button>
-              <button
-                type="button"
-                onClick={cancelEditing}
-                disabled={busy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-on-surface-variant hover:bg-surface-container-high disabled:opacity-45"
-              >
-                <X size={13} />
-                {labels.cancel}
-              </button>
-            </>
-          ) : null}
-
-          {!environment.virtual && !editing ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setName(environment.name);
-                  setEditing(true);
-                }}
-                disabled={busy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface disabled:opacity-45"
-              >
-                <Pencil size={13} />
-                {labels.edit}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRemoveRuntime(false);
-                  setRemoving(true);
-                }}
-                disabled={busy}
-                className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-error/80 hover:bg-error/10 hover:text-error disabled:opacity-45"
-              >
-                <Trash2 size={13} />
-                {labels.remove}
-              </button>
-            </>
-          ) : null}
-        </div>
       </div>
 
       {removing ? (
@@ -357,12 +332,11 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
           onConfirm={() => void removeEnvironment()}
         >
           {removableRuntime ? (
-            <label className="flex items-start gap-2 rounded-xl bg-surface-container-lowest px-3 py-2 text-left text-sm text-on-surface">
-              <input
-                type="checkbox"
+            <label className="flex cursor-pointer items-start gap-2 rounded-sm bg-control px-3 py-2 text-left text-sm text-fg">
+              <Checkbox
                 checked={removeRuntime}
                 onChange={(event) => setRemoveRuntime(event.target.checked)}
-                className="mt-1 accent-primary"
+                className="mt-0.5"
               />
               <span>
                 {formatMessage(labels.removeRuntimeBytes, {
@@ -401,10 +375,7 @@ function ToolchainSummaryLine({ environment }: { environment: Environment }) {
   if (!summary) return null;
 
   return (
-    <p
-      className="text-[11px] text-on-surface-variant/65"
-      data-testid="environment-toolchain-summary"
-    >
+    <p className="text-xs text-fg-muted" data-testid="environment-toolchain-summary">
       {summary}
     </p>
   );
@@ -425,9 +396,9 @@ function RuntimeRelease({ environment }: { environment: Environment }) {
   if (!runtimeVersion || !runtimeVersionDrift) return null;
 
   return (
-    <p className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant">
+    <Callout tone="warning">
       {formatMessage(t.environments.entities.runtimeVersionDrift, { version: runtimeVersion })}
-    </p>
+    </Callout>
   );
 }
 
@@ -436,7 +407,7 @@ function CapabilityChips({ environment }: { environment: Environment }) {
   const labels = t.environments.entities;
   const manifest = environment.status.manifest;
   if (!manifest) {
-    return <p className="text-xs text-on-surface-variant/50">{labels.noManifest}</p>;
+    return <p className="text-xs text-fg-subtle">{labels.noManifest}</p>;
   }
 
   const chips = [
@@ -451,13 +422,10 @@ function CapabilityChips({ environment }: { environment: Environment }) {
   ].filter((chip): chip is string => Boolean(chip));
 
   return (
-    <ul className="flex list-none flex-wrap gap-1.5" aria-label={labels.description}>
+    <ul className="flex list-none flex-wrap gap-2" aria-label={labels.description}>
       {chips.map((chip) => (
-        <li
-          key={chip}
-          className="rounded-md border border-outline-variant/15 bg-surface-container-lowest px-2 py-1 font-mono text-[10px] text-on-surface-variant"
-        >
-          {chip}
+        <li key={chip}>
+          <Chip>{chip}</Chip>
         </li>
       ))}
     </ul>
@@ -498,30 +466,20 @@ function PermissionsRow({ environment }: { environment: Environment }) {
   const stale = lifecycle.data?.stale === true;
 
   return (
-    <div
-      className="space-y-2 rounded-lg border border-outline-variant/20 bg-surface-container-lowest/70 px-2.5 py-2"
-      data-testid="environment-permissions"
+    <EntityPanel
+      testId="environment-permissions"
+      title={labels.title}
+      meta={
+        <>
+          {profile ? <Badge>{labels.profile[profile]}</Badge> : null}
+          {stale ? <Badge variant="warning">{t.environments.entities.runtime.stale}</Badge> : null}
+        </>
+      }
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-          {labels.title}
-        </p>
-        {profile ? (
-          <span className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
-            {labels.profile[profile]}
-          </span>
-        ) : null}
-        {stale ? (
-          <span className="rounded-md bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
-            {t.environments.entities.runtime.stale}
-          </span>
-        ) : null}
-      </div>
-
       {denied.length > 0 ? (
         <div className="space-y-1">
-          <p className="text-[11px] text-on-surface-variant/70">{labels.deniedIntro}</p>
-          <ul className="flex list-none flex-wrap gap-1.5">
+          <p className="text-xs text-fg-muted">{labels.deniedIntro}</p>
+          <ul className="flex list-none flex-wrap gap-2">
             {denied.map((capability) => {
               const capabilityLabels = t.environments.entities.permissions.capabilities;
               const label =
@@ -529,11 +487,8 @@ function PermissionsRow({ environment }: { environment: Environment }) {
                   ? capabilityLabels[capability as keyof typeof capabilityLabels]
                   : capability;
               return (
-                <li
-                  key={capability}
-                  className="rounded-md border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 font-mono text-[10px] text-on-surface-variant"
-                >
-                  {label}
+                <li key={capability}>
+                  <Chip>{label}</Chip>
                 </li>
               );
             })}
@@ -541,10 +496,10 @@ function PermissionsRow({ environment }: { environment: Environment }) {
         </div>
       ) : null}
 
-      <p className="text-[11px] text-on-surface-variant/65">{labels.allowShellHonesty}</p>
+      <Callout tone="warning">{labels.allowShellHonesty}</Callout>
 
       <CopyLine label={labels.setupCommand} value={setupCommand} />
-    </div>
+    </EntityPanel>
   );
 }
 

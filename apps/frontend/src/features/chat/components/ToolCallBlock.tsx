@@ -5,11 +5,16 @@ import {
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
 import { Check, Copy } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { FileChangePreviewBody } from './FileChangePreview';
 import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
 import { TimelineDisclosure } from './TimelineDisclosure';
@@ -24,6 +29,7 @@ import {
 } from './ToolCallVisuals';
 import {
   formatToolSummary,
+  getShellStreams,
   parseToolResult,
   summarizeParsedToolResult,
 } from './tool-result-summary';
@@ -61,7 +67,6 @@ export function ToolCallBlock({
 
   const [expanded, setExpanded] = useState(isError || autoExpandPreview);
   const [showRaw, setShowRaw] = useState(false);
-  const { copy, copied } = useClipboard();
 
   const preview = useMemo(
     () => (previewable && expanded ? buildFileChangePreview(name, args, result) : null),
@@ -81,6 +86,12 @@ export function ToolCallBlock({
       ? null
       : t.tools.status[status];
   const tone = toolStatusTone(status);
+  const resultLabels: Record<ResultKind, string> = {
+    error: t.tools.errorLabel,
+    result: t.tools.resultLabel,
+    stderr: t.tools.stderrLabel,
+    stdout: t.tools.stdoutLabel,
+  };
   const isActive = isActiveToolExecutionStatus(status);
   const duration = execution?.durationMs;
   // Parsed once and shared: the outcome on the row and the raw body below it
@@ -93,8 +104,14 @@ export function ToolCallBlock({
   // Only the disclosed body reads this, and re-serializing an unopened result
   // on every stream frame is work nobody can see.
   const displayedResult = useMemo(
-    () => (expanded ? formatToolResult(parsedResult, isError) : null),
-    [expanded, parsedResult, isError]
+    () => (expanded ? formatToolResult(name, parsedResult, isError) : null),
+    [expanded, name, parsedResult, isError]
+  );
+
+  const rawToggle = (
+    <Button variant="subtle" size="sm" onClick={() => setShowRaw((v) => !v)}>
+      {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
+    </Button>
   );
 
   useEffect(() => {
@@ -114,11 +131,6 @@ export function ToolCallBlock({
     if (diffPreviewMode === 'collapse_older') setExpanded(isError || isLatestFileChange);
   }, [previewable, diffPreviewMode, isError, isLatestFileChange]);
 
-  const handleCopyResult = async () => {
-    if (!displayedResult) return;
-    await copy(displayedResult);
-  };
-
   return (
     <TimelineItem tone={tone}>
       <TimelineRow
@@ -128,65 +140,66 @@ export function ToolCallBlock({
         summary={summary ? formatToolSummary(summary, t.tools.summary) : null}
         duration={duration !== undefined && !isActive ? formatToolDuration(duration) : null}
       >
-        <span className={`shrink-0 font-mono font-semibold ${toneTextClass(tone)}`}>{label}</span>
-        {source !== 'builtin' && (
-          <span className="shrink-0 rounded-sm bg-surface-container-high px-1 py-px text-[10px] text-on-surface-variant/70">
-            {t.tools.sources[source]}
-          </span>
-        )}
-        {hint && <span className="truncate font-mono text-on-surface-variant/60">{hint}</span>}
-        {statusLabel && (
-          <span className={`shrink-0 text-[11px] ${toneTextClass(tone)}`}>{statusLabel}</span>
-        )}
+        <span className={cn('shrink-0 font-mono font-medium', toneTextClass(tone))}>{label}</span>
+        {source !== 'builtin' && <Badge>{t.tools.sources[source]}</Badge>}
+        {hint && <span className="truncate font-mono text-fg-muted">{hint}</span>}
+        {statusLabel && <span className={cn('shrink-0', toneTextClass(tone))}>{statusLabel}</span>}
       </TimelineRow>
 
       <TimelineDisclosure open={expanded}>
-        <div className="app-scrollbar max-h-48 space-y-3 overflow-y-auto p-3.5 font-mono text-xs sm:max-h-72 md:max-h-96">
-          {preview !== null && (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowRaw((v) => !v)}
-                className="cursor-pointer text-[10px] uppercase tracking-wider text-on-surface-variant/50 transition-colors duration-200 hover:text-on-surface-variant"
-              >
-                {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
-              </button>
-            </div>
+        <div className="app-scrollbar max-h-48 overflow-y-auto text-xs sm:max-h-72 md:max-h-96">
+          {/* The toggle rides in the first file's header while the diff shows
+              (one band, not a bare button above a second one). The raw view has
+              no file header to carry it, so it keeps a row of its own. The diff
+              is drawn in the same sections as the output below: a 32px header,
+              then its lines as a full-bleed band of canvas. */}
+          {preview !== null && showRaw && (
+            <div className="flex h-8 items-center justify-end pr-1.5">{rawToggle}</div>
           )}
-          {preview !== null && !showRaw && <FileChangePreviewBody preview={preview} />}
+          {preview !== null && !showRaw && (
+            <FileChangePreviewBody preview={preview} action={rawToggle} />
+          )}
           {(preview === null || showRaw) && Object.keys(args).length > 0 && (
-            <div>
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-on-surface-variant/50">
-                {t.tools.argsLabel}
-              </p>
-              <pre className="whitespace-pre-wrap leading-relaxed text-on-surface-variant/70">
+            <ToolOutputSection label={t.tools.argsLabel}>
+              <pre className="whitespace-pre-wrap font-mono leading-relaxed text-fg-muted">
                 {JSON.stringify(args, null, 2)}
               </pre>
-            </div>
+            </ToolOutputSection>
           )}
-          {(preview === null || showRaw) && displayedResult !== null && (
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <p
-                  className={`text-[10px] uppercase tracking-wider ${isError ? 'text-error/50' : 'text-on-surface-variant/50'}`}
-                >
-                  {isError ? t.tools.errorLabel : t.tools.resultLabel}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void handleCopyResult()}
-                  title={copied ? t.tools.resultCopied : t.tools.copyResult}
-                  className="cursor-pointer text-on-surface-variant opacity-60 transition-opacity duration-200 hover:opacity-100"
-                >
-                  {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                </button>
-              </div>
-              <pre
-                className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-error/80' : 'text-on-surface-variant/70'}`}
+          {(preview === null || showRaw) &&
+            displayedResult?.sections.map((section) => (
+              <ToolOutputSection
+                key={section.kind}
+                label={resultLabels[section.kind]}
+                danger={section.danger}
+                action={
+                  <CopyOutputButton
+                    text={section.text}
+                    label={
+                      section.kind === 'stdout' || section.kind === 'stderr'
+                        ? formatMessage(t.tools.copyStream, { stream: resultLabels[section.kind] })
+                        : t.tools.copyResult
+                    }
+                  />
+                }
               >
-                {displayedResult}
-              </pre>
-            </div>
+                {/* A failure's text is what the reader came for, so it keeps the
+                    primary colour; the label above and the row's glyph carry the
+                    tone. */}
+                <pre
+                  className={cn(
+                    'whitespace-pre-wrap break-words font-mono leading-relaxed',
+                    section.danger ? 'text-fg' : 'text-fg-muted'
+                  )}
+                >
+                  {section.text}
+                </pre>
+              </ToolOutputSection>
+            ))}
+          {(preview === null || showRaw) && displayedResult?.truncated && (
+            <p className="border-t border-stroke px-3 py-2 text-fg-subtle">
+              {t.tools.outputTruncated}
+            </p>
           )}
         </div>
       </TimelineDisclosure>
@@ -194,17 +207,109 @@ export function ToolCallBlock({
   );
 }
 
-function formatToolResult(parsedResult: unknown, isError: boolean): string | null {
+interface ToolOutputSectionProps {
+  label: string;
+  /** The section reports a failure: its label is read in the error colour. */
+  danger?: boolean;
+  action?: ReactNode;
+  children: ReactNode;
+}
+
+/**
+ * One labelled stretch of a tool's disclosed body: a 32px header on the card,
+ * then the output in mono on `canvas`. Sections divide with a hairline rather
+ * than nesting a card in the card.
+ */
+function ToolOutputSection({ label, danger = false, action, children }: ToolOutputSectionProps) {
+  return (
+    <div className="border-t border-stroke first:border-t-0">
+      <div className="flex h-8 items-center justify-between pr-1.5 pl-3">
+        <MicroLabel className={cn(danger && 'text-danger')}>{label}</MicroLabel>
+        {action}
+      </div>
+      <div className="bg-canvas p-3">{children}</div>
+    </div>
+  );
+}
+
+type ResultKind = 'error' | 'result' | 'stderr' | 'stdout';
+
+interface ResultSection {
+  readonly kind: ResultKind;
+  readonly text: string;
+  /** The section is the failure itself: its label is read in the error colour. */
+  readonly danger: boolean;
+}
+
+interface FormattedToolResult {
+  readonly sections: readonly ResultSection[];
+  /** The runtime cut a shell run's output at its size limit. */
+  readonly truncated: boolean;
+}
+
+/**
+ * What the disclosed body shows for a finished call, as the sections it is
+ * drawn in.
+ *
+ * A shell run is its two streams, one section each and real line breaks, with
+ * the quiet one dropped: a compiler's complaint is the point of a failed `bash`
+ * row, and `JSON.stringify` turned it into one wrapped paragraph of `\n` and
+ * `\"`. Everything else is a single section, as before.
+ */
+function formatToolResult(
+  name: string,
+  parsedResult: unknown,
+  isError: boolean
+): FormattedToolResult | null {
   if (parsedResult === null) return null;
+
+  const streams = getShellStreams(name, parsedResult);
+  if (streams) {
+    // What the reader came for first: stderr when the call failed, stdout when
+    // it did not. `exitCode` is not repeated here; the row already says it.
+    const ordered: ResultSection[] = [
+      { kind: 'stdout', text: streams.stdout, danger: false },
+      { kind: 'stderr', text: streams.stderr, danger: isError },
+    ];
+    if (isError) ordered.reverse();
+    const sections = ordered.filter((section) => section.text.length > 0);
+    // A run that printed nothing has no stream to show, so its payload is the
+    // only thing left to say what happened.
+    if (sections.length > 0) return { sections, truncated: streams.truncated };
+  }
+
+  const kind = isError ? 'error' : 'result';
   if (
     isError &&
     typeof parsedResult === 'object' &&
     'error' in parsedResult &&
     typeof parsedResult.error === 'string'
   ) {
-    return parsedResult.error;
+    return { sections: [{ kind, text: parsedResult.error, danger: true }], truncated: false };
   }
-  return typeof parsedResult === 'string'
-    ? parsedResult
-    : (JSON.stringify(parsedResult, null, 2) ?? null);
+  const text =
+    typeof parsedResult === 'string' ? parsedResult : JSON.stringify(parsedResult, null, 2);
+  return { sections: [{ kind, text, danger: isError }], truncated: false };
+}
+
+/**
+ * Copies one section's text, which is the text the section shows.
+ *
+ * Its own component because each section has its own "copied" tick: a shell run
+ * has two, and ticking one must not tick the other.
+ */
+function CopyOutputButton({ text, label }: { text: string; label: string }) {
+  const { t } = useI18n();
+  const { copy, copied } = useClipboard();
+  return (
+    <Button
+      variant="subtle"
+      size="sm"
+      onClick={() => void copy(text)}
+      title={copied ? t.tools.resultCopied : label}
+      className="size-7 px-0 text-fg-muted"
+    >
+      {copied ? <Check size={ICON_SM} className="text-success" /> : <Copy size={ICON_SM} />}
+    </Button>
+  );
 }

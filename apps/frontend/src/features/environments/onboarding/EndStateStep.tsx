@@ -11,10 +11,14 @@
  */
 
 import type { CreateEnvironmentBody, Environment } from '@mangostudio/shared/environments';
-import { useId, useState } from 'react';
+import { Cable, KeyRound } from 'lucide-react';
+import { type ReactNode, useId, useState } from 'react';
+import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useCreateEnvironmentMutation, useRuntimePairingQuery } from '../queries';
 import type { SshFormFields } from '../ssh-form';
@@ -127,75 +131,64 @@ export function EndStateStep({
     }
   };
 
-  const choices: readonly { readonly value: OnboardingEndState; readonly label: string }[] = [
-    { value: 'ssh', label: labels.endStateSsh },
-    { value: 'paired', label: labels.endStatePaired },
+  const choices: readonly {
+    readonly value: OnboardingEndState;
+    readonly label: string;
+    readonly icon: ReactNode;
+  }[] = [
+    { value: 'ssh', label: labels.endStateSsh, icon: <KeyRound size={ICON_MD} /> },
+    { value: 'paired', label: labels.endStatePaired, icon: <Cable size={ICON_MD} /> },
   ];
 
   return (
     <div className="space-y-4" data-testid="onboarding-end-state-step">
       <fieldset className="space-y-2">
-        <legend className="font-medium text-on-surface-variant text-sm">
-          {labels.endStateLabel}
-        </legend>
+        <legend className="text-sm font-medium text-fg">{labels.endStateLabel}</legend>
         {/* Real radios rather than styled buttons: this is one choice out of
-            two, and arrow-key navigation and the announced group come free. */}
+            two, and arrow-key navigation and the announced group come free. The
+            current row wears the navigation's mark, as every pick-one list does. */}
         <div className="grid gap-2">
           {choices.map((choice) => (
-            <label
+            <PickOneRow
               key={choice.value}
-              className={`cursor-pointer rounded-xl border px-3 py-2 text-left font-semibold text-sm transition-colors has-disabled:cursor-default has-disabled:opacity-60 ${
-                endState === choice.value
-                  ? 'border-primary/45 bg-primary/10 text-on-surface'
-                  : 'border-outline-variant/20 text-on-surface-variant/70 hover:bg-surface-container-highest'
-              }`}
-            >
-              <input
-                type="radio"
-                name={groupId}
-                value={choice.value}
-                checked={endState === choice.value}
-                disabled={Boolean(existing)}
-                onChange={() => onEndState(choice.value)}
-                className="sr-only"
-              />
-              {choice.label}
-            </label>
+              name={groupId}
+              checked={endState === choice.value}
+              disabled={Boolean(existing)}
+              onSelect={() => onEndState(choice.value)}
+              icon={choice.icon}
+              title={choice.label}
+            />
           ))}
         </div>
-        <div className="rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-          <p className="text-on-surface-variant/70 text-xs">
-            {endState === 'paired' ? labels.endStatePairedHint : labels.endStateSshHint}
-          </p>
-        </div>
+        <p className="text-xs text-fg-muted">
+          {endState === 'paired' ? labels.endStatePairedHint : labels.endStateSshHint}
+        </p>
       </fieldset>
 
       {dialEndpointMissing ? (
-        <p
-          className="rounded-xl border border-warning/35 bg-warning/5 px-3 py-2.5 text-on-surface-variant text-xs"
-          role="alert"
-          data-testid="onboarding-public-url-gate"
-        >
+        <Callout tone="warning" role="alert" data-testid="onboarding-public-url-gate">
           {t.environments.entities.pairing.endpointUnset}
-        </p>
+        </Callout>
       ) : null}
 
       {dialEndpointFailed ? (
-        <div
-          className="space-y-2 rounded-xl border border-error/35 bg-error/5 px-3 py-2.5"
+        <Callout
+          tone="danger"
           role="alert"
           data-testid="onboarding-pairing-error"
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={pairing.isFetching}
+              onClick={() => void pairing.refetch()}
+            >
+              {labels.endStatePairingRetry}
+            </Button>
+          }
         >
-          <p className="text-on-surface-variant text-xs">{labels.endStatePairingUnavailable}</p>
-          <Button
-            variant="secondary"
-            className="w-full"
-            loading={pairing.isFetching}
-            onClick={() => void pairing.refetch()}
-          >
-            {labels.endStatePairingRetry}
-          </Button>
-        </div>
+          {labels.endStatePairingUnavailable}
+        </Callout>
       ) : null}
 
       {existing ? null : (
@@ -220,15 +213,15 @@ export function EndStateStep({
                 setId(event.target.value);
               }}
             />
-            {!idInvalid && <p className="text-on-surface-variant/60 text-xs">{add.idHint}</p>}
+            {!idInvalid && <p className="text-xs text-fg-muted">{add.idHint}</p>}
           </div>
         </>
       )}
 
       {error ? (
-        <p className="text-error text-xs" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
 
       <StepActions

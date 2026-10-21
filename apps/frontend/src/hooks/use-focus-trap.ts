@@ -13,10 +13,10 @@
  * disclosure are in the cycle for the same reason — a trap that excludes them
  * makes "read the terms" unreachable while the thing gating it is on screen.
  *
- * There is no shared modal primitive in this app; this is the shared piece of
- * one, kept small rather than grown into a component nobody asked for. What it
- * therefore has to carry itself is which dialog is on top when two of these are
- * open at once — see `engagedTraps`.
+ * `Dialog` (`components/ui/Dialog.tsx`) is the modal frame built on this; the
+ * hook stays separate because the gallery lightbox is a full-bleed overlay with
+ * no panel to frame. What the hook carries itself is which dialog is on top when
+ * two of these are open at once — see `engagedTraps`.
  *
  * The ref is a callback (via `useState`), not a plain `useRef`. Every current
  * caller mounts fresh each time its dialog appears, but a caller that instead
@@ -28,7 +28,7 @@
  * dialog actually appears, regardless of which pattern the caller uses.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /** Tabbable, not merely focusable: `tabindex="-1"` is script focus, not a stop. */
 const TABBABLE =
@@ -83,6 +83,15 @@ export function onFocusTrapEngaged(listener: () => void): () => void {
 export function useFocusTrap(onEscape: () => void) {
   const [dialog, setDialog] = useState<HTMLDivElement | null>(null);
 
+  // What had focus while the dialog was still being rendered, i.e. what opened
+  // it. Read here rather than in the effect below because a control inside the
+  // dialog that takes focus as it mounts (`autoFocus`) has already moved focus
+  // by then, and restoring "what was focused" would put the user back on a node
+  // that is about to be removed. Only refreshed while no dialog is engaged, so
+  // a re-render with the dialog up never overwrites it with an inner control.
+  const opener = useRef<HTMLElement | null>(null);
+  if (!dialog) opener.current = document.activeElement as HTMLElement | null;
+
   // Keyed on the node alone. Folding this into the listener effect below would
   // let an `onEscape` whose identity changed on a re-render pop and re-push a
   // background dialog to the top of the stack, handing it a keyboard it is not
@@ -92,8 +101,13 @@ export function useFocusTrap(onEscape: () => void) {
     engagedTraps.push(dialog);
     // Restored on close, so dismissing the dialog puts the user back where they
     // were rather than at the top of the document.
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    dialog.focus();
+    const focused = document.activeElement as HTMLElement | null;
+    // A control inside that already took focus (`autoFocus` on the field the
+    // dialog exists to edit, "Cancel" on a destructive confirmation) is where
+    // the user should start; pulling focus back out to the panel would undo it.
+    const startedInside = dialog.contains(focused);
+    const previouslyFocused = startedInside ? opener.current : focused;
+    if (!startedInside) dialog.focus();
     // Copied first: a listener that closes an overlay can unsubscribe another
     // one in the same tick, and mutating the set mid-iteration would skip it.
     for (const listener of [...engagedListeners]) listener();

@@ -27,6 +27,8 @@ describe('ContextBadge', () => {
     const indicator = container.querySelector('[data-testid="context-badge-indicator"]');
     expect(indicator?.querySelector('svg')).toBeTruthy();
     expect(indicator?.getAttribute('data-percent')).toBe('1');
+    // The figure is text beside the ring, not a digit drawn inside it.
+    expect(indicator?.querySelector('span')?.textContent).toBe('1%');
     // The strip carries the ring alone; `9.6k/1.0M` is not on it.
     expect(indicator?.textContent).not.toContain('1.0M');
   });
@@ -53,7 +55,7 @@ describe('ContextBadge', () => {
 
     expect(container.querySelector('[data-severity="danger"]')).toBeTruthy();
     expect(container.querySelector('svg circle:last-child')?.getAttribute('class')).toContain(
-      'stroke-error'
+      'stroke-danger'
     );
   });
 });

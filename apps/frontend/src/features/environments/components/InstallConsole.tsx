@@ -1,16 +1,20 @@
 /**
- * Live install log.
+ * Live install log: a status line over the output, which is mono on `canvas`
+ * inside whatever card the install was started from.
  *
  * Lines are appended verbatim. Autoscroll follows the tail until the user
  * scrolls up — reading the line that just failed must not be fought by the
  * viewport — and re-engages when they scroll back to the bottom.
  */
 
-import { CircleCheck, CircleX, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { CircleCheck, CircleX, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { formatDuration } from '../format';
 import type { InstallStreamState } from '../hooks/use-install-stream';
 
@@ -26,9 +30,9 @@ interface InstallConsoleProps {
 const AUTOSCROLL_THRESHOLD_PX = 32;
 
 const STREAM_STYLES = {
-  stdout: 'text-on-surface-variant',
-  stderr: 'text-error',
-  system: 'text-on-surface-variant/60 italic',
+  stdout: 'text-fg',
+  stderr: 'text-danger',
+  system: 'text-fg-muted italic',
 } as const;
 
 export function InstallConsole({ stream, stepLabel, onCancel, onClose }: InstallConsoleProps) {
@@ -55,50 +59,42 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
   const exit = stream.exit;
 
   return (
-    <section
-      className="space-y-3 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/60 p-4"
-      data-testid="install-console"
-    >
+    <section className="space-y-3" data-testid="install-console">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <StatusIcon phase={stream.phase} exitStatus={exit?.status} />
-          <span className="text-sm font-semibold text-on-surface">
+          <span className="text-sm font-medium text-fg">
             {exit ? s.runStatus[exit.status] : s.runStatus.running}
           </span>
           {stepLabel && (
-            <span
-              className="truncate text-xs text-on-surface-variant/60"
-              data-testid="install-step-label"
-            >
+            <span className="truncate text-xs text-fg-muted" data-testid="install-step-label">
               {stepLabel}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-on-surface-variant/70">
-            <input
-              type="checkbox"
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted">
+            <Checkbox
               checked={autoscroll}
               onChange={(event) => setAutoscroll(event.target.checked)}
-              className="accent-primary"
             />
             {s.autoscroll}
           </label>
           {isRunning ? (
-            <Button variant="ghost" size="sm" onClick={onCancel}>
+            <Button variant="subtle" size="sm" onClick={onCancel}>
               {s.cancelRun}
             </Button>
           ) : (
-            <Button variant="ghost" size="sm" onClick={onClose}>
+            <Button variant="subtle" size="sm" onClick={onClose}>
               {s.close}
             </Button>
           )}
         </div>
       </header>
 
-      {stream.reconnecting && <p className="text-xs text-tertiary">{s.reconnecting}</p>}
+      {stream.reconnecting && <p className="text-xs text-fg-muted">{s.reconnecting}</p>}
       {stream.droppedLines > 0 && (
-        <p className="text-xs text-on-surface-variant/60">
+        <p className="text-xs text-fg-muted">
           {formatMessage(s.linesDropped, { count: String(stream.droppedLines) })}
         </p>
       )}
@@ -106,7 +102,7 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
       <div
         ref={logRef}
         onScroll={handleScroll}
-        className="max-h-72 overflow-y-auto rounded-xl bg-surface-container-highest p-3 font-mono text-xs leading-relaxed"
+        className="app-scrollbar max-h-72 overflow-y-auto rounded-md border border-stroke bg-canvas p-3 font-mono text-xs leading-relaxed"
         // A `log` role is the live region for append-only output, so a screen
         // reader hears progress without the user having to poll it.
         role="log"
@@ -114,7 +110,7 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
         aria-label={s.consoleTitle}
       >
         {stream.lines.length === 0 ? (
-          <p className="text-on-surface-variant/50">{s.waitingForOutput}</p>
+          <p className="text-fg-subtle">{s.waitingForOutput}</p>
         ) : (
           stream.lines.map((line) => (
             <div
@@ -128,7 +124,7 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
       </div>
 
       {exit && (
-        <p className="text-xs text-on-surface-variant/70" data-testid="install-exit-summary">
+        <p className="text-xs text-fg-muted" data-testid="install-exit-summary">
           {exit.code === null
             ? formatMessage(s.exitSummaryNoCode, { duration: formatDuration(exit.durationMs) })
             : formatMessage(s.exitSummary, {
@@ -137,11 +133,11 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
               })}
         </p>
       )}
-      {exit?.truncated && <p className="text-xs text-on-surface-variant/60">{s.truncated}</p>}
+      {exit?.truncated && <p className="text-xs text-fg-muted">{s.truncated}</p>}
       {stream.phase === 'failed' && !exit && (
         // The server's own explanation beats the generic one whenever it sent
         // an error event rather than simply dropping the connection.
-        <p className="text-xs text-error">{stream.streamError ?? s.streamError}</p>
+        <p className="text-xs text-danger">{stream.streamError ?? s.streamError}</p>
       )}
     </section>
   );
@@ -155,9 +151,10 @@ function StatusIcon({
   exitStatus: string | undefined;
 }) {
   if (phase === 'connecting' || phase === 'streaming') {
-    return <LoaderCircle size={16} className="animate-spin text-primary" />;
+    return <Spinner size="sm" />;
   }
-  if (exitStatus === 'succeeded') return <CircleCheck size={16} className="text-primary" />;
-  if (exitStatus === 'interrupted') return <TriangleAlert size={16} className="text-tertiary" />;
-  return <CircleX size={16} className="text-error" />;
+  if (exitStatus === 'succeeded') return <CircleCheck size={ICON_MD} className="text-success" />;
+  if (exitStatus === 'interrupted')
+    return <TriangleAlert size={ICON_MD} className="text-warning" />;
+  return <CircleX size={ICON_MD} className="text-danger" />;
 }

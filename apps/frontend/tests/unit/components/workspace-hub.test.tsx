@@ -166,9 +166,8 @@ describe('WorkspaceHub', () => {
   it('greets by name and renders before any card query has answered', async () => {
     const { scenario } = await renderHub();
     try {
-      // The accessible name joins across the accent span, so the trailing
-      // period lands after a space. The assertion is about being greeted by
-      // name, not about where accname puts the punctuation.
+      // The assertion is about being greeted by name, not about the greeting's
+      // punctuation.
       expect(
         screen.getByRole('heading', { name: /Good (morning|afternoon|evening), Julio/ })
       ).toBeInTheDocument();
@@ -218,7 +217,7 @@ describe('WorkspaceHub', () => {
     );
     try {
       expect(await screen.findByText('feat/lsp-plugin')).toBeInTheDocument();
-      expect(screen.getByText('2 file(s) changed')).toBeInTheDocument();
+      expect(screen.getByText('2 files changed')).toBeInTheDocument();
       expect(screen.getByText('mango')).toBeInTheDocument();
       // A dirty tree changes what the starters offer.
       expect(
@@ -282,7 +281,7 @@ describe('WorkspaceHub', () => {
     };
     const { scenario } = await renderHub({}, { skills: [onlyInClaude] });
     try {
-      expect(await screen.findByText('1 skill(s) live in a single agent.')).toBeInTheDocument();
+      expect(await screen.findByText('1 skill lives in a single agent.')).toBeInTheDocument();
       // No propagate CTA: absent is frequently the state its author wanted.
       expect(screen.queryByRole('link', { name: 'Propagate' })).toBeNull();
       expect(screen.getByRole('link', { name: 'Open in the library' })).toBeInTheDocument();
@@ -310,7 +309,7 @@ describe('WorkspaceHub', () => {
     try {
       const user = userEvent.setup();
       const row = await screen.findByRole('button', { name: 'Open The forgotten refactor' });
-      expect(row).toHaveTextContent('5 changed');
+      expect(row).toHaveTextContent('5 files changed');
       expect(row).toHaveTextContent('1 unpushed');
       await user.click(row);
       expect(props.onSelectChat).toHaveBeenCalledWith('chat-2');

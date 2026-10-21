@@ -71,6 +71,17 @@ describe('ToolCallGroupBlock', () => {
     expect(within(childRegion).getByText('args')).toBeInTheDocument();
   });
 
+  it('keeps the label of a clean run neutral', () => {
+    const { container } = render(
+      <ToolCallGroupBlock calls={[entry({ toolCallId: 't1' }), entry({ toolCallId: 't2' })]} />
+    );
+
+    const label = screen.getAllByText('Read')[0];
+    expect(label.className).toContain('text-fg');
+    expect(label.className).not.toContain('text-success');
+    expect(container.querySelector('.chat-timeline-item--success')).toBeInTheDocument();
+  });
+
   it('shows an error tone when any call failed', () => {
     const { container } = render(
       <ToolCallGroupBlock
@@ -83,7 +94,7 @@ describe('ToolCallGroupBlock', () => {
 
     // A collapsed run must never hide a failure behind its neighbours.
     expect(container.querySelector('.chat-timeline-item--error')).toBeInTheDocument();
-    expect(screen.getAllByText('Read')[0].className).toContain('text-error');
+    expect(screen.getAllByText('Read')[0].className).toContain('text-danger');
   });
 
   it('totals the run beside the summary row', () => {
@@ -158,7 +169,7 @@ describe('ToolCallGroupBlock', () => {
     );
 
     const label = screen.getAllByText('Read')[0];
-    expect(label.className).toContain('text-on-surface-variant');
+    expect(label.className).toContain('text-fg-muted');
     expect(label.className).not.toContain('text-success');
     expect(container.querySelector('.chat-timeline-item--muted')).toBeInTheDocument();
     expect(container.querySelector('.lucide-ban')).toBeInTheDocument();
@@ -188,7 +199,7 @@ describe('ToolCallGroupBlock', () => {
       />
     );
 
-    expect(screen.getAllByText('Read')[0].className).toContain('text-primary');
+    expect(screen.getAllByText('Read')[0].className).toContain('text-accent-fg');
     expect(container.querySelector('.chat-timeline-item--active')).toBeInTheDocument();
   });
 });

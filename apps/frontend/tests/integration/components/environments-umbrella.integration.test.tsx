@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { en } from '@mangostudio/shared/i18n';
 import {
   createMemoryHistory,
   createRootRoute,
@@ -113,6 +114,30 @@ describe('environments umbrella', () => {
       '/environments/library/skills'
     );
     expect(screen.getByTestId('section-outlet')).toBeInTheDocument();
+  });
+
+  // The section's description, the machine picker and the re-check share one row
+  // above the strip. A tab that kept a band of its own for the button would
+  // stack a second, near-empty row under it, and a second button would offer
+  // two verbs for one idea.
+  it('offers the section one description and one re-check, above its strip', async () => {
+    createFetchScenario()
+      .respondWithJson('GET', '/api/library/propagate/backups', {
+        body: { sets: [], sizeBytes: 0, retentionCount: 0, retentionBytes: 0 },
+      })
+      .install();
+
+    await renderUmbrellaAt('/environments/library/skills');
+
+    const description = screen.getByText(en.library.subtitle);
+    const recheck = screen.getAllByRole('button', { name: en.environments.actions.refresh });
+    expect(recheck).toHaveLength(1);
+    // Same row as the description, and ahead of the second strip in the page.
+    expect(description.parentElement).toContainElement(recheck[0] as HTMLElement);
+    const sectionTabs = screen.getByRole('navigation', { name: 'Library' });
+    expect(
+      description.compareDocumentPosition(sectionTabs) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 
   // Fuzzy matching is what keeps the umbrella tab lit while a nested page is

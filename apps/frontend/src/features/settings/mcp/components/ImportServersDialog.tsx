@@ -6,13 +6,20 @@ import type {
   McpPortabilityPreviewEntry,
   PreviewMcpPortabilityImportBody,
 } from '@mangostudio/shared/mcp';
-import { AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import { useState } from 'react';
+import { SettingsField } from '@/components/settings/SettingsField';
+import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
+import { StatusNote } from '@/components/settings/StatusNote';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { FIELD_CLASS, Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { useApplyPortableMcpImport, usePreviewPortableMcpImport } from '../hooks/use-mcp-servers';
 
 interface ImportServersDialogProps {
@@ -155,59 +162,23 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
     setSubmitError(null);
   };
 
+  const busy = previewMutation.isPending || applyMutation.isPending;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-bold text-on-surface">{s.import.title}</h3>
-            <p className="mt-1 text-sm text-on-surface-variant/70">
-              {s.portability.importDescription}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" aria-label={s.cancelButton} onClick={onClose}>
-            <X size={16} />
-          </Button>
-        </div>
-
-        {step.kind === 'source' && (
-          <SourceStep
-            sourceKind={sourceKind}
-            path={path}
-            json={json}
-            fileName={fileName}
-            onSourceKind={setSourceKind}
-            onPath={setPath}
-            onJson={setJson}
-            onFile={handleFile}
-          />
-        )}
-        {step.kind === 'preview' && (
-          <PreviewStep
-            entries={step.entries}
-            decisions={step.decisions}
-            onDecision={setDecision}
-            onReplaceTarget={(entryKey, targetServerId) =>
-              patchDecision(entryKey, { targetServerId })
-            }
-            onSecretValue={setSecretValue}
-          />
-        )}
-        {step.kind === 'summary' && <SummaryStep summary={step.summary} />}
-
-        {submitError && <p className="text-sm text-error">{submitError}</p>}
-
-        <div className="flex gap-3 pt-2">
+    <Dialog
+      title={s.import.title}
+      description={s.portability.importDescription}
+      closeDisabled={busy}
+      onClose={onClose}
+      notice={submitError ? <Callout tone="danger">{submitError}</Callout> : undefined}
+      footer={
+        <>
           {step.kind === 'source' && (
             <>
-              <Button variant="secondary" className="flex-1" onClick={onClose}>
+              <Button variant="secondary" onClick={onClose}>
                 {s.cancelButton}
               </Button>
-              <Button
-                className="flex-1"
-                loading={previewMutation.isPending}
-                onClick={handlePreview}
-              >
+              <Button loading={previewMutation.isPending} onClick={handlePreview}>
                 {previewMutation.isPending ? s.import.previewingButton : s.import.previewButton}
               </Button>
             </>
@@ -216,7 +187,6 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
             <>
               <Button
                 variant="secondary"
-                className="flex-1"
                 onClick={() => {
                   setSubmitError(null);
                   setStep({ kind: 'source' });
@@ -225,7 +195,6 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
                 {s.import.backButton}
               </Button>
               <Button
-                className="flex-1"
                 disabled={!canApplyPreview(step)}
                 loading={applyMutation.isPending}
                 onClick={handleApply}
@@ -234,14 +203,35 @@ export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
               </Button>
             </>
           )}
-          {step.kind === 'summary' && (
-            <Button className="flex-1" onClick={onClose}>
-              {s.portability.done}
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
+          {step.kind === 'summary' && <Button onClick={onClose}>{s.portability.done}</Button>}
+        </>
+      }
+    >
+      {step.kind === 'source' && (
+        <SourceStep
+          sourceKind={sourceKind}
+          path={path}
+          json={json}
+          fileName={fileName}
+          onSourceKind={setSourceKind}
+          onPath={setPath}
+          onJson={setJson}
+          onFile={handleFile}
+        />
+      )}
+      {step.kind === 'preview' && (
+        <PreviewStep
+          entries={step.entries}
+          decisions={step.decisions}
+          onDecision={setDecision}
+          onReplaceTarget={(entryKey, targetServerId) =>
+            patchDecision(entryKey, { targetServerId })
+          }
+          onSecretValue={setSecretValue}
+        />
+      )}
+      {step.kind === 'summary' && <SummaryStep summary={step.summary} />}
+    </Dialog>
   );
 }
 
@@ -259,73 +249,63 @@ interface SourceStepProps {
 function SourceStep(props: SourceStepProps) {
   const { t } = useI18n();
   const s = t.settings.mcp;
-  const labels = {
-    file: s.portability.sourceFile,
-    path: s.import.sourcePath,
-    json: s.import.sourceJson,
-  };
+  const sourceOptions: { value: SourceKind; label: string }[] = [
+    { value: 'file', label: s.portability.sourceFile },
+    { value: 'path', label: s.import.sourcePath },
+    { value: 'json', label: s.import.sourceJson },
+  ];
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2">
-        {(['file', 'path', 'json'] as const).map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            onClick={() => props.onSourceKind(kind)}
-            className={`px-4 py-2 text-sm font-medium rounded-xl border transition-colors ${
-              props.sourceKind === kind
-                ? 'bg-primary/10 border-primary/60 text-primary'
-                : 'bg-surface-container-high border-outline-variant/20 text-on-surface-variant hover:text-on-surface'
-            }`}
-          >
-            {labels[kind]}
-          </button>
-        ))}
-      </div>
+      <SettingsSegmented
+        ariaLabel={s.import.title}
+        value={props.sourceKind}
+        options={sourceOptions}
+        onChange={props.onSourceKind}
+      />
 
       {props.sourceKind === 'file' && (
-        <div className="space-y-1.5">
-          <label htmlFor="mcp-import-file" className="text-sm font-medium text-on-surface-variant">
-            {s.portability.fileLabel}
-          </label>
+        <SettingsField
+          label={s.portability.fileLabel}
+          htmlFor="mcp-import-file"
+          hint={props.fileName || s.portability.fileHint}
+        >
           <input
             id="mcp-import-file"
             type="file"
             accept="application/json,.json"
             onChange={(event) => void props.onFile(event.target.files?.[0])}
-            className="block w-full rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface file:mr-3 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-primary"
+            className={cn(
+              FIELD_CLASS,
+              'h-auto cursor-pointer py-1 file:mr-3 file:cursor-pointer file:rounded-xs file:border-0 file:bg-fill-selected file:px-3 file:py-1 file:text-xs file:font-medium file:text-fg'
+            )}
           />
-          <p className="text-xs text-on-surface-variant/60">
-            {props.fileName || s.portability.fileHint}
-          </p>
-        </div>
+        </SettingsField>
       )}
       {props.sourceKind === 'path' && (
-        <div className="space-y-1.5">
+        <SettingsField
+          label={s.import.pathLabel}
+          htmlFor="mcp-import-path"
+          hint={s.import.pathHint}
+        >
           <Input
             id="mcp-import-path"
-            label={s.import.pathLabel}
             value={props.path}
             onChange={(event) => props.onPath(event.target.value)}
             placeholder={s.import.pathPlaceholder}
           />
-          <p className="text-xs text-on-surface-variant/60">{s.import.pathHint}</p>
-        </div>
+        </SettingsField>
       )}
       {props.sourceKind === 'json' && (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="mcp-import-json" className="text-sm font-medium text-on-surface-variant">
-            {s.import.jsonLabel}
-          </label>
-          <textarea
+        <SettingsField label={s.import.jsonLabel} htmlFor="mcp-import-json">
+          <Textarea
             id="mcp-import-json"
             value={props.json}
             onChange={(event) => props.onJson(event.target.value)}
             placeholder={s.import.jsonPlaceholder}
             rows={10}
-            className="rounded-xl px-3 py-2 text-sm font-mono bg-surface-container-high text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors resize-y"
+            className="font-mono text-xs"
           />
-        </div>
+        </SettingsField>
       )}
     </div>
   );
@@ -349,37 +329,26 @@ function PreviewStep({
   const { t } = useI18n();
   const s = t.settings.mcp;
   if (entries.length === 0) {
-    return (
-      <p className="py-6 text-center text-sm text-on-surface-variant/60">{s.import.emptyPreview}</p>
-    );
+    return <EmptyState title={s.import.emptyPreview} className="min-h-0 py-4" />;
   }
   return (
     <div className="space-y-3">
-      <h4 className="text-sm font-semibold uppercase tracking-wider text-on-surface-variant/70">
-        {s.portability.reviewTitle}
-      </h4>
-      {entries.map((entry) => {
+      <h4 className="text-sm font-semibold text-fg">{s.portability.reviewTitle}</h4>
+      {entries.map((entry, index) => {
         const state = decisions[entry.key];
         if (!state) return null;
         const eligibleReplacementCount = entry.conflicts.filter(
           (candidate) => !candidate.replaceBlockedBySlug
         ).length;
         return (
-          <section
-            key={entry.key}
-            className="rounded-2xl border border-outline-variant/20 p-4 space-y-3"
-          >
+          <section key={entry.key} className="space-y-3 rounded-md border border-stroke p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-on-surface">{entry.name}</span>
-                  {entry.transport && (
-                    <span className="rounded-full bg-surface-container-highest px-2 py-0.5 text-xs text-on-surface-variant">
-                      {s.transports[entry.transport]}
-                    </span>
-                  )}
+                  <span className="text-sm font-semibold text-fg">{entry.name}</span>
+                  {entry.transport && <Badge>{s.transports[entry.transport]}</Badge>}
                 </div>
-                <p className="truncate text-xs font-mono text-on-surface-variant/60">
+                <p className="truncate font-mono text-xs text-fg-muted">
                   {entry.slug} · {entry.command ?? entry.url ?? entry.key}
                 </p>
               </div>
@@ -388,7 +357,7 @@ function PreviewStep({
                 value={state.decision}
                 disabled={entry.status === 'invalid'}
                 onChange={(value) => onDecision(entry, value as McpPortabilityDecision)}
-                className="w-44 shrink-0"
+                className="w-full sm:w-44 sm:shrink-0"
                 options={entry.allowedDecisions.map((decision) => ({
                   value: decision,
                   label: s.portability.decisions[decision],
@@ -398,55 +367,47 @@ function PreviewStep({
             </div>
 
             {entry.status === 'invalid' && entry.reason && (
-              <p className="flex items-center gap-2 text-xs text-error">
-                <AlertTriangle size={13} />
-                {s.import.reasons[entry.reason]}
-              </p>
+              <StatusNote tone="danger">{s.import.reasons[entry.reason]}</StatusNote>
             )}
 
             {entry.conflicts.length > 0 ? (
-              <div className="rounded-xl bg-surface-container-low p-3 space-y-2">
-                <p className="text-xs font-semibold text-on-surface-variant">
-                  {s.portability.conflictsTitle}
-                </p>
-                {entry.conflicts.map((candidate) => {
-                  const blockedMessage = candidate.replaceBlockedBySlug
-                    ? formatReplaceBlockedBySlug(
-                        s.portability.replaceBlockedBySlug,
-                        candidate.replaceBlockedBySlug
-                      )
-                    : undefined;
-                  return (
-                    <div key={candidate.serverId} className="text-xs text-on-surface-variant/80">
-                      <div>
-                        <span className="font-medium text-on-surface">{candidate.name}</span>
-                        <span> ({candidate.slug}) · </span>
-                        {candidate.keys.map((key) => s.portability.conflictKeys[key]).join(', ')}
+              <Callout tone="warning" title={s.portability.conflictsTitle}>
+                <div className="space-y-2 text-xs">
+                  {entry.conflicts.map((candidate) => {
+                    const blockedMessage = candidate.replaceBlockedBySlug
+                      ? formatReplaceBlockedBySlug(
+                          s.portability.replaceBlockedBySlug,
+                          candidate.replaceBlockedBySlug
+                        )
+                      : undefined;
+                    return (
+                      <div key={candidate.serverId}>
+                        <div>
+                          <span className="font-medium text-fg">{candidate.name}</span>
+                          <span> ({candidate.slug}) · </span>
+                          {candidate.keys.map((key) => s.portability.conflictKeys[key]).join(', ')}
+                        </div>
+                        {blockedMessage && (
+                          <StatusNote tone="danger" className="mt-1" title={blockedMessage}>
+                            {blockedMessage}
+                          </StatusNote>
+                        )}
                       </div>
-                      {blockedMessage && (
-                        <p
-                          className="mt-1 flex items-center gap-1.5 text-error"
-                          title={blockedMessage}
-                        >
-                          <AlertTriangle size={12} />
-                          {blockedMessage}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              </Callout>
             ) : (
-              <p className="flex items-center gap-2 text-xs text-on-surface-variant/60">
-                <CheckCircle2 size={13} className="text-primary" />
-                {s.portability.noConflicts}
-              </p>
+              <StatusNote tone="success">{s.portability.noConflicts}</StatusNote>
             )}
 
             {state.decision === 'replace' && entry.conflicts.length > 1 && (
-              <div className="space-y-1.5 text-xs text-on-surface-variant">
-                <span>{s.portability.replacementTargetLabel}</span>
+              <SettingsField
+                label={s.portability.replacementTargetLabel}
+                htmlFor={`mcp-import-target-${index}`}
+              >
                 <Select
+                  id={`mcp-import-target-${index}`}
                   // Choosing `replace` already picks the first *eligible*
                   // candidate, so this fallback only runs when every candidate
                   // is blocked — and then there is nothing true to name. The
@@ -475,26 +436,26 @@ function PreviewStep({
                     };
                   })}
                 />
-              </div>
+              </SettingsField>
             )}
 
             {state.decision === 'copy' && entry.copyName && entry.copySlug && (
-              <p className="text-xs text-primary">
+              <StatusNote tone="info">
                 {s.portability.copyIdentity
                   .replace('{name}', entry.copyName)
                   .replace('{slug}', entry.copySlug)}
-              </p>
+              </StatusNote>
             )}
 
             {state.decision !== 'skip' && entry.secretReferences.length > 0 && (
-              <div className="space-y-2 border-t border-outline-variant/15 pt-3">
+              <div className="space-y-3 border-t border-stroke pt-3">
                 {entry.secretReferences.map((reference) =>
                   reference.required ? (
-                    <div key={`${reference.kind}:${reference.name}`} className="space-y-1.5">
-                      <p className="text-xs text-on-surface-variant">
+                    <div key={`${reference.kind}:${reference.name}`} className="space-y-1">
+                      <p className="text-xs text-fg-muted">
                         {s.portability.referenceSecretWarning.replace('{name}', reference.name)}
                       </p>
-                      <input
+                      <Input
                         type="password"
                         aria-label={s.portability.secretValueLabel.replace(
                           '{name}',
@@ -513,20 +474,18 @@ function PreviewStep({
                             event.target.value
                           )
                         }
-                        className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-high px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none"
                       />
                     </div>
                   ) : (
-                    <p
+                    <div
                       key={`${reference.kind}:${reference.name}`}
-                      className="flex items-center gap-2 text-xs text-on-surface-variant"
+                      className="flex flex-wrap items-center gap-2"
                     >
-                      <AlertTriangle size={13} className="text-tertiary" />
-                      {s.portability.literalSecretWarning.replace('{name}', reference.name)}
-                      <span className="rounded-full bg-tertiary/10 px-2 py-0.5 text-tertiary">
-                        {s.portability.redactedValue}
-                      </span>
-                    </p>
+                      <StatusNote tone="info">
+                        {s.portability.literalSecretWarning.replace('{name}', reference.name)}
+                      </StatusNote>
+                      <Badge>{s.portability.redactedValue}</Badge>
+                    </div>
                   )
                 )}
               </div>
@@ -575,21 +534,12 @@ function SummaryStep({ summary }: { summary: McpPortabilityApplyResponse }) {
     s.summaryInvalid.replace('{count}', String(summary.invalid)),
   ];
   return (
-    <div className="rounded-2xl border border-primary/20 bg-primary/5 p-5">
-      <div className="flex items-center gap-2 text-primary">
-        <CheckCircle2 size={18} />
-        <h4 className="font-semibold">{s.summaryTitle}</h4>
-      </div>
-      <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+    <Callout tone="success" title={s.summaryTitle}>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
         {values.map((value) => (
-          <li
-            key={value}
-            className="rounded-xl bg-surface-container-high px-3 py-2 text-xs text-on-surface-variant"
-          >
-            {value}
-          </li>
+          <li key={value}>{value}</li>
         ))}
       </ul>
-    </div>
+    </Callout>
   );
 }

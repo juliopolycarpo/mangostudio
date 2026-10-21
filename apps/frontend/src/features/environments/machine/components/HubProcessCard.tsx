@@ -4,25 +4,17 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { formatDuration } from '../../format';
 import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';
+import { MachineCard, MachineFact, MachineFacts } from './MachineCard';
 
 interface HubProcessCardProps {
   readonly status: MachineStatus;
   readonly isRestarting: boolean;
   readonly onRestart: () => void;
-}
-
-function Row({ label, value }: { readonly label: string; readonly value: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 text-sm">
-      <span className="text-on-surface-variant/70">{label}</span>
-      <span className="min-w-0 truncate text-right font-mono text-xs text-on-surface">{value}</span>
-    </div>
-  );
 }
 
 export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCardProps) {
@@ -31,52 +23,18 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
   const { hub } = status;
 
   return (
-    <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-hub-card">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <CardSectionLabel>{m.hub.title}</CardSectionLabel>
-          <p className="font-headline text-lg font-bold text-on-surface">
-            {hub.running ? m.hub.running : m.hub.notRunning}
-          </p>
-        </div>
-        {hub.health && (
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-bold ${HUB_HEALTH_TONE[hub.health].badge}`}
-            data-testid="machine-hub-health"
-          >
+    <MachineCard
+      title={m.hub.title}
+      headline={hub.running ? m.hub.running : m.hub.notRunning}
+      action={
+        hub.health ? (
+          <Badge variant={HUB_HEALTH_TONE[hub.health].badge} data-testid="machine-hub-health">
             {hubHealthLabel(t, hub.health)}
-          </span>
-        )}
-      </div>
-
-      {hub.running && (
-        <div className="space-y-1.5">
-          {hub.url && <Row label={m.hub.url} value={hub.url} />}
-          {hub.pid !== undefined && <Row label={m.hub.pid} value={String(hub.pid)} />}
-          {hub.launch && (
-            <Row
-              label={m.hub.launchLabel}
-              value={
-                hub.serviceUnit
-                  ? `${launchModeLabel(t, hub.launch)} · ${hub.serviceUnit}`
-                  : launchModeLabel(t, hub.launch)
-              }
-            />
-          )}
-          {hub.uptimeMs !== undefined && (
-            <Row label={m.hub.uptime} value={formatDuration(hub.uptimeMs)} />
-          )}
-          {hub.version && (
-            <Row
-              label={m.hub.version}
-              value={hub.buildSha ? `${hub.version} (${hub.buildSha.slice(0, 7)})` : hub.version}
-            />
-          )}
-          <Row label={m.hub.logFile} value={hub.logFile || m.hub.noLogFile} />
-        </div>
-      )}
-
-      <div className="border-t border-outline-variant/15 pt-4">
+          </Badge>
+        ) : null
+      }
+      testId="machine-hub-card"
+      footer={
         <MachineActionButton
           status={status}
           action="restart"
@@ -87,7 +45,41 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
           onConfirm={onRestart}
           testId="machine-restart"
         />
-      </div>
-    </section>
+      }
+    >
+      {hub.running && (
+        <MachineFacts>
+          {hub.url && <MachineFact label={m.hub.url} value={hub.url} mono />}
+          {hub.pid !== undefined && <MachineFact label={m.hub.pid} value={String(hub.pid)} mono />}
+          {hub.launch && (
+            <MachineFact
+              label={m.hub.launchLabel}
+              // How it was started is a phrase; the unit it runs as is a name.
+              value={[
+                { text: launchModeLabel(t, hub.launch) },
+                ...(hub.serviceUnit
+                  ? [{ text: ' · ' }, { text: hub.serviceUnit, code: true }]
+                  : []),
+              ]}
+            />
+          )}
+          {hub.uptimeMs !== undefined && (
+            <MachineFact label={m.hub.uptime} value={formatDuration(hub.uptimeMs)} />
+          )}
+          {hub.version && (
+            <MachineFact
+              label={m.hub.version}
+              value={hub.buildSha ? `${hub.version} (${hub.buildSha.slice(0, 7)})` : hub.version}
+              mono
+            />
+          )}
+          <MachineFact
+            label={m.hub.logFile}
+            value={hub.logFile || m.hub.noLogFile}
+            mono={Boolean(hub.logFile)}
+          />
+        </MachineFacts>
+      )}
+    </MachineCard>
   );
 }

@@ -8,15 +8,17 @@
  * that blanks on the first failure is worth less than the tabs it replaced.
  */
 
+import type { Messages } from '@mangostudio/shared/i18n';
 import { Link, type LinkProps } from '@tanstack/react-router';
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { EnvironmentPageState } from './EnvironmentPageState';
 
 interface OverviewSectionProps {
-  readonly title: string;
+  /** The tab this block summarizes: it names the block and words the link that opens it. */
+  readonly tab: keyof Messages['environments']['overview']['open'];
   readonly to: LinkProps['to'];
   readonly testId: string;
   /** True only while there is nothing to show; cached data keeps rendering. */
@@ -27,7 +29,7 @@ interface OverviewSectionProps {
 }
 
 export function OverviewSection({
-  title,
+  tab,
   to,
   testId,
   isPending,
@@ -40,13 +42,13 @@ export function OverviewSection({
   return (
     <section className="space-y-3" data-testid={testId}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-headline text-lg font-bold text-on-surface">{title}</h2>
+        <h2 className="text-base font-semibold text-fg">{t.environments.tabs[tab]}</h2>
         <Link
           to={to}
-          className="flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-on-surface-variant/70 transition-colors hover:bg-surface-container-high hover:text-primary"
+          className="inline-flex items-center gap-1 text-sm font-medium text-accent-fg hover:underline"
         >
-          {formatMessage(t.environments.overview.open, { section: title })}
-          <ChevronRight size={14} />
+          {t.environments.overview.open[tab]}
+          <ChevronRight size={ICON_SM} />
         </Link>
       </div>
 

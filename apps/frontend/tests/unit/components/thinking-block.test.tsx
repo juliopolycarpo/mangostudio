@@ -19,7 +19,7 @@ describe('ThinkingBlock', () => {
   it('renders open when streaming', async () => {
     render(<ThinkingBlock messageId="msg-2" text="Streaming thought" isStreaming={true} />);
     await flushAsyncRender();
-    const button = screen.getByRole('button', { name: /Thinking.../i });
+    const button = screen.getByRole('button', { name: /Thinking…/i });
     expect(button).toBeInTheDocument();
     expect(screen.getByText('Streaming thought')).toBeInTheDocument();
   });

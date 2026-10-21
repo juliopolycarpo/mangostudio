@@ -12,10 +12,13 @@ import { useQuery } from '@tanstack/react-query';
 import { GitBranch } from 'lucide-react';
 import { useMemo } from 'react';
 import { SectionCard } from '@/components/ui/SectionCard';
+import { chatTitleLabel } from '@/features/chat/lib/chat-title';
 import { chatListQueryOptions } from '@/features/chat/queries';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { uncommittedWork } from '../lib/uncommitted-work';
 
 const NO_CHATS: readonly Chat[] = [];
@@ -28,6 +31,7 @@ interface UncommittedWorkCardProps {
 
 export function UncommittedWorkCard({ currentChatId, onSelectChat }: UncommittedWorkCardProps) {
   const { t } = useI18n();
+  const plural = usePlural();
   const labels = t.home.uncommitted;
   // One shared empty array, not a fresh `?? []`: an unsettled query would
   // otherwise hand every render a new identity and defeat the memo below.
@@ -50,41 +54,49 @@ export function UncommittedWorkCard({ currentChatId, onSelectChat }: Uncommitted
 
   return (
     <SectionCard label={labels.label} tone="warning" className="sm:col-span-2">
-      <ul className="divide-y divide-outline-variant/10">
-        {work.rows.map((row) => (
-          <li key={row.chatId}>
-            <button
-              type="button"
-              onClick={() => onSelectChat(row.chatId)}
-              aria-label={formatMessage(labels.open, { title: row.title })}
-              className="flex w-full min-w-0 items-center justify-between gap-3 py-2 text-left transition-colors hover:text-on-surface"
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-on-surface">{row.title}</span>
-                {row.branch ? (
-                  <span className="mt-0.5 flex min-w-0 items-center gap-1 font-mono text-[11px] text-on-surface-variant/70">
-                    <GitBranch size={10} aria-hidden="true" className="shrink-0" />
-                    <span className="truncate">{row.branch}</span>
-                  </span>
-                ) : null}
-              </span>
-              <span className="shrink-0 space-x-2 font-mono text-[11px] text-warning">
-                {row.changedFileCount > 0 ? (
-                  <span>
-                    {formatMessage(labels.changed, { count: String(row.changedFileCount) })}
-                  </span>
-                ) : null}
-                {row.ahead > 0 ? (
-                  <span>{formatMessage(labels.unpushed, { count: String(row.ahead) })}</span>
-                ) : null}
-              </span>
-            </button>
-          </li>
-        ))}
+      <ul className="-mx-2 space-y-0.5">
+        {work.rows.map((row) => {
+          const title = chatTitleLabel(row.title, t.chat.untitled);
+          return (
+            <li key={row.chatId}>
+              <button
+                type="button"
+                onClick={() => onSelectChat(row.chatId)}
+                aria-label={formatMessage(labels.open, { title })}
+                className="flex min-h-10 w-full min-w-0 cursor-pointer items-center justify-between gap-3 rounded-sm px-2 py-1 text-left transition-colors hover:bg-fill-hover"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-fg">{title}</span>
+                  {row.branch ? (
+                    <span className="flex min-w-0 items-center gap-1 font-mono text-micro text-fg-subtle">
+                      <GitBranch size={ICON_SM} aria-hidden="true" className="shrink-0" />
+                      <span className="truncate">{row.branch}</span>
+                    </span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 space-x-2 font-mono text-micro text-warning">
+                  {row.changedFileCount > 0 ? (
+                    <span>
+                      {plural(
+                        { one: t.home.filesChangedOne, other: t.home.filesChangedOther },
+                        row.changedFileCount
+                      )}
+                    </span>
+                  ) : null}
+                  {row.ahead > 0 ? (
+                    <span>
+                      {plural({ one: labels.unpushedOne, other: labels.unpushedOther }, row.ahead)}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            </li>
+          );
+        })}
       </ul>
       {work.overflowCount > 0 ? (
-        <p className="text-xs text-on-surface-variant/70">
-          {formatMessage(labels.more, { count: String(work.overflowCount) })}
+        <p className="text-xs text-fg-muted">
+          {plural({ one: labels.moreOne, other: labels.moreOther }, work.overflowCount)}
         </p>
       ) : null}
     </SectionCard>

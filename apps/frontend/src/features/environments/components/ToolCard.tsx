@@ -11,18 +11,19 @@
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import type { ReactNode } from 'react';
 import type { ToolAvatarSize } from '@/components/ui/ToolAvatar';
+import { cn } from '@/lib/utils';
 import { ToolIdentityHeader } from '../identity/ToolIdentityHeader';
 
 /**
- * The card surface itself. Exported so panels that are card-shaped without
- * being a tool — the health rollup, the library snapshot — cannot drift away
- * from the cards they sit beside.
+ * The card surface itself: a flat `surface` fill and a hairline, no shadow.
+ * Exported so panels that are card-shaped without being a tool — the health
+ * rollup, the library snapshot — cannot drift away from the cards they sit
+ * beside.
  */
-export const TOOL_CARD_SURFACE =
-  'rounded-2xl border border-outline-variant/15 bg-surface-container-high';
+export const TOOL_CARD_SURFACE = 'rounded-md border border-stroke bg-surface';
 
 const DENSITY_CLASS = {
-  comfortable: 'space-y-4 p-5 sm:p-6',
+  comfortable: 'space-y-4 p-4 sm:p-6',
   compact: 'space-y-3 p-4',
 } as const;
 
@@ -45,7 +46,6 @@ interface ToolCardProps {
    * Tests key on these, so they are passed through rather than derived.
    */
   readonly dataAttributes?: Readonly<Record<`data-${string}`, string>>;
-  readonly className?: string;
 }
 
 export function ToolCard({
@@ -60,11 +60,10 @@ export function ToolCard({
   density = 'comfortable',
   testId,
   dataAttributes,
-  className = '',
 }: ToolCardProps) {
   return (
     <article
-      className={`${TOOL_CARD_SURFACE} ${DENSITY_CLASS[density]} ${className}`}
+      className={cn(TOOL_CARD_SURFACE, DENSITY_CLASS[density])}
       data-testid={testId}
       {...dataAttributes}
     >
@@ -73,6 +72,7 @@ export function ToolCard({
         id={id}
         fallbackName={fallbackName}
         avatarSize={avatarSize}
+        density={density}
         subtitle={subtitle}
         actions={actions}
       />
@@ -81,22 +81,5 @@ export function ToolCard({
 
       {footer ? <footer className="flex flex-wrap items-center gap-2">{footer}</footer> : null}
     </article>
-  );
-}
-
-/** The small-caps label that titles a section inside a card. */
-export function CardSectionLabel({
-  children,
-  className = '',
-}: {
-  readonly children: ReactNode;
-  readonly className?: string;
-}) {
-  return (
-    <p
-      className={`font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70 ${className}`}
-    >
-      {children}
-    </p>
   );
 }

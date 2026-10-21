@@ -38,7 +38,7 @@ export function PrerequisiteCard({ status, environmentId }: PrerequisiteCardProp
       testId="prerequisite-card"
       density="compact"
       dataAttributes={{ 'data-runtime-id': status.id }}
-      subtitle={<p className="text-xs text-on-surface-variant/60">{e.runtimes.prerequisiteHint}</p>}
+      subtitle={<p className="text-xs text-fg-muted">{e.runtimes.prerequisiteHint}</p>}
       actions={
         <>
           <HealthBadge health={status.health} />
@@ -50,7 +50,7 @@ export function PrerequisiteCard({ status, environmentId }: PrerequisiteCardProp
         </>
       }
     >
-      <p className="text-sm text-on-surface-variant/70">
+      <p className="text-sm text-fg-muted">
         {installation
           ? versionLabel(t, installation.version)
           : formatMessage(e.runtimes.notInstalled, { runtime: name })}

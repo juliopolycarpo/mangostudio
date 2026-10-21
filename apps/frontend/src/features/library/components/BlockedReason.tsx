@@ -10,6 +10,7 @@
 import type { PropagationBlockedReason, RemovalBlockedReason } from '@mangostudio/shared/library';
 import { Ban } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 export function BlockedReason({
   reason,
@@ -24,11 +25,11 @@ export function BlockedReason({
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-[11px] text-on-surface-variant/70"
+      className="inline-flex items-center gap-1.5 text-fg-muted text-xs"
       data-testid="blocked-reason"
       data-reason={reason}
     >
-      <Ban size={11} className="shrink-0 text-error/70" />
+      <Ban size={ICON_SM} aria-hidden="true" className="shrink-0 text-danger" />
       <span>{messages[reason] ?? reason}</span>
       {action}
     </span>

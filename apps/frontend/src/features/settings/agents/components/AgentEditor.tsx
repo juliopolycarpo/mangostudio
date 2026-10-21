@@ -1,7 +1,9 @@
 import type { AgentProfile, AgentProfileUpsertBody } from '@mangostudio/shared/agents';
 import { useCallback, useEffect, useState } from 'react';
+import { Card } from '@/components/ui/Card';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { AgentEditorMode, AgentEditorProps, EditableAgentProfile } from './AgentEditor.types';
-import { AgentEditorActionBar, AgentEditorHeader, AgentResetDialog } from './AgentEditorChrome';
+import { AgentEditorActionBar, AgentEditorHeader } from './AgentEditorChrome';
 import { AgentFriendlyEditor, AgentRawMarkdownSection } from './AgentEditorSections';
 
 export type { EditableAgentProfile } from './AgentEditor.types';
@@ -48,6 +50,12 @@ export function AgentEditor({
 
   const updateDraft = (partial: Partial<EditableAgentProfile>) => {
     setDraft((current) => ({ ...current, ...partial }));
+  };
+
+  const handleModeChange = (next: AgentEditorMode) => {
+    // The raw view starts from what the fields say now, not from what was saved.
+    if (next === 'raw') setRawMarkdown(serializeAgentMarkdown(draft));
+    setMode(next);
   };
 
   const handleSave = useCallback(() => {
@@ -98,7 +106,7 @@ export function AgentEditor({
   }, [handleSave, isSaving, dirty]);
 
   return (
-    <div className="space-y-0 rounded-2xl border border-outline-variant/20 bg-surface-container-high">
+    <Card padded={false}>
       <AgentEditorHeader
         title={title}
         draft={draft}
@@ -106,14 +114,10 @@ export function AgentEditor({
         mode={mode}
         dirty={dirty}
         isUserAgent={isUserAgent}
-        onFriendlyMode={() => setMode('friendly')}
-        onRawMode={() => {
-          setRawMarkdown(serializeAgentMarkdown(draft));
-          setMode('raw');
-        }}
+        onModeChange={handleModeChange}
       />
 
-      <div className="p-4 sm:p-6 space-y-6">
+      <div className="space-y-6 p-4 sm:p-6">
         {mode === 'raw' && isUserAgent ? (
           <AgentRawMarkdownSection
             labels={labels}
@@ -149,13 +153,17 @@ export function AgentEditor({
       />
 
       {showResetConfirm && (
-        <AgentResetDialog
-          labels={labels}
-          onCancel={() => setShowResetConfirm(false)}
+        <ConfirmDialog
+          title={labels.confirmResetTitle}
+          description={labels.confirmResetDescription}
+          entityName={draft.name}
+          confirmLabel={labels.confirmReset}
+          cancelLabel={labels.cancel}
           onConfirm={confirmReset}
+          onCancel={() => setShowResetConfirm(false)}
         />
       )}
-    </div>
+    </Card>
   );
 }
 

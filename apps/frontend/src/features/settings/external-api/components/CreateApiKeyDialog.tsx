@@ -5,13 +5,18 @@ import {
   type ApiKeyScope,
   type CreateApiKeyResponse,
 } from '@mangostudio/shared/api-keys';
-import { Check, Copy, KeyRound, X } from 'lucide-react';
+import { Check, Copy, KeyRound } from 'lucide-react';
 import { useState } from 'react';
+import { SettingsField } from '@/components/settings/SettingsField';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
+import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { scopeHint, scopeLabel } from '../format';
 import { useCreateApiKey } from '../hooks/use-api-key-mutations';
@@ -19,9 +24,6 @@ import { useCreateApiKey } from '../hooks/use-api-key-mutations';
 interface CreateApiKeyDialogProps {
   readonly onClose: () => void;
 }
-
-const FIELD_CLASS =
-  'w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20';
 
 export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
   const { t } = useI18n();
@@ -87,131 +89,103 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h3 className="text-xl font-bold text-on-surface">
-              {created ? reveal.title : labels.title}
-            </h3>
-            {!created && (
-              <p className="text-sm text-on-surface-variant/70">{scopeHint(t, scope)}</p>
-            )}
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={labels.cancelButton}
-            disabled={createMutation.isPending}
-            onClick={onClose}
-          >
-            <X size={16} />
+  const pending = createMutation.isPending;
+
+  if (created) {
+    return (
+      // The plaintext is shown this once and never again, so only "Done" puts it
+      // away: a stray Escape or a click on the backdrop would lose the key.
+      <Dialog
+        title={reveal.title}
+        onClose={onClose}
+        closeDisabled
+        footer={<Button onClick={onClose}>{reveal.done}</Button>}
+      >
+        <Callout tone="warning" icon={<KeyRound size={ICON_MD} />}>
+          {reveal.notice}
+        </Callout>
+        <code
+          className="block break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg"
+          data-testid="api-key-plaintext"
+        >
+          {created.key}
+        </code>
+        <div>
+          <Button variant="secondary" size="sm" onClick={() => void copy(created.key)}>
+            {copied ? <Check size={ICON_SM} /> : <Copy size={ICON_SM} />}
+            {copied ? reveal.copied : reveal.copy}
           </Button>
         </div>
+        {copyFailed && <Callout tone="danger">{reveal.copyFailed}</Callout>}
+      </Dialog>
+    );
+  }
 
-        {created ? (
-          <div className="space-y-4">
-            <div className="flex items-start gap-3 rounded-2xl border border-warning/30 bg-warning/10 p-4">
-              <KeyRound size={18} className="mt-0.5 shrink-0 text-warning" />
-              <p className="text-sm text-on-surface">{reveal.notice}</p>
-            </div>
-            <code
-              className="block break-all rounded-2xl bg-surface-container-lowest px-4 py-3 font-mono text-xs text-on-surface border border-outline-variant/20"
-              data-testid="api-key-plaintext"
-            >
-              {created.key}
-            </code>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" onClick={() => void copy(created.key)}>
-                {copied ? <Check size={14} /> : <Copy size={14} />}
-                {copied ? reveal.copied : reveal.copy}
-              </Button>
-            </div>
-            {copyFailed && <p className="text-xs text-error">{reveal.copyFailed}</p>}
-            <div className="flex justify-end pt-2">
-              <Button onClick={onClose}>{reveal.done}</Button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <label className="block space-y-2">
-              <span className="block text-sm font-semibold text-on-surface">
-                {labels.nameLabel}
-              </span>
-              <input
-                type="text"
-                value={name}
-                maxLength={API_KEY_NAME_MAX_LENGTH}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  if (nameError) setNameError(null);
-                }}
-                placeholder={labels.namePlaceholder}
-                aria-label={labels.nameLabel}
-                aria-invalid={Boolean(nameError)}
-                className={FIELD_CLASS}
-              />
-              {nameError && <span className="block text-xs text-error">{nameError}</span>}
-            </label>
+  return (
+    <Dialog
+      title={labels.title}
+      description={labels.description}
+      onClose={onClose}
+      closeDisabled={pending}
+      notice={submitError ? <Callout tone="danger">{submitError}</Callout> : undefined}
+      footer={
+        <>
+          <Button variant="secondary" disabled={pending} onClick={onClose}>
+            {labels.cancelButton}
+          </Button>
+          <Button loading={pending} onClick={handleSubmit}>
+            {pending ? labels.creatingButton : labels.createButton}
+          </Button>
+        </>
+      }
+    >
+      <Input
+        id="api-key-name"
+        label={labels.nameLabel}
+        type="text"
+        value={name}
+        maxLength={API_KEY_NAME_MAX_LENGTH}
+        onChange={(event) => {
+          setName(event.target.value);
+          if (nameError) setNameError(null);
+        }}
+        placeholder={labels.namePlaceholder}
+        error={nameError ?? undefined}
+      />
 
-            <div className="space-y-2">
-              <span className="block text-sm font-semibold text-on-surface">
-                {labels.scopeLabel}
-              </span>
-              <Select
-                value={scope}
-                onChange={(value) => setScope(value as ApiKeyScope)}
-                ariaLabel={labels.scopeLabel}
-                options={API_KEY_SCOPES.map((value) => ({
-                  value,
-                  label: scopeLabel(t, value),
-                }))}
-              />
-            </div>
+      {/* The hint belongs to the field it describes and follows the choice. */}
+      <SettingsField label={labels.scopeLabel} htmlFor="api-key-scope" hint={scopeHint(t, scope)}>
+        <Select
+          id="api-key-scope"
+          value={scope}
+          onChange={(value) => setScope(value as ApiKeyScope)}
+          ariaLabel={labels.scopeLabel}
+          options={API_KEY_SCOPES.map((value) => ({
+            value,
+            label: scopeLabel(t, value),
+          }))}
+        />
+      </SettingsField>
 
-            <label className="block space-y-2">
-              <span className="block text-sm font-semibold text-on-surface">
-                {labels.expiresLabel}
-              </span>
-              <span className="block text-xs text-on-surface-variant/60">
-                {formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
-              </span>
-              <input
-                type="number"
-                min={1}
-                max={API_KEY_EXPIRY_MAX_DAYS}
-                step={1}
-                value={expiresInDays}
-                onChange={(event) => {
-                  setExpiresInDays(event.target.value);
-                  if (expiresError) setExpiresError(null);
-                }}
-                aria-label={labels.expiresLabel}
-                aria-invalid={Boolean(expiresError)}
-                className={FIELD_CLASS}
-              />
-              {expiresError && <span className="block text-xs text-error">{expiresError}</span>}
-            </label>
-
-            {submitError && <p className="text-sm text-error">{submitError}</p>}
-
-            <div className="flex gap-3 pt-2">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                disabled={createMutation.isPending}
-                onClick={onClose}
-              >
-                {labels.cancelButton}
-              </Button>
-              <Button className="flex-1" loading={createMutation.isPending} onClick={handleSubmit}>
-                {createMutation.isPending ? labels.creatingButton : labels.createButton}
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+      {/* A count of days is a short number: the narrow centred field, with the
+          unit in the hint, as every number field in settings. */}
+      <Input
+        id="api-key-expires"
+        label={labels.expiresLabel}
+        type="number"
+        min={1}
+        max={API_KEY_EXPIRY_MAX_DAYS}
+        step={1}
+        value={expiresInDays}
+        onChange={(event) => {
+          setExpiresInDays(event.target.value);
+          if (expiresError) setExpiresError(null);
+        }}
+        placeholder={labels.expiresPlaceholder}
+        error={expiresError ?? undefined}
+        hint={formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
+        className="w-32 text-center"
+      />
+    </Dialog>
   );
 }

@@ -91,10 +91,51 @@ describe('WorkdirPickerDialog', () => {
     expect(screen.getByRole('button', { name: '.private' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'mangostudio' }));
-    await waitFor(() => expect(screen.getByTitle('/srv/projects/mangostudio')).toBeInTheDocument());
+    // The "Server path" field is where the current folder is written: entering
+    // a folder fills it in, so there is no second, read-only copy of the path.
+    await waitFor(() =>
+      expect(screen.getByLabelText('Server path')).toHaveValue('/srv/projects/mangostudio')
+    );
     await user.click(screen.getByRole('button', { name: 'Select this folder' }));
 
     expect(onSelect).toHaveBeenCalledWith('/srv/projects/mangostudio');
+
+    await settlePendingBrowse();
+  });
+
+  // A directory listing is a stack of rows with a hover wash, like the rail
+  // beside it, and not a grid of bordered secondary buttons. A recent folder
+  // leads with its name, so three siblings under /tmp can be told apart.
+  it('draws folders as plain rows and names a recent folder before its parent', async () => {
+    fetchScenario.respondWithJson('GET', '/api/workspace/fs?path=%2Fsrv%2Fprojects', {
+      body: {
+        path: '/srv/projects',
+        parent: '/srv',
+        entries: [{ name: 'mangostudio', path: '/srv/projects/mangostudio', hidden: false }],
+        home: '/home/mango',
+        roots: ['/'],
+        separator: '/',
+      },
+    });
+
+    render(
+      <WorkdirPickerDialog
+        open
+        initialPath="/srv/projects"
+        recentWorkdirs={['/tmp/mangostudio-visual-1', '/tmp/mangostudio-visual-2']}
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+      />
+    );
+    await settlePendingBrowse();
+
+    const folder = await screen.findByRole('button', { name: 'mangostudio' });
+    expect(folder).not.toHaveClass('border');
+    expect(folder).toHaveClass('hover:bg-fill-hover');
+
+    const recent = screen.getByRole('button', { name: /mangostudio-visual-2/ });
+    expect(recent).toHaveAttribute('title', '/tmp/mangostudio-visual-2');
+    expect(recent.textContent).toBe('mangostudio-visual-2/tmp');
 
     await settlePendingBrowse();
   });
@@ -148,7 +189,12 @@ describe('WorkdirPickerDialog', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    await waitFor(() => expect(screen.getByTitle('/srv/manual')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(fetchScenario.fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/workspace/fs?path=%2Fsrv%2Fmanual'),
+        expect.anything()
+      )
+    );
     expect(fetchScenario.fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/workspace/fs/validate'),
       expect.objectContaining({

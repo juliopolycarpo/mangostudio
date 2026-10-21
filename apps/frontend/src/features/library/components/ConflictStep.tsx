@@ -7,14 +7,21 @@
  *
  * "Keep them different" is a real answer, not a dismissal: sometimes copies
  * *should* differ, and saying so is an outcome the system records.
+ *
+ * The wizard only stops here when something diverges. With one readable version
+ * of everything there is nothing to choose, and a step that says so is a screen
+ * the person has to click through for nothing.
  */
 
 import type { PropagationPreview, PropagationPreviewEntry } from '@mangostudio/shared/library';
+import { Badge } from '@/components/ui/Badge';
+import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
-import { formatBytes } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
 import { resolutionFor, type WizardDraft } from '../propagation';
+import { ChoiceRow } from './ChoiceRow';
 import { ContentGroupList } from './ContentGroupList';
+import { InlineNote } from './InlineNote';
 
 interface ConflictStepProps {
   readonly preview: PropagationPreview;
@@ -32,22 +39,14 @@ export function ConflictStep({ preview, draft, unresolved, onResolve }: Conflict
   const l = t.library;
   const divergent = preview.entries.filter((entry) => entry.requiresWinnerSelection);
 
-  if (divergent.length === 0) {
-    return (
-      <p className="text-on-surface-variant text-sm" data-testid="conflict-none">
-        {l.conflict.description}
-      </p>
-    );
-  }
-
   return (
     <div className="space-y-4" data-testid="conflict-step">
-      <div className="space-y-1">
-        <p className="text-on-surface text-sm">{l.conflict.description}</p>
+      <div className="space-y-2">
+        <p className="text-fg-muted text-sm">{l.conflict.description}</p>
         {unresolved.length > 0 && (
-          <p className="text-error text-xs" data-testid="unresolved-count">
+          <InlineNote tone="warning" data-testid="unresolved-count">
             {formatMessage(l.conflict.unresolved, { count: String(unresolved.length) })}
-          </p>
+          </InlineNote>
         )}
       </div>
 
@@ -75,68 +74,53 @@ function ConflictEntry({
   readonly resolved: boolean;
   readonly onResolve: ConflictStepProps['onResolve'];
 }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const l = t.library;
   const choice = resolutionFor(draft, entry.resourceKey);
 
   return (
     <section
-      className="space-y-3 rounded-xl border border-outline-variant/15 bg-surface-container p-3"
+      className="space-y-3 rounded-md border border-stroke bg-surface p-4"
       data-testid="conflict-entry"
       data-resource-key={entry.resourceKey}
       data-resolved={resolved}
     >
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-semibold text-on-surface text-sm">{entry.ref.slug}</h3>
-        {resolved && (
-          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
-            {l.conflict.resolved}
-          </span>
-        )}
+        <h3 className="font-semibold text-fg text-sm">{entry.ref.slug}</h3>
+        {resolved && <Badge variant="success">{l.conflict.resolved}</Badge>}
       </header>
 
-      <ContentGroupList
-        groups={entry.sourceGroups}
-        selectedHash={choice.resolution === 'adopt-group' ? choice.winnerContentHash : undefined}
-        onSelect={(contentHash) =>
-          onResolve(entry.resourceKey, 'adopt-group', { winnerContentHash: contentHash })
-        }
-        renderMeta={(group) =>
-          [
-            formatMessage(l.detail.copies, { count: String(group.instanceCount) }),
-            formatMessage(l.detail.modified, {
-              when: formatRelativeTime(group.newestModifiedAtMs, locale),
-            }),
-            formatBytes(group.sizeBytes),
-          ].join(' · ')
-        }
-      />
+      <div className="space-y-1">
+        <ContentGroupList
+          groups={entry.sourceGroups}
+          selectedHash={choice.resolution === 'adopt-group' ? choice.winnerContentHash : undefined}
+          onSelect={(contentHash) =>
+            onResolve(entry.resourceKey, 'adopt-group', { winnerContentHash: contentHash })
+          }
+        />
 
-      {/*
-        Presented as a peer of the version choices, not as a way out of making
-        one. The explanation matters: the divergence stops being flagged until
-        one of the contents changes again, which is a commitment, not a snooze.
-      */}
-      <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-outline-variant/15 bg-surface-container-high p-2.5">
-        <input
-          type="radio"
+        {/*
+          Presented as a peer of the version choices, not as a way out of making
+          one. The explanation matters: the divergence stops being flagged until
+          one of the contents changes again, which is a commitment, not a snooze.
+        */}
+        <ChoiceRow
+          control="radio"
           name={`resolution:${entry.resourceKey}`}
           checked={choice.resolution === 'keep-per-location'}
           onChange={() => onResolve(entry.resourceKey, 'keep-per-location')}
           data-testid="keep-per-location"
-          className="mt-0.5 size-3.5 accent-primary"
-        />
-        <span className="min-w-0">
-          <span className="block font-medium text-on-surface text-xs">
+        >
+          <span className="block font-medium text-fg text-sm">
             {l.conflict.keepPerLocation.title}
           </span>
-          <span className="block text-[11px] text-on-surface-variant/70">
+          <span className="block text-fg-muted text-xs">
             {l.conflict.keepPerLocation.description}
           </span>
-        </span>
-      </label>
+        </ChoiceRow>
 
-      <EditOption entry={entry} draft={draft} onResolve={onResolve} />
+        <EditOption entry={entry} draft={draft} onResolve={onResolve} />
+      </div>
     </section>
   );
 }
@@ -161,37 +145,31 @@ function EditOption({
 
   if (entry.ref.kind === 'skill') {
     return (
-      <p className="text-[11px] text-on-surface-variant/60" data-testid="edit-unavailable">
+      <InlineNote tone="info" className="px-3 py-1" data-testid="edit-unavailable">
         {l.conflict.edit.unavailable}
-      </p>
+      </InlineNote>
     );
   }
 
   return (
-    <div className="space-y-2">
-      <label className="flex cursor-pointer items-start gap-2">
-        <input
-          type="radio"
-          name={`resolution:${entry.resourceKey}`}
-          checked={editing}
-          onChange={() =>
-            onResolve(entry.resourceKey, 'edit-then-adopt', {
-              editedContent: choice.editedContent ?? '',
-            })
-          }
-          data-testid="edit-then-adopt"
-          className="mt-0.5 size-3.5 accent-primary"
-        />
-        <span className="min-w-0">
-          <span className="block font-medium text-on-surface text-xs">{l.conflict.edit.title}</span>
-          <span className="block text-[11px] text-on-surface-variant/70">
-            {l.conflict.edit.description}
-          </span>
-        </span>
-      </label>
+    <>
+      <ChoiceRow
+        control="radio"
+        name={`resolution:${entry.resourceKey}`}
+        checked={editing}
+        onChange={() =>
+          onResolve(entry.resourceKey, 'edit-then-adopt', {
+            editedContent: choice.editedContent ?? '',
+          })
+        }
+        data-testid="edit-then-adopt"
+      >
+        <span className="block font-medium text-fg text-sm">{l.conflict.edit.title}</span>
+        <span className="block text-fg-muted text-xs">{l.conflict.edit.description}</span>
+      </ChoiceRow>
       {editing && (
-        <>
-          <textarea
+        <div className="space-y-2 px-3 pt-1 pb-2">
+          <Textarea
             value={choice.editedContent ?? ''}
             onChange={(event) =>
               onResolve(entry.resourceKey, 'edit-then-adopt', {
@@ -201,13 +179,13 @@ function EditOption({
             placeholder={l.conflict.edit.placeholder}
             aria-label={l.conflict.edit.placeholder}
             rows={8}
-            className="app-scrollbar w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest p-2 font-mono text-[11px] text-on-surface outline-none focus:border-primary"
+            className="app-scrollbar font-mono text-xs"
           />
           {(choice.editedContent ?? '').trim().length === 0 && (
-            <p className="text-error text-[11px]">{l.conflict.edit.empty}</p>
+            <InlineNote tone="warning">{l.conflict.edit.empty}</InlineNote>
           )}
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }

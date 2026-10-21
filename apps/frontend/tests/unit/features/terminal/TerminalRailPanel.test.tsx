@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { TerminalSession } from '@mangostudio/shared/terminal';
 import userEvent from '@testing-library/user-event';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
+import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
 // Stubbed so the panel test never needs a real WebSocket or an xterm mount —
@@ -106,6 +107,62 @@ describe('TerminalRailPanel', () => {
     expect(await screen.findByText('Terminals are turned off on this hub.')).toBeVisible();
   });
 
+  it('links to /terminal at the per-user cap when this chat has no session to close', async () => {
+    fetchScenario.respondWithJson(
+      'GET',
+      `/api/terminals/availability?environmentId=${ENVIRONMENT_ID}`,
+      {
+        body: {
+          environmentId: ENVIRONMENT_ID,
+          available: false,
+          reason: 'limit',
+          shells: [],
+          openSessions: 4,
+          maxSessions: 4,
+        },
+      }
+    );
+    fetchScenario.respondWithJson(
+      'GET',
+      `/api/terminals?environmentId=${ENVIRONMENT_ID}&chatId=${CHAT_ID}`,
+      { body: { sessions: [] } }
+    );
+
+    await renderWithRouter(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
+
+    // A limit is not an outage, and the sessions filling it live in other
+    // chats: the notice names the limit and links to where they can be closed.
+    expect(await screen.findByText('Terminal limit reached')).toBeVisible();
+    expect(screen.queryByText('Terminal is unavailable')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('You already have the maximum number of open terminals.')
+    ).toBeVisible();
+    const link = screen.getByRole('link', { name: 'Manage terminals' });
+    expect(link).toHaveAttribute('href', `/terminal?environmentId=${ENVIRONMENT_ID}`);
+  });
+
+  it('offers no link for a refusal the terminal list cannot fix', async () => {
+    fetchScenario.respondWithJson(
+      'GET',
+      `/api/terminals/availability?environmentId=${ENVIRONMENT_ID}`,
+      {
+        body: {
+          environmentId: ENVIRONMENT_ID,
+          available: false,
+          reason: 'disabled',
+          shells: [],
+          openSessions: 0,
+          maxSessions: 0,
+        },
+      }
+    );
+
+    render(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
+
+    expect(await screen.findByText('Terminals are turned off on this hub.')).toBeVisible();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
   it('keeps the open sessions reachable at the per-user cap, refusing only a new one', async () => {
     fetchScenario.respondWithJson(
       'GET',
@@ -146,7 +203,7 @@ describe('TerminalRailPanel', () => {
 
     render(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
 
-    expect(await screen.findByText('No terminal is open for this chat.')).toBeVisible();
+    expect(await screen.findByText('No terminal is open for this chat')).toBeVisible();
     expect(screen.getByRole('button', { name: 'New terminal' })).toBeVisible();
   });
 
@@ -176,7 +233,7 @@ describe('TerminalRailPanel', () => {
     });
 
     render(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
-    await screen.findByText('No terminal is open for this chat.');
+    await screen.findByText('No terminal is open for this chat');
     await user.click(screen.getByRole('button', { name: 'New terminal' }));
 
     expect(await screen.findByText('The environment is not connected.')).toBeVisible();
@@ -193,7 +250,7 @@ describe('TerminalRailPanel', () => {
     fetchScenario.failWithNetworkError('POST', '/api/terminals');
 
     render(<TerminalRailPanel chatId={CHAT_ID} environmentId={ENVIRONMENT_ID} />);
-    await screen.findByText('No terminal is open for this chat.');
+    await screen.findByText('No terminal is open for this chat');
     await user.click(screen.getByRole('button', { name: 'New terminal' }));
 
     expect(await screen.findByText('Could not open a terminal. Try again.')).toBeVisible();

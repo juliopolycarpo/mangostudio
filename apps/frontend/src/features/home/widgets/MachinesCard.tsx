@@ -20,6 +20,7 @@ import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { environmentScopeRoute } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
+import { CARD_LINK_CLASS } from './card-link';
 import { HubSkeletonLines } from './HubSkeletonLines';
 
 const NO_ENVIRONMENTS: readonly Environment[] = [];
@@ -56,10 +57,7 @@ export function MachinesCard() {
       label={labels.label}
       tone={cardTone(ordered)}
       action={
-        <Link
-          to="/environments"
-          className="micro-label text-primary/80 transition-colors hover:text-primary"
-        >
+        <Link to="/environments" className={CARD_LINK_CLASS}>
           {labels.open}
         </Link>
       }
@@ -67,23 +65,23 @@ export function MachinesCard() {
       {isPending && ordered.length === 0 ? <HubSkeletonLines /> : null}
 
       {ordered.length > 0 ? (
-        <ul className="space-y-1.5" data-testid="home-machines">
+        <ul className="-mx-2 space-y-0.5" data-testid="home-machines">
           {ordered.map((environment) => (
             <li key={environment.id}>
               <Link
                 {...environmentScopeRoute(environment.id)}
-                className="flex min-w-0 items-center gap-2 text-xs transition-colors hover:text-on-surface"
+                className="flex h-8 min-w-0 items-center gap-2 rounded-sm px-2 text-sm transition-colors hover:bg-fill-hover"
                 data-environment-id={environment.id}
               >
                 <StatusDot
                   tone={STATE_TONE[environment.status.state]}
                   pulse={environment.status.state === 'connecting'}
                 />
-                <span className="min-w-0 flex-1 truncate text-on-surface">{environment.name}</span>
-                <span className="shrink-0 font-mono text-[10px] text-on-surface-variant/60">
+                <span className="min-w-0 flex-1 truncate text-fg">{environment.name}</span>
+                <span className="shrink-0 font-mono text-micro text-fg-subtle">
                   {entityLabels.transport[environment.transportKind]}
                 </span>
-                <span className="shrink-0 font-mono text-[10px] text-on-surface-variant/80">
+                <span className="shrink-0 text-xs text-fg-muted">
                   {entityLabels.status[environment.status.state]}
                 </span>
               </Link>

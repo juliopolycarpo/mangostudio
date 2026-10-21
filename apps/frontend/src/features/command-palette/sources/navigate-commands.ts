@@ -8,14 +8,7 @@
 
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { LinkProps } from '@tanstack/react-router';
-import {
-  Image,
-  LayoutDashboard,
-  LayoutGrid,
-  MessageSquare,
-  MonitorCog,
-  Settings,
-} from 'lucide-react';
+import { House, Image, LayoutGrid, MessageSquare, MonitorCog, Settings } from 'lucide-react';
 import { settingsNavGroups } from '@/components/settings/settings-nav';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { environmentNavEntries } from '@/features/environments/environments-nav';
@@ -33,7 +26,7 @@ export function navigateCommands({ t, navigate }: NavigateCommandParams): Comman
     keywords?: string;
   }> = [
     { to: '/', label: t.chat.sectionLabel, icon: MessageSquare },
-    { to: '/home', label: t.home.nav, icon: LayoutDashboard },
+    { to: '/home', label: t.home.nav, icon: House },
     { to: '/studio', label: t.studio.title, icon: Image },
     { to: '/gallery', label: t.gallery.title, icon: LayoutGrid },
     ...environmentNavEntries(t.environments.tabs).map((entry) => ({
@@ -60,10 +53,10 @@ export function navigateCommands({ t, navigate }: NavigateCommandParams): Comman
     id: `navigate:${to}`,
     section: 'navigate' as const,
     label,
-    // Shown and searched both — the path is how a power user confirms which of
-    // two similarly named tabs a row opens, and how they reach it by typing.
-    hint: to ?? undefined,
-    keywords,
+    // No hint: the label already names the surface a tab belongs to
+    // ("Settings · MCP"), and a raw route beside it is developer detail. The
+    // path stays searchable, so typing "/settings/mcp" still reaches the row.
+    keywords: [keywords, to].filter(Boolean).join('\n'),
     icon,
     run: () => navigate(to),
   }));

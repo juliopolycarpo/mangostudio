@@ -1,20 +1,32 @@
 /**
- * Card for one MCP server: identity, transport chip, hosting environment,
- * last-known status badge, explicit test-connection action with inline result,
- * and expandable tools.
+ * Card for one MCP server: identity with its last-known status, transport and
+ * hosting environment as quiet metadata, then the row's actions on the right —
+ * Test and the enabled switch inline, and one overflow menu holding Edit, the
+ * rename pair and Delete — and expandable tools and resources. Under the command,
+ * a failure is a danger `Callout` that says which server could not be reached and
+ * what to do, with the raw transport error as its detail; a passing test is one
+ * quiet `StatusNote`. The failure is the last test's answer, or until there is
+ * one the cause the server last reported.
  */
 
 import type { McpServer, McpServerStatus, TestMcpServerResponse } from '@mangostudio/shared/mcp';
-import { ChevronDown, ChevronRight, Pencil, Server, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronDown, ChevronRight, Pencil, RefreshCw, Server, Trash2 } from 'lucide-react';
+import { type ComponentProps, useState } from 'react';
+import { StatusNote } from '@/components/settings/StatusNote';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
+import { MenuItem } from '@/components/ui/Menu';
+import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { Toggle } from '@/components/ui/Toggle';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { ToolIdentityMenu } from '@/features/environments/identity/ToolIdentityMenu';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useTestMcpServer, useUpdateMcpServer } from '../hooks/use-mcp-servers';
 import { McpServerResources } from './McpServerResources';
@@ -26,11 +38,25 @@ interface McpServerCardProps {
   onDelete: (server: McpServer) => void;
 }
 
-const statusStyles: Record<McpServerStatus, string> = {
-  connected: 'bg-primary/10 text-primary',
-  connecting: 'bg-on-surface-variant/10 text-on-surface-variant',
-  error: 'bg-error/10 text-error',
-  disconnected: 'bg-on-surface-variant/10 text-on-surface-variant/70',
+interface StatusPresentation {
+  readonly variant: NonNullable<ComponentProps<typeof Badge>['variant']>;
+  readonly tone: StatusDotTone;
+  /** Overrides the tone's fill where the badge's colour has no dot tone of its own. */
+  readonly dotClassName?: string;
+}
+
+/**
+ * Only the status badge wears a dot, so it never reads as the transport or
+ * environment badge beside it. `connecting` is `info` rather than `neutral` for
+ * the same reason, and it gets no pulse: the status is the last known state, not
+ * work in flight. `StatusDot` has no `info` tone, so the dot takes the badge's
+ * own colour through `dotClassName` and never reads as a second state.
+ */
+const STATUS_PRESENTATION: Record<McpServerStatus, StatusPresentation> = {
+  connected: { variant: 'success', tone: 'success' },
+  connecting: { variant: 'info', tone: 'neutral', dotClassName: 'bg-info' },
+  error: { variant: 'error', tone: 'error' },
+  disconnected: { variant: 'neutral', tone: 'neutral' },
 };
 
 export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) {
@@ -68,11 +94,34 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
     updateMutation.mutate({ id: server.id, body: { enabled } });
   };
 
+  // One line for whichever answer the last test produced; a new test clears both.
+  const testOutcome: { ok: boolean; message: string } | null = testError
+    ? { ok: false, message: testError }
+    : testResult
+      ? testResult.ok
+        ? {
+            ok: true,
+            message: s.testSuccess.replace('{count}', String(testResult.tools?.length ?? 0)),
+          }
+        : { ok: false, message: testResult.error ?? s.testFailed }
+      : null;
+  // A fresh test answer replaces the stored cause, so the card never shows two
+  // lines. The stored cause is state rather than something the user just
+  // asked for, which is why it is not announced.
+  const note =
+    testOutcome ??
+    (server.status === 'error' && server.statusError
+      ? { ok: false, message: server.statusError }
+      : null);
+
+  const status = STATUS_PRESENTATION[server.status];
+  const expanded = toolsOpen || resourcesOpen;
+
   return (
-    <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
+    <Card padded={false} className="space-y-3 p-4">
+      <div className="space-y-1">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ToolAvatar
               subjectKey={identity.subjectKey}
               monogram={identity.monogram}
@@ -80,110 +129,139 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               image={identity.image}
               size="sm"
             />
-            <h4 className="text-sm font-bold text-on-surface">{identity.name}</h4>
-            <span className="rounded-full bg-surface-container-highest px-2 py-0.5 text-xs text-on-surface-variant">
-              {s.transports[server.transport]}
-            </span>
-            <span
-              className="inline-flex items-center gap-1 rounded-full bg-surface-container-highest px-2 py-0.5 text-xs text-on-surface-variant"
-              title={`${s.environmentLabel}: ${environmentName}`}
-            >
-              <Server size={11} aria-hidden="true" />
-              {environmentName}
-            </span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles[server.status]}`}
+            <h3 className="text-sm font-semibold text-fg">{identity.name}</h3>
+            <Badge
+              variant={status.variant}
               title={server.status === 'error' ? server.statusError : undefined}
             >
+              <StatusDot tone={status.tone} className={status.dotClassName} />
               {s.status[server.status]}
-            </span>
+            </Badge>
+            <Badge>{s.transports[server.transport]}</Badge>
+            <Badge title={`${s.environmentLabel}: ${environmentName}`}>
+              <Server size={ICON_SM} aria-hidden="true" />
+              {environmentName}
+            </Badge>
           </div>
-          <p className="text-xs text-on-surface-variant/70 break-all">
-            {server.transport === 'stdio'
-              ? [server.command, ...server.args].filter(Boolean).join(' ')
-              : server.url}
-          </p>
+
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:flex-nowrap">
+            {/* First in the cluster: "Testing…" is wider than "Test", and growing
+                leftwards moves nothing else. */}
+            <Button
+              variant="subtle"
+              size="sm"
+              loading={testMutation.isPending}
+              onClick={handleTest}
+            >
+              {!testMutation.isPending && <RefreshCw size={ICON_SM} />}
+              {testMutation.isPending ? s.testingButton : s.testButton}
+            </Button>
+            {/* "Enabled" and "Disabled" are different widths, and the cluster sits on the
+                right edge, so a narrower word would slide this switch (and the Test
+                button before it) sideways and the switches of a list would zig-zag.
+                The slot is as wide for either word, in either language. */}
+            <div className="flex items-center sm:w-32">
+              <Toggle
+                id={`mcp-server-enabled-${server.id}`}
+                label={server.enabled ? s.enabledLabel : s.disabledLabel}
+                checked={server.enabled}
+                disabled={updateMutation.isPending}
+                onChange={(e) => handleToggleEnabled(e.target.checked)}
+              />
+            </div>
+            {/* Everything else the server offers is one overflow menu, so the ⋮ is
+                the usual "more actions" and not a second, unexplained menu between
+                two icon buttons. Delete is last, after a separator. */}
+            <ToolIdentityMenu
+              identity={identity}
+              defaultName={server.name}
+              size="icon-sm"
+              label={formatMessage(s.moreActions, { name: identity.name })}
+              before={(close) => (
+                <MenuItem
+                  icon={<Pencil size={ICON_MD} />}
+                  onSelect={() => {
+                    close();
+                    onEdit(server);
+                  }}
+                >
+                  {s.editButton}
+                </MenuItem>
+              )}
+              after={(close) => (
+                <MenuItem
+                  tone="danger"
+                  icon={<Trash2 size={ICON_MD} />}
+                  onSelect={() => {
+                    close();
+                    onDelete(server);
+                  }}
+                >
+                  {s.deleteServer}
+                </MenuItem>
+              )}
+            />
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <Toggle
-            id={`mcp-server-enabled-${server.id}`}
-            label={server.enabled ? s.enabledLabel : s.disabledLabel}
-            checked={server.enabled}
-            disabled={updateMutation.isPending}
-            onChange={(e) => handleToggleEnabled(e.target.checked)}
-          />
+        <p className="min-w-0 break-all font-mono text-xs text-fg-muted">
+          {server.transport === 'stdio'
+            ? [server.command, ...server.args].filter(Boolean).join(' ')
+            : server.url}
+        </p>
+        {/* What the command reveals sits under it, on the card's own left edge (the
+            button's 8px padding is pulled back), so the right column holds only the
+            row's actions. */}
+        <div className="-ml-2 flex flex-wrap gap-1 pt-1">
           <Button
-            variant="ghost"
+            variant="subtle"
             size="sm"
-            aria-label={s.editButton}
-            onClick={() => onEdit(server)}
+            aria-expanded={toolsOpen}
+            onClick={() => setToolsOpen((open) => !open)}
           >
-            <Pencil size={14} />
+            {toolsOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
+            {toolsOpen ? s.hideTools : s.showTools}
           </Button>
-          <ToolIdentityMenu identity={identity} defaultName={server.name} />
           <Button
-            variant="ghost"
+            variant="subtle"
             size="sm"
-            aria-label={s.deleteServer}
-            className="text-error hover:text-error"
-            onClick={() => onDelete(server)}
+            aria-expanded={resourcesOpen}
+            onClick={() => setResourcesOpen((open) => !open)}
           >
-            <Trash2 size={14} />
+            {resourcesOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
+            {resourcesOpen ? s.resources.hide : s.resources.show}
           </Button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="secondary" size="sm" loading={testMutation.isPending} onClick={handleTest}>
-          {testMutation.isPending ? s.testingButton : s.testButton}
-        </Button>
-        {testResult &&
-          (testResult.ok ? (
-            <span className="text-xs text-primary" role="status">
-              {s.testSuccess.replace('{count}', String(testResult.tools?.length ?? 0))}
-            </span>
-          ) : (
-            <span className="text-xs text-error" role="status">
-              {testResult.error ?? s.testFailed}
-            </span>
-          ))}
-        {testError && (
-          <span className="text-xs text-error" role="status">
-            {testError}
-          </span>
-        )}
-      </div>
+      {note ? (
+        note.ok ? (
+          <StatusNote tone="success" role="status">
+            {note.message}
+          </StatusNote>
+        ) : (
+          // A failure is something to act on: which server, what to do, and the
+          // way to do it, with the transport's own words as the detail.
+          <Callout
+            tone="danger"
+            role={testOutcome ? 'status' : undefined}
+            title={formatMessage(s.testFailedTitle, { name: identity.name })}
+            action={
+              <Button variant="secondary" size="sm" onClick={() => onEdit(server)}>
+                {s.editButton}
+              </Button>
+            }
+          >
+            <p>{s.testFailedHint}</p>
+            <p className="mt-1 break-all font-mono text-xs text-fg-muted">{note.message}</p>
+          </Callout>
+        )
+      ) : null}
 
-      <button
-        type="button"
-        onClick={() => setToolsOpen((open) => !open)}
-        className="flex items-center gap-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface transition-colors"
-        aria-expanded={toolsOpen}
-      >
-        {toolsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        {toolsOpen ? s.hideTools : s.showTools}
-      </button>
-
-      {toolsOpen && (
-        <div className="border-t border-outline-variant/10">
-          <McpServerTools server={server} />
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={() => setResourcesOpen((open) => !open)}
-        className="flex items-center gap-1.5 text-xs font-medium text-on-surface-variant hover:text-on-surface transition-colors"
-        aria-expanded={resourcesOpen}
-      >
-        {resourcesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        {resourcesOpen ? s.resources.hide : s.resources.show}
-      </button>
-
-      {resourcesOpen && (
-        <div className="border-t border-outline-variant/10">
-          <McpServerResources server={server} />
+      {expanded && (
+        <div className="space-y-3 border-t border-stroke pt-3">
+          {toolsOpen && <McpServerTools server={server} />}
+          {resourcesOpen && <McpServerResources server={server} />}
         </div>
       )}
     </Card>

@@ -1,5 +1,7 @@
 import { ChevronDown } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { Button } from './Button';
 import { Menu } from './Menu';
 
@@ -25,6 +27,11 @@ interface SplitButtonProps {
 /**
  * Primary action plus a menu of its variants, sharing one visual button. The
  * two halves are separate controls so the default action stays a single click.
+ *
+ * The halves stay one colour. While the primary half is unavailable it is the
+ * neutral grey every disabled button turns, so the chevron drops to `secondary`
+ * with it rather than staying the only mango in the region; a primary half that
+ * is merely loading keeps its accent, and the chevron keeps it too.
  */
 export function SplitButton({
   onClick,
@@ -34,12 +41,14 @@ export function SplitButton({
   menuLabel,
   open,
   onOpenChange,
-  className = '',
+  className,
   menu,
   children,
 }: SplitButtonProps) {
+  const primaryNeutral = disabled && !loading;
+
   return (
-    <div className={`flex min-w-0 items-stretch ${className}`}>
+    <div className={cn('flex min-w-0 items-stretch', className)}>
       <Button
         type="button"
         size="sm"
@@ -58,13 +67,23 @@ export function SplitButton({
           <Button
             type="button"
             size="sm"
+            variant={primaryNeutral ? 'secondary' : 'primary'}
             aria-label={menuLabel}
             title={menuLabel}
             disabled={menuDisabled}
-            className="h-full rounded-l-none border-l border-on-primary/25"
+            // While the primary half loads, its colour must carry across the
+            // divider even when the menu is blocked too: `aria-busy` is what
+            // keeps a disabled button out of the grey.
+            aria-busy={loading || undefined}
+            // The secondary variant brings its own `stroke` border, which an
+            // unconditional accent edge would repaint on all four sides.
+            className={cn(
+              'h-full rounded-l-none',
+              !primaryNeutral && 'border-l border-accent-pressed'
+            )}
             {...triggerProps}
           >
-            <ChevronDown size={14} />
+            <ChevronDown size={ICON_SM} />
           </Button>
         )}
       >

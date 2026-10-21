@@ -1,9 +1,33 @@
-import type { LucideIcon } from 'lucide-react';
 import { ChevronRight, X } from 'lucide-react';
-import type { ReactNode, Ref } from 'react';
+import { createContext, type ReactNode, type Ref, useContext, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Button } from '@/components/ui/Button';
+import { ICON_MD } from '@/lib/icon-sizes';
+
+/**
+ * The header's trailing slot, handed to whatever panel is mounted inside. Null
+ * until the header has mounted, and for content rendered outside a `RailPanel`.
+ */
+const RailPanelActionsSlot = createContext<HTMLElement | null>(null);
+
+/**
+ * Puts a panel's own controls (refresh, an overflow menu) in the rail header,
+ * level with the collapse chevron, instead of in a bar of their own below it.
+ *
+ * The header belongs to `RailPanel` so every occupant has the same title and
+ * exit; the controls belong to the panel, which owns the state they act on. A
+ * portal lets both be true without the panel growing a second header row.
+ * Renders nothing outside a `RailPanel`.
+ *
+ * @example
+ * <RailPanelActions><IconButton label={t.git.refresh} onClick={refresh}>…</IconButton></RailPanelActions>
+ */
+export function RailPanelActions({ children }: { readonly children: ReactNode }) {
+  const slot = useContext(RailPanelActionsSlot);
+  return slot ? createPortal(children, slot) : null;
+}
 
 interface RailPanelProps {
-  readonly icon: LucideIcon;
   readonly title: string;
   readonly closeLabel: string;
   readonly closeMode: 'collapse' | 'close';
@@ -12,9 +36,14 @@ interface RailPanelProps {
   readonly children: ReactNode;
 }
 
-/** Shared panel chrome so every rail occupant has the same title and exit affordance. */
+/**
+ * Shared panel chrome so every rail occupant has the same title and exit affordance.
+ *
+ * The header is 48px (`h-12`) with a `text-base` title, the app header's own
+ * height, so the two borders share one rhythm; `foundations.md` has no 44px step
+ * and gives `text-base` to section titles.
+ */
 export function RailPanel({
-  icon: Icon,
   title,
   closeLabel,
   closeMode,
@@ -23,28 +52,34 @@ export function RailPanel({
   children,
 }: RailPanelProps) {
   const CloseIcon = closeMode === 'collapse' ? ChevronRight : X;
+  const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface-container-low">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-outline-variant/15 px-4">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <Icon size={15} />
-        </span>
-        <h2 className="min-w-0 flex-1 truncate text-sm font-bold text-on-surface" title={title}>
+    <div className="flex h-full min-h-0 flex-col bg-surface">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-stroke px-4">
+        <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-fg" title={title}>
           {title}
         </h2>
-        <button
-          ref={closeButtonRef}
-          type="button"
-          onClick={onClose}
-          aria-label={closeLabel}
-          title={closeLabel}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
-        >
-          <CloseIcon size={16} />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {/* `contents`: the panel's buttons become siblings of the close button. */}
+          <div ref={setActionsSlot} className="contents" />
+          <Button
+            ref={closeButtonRef}
+            type="button"
+            variant="subtle"
+            size="icon-sm"
+            onClick={onClose}
+            aria-label={closeLabel}
+            title={closeLabel}
+            className="shrink-0 text-fg-muted hover:text-fg"
+          >
+            <CloseIcon size={ICON_MD} />
+          </Button>
+        </div>
       </header>
-      <div className="min-h-0 flex-1">{children}</div>
+      <RailPanelActionsSlot value={actionsSlot}>
+        <div className="min-h-0 flex-1">{children}</div>
+      </RailPanelActionsSlot>
     </div>
   );
 }

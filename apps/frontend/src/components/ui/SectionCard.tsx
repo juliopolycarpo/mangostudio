@@ -13,6 +13,8 @@ interface SectionCardProps {
   /** A control that belongs to the header rather than the body (refresh, link). */
   action?: ReactNode;
   className?: string;
+  /** Hooks for tests that key on a specific card. */
+  'data-testid'?: string;
   children: ReactNode;
 }
 
@@ -29,13 +31,21 @@ interface SectionCardProps {
  * staggered grid — a settings pane, the studio page — mounts plain, exactly as
  * it does today. Inside one, the grid drives it through context.
  */
-export function SectionCard({ label, tone, action, className, children }: SectionCardProps) {
+export function SectionCard({
+  label,
+  tone,
+  action,
+  className,
+  children,
+  'data-testid': testId,
+}: SectionCardProps) {
   const { cardItem } = useMotionPresets();
   return (
     <motion.section
       variants={cardItem}
+      data-testid={testId}
       className={cn(
-        'flex min-w-0 flex-col gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low/60 p-4',
+        'flex min-w-0 flex-col gap-3 rounded-md border border-stroke bg-surface p-4',
         className
       )}
     >

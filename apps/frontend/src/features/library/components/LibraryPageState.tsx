@@ -1,11 +1,17 @@
 /**
  * Shared loading, error, and empty states for the library screens, so every
- * tab reports the same conditions the same way.
+ * tab reports the same conditions the same way: a spinner while it waits, a
+ * danger `Callout` with a retry when it failed, an `EmptyState` when there is
+ * nothing to show.
  */
 
-import { LoaderCircle, TriangleAlert } from 'lucide-react';
+import { Inbox } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
 
 interface LibraryPageStateProps {
   readonly variant: 'loading' | 'error' | 'empty';
@@ -21,45 +27,49 @@ export function LibraryPageState({ variant, title, hint, onRetry }: LibraryPageS
   if (variant === 'loading') {
     return (
       <div
-        className="flex min-h-40 flex-col items-center justify-center gap-3 text-on-surface-variant"
+        className="flex min-h-40 flex-col items-center justify-center gap-3 text-sm text-fg-muted"
         data-testid="library-loading"
         role={title ? 'status' : undefined}
       >
-        <LoaderCircle size={20} className="animate-spin" aria-hidden={title ? true : undefined} />
-        {title && <p className="text-sm">{title}</p>}
+        {/* With a title the container is the status and the words are its name;
+            alone, the ring has to carry one. */}
+        <Spinner size={title ? 'md' : 'lg'} label={title ? undefined : t.common.loading} />
+        {title && <p>{title}</p>}
       </div>
     );
   }
 
   if (variant === 'error') {
     return (
-      <div
-        className="flex min-h-40 flex-col items-center justify-center gap-3 text-center"
+      <Callout
+        tone="danger"
+        title={title ?? l.matrix.loadError}
         data-testid="library-error"
-      >
-        <TriangleAlert size={20} className="text-error" />
-        <p className="text-error text-sm">{title ?? l.matrix.loadError}</p>
-        {onRetry && (
-          <Button variant="secondary" size="sm" onClick={onRetry}>
-            {l.matrix.retry}
-          </Button>
-        )}
-      </div>
+        action={
+          onRetry ? (
+            <Button variant="secondary" size="sm" onClick={onRetry}>
+              {l.matrix.retry}
+            </Button>
+          ) : undefined
+        }
+      />
     );
   }
 
   return (
-    <div
-      className="flex min-h-40 flex-col items-center justify-center gap-2 px-4 text-center"
-      data-testid="library-empty"
-    >
-      <p className="text-on-surface text-sm">{title ?? l.matrix.empty}</p>
-      {hint && <p className="text-on-surface-variant/60 text-xs">{hint}</p>}
-      {onRetry && (
-        <Button variant="ghost" size="sm" onClick={onRetry}>
-          {l.matrix.clearFilters}
-        </Button>
-      )}
+    <div data-testid="library-empty">
+      <EmptyState
+        icon={<Inbox size={ICON_LG} />}
+        title={title ?? l.matrix.empty}
+        hint={hint}
+        action={
+          onRetry ? (
+            <Button variant="secondary" size="sm" onClick={onRetry}>
+              {l.matrix.clearFilters}
+            </Button>
+          ) : undefined
+        }
+      />
     </div>
   );
 }

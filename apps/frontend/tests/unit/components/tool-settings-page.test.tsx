@@ -130,7 +130,7 @@ describe('ToolSettingsPage', () => {
     expect(screen.getByText('Delete file')).toBeInTheDocument();
     expect(screen.getByText('Move file')).toBeInTheDocument();
     expect(
-      screen.getByText('Allows the AI to create new text files without overwriting existing paths.')
+      screen.getByText('Lets the model create new text files without overwriting existing paths.')
     ).toBeInTheDocument();
     expect(screen.queryByText(/Server title/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Server description/)).not.toBeInTheDocument();
@@ -171,7 +171,7 @@ describe('ToolSettingsPage', () => {
     expect(timezoneInput).toBeInTheDocument();
   });
 
-  it('calls setMaxToolIterations when slider changes', async () => {
+  it('calls setMaxToolIterations when the number field changes', async () => {
     const user = userEvent.setup();
 
     fetchScenario.respondWithJson('GET', '/api/settings/tools', {
@@ -182,7 +182,7 @@ describe('ToolSettingsPage', () => {
 
     await screen.findByText('Current date and time');
 
-    const numberInput = screen.getAllByLabelText(/max tool iterations/i)[1];
+    const numberInput = screen.getByLabelText(/max tool iterations/i);
     await user.clear(numberInput);
     await user.type(numberInput, '15');
 
@@ -204,8 +204,8 @@ describe('ToolSettingsPage', () => {
       body: {},
     });
 
-    const checkbox = screen.getAllByRole('checkbox')[0];
-    await user.click(checkbox);
+    const toggle = screen.getAllByRole('switch')[0];
+    await user.click(toggle);
 
     await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
@@ -480,7 +480,7 @@ describe('ToolSettingsPage', () => {
     const qualitySelect = screen.getByRole('combobox');
     expect(qualitySelect).not.toBeDisabled();
 
-    // Check the "Let AI decide quality" checkbox
+    // Switch on "Let AI decide quality"
     const letAiCheckbox = screen.getByLabelText('Let AI decide quality');
     await user.click(letAiCheckbox);
 

@@ -3,11 +3,16 @@ import { cn } from '@/lib/utils';
 
 type EmptyStateTone = 'neutral' | 'success' | 'warning' | 'error';
 
+/**
+ * The icon's colour. A neutral icon is `fg-subtle`, a step quieter than the
+ * title beside it, which is `fg`: the glyph is decoration, the words are the
+ * message. The three status tones carry their meaning in the colour.
+ */
 const toneStyles: Record<EmptyStateTone, string> = {
-  neutral: 'text-on-surface-variant',
+  neutral: 'text-fg-subtle',
   success: 'text-success',
   warning: 'text-warning',
-  error: 'text-error',
+  error: 'text-danger',
 };
 
 interface EmptyStateProps {
@@ -38,8 +43,8 @@ export function EmptyState({
     >
       {icon ? <span className={toneStyles[tone]}>{icon}</span> : null}
       <div className="space-y-1">
-        <p className="text-sm font-semibold text-on-surface">{title}</p>
-        {hint ? <p className="text-xs leading-5 text-on-surface-variant">{hint}</p> : null}
+        <p className="text-sm font-medium text-fg">{title}</p>
+        {hint ? <p className="mx-auto max-w-xs text-xs text-fg-muted">{hint}</p> : null}
       </div>
       {action}
     </div>

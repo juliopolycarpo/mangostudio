@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import {
   formatToolSummary,
+  getShellStreams,
   getToolGroupSummary,
   getToolResultSummary,
 } from '@/features/chat/components/tool-result-summary';
@@ -83,5 +84,40 @@ describe('getToolGroupSummary', () => {
 
   it('has nothing to say about an empty run', () => {
     expect(getToolGroupSummary('grep', [])).toBeNull();
+  });
+});
+
+describe('getShellStreams', () => {
+  it('splits a shell run into the streams it printed', () => {
+    for (const name of ['bash', 'zsh', 'powershell']) {
+      expect(getShellStreams(name, { exitCode: 0, stdout: 'a\n', stderr: 'b\n' })).toEqual({
+        stdout: 'a\n',
+        stderr: 'b\n',
+        truncated: false,
+      });
+    }
+  });
+
+  it('carries the runtime’s truncation flag', () => {
+    expect(getShellStreams('bash', { stdout: 'a', stderr: '', truncated: true })?.truncated).toBe(
+      true
+    );
+  });
+
+  it('accepts a payload that names only one stream', () => {
+    expect(getShellStreams('bash', { stdout: 'a' })).toEqual({
+      stdout: 'a',
+      stderr: '',
+      truncated: false,
+    });
+  });
+
+  it('is null for every shape that is not a shell run', () => {
+    expect(getShellStreams('bash', { error: 'Command timed out after 30 seconds.' })).toBeNull();
+    expect(getShellStreams('bash', 'plain text')).toBeNull();
+    expect(getShellStreams('bash', null)).toBeNull();
+    expect(getShellStreams('bash', ['stdout'])).toBeNull();
+    expect(getShellStreams('bash', { stdout: 3, stderr: null })).toBeNull();
+    expect(getShellStreams('read_file', { stdout: 'a', stderr: '' })).toBeNull();
   });
 });

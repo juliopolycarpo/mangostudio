@@ -21,8 +21,8 @@
  * what they want to say is how much the agent should bother them. The matrix is
  * not removed — it is what anyone who does want the axes reaches for, and it is
  * what a stored custom pair is edited with. The disclosure lives inside this
- * component's own panel because the design system has no popover to nest, and
- * generalizing the hand-rolled one here is cheaper than adding one.
+ * component's own panel, on `ComposerPopover`, because the design system has no
+ * popover to nest.
  */
 
 import type {
@@ -39,9 +39,14 @@ import {
   externalPresetFor,
   externalPresetPair,
 } from '@mangostudio/shared/external-agents';
-import { AlertTriangle, Check, ChevronDown, Lock } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Check, ChevronDown, Shield } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 export interface PermissionSelectorProps {
   configurations: readonly ExternalSupportedConfiguration[];
@@ -74,7 +79,7 @@ export function PermissionSelector({
   // made with are what should be on screen — telling that user their setting
   // vanished would be worse than showing one more control.
   const [showMatrix, setShowMatrix] = useState(selectedPreset === undefined);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { containerRef, triggerRef, onKeyDown } = useDismissable(open, () => setOpen(false));
 
   // Re-opened when a *later* pair turns out to be custom, because this
   // component instance outlives the chat it was mounted for: switching to a
@@ -84,15 +89,6 @@ export function PermissionSelector({
   useEffect(() => {
     if (selectedPreset === undefined) setShowMatrix(true);
   }, [selectedPreset]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    return () => document.removeEventListener('mousedown', onPointerDown);
-  }, [open]);
 
   // Only what the adapter returned. A level or routing it never mentioned is not
   // a choice this vendor has, so it is not a control.
@@ -147,34 +143,45 @@ export function PermissionSelector({
     return pair ? [{ id: preset.id, pair }] : [];
   });
   const hasPresets = presets.length > 0;
+  // The chip names the setting in the words of the list it opens. A preset the
+  // popover offers is named as it is there (`Balanced`); the level's own name
+  // (`Default`) appears in no list the person picked from, and reads as a pick
+  // that did not take. Gated on the preset being offered: `selectedPreset`
+  // matches by candidate, so a vendor that does not offer it would otherwise
+  // show a name with no row to match it, the same mismatch the other way round.
+  const modeName =
+    selectedPreset !== undefined && presets.some((preset) => preset.id === selectedPreset)
+      ? labels.preset[selectedPreset].label
+      : labels.levelName[level];
 
   return (
-    <div ref={containerRef} className="relative flex items-center">
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    <div ref={containerRef} onKeyDown={onKeyDown} className="flex items-center">
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={labels.label}
-        className={`composer-chip max-w-[13rem] disabled:opacity-50 ${
-          unattended ? 'border-warning/40 text-warning' : ''
-        }`}
+        className="composer-chip max-w-[13rem] disabled:opacity-50"
       >
         {unattended ? (
-          <AlertTriangle size={11} className="shrink-0" />
+          <AlertTriangle size={ICON_SM} className="shrink-0 text-warning" />
         ) : (
-          <Lock size={11} className="composer-chip-icon shrink-0" />
+          <Shield size={ICON_SM} className="composer-chip-icon shrink-0" />
         )}
-        <span className="composer-chip-key opacity-70">{`${labels.modeKey}:`}</span>
-        <span className={`composer-chip-value ${unattended ? 'text-warning' : ''}`}>
-          {labels.levelName[level]}
-        </span>
-        <ChevronDown size={11} className="shrink-0" />
+        <span className="composer-chip-key text-fg-muted">{`${labels.modeKey}:`}</span>
+        <span className={cn('composer-chip-value', unattended && 'text-warning')}>{modeName}</span>
+        <ChevronDown size={ICON_SM} className="shrink-0" />
       </button>
 
       {open ? (
-        <div className="absolute bottom-full z-50 mb-2 w-80 space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-3 shadow-2xl">
+        <ComposerPopover
+          anchor={triggerRef}
+          className="app-scrollbar max-h-[70vh] space-y-3 overflow-y-auto p-3"
+        >
           {hasPresets ? (
             <Axis heading={labels.presetHeading}>
               {presets.map((preset) => (
@@ -204,12 +211,9 @@ export function PermissionSelector({
               type="button"
               onClick={() => setShowMatrix((value) => !value)}
               aria-expanded={showMatrix}
-              className="flex w-full items-center gap-1 px-1 text-[11px] text-on-surface-variant hover:text-on-surface"
+              className="flex h-7 w-full items-center gap-1 rounded-sm px-1 text-xs text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
             >
-              <ChevronDown
-                size={11}
-                className={`shrink-0 transition-transform ${showMatrix ? '' : '-rotate-90'}`}
-              />
+              <ChevronDown size={ICON_SM} className={cn('shrink-0', !showMatrix && '-rotate-90')} />
               {labels.advanced}
             </button>
           ) : null}
@@ -255,7 +259,7 @@ export function PermissionSelector({
               </Axis>
             </>
           ) : null}
-        </div>
+        </ComposerPopover>
       ) : null}
     </div>
   );
@@ -285,14 +289,14 @@ function unattendedWarning(
 
 function Axis({ heading, children }: { heading: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      {/* The capitals are this element's, not the catalog's: a screen reader
-          announcing an all-caps string letter by letter is reading styling, and
-          a locale that does not want capitals for this role can drop the class
-          without rewriting its copy. */}
-      <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+    <div className="space-y-1">
+      {/* The capitals are the micro-label class's, not the catalog's: a screen
+          reader announcing an all-caps string letter by letter is reading
+          styling, and a locale that does not want capitals for this role can
+          drop the class without rewriting its copy. */}
+      <MicroLabel as="p" className="px-2">
         {heading}
-      </p>
+      </MicroLabel>
       {children}
     </div>
   );
@@ -321,32 +325,35 @@ function Option({
       aria-pressed={selected}
       disabled={!supported}
       onClick={onSelect}
-      className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
-        selected ? 'border-primary/50 bg-primary/10' : 'border-outline-variant/15'
-      } enabled:hover:border-outline-variant/40 disabled:cursor-not-allowed disabled:opacity-60`}
+      className={cn(
+        'flex w-full items-start gap-2 rounded-sm px-2 py-2 text-left transition-colors disabled:cursor-not-allowed',
+        selected ? 'bg-fill-selected' : 'enabled:hover:bg-fill-hover'
+      )}
     >
-      <span
-        className={`mt-0.5 shrink-0 ${selected ? 'text-primary' : 'text-on-surface-variant/60'}`}
-      >
-        {selected ? <Check size={13} /> : '○'}
-      </span>
       <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block text-xs font-medium text-on-surface">{name}</span>
-        <span className="block text-[10px] leading-relaxed text-on-surface-variant/80">
-          {description}
+        {/* A refused pair is not faded: the reason under it is the thing to read.
+            The name steps down a text colour instead. */}
+        <span className={cn('block text-sm font-medium', supported ? 'text-fg' : 'text-fg-muted')}>
+          {name}
         </span>
+        <span className="block text-xs text-fg-muted">{description}</span>
         {!supported && unsupportedReason ? (
-          <span className="block text-[10px] leading-relaxed text-on-surface-variant/70">
-            {unsupportedReason}
-          </span>
+          <span className="block text-xs text-fg-muted">{unsupportedReason}</span>
         ) : null}
         {supported && warning ? (
-          <span className="flex items-start gap-1 text-[10px] leading-relaxed text-warning">
-            <AlertTriangle size={11} className="mt-px shrink-0" />
+          // The glyph carries the tone and the words stay in the primary text
+          // colour — one step above the description they follow, so the risk
+          // is never the quietest line in the row.
+          <span className="flex items-start gap-1 text-xs text-fg">
+            <AlertTriangle size={ICON_SM} className="mt-px shrink-0 text-warning" />
             {warning}
           </span>
         ) : null}
       </span>
+      {/* The selected mark every composer menu draws: a check in `accent-fg`,
+          trailing, on a `fill-selected` row. An unselected row carries nothing,
+          so a list never mixes an icon with a text glyph. */}
+      {selected ? <Check size={ICON_MD} className="mt-0.5 shrink-0 text-accent-fg" /> : null}
     </button>
   );
 }

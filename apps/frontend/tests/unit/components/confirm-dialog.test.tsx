@@ -5,10 +5,10 @@ import { fireEvent, render, screen } from '../../support/harness/render';
 
 describe('ConfirmDialog', () => {
   const props = {
-    title: 'Delete Connector',
+    title: 'Delete connector',
     description: 'Are you sure you want to delete',
     entityName: 'My OpenAI Key',
-    confirmLabel: 'Delete Connector',
+    confirmLabel: 'Delete connector',
     cancelLabel: 'Cancel',
     onConfirm: jest.fn(),
     onCancel: jest.fn(),
@@ -24,7 +24,7 @@ describe('ConfirmDialog', () => {
     render(<ConfirmDialog {...props} />);
 
     expect(screen.getByText('Cancel')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Delete Connector' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete connector' })).toBeInTheDocument();
   });
 
   it('calls onCancel when cancel is clicked', () => {
@@ -39,7 +39,7 @@ describe('ConfirmDialog', () => {
     const onConfirm = jest.fn();
     render(<ConfirmDialog {...props} onConfirm={onConfirm} />);
 
-    screen.getByRole('button', { name: 'Delete Connector' }).click();
+    screen.getByRole('button', { name: 'Delete connector' }).click();
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
@@ -47,13 +47,44 @@ describe('ConfirmDialog', () => {
     render(<ConfirmDialog {...props} isPending />);
 
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Delete Connector' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete connector' })).toBeDisabled();
   });
 
-  it('takes focus so a keyboard user starts inside the dialog', () => {
+  it('quotes the entity name only when it is given', () => {
+    const { rerender } = render(<ConfirmDialog {...props} />);
+    expect(screen.getByText(/My OpenAI Key/)).toHaveTextContent('\u201CMy OpenAI Key\u201D');
+
+    rerender(<ConfirmDialog {...props} entityName={undefined} />);
+    expect(screen.queryByText(/My OpenAI Key/)).toBeNull();
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('\u201C');
+  });
+
+  it('puts focus on Cancel, the safe answer, so a keyboard user starts inside the dialog', () => {
     render(<ConfirmDialog {...props} />);
 
-    expect(document.activeElement).toBe(screen.getByRole('dialog'));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+  });
+
+  it('is named by its title', () => {
+    render(<ConfirmDialog {...props} />);
+
+    expect(screen.getByRole('dialog', { name: 'Delete connector' })).toBeInTheDocument();
+  });
+
+  it('cancels on a click on the backdrop, but not while the request is in flight', () => {
+    const onCancel = jest.fn();
+    const { rerender } = render(<ConfirmDialog {...props} onCancel={onCancel} />);
+    const backdrop = screen.getByRole('dialog').parentElement as HTMLElement;
+
+    fireEvent.click(screen.getByRole('dialog'));
+    expect(onCancel).not.toHaveBeenCalled();
+
+    fireEvent.click(backdrop);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+
+    rerender(<ConfirmDialog {...props} onCancel={onCancel} isPending />);
+    fireEvent.click(backdrop);
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it('cancels on Escape', () => {
@@ -75,7 +106,7 @@ describe('ConfirmDialog', () => {
   it('keeps Tab inside the dialog instead of walking into the page behind it', () => {
     render(<ConfirmDialog {...props} />);
     const cancel = screen.getByRole('button', { name: 'Cancel' });
-    const confirm = screen.getByRole('button', { name: 'Delete Connector' });
+    const confirm = screen.getByRole('button', { name: 'Delete connector' });
 
     // Forward from the container lands on the first button; forward from the
     // last wraps rather than leaving.
@@ -97,7 +128,7 @@ describe('ConfirmDialog', () => {
     );
     const checkbox = screen.getByRole('checkbox');
     const cancel = screen.getByRole('button', { name: 'Cancel' });
-    const confirm = screen.getByRole('button', { name: 'Delete Connector' });
+    const confirm = screen.getByRole('button', { name: 'Delete connector' });
 
     // The checkbox sits above the buttons, so it is the ring's first stop:
     // backwards from it wraps to the last button rather than falling out of the

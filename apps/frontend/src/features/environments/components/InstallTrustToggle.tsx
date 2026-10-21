@@ -11,8 +11,11 @@
 
 import type { Environment } from '@mangostudio/shared/environments';
 import { ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import { Callout } from '@/components/ui/Callout';
+import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useUpdateEnvironmentMutation } from '../queries';
 
@@ -25,6 +28,7 @@ export function InstallTrustToggle({ environment }: InstallTrustToggleProps) {
   const trust = t.environments.trust;
   const update = useUpdateEnvironmentMutation();
   const [error, setError] = useState<string | null>(null);
+  const switchId = useId();
 
   // Local's answer comes from the loopback guard, so a switch here would decide
   // nothing and imply it decided something.
@@ -41,28 +45,27 @@ export function InstallTrustToggle({ environment }: InstallTrustToggleProps) {
 
   return (
     <div className="space-y-1" data-testid="install-trust">
-      <label className="flex items-start gap-2 text-xs text-on-surface-variant">
-        <input
-          type="checkbox"
+      <label htmlFor={switchId} className="flex cursor-pointer items-start gap-3">
+        <ToggleSwitch
+          id={switchId}
           checked={environment.allowInstalls}
           disabled={update.isPending}
           onChange={(event) => void toggle(event.target.checked)}
           aria-label={trust.label}
           data-testid="install-trust-toggle"
-          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-primary"
         />
         <span className="min-w-0">
-          <span className="flex items-center gap-1.5 font-semibold text-on-surface">
-            <ShieldCheck size={13} className="text-primary/80" aria-hidden="true" />
+          <span className="flex items-center gap-1.5 text-sm font-medium text-fg">
+            <ShieldCheck size={ICON_SM} className="text-fg-muted" aria-hidden="true" />
             {trust.label}
           </span>
-          <span className="mt-0.5 block text-on-surface-variant/65">{trust.hint}</span>
+          <span className="mt-0.5 block text-xs text-fg-muted">{trust.hint}</span>
         </span>
       </label>
       {error ? (
-        <p className="text-xs text-error" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
     </div>
   );

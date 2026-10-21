@@ -25,6 +25,103 @@ describe('AgentCliCard', () => {
     expect(screen.getByTestId('auth-state')).toHaveAttribute('data-auth-signal', 'unknown');
   });
 
+  // Signed in is a status, so it is a badge beside "Available" in the header, not
+  // bare green text on a line of its own; signed out is something the person can
+  // fix, so it is a warning (as on Home), not a blue note.
+  it('draws the sign-in state as a badge in the header: success, or a warning when it can be fixed', () => {
+    const installed = {
+      installations: [installation({ path: '/usr/local/bin/claude', version: '2.1.220' })],
+      effective: installation({ path: '/usr/local/bin/claude', version: '2.1.220' }),
+    };
+
+    const { rerender } = render(
+      <AgentCliCard
+        status={agentCliStatus({
+          ...installed,
+          authSignal: 'file-present',
+          authenticated: true,
+        })}
+        recipes={[]}
+      />
+    );
+    const signedIn = screen.getByTestId('auth-state');
+    expect(signedIn).toHaveTextContent(en.environments.agents.authSignedIn);
+    expect(signedIn.className).toContain('bg-success-subtle');
+    expect(signedIn.closest('header')).not.toBeNull();
+
+    rerender(
+      <AgentCliCard
+        status={agentCliStatus({ ...installed, authSignal: 'file-absent', authenticated: false })}
+        recipes={[]}
+      />
+    );
+    expect(screen.getByTestId('auth-state').className).toContain('bg-warning-subtle');
+  });
+
+  // "Not signed in" is true of a CLI that is not there, and is no reason to ask for
+  // anything: an absent optional tool is neutral.
+  it('keeps the signed-out badge neutral when the CLI is not installed at all', () => {
+    render(
+      <AgentCliCard
+        status={agentCliStatus({
+          targetId: 'codex',
+          id: 'codex',
+          authSignal: 'file-absent',
+          authenticated: false,
+        })}
+        recipes={[]}
+      />
+    );
+
+    expect(screen.getByTestId('auth-state').className).toContain('bg-fill-selected');
+    expect(screen.getByTestId('auth-state').className).not.toContain('bg-warning-subtle');
+  });
+
+  // Kind, path, state and count are columns shared by every row, so "writable" starts at
+  // one x on each of them instead of wherever the path before it happened to end.
+  it('lays the library locations out as columns that every row shares', () => {
+    const status = agentCliStatus({
+      locations: [
+        {
+          id: 'claude-skills',
+          kind: 'skill',
+          scope: 'home',
+          path: '/home/dev/.claude/skills',
+          access: 'read-write',
+          exists: true,
+          readable: true,
+          writable: true,
+          targetIds: ['claude'],
+          entryCount: 4,
+        },
+        {
+          id: 'claude-commands',
+          kind: 'command',
+          scope: 'home',
+          path: '/home/dev/.claude/commands',
+          access: 'read-write',
+          exists: false,
+          readable: false,
+          writable: false,
+          targetIds: ['claude'],
+        },
+      ],
+    });
+
+    render(<AgentCliCard status={status} recipes={[]} />);
+
+    const rows = screen.getAllByTestId('library-location');
+    expect(rows).toHaveLength(2);
+    // Four cells per row (kind, path, state, count) whether or not there is a count,
+    // so the columns line up.
+    for (const row of rows) expect(row.children).toHaveLength(4);
+    expect(rows[0].parentElement?.className).toContain(
+      'sm:grid-cols-[5.5rem_minmax(0,1fr)_8rem_5rem]'
+    );
+    expect(rows[0].className).toContain('sm:grid-cols-subgrid');
+    expect(rows[0].textContent).toContain(en.library.kinds.skill);
+  });
+
   it('reports a real signed-out verdict when the probe can see it', () => {
     const status = agentCliStatus({
       targetId: 'codex',

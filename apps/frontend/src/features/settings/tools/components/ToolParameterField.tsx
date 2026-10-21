@@ -5,11 +5,18 @@
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
+import { SettingsField } from '@/components/settings/SettingsField';
+import { SettingsRow } from '@/components/settings/SettingsRow';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
+import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 interface ToolParameterFieldProps {
   descriptor: ToolParameterDescriptor;
@@ -63,16 +70,23 @@ function isPathListItemArray(value: unknown): value is PathListItem[] {
   return Array.isArray(value) && value.every(isPathListItem);
 }
 
+/**
+ * The hint belongs to the input that adds a path, so it sits directly under it
+ * and the paths already added hang below. The hint also says what an empty list
+ * means, so there is no separate "nothing here" line between the two.
+ */
 function PathListField({
   value,
   onChange,
   disabled,
-  placeholder,
+  ariaLabel,
+  hint,
 }: {
   value: unknown;
   onChange: (value: unknown) => void;
   disabled: boolean;
-  placeholder?: string;
+  ariaLabel: string;
+  hint?: string;
 }) {
   const { t } = useI18n();
   const s = t.settings.tools.pathList;
@@ -126,39 +140,38 @@ function PathListField({
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={newPath}
-          onChange={(e) => setNewPath(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              handleAdd();
-            }
-          }}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="flex-1 rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        />
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={disabled || !newPath.trim()}
-          onClick={handleAdd}
-        >
-          {s.add}
-        </Button>
+      <div className="space-y-1">
+        <div className="flex gap-2">
+          <div className="min-w-0 flex-1">
+            <Input
+              type="text"
+              value={newPath}
+              onChange={(e) => setNewPath(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAdd();
+                }
+              }}
+              disabled={disabled}
+              placeholder={s.pathPlaceholder}
+              aria-label={ariaLabel}
+              className="font-mono text-xs"
+            />
+          </div>
+          <Button variant="secondary" disabled={disabled || !newPath.trim()} onClick={handleAdd}>
+            {s.add}
+          </Button>
+        </div>
+        {hint ? <p className="text-xs text-fg-muted">{hint}</p> : null}
       </div>
 
-      {items.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/40 py-2">{s.noPaths}</p>
-      ) : (
-        <ul className="space-y-1.5">
+      {items.length > 0 ? (
+        <ul className="space-y-1">
           {items.map((item, index) => (
             <li
               key={item.path}
-              className="flex items-center gap-2 p-2 rounded-lg bg-surface-container-lowest border border-outline-variant/10"
+              className="flex items-center gap-2 rounded-sm border border-stroke bg-control px-2 py-1"
             >
               <Checkbox
                 checked={item.enabled}
@@ -166,53 +179,60 @@ function PathListField({
                 disabled={disabled}
               />
               {editingIndex === index ? (
-                <input
-                  type="text"
-                  value={editingPath}
-                  onChange={(e) => setEditingPath(e.target.value)}
-                  onBlur={saveEdit}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      saveEdit();
-                    }
-                    if (e.key === 'Escape') {
-                      cancelEdit();
-                    }
-                  }}
-                  className="flex-1 rounded-lg px-3 py-1.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
-                />
+                <div className="min-w-0 flex-1">
+                  <Input
+                    type="text"
+                    value={editingPath}
+                    onChange={(e) => setEditingPath(e.target.value)}
+                    onBlur={saveEdit}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        saveEdit();
+                      }
+                      if (e.key === 'Escape') {
+                        cancelEdit();
+                      }
+                    }}
+                    aria-label={s.edit}
+                    className="font-mono text-xs"
+                  />
+                </div>
               ) : (
                 <>
                   <span
-                    className={`flex-1 text-sm ${item.enabled ? 'text-on-surface' : 'text-on-surface-variant/40 line-through'}`}
+                    className={cn(
+                      'min-w-0 flex-1 break-all font-mono text-xs',
+                      item.enabled ? 'text-fg' : 'text-fg-subtle line-through'
+                    )}
                   >
                     {item.path}
                   </span>
-                  <button
-                    type="button"
+                  <Button
+                    variant="subtle"
+                    size="icon-sm"
                     onClick={() => startEdit(index)}
                     disabled={disabled}
-                    className="p-1.5 rounded-md text-on-surface-variant hover:bg-surface-container-high disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label={s.edit}
                   >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
+                    <Pencil size={ICON_SM} />
+                  </Button>
+                  <Button
+                    variant="subtle-danger"
+                    size="icon-sm"
                     onClick={() => handleDelete(index)}
                     disabled={disabled}
-                    className="p-1.5 rounded-md text-error hover:bg-error/10 disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label={s.delete}
+                    title={s.delete}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    <Trash2 size={ICON_SM} />
+                  </Button>
                 </>
               )}
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -269,8 +289,9 @@ export function ToolParameterField({
     return descriptor.description;
   }, [descriptor.name, descriptor.description, t]);
 
-  const baseInputClass =
-    'w-full rounded-xl px-4 py-2.5 text-sm bg-surface-container-lowest text-on-surface border border-outline-variant/20 placeholder:text-on-surface/30 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
+  // A parameter's name is a field label like any other (14px/500), a weight step
+  // under the tool's own 14px/600; the indented `stroke` rule carries the nesting,
+  // so the name does not shrink as well.
 
   const descriptorValue = value ?? descriptor.defaultValue ?? '';
 
@@ -290,12 +311,13 @@ export function ToolParameterField({
       ),
     ];
     return (
-      <div className="space-y-1">
-        {label && (
-          <label htmlFor={`${fieldId}-model`} className="text-sm text-on-surface-variant">
-            {label}
-          </label>
-        )}
+      <SettingsRow
+        label={label}
+        hint={description}
+        htmlFor={`${fieldId}-model`}
+        layout="field"
+        className="p-0"
+      >
         <Select
           id={`${fieldId}-model`}
           value={toSafeString(descriptorValue)}
@@ -305,33 +327,30 @@ export function ToolParameterField({
           options={modelOptions}
           placeholder={fallbackLabel(modelOptions)}
         />
-      </div>
+      </SettingsRow>
     );
   }
 
   switch (descriptor.type) {
     case 'boolean': {
+      // The autosave makes this an immediate setting, so it is a switch. The
+      // padding is the card's own: the row sits inside a tool's row.
       return (
-        <label className="flex items-center gap-3 cursor-pointer">
-          <Checkbox
+        <SettingsRow as="label" label={label} hint={description} className="p-0">
+          <ToggleSwitch
             checked={Boolean(descriptorValue)}
             onChange={(e) => onChange(e.target.checked)}
             disabled={disabled}
+            aria-label={label}
           />
-          {label}
-        </label>
+        </SettingsRow>
       );
     }
 
     case 'number': {
       return (
-        <div className="space-y-1">
-          {label && (
-            <label htmlFor={`${fieldId}-number`} className="text-sm text-on-surface-variant">
-              {label}
-            </label>
-          )}
-          <input
+        <SettingsRow label={label} hint={description} htmlFor={`${fieldId}-number`} className="p-0">
+          <Input
             id={`${fieldId}-number`}
             type="number"
             min={descriptor.min}
@@ -340,22 +359,22 @@ export function ToolParameterField({
             value={descriptorValue === '' ? '' : Number(descriptorValue)}
             onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
             disabled={disabled}
-            placeholder={description}
-            className={baseInputClass}
+            className="w-32 text-center"
           />
-        </div>
+        </SettingsRow>
       );
     }
 
     case 'select': {
       const options = descriptor.options ?? [];
       return (
-        <div className="space-y-1">
-          {label && (
-            <label htmlFor={`${fieldId}-select`} className="text-sm text-on-surface-variant">
-              {label}
-            </label>
-          )}
+        <SettingsRow
+          label={label}
+          hint={description}
+          htmlFor={`${fieldId}-select`}
+          layout="field"
+          className="p-0"
+        >
           <Select
             id={`${fieldId}-select`}
             value={toSafeString(descriptorValue)}
@@ -365,7 +384,7 @@ export function ToolParameterField({
             options={options}
             placeholder={fallbackLabel(options)}
           />
-        </div>
+        </SettingsRow>
       );
     }
 
@@ -374,13 +393,8 @@ export function ToolParameterField({
         ? descriptorValue.join('\n')
         : toSafeString(descriptorValue);
       return (
-        <div className="space-y-1">
-          {label && (
-            <label htmlFor={`${fieldId}-list`} className="text-sm text-on-surface-variant">
-              {label}
-            </label>
-          )}
-          <textarea
+        <SettingsField label={label} htmlFor={`${fieldId}-list`} hint={description}>
+          <Textarea
             id={`${fieldId}-list`}
             value={listValue}
             onChange={(e) => {
@@ -391,46 +405,43 @@ export function ToolParameterField({
               onChange(lines);
             }}
             disabled={disabled}
-            placeholder={description}
             rows={4}
-            className={`${baseInputClass} resize-y`}
           />
-        </div>
+        </SettingsField>
       );
     }
 
     case 'path_list': {
       return (
-        <div className="space-y-1">
-          {label && <span className="text-sm text-on-surface-variant">{label}</span>}
+        <SettingsField label={label}>
           <PathListField
             value={descriptorValue}
             onChange={onChange}
             disabled={disabled}
-            placeholder={description}
+            ariaLabel={label}
+            hint={description}
           />
-        </div>
+        </SettingsField>
       );
     }
 
     default: {
       return (
-        <div className="space-y-1">
-          {label && (
-            <label htmlFor={`${fieldId}-text`} className="text-sm text-on-surface-variant">
-              {label}
-            </label>
-          )}
-          <input
+        <SettingsRow
+          label={label}
+          hint={description}
+          htmlFor={`${fieldId}-text`}
+          layout="field"
+          className="p-0"
+        >
+          <Input
             id={`${fieldId}-text`}
             type="text"
             value={toSafeString(descriptorValue)}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
-            placeholder={description}
-            className={baseInputClass}
           />
-        </div>
+        </SettingsRow>
       );
     }
   }

@@ -10,13 +10,14 @@
 
 import type { LibraryLocationStatus } from '@mangostudio/shared/library';
 import { Lock } from 'lucide-react';
+import { Badge } from '@/components/ui/Badge';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { Toggle } from '@/components/ui/Toggle';
-import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { type LocationSetting, useLocationSettings } from '../hooks/use-location-settings';
 import { LibraryPageState } from './LibraryPageState';
 
@@ -25,58 +26,38 @@ export function LocationSettings() {
   const l = t.library;
   const scope = useEnvironmentScope();
   const settings = useLocationSettings(scope.environmentId);
-  const header = <EnvironmentScopeHeader scope={scope} onRefresh={settings.refetch} />;
 
   if (scope.environment && !scope.permitsLibrary) {
     return (
-      <div className="space-y-4">
-        {header}
-        <EnvironmentScopeNotice
-          environment={scope.environment}
-          reason="not-permitted"
-          surface="library"
-        />
-      </div>
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="not-permitted"
+        surface="library"
+      />
     );
   }
 
   // Before the loading check: while detecting, the settings have arrived but
   // their enablement is a placeholder, so no row may render it as real.
   if (settings.defaultsPending) {
-    return (
-      <div className="space-y-4">
-        {header}
-        <LibraryPageState variant="loading" title={l.locationSettings.detecting} />
-      </div>
-    );
+    return <LibraryPageState variant="loading" title={l.locationSettings.detecting} />;
   }
 
   if (settings.isPending && settings.groups.length === 0) {
-    return (
-      <div className="space-y-4">
-        {header}
-        <LibraryPageState variant="loading" />
-      </div>
-    );
+    return <LibraryPageState variant="loading" />;
   }
 
   if (settings.error && settings.groups.length === 0) {
-    return (
-      <div className="space-y-4">
-        {header}
-        <LibraryPageState variant="error" onRetry={settings.refetch} />
-      </div>
-    );
+    return <LibraryPageState variant="error" onRetry={settings.refetch} />;
   }
 
   return (
     <div className="space-y-4" data-testid="location-settings">
-      {header}
-      <p className="text-on-surface-variant/60 text-sm">{l.locationSettings.description}</p>
+      <p className="text-fg-muted text-sm">{l.locationSettings.description}</p>
 
       {settings.groups.map((group) => (
         <SectionCard key={group.kind} label={l.kinds[group.kind]}>
-          <ul className="space-y-3">
+          <ul className="divide-y divide-stroke">
             {group.locations.map((location) => (
               <LocationRow
                 key={location.status.id}
@@ -106,20 +87,17 @@ function LocationRow({
   const { status } = location;
 
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2">
+    <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3 first:pt-0 last:pb-0">
       <div className="min-w-0 space-y-0.5">
-        <p className="truncate font-mono text-on-surface text-xs">{status.path ?? status.id}</p>
-        <p className="text-on-surface-variant/60 text-xs">{describeStatus(l, status)}</p>
+        <p className="truncate font-mono text-fg text-xs">{status.path ?? status.id}</p>
+        <p className="text-fg-muted text-xs">{describeStatus(l, status)}</p>
       </div>
 
       {location.locked ? (
-        <span
-          className="inline-flex items-center gap-1.5 text-on-surface-variant/60 text-xs"
-          title={l.locationSettings.alwaysOnHint}
-        >
-          <Lock size={12} aria-hidden="true" />
+        <Badge title={l.locationSettings.alwaysOnHint}>
+          <Lock size={ICON_SM} aria-hidden="true" />
           {l.locationSettings.alwaysOn}
-        </span>
+        </Badge>
       ) : (
         <Toggle
           id={`library-location-${status.id}`}

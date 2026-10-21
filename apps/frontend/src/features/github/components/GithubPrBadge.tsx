@@ -26,14 +26,7 @@ export function GithubPrBadge({ state, draft }: GithubPrBadgeProps) {
     ? t.github.states.draft
     : t.github.states[state.toLowerCase() as Lowercase<GithubPrState>];
 
-  return (
-    <Badge
-      variant={badgeVariant(state, draft)}
-      className="px-1.5 py-0.5 text-[9px] tracking-normal"
-    >
-      {label}
-    </Badge>
-  );
+  return <Badge variant={badgeVariant(state, draft)}>{label}</Badge>;
 }
 
 function badgeVariant(state: GithubPrState, draft: boolean) {

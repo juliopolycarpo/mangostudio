@@ -1,6 +1,9 @@
 import { Check, Copy } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 interface SignInCommandProps {
   /** The vendor's own sign-in command. Shown as plain text, never interpreted. */
@@ -9,7 +12,8 @@ interface SignInCommandProps {
 }
 
 /**
- * The command a signed-out user runs, with a copy button.
+ * The command a signed-out user runs, with a copy button inside the field's right edge.
+ * The one field for every place the product asks for a vendor command to be run.
  *
  * MangoStudio cannot run it for them: it has to run on the machine that hosts the agent. The
  * command is rendered as a text node, so whatever it contains stays inert.
@@ -20,18 +24,25 @@ export function SignInCommand({ command, className }: SignInCommandProps) {
   const { t } = useI18n();
   const { copy, copied } = useClipboard();
   return (
-    <div className={`flex items-center gap-2 ${className ?? ''}`}>
-      <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-container-high px-2 py-1 text-[10px] text-on-surface-variant">
-        {command}
-      </code>
-      <button
-        type="button"
+    // One field, the copy button inside its right edge: a button floating beside
+    // a bare field read as two unrelated things. The container takes its height
+    // from the button, so the 44px touch floor needs no second rule here.
+    <div
+      className={cn(
+        'flex min-w-0 items-center gap-1 rounded-md border border-stroke bg-canvas p-0.5 pl-2',
+        className
+      )}
+    >
+      <code className="min-w-0 flex-1 truncate font-mono text-xs text-fg">{command}</code>
+      <Button
+        variant="subtle"
+        size="sm"
         onClick={() => copy(command)}
         aria-label={t.externalAgents.selector.copyLoginCommand}
-        className="shrink-0 rounded-lg p-1 text-on-surface-variant transition-colors hover:bg-surface-container-high"
+        className="shrink-0"
       >
-        {copied ? <Check size={12} /> : <Copy size={12} />}
-      </button>
+        {copied ? <Check size={ICON_SM} /> : <Copy size={ICON_SM} />}
+      </Button>
     </div>
   );
 }

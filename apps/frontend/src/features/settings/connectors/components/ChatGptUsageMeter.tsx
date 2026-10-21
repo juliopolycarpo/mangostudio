@@ -1,6 +1,8 @@
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
 import type { Messages } from '@mangostudio/shared/i18n';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
 import { computeBurnPace } from '../lib/usage-pace';
 
 type ConnectorMessages = Messages['settings']['connectors'];
@@ -56,10 +58,11 @@ function UsageWindowBar({
           )}`
         : s.chatgptPaceRunningHot
       : s.chatgptPaceOnPace);
+  const label = windowLabel(window, fallbackLabel, s);
   return (
     <div className="space-y-1">
-      <div className="flex items-baseline justify-between gap-2 text-[10px] text-on-surface-variant/60">
-        <span>{windowLabel(window, fallbackLabel, s)}</span>
+      <div className="flex items-baseline justify-between gap-2 text-xs text-fg-muted">
+        <span>{label}</span>
         <span>
           {s.chatgptUsageUsed.replace('{percent}', String(Math.round(percent)))}
           {showReset &&
@@ -70,22 +73,27 @@ function UsageWindowBar({
           {paceLabel && (
             <>
               {' · '}
-              <span className={pace?.status === 'runningHot' ? 'text-amber-200/90' : undefined}>
+              <span className={cn(pace?.status === 'runningHot' && 'text-warning')}>
                 {paceLabel}
               </span>
             </>
           )}
         </span>
       </div>
+      {/* Track and fill are tokens that hold in both themes: the fill is the
+          accent's text variant (it clears 3:1 on a white surface, where the
+          button fill does not) and turns to the danger colour near the limit.
+          The percentage beside it is the signal; colour only confirms it. */}
       <div
         role="progressbar"
+        aria-label={label}
         aria-valuenow={Math.round(percent)}
         aria-valuemin={0}
         aria-valuemax={100}
-        className="h-1.5 overflow-hidden rounded-full bg-surface-container-high"
+        className="h-1.5 overflow-hidden rounded-xs bg-stroke"
       >
         <div
-          className={`h-full rounded-full ${percent >= 90 ? 'bg-error/80' : 'bg-primary/70'}`}
+          className={cn('h-full rounded-xs', percent >= 90 ? 'bg-danger' : 'bg-accent-fg')}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -128,10 +136,8 @@ export function ChatGptUsageMeter({ usage }: { usage: ChatGptUsageSnapshot }) {
   }
 
   return (
-    <div className="mt-1.5 max-w-xs space-y-1.5">
-      {usage.limitReached && (
-        <p className="text-[11px] font-medium text-amber-200/90">{s.chatgptUsageLimitReached}</p>
-      )}
+    <div className="max-w-md space-y-3">
+      {usage.limitReached && <Callout tone="warning">{s.chatgptUsageLimitReached}</Callout>}
       {usage.primary && (
         <UsageWindowBar
           window={usage.primary}
@@ -148,9 +154,7 @@ export function ChatGptUsageMeter({ usage }: { usage: ChatGptUsageSnapshot }) {
           now={now}
         />
       )}
-      {footer.length > 0 && (
-        <p className="text-[10px] text-on-surface-variant/50">{footer.join(' · ')}</p>
-      )}
+      {footer.length > 0 && <p className="text-xs text-fg-muted">{footer.join(' · ')}</p>}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { Check } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 /** Props the caller must spread onto whatever element opens the menu. */
@@ -86,7 +87,7 @@ export function Menu({
           <motion.div
             {...popoverBelow}
             role="menu"
-            className={`dropdown-panel absolute top-full mt-1.5 py-1 ${
+            className={`dropdown-panel absolute top-full mt-1 p-1 ${
               align === 'right' ? 'right-0' : 'left-0'
             } ${panelClassName}`}
           >
@@ -129,21 +130,21 @@ export function MenuItem({
       {...roleProps}
       disabled={disabled}
       onClick={onSelect}
-      className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-        tone === 'danger'
-          ? 'text-error hover:bg-error/10'
-          : 'text-on-surface hover:bg-primary/10 hover:text-primary'
+      className={`flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        tone === 'danger' ? 'text-danger hover:bg-danger-subtle' : 'text-fg hover:bg-fill-hover'
       }`}
     >
       {icon ? (
-        <span className="flex size-3.5 shrink-0 items-center justify-center">{icon}</span>
+        <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
+          {icon}
+        </span>
       ) : null}
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {checked ? <Check size={13} className="shrink-0 text-primary" /> : null}
+      {checked ? <Check size={ICON_MD} className="shrink-0 text-accent-fg" /> : null}
     </button>
   );
 }
 
 export function MenuSeparator() {
-  return <hr className="my-1 h-px border-0 bg-outline-variant/20" />;
+  return <hr className="-mx-1 my-1 h-px border-0 bg-stroke" />;
 }

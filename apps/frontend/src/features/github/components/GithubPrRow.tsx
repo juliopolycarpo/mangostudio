@@ -4,9 +4,11 @@ import { MenuItem } from '@/components/ui/Menu';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { checkChipStatus } from '../lib/check-status';
 import { GithubPrBadge } from './GithubPrBadge';
 import { GithubRowMenu } from './GithubRowMenu';
+import { GithubRowShell } from './GithubRowShell';
 
 interface GithubPrRowProps {
   readonly chatId: string;
@@ -31,21 +33,19 @@ export function GithubPrRow({ chatId, nameWithOwner, pr, onOpen, onCheckout }: G
   const checks = checkChipStatus(pr.checks);
 
   return (
-    <li className="group flex items-start gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-surface-container-high/50">
+    <GithubRowShell>
       <button
         type="button"
         onClick={() => onOpen(pr.number)}
-        className="min-w-0 flex-1 cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-primary"
+        className="min-w-0 flex-1 cursor-pointer text-left"
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0 font-mono text-[10px] text-on-surface-variant">
+          <span className="shrink-0 font-mono text-xs text-fg-muted">
             {formatMessage(t.github.row.number, { number: String(pr.number) })}
           </span>
-          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-on-surface">
-            {pr.title}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{pr.title}</span>
         </span>
-        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-on-surface-variant">
+        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
           <StatusDot tone={checks.tone} />
           <span className="shrink-0">{t.github.chip[checks.labelKey]}</span>
           {pr.author ? (
@@ -57,10 +57,10 @@ export function GithubPrRow({ chatId, nameWithOwner, pr, onOpen, onCheckout }: G
       </button>
       <GithubPrBadge state={pr.state} draft={pr.isDraft} />
       <GithubRowMenu chatId={chatId} target={{ url: pr.url, number: pr.number, nameWithOwner }}>
-        <MenuItem onSelect={() => onCheckout(pr.number)} icon={<GitBranch size={13} />}>
+        <MenuItem onSelect={() => onCheckout(pr.number)} icon={<GitBranch size={ICON_MD} />}>
           {t.github.actions.checkout}
         </MenuItem>
       </GithubRowMenu>
-    </li>
+    </GithubRowShell>
   );
 }

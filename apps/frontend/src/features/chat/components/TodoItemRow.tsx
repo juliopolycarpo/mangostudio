@@ -1,6 +1,7 @@
 import type { TodoItem } from '@mangostudio/shared/todos';
 import { Check, ChevronsRight, Circle } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 
 interface TodoItemRowProps {
   todo: TodoItem;
@@ -14,10 +15,10 @@ export function TodoItemRow({ todo }: TodoItemRowProps) {
       <span
         className={
           todo.status === 'completed'
-            ? 'text-on-surface-variant/60 line-through'
+            ? 'text-fg-muted line-through'
             : todo.status === 'in_progress'
-              ? 'font-medium text-on-surface'
-              : 'text-on-surface-variant'
+              ? 'font-medium text-fg'
+              : 'text-fg-muted'
         }
       >
         {todo.content}
@@ -32,8 +33,8 @@ function TodoStatusIcon({ status }: { status: TodoItem['status'] }) {
   if (status === 'completed') {
     return (
       <Check
-        size={16}
-        className="mt-0.5 shrink-0 text-primary"
+        size={ICON_MD}
+        className="mt-0.5 shrink-0 text-success"
         aria-label={labels.statusCompleted}
       />
     );
@@ -41,16 +42,16 @@ function TodoStatusIcon({ status }: { status: TodoItem['status'] }) {
   if (status === 'in_progress') {
     return (
       <ChevronsRight
-        size={16}
-        className="mt-0.5 shrink-0 text-primary"
+        size={ICON_MD}
+        className="mt-0.5 shrink-0 text-accent-fg"
         aria-label={labels.statusInProgress}
       />
     );
   }
   return (
     <Circle
-      size={16}
-      className="mt-0.5 shrink-0 text-on-surface-variant/50"
+      size={ICON_MD}
+      className="mt-0.5 shrink-0 text-fg-subtle"
       aria-label={labels.statusPending}
     />
   );

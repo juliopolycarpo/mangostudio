@@ -123,7 +123,52 @@ describe('external activity row', () => {
 
   it('colours the vendor tool name by the same outcome', () => {
     renderParts([turnPart(), activityPart({ name: 'commandExecution', status: 'failed' })]);
-    expect(screen.getByText('commandExecution').className).toContain('text-error');
+    expect(screen.getByText('commandExecution').className).toContain('text-danger');
+  });
+
+  it('leaves a completed vendor tool name neutral', () => {
+    renderParts([turnPart(), activityPart({ name: 'commandExecution', status: 'completed' })]);
+    const name = screen.getByText('commandExecution');
+    expect(name.className).toContain('text-fg');
+    expect(name.className).not.toContain('text-success');
+  });
+
+  // Colour alone cannot be the difference between a call that failed and one
+  // that was cancelled: they differ by glyph and by word, as on a native row.
+  it('tells a failed call from a cancelled one by glyph and word, not by colour', () => {
+    const { container } = renderParts([
+      turnPart(),
+      activityPart({ callId: 'f', name: 'failing', status: 'failed', isError: true }),
+      activityPart({ callId: 'c', name: 'stopped', status: 'cancelled' }),
+      activityPart({ callId: 'd', name: 'finished', status: 'completed' }),
+    ]);
+    const rowOf = (name: string) =>
+      screen.getByText(name).closest('.chat-timeline-item') as HTMLElement;
+
+    const failed = rowOf('failing');
+    expect(failed.querySelector('.lucide-circle-alert')).not.toBeNull();
+    expect(failed.querySelector('.lucide-ban')).toBeNull();
+    expect(failed).toHaveTextContent(en.tools.status.failed);
+
+    const cancelled = rowOf('stopped');
+    expect(cancelled.querySelector('.lucide-ban')).not.toBeNull();
+    expect(cancelled.querySelector('.lucide-circle-alert')).toBeNull();
+    expect(cancelled).toHaveTextContent(en.tools.status.cancelled);
+
+    // A call that went to plan stays quiet: the node and the check carry it.
+    const finished = rowOf('finished');
+    expect(finished.querySelector('.lucide-check')).not.toBeNull();
+    expect(finished).not.toHaveTextContent(en.tools.status.failed);
+    expect(finished).not.toHaveTextContent(en.tools.status.cancelled);
+    expect(container.querySelectorAll('.chat-timeline-item')).toHaveLength(3);
+  });
+
+  it('lets isError win over a completed status in the glyph, the word and the sentence', () => {
+    renderParts([turnPart(), activityPart({ name: 'odd', status: 'completed', isError: true })]);
+    const row = screen.getByText('odd').closest('.chat-timeline-item') as HTMLElement;
+    expect(row.querySelector('.lucide-circle-alert')).not.toBeNull();
+    expect(row).toHaveTextContent(en.tools.status.failed);
+    expect(row).not.toHaveTextContent(en.externalAgents.activity.statusCompleted);
   });
 
   // A row with nothing to open must not advertise a disclosure it cannot
@@ -190,6 +235,56 @@ describe('external approval card', () => {
     });
   });
 
+  // The card is the record of what was authorised. Once answered it says so in
+  // one line, with the vendor's own label, instead of three grey tiles.
+  it('shows an answered approval as a record of the chosen option, with nothing to press', () => {
+    renderParts([turnPart(), approvalPart({ decision: 'approve', decisionSource: 'user' })]);
+
+    expect(screen.getByText(/Permission answered/i)).toBeInTheDocument();
+    expect(screen.getByText('Approve for this session')).toBeInTheDocument();
+    expect(screen.queryByText('Deny')).toBeNull();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('does not read a chosen destructive option as a refusal', () => {
+    const { container } = renderParts([
+      turnPart(),
+      approvalPart({ decision: 'deny', decisionSource: 'user' }),
+    ]);
+
+    const record = screen.getByText('Deny').closest('p') as HTMLElement;
+    expect(record.dataset.destructive).toBe('true');
+    // The selection mark is the same check whatever was chosen, and the option
+    // keeps the warning glyph it wore as a button. No ban, no success tint.
+    expect(record.querySelector('.lucide-check')).not.toBeNull();
+    expect(record.querySelector('.lucide-triangle-alert')).not.toBeNull();
+    expect(container.querySelector('.lucide-ban')).toBeNull();
+    expect(record.querySelector('.text-success')).toBeNull();
+  });
+
+  it('keeps the inert options of a card nobody answered', () => {
+    renderParts([turnPart(), approvalPart({ decisionSource: 'cancelled' })]);
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Approve for this session',
+      'Deny',
+    ]);
+    for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
+  });
+
+  it('keeps the options when a decision names an option the card does not carry', () => {
+    renderParts([turnPart(), approvalPart({ decision: 'ghost', decisionSource: 'user' })]);
+    expect(screen.getAllByRole('button')).toHaveLength(2);
+  });
+
+  it('turns into the record as soon as the answer is accepted', async () => {
+    renderParts([turnPart({ status: 'active' }), approvalPart()]);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve for this session' }));
+
+    await screen.findByText(/Permission answered/i);
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    expect(screen.getByText('Approve for this session')).toBeInTheDocument();
+  });
+
   it('renders an abandoned approval as expired rather than as a live control', () => {
     renderParts([turnPart(), approvalPart({ decisionSource: 'expired' })]);
     expect(screen.getByText(/Permission expired/i)).toBeInTheDocument();
@@ -230,15 +325,6 @@ describe('external turn summary', () => {
     expect(screen.getByText('in 1.2k')).toBeInTheDocument();
     expect(screen.getByText('out 34')).toBeInTheDocument();
     expect(screen.queryByText(/total/i)).toBeNull();
-  });
-
-  it('explains a turn the hub ended, and stays quiet about one that finished', () => {
-    const { unmount } = renderParts([turnPart({ terminalReason: 'runtime-disconnected' })]);
-    expect(screen.getByText(/connection to that machine dropped/i)).toBeInTheDocument();
-    unmount();
-
-    renderParts([turnPart({ terminalReason: 'completed' })]);
-    expect(screen.queryByText(/connection to that machine dropped/i)).toBeNull();
   });
 
   it("keeps the vendor's error code and message rather than flattening them", () => {
@@ -676,15 +762,26 @@ describe('a conversation the agent did not continue', () => {
 describe('an unfinished section', () => {
   it('marks the trailing text as cut off', () => {
     renderParts([
-      turnPart({ status: 'terminal', terminalReason: 'cancelled-by-user' }),
+      turnPart({ status: 'terminal', terminalReason: 'interrupted' }),
       { type: 'text', text: 'partial', incomplete: true },
     ]);
     expect(screen.getByText('Cut off.')).toBeInTheDocument();
   });
 
-  it('marks the trailing thinking row as cut off, visible without expanding it', () => {
+  // The person pressed stop: the turn's closing line says so, and the row says
+  // "Cancelled" — a third "Cut off." inside the bubble repeated it.
+  it('leaves the mark off a turn the person stopped', () => {
     renderParts([
       turnPart({ status: 'terminal', terminalReason: 'cancelled-by-user' }),
+      { type: 'text', text: 'partial', incomplete: true },
+      { type: 'thinking', text: 'reasoning', incomplete: true },
+    ]);
+    expect(screen.queryByText(/Cut off\./)).toBeNull();
+  });
+
+  it('marks the trailing thinking row as cut off, visible without expanding it', () => {
+    renderParts([
+      turnPart({ status: 'terminal', terminalReason: 'interrupted' }),
       { type: 'thinking', text: 'reasoning', incomplete: true },
     ]);
     // The block auto-collapses once a finished turn stops streaming into it —

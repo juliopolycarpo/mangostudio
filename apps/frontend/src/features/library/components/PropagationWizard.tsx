@@ -1,6 +1,8 @@
 /**
  * The propagation flow: resolve conflicts → choose destinations → review →
- * apply, then a result panel with the backup handle and Undo.
+ * apply, then a result panel with the backup handle and Undo. The first step is
+ * only a step when something diverges; with one readable version of everything
+ * there is nothing to resolve, and the flow opens on the destinations.
  *
  * Each gate is closed for a reason the API also enforces, so the wizard never
  * lets a user spend effort on a request that would be refused: no continuing
@@ -16,12 +18,13 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryLocationId, PropagationPreviewRequest } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
-import { X } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { resourceTitle } from '../format';
 import { usePropagation } from '../hooks/use-propagation';
 import {
   isNoopApply,
@@ -32,9 +35,11 @@ import {
 import { libraryLocationsQueryOptions } from '../queries';
 import { ConflictStep } from './ConflictStep';
 import { DestinationStep } from './DestinationStep';
+import { InlineNote } from './InlineNote';
 import { LibraryPageState } from './LibraryPageState';
 import { ResultPanel } from './ResultPanel';
 import { ReviewStep } from './ReviewStep';
+import { WizardFrame } from './WizardFrame';
 
 interface PropagationWizardProps {
   readonly resourceKeys: readonly string[];
@@ -44,7 +49,13 @@ interface PropagationWizardProps {
   readonly onClose: () => void;
 }
 
-const STEP_ORDER: readonly WizardStep[] = ['conflict', 'destinations', 'review', 'result'];
+const STEPS_WITH_CONFLICTS: readonly WizardStep[] = [
+  'conflict',
+  'destinations',
+  'review',
+  'result',
+];
+const STEPS_WITHOUT_CONFLICTS: readonly WizardStep[] = ['destinations', 'review', 'result'];
 
 export function PropagationWizard({
   resourceKeys,
@@ -104,10 +115,19 @@ export function PropagationWizard({
     [preview, wizard.draft]
   );
 
-  const stepIndex = STEP_ORDER.indexOf(wizard.step);
+  // A step that only says "nothing to choose" is not worth a stop. Until the
+  // preview lands the answer is assumed to be no, since that is the common one
+  // and the stepper then does not lose a segment when it arrives.
+  const needsConflictStep =
+    preview?.entries.some((entry) => entry.requiresWinnerSelection) ?? false;
+  const stepOrder = needsConflictStep ? STEPS_WITH_CONFLICTS : STEPS_WITHOUT_CONFLICTS;
+  // The controller opens on the conflict step; with none to settle that is
+  // the destinations.
+  const step = wizard.step === 'conflict' && !needsConflictStep ? 'destinations' : wizard.step;
+  const stepIndex = stepOrder.indexOf(step);
   const title =
     resourceKeys.length === 1
-      ? formatMessage(l.wizard.titleOne, { resource: resourceKeys[0] })
+      ? resourceTitle(l.wizard.titleOne, l.kindsInline, resourceKeys[0])
       : formatMessage(l.wizard.title, { count: String(resourceKeys.length) });
 
   // No candidate means no preview was ever requested, so every downstream step
@@ -116,9 +136,9 @@ export function PropagationWizard({
 
   const canContinue =
     hasDestinations &&
-    (wizard.step === 'conflict'
+    (step === 'conflict'
       ? unresolved.length === 0
-      : wizard.step === 'destinations'
+      : step === 'destinations'
         ? wizard.draft.destinations.size > 0
         : false);
 
@@ -126,154 +146,127 @@ export function PropagationWizard({
   const canApply = pendingAcks.length === 0 && !nothingToDo && !wizard.isApplying;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-6"
-      data-testid="propagation-wizard"
-    >
-      <div className="app-scrollbar flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-outline-variant/15 bg-surface-container-low sm:rounded-2xl">
-        <header className="flex items-start justify-between gap-3 border-outline-variant/15 border-b px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="truncate font-bold text-on-surface text-sm">{title}</h2>
-            <ol className="mt-1 flex flex-wrap gap-x-3 text-[11px]">
-              {STEP_ORDER.map((step, index) => (
-                <li
-                  key={step}
-                  className={
-                    index === stepIndex
-                      ? 'font-semibold text-primary'
-                      : index < stepIndex
-                        ? 'text-on-surface-variant'
-                        : 'text-on-surface-variant/40'
-                  }
-                >
-                  {stepLabel(l, step)}
-                </li>
-              ))}
-            </ol>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={l.wizard.close}
-            className="shrink-0 rounded-lg p-1 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
-          >
-            <X size={16} />
-          </button>
-        </header>
-
-        <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-4">
-          {wizard.isStale && (
-            <div
-              className="mb-3 space-y-2 rounded-lg border border-error/30 bg-error/5 p-3"
-              data-testid="stale-preview"
+    <WizardFrame
+      testId="propagation-wizard"
+      title={title}
+      steps={stepOrder.map((stepId) => stepLabel(l, stepId))}
+      stepIndex={stepIndex}
+      onClose={onClose}
+      notes={
+        <>
+          {step === 'review' && pendingAcks.length > 0 && (
+            <InlineNote tone="warning" data-testid="acknowledge-required">
+              {l.adaptation.acknowledgeRequired}
+            </InlineNote>
+          )}
+          {step === 'review' && pendingAcks.length === 0 && nothingToDo && (
+            <InlineNote tone="warning" data-testid="nothing-to-do">
+              {l.review.nothingToDo}
+            </InlineNote>
+          )}
+          {wizard.applyError !== null && wizard.applyError !== undefined && (
+            <InlineNote tone="danger">{l.review.applyError}</InlineNote>
+          )}
+        </>
+      }
+      actions={
+        <>
+          {/* Every step until the result offers Cancel, so the footer is always
+              the way out; Back joins it once there is a step to go back to. */}
+          {step !== 'result' && (
+            <Button variant="secondary" onClick={onClose}>
+              {l.wizard.cancel}
+            </Button>
+          )}
+          {step !== 'result' && stepIndex > 0 && (
+            <Button variant="secondary" onClick={() => wizard.setStep(stepOrder[stepIndex - 1])}>
+              {l.wizard.back}
+            </Button>
+          )}
+          {step === 'result' ? (
+            <Button onClick={onClose}>{l.result.done}</Button>
+          ) : step === 'review' ? (
+            <Button
+              onClick={wizard.apply}
+              disabled={!canApply}
+              loading={wizard.isApplying}
+              data-testid="apply-button"
             >
-              <p className="text-error text-xs">{l.wizard.stale}</p>
-              <Button variant="secondary" size="sm" onClick={wizard.repreview}>
-                {l.wizard.restale}
-              </Button>
-            </div>
-          )}
-
-          {!hasDestinations ? (
-            // Not a failure: nothing was asked, so there is nothing to retry.
-            <LibraryPageState
-              variant="empty"
-              title={l.wizard.noDestinations}
-              hint={l.wizard.noDestinationsHint}
-            />
-          ) : wizard.isPreviewing && !preview ? (
-            <LibraryPageState variant="loading" />
-          ) : wizard.previewError || !preview ? (
-            <LibraryPageState
-              variant="error"
-              title={l.wizard.previewError}
-              onRetry={wizard.repreview}
-            />
-          ) : wizard.step === 'conflict' ? (
-            <ConflictStep
-              preview={preview}
-              draft={wizard.draft}
-              unresolved={unresolved}
-              onResolve={wizard.setResolution}
-            />
-          ) : wizard.step === 'destinations' ? (
-            <DestinationStep
-              preview={preview}
-              draft={wizard.draft}
-              locations={locationsQuery.data ?? []}
-              environmentName={environmentName}
-              onToggle={wizard.toggleDestination}
-            />
-          ) : wizard.step === 'review' ? (
-            <ReviewStep
-              preview={preview}
-              draft={wizard.draft}
-              onSelectStrategy={wizard.setStrategy}
-              onToggleAcknowledged={wizard.toggleAcknowledgement}
-            />
+              {wizard.isApplying ? l.review.applying : l.review.apply}
+            </Button>
           ) : (
-            <ResultPanel
-              result={wizard.result}
-              undoResult={wizard.undoResult}
-              isUndoing={wizard.isUndoing}
-              undoError={wizard.undoError}
-              environmentName={environmentName}
-              onUndo={wizard.undo}
-            />
+            <Button
+              onClick={() => wizard.setStep(stepOrder[stepIndex + 1])}
+              disabled={!canContinue}
+              data-testid="continue-button"
+            >
+              {l.wizard.continue}
+            </Button>
           )}
-        </div>
+        </>
+      }
+    >
+      {wizard.isStale && (
+        <Callout
+          tone="danger"
+          title={l.wizard.stale}
+          data-testid="stale-preview"
+          action={
+            <Button variant="secondary" size="sm" onClick={wizard.repreview}>
+              {l.wizard.restale}
+            </Button>
+          }
+        />
+      )}
 
-        <footer className="flex flex-wrap items-center justify-between gap-2 border-outline-variant/15 border-t px-4 py-3">
-          <div className="min-w-0 text-[11px] text-error">
-            {wizard.step === 'review' && pendingAcks.length > 0 && (
-              <span data-testid="acknowledge-required">{l.adaptation.acknowledgeRequired}</span>
-            )}
-            {wizard.step === 'review' && pendingAcks.length === 0 && nothingToDo && (
-              <span data-testid="nothing-to-do">{l.review.nothingToDo}</span>
-            )}
-            {wizard.applyError !== null && wizard.applyError !== undefined && (
-              <span>{l.review.applyError}</span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            {stepIndex > 0 && wizard.step !== 'result' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => wizard.setStep(STEP_ORDER[stepIndex - 1])}
-              >
-                {l.wizard.back}
-              </Button>
-            )}
-            {wizard.step === 'result' ? (
-              <Button size="sm" onClick={onClose}>
-                {l.result.done}
-              </Button>
-            ) : wizard.step === 'review' ? (
-              <Button
-                size="sm"
-                onClick={wizard.apply}
-                disabled={!canApply}
-                loading={wizard.isApplying}
-                data-testid="apply-button"
-              >
-                {wizard.isApplying ? l.review.applying : l.review.apply}
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                onClick={() => wizard.setStep(STEP_ORDER[stepIndex + 1])}
-                disabled={!canContinue}
-                data-testid="continue-button"
-              >
-                {l.wizard.continue}
-              </Button>
-            )}
-          </div>
-        </footer>
-      </div>
-    </div>
+      {!hasDestinations ? (
+        // Not a failure: nothing was asked, so there is nothing to retry.
+        <LibraryPageState
+          variant="empty"
+          title={l.wizard.noDestinations}
+          hint={l.wizard.noDestinationsHint}
+        />
+      ) : wizard.isPreviewing && !preview ? (
+        <LibraryPageState variant="loading" />
+      ) : wizard.previewError || !preview ? (
+        <LibraryPageState
+          variant="error"
+          title={l.wizard.previewError}
+          onRetry={wizard.repreview}
+        />
+      ) : step === 'conflict' ? (
+        <ConflictStep
+          preview={preview}
+          draft={wizard.draft}
+          unresolved={unresolved}
+          onResolve={wizard.setResolution}
+        />
+      ) : step === 'destinations' ? (
+        <DestinationStep
+          preview={preview}
+          draft={wizard.draft}
+          locations={locationsQuery.data ?? []}
+          environmentName={environmentName}
+          onToggle={wizard.toggleDestination}
+        />
+      ) : step === 'review' ? (
+        <ReviewStep
+          preview={preview}
+          draft={wizard.draft}
+          onSelectStrategy={wizard.setStrategy}
+          onToggleAcknowledged={wizard.toggleAcknowledgement}
+        />
+      ) : (
+        <ResultPanel
+          result={wizard.result}
+          undoResult={wizard.undoResult}
+          isUndoing={wizard.isUndoing}
+          undoError={wizard.undoError}
+          environmentName={environmentName}
+          onUndo={wizard.undo}
+        />
+      )}
+    </WizardFrame>
   );
 }
 

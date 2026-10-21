@@ -9,6 +9,7 @@ right depth quickly instead of scanning a flat list of files.
 | --------------- | ---------------------------- | ----------------------------------------------------------------- |
 | `architecture/` | Maintainers, feature authors | System design, cross-cutting runtime behavior, and internal flows |
 | `features/`     | Feature authors              | Behavior and implementation notes for product areas               |
+| `design/`       | Frontend and native authors  | The flat design system: tokens, components, patterns, decisions   |
 | `providers/`    | Provider integrators         | Provider-specific notes and provider onboarding guides            |
 | `reference/`    | Contributors, agents         | API surface, testing rules, and file-map navigation               |
 | `guides/`       | New contributors             | Task-oriented onboarding and contributor workflows                |
@@ -41,6 +42,17 @@ right depth quickly instead of scanning a flat list of files.
 - [`features/image-generation.md`](./features/image-generation.md)
 - [`features/terminal.md`](./features/terminal.md)
 - [`features/environments.md`](./features/environments.md)
+
+### Frontend / UI work
+
+1. [`design/README.md`](./design/README.md): principles, page index, and the tests that
+   enforce the system
+2. [`design/foundations.md`](./design/foundations.md): every token and its rule
+3. [`design/components.md`](./design/components.md) and
+   [`design/patterns.md`](./design/patterns.md) before building or changing a screen
+4. [`design/decisions.md`](./design/decisions.md) before changing a rule
+5. [`architecture/frontend-build.md`](./architecture/frontend-build.md) for the bundle and
+   the test harness
 
 ### Provider-specific notes
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest, spyOn } from 'bun:te
 import userEvent from '@testing-library/user-event';
 import { ConnectorsSettings } from '../../../src/features/settings/connectors';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { render, screen, waitFor, within } from '../../support/harness/render';
 import {
   createFetchScenario,
   type FetchScenarioMock,
@@ -13,6 +13,12 @@ function createDefaultProps() {
     modelCatalog: EMPTY_MODEL_CATALOG,
     reloadModelCatalog: jest.fn().mockResolvedValue(undefined),
   };
+}
+
+/** The provider is a `Select`: open it, then pick the option by name. */
+async function pickProvider(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+  await user.click(screen.getByRole('combobox', { name: 'Provider' }));
+  await user.click(screen.getByRole('option', { name }));
 }
 
 function withProviderSettings(fetchScenario: ReturnType<typeof createFetchScenario>) {
@@ -105,8 +111,81 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText('My Key');
     expect(screen.getByText('****...1234')).toBeInTheDocument();
+    // The glyph never stands alone: the card says the state and where the key lives.
+    expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(screen.getByText('OS secret store')).toBeInTheDocument();
 
     expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  /** A bare gear reads as the connector's own settings; the card's main job is choosing models. */
+  it('names the models action on the card instead of leaving a bare gear', async () => {
+    const props = createDefaultProps();
+
+    fetchScenario.respondWithJson('GET', '/api/settings/connectors', {
+      body: {
+        connectors: [
+          {
+            id: 'conn-1',
+            name: 'My Key',
+            provider: 'gemini',
+            configured: true,
+            source: 'bun-secrets',
+            maskedSuffix: '****...1234',
+            updatedAt: 1700000000000,
+            lastValidatedAt: 1700000000000,
+            lastValidationError: null,
+            enabledModels: [],
+            userId: 'user-1',
+          },
+        ],
+      },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText('My Key');
+    const models = screen.getByRole('button', { name: 'Configure models' });
+    expect(models).toHaveTextContent('Models');
+  });
+
+  it('asks whether to delete, naming the consequence, before it deletes anything', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+
+    fetchScenario.respondWithJson('GET', '/api/settings/connectors', {
+      body: {
+        connectors: [
+          {
+            id: 'conn-1',
+            name: 'My Key',
+            provider: 'gemini',
+            configured: true,
+            source: 'bun-secrets',
+            maskedSuffix: '****...1234',
+            updatedAt: 1700000000000,
+            lastValidatedAt: 1700000000000,
+            lastValidationError: null,
+            enabledModels: [],
+            userId: 'user-1',
+          },
+        ],
+      },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText('My Key');
+    await user.click(screen.getByRole('button', { name: 'Delete connector' }));
+
+    // The title is the question and the button is the verb: they never read alike.
+    const dialog = screen.getByRole('dialog', { name: 'Delete this connector?' });
+    expect(dialog).toHaveTextContent('This removes the connector and its stored credentials.');
+    expect(dialog).toHaveTextContent('My Key');
+    expect(within(dialog).getByRole('button', { name: 'Delete connector' })).toBeInTheDocument();
+    expect(
+      findFetchCall(fetchScenario.fetchMock, 'DELETE', '/api/settings/connectors/conn-1')
+    ).toBe(undefined);
   });
 
   it('adds a connector when form is submitted', async () => {
@@ -140,7 +219,7 @@ describe('ConnectorsSettings', () => {
     // Wait for the initial empty state to load
     await screen.findByText(/no connectors found/i);
 
-    // Open the add modal — pick the first "Add Connector" button (header button)
+    // Open the add modal from the empty state (the header button is hidden while it shows)
     const addButtons = screen.getAllByRole('button', { name: /add connector/i });
     await user.click(addButtons[0]);
 
@@ -148,14 +227,37 @@ describe('ConnectorsSettings', () => {
     const nameInput = screen.getByLabelText(/^name$/i);
     await user.type(nameInput, 'test-connector');
 
-    const apiKeyInput = screen.getByLabelText(/api key/i);
+    const apiKeyInput = screen.getByLabelText(/^api key$/i);
     await user.type(apiKeyInput, 'new-key-5678');
 
-    // Submit — the modal's submit button is the last "Add Connector" button in the DOM
+    // Submit — the modal's submit button is the last "Add connector" button in the DOM
     const allAddButtons = screen.getAllByRole('button', { name: /add connector/i });
     await user.click(allAddButtons[allAddButtons.length - 1]);
 
     await waitFor(() => expect(props.reloadModelCatalog).toHaveBeenCalledTimes(1));
+  });
+
+  it('names the API key visibility toggle for what it does next', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+
+    withProviderSettings(fetchScenario).respondWithJson('GET', '/api/settings/connectors', {
+      body: { connectors: [] },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText(/no connectors found/i);
+    await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
+
+    const apiKeyInput = screen.getByLabelText(/^api key$/i);
+    expect(apiKeyInput).toHaveAttribute('type', 'password');
+
+    await user.click(screen.getByRole('button', { name: 'Show API key' }));
+    expect(apiKeyInput).toHaveAttribute('type', 'text');
+
+    await user.click(screen.getByRole('button', { name: 'Hide API key' }));
+    expect(apiKeyInput).toHaveAttribute('type', 'password');
   });
 
   it('submits DeepSeek connectors with an optional base URL', async () => {
@@ -186,10 +288,10 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /deepseek/i }));
+    await pickProvider(user, /deepseek/i);
     await user.type(screen.getByLabelText(/^name$/i), 'deepseek-connector');
     await user.type(screen.getByLabelText(/base url/i), 'https://api.deepseek.com');
-    await user.type(screen.getByLabelText(/api key/i), 'sk-deepseek-test-key');
+    await user.type(screen.getByLabelText(/^api key$/i), 'sk-deepseek-test-key');
     const allAddButtons = screen.getAllByRole('button', { name: /add connector/i });
     await user.click(allAddButtons[allAddButtons.length - 1]);
 
@@ -223,7 +325,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await pickProvider(user, /chatgpt/i);
 
     expect(screen.getByText(/connect a chatgpt subscription in your browser/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^sign in with chatgpt$/i })).toBeInTheDocument();
@@ -255,7 +357,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await pickProvider(user, /chatgpt/i);
     await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
     await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
 
@@ -292,7 +394,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await pickProvider(user, /chatgpt/i);
     await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
     await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
 
@@ -329,7 +431,7 @@ describe('ConnectorsSettings', () => {
 
     await screen.findByText(/no connectors found/i);
     await user.click(screen.getAllByRole('button', { name: /add connector/i })[0]);
-    await user.click(screen.getByRole('button', { name: /chatgpt/i }));
+    await pickProvider(user, /chatgpt/i);
     await user.type(screen.getByLabelText(/^name$/i), 'ChatGPT Plus');
     await user.click(screen.getByRole('button', { name: /^sign in with chatgpt$/i }));
 

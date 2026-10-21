@@ -23,7 +23,7 @@ import {
   environmentScopeRoute,
   validateEnvironmentSearch,
 } from '../../../../src/features/environments/use-environment-scope';
-import { act, render, screen, waitFor } from '../../../support/harness/render';
+import { act, render, screen, waitFor, within } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 import { installation, runtimeStatus } from './fixtures';
 
@@ -168,7 +168,10 @@ describe('environment-scoped toolchains', () => {
 
     await waitFor(() => expect(screen.getByText('1.0.0')).toBeInTheDocument());
     const picker = await screen.findByTestId('environment-scope-picker');
-    await userEvent.selectOptions(picker.querySelector('select') as HTMLSelectElement, 'ubuntu');
+    await userEvent.click(
+      within(picker).getByRole('combobox', { name: en.environments.scope.label })
+    );
+    await userEvent.click(screen.getByRole('option', { name: 'Ubuntu' }));
 
     await waitFor(() => expect(screen.getByText('9.9.9')).toBeInTheDocument());
     expect(screen.queryByText('1.0.0')).not.toBeInTheDocument();

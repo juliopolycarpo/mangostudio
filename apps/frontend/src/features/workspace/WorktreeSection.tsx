@@ -1,24 +1,30 @@
 import type { GitWorktree } from '@mangostudio/shared/git';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { AlertTriangle, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Spinner } from '@/components/ui/Spinner';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
 import { resolveApiErrorMessage } from '@/lib/utils';
+import { GroupHeading } from './components/GroupHeading';
+import { IconButton } from './components/IconButton';
+import { RowList } from './components/RowList';
 import {
   type AddWorktreeInput,
   useAddWorktree,
   useGitWorktrees,
   useRemoveWorktree,
 } from './hooks/use-git-state';
+import { shortHash } from './short-hash';
 import { WorktreeAddForm } from './WorktreeAddForm';
 
 type WorktreeLabels = Messages['git']['worktrees'];
@@ -76,40 +82,30 @@ export function WorktreeSection({
 
   return (
     <section>
-      <MicroLabel as="h3" className="mb-1.5 flex items-center gap-2 font-bold tracking-[0.12em]">
-        <span>{labels.title}</span>
-        {worktrees.length > 0 ? (
-          <span className="rounded-full bg-surface-container-high px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
-            {worktrees.length}
-          </span>
-        ) : null}
-        <span className="ml-auto flex items-center gap-0.5">
-          <IconAction
-            label={labels.refresh}
-            disabled={worktreesQuery.isFetching}
-            onClick={() => void worktreesQuery.refetch()}
-          >
-            <RefreshCw
-              size={ICON_SM}
-              className={worktreesQuery.isFetching ? 'animate-spin' : undefined}
-            />
-          </IconAction>
-          <IconAction
-            label={labels.add}
-            disabled={addMutation.isPending}
-            onClick={() => setFormOpen((open) => !open)}
-          >
-            <Plus size={ICON_SM} />
-          </IconAction>
-        </span>
-      </MicroLabel>
+      {/* The count only earns its badge once there is something to count: a lone
+          main worktree is every repository, and a "1" beside the title is noise.
+          The panel header's refresh also refetches this list. */}
+      <GroupHeading
+        title={labels.title}
+        count={worktrees.length > 1 ? worktrees.length : undefined}
+      >
+        <IconButton
+          label={labels.add}
+          disabled={addMutation.isPending}
+          onClick={() => setFormOpen((open) => !open)}
+        >
+          <Plus size={ICON_SM} />
+        </IconButton>
+      </GroupHeading>
 
       {formOpen ? (
-        <WorktreeAddForm
-          pending={addMutation.isPending}
-          onSubmit={(input) => void add(input)}
-          onCancel={() => setFormOpen(false)}
-        />
+        <div className="mb-3">
+          <WorktreeAddForm
+            pending={addMutation.isPending}
+            onSubmit={(input) => void add(input)}
+            onCancel={() => setFormOpen(false)}
+          />
+        </div>
       ) : null}
 
       <WorktreeList
@@ -136,13 +132,8 @@ export function WorktreeSection({
           onConfirm={() => void confirmRemove()}
           onCancel={() => setRemoveTarget(null)}
         >
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-on-surface-variant">
-            <input
-              type="checkbox"
-              checked={force}
-              onChange={(event) => setForce(event.target.checked)}
-              className="accent-primary"
-            />
+          <label className="flex cursor-pointer items-center gap-2 pt-2 text-sm text-fg">
+            <Checkbox checked={force} onChange={(event) => setForce(event.target.checked)} />
             {labels.force}
           </label>
         </ConfirmDialog>
@@ -173,10 +164,9 @@ function WorktreeList({
 
   if (error) {
     return (
-      <EmptyState
-        icon={<AlertTriangle size={ICON_SM} />}
+      <Callout
+        tone="danger"
         title={labels.loadError}
-        tone="error"
         action={
           <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
             {t.common.retry}
@@ -186,19 +176,15 @@ function WorktreeList({
     );
   }
   if (loading) {
-    return (
-      <EmptyState
-        icon={<RefreshCw size={ICON_SM} className="animate-spin" />}
-        title={labels.loading}
-      />
-    );
+    return <EmptyState icon={<Spinner />} title={labels.loading} className="min-h-24 py-4" />;
   }
-  // A repository always has a main worktree, so a single row means there is
-  // nothing here the panel did not already say at the top.
-  if (worktrees.length <= 1) return <EmptyState title={labels.empty} />;
+  // A repository always has a main worktree, so a single row is a standing fact
+  // and not an empty list. One quiet line: an `EmptyState` title is 14px in
+  // `fg` and outshouts the section's own micro-label.
+  if (worktrees.length <= 1) return <p className="text-xs text-fg-muted">{labels.empty}</p>;
 
   return (
-    <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
+    <RowList>
       {worktrees.map((worktree) => (
         <WorktreeRow
           key={worktree.path}
@@ -208,7 +194,7 @@ function WorktreeList({
           onRemove={() => onRemove(worktree)}
         />
       ))}
-    </ul>
+    </RowList>
   );
 }
 
@@ -229,31 +215,32 @@ function WorktreeRow({
   const removeLabel = labels.removeLabel.replace('{path}', worktree.path);
 
   return (
-    <li className="flex min-w-0 items-start gap-2 border-b border-outline-variant/10 px-2.5 py-2 last:border-b-0">
+    <li className="flex min-w-0 items-start gap-2 px-3 py-2">
       <StatusDot tone={rowTone(worktree, isCurrent)} className="mt-1.5" />
       <div className="min-w-0 flex-1">
         <p
-          className="truncate text-[11px] font-semibold leading-4 text-on-surface"
+          className="truncate text-sm font-medium text-fg"
           title={labels.open.replace('{path}', worktree.path)}
         >
           {workdirLabel(worktree.path) ?? worktree.path}
         </p>
-        <p className="truncate font-mono text-[10px] text-on-surface-variant">
-          {worktree.branch ?? labels.detached.replace('{commit}', worktree.head?.slice(0, 8) ?? '')}
+        <p className="truncate font-mono text-xs text-fg-muted">
+          {worktree.branch ??
+            labels.detached.replace('{commit}', worktree.head ? shortHash(worktree.head) : '')}
         </p>
         <WorktreeBadges worktree={worktree} isCurrent={isCurrent} labels={labels} />
       </div>
       {removable ? (
-        <button
-          type="button"
-          aria-label={removeLabel}
-          title={worktree.isLocked ? lockTitle(worktree, labels) : removeLabel}
+        <IconButton
+          label={removeLabel}
+          tone="danger"
           disabled={pending || worktree.isLocked}
           onClick={onRemove}
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant transition-colors hover:bg-error/10 hover:text-error disabled:cursor-not-allowed disabled:opacity-30"
+          // The tooltip carries the lock reason while the button is unavailable.
+          title={worktree.isLocked ? lockTitle(worktree, labels) : undefined}
         >
           <Trash2 size={ICON_SM} />
-        </button>
+        </IconButton>
       ) : null}
     </li>
   );
@@ -289,7 +276,6 @@ function WorktreeBadges({
         <Badge
           key={badge.key}
           variant={badge.variant}
-          className="px-1.5 py-0.5 text-[9px] tracking-normal"
           title={badgeTitle(badge.key, worktree, labels)}
         >
           {badge.text}
@@ -323,29 +309,4 @@ function rowTone(worktree: GitWorktree, isCurrent: boolean): StatusDotTone {
   if (worktree.isPrunable || worktree.isLocked) return 'warning';
   if (isCurrent) return 'accent';
   return 'neutral';
-}
-
-function IconAction({
-  label,
-  disabled,
-  onClick,
-  children,
-}: {
-  readonly label: string;
-  readonly disabled: boolean;
-  readonly onClick: () => void;
-  readonly children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="flex size-6 cursor-pointer items-center justify-center rounded tracking-normal text-on-surface-variant transition-colors hover:bg-primary/10 hover:text-primary disabled:cursor-wait disabled:opacity-50"
-    >
-      {children}
-    </button>
-  );
 }

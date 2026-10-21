@@ -19,7 +19,7 @@ const options: ModelOption[] = [
 ];
 
 const labels = {
-  loading: 'Loading models...',
+  loading: 'Loading models…',
   unavailable: 'Models unavailable',
   noModelsAvailable: 'No models available',
 };
@@ -99,7 +99,7 @@ describe('resolveActiveModeModel', () => {
 describe('getModelSelectorPlaceholder', () => {
   it('returns loading message when status is loading', () => {
     const catalog: ModelCatalogResponse = { ...EMPTY_MODEL_CATALOG, status: 'loading' };
-    expect(getModelSelectorPlaceholder(catalog, labels)).toBe('Loading models...');
+    expect(getModelSelectorPlaceholder(catalog, labels)).toBe('Loading models…');
   });
 
   it('returns error message when status is error', () => {

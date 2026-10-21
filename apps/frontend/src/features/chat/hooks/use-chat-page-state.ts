@@ -177,7 +177,6 @@ export function useChatPageMessages({ chatId, seedContextInfo }: UseChatPageMess
 
   // Leaving the chat (a switch or the page unmounting) ends whatever was being
   // read ahead for it, so hopping between chats never queues requests.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs for the chat that is being left
   useEffect(
     () => () => {
       backgroundRef.current?.controller.abort();

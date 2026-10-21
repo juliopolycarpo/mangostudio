@@ -1,4 +1,5 @@
 import type { Messages } from '@mangostudio/shared/i18n';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import type { TurnPhase } from '../lib/turn-status';
 
@@ -35,9 +36,5 @@ export function TurnStatusChip({ phase, showWorkingRow }: TurnStatusChipProps) {
   const { t } = useI18n();
   if (phase === 'settled' || showWorkingRow) return null;
 
-  return (
-    <span className="shrink-0 animate-pulse rounded-full bg-surface-container-high px-1.5 py-0.5 text-[10px] text-on-surface-variant/80">
-      {phaseLabel(phase, t.chat.feed)}
-    </span>
-  );
+  return <Badge className="animate-pulse">{phaseLabel(phase, t.chat.feed)}</Badge>;
 }

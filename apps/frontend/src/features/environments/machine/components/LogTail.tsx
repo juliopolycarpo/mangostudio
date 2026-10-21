@@ -9,25 +9,26 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { machineGuardReasonLabel } from '../format';
 import { useMachineLogs } from '../queries';
+import { MachineCard } from './MachineCard';
 
 function LogBody({ tail }: { readonly tail: MachineLogTail }) {
   const { t } = useI18n();
   const m = t.environments.machine.logs;
   return (
     <>
-      <p className="truncate font-mono text-xs text-on-surface-variant/70">
+      <p className="truncate font-mono text-xs text-fg-muted">
         {tail.truncated
           ? formatMessage(m.truncated, { count: String(tail.lines.length), file: tail.file ?? '' })
           : tail.file}
       </p>
       {tail.lines.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/70">{m.empty}</p>
+        <p className="text-sm text-fg-muted">{m.empty}</p>
       ) : (
-        <pre className="max-h-80 overflow-auto rounded-xl bg-surface-container-lowest p-3 font-mono text-[11px] leading-relaxed text-on-surface">
+        <pre className="app-scrollbar max-h-80 overflow-auto rounded-md border border-stroke bg-canvas p-3 font-mono text-xs leading-relaxed text-fg">
           {tail.lines.join('\n')}
         </pre>
       )}
@@ -56,15 +57,15 @@ function LogContent({ logs }: { readonly logs: ReturnType<typeof useMachineLogs>
     return (
       <div className="space-y-1" data-testid="machine-logs-refused">
         {logs.data.reasons.map((reason) => (
-          <p key={reason} className="text-sm text-on-surface-variant">
+          <p key={reason} className="text-sm text-fg-muted">
             {machineGuardReasonLabel(t, reason)}
           </p>
         ))}
-        <p className="text-sm text-on-surface-variant/70">{m.readLocally}</p>
+        <p className="text-sm text-fg-muted">{m.readLocally}</p>
       </div>
     );
   }
-  if (!logs.data.tail.file) return <p className="text-sm text-on-surface-variant/70">{m.none}</p>;
+  if (!logs.data.tail.file) return <p className="text-sm text-fg-muted">{m.none}</p>;
   return <LogBody tail={logs.data.tail} />;
 }
 
@@ -74,21 +75,22 @@ export function LogTail() {
   const logs = useMachineLogs();
 
   return (
-    <section className={`${TOOL_CARD_SURFACE} space-y-3 p-5`} data-testid="machine-logs">
-      <div className="flex items-center justify-between gap-3">
-        <CardSectionLabel>{m.title}</CardSectionLabel>
+    <MachineCard
+      title={m.title}
+      testId="machine-logs"
+      action={
         <Button
-          variant="ghost"
+          variant="subtle"
           size="sm"
           onClick={() => void logs.refetch()}
           loading={logs.isFetching && Boolean(logs.data)}
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={ICON_SM} />
           {t.environments.machine.refresh}
         </Button>
-      </div>
-
+      }
+    >
       <LogContent logs={logs} />
-    </section>
+    </MachineCard>
   );
 }

@@ -1,6 +1,7 @@
-import { AlertTriangle, FileText, Sparkles } from 'lucide-react';
+import { FileText, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { Callout } from '@/components/ui/Callout';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 interface ContextWarningCalloutProps {
   title: string;
@@ -38,41 +39,35 @@ export function ContextWarningCallout({
 }: ContextWarningCalloutProps) {
   const modelActionBlocked = isPending || modelActionsDisabled;
   return (
-    <Card variant="solid" padded={false} className="border-warning/20 bg-warning/8 p-4">
-      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-warning">
-            <AlertTriangle size={16} />
-            <span className="text-sm font-bold">{title}</span>
-          </div>
-          <p className="text-sm text-on-surface-variant/80">{detail}</p>
-          <p className="text-xs text-on-surface-variant/60">{keepHistoryNote}</p>
-        </div>
-        <div className="flex flex-wrap gap-2 md:justify-end">
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={modelActionBlocked}
-            loading={isPending}
-            onClick={onCompact}
-          >
-            <Sparkles size={14} />
-            {isPending ? pendingLabel : compactLabel}
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={modelActionBlocked}
-            onClick={onStartSummarizedChat}
-          >
-            <FileText size={14} />
-            {newChatLabel}
-          </Button>
-          <Button variant="ghost" size="sm" disabled={isPending} onClick={onContinue}>
-            {continueLabel}
-          </Button>
-        </div>
+    <Callout tone="warning" title={title} className="p-4">
+      <div className="space-y-1">
+        <p>{detail}</p>
+        <p className="text-xs">{keepHistoryNote}</p>
       </div>
-    </Card>
+      <div className="flex flex-wrap gap-2 pt-3">
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={modelActionBlocked}
+          loading={isPending}
+          onClick={onCompact}
+        >
+          <Sparkles size={ICON_SM} />
+          {isPending ? pendingLabel : compactLabel}
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={modelActionBlocked}
+          onClick={onStartSummarizedChat}
+        >
+          <FileText size={ICON_SM} />
+          {newChatLabel}
+        </Button>
+        <Button variant="subtle" size="sm" disabled={isPending} onClick={onContinue}>
+          {continueLabel}
+        </Button>
+      </div>
+    </Callout>
   );
 }

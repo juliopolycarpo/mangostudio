@@ -14,11 +14,17 @@
 
 import type { AgentCliStatus, Environment, RuntimeStatus } from '@mangostudio/shared/environments';
 import { useQueries } from '@tanstack/react-query';
-import { X } from 'lucide-react';
+import { Check, X } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { agentCliStatusesQueryOptions, runtimeStatusesQueryOptions } from '../queries';
 import { EnvironmentPageState } from './EnvironmentPageState';
+import { TOOL_CARD_SURFACE } from './ToolCard';
 
 interface CapabilityDiffProps {
   readonly environments: readonly Environment[];
@@ -45,10 +51,10 @@ interface DiffRow {
 }
 
 const CELL_CLASS: Record<CellState, string> = {
-  present: 'text-primary',
-  absent: 'text-on-surface-variant/50',
-  'not-permitted': 'text-tertiary',
-  unknown: 'text-on-surface-variant/40',
+  present: 'text-success',
+  absent: 'text-fg-subtle',
+  'not-permitted': 'text-info',
+  unknown: 'text-fg-subtle',
 };
 
 /**
@@ -163,25 +169,22 @@ export function CapabilityDiff({
   ];
 
   return (
-    <section
-      className="space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-high p-4"
-      data-testid="capability-diff"
-    >
+    <section className={cn(TOOL_CARD_SURFACE, 'space-y-3 p-4')} data-testid="capability-diff">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="font-headline text-base font-semibold text-on-surface">
-            {e.scope.compareTitle}
-          </h2>
-          <p className="text-sm text-on-surface-variant/60">{e.scope.compareHint}</p>
+          <h2 className="text-base font-semibold text-fg">{e.scope.compareTitle}</h2>
+          <p className="text-sm text-fg-muted">{e.scope.compareHint}</p>
         </div>
-        <button
+        <Button
           type="button"
+          variant="subtle"
+          size="icon"
           onClick={onClose}
           aria-label={e.scope.compareClose}
-          className="rounded-lg p-1 text-on-surface-variant/60 transition-colors hover:bg-surface-container-highest hover:text-on-surface"
+          className="text-fg-muted"
         >
-          <X size={16} />
-        </button>
+          <X size={ICON_MD} />
+        </Button>
       </div>
 
       {left.isPending || right.isPending ? (
@@ -190,9 +193,9 @@ export function CapabilityDiff({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[32rem] border-collapse text-sm">
             <thead>
-              <tr className="border-b border-outline-variant/15 text-left">
-                <th className="py-2 pr-4 font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
-                  {e.tabs.health}
+              <tr className="border-b border-stroke text-left">
+                <th className="py-2 pr-4 text-left">
+                  <MicroLabel>{e.tabs.health}</MicroLabel>
                 </th>
                 <ColumnHeader
                   label={e.scope.compareLeft}
@@ -212,15 +215,15 @@ export function CapabilityDiff({
               {rows.map((row, index) => (
                 <tr
                   key={row.key}
-                  className="border-b border-outline-variant/10 last:border-b-0"
+                  className="border-b border-stroke last:border-b-0"
                   data-testid="capability-diff-row"
                   data-row-key={row.key}
                 >
-                  <th scope="row" className="py-2 pr-4 text-left font-medium text-on-surface">
+                  <th scope="row" className="py-2 pr-4 text-left font-medium text-fg">
                     {isGroupStart(rows, index) && (
-                      <span className="mb-1 block font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">
+                      <MicroLabel className="mb-1 block">
                         {groupLabel(e.scope, row.group)}
-                      </span>
+                      </MicroLabel>
                     )}
                     {row.label}
                   </th>
@@ -253,18 +256,16 @@ function ColumnHeader({
   return (
     <th scope="col" className="py-2 pr-4 text-left">
       <span className="sr-only">{label}</span>
-      <select
+      <Select
         value={value}
-        aria-label={label}
-        onChange={(event) => onSelect(event.target.value)}
-        className="max-w-[10rem] appearance-none rounded-lg bg-transparent py-1 text-sm font-semibold text-on-surface outline-none"
-      >
-        {environments.map((environment) => (
-          <option key={environment.id} value={environment.id}>
-            {environment.name}
-          </option>
-        ))}
-      </select>
+        ariaLabel={label}
+        options={environments.map((environment) => ({
+          value: environment.id,
+          label: environment.name,
+        }))}
+        onChange={onSelect}
+        className="w-44"
+      />
     </th>
   );
 }
@@ -281,7 +282,10 @@ function DiffCell({ cell }: { readonly cell: Cell }) {
 
   return (
     <td className="py-2 pr-4 align-top" data-testid="capability-diff-cell" data-state={cell.state}>
-      <span className={CELL_CLASS[cell.state]}>{cell.detail ?? label}</span>
+      <span className={cn('inline-flex items-center gap-1', CELL_CLASS[cell.state])}>
+        {cell.state === 'present' ? <Check size={ICON_SM} aria-hidden="true" /> : null}
+        {cell.detail ?? label}
+      </span>
       {cell.detail && <span className="sr-only"> {label}</span>}
     </td>
   );

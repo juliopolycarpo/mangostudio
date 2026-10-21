@@ -3,6 +3,13 @@ import Type, { type Static } from 'typebox';
 /** Header external callers present a key on. */
 export const API_KEY_HEADER = 'x-api-key';
 
+/**
+ * Prefix of every key the hub issues. The API configures Better Auth with it,
+ * and the settings page needs it to tell a hint that identifies a key from one
+ * that is the prefix alone, which labels every row the same and is not shown.
+ */
+export const API_KEY_PREFIX = 'mango_';
+
 /** Product limits shared by the API and its consumers. */
 export const API_KEY_NAME_MAX_LENGTH = 64;
 export const API_KEY_EXPIRY_MAX_DAYS = 365;

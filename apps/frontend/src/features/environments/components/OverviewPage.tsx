@@ -19,6 +19,7 @@ import { OverviewMachineSection } from '../machine/components/OverviewMachineSec
 import { machineStatusQueryOptions } from '../machine/queries';
 import { EnvironmentEntitiesOverview } from './EnvironmentEntitiesOverview';
 import { EnvironmentPageState } from './EnvironmentPageState';
+import { EnvironmentScopeHeader } from './EnvironmentScopeHeader';
 import { OverviewAgentCard } from './OverviewAgentCard';
 import { OverviewHealthRollup } from './OverviewHealthRollup';
 import { OverviewLibrarySnapshot } from './OverviewLibrarySnapshot';
@@ -34,8 +35,8 @@ export function OverviewPage() {
   const machine = useQuery(machineStatusQueryOptions());
 
   return (
-    <div className="space-y-6">
-      <p className="text-sm text-on-surface-variant/60">{t.environments.overview.description}</p>
+    <div className="space-y-8">
+      <EnvironmentScopeHeader description={t.environments.overview.description} />
 
       <SetupChecklist
         runtimes={runtimes.data ?? []}
@@ -67,7 +68,7 @@ function AgentsOverview() {
 
   return (
     <OverviewSection
-      title={e.tabs.agents}
+      tab="agents"
       to="/environments/agents"
       testId="overview-agents"
       isPending={agents.isPending && !agents.data}
@@ -82,7 +83,7 @@ function AgentsOverview() {
           hint={e.overview.agentsEmptyHint}
         />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {statuses.map((status) => (
             <OverviewAgentCard key={status.targetId} status={status} recipes={recipes.data ?? []} />
           ))}
@@ -100,7 +101,7 @@ function ToolchainsOverview() {
 
   return (
     <OverviewSection
-      title={e.tabs.runtimes}
+      tab="runtimes"
       to="/environments/runtimes"
       testId="overview-toolchains"
       isPending={runtimes.isPending && !runtimes.data}
@@ -110,7 +111,7 @@ function ToolchainsOverview() {
       {statuses.length === 0 ? (
         <EnvironmentPageState variant="empty" size="section" title={e.overview.toolchainsEmpty} />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
           {statuses.map((status) => (
             <OverviewToolchainCard key={status.id} status={status} />
           ))}

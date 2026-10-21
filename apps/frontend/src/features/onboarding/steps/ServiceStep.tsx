@@ -6,10 +6,15 @@
  * is somewhere else — or the platform has no supervisor — the server says so
  * and hands back the command to run instead, which is the only honest thing a
  * remote page can offer.
+ *
+ * A supervisor that could not be asked is not a supervisor with nothing in it:
+ * that state is drawn as its own warning, with the machine page's sentence and
+ * the raw line the supervisor printed, never as a definite "Not installed".
  */
 
-import { Server } from 'lucide-react';
+import type { MachineStatus } from '@mangostudio/shared/machine';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
 import { CopyLine } from '@/features/environments/components/CopyLine';
 import {
@@ -18,6 +23,50 @@ import {
 } from '@/features/environments/machine/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { StepFrame } from '../StepFrame';
+
+/**
+ * The one-line verdict on the hub's service unit.
+ *
+ * `error` wins over `installed`, as it does on the machine page: when the
+ * supervisor could not be asked, neither "Installed" nor "Not installed" is a
+ * thing this page knows.
+ */
+function ServiceState({ service }: { readonly service: MachineStatus['service'] }) {
+  const { t } = useI18n();
+  const s = t.onboarding.service;
+
+  if (service.error) {
+    return (
+      <Callout
+        tone="warning"
+        title={s.unreadable}
+        data-testid="onboarding-service-state"
+        data-installed={service.installed}
+      >
+        {/* A short title, then the explanation as body text, like the other
+            warnings in the wizard: a Callout title is one line at weight 500, and
+            a three-line sentence in it read as the loudest thing on the step.
+            A coded reason has a sentence in every locale; the line beneath is
+            whatever the supervisor printed, which no dictionary can hold. */}
+        <div className="space-y-1">
+          {service.errorCode ? (
+            <p>{t.environments.machine.service.errors[service.errorCode]}</p>
+          ) : null}
+          <p className="break-all font-mono text-xs">{service.error}</p>
+        </div>
+      </Callout>
+    );
+  }
+
+  return (
+    <Callout
+      tone={service.installed ? 'success' : 'neutral'}
+      title={service.installed ? s.installed : s.notInstalled}
+      data-testid="onboarding-service-state"
+      data-installed={service.installed}
+    />
+  );
+}
 
 export function ServiceStep() {
   const { t } = useI18n();
@@ -31,19 +80,10 @@ export function ServiceStep() {
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
       {machine.isPending || !status ? (
         <div className="flex justify-center py-6">
-          <Spinner size="md" />
+          <Spinner size="md" label={t.common.loading} />
         </div>
       ) : (
-        <div
-          className="flex items-center gap-3 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/60 px-4 py-3"
-          data-testid="onboarding-service-state"
-          data-installed={status.service.installed}
-        >
-          <Server aria-hidden size={16} className="shrink-0 text-primary" />
-          <span className="font-semibold text-on-surface text-sm">
-            {status.service.installed ? s.installed : s.notInstalled}
-          </span>
-        </div>
+        <ServiceState service={status.service} />
       )}
 
       {status && !status.service.installed && install?.available ? (
@@ -63,12 +103,14 @@ export function ServiceStep() {
         <div className="space-y-2" data-testid="onboarding-service-refused">
           {/* The machine surface already has a sentence for every refusal
               code, and they are the accurate ones — a terminal owning the
-              process is a different fact from a browser on another computer. */}
-          <p className="text-on-surface-variant/70 text-sm">
-            {install.reason
-              ? t.environments.machine.actions.reasons[install.reason]
-              : t.environments.machine.actions.reasons.guard}
-          </p>
+              process is a different fact from a browser on another computer.
+              Except one: "see the error above" is the machine page's wording,
+              and here the warning above already says it. */}
+          {install.reason === 'service-unreadable' ? null : (
+            <p className="text-sm text-fg-muted">
+              {t.environments.machine.actions.reasons[install.reason ?? 'guard']}
+            </p>
+          )}
           <CopyLine label={s.commandTitle} value={install.command} />
         </div>
       ) : null}

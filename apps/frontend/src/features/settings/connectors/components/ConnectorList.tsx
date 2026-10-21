@@ -1,11 +1,16 @@
 import type { Connector } from '@mangostudio/shared/connectors';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, Plus } from 'lucide-react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { USAGE_ALERT_THRESHOLDS, type UsageAlertThreshold } from '../lib/usage-alerts';
-import { ConnectorCard } from './ConnectorCard';
+import { ConnectorRow } from './ConnectorRow';
 
 interface ConnectorListProps {
   connectors: Connector[];
@@ -29,58 +34,35 @@ export function ConnectorList({
   const { t } = useI18n();
   const s = t.settings.connectors;
   const hasChatGpt = connectors.some((c) => c.provider === 'chatgpt');
+  // The empty state carries its own Add, so the header's is not drawn beside it.
+  const addAction =
+    connectors.length === 0 ? undefined : (
+      <Button variant="secondary" size="sm" onClick={onAddConnector}>
+        <Plus size={ICON_SM} />
+        {s.addButton}
+      </Button>
+    );
 
   return (
-    <Card variant="solid" className="p-4 sm:p-6 space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {s.title}
-        </h2>
-        <div className="flex items-center gap-3">
-          {hasChatGpt && (
-            <div className="flex items-center gap-1.5 text-[10px] text-on-surface-variant/60">
-              {s.chatgptAlertThresholdLabel}
-              <Select
-                value={alertThreshold === null ? 'off' : String(alertThreshold)}
-                onChange={(value) =>
-                  onAlertThresholdChange(value === 'off' ? null : (Number(value) as 75 | 90))
-                }
-                ariaLabel={s.chatgptAlertThresholdLabel}
-                className="w-32"
-                options={[
-                  { value: 'off', label: s.chatgptAlertThresholdOff },
-                  ...USAGE_ALERT_THRESHOLDS.map((percent) => ({
-                    value: String(percent),
-                    label: s.chatgptAlertThresholdOption.replace('{percent}', String(percent)),
-                  })),
-                ]}
-              />
-            </div>
-          )}
-          <Button variant="secondary" size="sm" onClick={onAddConnector} className="gap-1.5">
-            <span className="text-base leading-none">+</span>
-            {s.addButton}
-          </Button>
-        </div>
-      </div>
-
+    <SettingsPage title={s.title} description={s.description} actions={addAction}>
       {connectors.length === 0 ? (
-        <div className="bg-surface-container-lowest border border-dashed border-outline-variant/30 rounded-2xl p-8 text-center space-y-4">
-          <div className="p-4 bg-surface-container-high rounded-full w-fit mx-auto text-on-surface-variant/40">
-            <KeyRound size={32} />
-          </div>
-          <div className="space-y-1">
-            <p className="text-on-surface font-bold">{s.emptyTitle}</p>
-            <p className="text-sm text-on-surface-variant/60">{s.emptyDescription}</p>
-          </div>
-          <Button variant="primary" onClick={onAddConnector}>
-            {s.addConnectorButton}
-          </Button>
-        </div>
+        <Card padded={false}>
+          <EmptyState
+            icon={<KeyRound size={ICON_LG} />}
+            title={s.emptyTitle}
+            hint={s.emptyDescription}
+            action={
+              <Button variant="secondary" size="sm" onClick={onAddConnector}>
+                <Plus size={ICON_SM} />
+                {s.addConnectorButton}
+              </Button>
+            }
+          />
+        </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3">
+        <SettingsSection>
           {connectors.map((c) => (
-            <ConnectorCard
+            <ConnectorRow
               key={c.id}
               connector={c}
               onConfigure={onConfigureConnector}
@@ -88,8 +70,29 @@ export function ConnectorList({
               onReauthenticated={onReauthenticatedConnector}
             />
           ))}
-        </div>
+        </SettingsSection>
       )}
-    </Card>
+
+      {hasChatGpt && (
+        <SettingsSection>
+          <SettingsRow label={s.chatgptAlertThresholdLabel} layout="field">
+            <Select
+              value={alertThreshold === null ? 'off' : String(alertThreshold)}
+              onChange={(value) =>
+                onAlertThresholdChange(value === 'off' ? null : (Number(value) as 75 | 90))
+              }
+              ariaLabel={s.chatgptAlertThresholdLabel}
+              options={[
+                { value: 'off', label: s.chatgptAlertThresholdOff },
+                ...USAGE_ALERT_THRESHOLDS.map((percent) => ({
+                  value: String(percent),
+                  label: s.chatgptAlertThresholdOption.replace('{percent}', String(percent)),
+                })),
+              ]}
+            />
+          </SettingsRow>
+        </SettingsSection>
+      )}
+    </SettingsPage>
   );
 }

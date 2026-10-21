@@ -4,7 +4,9 @@ import { Badge } from '@/components/ui/Badge';
 import { MenuItem } from '@/components/ui/Menu';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { GithubRowMenu } from './GithubRowMenu';
+import { GithubRowShell } from './GithubRowShell';
 
 interface GithubIssueRowProps {
   readonly chatId: string;
@@ -27,22 +29,20 @@ export function GithubIssueRow({ chatId, nameWithOwner, issue, onStartChat }: Gi
   const { t } = useI18n();
 
   return (
-    <li className="group flex items-start gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-surface-container-high/50">
+    <GithubRowShell>
       <button
         type="button"
         onClick={() => onStartChat(issue)}
         title={t.github.actions.issueToNewChat}
-        className="min-w-0 flex-1 cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-primary"
+        className="min-w-0 flex-1 cursor-pointer text-left"
       >
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0 font-mono text-[10px] text-on-surface-variant">
+          <span className="shrink-0 font-mono text-xs text-fg-muted">
             {formatMessage(t.github.row.number, { number: String(issue.number) })}
           </span>
-          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-on-surface">
-            {issue.title}
-          </span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-fg">{issue.title}</span>
         </span>
-        <span className="mt-0.5 block truncate text-[10px] text-on-surface-variant">
+        <span className="mt-0.5 block truncate text-xs text-fg-muted">
           {issue.assignees.length > 0
             ? formatMessage(t.github.row.assignees, {
                 assignees: issue.assignees.map((actor) => actor.login).join(', '),
@@ -50,20 +50,17 @@ export function GithubIssueRow({ chatId, nameWithOwner, issue, onStartChat }: Gi
             : t.github.row.unassigned}
         </span>
       </button>
-      <Badge
-        variant={issue.state === 'OPEN' ? 'success' : 'neutral'}
-        className="px-1.5 py-0.5 text-[9px] tracking-normal"
-      >
+      <Badge variant={issue.state === 'OPEN' ? 'success' : 'neutral'}>
         {t.github.issueState[issue.state]}
       </Badge>
       <GithubRowMenu
         chatId={chatId}
         target={{ url: issue.url, number: issue.number, nameWithOwner }}
       >
-        <MenuItem onSelect={() => onStartChat(issue)} icon={<MessageSquarePlus size={13} />}>
+        <MenuItem onSelect={() => onStartChat(issue)} icon={<MessageSquarePlus size={ICON_MD} />}>
           {t.github.actions.issueToNewChat}
         </MenuItem>
       </GithubRowMenu>
-    </li>
+    </GithubRowShell>
   );
 }

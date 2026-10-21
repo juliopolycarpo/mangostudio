@@ -20,6 +20,18 @@ describe('cn', () => {
   it('returns empty string for no inputs', () => {
     expect(cn()).toBe('');
   });
+
+  it("knows the design system's own type sizes, so a size and a colour do not collide", () => {
+    expect(cn('text-title font-semibold', 'text-danger')).toBe(
+      'text-title font-semibold text-danger'
+    );
+    expect(cn('text-micro', 'text-danger')).toBe('text-micro text-danger');
+  });
+
+  it('lets a later design-system size or elevation replace an earlier one', () => {
+    expect(cn('text-sm', 'text-title')).toBe('text-title');
+    expect(cn('shadow-popover', 'shadow-dialog')).toBe('shadow-dialog');
+  });
 });
 
 describe('DEFAULT_API_ERROR_FALLBACK', () => {

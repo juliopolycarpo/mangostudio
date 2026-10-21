@@ -3,7 +3,7 @@ import { fireEvent, screen } from '@testing-library/react';
 import { Badge } from '../../../src/components/ui/Badge';
 import { Chip } from '../../../src/components/ui/Chip';
 import { EmptyState } from '../../../src/components/ui/EmptyState';
-import { KbdHint } from '../../../src/components/ui/KbdHint';
+import { KbdHint, ReturnKey } from '../../../src/components/ui/KbdHint';
 import { MicroLabel } from '../../../src/components/ui/MicroLabel';
 import { Skeleton } from '../../../src/components/ui/Skeleton';
 import { StatusDot } from '../../../src/components/ui/StatusDot';
@@ -11,11 +11,11 @@ import { render } from '../../support/harness/render';
 
 describe('Badge', () => {
   it.each([
-    ['neutral', 'text-on-surface-variant'],
+    ['neutral', 'text-fg-muted'],
     ['success', 'text-success'],
     ['warning', 'text-warning'],
-    ['error', 'text-error'],
-    ['accent', 'text-primary'],
+    ['error', 'text-danger'],
+    ['accent', 'text-accent-fg'],
   ] as const)('renders the %s variant with its tone class', (variant, toneClass) => {
     render(
       <Badge variant={variant} data-testid="badge">
@@ -60,11 +60,11 @@ describe('Chip', () => {
 
 describe('StatusDot', () => {
   it.each([
-    ['accent', 'bg-primary'],
+    ['accent', 'bg-accent'],
     ['success', 'bg-success'],
     ['warning', 'bg-warning'],
-    ['error', 'bg-error'],
-    ['neutral', 'bg-outline'],
+    ['error', 'bg-danger'],
+    ['neutral', 'bg-stroke-strong'],
   ] as const)('renders the %s tone', (tone, toneClass) => {
     const { container } = render(<StatusDot tone={tone} />);
     const dot = container.querySelector(`[data-tone="${tone}"]`);
@@ -93,6 +93,22 @@ describe('KbdHint', () => {
     const { container } = render(<KbdHint keys="⌘K" />);
     const kbd = container.querySelector('kbd');
     expect(kbd?.textContent).toBe('⌘K');
+  });
+
+  it('draws the Return key as an icon, hidden from the accessible name', () => {
+    const { container } = render(<KbdHint keys={<ReturnKey />} />);
+    const kbd = container.querySelector('kbd');
+    // An icon, not the thin `⏎` text glyph: there is no text to read.
+    expect(kbd?.querySelector('svg')).not.toBeNull();
+    expect(kbd?.textContent).toBe('');
+    expect(kbd?.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('is not drawn on a coarse pointer, even when a caller shows it from a breakpoint up', () => {
+    // A touch screen has no Esc or Ctrl+N. The rule is the primitive's, so a
+    // call site's `sm:inline-flex` keeps it alongside rather than replacing it.
+    const { container } = render(<KbdHint keys="Esc" className="hidden sm:inline-flex" />);
+    expect(container.querySelector('kbd')).toHaveClass('pointer-coarse:hidden', 'sm:inline-flex');
   });
 });
 
@@ -123,5 +139,20 @@ describe('EmptyState', () => {
     expect(screen.getByText('Try another query')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     expect(onAction).toHaveBeenCalledTimes(1);
+  });
+
+  // components.md: the glyph is a step quieter than the title beside it. The
+  // title is `fg`, so a `fg-muted` icon read as the same grey as the hint.
+  it('draws a neutral icon in fg-subtle and a status icon in its status colour', () => {
+    render(
+      <>
+        <EmptyState icon={<svg data-testid="neutral-icon" />} title="Nothing here" />
+        <EmptyState icon={<svg data-testid="error-icon" />} title="Failed" tone="error" />
+      </>
+    );
+
+    expect(screen.getByTestId('neutral-icon').parentElement).toHaveClass('text-fg-subtle');
+    expect(screen.getByTestId('neutral-icon').parentElement).not.toHaveClass('text-fg-muted');
+    expect(screen.getByTestId('error-icon').parentElement).toHaveClass('text-danger');
   });
 });

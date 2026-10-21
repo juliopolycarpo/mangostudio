@@ -23,12 +23,17 @@ import type {
 } from '@mangostudio/shared/library';
 import { Link } from '@tanstack/react-router';
 import { Server } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { hashPrefix } from '../format';
 import { destinationKey, destinationsByEnvironment, type WizardDraft } from '../propagation';
 import { BlockedReason } from './BlockedReason';
+import { ChoiceRow } from './ChoiceRow';
+import { InlineNote } from './InlineNote';
 
 interface DestinationStepProps {
   readonly preview: PropagationPreview;
@@ -62,10 +67,18 @@ export function DestinationStep({
   const { t } = useI18n();
   const l = t.library;
   const machines = useMemo(() => destinationsByEnvironment(preview), [preview]);
+  // The reminder is for someone who emptied the list. On a screen nobody has
+  // touched, the intro line and the disabled Continue already say what is next,
+  // and a warning there is the only alarm-coloured thing in the dialog.
+  const [touched, setTouched] = useState(false);
+  const toggle = (environmentId: string, locationId: LibraryLocationId) => {
+    setTouched(true);
+    onToggle(environmentId, locationId);
+  };
 
   if (machines.length === 0) {
     return (
-      <p className="text-on-surface-variant text-sm" data-testid="destination-none">
+      <p className="text-fg-muted text-sm" data-testid="destination-none">
         {l.destination.none}
       </p>
     );
@@ -73,23 +86,21 @@ export function DestinationStep({
 
   return (
     <div className="space-y-4" data-testid="destination-step">
-      <p className="text-on-surface text-sm">{l.destination.description}</p>
+      <p className="text-fg-muted text-sm">{l.destination.description}</p>
       {machines.map(([environmentId, machineDestinations]) => (
         <section
           key={environmentId}
-          className="space-y-2"
+          className="space-y-3"
           data-testid="destination-machine"
           data-environment-id={environmentId}
         >
-          <h3 className="flex items-center gap-1.5 font-semibold text-on-surface text-xs">
-            <Server size={12} aria-hidden="true" />
+          <h3 className="flex items-center gap-2 font-semibold text-fg text-sm">
+            <Server size={ICON_MD} aria-hidden="true" className="text-fg-muted" />
             {environmentName(environmentId)}
           </h3>
           {groupByTarget(machineDestinations).map(([targetId, group]) => (
             <div key={targetId} className="space-y-1.5">
-              <h4 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
-                {l.targets[targetId]}
-              </h4>
+              <MicroLabel as="h4">{l.targets[targetId]}</MicroLabel>
               {group.map((destination) => (
                 <DestinationRow
                   key={destinationKey(destination.environmentId, destination.locationId)}
@@ -105,17 +116,17 @@ export function DestinationStep({
                   checked={draft.destinations.has(
                     destinationKey(destination.environmentId, destination.locationId)
                   )}
-                  onToggle={onToggle}
+                  onToggle={toggle}
                 />
               ))}
             </div>
           ))}
         </section>
       ))}
-      {draft.destinations.size === 0 && (
-        <p className="text-error text-xs" data-testid="no-destination-selected">
+      {touched && draft.destinations.size === 0 && (
+        <InlineNote tone="warning" data-testid="no-destination-selected">
           {l.destination.noneSelected}
-        </p>
+        </InlineNote>
       )}
     </div>
   );
@@ -136,51 +147,49 @@ function DestinationRow({
   const l = t.library;
   const blocked = destination.blockedReason !== undefined;
   const otherTargets = destination.targetIds.slice(1);
+  // Three facts at most, set apart by the product's `·` so they do not run into
+  // one phrase ("Markdown with frontmatter Holds c3aab8…").
+  const facts = [
+    l.format[destination.toFormat],
+    destination.currentContentHash
+      ? formatMessage(l.destination.currentContent, {
+          hash: `${hashPrefix(destination.currentContentHash)}…`,
+        })
+      : l.destination.empty,
+    ...(status?.access === 'read-only' ? [l.destination.readOnly] : []),
+  ];
 
   return (
-    <label
-      className={`flex items-start gap-2 rounded-lg border p-2.5 ${
-        blocked
-          ? 'cursor-not-allowed border-outline-variant/10 bg-surface-container/40 opacity-70'
-          : 'cursor-pointer border-outline-variant/15 bg-surface-container-high'
-      }`}
-      data-testid="destination-row"
-      data-environment-id={destination.environmentId}
-      data-location-id={destination.locationId}
-      data-blocked={blocked}
+    <ChoiceRow
+      control="checkbox"
+      bordered
+      firstLine="xs"
+      row={{
+        'data-testid': 'destination-row',
+        'data-environment-id': destination.environmentId,
+        'data-location-id': destination.locationId,
+        'data-blocked': blocked,
+      }}
+      checked={checked && !blocked}
+      // A blocked destination can never be applied — the apply route rejects
+      // it outright — so the checkbox is disabled rather than merely warned about.
+      disabled={blocked}
+      onChange={() => onToggle(destination.environmentId, destination.locationId)}
     >
-      <input
-        type="checkbox"
-        checked={checked && !blocked}
-        // A blocked destination can never be applied — the apply route rejects
-        // it outright — so the checkbox is disabled rather than merely warned about.
-        disabled={blocked}
-        onChange={() => onToggle(destination.environmentId, destination.locationId)}
-        className="mt-0.5 size-3.5 accent-primary"
-      />
-      <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block break-all font-mono text-on-surface text-xs">
+      <span className="block space-y-1">
+        <span
+          className={cn('block break-all font-mono text-xs', blocked ? 'text-fg-muted' : 'text-fg')}
+        >
           {destination.path ?? destination.locationId}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-on-surface-variant/60">
-          <span>{l.format[destination.toFormat]}</span>
-          <span>
-            {destination.currentContentHash
-              ? formatMessage(l.destination.currentContent, {
-                  hash: `${hashPrefix(destination.currentContentHash)}…`,
-                })
-              : l.destination.empty}
-          </span>
-          {status?.access === 'read-only' && <span>{l.destination.readOnly}</span>}
-        </span>
+        <span className="block text-fg-muted text-xs">{facts.join(' · ')}</span>
 
         {otherTargets.length > 0 && (
-          <span className="block text-[11px] text-primary" data-testid="serves-multiple-targets">
+          <InlineNote tone="info" data-testid="serves-multiple-targets">
             {formatMessage(l.destination.servesMultipleTargets, {
-              location: destination.path ?? destination.locationId,
               targets: otherTargets.map((targetId) => l.targets[targetId]).join(', '),
             })}
-          </span>
+          </InlineNote>
         )}
 
         {destination.blockedReason && (
@@ -193,7 +202,7 @@ function DestinationRow({
                 destination.blockedReason === 'location-unwritable' ? (
                   <Link
                     to="/environments/agents"
-                    className="text-primary underline underline-offset-2"
+                    className="text-accent-fg underline underline-offset-2"
                   >
                     {l.destination.unwritableAction}
                   </Link>
@@ -203,6 +212,6 @@ function DestinationRow({
           </span>
         )}
       </span>
-    </label>
+    </ChoiceRow>
   );
 }

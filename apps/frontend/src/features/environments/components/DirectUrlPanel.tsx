@@ -8,11 +8,14 @@ import { shouldWarnPlaintextHttpRuntime } from '@mangostudio/shared/environments
 import { KeyRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useRuntimeLifecycleQuery, useUpdateEnvironmentMutation } from '../queries';
 import { CopyLine } from './CopyLine';
+import { CommandGroup, EntityPanel } from './EntityPanel';
 
 function serveListenCommand(baseUrl: string): string {
   const trimmed = baseUrl.trim();
@@ -76,18 +79,12 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
   };
 
   return (
-    <section
-      className="space-y-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 p-3"
-      data-testid="direct-url-panel"
+    <EntityPanel
+      testId="direct-url-panel"
+      icon={<KeyRound size={ICON_MD} />}
+      title={labels.title}
+      description={labels.description}
     >
-      <div className="flex items-start gap-2">
-        <KeyRound size={14} className="mt-0.5 shrink-0 text-primary" />
-        <div className="min-w-0 space-y-0.5">
-          <p className="font-semibold text-on-surface text-xs">{labels.title}</p>
-          <p className="text-[11px] text-on-surface-variant/70">{labels.description}</p>
-        </div>
-      </div>
-
       <div className="space-y-1">
         <Input
           id={`direct-url-base-${environment.id}`}
@@ -98,14 +95,10 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
             setBaseUrl(event.target.value);
           }}
         />
-        <p className="text-[11px] text-on-surface-variant/60">{labels.baseUrlHint}</p>
+        <p className="text-xs text-fg-muted">{labels.baseUrlHint}</p>
       </div>
 
-      {warnPlaintext ? (
-        <p className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant">
-          {labels.plaintextWarning}
-        </p>
-      ) : null}
+      {warnPlaintext ? <Callout tone="warning">{labels.plaintextWarning}</Callout> : null}
 
       <div className="space-y-1">
         <Input
@@ -117,21 +110,20 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
           placeholder={environment.hasRuntimeToken ? '••••••••' : undefined}
           onChange={(event) => setToken(event.target.value)}
         />
-        <p className="text-[11px] text-on-surface-variant/60">{labels.tokenHint}</p>
-        <p className="text-[11px] text-on-surface-variant/70">
+        <p className="text-xs text-fg-muted">{labels.tokenHint}</p>
+        <p className="text-xs text-fg-muted">
           {environment.hasRuntimeToken ? labels.tokenSet : labels.tokenMissing}
         </p>
       </div>
 
       {error ? (
-        <p className="text-[11px] text-error" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
 
       <Button
         variant="secondary"
-        className="h-8 px-2.5 text-xs"
         disabled={!canSave}
         loading={update.isPending}
         onClick={() => void save()}
@@ -139,19 +131,15 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
         {environment.hasRuntimeToken && trimmedToken ? labels.tokenRotate : labels.tokenSave}
       </Button>
 
-      <div className="space-y-2 rounded-lg border border-outline-variant/25 bg-surface-container-low/40 p-2.5">
-        <p className="font-semibold text-[11px] text-on-surface">{labels.stepServe}</p>
-        <CopyLine
-          label={labels.stepServe}
-          value={serveListenCommand(trimmedBaseUrl || initial.baseUrl)}
-        />
+      <CommandGroup title={labels.stepServe}>
+        <CopyLine value={serveListenCommand(trimmedBaseUrl || initial.baseUrl)} />
         {serviceInstall ? (
           <>
             <CopyLine label={labels.stepService} value={serviceInstall} />
-            <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
+            <p className="text-xs text-fg-muted">{labels.serviceHint}</p>
           </>
         ) : null}
-      </div>
-    </section>
+      </CommandGroup>
+    </EntityPanel>
   );
 }

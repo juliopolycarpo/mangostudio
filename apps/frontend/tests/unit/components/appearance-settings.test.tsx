@@ -23,13 +23,13 @@ describe('AppearanceSettings', () => {
 
   it('renders the app theme section', () => {
     render(<AppearanceSettings />);
-    expect(screen.getByText('App Theme')).toBeTruthy();
+    expect(screen.getByText('App theme')).toBeTruthy();
     expect(screen.getByRole('button', { name: /^dark$/i })).toBeTruthy();
   });
 
   it('renders the font size section with all options', () => {
     render(<AppearanceSettings />);
-    expect(screen.getByText('Font Size')).toBeTruthy();
+    expect(screen.getByText('Font size')).toBeTruthy();
     expect(screen.getByRole('button', { name: /^small$/i })).toBeTruthy();
     // Multiple 'Default' buttons exist (font size + density); verify at least one per group
     const defaultButtons = screen.getAllByRole('button', { name: /^default$/i });
@@ -39,7 +39,7 @@ describe('AppearanceSettings', () => {
 
   it('renders the chat density section with all options', () => {
     render(<AppearanceSettings />);
-    expect(screen.getByText('Chat Density')).toBeTruthy();
+    expect(screen.getByText('Chat density')).toBeTruthy();
     expect(screen.getByRole('button', { name: /compact/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /comfortable/i })).toBeTruthy();
   });
@@ -238,7 +238,7 @@ describe('AppearanceSettings — code theme selector', () => {
 
   it('renders the code theme section', () => {
     render(<AppearanceSettings />);
-    expect(screen.getByText('Code Theme')).toBeTruthy();
+    expect(screen.getByText('Code theme')).toBeTruthy();
   });
 
   it('shows auto and manual mode buttons', () => {

@@ -5,6 +5,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { en } from '@mangostudio/shared/i18n';
 import type {
   MachineDoctorReport,
   MachineLogTail,
@@ -135,6 +136,9 @@ describe('MachinePage', () => {
     expect(within(hub).getByText('Running')).toBeTruthy();
     expect(within(hub).getByText('http://127.0.0.1:3001')).toBeTruthy();
     expect(within(hub).getByText('in the background')).toBeTruthy();
+    // Technical values are mono; a phrase is set in the interface font.
+    expect(within(hub).getByText('http://127.0.0.1:3001').className).toContain('font-mono');
+    expect(within(hub).getByText('in the background').className).not.toContain('font-mono');
     expect(within(hub).getByTestId('machine-hub-health').textContent).toBe('Healthy');
 
     const service = screen.getByTestId('machine-service-card');
@@ -367,6 +371,56 @@ describe('MachinePage', () => {
         'This page was not opened from the machine the hub runs on.'
       )
     );
+  });
+
+  // The supervisor not being reachable is something the person can fix (open a
+  // desktop session, enable linger), so the notice is a warning, and the refusal
+  // under it must not say again that the service manager could not be asked.
+  it('words a fixable service error as a warning and does not repeat it as a refusal', async () => {
+    mountScenario({
+      ...STATUS,
+      service: {
+        ...STATUS.service,
+        error: 'Failed to connect to bus: No medium found',
+        errorCode: 'no-session-bus',
+      },
+      actions: {
+        ...STATUS.actions,
+        installService: {
+          available: false,
+          command: 'mangostudio service install',
+          reason: 'service-unreadable',
+        },
+      },
+    });
+    render(<MachinePage />);
+
+    const notice = await screen.findByTestId('machine-service-error');
+    expect(notice.className).toContain('bg-warning-subtle');
+    expect(notice.className).not.toContain('bg-danger-subtle');
+    // The supervisor was not asked, so the headline does not claim the unit is
+    // absent; it says the state could not be checked.
+    const service = screen.getByTestId('machine-service-card');
+    expect(within(service).getByText(en.environments.machine.service.unknown)).toBeTruthy();
+    expect(within(service).queryByText(en.environments.machine.service.notInstalled)).toBeNull();
+
+    const refused = screen.getByTestId('machine-service-install-refused');
+    expect(refused.textContent).not.toContain(
+      en.environments.machine.actions.reasons['service-unreadable']
+    );
+    // The way forward stays: the command to type instead.
+    expect(within(refused).getByText('mangostudio service install')).toBeTruthy();
+  });
+
+  it('keeps an error the supervisor printed for itself as a failure', async () => {
+    mountScenario({
+      ...STATUS,
+      service: { ...STATUS.service, error: 'Unit mangostudio.service could not be loaded' },
+    });
+    render(<MachinePage />);
+
+    const notice = await screen.findByTestId('machine-service-error');
+    expect(notice.className).toContain('bg-danger-subtle');
   });
 
   it('shows a translated "check failed" sentence, keeping the server’s own text as a title', async () => {

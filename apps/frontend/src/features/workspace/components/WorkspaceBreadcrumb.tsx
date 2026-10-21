@@ -1,6 +1,8 @@
 /**
- * The header's cockpit line: `in <workdir basename> / <branch>`, with a quiet
- * warning dot while the tree is dirty.
+ * The header's cockpit line: `in <workdir basename> / <branch>`, with a warning
+ * dot and, from `md` up, the word "Modified" while the tree is dirty. A dot
+ * alone is a colour doing a word's job: pale yellow in dark, rust in light,
+ * unexplained to anyone who is not hovering it.
  *
  * Reads the same `git-state` query the workspace rail subscribes to, so when
  * the rail is open this costs nothing new; when it is closed, one cached query
@@ -76,32 +78,39 @@ export function WorkspaceBreadcrumbView({
   const { t } = useI18n();
   return (
     <span
-      className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-on-surface-variant"
+      className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-fg-muted"
       data-testid="workspace-breadcrumb"
     >
-      <span className="shrink-0 text-on-surface-variant/60">{t.workspace.breadcrumbIn}</span>
+      <span className="shrink-0">{t.workspace.breadcrumbIn}</span>
       {onChangeWorkdir ? (
         <button
           type="button"
           onClick={onChangeWorkdir}
           aria-label={formatMessage(t.workspace.changeWorkdir, { name: basename })}
-          className="truncate font-medium text-on-surface underline-offset-2 transition-colors hover:text-primary hover:underline"
+          className="-mx-1 cursor-pointer truncate rounded-sm px-1 font-medium text-fg transition-colors hover:bg-fill-hover"
         >
           {basename}
         </button>
       ) : (
-        <span className="truncate font-medium text-on-surface">{basename}</span>
+        <span className="truncate font-medium text-fg">{basename}</span>
       )}
       {branch ? (
         <>
-          <span className="shrink-0 text-on-surface-variant/60">/</span>
-          <span className="truncate text-primary">{branch}</span>
+          <span className="shrink-0 text-fg-subtle">/</span>
+          <span className="truncate">{branch}</span>
         </>
       ) : null}
       {dirty ? (
-        <span className="flex shrink-0 items-center" title={t.workspace.breadcrumbDirty}>
+        // The full phrase stays the tooltip and the screen-reader text; the
+        // visible word is the short one, so the line still fits beside the
+        // branch. Below `md` there is no room for it and the dot stands with its
+        // tooltip, as before.
+        <span className="flex shrink-0 items-center gap-1.5" title={t.workspace.breadcrumbDirty}>
           <StatusDot tone="warning" />
           <span className="sr-only">{t.workspace.breadcrumbDirty}</span>
+          <span aria-hidden="true" className="hidden md:inline">
+            {t.workspace.breadcrumbDirtyShort}
+          </span>
         </span>
       ) : null}
     </span>

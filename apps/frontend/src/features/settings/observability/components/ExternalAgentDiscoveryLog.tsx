@@ -15,7 +15,9 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
-import { Card } from '@/components/ui/Card';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { Badge } from '@/components/ui/Badge';
 import {
   externalAgentSelectable,
   useExternalAgents,
@@ -37,52 +39,50 @@ export function ExternalAgentDiscoveryLog() {
   const labels = t.settings.logs.externalAgentDiscovery;
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold text-on-surface">{labels.title}</h2>
-        <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
-      </div>
-
+    <SettingsSection title={labels.title} description={labels.description}>
       {external.isLoading ? (
         // "No agents" is a verdict, and this query outlives the page's other
         // one: claiming it before discovery answers would read as a machine
         // with nothing installed.
-        <p className="text-sm text-on-surface-variant/70">{t.common.loading}</p>
+        <p className="px-4 py-3 text-sm text-fg-muted">{t.common.loading}</p>
       ) : external.agents.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/70">{labels.empty}</p>
+        <p className="px-4 py-3 text-sm text-fg-muted">{labels.empty}</p>
       ) : (
-        <ul className="space-y-2">
-          {external.agents.map((agent) => (
-            <li
+        external.agents.map((agent) => {
+          const undetermined =
+            agent.discoveryState === 'undetermined' && externalAgentSelectable(agent);
+          return (
+            <SettingsRow
               key={agent.targetId}
-              className="rounded-xl bg-surface-container-lowest px-4 py-3 text-sm"
-            >
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="font-medium text-on-surface">
-                  {t.externalAgents.target[agent.targetId]}
+              label={t.externalAgents.target[agent.targetId]}
+              aside={
+                <span className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-3">
+                  {agent.discovery ? (
+                    // The time and its footnotes sit beside the state, so a row with
+                    // a probe and a row without one are the same height.
+                    <span className="font-mono text-micro text-fg-muted tabular-nums">
+                      {formatTimestamp(agent.discovery.probedAtMs, locale)}
+                      {agent.discovery.attempts > 1
+                        ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`
+                        : ''}
+                      {agent.discovery.failureCode ? ` · ${agent.discovery.failureCode}` : ''}
+                    </span>
+                  ) : null}
+                  <Badge variant={stateVariant(agent)}>{summary(agent, labels)}</Badge>
                 </span>
-                <span className="text-xs text-on-surface-variant/60">{summary(agent, labels)}</span>
-              </div>
-              {agent.discoveryState === 'undetermined' && externalAgentSelectable(agent) ? (
-                <p className="mt-1 text-xs text-on-surface-variant/70">
-                  {t.externalAgents.selector.discoveryUndeterminedHint}
-                </p>
-              ) : null}
-              {agent.discovery ? (
-                <p className="mt-1 text-xs text-on-surface-variant/70">
-                  {formatTimestamp(agent.discovery.probedAtMs, locale)}
-                  {agent.discovery.attempts > 1
-                    ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`
-                    : ''}
-                  {agent.discovery.failureCode ? ` · ${agent.discovery.failureCode}` : ''}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+              }
+              hint={undetermined ? t.externalAgents.selector.discoveryUndeterminedHint : undefined}
+            />
+          );
+        })
       )}
-    </Card>
+    </SettingsSection>
   );
+}
+
+function stateVariant(agent: ExternalAgentDescriptor): 'neutral' | 'success' | 'info' {
+  if (!agent.discovery) return 'neutral';
+  return agent.discovery.source === 'cache' ? 'info' : 'success';
 }
 
 function summary(

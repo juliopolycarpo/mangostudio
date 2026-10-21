@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
-import { unavailableMessage } from '../../../../src/features/terminal/unavailable-message';
+import {
+  unavailableMessage,
+  unavailableTone,
+} from '../../../../src/features/terminal/unavailable-message';
 
 describe('unavailableMessage', () => {
   it('describes a runtime open failure without reporting a disconnected environment', () => {
@@ -34,5 +37,21 @@ describe('unavailableMessage', () => {
     expect(unavailableMessage(en, 'runtime-update-required')).toContain('runtime');
     expect(unavailableMessage(en, 'runtime-update-required')).toContain('update');
     expect(unavailableMessage(ptBR, 'runtime-update-required')).toContain('atualização');
+  });
+
+  const tones: ReadonlyArray<[TerminalRefusalReason, 'info' | 'warning']> = [
+    ['disabled', 'info'],
+    ['not-isolated', 'info'],
+    ['limit', 'warning'],
+    ['unavailable', 'warning'],
+    ['runtime-unavailable', 'warning'],
+    ['runtime-update-required', 'warning'],
+    ['disconnected', 'warning'],
+  ];
+
+  it.each(tones)('draws %s as a %s notice', (reason, expected) => {
+    // Standing policy is a fact to read; anything the person can act on or wait
+    // out is a warning (patterns.md, Notices).
+    expect(unavailableTone(reason)).toBe(expected);
   });
 });

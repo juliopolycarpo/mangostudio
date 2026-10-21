@@ -1,6 +1,6 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, Loader2, Sparkles } from 'lucide-react';
+import { ArrowDown, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   type UIEvent,
@@ -11,13 +11,18 @@ import {
   useState,
   type WheelEvent,
 } from 'react';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
 import { useChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
 import type { OlderMessages } from '../hooks/use-chat-page-state';
+import { useModelDisplayNames } from '../hooks/use-model-display-names';
 import { useTranscriptReadAhead } from '../hooks/use-transcript-read-ahead';
+import { CHAT_COLUMN_CLASS, CHAT_GUTTER_X_CLASS } from '../lib/chat-column';
 import type { ReaderPosition } from '../transcript-read-ahead';
 import { ChatMessageRow } from './ChatMessageRow';
 
@@ -34,13 +39,12 @@ const LOAD_OLDER_WITHIN_PX = 3 * ESTIMATED_ROW_HEIGHT_PX;
 function EmptyFeed() {
   const { t } = useI18n();
   return (
-    <div className="flex flex-col items-center justify-center h-full text-on-surface-variant/50 px-4">
-      <Sparkles size={48} className="mb-4 opacity-50" />
-      <p className="text-lg font-headline text-center">{t.chat.feed.emptyTitle}</p>
-      <p className="text-xs mt-2 text-on-surface-variant/40 text-center">
-        {t.chat.feed.emptySubtitle}
-      </p>
-    </div>
+    <EmptyState
+      icon={<Sparkles size={ICON_LG} />}
+      title={t.chat.feed.emptyTitle}
+      hint={t.chat.feed.emptySubtitle}
+      className="h-full"
+    />
   );
 }
 
@@ -78,6 +82,9 @@ export function ChatFeed({
   // observers and N realtime-invalidation listeners for a resolver almost none
   // of them needed.
   const toolIdentities = useToolIdentities();
+  // Likewise once for the feed: each turn header names its model the way the
+  // composer does, and a lookup per row would be a catalog observer per row.
+  const modelNames = useModelDisplayNames();
   const { data: checkpointData } = useChatFileCheckpoints(chatId);
   // The summary is both the revert affordance's gate and what the confirmation
   // needs to say about the writes it cannot undo, so the row carries the entry
@@ -201,7 +208,14 @@ export function ChatFeed({
       onScroll={handleFeedScroll}
       onWheel={handleFeedWheel}
       onTouchMove={requestOlderNearTop}
-      className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 hide-scrollbar max-w-5xl mx-auto w-full"
+      // Full width, so a wheel or a touch in the margins beside the column still
+      // scrolls the feed; the column itself is the one the composer sits in.
+      //
+      // The bottom padding is the gap above the composer, and it lives here
+      // rather than on the composer's footer: padding on the footer was a strip
+      // of canvas between the scroller's clip edge and the frame, with text cut
+      // through the middle of it. Here the clip edge is the composer's own border.
+      className={`hide-scrollbar min-h-0 flex-1 overflow-y-auto pt-4 pb-6 sm:pt-6 sm:pb-8 md:pt-8 md:pb-10 ${CHAT_GUTTER_X_CLASS}`}
     >
       {messages.length === 0 && <EmptyFeed />}
 
@@ -209,8 +223,8 @@ export function ChatFeed({
           every message down when it appears and again when it goes. */}
       {older?.isLoading && (
         <div className="sticky top-0 z-10 flex h-0 justify-center pointer-events-none">
-          <output className="glass-elevated flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30">
-            <Loader2 size={13} className="animate-spin" />
+          <output className="flex h-8 items-center gap-2 rounded-md border border-stroke bg-surface-raised px-3 text-xs font-medium text-fg-muted shadow-popover">
+            <Spinner size="sm" />
             {t.chat.feed.loadingOlder}
           </output>
         </div>
@@ -219,9 +233,9 @@ export function ChatFeed({
       {messages.length > 0 && (
         <div
           ref={contentRef}
+          className={CHAT_COLUMN_CLASS}
           style={{
             height: `${totalSize}px`,
-            width: '100%',
             position: 'relative',
           }}
         >
@@ -238,6 +252,7 @@ export function ChatFeed({
                 virtualRow.index === messages.length - 1 ? onQuestionSubmit : undefined
               }
               toolIdentities={toolIdentities}
+              modelNames={modelNames}
             />
           ))}
         </div>
@@ -245,17 +260,25 @@ export function ChatFeed({
 
       <AnimatePresence>
         {showScrollButton && messages.length > 0 && (
-          <motion.button
+          // Zero height and out of the pointer's way, stuck to the foot of the
+          // port at the column's right edge: the prose is capped well short of
+          // that edge, so the button sits beside the lines being read instead of
+          // on top of them, as it did centred.
+          <motion.div
             key="scroll-to-bottom"
             {...fadeRise}
-            type="button"
-            onClick={scrollToBottom}
-            className="glass-elevated sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-on-surface-variant border border-outline-variant/30 cursor-pointer hover:border-outline-variant/50 hover:text-on-surface transition-colors duration-200"
-            title={t.chat.scrollToBottom}
+            className={`${CHAT_COLUMN_CLASS} pointer-events-none sticky bottom-3 z-10 flex h-0 items-end justify-end`}
           >
-            <ArrowDown size={13} />
-            {t.chat.scrollToBottom}
-          </motion.button>
+            <button
+              type="button"
+              onClick={scrollToBottom}
+              className="pointer-events-auto flex h-8 cursor-pointer items-center gap-2 rounded-sm border border-stroke bg-control px-3 text-xs font-medium text-fg shadow-popover transition-colors hover:bg-control-hover active:bg-control-pressed"
+              title={t.chat.scrollToBottom}
+            >
+              <ArrowDown size={ICON_SM} />
+              {t.chat.scrollToBottom}
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
     </section>

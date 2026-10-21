@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { describeAccountLimits, nextAccountLimitsCopyChangeMs } from './account-limits-copy';
 import { useExternalAccountLimits } from './use-external-account-limits';
 import { useExternalAgents } from './useExternalAgents';
@@ -100,10 +101,10 @@ export function QuotaPillView({
       title={labels.refresh}
       data-testid="header-quota-pill"
       data-verdict={verdict.kind}
-      className="min-w-0 shrink-0 cursor-pointer disabled:cursor-default"
+      className="min-w-0 shrink-0 cursor-pointer rounded-sm disabled:cursor-default"
     >
-      <Badge variant={variant} className="max-w-full gap-1.5 normal-case tracking-normal font-mono">
-        <RefreshCw size={10} className={refreshing ? 'animate-spin' : undefined} />
+      <Badge variant={variant} className="max-w-full gap-1.5 font-mono">
+        <RefreshCw size={ICON_SM} className={refreshing ? 'animate-spin' : undefined} />
         {/* Below `sm` the readout collapses to its icon and the badge's own
             colour, which is what the warning states are actually carrying — the
             longest body ("quota exhausted, resets in …") is wider than the space

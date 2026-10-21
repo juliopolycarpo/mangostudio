@@ -98,6 +98,28 @@ describe('ActivityFeed (full density)', () => {
     expect(screen.queryByText('Yesterday')).toBeNull();
   });
 
+  it('draws each age in one fixed column, short for the eye and in full for the tooltip and the screen reader', () => {
+    const fiveMinutesAgo = Date.now() - 5 * 60_000;
+    const { container } = render(
+      <ActivityFeed events={[chatCreated('recent', 'Recent chat', fiveMinutesAgo)]} compact />
+    );
+
+    const time = container.querySelector('time');
+    expect(time).toHaveClass('w-10', 'shrink-0', 'text-right', 'tabular-nums');
+    expect(time).toHaveAttribute('title', '5 minutes ago');
+    expect(time?.querySelector('[aria-hidden="true"]')).toHaveTextContent('5m');
+    expect(screen.getByText('5 minutes ago')).toHaveClass('sr-only');
+  });
+
+  it('lets the subject wrap to two lines before it is cut, and keeps the glyph on the first', () => {
+    const { container } = render(
+      <ActivityFeed events={[chatCreated('long', 'A very long title', TODAY_NOON)]} compact />
+    );
+
+    expect(screen.getByText('Started A very long title')).toHaveClass('line-clamp-2', 'flex-1');
+    expect(container.querySelector('li > div')).toHaveClass('items-start');
+  });
+
   it('renders the empty message for no events', () => {
     render(<ActivityFeed events={[]} />);
     expect(screen.getByText('Nothing here yet.')).toBeInTheDocument();

@@ -54,10 +54,8 @@ describe('ExternalAgentSettingsPage', () => {
 
     // The claim is about this account. Making it while the query is still in
     // flight would tell every user their consents were gone on every page load.
-    expect(screen.queryByText(/have not acknowledged any external agent/i)).toBeNull();
-    expect(
-      await screen.findByText(/have not acknowledged any external agent/i)
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/No external agents acknowledged yet/i)).toBeNull();
+    expect(await screen.findByText(/No external agents acknowledged yet/i)).toBeInTheDocument();
   });
 
   it('withdraws the acknowledgement for the vendor whose row was clicked', async () => {
@@ -88,9 +86,22 @@ describe('ExternalAgentSettingsPage', () => {
 
   /** Withdrawing is the safe direction, so it is never hidden behind a confirm. */
   it('warns that withdrawing stops a running turn', async () => {
-    respondWithDisclosures(fetchScenario, []);
+    respondWithDisclosures(fetchScenario, [
+      { targetId: 'claude', disclosureVersion: 1, acknowledgedAt: ACKNOWLEDGED_AT },
+    ]);
     render(<ExternalAgentSettingsPage />);
 
     expect(await screen.findByText(/stops any turn running now/i)).toBeInTheDocument();
+  });
+
+  /** There is nothing to withdraw yet, so the page says what the notices are and how one appears. */
+  it('explains the empty list instead of a Withdraw button nobody can see', async () => {
+    respondWithDisclosures(fetchScenario, []);
+    render(<ExternalAgentSettingsPage />);
+
+    expect(
+      await screen.findByText(/first time you run Claude Code, Codex or Cursor/i)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/stops any turn running now/i)).toBeNull();
   });
 });

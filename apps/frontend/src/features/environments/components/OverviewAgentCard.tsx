@@ -12,10 +12,12 @@ import { Link } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import {
   describeFinding,
   findInstallRecipe,
   findingSeverity,
+  isQuietFinding,
   prefixedVersionLabel,
   worstFinding,
 } from '../format';
@@ -53,13 +55,18 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
       testId="overview-agent-card"
       dataAttributes={{ 'data-target-id': status.targetId }}
       subtitle={
-        <p className="text-xs text-on-surface-variant/60">
+        <p className="text-xs text-fg-muted">
           {status.effective
             ? prefixedVersionLabel(t, status.effective.version)
             : e.agents.notInstalled}
         </p>
       }
-      actions={<HealthBadge health={status.health} />}
+      actions={
+        <>
+          <HealthBadge health={status.health} />
+          <AgentAuthState status={status} />
+        </>
+      }
       footer={
         <>
           <ProbeButton
@@ -74,20 +81,18 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
               input={{ kind: 'none' }}
               label={formatMessage(e.runtimes.install, { runtime: name })}
               variant="primary"
-              icon={<Download size={14} />}
+              icon={<Download size={ICON_MD} />}
             />
           )}
           <Link
             to="/environments/agents"
-            className="ml-auto rounded-lg px-2 py-1 text-sm text-on-surface-variant/70 transition-colors hover:bg-surface-container-highest hover:text-primary"
+            className="ml-auto text-sm font-medium text-accent-fg hover:underline"
           >
             {e.overview.agentDetails}
           </Link>
         </>
       }
     >
-      <AgentAuthState status={status} showHint={false} />
-
       <AgentPresenceChips targetId={status.targetId} environments={environments.data ?? []} />
 
       {/* One line for the worst finding, because a card with room for one has
@@ -98,8 +103,12 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
           data-testid="overview-agent-finding"
           data-finding-code={finding.code}
         >
-          <FindingIcon severity={findingSeverity(finding)} size={14} />
-          <p className="text-xs text-on-surface-variant">{describeFinding(t, finding, lookup)}</p>
+          <FindingIcon
+            severity={findingSeverity(finding)}
+            quiet={isQuietFinding(finding)}
+            size={ICON_SM}
+          />
+          <p className="text-xs text-fg-muted">{describeFinding(t, finding, lookup)}</p>
         </div>
       )}
     </ToolCard>

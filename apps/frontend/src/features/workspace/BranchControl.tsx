@@ -1,13 +1,19 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { GitBranchInfo } from '@mangostudio/shared/git';
-import { Check, ChevronDown, Cloud, GitBranch, MoreHorizontal, Plus } from 'lucide-react';
+import { Check, ChevronDown, GitBranch, MoreHorizontal, Plus } from 'lucide-react';
 import { type FormEvent, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
+import { FIELD_CLASS, Input } from '@/components/ui/Input';
 import { Menu, MenuItem } from '@/components/ui/Menu';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useToast } from '@/components/ui/Toast';
 import { BranchPrTag, useBranchPrAnnotations } from '@/features/github/components/BranchPrTag';
 import { useI18n } from '@/hooks/use-i18n';
-import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
+import { DialogCodeBlock, DialogPathList } from './components/DialogBlocks';
+import { IconButton } from './components/IconButton';
 import {
   useCheckoutRemoteBranch,
   useCreateBranch,
@@ -146,6 +152,11 @@ export function BranchControl({
     }
   };
 
+  const closeRename = () => {
+    setRenameTarget(null);
+    setRenameValue('');
+  };
+
   const remove = async (force: boolean) => {
     if (!deleteTarget) return;
     try {
@@ -170,42 +181,44 @@ export function BranchControl({
 
   return (
     <>
-      <details ref={menuRef} className="group relative">
+      <details ref={menuRef} className="relative">
         <summary
           aria-label={labels.menu}
-          className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-1 py-1 text-on-surface transition-colors hover:bg-surface-container-high [&::-webkit-details-marker]:hidden"
+          className="flex h-8 cursor-pointer list-none items-center gap-2 rounded-sm px-2 text-fg transition-colors hover:bg-fill-hover [&::-webkit-details-marker]:hidden"
         >
-          <GitBranch size={15} className="shrink-0 text-primary" />
+          <GitBranch size={ICON_MD} className="shrink-0 text-fg-muted" />
           <span
-            className="min-w-0 flex-1 truncate font-mono text-xs font-semibold"
+            className="min-w-0 flex-1 truncate font-mono text-xs font-medium"
             title={branchName}
           >
             {branchName}
           </span>
-          <ChevronDown
-            size={13}
-            className="shrink-0 text-on-surface-variant transition-transform group-open:rotate-180"
-          />
+          <ChevronDown size={ICON_SM} className="shrink-0 text-fg-muted" />
         </summary>
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 min-w-64 rounded-xl border border-outline-variant/20 bg-surface-container-high shadow-2xl">
+        {/* `overflow-visible` undoes the panel's clip: the row menu below is
+            itself a panel and has to be able to leave this one. */}
+        <div className="dropdown-panel absolute top-full right-0 left-0 mt-1 min-w-64 overflow-visible">
           {/* Scrolling is dropped while a row menu is open so the popover is not clipped by this container. */}
           <div
-            className={`p-1.5 max-h-64 ${
+            className={`max-h-64 p-1 ${
               rowMenu === null ? 'app-scrollbar overflow-y-auto' : 'overflow-visible'
             }`}
           >
             {branches.isLoading ? (
-              <p className="px-2 py-3 text-xs text-on-surface-variant">{t.common.loading}</p>
+              <p className="px-2 py-3 text-xs text-fg-muted">{t.common.loading}</p>
             ) : (
               <>
-                <p className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                <MicroLabel as="p" className="block px-2 py-1">
                   {labels.localSection}
-                </p>
+                </MicroLabel>
                 {branches.data?.branches.length ? (
                   branches.data.branches.map((item) => (
                     <div
                       key={item.name}
-                      className="flex items-center gap-1 rounded-lg pr-1 hover:bg-surface-container-highest"
+                      className={cn(
+                        'flex items-center gap-1 rounded-sm pr-1 transition-colors hover:bg-fill-hover',
+                        item.current && 'bg-fill-selected'
+                      )}
                     >
                       <button
                         type="button"
@@ -213,31 +226,30 @@ export function BranchControl({
                         onClick={() => void switchTo(item.name)}
                         aria-label={labels.switchTo.replace('{branch}', item.name)}
                         title={item.name}
-                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left disabled:cursor-default"
+                        className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm px-2 text-left disabled:cursor-default"
                       >
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">
                           {item.name}
                         </span>
                         {/* Which pull request this branch became, and whether
                             it is merged — so "delete" is an informed click
                             rather than a guess. */}
                         <BranchPrTag annotation={prAnnotations.get(item.name)} />
-                        {item.current ? <Check size={13} className="text-primary" /> : null}
+                        {item.current ? (
+                          <Check size={ICON_MD} className="shrink-0 text-accent-fg" />
+                        ) : null}
                       </button>
                       <Menu
                         open={rowMenu === item.name}
                         onOpenChange={(next) => setRowMenu(next ? item.name : null)}
                         panelClassName="w-40"
                         trigger={(triggerProps) => (
-                          <button
-                            type="button"
-                            aria-label={labels.itemMenu.replace('{branch}', item.name)}
-                            title={labels.itemMenu.replace('{branch}', item.name)}
-                            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+                          <IconButton
+                            label={labels.itemMenu.replace('{branch}', item.name)}
                             {...triggerProps}
                           >
-                            <MoreHorizontal size={13} />
-                          </button>
+                            <MoreHorizontal size={ICON_SM} />
+                          </IconButton>
                         )}
                       >
                         <MenuItem
@@ -264,13 +276,13 @@ export function BranchControl({
                     </div>
                   ))
                 ) : (
-                  <p className="px-2 py-3 text-xs text-on-surface-variant">{labels.empty}</p>
+                  <p className="px-2 py-3 text-xs text-fg-muted">{labels.empty}</p>
                 )}
                 {remotes.length > 0 ? (
                   <>
-                    <p className="mt-1 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
+                    <MicroLabel as="p" className="mt-1 block px-2 py-1">
                       {labels.remoteSection}
-                    </p>
+                    </MicroLabel>
                     {remotes.map((item) => (
                       <button
                         key={item.ref}
@@ -279,10 +291,9 @@ export function BranchControl({
                         onClick={() => void checkoutRemote(item.ref, item.name)}
                         aria-label={labels.checkoutRemote.replace('{branch}', item.ref)}
                         title={item.ref}
-                        className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-container-highest disabled:cursor-default"
+                        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left transition-colors hover:bg-fill-hover disabled:cursor-default"
                       >
-                        <Cloud size={12} className="shrink-0 text-on-surface-variant" />
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">
                           {item.ref}
                         </span>
                       </button>
@@ -292,177 +303,118 @@ export function BranchControl({
               </>
             )}
           </div>
-          <form
-            onSubmit={(event) => void create(event)}
-            className="border-t border-outline-variant/15 p-2"
-          >
+          <form onSubmit={(event) => void create(event)} className="border-t border-stroke p-2">
             <label className="sr-only" htmlFor="git-create-branch">
               {labels.create}
             </label>
-            <div className="flex gap-1.5">
+            <div className="flex gap-2">
               <input
                 id="git-create-branch"
                 value={newBranch}
                 onChange={(event) => setNewBranch(event.target.value)}
                 placeholder={labels.createPlaceholder}
-                className="min-w-0 flex-1 rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-2 py-1.5 font-mono text-[11px] outline-none focus:border-primary/60"
+                className={cn(FIELD_CLASS, 'min-w-0 flex-1 font-mono text-xs')}
               />
-              <button
+              <Button
                 type="submit"
+                size="icon"
                 disabled={pending || !newBranch.trim()}
                 aria-label={labels.create}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-lg bg-primary text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Plus size={13} />
-              </button>
+                <Plus size={ICON_MD} />
+              </Button>
             </div>
           </form>
         </div>
       </details>
 
       {renameTarget ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="git-branch-rename-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
-        >
-          <form
-            onSubmit={(event) => void rename(event)}
-            className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl"
-          >
-            <h3 id="git-branch-rename-title" className="text-lg font-bold text-on-surface">
-              {labels.renameTitle.replace('{branch}', renameTarget)}
-            </h3>
-            <label className="block space-y-1">
-              <span className="sr-only">{labels.renameLabel}</span>
-              <input
-                value={renameValue}
-                onChange={(event) => setRenameValue(event.target.value)}
-                aria-label={labels.renameLabel}
-                placeholder={labels.createPlaceholder}
-                className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 font-mono text-xs text-on-surface outline-none focus:border-primary/60"
-              />
-            </label>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => {
-                  setRenameTarget(null);
-                  setRenameValue('');
-                }}
-              >
+        <Dialog
+          size="sm"
+          title={labels.renameTitle.replace('{branch}', renameTarget)}
+          onSubmit={(event) => void rename(event)}
+          onClose={closeRename}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={closeRename}>
                 {labels.renameCancel}
               </Button>
               <Button
                 type="submit"
-                className="flex-1"
                 loading={renameMutation.isPending}
                 disabled={!renameValue.trim() || renameValue.trim() === renameTarget}
               >
                 {labels.renameConfirm}
               </Button>
-            </div>
-          </form>
-        </div>
+            </>
+          }
+        >
+          <Input
+            value={renameValue}
+            onChange={(event) => setRenameValue(event.target.value)}
+            aria-label={labels.renameLabel}
+            placeholder={labels.createPlaceholder}
+            className="font-mono"
+          />
+        </Dialog>
       ) : null}
 
       {deleteTarget ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="git-branch-delete-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
-        >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
-            <div className="space-y-2">
-              <h3 id="git-branch-delete-title" className="text-lg font-bold text-on-surface">
-                {deleteTarget.notMerged
-                  ? labels.deleteNotMergedTitle
-                  : labels.deleteTitle.replace('{branch}', deleteTarget.name)}
-              </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">
-                {deleteTarget.notMerged ? labels.deleteNotMergedHint : labels.deleteHint}
-              </p>
-              <p className="truncate rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
-                {deleteTarget.name}
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setDeleteTarget(null)}
-              >
+        <Dialog
+          size="sm"
+          title={
+            deleteTarget.notMerged
+              ? labels.deleteNotMergedTitle
+              : labels.deleteTitle.replace('{branch}', deleteTarget.name)
+          }
+          description={deleteTarget.notMerged ? labels.deleteNotMergedHint : labels.deleteHint}
+          onClose={() => setDeleteTarget(null)}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setDeleteTarget(null)}>
                 {labels.deleteCancel}
               </Button>
               <Button
                 type="button"
                 variant="danger"
-                className="flex-1"
                 loading={deleteMutation.isPending}
                 onClick={() => void remove(deleteTarget.notMerged)}
               >
                 {deleteTarget.notMerged ? labels.deleteNotMergedConfirm : labels.deleteConfirm}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <DialogCodeBlock className="truncate">{deleteTarget.name}</DialogCodeBlock>
+        </Dialog>
       ) : null}
 
       {blockedSwitch ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="git-checkout-blocked-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
-        >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
-            <div className="space-y-2">
-              <h3 id="git-checkout-blocked-title" className="text-lg font-bold text-on-surface">
-                {labels.checkoutBlockedTitle}
-              </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">
-                {labels.checkoutBlockedHint}
-              </p>
-            </div>
-            {blockedSwitch.paths.length > 0 ? (
-              <div>
-                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-                  {labels.conflictingPaths}
-                </p>
-                <ul className="max-h-32 overflow-y-auto rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
-                  {blockedSwitch.paths.map((path) => (
-                    <li key={path} className="truncate py-0.5" title={path}>
-                      {path}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setBlockedSwitch(null)}
-              >
+        <Dialog
+          size="sm"
+          title={labels.checkoutBlockedTitle}
+          description={labels.checkoutBlockedHint}
+          onClose={() => setBlockedSwitch(null)}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setBlockedSwitch(null)}>
                 {labels.cancel}
               </Button>
-              <Button
-                type="button"
-                className="flex-1"
-                loading={pending}
-                onClick={() => void stashAndSwitch()}
-              >
+              <Button type="button" loading={pending} onClick={() => void stashAndSwitch()}>
                 {labels.stashAndSwitch}
               </Button>
+            </>
+          }
+        >
+          {blockedSwitch.paths.length > 0 ? (
+            <div className="space-y-1.5">
+              <MicroLabel as="p" className="block">
+                {labels.conflictingPaths}
+              </MicroLabel>
+              <DialogPathList paths={blockedSwitch.paths} />
             </div>
-          </div>
-        </div>
+          ) : null}
+        </Dialog>
       ) : null}
     </>
   );

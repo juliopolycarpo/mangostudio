@@ -11,33 +11,42 @@
  */
 
 import type { ExternalNoticePart } from '@mangostudio/shared/types';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 
 export interface ExternalNoticeBlockProps {
   part: ExternalNoticePart;
 }
 
-const TONE: Record<ExternalNoticePart['severity'], string> = {
-  info: 'border-outline-variant/30 bg-surface-container-low/40 text-on-surface-variant',
-  warning: 'border-warning/30 bg-warning/10 text-warning',
-  error: 'border-error/30 bg-error/5 text-error',
-};
+/** The vendor's severity picks the callout's tone; an `error` notice is still only a notice. */
+const TONE = {
+  info: 'info',
+  warning: 'warning',
+  error: 'danger',
+} as const satisfies Record<ExternalNoticePart['severity'], 'info' | 'warning' | 'danger'>;
 
 export function ExternalNoticeBlock({ part }: ExternalNoticeBlockProps) {
   const { t } = useI18n();
   const label = t.externalAgents.notice[part.severity];
 
   return (
-    <div
+    <Callout
       role="status"
       data-severity={part.severity}
-      className={`max-w-2xl rounded-xl border px-3 py-2 text-xs leading-relaxed ${TONE[part.severity]}`}
+      tone={TONE[part.severity]}
+      className="max-w-(--timeline-card-max)"
+      title={
+        <>
+          {/* The glyph and fill carry the severity visually; the word is for
+              the reader who gets neither. */}
+          <span className="sr-only">{label}: </span>
+          <span className="whitespace-pre-wrap break-words">{part.title}</span>
+        </>
+      }
     >
-      <span className="mr-1.5 text-[10px] font-bold uppercase tracking-widest">{label}</span>
-      <span className="whitespace-pre-wrap break-words font-medium">{part.title}</span>
       {part.description ? (
-        <p className="mt-1 whitespace-pre-wrap break-words opacity-80">{part.description}</p>
+        <p className="whitespace-pre-wrap break-words">{part.description}</p>
       ) : null}
-    </div>
+    </Callout>
   );
 }

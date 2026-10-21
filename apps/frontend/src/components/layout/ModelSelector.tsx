@@ -1,10 +1,15 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import type { ProviderType } from '@mangostudio/shared/types';
-import { Activity, Check, ChevronDown, Cpu, Lock, Sparkles, Zap } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { Check, ChevronDown, Lock } from 'lucide-react';
+import { AnimatePresence } from 'motion/react';
+import { useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
-import { useMotionPresets } from '@/lib/motion/use-motion-presets';
+import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { getModelSelectorPlaceholder } from '../../utils/model-utils';
 
@@ -26,8 +31,7 @@ export function ModelSelector({
   lockedProvider,
 }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const { popoverAbove } = useMotionPresets();
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { containerRef, triggerRef, onKeyDown } = useDismissable(isOpen, () => setIsOpen(false));
   const { t } = useI18n();
 
   const selectedModel = activeModels.find((m) => m.modelId === activeModel);
@@ -36,21 +40,6 @@ export function ModelSelector({
     unavailable: t.models.unavailable,
     noModelsAvailable: t.models.noModelsAvailable,
   });
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
 
   const handleToggle = () => {
     if (!isDisabled) setIsOpen(!isOpen);
@@ -77,121 +66,114 @@ export function ModelSelector({
     return key;
   };
 
-  const getModelIcon = (name: string) => {
-    const low = name.toLowerCase();
-    if (low.includes('flash')) return <Zap className="w-3.5 h-3.5 text-amber-400" />;
-    if (low.includes('pro')) return <Cpu className="w-3.5 h-3.5 text-primary" />;
-    if (low.includes('lite')) return <Activity className="w-3.5 h-3.5 text-emerald-400" />;
-    return <Sparkles className="w-3.5 h-3.5 text-blue-400" />;
-  };
+  // Said once for the whole list rather than under every locked group: the
+  // reason is the same sentence for all of them, and it names the one provider
+  // the chat is tied to. Only when a row is actually locked — a catalog with
+  // nothing else in it has no padlock to explain.
+  const lockReason =
+    lockedProvider != null && activeModels.some((model) => model.provider !== lockedProvider)
+      ? formatMessage(t.models.providerLocked, { provider: getProviderLabel(lockedProvider) })
+      : null;
 
   return (
-    <div className="relative flex items-center" ref={containerRef}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    <div className="flex items-center" ref={containerRef} onKeyDown={onKeyDown}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={handleToggle}
         disabled={isDisabled}
-        aria-haspopup="listbox"
+        // `true`, not `listbox`: the panel is grouped (provider headings, a
+        // lock reason, badges, rows that cannot be chosen) and its rows are
+        // plain buttons, so promising a listbox's arrow-key model would be a
+        // claim nothing here keeps.
+        aria-haspopup="true"
         aria-expanded={isOpen}
         aria-label={t.chat.input.modelLabel}
         // The open state is styled off `aria-expanded` in `index.css`, so it
-        // follows the composer's runner accent rather than the product primary.
-        className={cn(
-          'composer-chip group max-w-[13rem]',
-          isDisabled && 'opacity-50 cursor-not-allowed'
-        )}
+        // follows the composer's runner accent rather than the product accent.
+        className="composer-chip max-w-[13rem] disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <span className="composer-chip-key text-on-surface-variant/70">{`${t.chat.input.modelLabel}:`}</span>
+        <span className="composer-chip-key text-fg-muted">{`${t.chat.input.modelLabel}:`}</span>
         <span className="composer-chip-value composer-chip-runner">
           {selectedModel?.displayName || placeholder}
         </span>
-        <ChevronDown
-          className={cn(
-            'size-3 shrink-0 text-on-surface-variant/50 transition-transform duration-200',
-            isOpen && 'rotate-180 text-current'
-          )}
-        />
+        <ChevronDown size={ICON_SM} className="shrink-0" />
       </button>
 
       <AnimatePresence>
         {isOpen && (
-          <motion.div
-            {...popoverAbove}
-            /* Upward: this control lives in the composer at the foot of the
-               viewport, and the downward panel it inherited from the header
-               opened off the bottom of the screen. */
-            className="dropdown-panel absolute left-0 bottom-full mb-2 w-[19rem] max-h-[60vh] hide-scrollbar overflow-y-auto"
+          <ComposerPopover
+            animated
+            anchor={triggerRef}
+            className="app-scrollbar max-h-[60vh] space-y-1 overflow-y-auto p-1"
           >
-            <div className="py-2">
-              {Object.keys(groups).length === 0 ? (
-                <div className="px-4 py-3 text-sm text-on-surface-variant italic">
-                  {t.models.noModelsAvailable}
-                </div>
-              ) : (
-                Object.entries(groups).map(([providerKey, models]) => (
-                  <div key={providerKey} className="mb-2 last:mb-0">
-                    <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/50">
-                      {getProviderLabel(providerKey)}
-                    </div>
-                    {models.map((model) => {
-                      const isLocked = lockedProvider != null && model.provider !== lockedProvider;
-                      return (
-                        <button
-                          type="button"
-                          key={model.modelId}
-                          onClick={() => !isLocked && handleSelect(model.modelId)}
-                          disabled={isLocked}
+            {lockReason ? <p className="px-2 pt-1 text-xs text-fg-muted">{lockReason}</p> : null}
+            {Object.keys(groups).length === 0 ? (
+              <div className="px-2 py-2 text-sm text-fg-muted">{t.models.noModelsAvailable}</div>
+            ) : (
+              Object.entries(groups).map(([providerKey, models]) => (
+                <div key={providerKey}>
+                  <MicroLabel as="div" className="px-2 pb-1 pt-2">
+                    {getProviderLabel(providerKey)}
+                  </MicroLabel>
+                  {models.map((model) => {
+                    const isLocked = lockedProvider != null && model.provider !== lockedProvider;
+                    const isSelected = activeModel === model.modelId && !isLocked;
+                    const isPreview = model.modelId.includes('preview');
+                    const showsReasoning = model.capabilities?.reasoning && !isLocked;
+                    return (
+                      <button
+                        type="button"
+                        key={model.modelId}
+                        onClick={() => !isLocked && handleSelect(model.modelId)}
+                        disabled={isLocked}
+                        className={cn(
+                          'flex h-8 w-full items-center gap-2 rounded-sm px-2 text-left transition-colors',
+                          // A locked row is not faded: its name says which models
+                          // exist, and the line at the top says why they are out
+                          // of reach. The name steps down a text colour instead.
+                          isLocked
+                            ? 'cursor-not-allowed'
+                            : 'hover:bg-fill-hover active:bg-fill-pressed',
+                          isSelected && 'bg-fill-selected'
+                        )}
+                      >
+                        {/* The one mark a row ever wears, and only when the chat's
+                            provider rules it out. While any row is locked the slot
+                            is held for every row so names keep one left edge; a
+                            list with no lock starts its names at the row's own
+                            inset, like every other composer menu. The provider
+                            heading already says who makes the model. */}
+                        {lockReason ? (
+                          <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
+                            {isLocked ? <Lock size={ICON_MD} /> : null}
+                          </span>
+                        ) : null}
+                        <span
                           className={cn(
-                            'w-full flex items-center justify-between px-4 py-2.5 text-left transition-all duration-150',
-                            !isLocked && 'hover:bg-primary/10 active:bg-primary/20 group/item',
-                            activeModel === model.modelId && !isLocked && 'bg-primary/5',
-                            isLocked && 'opacity-40 cursor-not-allowed'
+                            'min-w-0 flex-1 truncate text-sm',
+                            isLocked ? 'text-fg-muted' : 'text-fg',
+                            isSelected && 'font-medium'
                           )}
                         >
-                          <div className="flex items-center gap-3">
-                            <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                              {isLocked ? (
-                                <Lock className="w-3.5 h-3.5 text-on-surface-variant" />
-                              ) : (
-                                getModelIcon(model.displayName)
-                              )}
-                            </div>
-                            <div>
-                              <div
-                                className={cn(
-                                  'text-sm font-medium transition-colors',
-                                  activeModel === model.modelId && !isLocked
-                                    ? 'text-primary'
-                                    : 'text-on-surface group-hover/item:text-on-surface'
-                                )}
-                              >
-                                {model.displayName}
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                {model.modelId.includes('preview') && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-container-highest text-on-surface-variant border border-outline-variant/30">
-                                    {t.models.preview}
-                                  </span>
-                                )}
-                                {model.capabilities?.reasoning && !isLocked && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/30">
-                                    {t.thinking.reasoningBadge}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          {activeModel === model.modelId && !isLocked && (
-                            <Check className="w-4 h-4 text-primary" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))
-              )}
-            </div>
-          </motion.div>
+                          {model.displayName}
+                        </span>
+                        {/* On the row's own line, ahead of the check: a badge on a
+                            second line made every reasoning model 22px taller than
+                            its neighbours and broke the list's rhythm. */}
+                        {isPreview && <Badge variant="neutral">{t.models.preview}</Badge>}
+                        {showsReasoning && (
+                          <Badge variant="neutral">{t.thinking.reasoningBadge}</Badge>
+                        )}
+                        {isSelected && <Check size={ICON_MD} className="shrink-0 text-accent-fg" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </ComposerPopover>
         )}
       </AnimatePresence>
     </div>

@@ -1,76 +1,23 @@
 import type { DiffPreviewMode } from '@mangostudio/shared/app-settings';
-import { Card } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { Check } from 'lucide-react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
+import { SettingToggle } from '@/components/settings/SettingToggle';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useGlobalSettings } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import type { CodeThemeConfig, ThemeConfig } from '@/hooks/use-theme';
 import { useTheme } from '@/hooks/use-theme';
 import { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { ThemePreviewSample } from './ThemePreviewSample';
 
+type AppTheme = ThemeConfig['appTheme'];
 type FontSize = ThemeConfig['fontSize'];
 type ChatDensity = ThemeConfig['chatDensity'];
-
-function OptionButton({
-  selected,
-  disabled,
-  onClick,
-  label,
-  badge,
-}: {
-  selected: boolean;
-  disabled?: boolean;
-  onClick?: () => void;
-  label: string;
-  badge?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={selected}
-      className={`
-        flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200
-        border focus:outline-none focus:ring-2 focus:ring-primary/40
-        ${
-          selected
-            ? 'bg-primary/15 border-primary/50 text-primary'
-            : disabled
-              ? 'opacity-40 cursor-not-allowed border-outline-variant/20 text-on-surface-variant/50'
-              : 'border-outline-variant/20 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface cursor-pointer'
-        }
-      `}
-    >
-      {label}
-      {badge && (
-        <span className="ml-1.5 text-[10px] font-label font-bold text-on-surface-variant/50 uppercase tracking-wide">
-          {badge}
-        </span>
-      )}
-    </button>
-  );
-}
-
-function SettingsSection({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-        {title}
-      </h3>
-      <p className="text-sm text-on-surface-variant/60">{description}</p>
-      {children}
-    </Card>
-  );
-}
 
 const THEME_I18N_KEYS = {
   'one-dark-pro': 'oneDarkPro',
@@ -79,6 +26,13 @@ const THEME_I18N_KEYS = {
   'one-light': 'oneLight',
 } as const satisfies Record<CodeThemeId, string>;
 
+/**
+ * A code theme as a tile: a live sample of the theme above its name. The
+ * current theme is marked as the current item is everywhere else — a neutral
+ * fill and the accent bar on the caption's leading edge — plus a check and a
+ * firmer border, so selection is never the colour alone and the tile keeps one
+ * border width whether or not it is chosen.
+ */
 function ThemeCard({
   themeId,
   selected,
@@ -95,23 +49,26 @@ function ThemeCard({
       type="button"
       onClick={onClick}
       aria-pressed={selected}
-      className={`
-        rounded-xl border-2 transition-all duration-200 overflow-hidden text-left
-        focus:outline-none focus:ring-2 focus:ring-primary/40
-        ${selected ? 'border-primary ring-1 ring-primary/30' : 'border-outline-variant/20 hover:border-outline-variant/50 cursor-pointer'}
-      `}
+      className={cn(
+        'cursor-pointer overflow-hidden rounded-sm border text-left transition-colors',
+        selected ? 'border-stroke-strong' : 'border-stroke hover:border-stroke-strong'
+      )}
     >
       <ThemePreviewSample themeId={themeId} />
-      <div className="px-3 py-2 text-xs font-semibold text-on-surface-variant bg-surface-container-high">
+      <div
+        className={cn(
+          'relative flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-fg',
+          selected ? cn('bg-fill-selected', SELECTION_BAR) : 'bg-surface'
+        )}
+      >
         {label}
+        {selected ? (
+          <Check size={ICON_SM} className="shrink-0 text-accent-fg" aria-hidden="true" />
+        ) : null}
       </div>
     </button>
   );
 }
-
-const PREVIEW_SENTENCE_KEY = 'The quick brown fox jumps over the lazy dog.';
-
-const DIFF_PREVIEW_MODES = ['expanded', 'collapsed', 'collapse_older'] as const;
 
 const DIFF_PREVIEW_MODE_I18N_KEYS = {
   expanded: 'modeExpanded',
@@ -119,18 +76,17 @@ const DIFF_PREVIEW_MODE_I18N_KEYS = {
   collapse_older: 'modeCollapseOlder',
 } as const satisfies Record<DiffPreviewMode, string>;
 
+const DIFF_PREVIEW_MODES = ['expanded', 'collapsed', 'collapse_older'] as const;
+
 /**
- * Appearance settings tab: app theme, code theme, font size, chat density,
- * file change previews.
+ * Appearance settings page: app theme, font size and chat density in one
+ * card, then code theme and file change previews.
  */
 export function AppearanceSettings() {
   const { t } = useI18n();
   const { config, setConfig } = useTheme();
   const { chatDisplaySettings, setDiffPreviewsEnabled, setDiffPreviewMode } = useGlobalSettings();
   const s = t.settings.appearance;
-
-  const setFontSize = (fontSize: FontSize) => setConfig({ fontSize });
-  const setDensity = (chatDensity: ChatDensity) => setConfig({ chatDensity });
 
   const codeTheme = config.codeTheme;
   const setCodeThemeMode = (mode: CodeThemeConfig['mode']) =>
@@ -146,50 +102,71 @@ export function AppearanceSettings() {
   const lightThemes = CODE_THEMES.filter((id) => id === 'github-light' || id === 'one-light');
 
   return (
-    <div className="space-y-4">
-      {/* ── App Theme ── */}
-      <SettingsSection title={s.appTheme.label} description={s.appTheme.description}>
-        <div className="flex flex-wrap gap-2">
-          <OptionButton
-            selected={config.appTheme === 'dark'}
-            onClick={() => setConfig({ appTheme: 'dark' })}
-            label={s.appTheme.dark}
+    <SettingsPage title={s.title}>
+      {/* The page's plain choices share one card, one row each, as General's
+          first card does; Code theme and File changes keep their own headed
+          sections because each carries more than a single control. */}
+      <SettingsSection>
+        <SettingsRow label={s.appTheme.label} hint={s.appTheme.description} layout="stacked">
+          <SettingsSegmented<AppTheme>
+            ariaLabel={s.appTheme.label}
+            value={config.appTheme}
+            options={[
+              { value: 'dark', label: s.appTheme.dark },
+              { value: 'light', label: s.appTheme.light },
+              { value: 'system', label: s.appTheme.system },
+            ]}
+            onChange={(appTheme) => setConfig({ appTheme })}
           />
-          <OptionButton
-            selected={config.appTheme === 'light'}
-            onClick={() => setConfig({ appTheme: 'light' })}
-            label={s.appTheme.light}
+        </SettingsRow>
+        <SettingsRow label={s.fontSize.label} hint={s.fontSize.description} layout="stacked">
+          <SettingsSegmented<FontSize>
+            ariaLabel={s.fontSize.label}
+            value={config.fontSize}
+            options={[
+              { value: 'small', label: s.fontSize.small },
+              { value: 'default', label: s.fontSize.default },
+              { value: 'large', label: s.fontSize.large },
+            ]}
+            onChange={(fontSize) => setConfig({ fontSize })}
           />
-          <OptionButton
-            selected={config.appTheme === 'system'}
-            onClick={() => setConfig({ appTheme: 'system' })}
-            label={s.appTheme.system}
+          <p
+            className="mt-3 leading-relaxed text-fg-muted"
+            style={{ fontSize: 'var(--chat-font-size)' }}
+          >
+            {s.fontSize.preview}
+          </p>
+        </SettingsRow>
+        <SettingsRow label={s.chatDensity.label} hint={s.chatDensity.description} layout="stacked">
+          <SettingsSegmented<ChatDensity>
+            ariaLabel={s.chatDensity.label}
+            value={config.chatDensity}
+            options={[
+              { value: 'compact', label: s.chatDensity.compact },
+              { value: 'default', label: s.chatDensity.default },
+              { value: 'comfortable', label: s.chatDensity.comfortable },
+            ]}
+            onChange={(chatDensity) => setConfig({ chatDensity })}
           />
-        </div>
+        </SettingsRow>
       </SettingsSection>
 
-      {/* ── Code Theme ── */}
-      <SettingsSection title={s.codeTheme.label} description={s.codeTheme.description}>
-        <div className="flex flex-wrap gap-2">
-          <OptionButton
-            selected={codeTheme.mode === 'auto'}
-            onClick={() => setCodeThemeMode('auto')}
-            label={s.codeTheme.auto}
-          />
-          <OptionButton
-            selected={codeTheme.mode === 'manual'}
-            onClick={() => setCodeThemeMode('manual')}
-            label={s.codeTheme.manual}
-          />
-        </div>
+      <SettingsSection title={s.codeTheme.label} description={s.codeTheme.description} padded>
+        <SettingsSegmented<CodeThemeConfig['mode']>
+          ariaLabel={s.codeTheme.label}
+          value={codeTheme.mode}
+          options={[
+            { value: 'auto', label: s.codeTheme.auto },
+            { value: 'manual', label: s.codeTheme.manual },
+          ]}
+          onChange={setCodeThemeMode}
+        />
 
         {codeTheme.mode === 'auto' ? (
-          <div className="space-y-3 mt-2">
-            <div>
-              <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
-                {s.codeTheme.darkPreference}
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-fg">{s.codeTheme.darkPreference}</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {darkThemes.map((id) => (
                   <ThemeCard
                     key={id}
@@ -201,11 +178,9 @@ export function AppearanceSettings() {
                 ))}
               </div>
             </div>
-            <div>
-              <p className="text-xs font-semibold text-on-surface-variant/70 mb-2">
-                {s.codeTheme.lightPreference}
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-fg">{s.codeTheme.lightPreference}</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {lightThemes.map((id) => (
                   <ThemeCard
                     key={id}
@@ -219,7 +194,7 @@ export function AppearanceSettings() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {CODE_THEMES.map((id) => (
               <ThemeCard
                 key={id}
@@ -233,68 +208,26 @@ export function AppearanceSettings() {
         )}
       </SettingsSection>
 
-      {/* ── Font Size ── */}
-      <SettingsSection title={s.fontSize.label} description={s.fontSize.description}>
-        <div className="flex flex-wrap gap-2">
-          {(['small', 'default', 'large'] as const).map((size) => (
-            <OptionButton
-              key={size}
-              selected={config.fontSize === size}
-              onClick={() => setFontSize(size)}
-              label={s.fontSize[size]}
-            />
-          ))}
-        </div>
-        {/* Live preview */}
-        <p
-          className="mt-2 text-on-surface-variant/70 font-body leading-relaxed transition-all duration-200"
-          style={{ fontSize: 'var(--chat-font-size)' }}
-        >
-          {PREVIEW_SENTENCE_KEY}
-        </p>
-      </SettingsSection>
-
-      {/* ── File Change Previews ── */}
       <SettingsSection title={s.fileChanges.label} description={s.fileChanges.description}>
-        <div className="flex items-start justify-between gap-4">
-          <p className="text-sm font-medium text-on-surface">{s.fileChanges.enabled}</p>
-          <Checkbox
-            checked={chatDisplaySettings.diffPreviewsEnabled}
-            onChange={(event) => setDiffPreviewsEnabled(event.target.checked)}
-            aria-label={s.fileChanges.enabled}
-            className="mt-1"
-          />
-        </div>
-        {chatDisplaySettings.diffPreviewsEnabled && (
-          <>
-            <div className="flex flex-wrap gap-2">
-              {DIFF_PREVIEW_MODES.map((mode) => (
-                <OptionButton
-                  key={mode}
-                  selected={chatDisplaySettings.diffPreviewMode === mode}
-                  onClick={() => setDiffPreviewMode(mode)}
-                  label={s.fileChanges[DIFF_PREVIEW_MODE_I18N_KEYS[mode]]}
-                />
-              ))}
-            </div>
-            <p className="text-xs text-on-surface-variant/50">{s.fileChanges.modeDescription}</p>
-          </>
-        )}
-      </SettingsSection>
-
-      {/* ── Chat Density ── */}
-      <SettingsSection title={s.chatDensity.label} description={s.chatDensity.description}>
-        <div className="flex flex-wrap gap-2">
-          {(['compact', 'default', 'comfortable'] as const).map((density) => (
-            <OptionButton
-              key={density}
-              selected={config.chatDensity === density}
-              onClick={() => setDensity(density)}
-              label={s.chatDensity[density]}
+        <SettingToggle
+          label={s.fileChanges.enabled}
+          checked={chatDisplaySettings.diffPreviewsEnabled}
+          onChange={setDiffPreviewsEnabled}
+        />
+        {chatDisplaySettings.diffPreviewsEnabled ? (
+          <SettingsRow hint={s.fileChanges.modeDescription} layout="stacked">
+            <SettingsSegmented<DiffPreviewMode>
+              ariaLabel={s.fileChanges.label}
+              value={chatDisplaySettings.diffPreviewMode}
+              options={DIFF_PREVIEW_MODES.map((mode) => ({
+                value: mode,
+                label: s.fileChanges[DIFF_PREVIEW_MODE_I18N_KEYS[mode]],
+              }))}
+              onChange={setDiffPreviewMode}
             />
-          ))}
-        </div>
+          </SettingsRow>
+        ) : null}
       </SettingsSection>
-    </div>
+    </SettingsPage>
   );
 }

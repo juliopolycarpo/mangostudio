@@ -9,6 +9,7 @@
  */
 
 import { sshPreflightCommands } from '@mangostudio/shared/environments';
+import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { CopyLine } from '../components/CopyLine';
@@ -32,7 +33,7 @@ export function ReachStep({ form, onChange, onContinue }: ReachStepProps) {
 
   return (
     <div className="space-y-4" data-testid="onboarding-reach-step">
-      <p className="text-on-surface-variant/70 text-xs">{labels.reachIntro}</p>
+      <p className="text-sm text-fg-muted">{labels.reachIntro}</p>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Input
@@ -83,13 +84,11 @@ export function ReachStep({ form, onChange, onContinue }: ReachStepProps) {
       {/* Said here rather than discovered at the push: a Windows target is a
           non-goal of the ssh transport, and finding that out three steps in
           after a platform probe is a worse way to learn it. */}
-      <p className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5 text-on-surface-variant/70 text-xs">
-        {labels.reachWindows}
-      </p>
+      <Callout tone="info">{labels.reachWindows}</Callout>
 
       {config.host ? (
-        <div className="space-y-2 rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-          <p className="text-on-surface-variant/70 text-xs">{add.sshPreflight}</p>
+        <div className="space-y-2">
+          <p className="text-sm text-fg-muted">{add.sshPreflight}</p>
           <CopyLine label={add.sshPreflightReach} value={sshPreflightCommands(config).reach} />
         </div>
       ) : null}

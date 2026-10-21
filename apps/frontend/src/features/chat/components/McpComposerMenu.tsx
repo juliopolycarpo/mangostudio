@@ -6,18 +6,31 @@
  */
 
 import type { ChatAttachment } from '@mangostudio/shared/chat';
-import type { McpPromptDescriptor, McpServer } from '@mangostudio/shared/mcp';
-import { useQuery } from '@tanstack/react-query';
-import { FileText, Plug, SquareSlash, X } from 'lucide-react';
-import { useState } from 'react';
+import type {
+  McpPromptDescriptor,
+  McpResourceDescriptor,
+  McpServer,
+} from '@mangostudio/shared/mcp';
+import { useQueries, useQuery } from '@tanstack/react-query';
+import { FileText, Plug, SquareSlash } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
+import { Dialog } from '@/components/ui/Dialog';
+import { FIELD_CLASS } from '@/components/ui/Input';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { getMcpPrompt, readMcpResource } from '@/features/settings/mcp/api';
 import {
   mcpServerListQueryOptions,
   mcpServerPromptsQueryOptions,
   mcpServerResourcesQueryOptions,
 } from '@/features/settings/mcp/queries';
+import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   flattenMcpPromptText,
@@ -46,12 +59,10 @@ export function McpComposerMenu({
   const { t } = useI18n();
   const labels = t.chat.input;
   const [open, setOpen] = useState(false);
+  const { containerRef, triggerRef, onKeyDown } = useDismissable(open, () => setOpen(false));
   const [argumentForm, setArgumentForm] = useState<ArgumentFormState | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const serversQuery = useQuery({ ...mcpServerListQueryOptions(), enabled: open });
-  const servers = (serversQuery.data?.servers ?? []).filter((server) => server.enabled);
 
   const insertResolvedPrompt = async (
     serverId: string,
@@ -77,6 +88,9 @@ export function McpComposerMenu({
 
   const handlePromptClick = (serverId: string, prompt: McpPromptDescriptor) => {
     if (prompt.arguments.length > 0) {
+      // The form is a modal: the menu behind it would be one more layer to
+      // dismiss, and the press that lands in the dialog is outside the menu.
+      setOpen(false);
       setArgumentForm({ serverId, prompt });
       return;
     }
@@ -99,64 +113,195 @@ export function McpComposerMenu({
   };
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => {
-          setOpen((value) => !value);
-          setErrorText(null);
-        }}
-        disabled={disabled}
-        aria-expanded={open}
-        className="terminal-chip composer-tool-chip"
-        title={labels.mcpMenuButton}
-      >
-        <Plug size={12} className="shrink-0" />
-        <span className="hidden sm:inline">MCP</span>
-      </button>
+    <>
+      {/* Not `relative`: the panel is anchored to the composer, not to this chip. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper. */}
+      <div ref={containerRef} onKeyDown={onKeyDown}>
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => {
+            setOpen((value) => !value);
+            setErrorText(null);
+          }}
+          disabled={disabled}
+          aria-expanded={open}
+          className="composer-chip composer-tool-chip"
+          title={labels.mcpMenuButton}
+        >
+          <Plug size={ICON_SM} className="shrink-0" />
+          <span className="hidden sm:inline">{t.tools.sources.mcp}</span>
+        </button>
 
-      {open && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-outline-variant/20 bg-surface-container-high p-3 shadow-2xl space-y-3">
-          {serversQuery.isLoading && (
-            <p className="text-xs text-on-surface-variant">{t.common.loading}</p>
-          )}
-          {!serversQuery.isLoading && servers.length === 0 && (
-            <p className="text-xs text-on-surface-variant/70">{labels.mcpMenuEmpty}</p>
-          )}
-          {errorText && (
-            <p className="text-xs text-error" role="alert">
-              {errorText}
-            </p>
-          )}
-          {servers.map((server) => (
-            <McpServerMenuSection
-              key={server.id}
-              server={server}
+        {open && (
+          <ComposerPopover
+            anchor={triggerRef}
+            className="app-scrollbar max-h-96 space-y-3 overflow-y-auto p-3"
+          >
+            <MicroLabel as="p">{labels.mcpMenuButton}</MicroLabel>
+            {errorText && <Callout tone="danger" role="alert" title={errorText} />}
+            <McpMenuCatalog
               chatId={chatId}
               busy={busy}
               onPromptClick={handlePromptClick}
               onResourceClick={(serverId, uri) => void handleResourceClick(serverId, uri)}
             />
-          ))}
-        </div>
-      )}
+          </ComposerPopover>
+        )}
+      </div>
 
+      {/* Outside the wrapper above, so an Escape typed in the form closes the form
+          (the dialog's own listener) instead of being taken by the menu, and a
+          press in it is not read as a press on the menu. */}
       {argumentForm && (
         <McpPromptArgumentDialog
           prompt={argumentForm.prompt}
           busy={busy}
-          onCancel={() => setArgumentForm(null)}
+          // The menu is closed while the form is up, so a failed insert would
+          // have nowhere to say so but here.
+          errorText={errorText}
+          onCancel={() => {
+            setArgumentForm(null);
+            setErrorText(null);
+          }}
           onSubmit={(values) =>
             void insertResolvedPrompt(argumentForm.serverId, argumentForm.prompt, values)
           }
         />
       )}
+    </>
+  );
+}
+
+/** What one enabled server offers the menu, with how far the asking has got. */
+interface McpServerCatalog {
+  readonly server: McpServer;
+  readonly prompts: readonly McpPromptDescriptor[];
+  readonly resources: readonly McpResourceDescriptor[];
+  /** Either listing is still on its way. */
+  readonly loading: boolean;
+  /** Either listing failed for a reason other than "this server doesn't do that". */
+  readonly failed: boolean;
+}
+
+interface McpMenuCatalogProps {
+  chatId: string | null;
+  busy: boolean;
+  onPromptClick: (serverId: string, prompt: McpPromptDescriptor) => void;
+  onResourceClick: (serverId: string, uri: string) => void;
+}
+
+/**
+ * The popover's body: every enabled server's prompts and resources, or the
+ * reason there is nothing to show.
+ *
+ * The listings are asked for here rather than inside each server's section
+ * because the panel has to know what its sections add up to. A tools-only
+ * server (both capabilities unsupported — the most common kind) contributes
+ * nothing, and when every server is like that the sections together drew an
+ * empty bordered box with no word in it. Only mounted while the popover is
+ * open, so nothing is fetched for a menu nobody opened.
+ */
+function McpMenuCatalog({ chatId, busy, onPromptClick, onResourceClick }: McpMenuCatalogProps) {
+  const { t } = useI18n();
+  const labels = t.chat.input;
+  const serversQuery = useQuery(mcpServerListQueryOptions());
+  const servers = (serversQuery.data?.servers ?? []).filter((server) => server.enabled);
+  const promptQueries = useQueries({
+    queries: servers.map((server) => mcpServerPromptsQueryOptions(server.id)),
+  });
+  const resourceQueries = useQueries({
+    queries: servers.map((server) => mcpServerResourcesQueryOptions(server.id)),
+  });
+
+  // A refetch that fails keeps the list it had, so only a menu with nothing to
+  // show can be a failed one — and the list failing is not "no prompts".
+  if (!serversQuery.data) {
+    return serversQuery.isError ? (
+      <McpLoadFailed
+        retrying={serversQuery.isFetching}
+        onRetry={() => void serversQuery.refetch()}
+      />
+    ) : (
+      <McpMenuLoading />
+    );
+  }
+
+  const catalogs: McpServerCatalog[] = servers.map((server, index) => {
+    const prompts = promptQueries[index];
+    const resources = resourceQueries[index];
+    return {
+      server,
+      prompts: prompts?.data?.prompts ?? [],
+      resources: resources?.data?.resources ?? [],
+      loading: Boolean(prompts?.isPending || resources?.isPending),
+      failed: Boolean(prompts?.isError || resources?.isError),
+    };
+  });
+  const loading = catalogs.some((catalog) => catalog.loading);
+  const failed = catalogs.some((catalog) => catalog.failed);
+  const hasContent = catalogs.some(
+    (catalog) => catalog.prompts.length > 0 || catalog.resources.length > 0
+  );
+  const failedQueries = [...promptQueries, ...resourceQueries].filter((query) => query.isError);
+  const retry = () => {
+    for (const query of failedQueries) void query.refetch();
+  };
+
+  return (
+    <>
+      {catalogs.map((catalog) => (
+        <McpServerMenuSection
+          key={catalog.server.id}
+          catalog={catalog}
+          chatId={chatId}
+          busy={busy}
+          onPromptClick={onPromptClick}
+          onResourceClick={onResourceClick}
+        />
+      ))}
+      {/* A listing that failed is not an empty one: "exposes no prompts" would
+          be false for exactly the servers the user is trying to reach. */}
+      {failed && (
+        <McpLoadFailed retrying={failedQueries.some((query) => query.isFetching)} onRetry={retry} />
+      )}
+      {!loading && !failed && !hasContent && (
+        <p className="text-xs text-fg-muted">{labels.mcpMenuEmpty}</p>
+      )}
+    </>
+  );
+}
+
+/** Rows' worth of grey while a listing is on its way, announced once as a status. */
+function McpMenuLoading() {
+  const { t } = useI18n();
+  return (
+    <div role="status" className="space-y-1">
+      <span className="sr-only">{t.common.loading}</span>
+      <Skeleton className="h-8 w-full" />
+      <Skeleton className="h-8 w-full" />
     </div>
   );
 }
 
+function McpLoadFailed({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
+  const { t } = useI18n();
+  return (
+    <Callout
+      tone="danger"
+      role="alert"
+      title={t.chat.input.mcpLoadFailed}
+      action={
+        <Button size="sm" variant="secondary" loading={retrying} onClick={onRetry}>
+          {t.common.retry}
+        </Button>
+      }
+    />
+  );
+}
+
 interface McpServerMenuSectionProps {
-  server: McpServer;
+  catalog: McpServerCatalog;
   chatId: string | null;
   busy: boolean;
   onPromptClick: (serverId: string, prompt: McpPromptDescriptor) => void;
@@ -164,7 +309,7 @@ interface McpServerMenuSectionProps {
 }
 
 function McpServerMenuSection({
-  server,
+  catalog,
   chatId,
   busy,
   onPromptClick,
@@ -172,78 +317,53 @@ function McpServerMenuSection({
 }: McpServerMenuSectionProps) {
   const { t } = useI18n();
   const labels = t.chat.input;
-  const promptsQuery = useQuery(mcpServerPromptsQueryOptions(server.id));
-  const resourcesQuery = useQuery(mcpServerResourcesQueryOptions(server.id));
+  const { server, prompts, resources } = catalog;
 
-  const prompts = promptsQuery.data?.prompts ?? [];
-  const resources = resourcesQuery.data?.resources ?? [];
-  if (promptsQuery.isLoading || resourcesQuery.isLoading) {
-    return <p className="text-xs text-on-surface-variant">{t.common.loading}</p>;
+  if (catalog.loading) {
+    return (
+      <div className="space-y-2">
+        <McpServerName>{server.name}</McpServerName>
+        <McpMenuLoading />
+      </div>
+    );
   }
   // A tools-only server (both capabilities unsupported) has nothing to offer.
+  // The menu says so once, for all of them, rather than each leaving a gap.
   if (prompts.length === 0 && resources.length === 0) return null;
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
-        {server.name}
-      </p>
+      <McpServerName>{server.name}</McpServerName>
 
       {prompts.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[10px] font-medium text-on-surface-variant/50">
-            {labels.mcpPromptsSection}
-          </p>
+          <p className="text-xs font-medium text-fg-muted">{labels.mcpPromptsSection}</p>
           {prompts.map((prompt) => (
-            <button
+            <McpEntryButton
               key={prompt.name}
-              type="button"
+              icon={<SquareSlash size={ICON_MD} />}
+              title={prompt.name}
+              detail={prompt.description}
               disabled={busy}
               onClick={() => onPromptClick(server.id, prompt)}
-              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-surface-container-highest/60 transition-colors disabled:opacity-50"
-            >
-              <SquareSlash size={13} className="mt-0.5 shrink-0 text-primary/70" />
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-on-surface">
-                  {prompt.name}
-                </span>
-                {prompt.description && (
-                  <span className="block truncate text-[11px] text-on-surface-variant/70">
-                    {prompt.description}
-                  </span>
-                )}
-              </span>
-            </button>
+            />
           ))}
         </div>
       )}
 
       {resources.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[10px] font-medium text-on-surface-variant/50">
-            {labels.mcpResourcesSection}
-          </p>
-          {!chatId && (
-            <p className="px-2 text-[11px] text-on-surface-variant/60">{labels.mcpNeedsChat}</p>
-          )}
+          <p className="text-xs font-medium text-fg-muted">{labels.mcpResourcesSection}</p>
+          {!chatId && <p className="px-2 text-xs text-fg-muted">{labels.mcpNeedsChat}</p>}
           {resources.map((resource) => (
-            <button
+            <McpEntryButton
               key={resource.uri}
-              type="button"
+              icon={<FileText size={ICON_MD} />}
+              title={resource.name}
+              detail={resource.uri}
               disabled={busy || !chatId}
               onClick={() => onResourceClick(server.id, resource.uri)}
-              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-surface-container-highest/60 transition-colors disabled:opacity-50"
-            >
-              <FileText size={13} className="mt-0.5 shrink-0 text-primary/70" />
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-on-surface">
-                  {resource.name}
-                </span>
-                <span className="block truncate text-[11px] text-on-surface-variant/70">
-                  {resource.uri}
-                </span>
-              </span>
-            </button>
+            />
           ))}
         </div>
       )}
@@ -251,9 +371,50 @@ function McpServerMenuSection({
   );
 }
 
+/**
+ * A server's name over its entries. Not a second `MicroLabel`: the popover's own
+ * title is one, and two upper-case mono lines in a row read as one heading
+ * wrapped. A server is content, so it is drawn heavier than the `Prompts` and
+ * `Resources` labels beneath it and in the text colour.
+ */
+function McpServerName({ children }: { children: ReactNode }) {
+  return <p className="truncate text-sm font-semibold text-fg">{children}</p>;
+}
+
+/** One insertable prompt or attachable resource: a glyph, a name and a one-line detail. */
+function McpEntryButton({
+  icon,
+  title,
+  detail,
+  disabled,
+  onClick,
+}: {
+  icon: ReactNode;
+  title: string;
+  detail?: string | null;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-fill-hover disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <span className="mt-0.5 shrink-0 text-fg-muted">{icon}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-fg">{title}</span>
+        {detail ? <span className="block truncate text-xs text-fg-muted">{detail}</span> : null}
+      </span>
+    </button>
+  );
+}
+
 interface McpPromptArgumentDialogProps {
   prompt: McpPromptDescriptor;
   busy: boolean;
+  errorText: string | null;
   onCancel: () => void;
   onSubmit: (values: Record<string, string>) => void;
 }
@@ -261,6 +422,7 @@ interface McpPromptArgumentDialogProps {
 function McpPromptArgumentDialog({
   prompt,
   busy,
+  errorText,
   onCancel,
   onSubmit,
 }: McpPromptArgumentDialogProps) {
@@ -270,72 +432,46 @@ function McpPromptArgumentDialog({
   const missing = missingRequiredMcpArguments(prompt.arguments, values);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-sm rounded-3xl p-5 sm:p-6 shadow-2xl border border-outline-variant/20 space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="text-base font-bold text-on-surface">{labels.mcpPromptArgsTitle}</h3>
-            <p className="truncate text-xs text-on-surface-variant/70">{prompt.name}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg p-1 text-on-surface-variant hover:text-on-surface"
-            aria-label={labels.mcpPromptCancel}
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <form
-          className="space-y-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (missing.length === 0) onSubmit(values);
-          }}
-        >
-          {prompt.arguments.map((argument) => (
-            <label key={argument.name} className="block space-y-1">
-              <span className="flex items-center gap-2 text-xs font-medium text-on-surface">
-                {argument.name}
-                {argument.required && (
-                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] text-primary">
-                    {labels.mcpArgRequired}
-                  </span>
-                )}
-              </span>
-              {argument.description && (
-                <span className="block text-[11px] text-on-surface-variant/70">
-                  {argument.description}
-                </span>
-              )}
-              <input
-                type="text"
-                value={values[argument.name] ?? ''}
-                onChange={(event) =>
-                  setValues((current) => ({ ...current, [argument.name]: event.target.value }))
-                }
-                className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:border-primary/40"
-              />
-            </label>
-          ))}
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="ghost" size="sm" type="button" onClick={onCancel}>
-              {labels.mcpPromptCancel}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              type="submit"
-              loading={busy}
-              disabled={missing.length > 0}
-            >
-              {labels.mcpPromptInsert}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <Dialog
+      size="sm"
+      title={labels.mcpPromptArgsTitle}
+      description={<span className="block truncate font-mono text-xs">{prompt.name}</span>}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (missing.length === 0) onSubmit(values);
+      }}
+      onClose={onCancel}
+      notice={errorText ? <Callout tone="danger" role="alert" title={errorText} /> : undefined}
+      footer={
+        <>
+          <Button variant="secondary" type="button" onClick={onCancel}>
+            {labels.mcpPromptCancel}
+          </Button>
+          <Button type="submit" loading={busy} disabled={missing.length > 0}>
+            {labels.mcpPromptInsert}
+          </Button>
+        </>
+      }
+    >
+      {prompt.arguments.map((argument) => (
+        <label key={argument.name} className="block space-y-1">
+          <span className="flex items-center gap-2 text-sm font-medium text-fg">
+            {argument.name}
+            {argument.required && <Badge variant="neutral">{labels.mcpArgRequired}</Badge>}
+          </span>
+          <input
+            type="text"
+            value={values[argument.name] ?? ''}
+            onChange={(event) =>
+              setValues((current) => ({ ...current, [argument.name]: event.target.value }))
+            }
+            className={FIELD_CLASS}
+          />
+          {argument.description && (
+            <span className="block text-xs text-fg-muted">{argument.description}</span>
+          )}
+        </label>
+      ))}
+    </Dialog>
   );
 }

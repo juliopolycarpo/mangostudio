@@ -6,10 +6,13 @@ import {
 } from '@mangostudio/shared/workspaces';
 import { PanelRightOpen } from 'lucide-react';
 import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
 import { RailPanel } from './RailPanel';
 import { onRailPanelRequest } from './rail-panel-request';
@@ -25,6 +28,13 @@ interface WorkspaceRailProps {
   readonly environmentId?: string | null;
   readonly settings: WorkspacePanelSettings;
   readonly onWidthChange?: (width: number) => void;
+  /**
+   * Where the drawer's trigger is drawn below the desktop breakpoint: a slot in
+   * the composer's tool row, which the chat page owns. Null (the default) draws
+   * no trigger — the command palette still opens the drawer — rather than a
+   * button floating over the transcript.
+   */
+  readonly triggerSlot?: HTMLElement | null;
 }
 
 export function WorkspaceRail({
@@ -33,6 +43,7 @@ export function WorkspaceRail({
   environmentId = null,
   settings,
   onWidthChange,
+  triggerSlot = null,
 }: WorkspaceRailProps) {
   const { t } = useI18n();
   const todosQuery = useChatTodos(chatId);
@@ -137,7 +148,6 @@ export function WorkspaceRail({
     closeButtonRef?: Ref<HTMLButtonElement>
   ) => (
     <RailPanel
-      icon={activePanel.icon}
       title={activeTitle}
       closeMode={closeMode}
       closeButtonRef={closeButtonRef}
@@ -159,7 +169,7 @@ export function WorkspaceRail({
     return (
       <aside
         aria-label={t.workspace.sidePanelTitle}
-        className="relative flex h-full shrink-0 border-l border-outline-variant/15 bg-surface-container-low"
+        className="relative flex h-full shrink-0 border-l border-stroke bg-surface"
         style={{ width: collapsed ? COLLAPSED_RAIL_WIDTH : width }}
       >
         {!collapsed ? (
@@ -177,6 +187,7 @@ export function WorkspaceRail({
           panels={availablePanels}
           panelTitles={panelTitles}
           activePanelId={activePanel.id}
+          collapsed={collapsed}
           navigationLabel={t.workspace.sidePanelNavigation}
           switchLabel={t.workspace.sidePanelSwitch}
           onSelect={selectPanel}
@@ -190,28 +201,33 @@ export function WorkspaceRail({
 
   return (
     <>
-      <button
-        ref={mobileTriggerRef}
-        type="button"
-        onClick={() => setMobileOpen(true)}
-        aria-label={t.workspace.sidePanelOpen}
-        title={t.workspace.sidePanelOpen}
-        className="fixed bottom-24 right-3 z-30 flex size-11 items-center justify-center rounded-2xl border border-outline-variant/25 bg-surface-container-high text-on-surface shadow-xl transition-all hover:border-primary/40 hover:text-primary active:scale-95 motion-reduce:transition-none"
-      >
-        <PanelRightOpen size={19} />
-      </button>
+      {/* The trigger is a tool chip in the composer's own row, reached through
+          a portal into the slot the chat page hands down. It used to float over
+          the transcript's corner, which cost the transcript a gutter (`pr-16`)
+          that the composer and the notices did not share. */}
+      {triggerSlot
+        ? createPortal(
+            <button
+              ref={mobileTriggerRef}
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.workspace.sidePanelOpen}
+              title={t.workspace.sidePanelOpen}
+              className="composer-chip composer-tool-chip"
+            >
+              <PanelRightOpen size={ICON_SM} className="shrink-0" />
+            </button>,
+            triggerSlot
+          )
+        : null}
       {mobileOpen ? (
         <>
-          <div
-            aria-hidden="true"
-            onClick={closeMobile}
-            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
-          />
+          <div aria-hidden="true" onClick={closeMobile} className="fixed inset-0 z-[45] bg-scrim" />
           <aside
             role="dialog"
             aria-modal="true"
             aria-label={t.workspace.sidePanelTitle}
-            className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,24rem)] border-l border-outline-variant/20 bg-surface-container-low shadow-2xl"
+            className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,24rem)] border-l border-stroke bg-surface"
           >
             <PanelDock
               panels={availablePanels}
@@ -235,6 +251,13 @@ interface PanelDockProps {
   readonly panels: readonly RailPanelDefinition[];
   readonly panelTitles: Readonly<Record<WorkspacePanelId, string>>;
   readonly activePanelId: WorkspacePanelId;
+  /**
+   * The rail is folded down to this strip, so no panel is on screen. Every icon
+   * is idle then: the current-item mark (fill, accent bar, `aria-pressed`) says
+   * "this one is open", and showing it on a panel nothing displays reads as a
+   * selection the person never made — one that changed from chat to chat.
+   */
+  readonly collapsed?: boolean;
   readonly navigationLabel: string;
   readonly switchLabel: string;
   readonly onSelect: (panelId: WorkspacePanelId) => void;
@@ -244,6 +267,7 @@ function PanelDock({
   panels,
   panelTitles,
   activePanelId,
+  collapsed = false,
   navigationLabel,
   switchLabel,
   onSelect,
@@ -251,32 +275,32 @@ function PanelDock({
   return (
     <nav
       aria-label={navigationLabel}
-      className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-outline-variant/15 bg-surface-container-lowest py-2"
+      className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-stroke bg-sidebar py-2"
     >
       {panels.map((panel) => {
         const Icon = panel.icon;
         const title = panelTitles[panel.id];
-        const active = panel.id === activePanelId;
+        const active = !collapsed && panel.id === activePanelId;
         return (
           <Button
             key={panel.id}
             type="button"
-            variant="ghost"
+            variant="subtle"
             size="icon"
             onClick={() => onSelect(panel.id)}
             aria-label={switchLabel.replace('{panel}', title)}
             aria-pressed={active}
             title={title}
-            className={`relative size-10 focus-visible:outline-2 focus-visible:outline-primary ${
+            // The current panel's mark is the shared selection bar, moved out to the
+            // dock's own edge (`before:-left-2`) like the sidebar's current page: the
+            // fill alone would not survive a grayscale screen.
+            className={`relative ${
               active
-                ? 'bg-primary/12 text-primary hover:bg-primary/15 hover:text-primary'
-                : 'text-on-surface-variant'
+                ? `bg-fill-selected text-fg ${SELECTION_BAR} before:-left-2`
+                : 'text-fg-muted enabled:hover:text-fg'
             }`}
           >
-            {active ? (
-              <span className="absolute -left-1 h-5 w-0.5 rounded-r-full bg-primary" />
-            ) : null}
-            <Icon size={18} />
+            <Icon size={ICON_MD} />
           </Button>
         );
       })}

@@ -111,9 +111,9 @@ describe('ChipSelect', () => {
   });
 
   it('falls back to the placeholder when the value matches nothing yet', () => {
-    renderSelect({ value: 'env-7f3a', options: [], placeholder: 'Loading environments...' });
+    renderSelect({ value: 'env-7f3a', options: [], placeholder: 'Loading environments…' });
 
-    expect(trigger()).toHaveTextContent('Loading environments...');
+    expect(trigger()).toHaveTextContent('Loading environments…');
   });
 
   it('cannot be opened while disabled', async () => {
@@ -123,5 +123,78 @@ describe('ChipSelect', () => {
     await user.click(trigger());
 
     expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  describe('placement', () => {
+    async function panelOf(overrides: Partial<React.ComponentProps<typeof ChipSelect>> = {}) {
+      const user = userEvent.setup();
+      renderSelect(overrides);
+      await user.click(trigger());
+      return screen.getByRole('listbox').parentElement as HTMLElement;
+    }
+
+    it('opens upward by default, for a chip at the foot of the viewport', async () => {
+      const panel = await panelOf();
+
+      expect(panel.className).toContain('bottom-full');
+      expect(panel.className).not.toContain('top-full');
+    });
+
+    it('opens downward when placed below, for a chip near the top of the page', async () => {
+      const panel = await panelOf({ placement: 'below' });
+
+      expect(panel.className).toContain('top-full');
+      expect(panel.className).not.toContain('bottom-full');
+    });
+
+    // The agent and effort menus sat ~1px above the composer shell while the
+    // model and permission menus sat one 8px gap above it: the panel was
+    // anchored to its own chip (7px under the shell's edge) instead of to the
+    // shell. Upward, the wrapper must therefore not be the positioned ancestor.
+    describe('docking upward', () => {
+      it('is a composer popover: one 8px gap above the shell, not above the chip', async () => {
+        const panel = await panelOf();
+        const tokens = panel.className.split(' ');
+
+        expect(tokens).toEqual(expect.arrayContaining(['dropdown-panel', 'absolute']));
+        expect(tokens).toEqual(expect.arrayContaining(['bottom-full', 'left-0', 'mb-2']));
+        expect(tokens).not.toContain('mt-1');
+      });
+
+      it('leaves the composer shell as the positioned ancestor', async () => {
+        await panelOf();
+
+        expect(trigger().parentElement?.className.split(' ')).not.toContain('relative');
+      });
+
+      it('keeps its own width and scroll rather than the popover default', async () => {
+        const panel = await panelOf({ panelClassName: 'w-40' });
+        const tokens = panel.className.split(' ');
+
+        expect(tokens).toContain('w-40');
+        expect(tokens).not.toContain('w-80');
+        expect(tokens).toEqual(expect.arrayContaining(['app-scrollbar', 'overflow-y-auto']));
+      });
+    });
+
+    it('hangs a downward panel off the chip, which is then the positioned ancestor', async () => {
+      const panel = await panelOf({ placement: 'below' });
+
+      expect(trigger().parentElement?.className.split(' ')).toContain('relative');
+      expect(panel.className.split(' ')).toEqual(
+        expect.arrayContaining(['dropdown-panel', 'absolute', 'top-full', 'mt-1', 'left-0'])
+      );
+    });
+  });
+
+  it('draws its rows at the menu size, with the description a step under it', async () => {
+    const user = userEvent.setup();
+    renderSelect({ options: [{ value: 'low', label: 'low', description: 'Fast and cheap' }] });
+
+    await user.click(trigger());
+
+    const option = screen.getByRole('option', { name: /low/ });
+    expect(option.className).toContain('text-sm');
+    expect(screen.getByText('Fast and cheap').className).toContain('text-xs');
   });
 });

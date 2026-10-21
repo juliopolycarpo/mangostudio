@@ -132,3 +132,39 @@ describe('useFocusTrap with a tabIndex={-1} control after the last real stop', (
     expect(document.activeElement).not.toBe(skipped);
   });
 });
+
+/**
+ * A field the dialog exists to edit grabs focus as it mounts (`autoFocus`), a
+ * beat before the trap's own "focus the dialog" step. The trap must not undo it,
+ * and must still remember what opened the dialog: by the time its effect runs,
+ * the active element is already inside the dialog.
+ */
+function DialogWithAutofocusField() {
+  const dialogRef = useFocusTrap(jest.fn());
+  return (
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Dialog" tabIndex={-1}>
+      {/* biome-ignore lint/a11y/noAutofocus: the case under test. */}
+      <input aria-label="Field" autoFocus />
+    </div>
+  );
+}
+
+describe('useFocusTrap with a control that takes focus as it mounts', () => {
+  it('leaves focus on that control instead of pulling it back to the panel', () => {
+    render(<DialogWithAutofocusField />);
+
+    expect(screen.getByRole('textbox', { name: 'Field' })).toHaveFocus();
+  });
+
+  it('still returns focus to whatever opened the dialog', () => {
+    const trigger = document.createElement('button');
+    document.body.append(trigger);
+    trigger.focus();
+
+    const { unmount } = render(<DialogWithAutofocusField />);
+    unmount();
+
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
+  });
+});

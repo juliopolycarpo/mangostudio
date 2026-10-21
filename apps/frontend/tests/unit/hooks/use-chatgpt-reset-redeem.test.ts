@@ -18,7 +18,7 @@ function setup() {
   const toast = jest.fn();
   const onSettled = jest.fn();
   const rendered = renderHook(() =>
-    useChatGptResetRedeem({ connectorId: 'connector-1', messages, toast, onSettled })
+    useChatGptResetRedeem({ connectorId: 'connector-1', messages, locale: 'en', toast, onSettled })
   );
   return { ...rendered, toast, onSettled };
 }
@@ -39,11 +39,19 @@ describe('useChatGptResetRedeem', () => {
     const [connectorId, requestId] = mockRedeemChatGptResetCredit.mock.calls[0] as [string, string];
     expect(connectorId).toBe('connector-1');
     expect(requestId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(toast).toHaveBeenCalledWith(
-      messages.chatgptRedeemSuccess.replace('{count}', '2'),
-      'success'
-    );
+    expect(toast).toHaveBeenCalledWith('Rate limit reset — 2 windows restored.', 'success');
     expect(onSettled).toHaveBeenCalledTimes(1);
+  });
+
+  it('says "window" for a single restored window', async () => {
+    mockRedeemChatGptResetCredit.mockResolvedValue({ code: 'reset', windowsReset: 1 });
+    const { result, toast } = setup();
+
+    await act(async () => {
+      await result.current.redeem();
+    });
+
+    expect(toast).toHaveBeenCalledWith('Rate limit reset — 1 window restored.', 'success');
   });
 
   it('reuses the same request id across failed retries and rotates it after an outcome', async () => {

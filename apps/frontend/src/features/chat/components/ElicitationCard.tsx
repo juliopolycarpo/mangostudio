@@ -12,11 +12,15 @@ import type {
 } from '@mangostudio/shared/mcp';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, CircleHelp } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { FIELD_CLASS } from '@/components/ui/Input';
+import { SectionCard } from '@/components/ui/SectionCard';
 import { messageKeys } from '@/features/chat/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { McpElicitationGoneError, respondMcpElicitation } from '@/services/mcp-elicitation-service';
+import { ChoiceButton } from './ChoiceButton';
 
 type ElicitationPart = Extract<MessagePart, { type: 'mcp_elicitation' }>;
 
@@ -90,16 +94,16 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
           : labels.cancelled;
 
   return (
-    <div className="max-w-2xl w-full rounded-2xl border border-outline-variant/15 bg-surface-container-low p-4 sm:p-5 text-sm text-on-surface space-y-4">
-      <div className="flex flex-wrap items-center gap-2 text-on-surface-variant">
-        <CircleHelp size={16} className="text-primary" />
-        <span className="text-xs font-bold uppercase tracking-widest">{title}</span>
-        <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs">
+    <SectionCard
+      label={title}
+      action={
+        <span className="terminal-chip">
           {labels.fromServer.replace('{server}', part.serverSlug)}
         </span>
-      </div>
-
-      <p className="font-medium text-on-surface whitespace-pre-wrap">{part.message}</p>
+      }
+      className="w-full max-w-(--timeline-card-max) gap-4 text-sm text-fg"
+    >
+      <p className="whitespace-pre-wrap font-medium text-fg">{part.message}</p>
 
       {part.fields.map((field) => (
         <FieldEditor
@@ -115,27 +119,27 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
         />
       ))}
 
-      {interactive && error && <p className="text-xs text-error">{error}</p>}
+      {interactive && error && <Callout tone="danger" title={error} />}
 
       {interactive && (
         <div className="flex flex-wrap justify-end gap-2">
-          <button
+          <Button
             type="button"
+            variant="secondary"
             disabled={submitting}
             onClick={() => void respond({ action: 'cancel' })}
-            className="rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high cursor-pointer disabled:opacity-40"
           >
             {labels.cancel}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
             disabled={submitting}
             onClick={() => void respond({ action: 'decline' })}
-            className="rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high cursor-pointer disabled:opacity-40"
           >
             {labels.decline}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             disabled={!requiredFilled || submitting}
             onClick={() =>
@@ -144,13 +148,12 @@ export function ElicitationCard({ part }: ElicitationCardProps) {
                 content: buildContent(part.fields, values),
               })
             }
-            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity duration-150 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
           >
             {labels.submit}
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -174,34 +177,52 @@ function FieldEditor({
   onChange: (value: FieldValue) => void;
 }) {
   const label = field.title ?? field.name;
+  const idBase = useId();
+  const labelId = `${idBase}-label`;
+  const descriptionId = field.description ? `${idBase}-description` : undefined;
+  const hintId = field.kind === 'multi_enum' ? `${idBase}-hint` : undefined;
+  // What the field is described by: its own explanation, then the "select one or
+  // more" line when it takes several — the same wiring `QuestionCard` gives a question.
+  const describedBy = [descriptionId, hintId].filter(Boolean).join(' ') || undefined;
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="font-medium text-on-surface">{label}</p>
-        {field.required && (
-          <span className="text-xs text-on-surface-variant/70">{requiredHint}</span>
-        )}
+        <p id={labelId} className="font-medium text-fg">
+          {label}
+        </p>
+        {field.required && <span className="text-xs text-fg-muted">{requiredHint}</span>}
       </div>
       {field.description && (
-        <p className="text-xs text-on-surface-variant/80">{field.description}</p>
+        <p id={descriptionId} className="text-xs text-fg-muted">
+          {field.description}
+        </p>
       )}
 
       {field.kind === 'enum' || field.kind === 'multi_enum' ? (
         <>
           {field.kind === 'multi_enum' && (
-            <p className="text-xs text-on-surface-variant/70">{multiSelectHint}</p>
+            <p id={hintId} className="text-xs text-fg-muted">
+              {multiSelectHint}
+            </p>
           )}
-          <div className="space-y-1.5">
+          {/* One answer to the field above, so a group named by it, as a question's
+              options are. */}
+          <fieldset
+            aria-labelledby={labelId}
+            aria-describedby={describedBy}
+            className="min-w-0 space-y-2"
+          >
             {(field.options ?? []).map((option) => {
               const selected =
                 field.kind === 'multi_enum'
                   ? Array.isArray(value) && value.includes(option.value)
                   : value === option.value;
               return (
-                <button
+                <ChoiceButton
                   key={option.value}
-                  type="button"
+                  kind={field.kind === 'multi_enum' ? 'several' : 'one'}
+                  selected={selected}
                   disabled={!interactive}
                   onClick={() => {
                     if (field.kind === 'multi_enum') {
@@ -215,46 +236,36 @@ function FieldEditor({
                     }
                     onChange(selected ? '' : option.value);
                   }}
-                  className={`flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors duration-150 ${
-                    selected
-                      ? 'border-primary/50 bg-primary/10'
-                      : 'border-outline-variant/15 bg-surface-container-high'
-                  } ${interactive ? 'cursor-pointer hover:border-outline-variant/40' : 'cursor-default opacity-70'}`}
                 >
-                  <span
-                    className={`mt-0.5 text-xs font-semibold ${selected ? 'text-primary' : 'text-on-surface-variant/70'}`}
-                  >
-                    {selected ? <Check size={14} /> : '○'}
-                  </span>
-                  <span className="min-w-0 flex-1 font-medium text-on-surface">{option.label}</span>
-                </button>
+                  <span className="font-medium text-fg">{option.label}</span>
+                </ChoiceButton>
               );
             })}
-          </div>
+          </fieldset>
         </>
       ) : field.kind === 'boolean' ? (
-        <div className="flex gap-2">
-          {[true, false].map((option) => {
-            const selected = value === option;
-            return (
-              <button
-                key={String(option)}
-                type="button"
-                disabled={!interactive}
-                onClick={() => onChange(option)}
-                className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
-                  selected
-                    ? 'border-primary/50 bg-primary/10 text-on-surface'
-                    : 'border-outline-variant/15 bg-surface-container-high text-on-surface-variant'
-                } ${interactive ? 'cursor-pointer' : 'cursor-default opacity-70'}`}
-              >
-                {option ? booleanTrue : booleanFalse}
-              </button>
-            );
-          })}
-        </div>
+        <fieldset
+          aria-labelledby={labelId}
+          aria-describedby={describedBy}
+          className="flex min-w-0 gap-2"
+        >
+          {[true, false].map((option) => (
+            <ChoiceButton
+              key={String(option)}
+              kind="one"
+              selected={value === option}
+              disabled={!interactive}
+              onClick={() => onChange(option)}
+              className="w-auto"
+            >
+              {option ? booleanTrue : booleanFalse}
+            </ChoiceButton>
+          ))}
+        </fieldset>
       ) : (
         <input
+          aria-labelledby={labelId}
+          aria-describedby={describedBy}
           type={
             field.kind === 'number' || field.kind === 'integer'
               ? 'number'
@@ -283,7 +294,7 @@ function FieldEditor({
             }
             onChange(event.target.value);
           }}
-          className="w-full rounded-xl border border-outline-variant/15 bg-surface-container-high px-3 py-2 text-sm text-on-surface focus:border-primary/50 focus:outline-none disabled:opacity-70"
+          className={FIELD_CLASS}
         />
       )}
     </div>

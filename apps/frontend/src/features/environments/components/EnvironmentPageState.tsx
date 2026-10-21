@@ -12,10 +12,14 @@
 
 import { PackageOpen } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
+import { TOOL_CARD_SURFACE } from './ToolCard';
 
-const PADDING_CLASS = { page: 'py-16', section: 'py-8' } as const;
+const PADDING_CLASS = { page: 'py-12', section: 'py-6' } as const;
 
 interface EnvironmentPageStateProps {
   variant: 'loading' | 'error' | 'empty';
@@ -41,35 +45,37 @@ export function EnvironmentPageState({
         className={`flex items-center justify-center ${padding}`}
         data-testid="environments-loading"
       >
-        <Spinner size={size === 'page' ? 'lg' : 'md'} />
+        <Spinner size={size === 'page' ? 'lg' : 'md'} label={t.common.loading} />
       </div>
     );
   }
 
   if (variant === 'error') {
     return (
-      <div
-        className={`flex flex-col items-center gap-3 ${padding}`}
+      <Callout
+        tone="danger"
         data-testid="environments-error"
+        action={
+          onRetry ? (
+            <Button variant="secondary" size="sm" onClick={onRetry}>
+              {t.environments.actions.retry}
+            </Button>
+          ) : undefined
+        }
       >
-        <p className="text-sm text-error">{t.environments.loadError}</p>
-        {onRetry && (
-          <Button variant="ghost" size="sm" onClick={onRetry}>
-            {t.environments.actions.retry}
-          </Button>
-        )}
-      </div>
+        {t.environments.loadError}
+      </Callout>
     );
   }
 
   return (
-    <div
-      className={`flex flex-col items-center gap-2 rounded-2xl border border-outline-variant/15 bg-surface-container-high text-center ${padding}`}
-      data-testid="environments-empty"
-    >
-      <PackageOpen size={28} className="text-on-surface-variant/50" />
-      {title && <p className="text-sm font-semibold text-on-surface">{title}</p>}
-      {hint && <p className="max-w-md text-sm text-on-surface-variant/60">{hint}</p>}
+    <div className={TOOL_CARD_SURFACE} data-testid="environments-empty">
+      <EmptyState
+        icon={<PackageOpen size={ICON_LG} />}
+        title={title ?? ''}
+        hint={hint}
+        className={size === 'page' ? 'py-12' : undefined}
+      />
     </div>
   );
 }

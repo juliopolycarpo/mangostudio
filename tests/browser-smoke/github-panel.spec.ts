@@ -17,15 +17,15 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // A chat with no working directory opens the folder picker by itself, and it
   // is a modal that swallows the clicks below. The landing may already have
   // opened a chat — and its picker — before this spec ran, so dismiss whatever
-  // is up before reaching for "New Chat" as well as after it.
+  // is up before reaching for "New chat" as well as after it.
   await dismissWorkdirPicker(page);
 
   // The rail only exists on the chat surface and only once a chat does.
-  // Scoped to `main` because the sidebar carries a second button with the same
-  // label, and an unscoped locator is a strict-mode violation that would kill
-  // the spec before it reaches the panel. The chat header is a plain element
-  // rather than a <header>, so it has no `banner` role to scope to.
-  await page.getByRole('main').getByRole('button', { name: 'New Chat' }).click();
+  // From `md` up the sidebar carries "New chat" and the header's copy is
+  // hidden. By test id, because Home lists "New chat" per workspace and an
+  // untitled chat's row is a button with the same name: a name locator is a
+  // strict-mode violation that would kill the spec before it reaches the panel.
+  await page.getByTestId('sidebar-new-chat').click();
 
   // The new chat brings a picker of its own. Dismissing it is also what sets up
   // the one deterministic assertion further down: the chat stays unbound, so
@@ -38,20 +38,33 @@ test('github rail panel renders and obeys its visibility setting', async ({ page
   // and clicking then would close the panel the assertions below need.
   if ((await railButton.getAttribute('aria-pressed')) !== 'true') await railButton.click();
 
-  await expect(page.getByTestId('github-panel')).toBeVisible({ timeout: 15_000 });
+  const panel = page.getByTestId('github-panel');
+  await expect(panel).toBeVisible({ timeout: 15_000 });
 
   // Structure, not state. The review queue is not deterministic: authenticated
-  // locally it lists rows, on CI `gh` is absent, and on a fresh account it is
-  // empty — three different renders, and asserting any one of them fails
-  // somewhere. That both containers exist is the part that is always true.
-  await expect(page.getByTestId('github-inbox-section')).toBeVisible();
-  await expect(page.getByTestId('github-repo-section')).toBeVisible();
+  // locally it lists rows, on a fresh account it is empty, and where `gh` is
+  // missing or signed out (CI has no `gh`) the panel says so once and draws
+  // neither section. Which of those it is depends on the inbox read, which
+  // shows a loading state from the first render, so wait that out first: the
+  // panel only swaps its sections for the notice once the read settles.
+  await expect(panel.getByText('Reading GitHub context…')).toHaveCount(0, { timeout: 15_000 });
+  const machineNotice = panel.getByText(
+    /^GitHub CLI is not (installed|signed in) where this chat runs\.$/
+  );
+  if ((await machineNotice.count()) === 0) {
+    await expect(page.getByTestId('github-inbox-section')).toBeVisible();
+    await expect(page.getByTestId('github-repo-section')).toBeVisible();
 
-  // The one deterministic state on the panel: a brand-new chat has no folder
-  // bound, so "This repo" says so rather than asking GitHub about one.
-  await expect(
-    page.getByText('Point this chat at a folder to see its pull requests and issues.')
-  ).toBeVisible({ timeout: 15_000 });
+    // The one deterministic state inside the sections: a brand-new chat has no
+    // folder bound, so "This repo" says so rather than asking GitHub about one.
+    await expect(
+      page.getByText('Point this chat at a folder to see its pull requests and issues.')
+    ).toBeVisible({ timeout: 15_000 });
+  } else {
+    await expect(machineNotice).toBeVisible();
+    await expect(page.getByTestId('github-inbox-section')).toHaveCount(0);
+    await expect(page.getByTestId('github-repo-section')).toHaveCount(0);
+  }
 
   // Turning the panel off in settings must remove it from the rail — the
   // cheapest end-to-end proof that the settings normalizer and the registry

@@ -122,9 +122,48 @@ describe('AgentSettingsPage', () => {
 
     render(<AgentSettingsPage />);
 
-    expect(await screen.findByRole('button', { name: /chat/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /default/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /researcher/i })).toBeInTheDocument();
+    expect(await screen.findByRole('radio', { name: /chat/i })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /default/i })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /researcher/i })).toBeInTheDocument();
+  });
+
+  /** Reset and Save answer the same question, so a clean editor disables both. */
+  it('disables Reset while there is nothing to undo, and enables it after an edit', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
+
+    render(<AgentSettingsPage />);
+
+    const prompt = await screen.findByLabelText('System prompt');
+    expect(screen.getByRole('button', { name: /reset/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    await user.type(prompt, ' more');
+
+    expect(screen.getByRole('button', { name: /reset/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  /** An empty prompt is a real value, so the field says what the model then gets. */
+  it('explains an empty system prompt, and drops the note once there is text', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
+
+    render(<AgentSettingsPage />);
+
+    const hint = /No instructions: the model gets only the working folder, skills and to-dos/;
+    await screen.findByLabelText('System prompt');
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: /default/i }));
+    const prompt = screen.getByLabelText('System prompt');
+    expect(prompt).toHaveValue('');
+    expect(screen.getByText(hint)).toBeInTheDocument();
+
+    await user.type(prompt, 'Be brief.');
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
   });
 
   it('does not render markdown controls for built-in agents', async () => {
@@ -146,7 +185,7 @@ describe('AgentSettingsPage', () => {
 
     render(<AgentSettingsPage />);
 
-    await user.click(await screen.findByRole('button', { name: /researcher/i }));
+    await user.click(await screen.findByRole('radio', { name: /researcher/i }));
 
     expect(screen.getByRole('button', { name: 'Markdown' })).toBeInTheDocument();
     expect(screen.getByDisplayValue('/home/user/.mango/agents/researcher.md')).toBeInTheDocument();
@@ -175,10 +214,10 @@ describe('AgentSettingsPage', () => {
 
     render(<AgentSettingsPage />);
 
-    await user.click(await screen.findByRole('button', { name: 'Create Agent' }));
+    await user.click(await screen.findByRole('button', { name: 'Create agent' }));
 
-    expect(screen.getByRole('heading', { name: 'New Agent' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('New Agent')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'New agent' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('New agent')).toBeInTheDocument();
   });
 
   it('starts a draft agent from the empty state action', async () => {
@@ -189,10 +228,11 @@ describe('AgentSettingsPage', () => {
     render(<AgentSettingsPage />);
 
     await screen.findByText('No agents yet');
-    await user.click(screen.getAllByRole('button', { name: 'Create Agent' })[1]);
+    // One way in: the header does not repeat the empty state's action.
+    await user.click(screen.getByRole('button', { name: 'Create agent' }));
 
-    expect(screen.getByRole('heading', { name: 'New Agent' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('New Agent')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'New agent' })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('New agent')).toBeInTheDocument();
   });
 
   it('invalidates cached capability projections after saving an agent', async () => {
@@ -248,7 +288,7 @@ describe('AgentToolPicker', () => {
 
     render(
       <AgentToolPicker
-        label="Allowed Tools"
+        label="Allowed tools"
         disabledLabel="No tools available."
         tools={TOOLS_RESPONSE.tools}
         selectedToolNames={['read_file']}

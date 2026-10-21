@@ -9,8 +9,8 @@ import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { healthLabel } from '../format';
 
-const HEALTH_VARIANTS: Record<RuntimeHealth, 'accent' | 'warning' | 'neutral' | 'error'> = {
-  ok: 'accent',
+const HEALTH_VARIANTS: Record<RuntimeHealth, 'success' | 'warning' | 'neutral' | 'error'> = {
+  ok: 'success',
   warn: 'warning',
   missing: 'neutral',
   error: 'error',

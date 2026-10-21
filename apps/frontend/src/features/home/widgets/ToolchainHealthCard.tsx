@@ -13,26 +13,22 @@
  * avoid.
  */
 
-import type { RuntimeHealth } from '@mangostudio/shared/environments';
 import { Link } from '@tanstack/react-router';
 import { SectionCard } from '@/components/ui/SectionCard';
-import { healthLabel, healthRollup } from '@/features/environments/format';
+import {
+  HEALTH_ORDER,
+  type HealthRollup,
+  healthCountClass,
+  healthLabel,
+  healthRollup,
+} from '@/features/environments/format';
 import {
   useAgentCliStatuses,
   useRuntimeStatuses,
 } from '@/features/environments/hooks/use-runtime-status';
 import { useI18n } from '@/hooks/use-i18n';
+import { CARD_LINK_CLASS } from './card-link';
 import { HubSkeletonLines } from './HubSkeletonLines';
-
-/** Worst first: the reason to open this card is at the top of the list. */
-const HEALTH_ORDER: readonly RuntimeHealth[] = ['error', 'missing', 'warn', 'ok'];
-
-const COUNT_STYLES: Record<RuntimeHealth, string> = {
-  ok: 'text-primary',
-  warn: 'text-warning',
-  missing: 'text-on-surface-variant',
-  error: 'text-error',
-};
 
 export function ToolchainHealthCard() {
   const { t } = useI18n();
@@ -45,51 +41,54 @@ export function ToolchainHealthCard() {
 
   const counts = healthRollup([runtimes.data ?? [], agents.data ?? []]);
   const total = HEALTH_ORDER.reduce((sum, health) => sum + counts[health], 0);
-  const needsAttention = total - counts.ok;
 
   return (
     <SectionCard
       label={labels.label}
-      tone={cardTone(counts.error > 0, needsAttention > 0)}
+      tone={cardTone(counts, total)}
       action={
-        <Link
-          to="/environments/health"
-          className="micro-label text-primary/80 transition-colors hover:text-primary"
-        >
+        <Link to="/environments/health" className={CARD_LINK_CLASS}>
           {labels.open}
         </Link>
       }
     >
       {!hasData ? <HubSkeletonLines /> : null}
 
-      {hasData && total === 0 ? (
-        <p className="text-xs text-on-surface-variant">{labels.empty}</p>
-      ) : null}
+      {hasData && total === 0 ? <p className="text-xs text-fg-muted">{labels.empty}</p> : null}
 
       {hasData && total > 0 ? (
         <>
-          <ul className="grid grid-cols-4 gap-2" data-testid="home-health-rollup">
+          <ul className="grid grid-cols-2 gap-3" data-testid="home-health-rollup">
             {HEALTH_ORDER.map((health) => (
-              <li key={health} className="min-w-0 space-y-0.5" data-health={health}>
-                <p className={`font-headline text-xl font-bold ${COUNT_STYLES[health]}`}>
+              <li key={health} className="space-y-0.5" data-health={health}>
+                <p
+                  className={`text-title font-semibold ${healthCountClass(health, counts[health])}`}
+                >
                   {counts[health]}
                 </p>
-                <p className="micro-label truncate text-on-surface-variant/60">
-                  {healthLabel(t, health)}
-                </p>
+                <p className="text-xs text-fg-muted">{healthLabel(t, health)}</p>
               </li>
             ))}
           </ul>
-          {needsAttention === 0 ? (
-            <p className="text-xs text-on-surface-variant/70">{labels.allClear}</p>
-          ) : null}
+          {counts.ok === total ? <p className="text-xs text-fg-muted">{labels.allClear}</p> : null}
         </>
       ) : null}
     </SectionCard>
   );
 }
 
-function cardTone(hasError: boolean, hasAttention: boolean) {
-  if (hasError) return 'error' as const;
-  return hasAttention ? ('warning' as const) : ('success' as const);
+/**
+ * The header dot, read off the same buckets the tiles below it show.
+ *
+ * A fault is `error`; a thing the person can fix (`warn`, the tile that says
+ * "needs attention") is `warning`. A tool that is simply not installed is
+ * `neutral`, never amber: an optional CLI that was never there is not unwell,
+ * and a healthy landing page shows no amber (patterns.md, Status). Counting
+ * everything that is not `ok` painted the dot yellow over a "needs attention"
+ * tile that read 0.
+ */
+function cardTone(counts: HealthRollup, total: number) {
+  if (counts.error > 0) return 'error' as const;
+  if (counts.warn > 0) return 'warning' as const;
+  return total === 0 || counts.missing > 0 ? ('neutral' as const) : ('success' as const);
 }

@@ -1,12 +1,22 @@
 import type { GalleryItem } from '@mangostudio/shared/types';
-import { LayoutGrid, Loader2 } from 'lucide-react';
+import { LayoutGrid } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { GalleryLightbox } from './components/GalleryLightbox';
 import { GalleryTile } from './components/GalleryTile';
 import { useGalleryQuery } from './queries';
+
+/**
+ * Two columns from the phone up, the density of Studio's recent strip, which
+ * draws the same `GalleryTile`: one 358px tile per row made a dozen images a
+ * dozen screens. The skeleton and the loaded grid share it so nothing jumps
+ * when the first page lands.
+ */
+const GALLERY_GRID = 'grid grid-cols-2 gap-3 pb-12 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4';
 
 export function GalleryPage() {
   const [selectedImage, setSelectedImage] = useState<GalleryItem | null>(null);
@@ -35,37 +45,30 @@ export function GalleryPage() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 space-y-6 sm:space-y-8 h-full flex flex-col overflow-y-auto">
-      <div className="flex items-center gap-3 sm:gap-4 mb-6 sm:mb-8 shrink-0">
-        <div className="p-3 bg-primary-container text-on-primary-container rounded-2xl">
-          <LayoutGrid size={24} />
-        </div>
-        <h1 className="text-2xl sm:text-3xl font-bold font-headline text-on-background">
-          {t.gallery.title}
-        </h1>
-      </div>
+    <div className="flex h-full flex-col gap-6 overflow-y-auto p-4 sm:gap-8 sm:p-6">
+      <h1 className="shrink-0 text-title font-semibold text-fg">{t.gallery.title}</h1>
 
       {status === 'pending' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
+        <div className={GALLERY_GRID}>
           {Array.from({ length: 8 }, (_, index) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
-            <Skeleton key={index} className="aspect-square rounded-2xl" />
+            <Skeleton key={index} className="aspect-square rounded-md" />
           ))}
         </div>
       ) : items.length === 0 ? (
         <EmptyState
-          icon={<LayoutGrid size={48} className="opacity-50" />}
+          icon={<LayoutGrid size={ICON_LG} />}
           title={t.gallery.empty}
           className="flex-1 py-20"
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
+        <div className={GALLERY_GRID}>
           {items.map((item) => (
             <GalleryTile key={item.id} item={item} onView={setSelectedImage} />
           ))}
 
-          <div ref={loadMoreRef} className="col-span-full h-10 flex justify-center items-center">
-            {isFetchingNextPage && <Loader2 className="w-6 h-6 animate-spin text-primary" />}
+          <div ref={loadMoreRef} className="col-span-full flex h-10 items-center justify-center">
+            {isFetchingNextPage && <Spinner size="md" label={t.common.loading} />}
           </div>
         </div>
       )}

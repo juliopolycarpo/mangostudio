@@ -221,24 +221,29 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
     fitAndResize(term, fitAddon, socketRef.current);
   }, [config.fontSize]);
 
+  // The wrapper paints `canvas` (xterm's own theme background) and carries the
+  // inset, so the output never sits flush against a border and the strip FitAddon
+  // leaves under the last row is the same colour as the rows. `containerRef`
+  // stays bare: FitAddon measures the box it is given, and padding on it would
+  // be counted into the grid.
   return (
-    <div className="relative h-full min-h-0 w-full">
+    <div className="relative h-full min-h-0 w-full bg-canvas p-2">
       <div ref={containerRef} className="h-full min-h-0 w-full" data-testid="terminal-view" />
       {socket.status === 'replaced' && (
         // `z-10`: xterm stacks its own layers (the link-layer canvas is z-index
         // 2) above a sibling overlay with no z-index, which leaves the button
         // visible but unclickable.
         <div
-          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-surface/90 p-6 text-center"
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-canvas p-6 text-center"
           data-testid="terminal-replaced-overlay"
         >
-          <p className="text-sm text-on-surface-variant">{t.terminal.openInWindow}</p>
+          <p className="text-sm text-fg-muted">{t.terminal.openInWindow}</p>
           <Button onClick={() => socket.reconnect()}>{t.terminal.takeOver}</Button>
         </div>
       )}
       {socket.status === 'reconnecting' && (
         <div className="absolute inset-x-0 top-0 z-10 flex justify-center p-2">
-          <span className="rounded bg-surface/90 px-2 py-1 text-xs text-on-surface-variant">
+          <span className="rounded-md border border-stroke bg-surface-raised px-3 py-1 text-xs text-fg-muted shadow-popover">
             {t.terminal.reconnecting}
           </span>
         </div>

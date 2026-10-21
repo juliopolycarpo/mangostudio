@@ -207,4 +207,25 @@ describe('RunnerSelectorContainer', () => {
     expect(setRunnerTarget).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog')).toBeTruthy();
   });
+
+  // A fork used to skip the notice and land in a new chat that refused every
+  // send. It goes through the same notice a switch does, and forks on accept.
+  it('forks to a vendor whose notice is unread only after the notice is accepted', async () => {
+    descriptorState.current = NEEDS_DISCLOSURE;
+    openSelector();
+
+    fireEvent.click(screen.getByRole('option', { name: /codex cli/i }));
+    expect(forkChatWithRunner).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole('button', { name: /got it, continue/i }));
+
+    await waitFor(() =>
+      expect(forkChatWithRunner).toHaveBeenCalledWith('chat-1', {
+        kind: 'external',
+        targetId: 'codex',
+      })
+    );
+    expect(accept).toHaveBeenCalledWith('codex', 'local');
+    expect(setRunnerTarget).not.toHaveBeenCalled();
+  });
 });

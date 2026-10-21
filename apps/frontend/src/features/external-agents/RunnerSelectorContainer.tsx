@@ -36,7 +36,14 @@ export function RunnerSelectorContainer() {
   const external = useExternalAgents(app.currentEnvironmentId);
   const disclosures = useExternalDisclosures();
   const hasTurns = useChatHasTurns(app.currentChatId);
-  const [pendingDisclosure, setPendingDisclosure] = useState<ExternalAgentDescriptor | null>(null);
+  /**
+   * The vendor whose notice is up, and what reading it leads to: switching this
+   * chat to it, or a new chat with it (`forks`) once this one has turns.
+   */
+  const [pendingDisclosure, setPendingDisclosure] = useState<{
+    descriptor: ExternalAgentDescriptor;
+    forks: boolean;
+  } | null>(null);
   const [isAccepting, setAccepting] = useState(false);
   const [isPickingSession, setPickingSession] = useState(false);
   const [adoptingId, setAdoptingId] = useState<string | undefined>(undefined);
@@ -57,6 +64,23 @@ export function RunnerSelectorContainer() {
     void forkChatWithRunner(app.currentChatId, runner)
       .then((chat) => app.handleSelectChat(chat.id))
       .catch(() => toast(t.externalAgents.selector.forkFailed, 'error'));
+  };
+
+  /**
+   * A fork to a vendor whose notice is unread goes through the notice first,
+   * exactly as a switch does: forking straight away landed the person in a new
+   * chat that refused every send until they found the notice somewhere else.
+   */
+  const forkThroughDisclosure = (runner: ChatRunnerConfiguration) => {
+    const descriptor =
+      runner.kind === 'external'
+        ? external.agents.find((candidate) => candidate.targetId === runner.targetId)
+        : undefined;
+    if (descriptor?.unavailableReason === 'disclosure-required') {
+      setPendingDisclosure({ descriptor, forks: true });
+      return;
+    }
+    fork(runner);
   };
 
   /**
@@ -107,12 +131,12 @@ export function RunnerSelectorContainer() {
           // which is either a dialog that never satisfies the gate or an agent
           // the selector offers and every send refuses.
           if (descriptor.unavailableReason === 'disclosure-required') {
-            setPendingDisclosure(descriptor);
+            setPendingDisclosure({ descriptor, forks: false });
             return;
           }
           activate(descriptor);
         }}
-        onForkWithRunner={fork}
+        onForkWithRunner={forkThroughDisclosure}
         onBrowseSessions={() => setPickingSession(true)}
       />
 
@@ -131,21 +155,25 @@ export function RunnerSelectorContainer() {
 
       {pendingDisclosure ? (
         <ExternalDisclosureDialog
-          targetId={pendingDisclosure.targetId}
+          targetId={pendingDisclosure.descriptor.targetId}
           permissionLevel={normalizePermissionLevel(app.runnerPermissions.level).value}
           busy={isAccepting}
           onCancel={() => setPendingDisclosure(null)}
           onAccept={() => {
-            // Persist first, activate second. The other order points the chat at
-            // a third party on the strength of a write that can still fail, and
-            // a failed one leaves the vendor already reachable with nothing on
-            // record saying the user was ever shown the notice.
-            const descriptor = pendingDisclosure;
+            // Persist first, activate (or fork) second. The other order points
+            // a chat at a third party on the strength of a write that can still
+            // fail, and a failed one leaves the vendor already reachable with
+            // nothing on record saying the user was ever shown the notice.
+            const { descriptor, forks } = pendingDisclosure;
             setAccepting(true);
             void disclosures
               .accept(descriptor.targetId, descriptor.environmentId)
               .then(() => {
                 setPendingDisclosure(null);
+                if (forks) {
+                  fork({ kind: 'external', targetId: descriptor.targetId });
+                  return;
+                }
                 activate(descriptor);
               })
               .catch(() => {

@@ -3,15 +3,15 @@ import type { ReactNode } from 'react';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 /**
- * The surface a timeline row opens onto. Exported for the one body that needs
- * the panel without the animation.
+ * The surface a timeline row opens onto: a `surface` container with a hairline,
+ * flat like every other card. Exported for the one body that needs the panel
+ * without the animation.
  *
  * Carries no `overflow`: the animated panel clips, but a body that scrolls its
  * own detail must not, and two overflow utilities on one element resolve by
  * stylesheet order rather than by the order they are written in.
  */
-export const TIMELINE_PANEL_CLASS =
-  'mt-1.5 rounded-lg border border-outline-variant/15 bg-surface-container-lowest/60';
+export const TIMELINE_PANEL_CLASS = 'mt-1.5 rounded-md border border-stroke bg-surface';
 
 interface TimelineDisclosureProps {
   open: boolean;

@@ -10,6 +10,7 @@
 
 import { useQueries } from '@tanstack/react-query';
 import { CircleAlert, CircleCheck } from 'lucide-react';
+import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
 import { RecipeAction } from '@/features/environments/components/RecipeAction';
 import { installStep } from '@/features/environments/format';
@@ -19,8 +20,17 @@ import {
   runtimeStatusesQueryOptions,
 } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { StepFrame } from '../StepFrame';
 import { isRuntimeReady, PROJECT_RUNTIME_IDS } from '../use-onboarding-facts';
+
+/**
+ * The version as one list reads it: Node answers `v22.22.0` and Bun `1.4.2`, and
+ * two rows in one list should not wear two forms of the same fact.
+ */
+function plainVersion(version: string): string {
+  return version.replace(/^v(?=\d)/i, '');
+}
 
 export function ToolchainStep({ environmentId }: { readonly environmentId: string }) {
   const { t } = useI18n();
@@ -37,17 +47,17 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
       {runtimes.isPending ? (
         <div className="flex justify-center py-6">
-          <Spinner size="md" />
+          <Spinner size="md" label={t.common.loading} />
         </div>
       ) : runtimes.isError ? (
         // A refused probe answers `[]`, exactly like a machine with neither
         // runtime on it. Drawing the list from that tells somebody who has Node
         // installed to install Node, and offers a button that would do it.
-        <p className="text-on-surface-variant text-sm" data-testid="onboarding-toolchain-failed">
+        <Callout tone="warning" data-testid="onboarding-toolchain-failed">
           {s.probeFailed}
-        </p>
+        </Callout>
       ) : (
-        <ul className="space-y-2">
+        <ul className="divide-y divide-stroke border-y border-stroke">
           {PROJECT_RUNTIME_IDS.map((id) => {
             const runtime = (runtimes.data ?? []).find((candidate) => candidate.id === id);
             const ready = isRuntimeReady(runtime);
@@ -57,27 +67,23 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
                 key={id}
                 data-testid={`onboarding-runtime-${id}`}
                 data-ready={ready}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-outline-variant/20 bg-surface-container-lowest/60 px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-3 px-3 py-3"
               >
-                <span className="flex items-center gap-2.5">
+                <span className="flex items-center gap-2">
                   {ready ? (
-                    <CircleCheck aria-hidden size={16} className="shrink-0 text-primary" />
+                    <CircleCheck aria-hidden size={ICON_MD} className="shrink-0 text-success" />
                   ) : (
-                    <CircleAlert
-                      aria-hidden
-                      size={16}
-                      className="shrink-0 text-on-surface-variant/50"
-                    />
+                    <CircleAlert aria-hidden size={ICON_MD} className="shrink-0 text-fg-subtle" />
                   )}
-                  <span className="font-semibold text-on-surface text-sm">{name}</span>
+                  <span className="text-sm font-medium text-fg">{name}</span>
                 </span>
                 {ready ? (
-                  <span className="text-on-surface-variant/70 text-xs">
-                    {runtime?.effective?.version ?? s.ready}
+                  <span className="text-xs text-fg-muted">
+                    {plainVersion(runtime?.effective?.version ?? s.ready)}
                   </span>
                 ) : (
                   <span className="flex items-center gap-3">
-                    <span className="text-on-surface-variant/70 text-xs">{s.missing}</span>
+                    <span className="text-xs text-fg-muted">{s.missing}</span>
                     <RecipeAction
                       step={installStep(recipes.data ?? [], id)}
                       action="install"

@@ -39,12 +39,12 @@ export function GithubSection({
 
   return (
     <section data-testid={testId} className="min-w-0">
-      <div className="flex items-center gap-1.5 px-3 py-2">
+      <div className="flex items-center gap-2 px-4 py-2">
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={!collapsed}
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded text-left text-on-surface-variant transition-colors hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+          className="-ml-1 flex h-7 min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-sm pl-1 pr-2 text-left text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
         >
           <Chevron size={ICON_SM} className="shrink-0" aria-hidden="true" />
           <MicroLabel as="h3" className="min-w-0 truncate">
@@ -53,7 +53,7 @@ export function GithubSection({
         </button>
         {action}
       </div>
-      {collapsed ? null : <div className="px-3 pb-3">{children}</div>}
+      {collapsed ? null : <div className="px-4 pb-4">{children}</div>}
     </section>
   );
 }

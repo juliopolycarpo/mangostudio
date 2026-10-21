@@ -18,9 +18,12 @@ import type {
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
 import { externalAgentVendor } from '@mangostudio/shared/external-agents';
-import { AlertTriangle, ExternalLink } from 'lucide-react';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { ExternalLink } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 export interface ExternalDisclosureDialogProps {
   /**
@@ -55,99 +58,80 @@ export function ExternalDisclosureDialog({
   const labels = t.externalAgents.disclosure;
   const vendor = t.externalAgents.target[targetId];
   const links = externalAgentVendor(targetId);
-  const dialogRef = useFocusTrap(onCancel);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        aria-label={labels.title.replace('{vendor}', vendor)}
-        className="w-full max-w-lg space-y-4 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-5 text-sm text-on-surface shadow-2xl outline-none"
-      >
-        <h2 className="text-base font-semibold">{labels.title.replace('{vendor}', vendor)}</h2>
-
-        <ul className="space-y-2 text-xs leading-relaxed text-on-surface-variant">
-          <li>{labels.thirdParty.replace('{vendor}', vendor)}</li>
-          <li>{labels.dataFlow.replace('{vendor}', vendor)}</li>
-          <li>{labels.billing.replace('{vendor}', vendor)}</li>
-          <li>{labels.ownership.replace('{vendor}', vendor)}</li>
-          {/*
-            Claude only. It runs the machine's own hooks, skills, plugins and MCP
-            servers inside the turn — the one exposure a user cannot see from
-            anywhere in MangoStudio. Codex and Cursor read project files too, but
-            what each of them loads has not been characterized, and naming the
-            wrong sources for a vendor is worse than staying quiet.
-          */}
-          {targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
-        </ul>
-
-        <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
-          <AlertTriangle size={14} className="mt-px shrink-0" />
-          {labels.autoExecution.replace('{vendor}', vendor)}
-        </p>
-
-        {/*
-          The warning above says the level decides how much runs unattended.
-          Naming the level the chat is actually on turns that from a general
-          caution into something the user can check before agreeing.
-        */}
-        {permissionLevel ? (
-          <p className="text-xs text-on-surface-variant">
-            {labels.permissionNow.replace(
-              '{level}',
-              t.externalAgents.permission.levelName[permissionLevel]
-            )}
-          </p>
-        ) : null}
-
-        {/*
-          Linked, never summarized. Paraphrasing another company's terms would be
-          MangoStudio making a claim about obligations that are not its to state.
-        */}
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-on-surface-variant/70">
-          <ExternalLink size={12} className="shrink-0" />
-          <a
-            href={links.termsUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="underline underline-offset-2 hover:text-on-surface"
-          >
-            {labels.terms.replace('{vendor}', vendor)}
-          </a>
-          <a
-            href={links.privacyUrl}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="underline underline-offset-2 hover:text-on-surface"
-          >
-            {labels.privacy.replace('{vendor}', vendor)}
-          </a>
-        </p>
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="cursor-pointer rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:cursor-default disabled:opacity-50"
-          >
+    <Dialog
+      title={labels.title.replace('{vendor}', vendor)}
+      onClose={onCancel}
+      closeDisabled={busy}
+      footer={
+        <>
+          <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
             {reviewOnly ? labels.close : labels.cancel}
-          </button>
+          </Button>
           {reviewOnly ? null : (
-            <button
-              type="button"
-              onClick={onAccept}
-              disabled={busy}
-              className="cursor-pointer rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
-            >
+            <Button type="button" onClick={onAccept} loading={busy}>
               {busy ? labels.accepting : labels.accept}
-            </button>
+            </Button>
           )}
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <ul className="space-y-2 text-sm text-fg-muted">
+        <li>{labels.thirdParty.replace('{vendor}', vendor)}</li>
+        <li>{labels.dataFlow.replace('{vendor}', vendor)}</li>
+        <li>{labels.billing.replace('{vendor}', vendor)}</li>
+        <li>{labels.ownership.replace('{vendor}', vendor)}</li>
+        {/*
+          Claude only. It runs the machine's own hooks, skills, plugins and MCP
+          servers inside the turn — the one exposure a user cannot see from
+          anywhere in MangoStudio. Codex and Cursor read project files too, but
+          what each of them loads has not been characterized, and naming the
+          wrong sources for a vendor is worse than staying quiet.
+        */}
+        {targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
+      </ul>
+
+      <Callout tone="warning">{labels.autoExecution.replace('{vendor}', vendor)}</Callout>
+
+      {/*
+        The callout above says the level decides how much runs unattended.
+        Naming the level the chat is actually on turns that from a general
+        caution into something the user can check before agreeing.
+      */}
+      {permissionLevel ? (
+        <p className="text-xs text-fg-muted">
+          {labels.permissionNow.replace(
+            '{level}',
+            t.externalAgents.permission.levelName[permissionLevel]
+          )}
+        </p>
+      ) : null}
+
+      {/*
+        Linked, never summarized. Paraphrasing another company's terms would be
+        MangoStudio making a claim about obligations that are not its to state.
+      */}
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <a
+          href={links.termsUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex items-center gap-1 text-accent-fg underline underline-offset-2"
+        >
+          {labels.terms.replace('{vendor}', vendor)}
+          <ExternalLink size={ICON_SM} className="shrink-0" aria-hidden="true" />
+        </a>
+        <a
+          href={links.privacyUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex items-center gap-1 text-accent-fg underline underline-offset-2"
+        >
+          {labels.privacy.replace('{vendor}', vendor)}
+          <ExternalLink size={ICON_SM} className="shrink-0" aria-hidden="true" />
+        </a>
+      </p>
+    </Dialog>
   );
 }

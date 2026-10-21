@@ -1,9 +1,10 @@
 import { createLazyFileRoute, Link, useRouter } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { BrandLockup } from '@/components/layout/BrandLockup';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
-import { Logo } from '@/components/ui/Logo';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
 
@@ -18,7 +19,7 @@ function LoginPage() {
   const { redirect } = Route.useSearch();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [hasFailed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -33,22 +34,30 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
+    setFailed(false);
 
     await authClient.signIn.email(
       { email, password },
       {
-        onError: (ctx) => {
-          setError(ctx.error.message || t.auth.loginError);
+        // The server's sentence is English and says what its library thinks, not
+        // what to do. Whatever refused the request, the person gets the same
+        // translated line, in the page's language.
+        onError: () => {
+          setFailed(true);
         },
       }
     );
     setLoading(false);
   };
 
+  // Anchored to a fixed offset from the top rather than centred: a centred group
+  // moves when the card grows (the error notice, a longer field list), and the
+  // form jumps under the cursor of someone retyping. Here only the space below
+  // it changes, and both pages put the logo where the other does.
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-dim px-4">
-      <Card variant="glass" className="w-full max-w-sm">
+    <div className="flex min-h-screen flex-col items-center justify-start gap-6 bg-canvas px-4 pb-8 pt-[18vh]">
+      <BrandLockup />
+      <Card className="w-full max-w-sm rounded-lg">
         <form
           id="login-form"
           onSubmit={(e) => void handleSubmit(e)}
@@ -56,50 +65,42 @@ function LoginPage() {
           action="#"
           className="space-y-5"
         >
-          <div className="flex flex-col items-center gap-2 mb-4">
-            <Logo className="w-24 h-24" />
-            <h1 className="font-headline text-2xl font-semibold text-center text-on-surface">
-              {t.auth.loginTitle}
-            </h1>
+          <h1 className="text-title font-semibold text-fg">{t.auth.loginTitle}</h1>
+
+          {hasFailed && <Callout tone="danger" role="alert" title={t.auth.loginError} />}
+
+          <div className="space-y-3">
+            <Input
+              type="email"
+              id="email"
+              name="email"
+              label={t.auth.emailLabel}
+              placeholder={t.auth.emailPlaceholder}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+
+            <Input
+              type="password"
+              id="password"
+              name="password"
+              label={t.auth.passwordLabel}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
           </div>
 
-          {error && (
-            <p className="text-xs text-error text-center bg-error/10 rounded-lg px-3 py-2">
-              {error}
-            </p>
-          )}
-
-          <Input
-            type="email"
-            id="email"
-            name="email"
-            label={t.auth.emailLabel}
-            placeholder={t.auth.emailPlaceholder}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            required
-          />
-
-          <Input
-            type="password"
-            id="password"
-            name="password"
-            label={t.auth.passwordLabel}
-            placeholder={t.auth.passwordPlaceholder}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
-
-          <Button type="submit" variant="primary" loading={loading} className="w-full">
+          <Button type="submit" size="lg" loading={loading} className="w-full">
             {loading ? t.auth.loginLoading : t.auth.loginButton}
           </Button>
 
-          <p className="text-sm text-center text-on-surface-variant">
+          <p className="text-center text-sm text-fg-muted">
             {t.auth.noAccount}{' '}
-            <Link to="/signup" className="text-primary hover:underline">
+            <Link to="/signup" className="text-accent-fg underline underline-offset-2">
               {t.auth.signupLink}
             </Link>
           </p>

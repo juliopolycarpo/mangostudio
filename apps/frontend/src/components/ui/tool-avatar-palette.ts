@@ -66,14 +66,20 @@ export const TOOL_AVATAR_PALETTE: readonly ToolAvatarPalette[] = [
  * Keyed by id rather than by full subject key on purpose: `agent:claude` and
  * `runtime:claude` are the same tool seen from two tabs, and giving them one
  * colour is what makes the avatar recognisable across the umbrella.
+ *
+ * The four agents wear the family of their `agent-*` identity colour, so a
+ * runner does not change colour between the sidebar dot, the composer and a
+ * matrix column: Claude's terracotta is `orange`, Codex's cyan is `teal`,
+ * Cursor's lavender is `violet`, and MangoStudio's own mango is `amber`. The
+ * toolchains take the rest.
  */
 const SLOT_BY_TOOL_ID: Readonly<Record<string, string>> = {
   claude: 'orange',
   codex: 'teal',
   cursor: 'violet',
-  bun: 'amber',
+  mangostudio: 'amber',
   node: 'green',
-  mangostudio: 'blue',
+  bun: 'blue',
   nvm: 'rose',
   fnm: 'fuchsia',
   volta: 'cyan',

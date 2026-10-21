@@ -7,10 +7,12 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+import { Card } from '@/components/ui/Card';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import { OverviewSection } from '../../components/OverviewSection';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
 import { machineStatusQueryOptions } from '../queries';
 
@@ -22,7 +24,7 @@ export function OverviewMachineSection() {
 
   return (
     <OverviewSection
-      title={e.tabs.machine}
+      tab="machine"
       to="/environments/machine"
       testId="overview-machine"
       isPending={status.isPending && !data}
@@ -32,40 +34,46 @@ export function OverviewMachineSection() {
       {!data ? null : !data.hub.running ? (
         <EnvironmentPageState variant="empty" size="section" title={e.machine.hub.notRunning} />
       ) : (
-        <div className={`${TOOL_CARD_SURFACE} p-4`}>
+        <Card>
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="machine-rollup">
             <li className="space-y-0.5">
-              <p className="font-headline text-lg font-bold text-on-surface">
+              <p className="text-base font-semibold text-fg">
                 {data.hub.version ?? e.versionUnknown}
               </p>
-              <CardSectionLabel>{e.machine.hub.version}</CardSectionLabel>
+              <MicroLabel as="p">{e.machine.hub.version}</MicroLabel>
             </li>
             <li className="space-y-0.5">
-              <p className="font-headline text-lg font-bold text-on-surface">
+              <p className="text-base font-semibold text-fg">
                 {data.hub.launch ? launchModeLabel(t, data.hub.launch) : '—'}
               </p>
-              <CardSectionLabel>{e.machine.hub.launchLabel}</CardSectionLabel>
+              <MicroLabel as="p">{e.machine.hub.launchLabel}</MicroLabel>
             </li>
             <li className="space-y-0.5">
               <p
-                className={`font-headline text-lg font-bold ${data.service.installed ? 'text-primary' : 'text-on-surface-variant'}`}
+                className={cn(
+                  'text-base font-semibold',
+                  data.service.installed ? 'text-fg' : 'text-fg-muted'
+                )}
               >
                 {data.service.installed
                   ? e.machine.service.installed
                   : e.machine.service.notInstalled}
               </p>
-              <CardSectionLabel>{e.machine.service.title}</CardSectionLabel>
+              <MicroLabel as="p">{e.machine.service.title}</MicroLabel>
             </li>
             <li className="space-y-0.5">
               <p
-                className={`font-headline text-lg font-bold ${data.hub.health ? HUB_HEALTH_TONE[data.hub.health].text : 'text-on-surface-variant'}`}
+                className={cn(
+                  'text-base font-semibold',
+                  data.hub.health ? HUB_HEALTH_TONE[data.hub.health].text : 'text-fg-muted'
+                )}
               >
                 {data.hub.health ? hubHealthLabel(t, data.hub.health) : '—'}
               </p>
-              <CardSectionLabel>{e.machine.hub.healthLabel}</CardSectionLabel>
+              <MicroLabel as="p">{e.machine.hub.healthLabel}</MicroLabel>
             </li>
           </ul>
-        </div>
+        </Card>
       )}
     </OverviewSection>
   );

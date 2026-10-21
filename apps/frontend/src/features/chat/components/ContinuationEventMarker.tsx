@@ -1,5 +1,6 @@
 import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { EventRule } from './EventRule';
 
 interface ContinuationEventMarkerProps {
   provider: ProviderType;
@@ -81,17 +82,9 @@ export function ContinuationEventMarker({
   });
   const suffix = recovered ? t.chat.continuation.recovered : t.chat.continuation.notRecovered;
 
-  const errorEvent = isError(reasonCode);
-  const toneClass = errorEvent ? 'text-error/80' : 'text-on-surface-variant/60';
-  const lineClass = errorEvent ? 'bg-error/30' : 'bg-outline-variant/20';
-
   return (
-    <div className={`flex items-center gap-2 py-2 text-xs my-1 ${toneClass}`}>
-      <div className={`flex-1 h-px ${lineClass}`} />
-      <span className="font-medium whitespace-nowrap">
-        {label} {suffix}
-      </span>
-      <div className={`flex-1 h-px ${lineClass}`} />
-    </div>
+    <EventRule tone={isError(reasonCode) ? 'danger' : 'neutral'}>
+      {label} {suffix}
+    </EventRule>
   );
 }

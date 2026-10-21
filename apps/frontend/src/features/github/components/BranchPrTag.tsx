@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { annotateBranchesWithPrs, type BranchPrAnnotation } from '../lib/branch-pr-annotation';
@@ -49,13 +50,14 @@ export function BranchPrTag({
   const number = formatMessage(t.github.row.number, { number: String(annotation.number) });
 
   return (
-    <span
-      className={`shrink-0 font-mono text-[10px] ${
-        annotation.isMerged ? 'text-success' : 'text-on-surface-variant/70'
-      }`}
+    <Badge
+      // Merged shares the accent `GithubPrBadge` gives it, so the branch list and
+      // the pull request list say the same thing in the same colour.
+      variant={annotation.isMerged ? 'accent' : 'neutral'}
+      className="font-mono"
       title={annotation.isMerged ? t.github.branchPr.merged : annotation.url}
     >
       {annotation.isMerged ? `${number} · ${t.github.branchPr.merged}` : number}
-    </span>
+    </Badge>
   );
 }

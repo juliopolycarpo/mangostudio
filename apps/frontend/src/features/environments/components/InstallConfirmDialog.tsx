@@ -13,10 +13,12 @@
 import type { InstallPreparation, InstallRecipePreview } from '@mangostudio/shared/environments';
 import { renderShellCommand } from '@mangostudio/shared/environments';
 import { Download, FolderPen, Globe, TerminalSquare, X } from 'lucide-react';
-import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { chainStepLabel, formatBytes } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import type { InstallChainStep } from '../install-chain';
@@ -41,16 +43,6 @@ export function InstallConfirmDialog({
   const s = t.environments.install;
   const { resolve } = useToolIdentities();
 
-  // Escape backs out of the dialog, as it does everywhere else in the app. A
-  // modal that gates running a command must not trap a keyboard user in it.
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onCancel]);
-
   // The prepared recipe is the authority on the step it describes: it alone
   // knows the installer that was actually downloaded.
   const recipes: readonly InstallRecipePreview[] = steps.map((step, index) =>
@@ -74,64 +66,49 @@ export function InstallConfirmDialog({
       : s.confirmDescription;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm sm:p-6">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="install-confirm-title"
-        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-outline-variant/20 bg-surface-container-high shadow-2xl"
-      >
-        <header className="flex items-start justify-between gap-4 border-b border-outline-variant/15 px-5 py-4 sm:px-6">
-          <div className="min-w-0 space-y-1">
-            <h2 id="install-confirm-title" className="text-xl font-bold text-on-surface">
-              {title}
-            </h2>
-            <p className="text-sm text-on-surface-variant/65">{description}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-xl p-2 text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface"
-            aria-label={s.cancel}
-          >
-            <X size={18} />
-          </button>
-        </header>
-
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4 sm:px-6">
-          {recipes.map((recipe, index) => (
-            <div
-              key={recipe.id}
-              className={
-                isChain ? 'space-y-5 rounded-2xl border border-outline-variant/15 p-4' : 'space-y-5'
-              }
-              data-testid="install-step"
-            >
-              {isChain && (
-                <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-                  {chainStepLabel(
-                    t,
-                    index,
-                    recipes.length,
-                    resolve('runtime', recipe.runtimeId).name
-                  )}
-                </p>
-              )}
-              <RecipeDetails recipe={recipe} />
-            </div>
-          ))}
-        </div>
-
-        <footer className="flex justify-end gap-2 border-t border-outline-variant/15 px-5 py-4 sm:px-6">
-          <Button variant="ghost" onClick={onCancel}>
+    // Escape and the backdrop back out of the dialog, as they do everywhere
+    // else in the app: a modal that gates running a command must not trap a
+    // keyboard user in it.
+    <Dialog
+      size="lg"
+      title={title}
+      description={description}
+      onClose={onCancel}
+      headerAction={
+        <Button variant="subtle" size="icon" onClick={onCancel} aria-label={s.cancel}>
+          <X size={ICON_MD} />
+        </Button>
+      }
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             {s.cancel}
           </Button>
-          <Button onClick={onConfirm} loading={isStarting}>
+          <Button
+            variant={isUninstall ? 'danger' : 'primary'}
+            onClick={onConfirm}
+            loading={isStarting}
+          >
             {isUninstall ? s.runUninstall : s.run}
           </Button>
-        </footer>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {recipes.map((recipe, index) => (
+        <div
+          key={recipe.id}
+          className={isChain ? 'space-y-5 rounded-md border border-stroke p-4' : 'space-y-5'}
+          data-testid="install-step"
+        >
+          {isChain && (
+            <MicroLabel as="p">
+              {chainStepLabel(t, index, recipes.length, resolve('runtime', recipe.runtimeId).name)}
+            </MicroLabel>
+          )}
+          <RecipeDetails recipe={recipe} />
+        </div>
+      ))}
+    </Dialog>
   );
 }
 
@@ -142,9 +119,9 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
   return (
     <>
       <section className="space-y-2">
-        <SectionLabel icon={<TerminalSquare size={14} />} label={s.commandLabel} />
+        <SectionLabel icon={<TerminalSquare size={ICON_SM} />} label={s.commandLabel} />
         <code
-          className="block break-all rounded-xl bg-surface-container-highest px-3 py-2 font-mono text-xs text-on-surface"
+          className="block break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg"
           data-testid="install-argv"
         >
           {/* Quoted the way the API quotes its copyable command: an
@@ -155,10 +132,10 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
 
       {recipe.writes.length > 0 && (
         <section className="space-y-2">
-          <SectionLabel icon={<FolderPen size={14} />} label={s.willWrite} />
+          <SectionLabel icon={<FolderPen size={ICON_SM} />} label={s.willWrite} />
           <ul className="space-y-1">
             {recipe.writes.map((target) => (
-              <li key={target} className="break-all font-mono text-xs text-on-surface-variant">
+              <li key={target} className="break-all font-mono text-xs text-fg-muted">
                 {target}
               </li>
             ))}
@@ -167,20 +144,20 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
       )}
 
       {recipe.networkAccess && (
-        <section className="flex items-center gap-2 text-sm text-on-surface-variant">
-          <Globe size={14} className="shrink-0 text-tertiary" />
+        <section className="flex items-center gap-2 text-sm text-fg-muted">
+          <Globe size={ICON_SM} className="shrink-0" />
           <span>{s.requiresNetwork}</span>
         </section>
       )}
 
       {recipe.download && (
         <section className="space-y-1.5">
-          <SectionLabel icon={<Download size={14} />} label={s.downloadLabel} />
-          <p className="break-all font-mono text-xs text-on-surface-variant">
+          <SectionLabel icon={<Download size={ICON_SM} />} label={s.downloadLabel} />
+          <p className="break-all font-mono text-xs text-fg-muted">
             {formatMessage(s.downloadOrigin, { url: recipe.download.url })}
           </p>
           {recipe.download.sizeBytes !== undefined && (
-            <p className="text-xs text-on-surface-variant/70">
+            <p className="text-xs text-fg-muted">
               {formatMessage(s.downloadSize, {
                 size: formatBytes(recipe.download.sizeBytes),
               })}
@@ -191,12 +168,12 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
 
       {recipe.profileSetup && (
         <section className="space-y-2">
-          <p className="text-sm text-on-surface-variant">{s.profileSetup}</p>
-          <code className="block whitespace-pre-wrap break-all rounded-xl bg-surface-container-highest px-3 py-2 font-mono text-xs text-on-surface">
+          <p className="text-sm text-fg-muted">{s.profileSetup}</p>
+          <code className="block whitespace-pre-wrap break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg">
             {recipe.profileSetup.lines.join('\n')}
           </code>
           {recipe.profileSetup.present && (
-            <p className="text-xs text-on-surface-variant/70">
+            <p className="text-xs text-fg-muted">
               {formatMessage(s.profileAlreadyPresent, {
                 files: recipe.profileSetup.detectedIn.join(', '),
               })}
@@ -210,9 +187,9 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
 
 function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
-    <div className="flex items-center gap-2 text-on-surface-variant/70">
+    <MicroLabel as="p" className="flex items-center gap-2">
       {icon}
-      <span className="font-label text-[10px] font-bold uppercase tracking-widest">{label}</span>
-    </div>
+      {label}
+    </MicroLabel>
   );
 }

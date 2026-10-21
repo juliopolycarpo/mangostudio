@@ -3,9 +3,12 @@ import type { GitBranchInfo } from '@mangostudio/shared/git';
 import { CloudDownload, CloudUpload } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
-import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
 import { readGitPanelPrefs } from './git-panel-prefs';
 import { useGitFetch, useGitPull, useGitPush } from './hooks/use-git-state';
 
@@ -97,12 +100,12 @@ export function RemoteActions({
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-0.5">
+      <div className="flex shrink-0 items-center gap-1">
         <RemoteButton
           label={labels.fetch}
           disabled={pending}
           onClick={() => void run('fetch')}
-          icon={<CloudDownload size={13} />}
+          icon={<CloudDownload size={ICON_SM} />}
         />
         {branch.behind > 0 ? (
           <RemoteButton
@@ -111,7 +114,7 @@ export function RemoteActions({
             highlight
             disabled={pending}
             onClick={() => void run('pull')}
-            icon={<CloudDownload size={13} />}
+            icon={<CloudDownload size={ICON_SM} />}
           />
         ) : null}
         {/*
@@ -125,64 +128,51 @@ export function RemoteActions({
             highlight
             disabled={pending}
             onClick={() => void run('push')}
-            icon={<CloudUpload size={13} />}
+            icon={<CloudUpload size={ICON_SM} />}
           />
         ) : null}
       </div>
 
       {guidance ? (
-        <div className="mt-2 space-y-2 rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5">
-          <p className="text-[11px] leading-4 text-warning">{guidance}</p>
+        <Callout tone="warning" className="mt-2 w-full">
+          <p>{guidance}</p>
           {canForcePush ? (
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
+              className="mt-2"
               disabled={pending}
               onClick={() => setConfirmForcePush(true)}
-              className="cursor-pointer rounded-full bg-warning/20 px-2 py-1 text-[10px] font-semibold text-warning transition-colors hover:bg-warning/30 disabled:cursor-wait disabled:opacity-50"
             >
               {labels.forcePush}
-            </button>
+            </Button>
           ) : null}
-        </div>
+        </Callout>
       ) : null}
 
       {confirmForcePush ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="git-force-push-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
-        >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
-            <div className="space-y-2">
-              <h3 id="git-force-push-title" className="text-lg font-bold text-on-surface">
-                {labels.forcePushConfirmTitle}
-              </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">
-                {labels.forcePushConfirmHint}
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setConfirmForcePush(false)}
-              >
+        <Dialog
+          size="sm"
+          title={labels.forcePushConfirmTitle}
+          description={labels.forcePushConfirmHint}
+          onClose={() => setConfirmForcePush(false)}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setConfirmForcePush(false)}>
                 {labels.forcePushCancel}
               </Button>
               <Button
                 type="button"
                 variant="danger"
-                className="flex-1"
                 loading={pushMutation.isPending}
                 onClick={() => void forcePush()}
               >
                 {labels.forcePushConfirm}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
       ) : null}
     </>
   );
@@ -204,20 +194,18 @@ function RemoteButton({
   readonly onClick: () => void;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="subtle"
+      size="sm"
       aria-label={label}
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-7 cursor-pointer items-center gap-1 rounded-lg px-1.5 transition-colors disabled:cursor-wait disabled:opacity-50 ${
-        highlight
-          ? 'text-primary hover:bg-primary/10'
-          : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
-      }`}
+      className={cn('gap-1 px-1.5', highlight ? 'text-fg' : 'text-fg-muted')}
     >
       {icon}
-      {badge !== undefined ? <span className="font-mono text-[10px]">{badge}</span> : null}
-    </button>
+      {badge !== undefined ? <span className="font-mono text-micro">{badge}</span> : null}
+    </Button>
   );
 }

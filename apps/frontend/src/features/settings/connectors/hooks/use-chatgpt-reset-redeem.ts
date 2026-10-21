@@ -10,6 +10,7 @@
 import type { ChatGptRedeemOutcome } from '@mangostudio/shared/connectors';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useCallback, useRef, useState } from 'react';
+import { pluralMessage } from '@/hooks/use-plural';
 import { redeemChatGptResetCredit } from '../api';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -17,6 +18,8 @@ type ToastType = 'success' | 'error' | 'info';
 interface UseChatGptResetRedeemOptions {
   connectorId: string;
   messages: Messages['settings']['connectors'];
+  /** The active locale, which decides how "1 window" and "2 windows" agree. */
+  locale: string;
   toast: (message: string, type?: ToastType) => void;
   /** Called after every attempt (any outcome or failure) to refresh usage. */
   onSettled?: () => void | Promise<void>;
@@ -25,12 +28,17 @@ interface UseChatGptResetRedeemOptions {
 function outcomeToast(
   code: ChatGptRedeemOutcome,
   windowsReset: number,
-  s: Messages['settings']['connectors']
+  s: Messages['settings']['connectors'],
+  locale: string
 ): { message: string; type: ToastType } {
   switch (code) {
     case 'reset':
       return {
-        message: s.chatgptRedeemSuccess.replace('{count}', String(windowsReset)),
+        message: pluralMessage(
+          { one: s.chatgptRedeemSuccessOne, other: s.chatgptRedeemSuccessOther },
+          windowsReset,
+          locale
+        ),
         type: 'success',
       };
     case 'nothing_to_reset':
@@ -45,6 +53,7 @@ function outcomeToast(
 export function useChatGptResetRedeem({
   connectorId,
   messages,
+  locale,
   toast,
   onSettled,
 }: UseChatGptResetRedeemOptions) {
@@ -62,7 +71,7 @@ export function useChatGptResetRedeem({
       const result = await redeemChatGptResetCredit(connectorId, redeemRequestId);
       requestIdRef.current = null;
       if (result.code === 'reset') setLastWindowsReset(result.windowsReset);
-      const { message, type } = outcomeToast(result.code, result.windowsReset, messages);
+      const { message, type } = outcomeToast(result.code, result.windowsReset, messages, locale);
       toast(message, type);
     } catch {
       // Keep the request id: the redemption state is unknown, so the retry
@@ -72,7 +81,7 @@ export function useChatGptResetRedeem({
       setIsRedeeming(false);
       await onSettled?.();
     }
-  }, [connectorId, messages, toast, onSettled]);
+  }, [connectorId, messages, locale, toast, onSettled]);
 
   return { redeem, isRedeeming, lastWindowsReset };
 }

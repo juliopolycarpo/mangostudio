@@ -4,10 +4,13 @@ import {
   type ExternalAgentUnavailableReason,
   isExternalAgentKindCode,
 } from '@mangostudio/shared/external-agents';
+import { Callout } from '@/components/ui/Callout';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
+import { toolLoopRounds } from '../../lib/tool-loop-detail';
 
 interface ErrorPartProps {
   text: string;
@@ -22,6 +25,12 @@ interface ErrorPartProps {
    * other kind keeps `text` and is shown as plain text, so the person has something to quote.
    */
   code?: string;
+  /**
+   * The hub's own note on the turn's `tool_loop_exhausted` event — how far the tool loop got
+   * before it stopped. It is English the hub wrote, so the card says it in the reader's words
+   * (the number of rounds) and keeps the original only as the sentence's tooltip, for quoting.
+   */
+  detail?: string;
 }
 
 /**
@@ -41,8 +50,11 @@ export function ErrorPart({
   remedy,
   requiredVersion,
   code,
+  detail,
 }: ErrorPartProps) {
   const { t } = useI18n();
+  const plural = usePlural();
+  const rounds = toolLoopRounds(detail);
   const command = remedy?.kind === 'sign-in' ? remedy.command : undefined;
   // A reason describes the agent; the session cap describes the runtime, so it is keyed by code.
   const capacity = !unavailableReason && code === EXTERNAL_AGENT_CAPACITY_CODE;
@@ -54,11 +66,23 @@ export function ErrorPart({
       ? t.externalAgents.openFailure.capacity
       : text;
   return (
-    <div className="max-w-2xl space-y-1.5 rounded-xl border border-error/20 bg-error/10 p-4 font-body text-sm text-error">
-      <p>{sentence}</p>
-      {kind ? <span className="block font-mono text-[10px] opacity-70">{kind}</span> : null}
-      {command ? <SignInCommand command={command} /> : null}
-      {unavailableReason && remedy ? <ExternalRemedyLink remedy={remedy} /> : null}
-    </div>
+    <Callout tone="danger" className="max-w-(--timeline-card-max)">
+      <div className="space-y-1.5">
+        <p className="text-fg" title={detail}>
+          {sentence}
+        </p>
+        {rounds !== null ? (
+          <p>
+            {plural(
+              { one: t.chat.feed.toolLoopRoundsOne, other: t.chat.feed.toolLoopRoundsOther },
+              rounds
+            )}
+          </p>
+        ) : null}
+        {kind ? <span className="block font-mono text-micro text-fg-subtle">{kind}</span> : null}
+        {command ? <SignInCommand command={command} /> : null}
+        {unavailableReason && remedy ? <ExternalRemedyLink remedy={remedy} /> : null}
+      </div>
+    </Callout>
   );
 }

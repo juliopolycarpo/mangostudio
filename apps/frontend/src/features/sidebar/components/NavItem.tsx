@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 
@@ -28,31 +29,44 @@ export function NavItem({
   onClick,
 }: NavItemProps) {
   const horizontal = orientation === 'horizontal';
+  const glyph = <Icon size={horizontal ? ICON_MD : ICON_LG} className="shrink-0" />;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'w-full rounded-lg transition-all duration-200',
+        'relative w-full rounded-sm transition-colors',
         horizontal
-          ? 'flex items-center gap-3 px-4 py-3 text-left'
-          : 'flex flex-col items-center justify-center gap-1 p-2 text-xs font-medium',
+          ? 'flex h-8 items-center gap-2 px-2 text-left text-sm'
+          : 'flex flex-col items-center justify-center gap-1 p-2 text-xs',
+        // The current page is a neutral fill plus a 3px accent bar on the leading
+        // edge — the NavigationView's own signal. The bar is what carries the
+        // colour; the fill alone would not survive a grayscale screen.
         active
-          ? 'text-primary bg-surface-container-high'
-          : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
+          ? cn('bg-fill-selected font-medium text-fg', horizontal && SELECTION_BAR)
+          : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
       )}
     >
-      <Icon size={horizontal ? ICON_MD : ICON_LG} className="shrink-0" />
-      <span
-        className={cn('truncate', horizontal && 'font-label font-medium text-sm')}
-        title={horizontal ? undefined : label}
-      >
+      {/* The row's glyph sits in the same 20px centred slot a chat row's does, so
+          the label of a page and the title of a chat start on one x (the rail's
+          `px-3`, this row's `px-2`, the slot, the gap). */}
+      {horizontal ? (
+        <span aria-hidden="true" className="flex size-5 shrink-0 items-center justify-center">
+          {glyph}
+        </span>
+      ) : (
+        glyph
+      )}
+      {/* `max-w-full`: in the tile's column the label is as wide as its text
+          however narrow the cell is, so "Environments" ran past its neighbours
+          instead of ending in an ellipsis. */}
+      <span className="max-w-full truncate" title={horizontal ? undefined : label}>
         {label}
       </span>
       {horizontal && badgeLabel ? (
         <span
-          className="ml-auto shrink-0 rounded-full bg-warning/15 px-1.5 py-0.5 font-mono text-[10px] font-bold text-warning"
+          className="ml-auto shrink-0 rounded-full bg-warning-subtle px-1.5 font-mono text-micro font-medium text-warning"
           data-testid="nav-item-badge"
         >
           {badgeLabel}

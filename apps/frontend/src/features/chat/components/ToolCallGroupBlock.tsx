@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { isFileChangeTool } from './file-change-preview';
 import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
@@ -108,18 +109,16 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
         expanded={expanded}
         onToggle={() => setExpanded((v) => !v)}
         glyph={<StatusGlyph status={status} name={name} />}
+        // `+N more` rides in the right-hand cluster, not as a pill after the
+        // argument, and the row drops it below `sm`: the outcome beside it
+        // already counts what the group touched, and the opened group lists every
+        // member, so on a phone the room goes to the target.
+        count={moreCount > 0 ? moreLabel : null}
         summary={summary ? formatToolSummary(summary, t.tools.summary) : null}
         duration={duration === null ? null : formatToolDuration(duration)}
       >
-        <span className={`shrink-0 font-mono font-semibold ${toneTextClass(tone)}`}>{label}</span>
-        {firstHint && (
-          <span className="truncate font-mono text-on-surface-variant/60">{firstHint}</span>
-        )}
-        {moreCount > 0 && (
-          <span className="shrink-0 rounded-sm bg-surface-container-high px-1 py-px text-[10px] text-on-surface-variant/70">
-            {moreLabel}
-          </span>
-        )}
+        <span className={cn('shrink-0 font-mono font-medium', toneTextClass(tone))}>{label}</span>
+        {firstHint && <span className="truncate font-mono text-fg-muted">{firstHint}</span>}
       </TimelineRow>
 
       {/* A group opens onto a nested rail, not onto a card. */}

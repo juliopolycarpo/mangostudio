@@ -10,14 +10,13 @@ import { render } from '../../support/harness/render';
 
 /** The balloon body both sides share. Kept here so a silent edit is caught. */
 const BODY_CLASSES = [
-  'px-5',
+  'px-4',
   'py-3',
-  'rounded-2xl',
-  'bg-surface-container-low',
-  'text-on-surface',
+  'rounded-lg',
+  'bg-surface',
+  'text-fg',
   'border',
-  'border-outline-variant/10',
-  'font-body',
+  'border-stroke',
   'chat-message-body',
   'leading-relaxed',
 ];
@@ -48,7 +47,7 @@ describe('MessageBubble', () => {
 
     const bubble = container.querySelector('.chat-message-body');
     expect(bubble?.classList.contains('max-w-2xl')).toBe(true);
-    expect(bubble?.classList.contains('rounded-2xl')).toBe(true);
+    expect(bubble?.classList.contains('rounded-lg')).toBe(true);
   });
 
   it('emits no trailing space when no className is given', () => {
@@ -56,6 +55,13 @@ describe('MessageBubble', () => {
 
     const bubble = container.querySelector('.chat-message-body');
     expect(bubble?.getAttribute('class')).toBe(BODY_CLASSES.join(' '));
+  });
+
+  it('is flat: a surface and a hairline, no shadow', () => {
+    const { container } = render(<MessageBubble>body</MessageBubble>);
+
+    const bubble = container.querySelector('.chat-message-body');
+    expect(bubble?.getAttribute('class')).not.toMatch(/shadow/);
   });
 
   it('takes no alignment prop: the row owns which side a turn hangs off', () => {

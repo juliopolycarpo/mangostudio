@@ -57,10 +57,23 @@ describe('BackupUsage', () => {
 
     const strip = await screen.findByTestId('backup-usage');
     expect(strip).toHaveTextContent(
-      en.library.backups.usage.replace('{count}', '3').replace('{size}', '4.0 KiB')
+      en.library.backups.usage.replace('{count}', '3').replace('{size}', '4 KiB')
     );
     expect(strip).toHaveTextContent(
       en.library.backups.retention.replace('{count}', '5').replace('{size}', '95.4 MiB')
+    );
+  });
+
+  // "1 backups" is the grammar slip this guards, and a retention limit that is a
+  // whole number of MiB must not print a trailing ".0".
+  it('says one backup in the singular and drops a zero decimal', async () => {
+    await renderUsage({ ...usage, setCount: 1, retentionBytes: 512 * 1024 * 1024 });
+
+    const strip = await screen.findByTestId('backup-usage');
+    expect(strip).toHaveTextContent(en.library.backups.usageOne.replace('{size}', '4 KiB'));
+    expect(strip).not.toHaveTextContent('1 backups');
+    expect(strip).toHaveTextContent(
+      en.library.backups.retention.replace('{count}', '5').replace('{size}', '512 MiB')
     );
   });
 

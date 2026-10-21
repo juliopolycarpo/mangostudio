@@ -38,6 +38,15 @@ describe('ContextSettings', () => {
     expect(screen.getByLabelText('Preferred summary model')).toBeInTheDocument();
   });
 
+  /** The number field carries the value and the hint carries the unit; a readout would say both twice. */
+  it('shows each threshold once, with the unit in the hint', () => {
+    renderSettings();
+
+    expect(screen.queryByText(/% of context/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/percentage of the window/i)).toHaveLength(3);
+    expect(screen.getAllByRole('spinbutton')).toHaveLength(3);
+  });
+
   it('updates compaction behavior through the provided setter', async () => {
     const props = renderSettings();
 

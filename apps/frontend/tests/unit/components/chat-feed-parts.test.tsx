@@ -48,6 +48,60 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     jest.clearAllMocks();
   });
 
+  // The turn reports a tool-loop stop twice — an event with the numbers, an
+  // error with the sentence. Drawn separately, a red-glyph divider sat directly
+  // above a danger card saying the same thing.
+  it('tells a tool-loop stop once, in the error card, with the event detail', async () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'system_event',
+        event: 'tool_loop_exhausted',
+        detail: 'Reached 25 iterations with 2 pending tool calls',
+      },
+      { type: 'error', text: 'The model exceeded the maximum number of tool interactions.' },
+    ];
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[makeMessage({ parts })]} />);
+    await flushAsyncRender();
+
+    expect(container.querySelectorAll('.chat-timeline-item--divider')).toHaveLength(0);
+    const card = container.querySelector('.chat-timeline-item--card');
+    expect(card).toHaveTextContent('The model exceeded the maximum number of tool interactions.');
+    // The hub's English note is said in the reader's words; the original stays
+    // on the sentence's tooltip for quoting.
+    expect(card).toHaveTextContent('Stopped after 25 rounds of tool calls.');
+    expect(card).not.toHaveTextContent('Reached 25 iterations');
+    expect(
+      screen.getByText('The model exceeded the maximum number of tool interactions.')
+    ).toHaveAttribute('title', 'Reached 25 iterations with 2 pending tool calls');
+  });
+
+  it('keeps an unrecognised tool-loop note off the card face', async () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'system_event',
+        event: 'tool_loop_exhausted',
+        detail: 'stopped after 1000 tool calls',
+      },
+      { type: 'error', text: 'The model exceeded the maximum number of tool interactions.' },
+    ];
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[makeMessage({ parts })]} />);
+    await flushAsyncRender();
+
+    const card = container.querySelector('.chat-timeline-item--card');
+    expect(card).not.toHaveTextContent('stopped after 1000 tool calls');
+  });
+
+  it('still marks a tool-loop stop that has no error card after it', async () => {
+    const parts: MessagePart[] = [
+      { type: 'system_event', event: 'tool_loop_exhausted', detail: 'Reached 25 iterations' },
+    ];
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[makeMessage({ parts })]} />);
+    await flushAsyncRender();
+
+    expect(container.querySelectorAll('.chat-timeline-item--divider')).toHaveLength(1);
+    expect(screen.getByText(/Reached 25 iterations/)).toBeInTheDocument();
+  });
+
   it('renders a single thinking block for a legacy single-thinking part', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'single thought' },
@@ -85,7 +139,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // one more step (`--block`), and it draws the same balloon a user gets.
     const bubbleItems = container.querySelectorAll('.chat-timeline-item--bubble');
     expect(bubbleItems).toHaveLength(1);
-    expect(bubbleItems[0]?.querySelector('.rounded-2xl.bg-surface-container-low')).not.toBeNull();
+    expect(bubbleItems[0]?.querySelector('.rounded-lg.bg-surface')).not.toBeNull();
     expect(screen.getByText('Created /tmp/probe.txt.')).toBeInTheDocument();
   });
 
@@ -152,7 +206,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // Only the part being streamed into carries the caret. Asking whether a
     // later *thinking* part existed kept the finished thought expanded and
     // pulsing — with its own caret — for the rest of the turn.
-    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Thinking…')).not.toBeInTheDocument();
     expect(screen.getByText('Thought')).toBeInTheDocument();
     expect(container.querySelectorAll('.markdown-content--streaming')).toHaveLength(1);
     expect(container.querySelector('.markdown-content--streaming')).toHaveTextContent(
@@ -173,7 +227,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    // ToolCallBlock in pending state shows "Calling..." label
+    // ToolCallBlock in pending state shows "Calling…" label
     const buttons = container.querySelectorAll('button');
     const toolButtons = Array.from(buttons).filter((btn) =>
       btn.textContent?.includes('calculator')
@@ -341,7 +395,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
       noResponse: screen.queryByText('No response') !== null,
     }).toEqual({
       severity: 'warning',
-      text: 'WarningRate limit close <b>now</b>Resets in four minutes.',
+      text: 'Warning: Rate limit close <b>now</b>Resets in four minutes.',
       markup: null,
       noResponse: true,
     });
@@ -379,7 +433,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByText('Create Image')).toBeInTheDocument();
+    expect(screen.getByText('Create image')).toBeInTheDocument();
   });
 
   it('renders legacy assistant image messages with imageUrl and style params', async () => {
@@ -399,8 +453,11 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // goes stale the moment a turn is reloaded, so the turn's phase is derived
     // and only stated while it is still true.
     expect(screen.getByText('gpt-image-2')).toBeInTheDocument();
-    expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
-    expect(screen.getByText(/Thought for/)).toBeInTheDocument();
+    expect(screen.getByAltText('Generated image')).toHaveAttribute(
+      'src',
+      '/images/generated-123.png'
+    );
+    expect(screen.getByText('Responded in 1.2s')).toBeInTheDocument();
     expect(screen.getByText('1K')).toBeInTheDocument();
   });
 
@@ -417,7 +474,10 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByAltText('Generated')).toHaveAttribute('src', '/images/generated-123.png');
+    expect(screen.getByAltText('Generated image')).toHaveAttribute(
+      'src',
+      '/images/generated-123.png'
+    );
   });
 
   it('shows an unavailable state when a generated image fails to load', async () => {
@@ -426,7 +486,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     render(<ChatFeed chatId="chat-1" messages={[msg]} />);
 
     await flushAsyncRender();
-    fireEvent.error(screen.getByAltText('Generated'));
+    fireEvent.error(screen.getByAltText('Generated image'));
 
     expect(screen.getByText('Image no longer available')).toBeInTheDocument();
     expect(
@@ -456,7 +516,7 @@ describe('ChatFeed — generated_image part rendering', () => {
 
     await flushAsyncRender();
 
-    expect(screen.getByText('Generating image...')).toBeInTheDocument();
+    expect(screen.getByText('Generating image…')).toBeInTheDocument();
     expect(screen.getByText('a polar bear')).toBeInTheDocument();
   });
 
@@ -604,7 +664,10 @@ describe('ChatFeed — generated_image part rendering', () => {
     await flushAsyncRender();
 
     expect(screen.getByText('Explore')).toBeInTheDocument();
-    expect(screen.getByText('Subagent trace')).toBeInTheDocument();
+    // The status pill carries the word; the card does not also announce what the
+    // tool row above it and its own chevron already say.
+    expect(screen.queryByText('Subagent trace')).not.toBeInTheDocument();
+    expect(screen.getByText('Completed')).toBeInTheDocument();
     expect(screen.getByText('I used Explore.')).toBeInTheDocument();
 
     // The disclosure state has to reach assistive technology, not just the chevron.

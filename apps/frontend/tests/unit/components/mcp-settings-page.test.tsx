@@ -62,12 +62,26 @@ describe('McpSettingsPage', () => {
     fetchScenario.restore();
   });
 
-  it('shows the empty state when no servers exist', async () => {
+  it('shows the empty state with its own Add, and no header twin, when no servers exist', async () => {
     fetchScenario.respondWithJson('GET', '/api/mcp/servers', { body: { servers: [] } });
 
     render(<McpSettingsPage />);
 
     expect(await screen.findByText(/no mcp servers yet/i)).toBeInTheDocument();
+    const addButtons = screen.getAllByRole('button', { name: /add server/i });
+    expect(addButtons).toHaveLength(1);
+    expect(addButtons[0]).toHaveClass('bg-control');
+  });
+
+  it('draws the header Add as a secondary button once servers exist', async () => {
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [STDIO_SERVER] },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Everything');
+    expect(screen.getByRole('button', { name: /add server/i })).toHaveClass('bg-control');
   });
 
   it('shows error state with retry button', async () => {
@@ -94,6 +108,55 @@ describe('McpSettingsPage', () => {
     expect(screen.getByText('HTTP')).toBeInTheDocument();
     expect(screen.getByText('Connected')).toBeInTheDocument();
     expect(screen.getByText('Error')).toBeInTheDocument();
+  });
+
+  it('gives only the status badge a dot, and tells connecting apart from disconnected', async () => {
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: {
+        servers: [
+          { ...STDIO_SERVER, id: 'srv-connecting', name: 'Booting', status: 'connecting' },
+          { ...HTTP_SERVER, id: 'srv-off', name: 'Idle', status: 'disconnected' },
+        ],
+      },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Booting');
+    const connecting = screen.getByText('Connecting');
+    const disconnected = screen.getByText('Disconnected');
+
+    expect(connecting.querySelector('[data-tone]')).not.toBeNull();
+    expect(disconnected.querySelector('[data-tone]')).not.toBeNull();
+    // Same grey as metadata would be indistinguishable; `connecting` is `info`.
+    expect(connecting).toHaveClass('bg-info-subtle');
+    expect(disconnected).not.toHaveClass('bg-info-subtle');
+    // Transport and environment stay plain metadata badges.
+    expect(screen.getByText('stdio').querySelector('[data-tone]')).toBeNull();
+    expect(screen.getByText('HTTP').querySelector('[data-tone]')).toBeNull();
+  });
+
+  it('keeps Test with the row actions and the tool disclosure beside the command', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [STDIO_SERVER] },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Everything');
+    const testButton = screen.getByRole('button', { name: /^test$/i });
+    expect(testButton.parentElement).toContainElement(
+      screen.getByRole('button', { name: /more actions for everything/i })
+    );
+
+    const showTools = screen.getByRole('button', { name: /show tools/i });
+    expect(showTools).toHaveAttribute('aria-expanded', 'false');
+    await user.click(showTools);
+    expect(screen.getByRole('button', { name: /hide tools/i })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
   });
 
   it('opens the add form, validates required fields with i18n messages, and shows the stdio trust warning', async () => {
@@ -157,6 +220,25 @@ describe('McpSettingsPage', () => {
     });
   });
 
+  it('gathers Edit, the rename pair and Delete in one overflow menu, Delete last', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [STDIO_SERVER] },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Everything');
+    // No loose Edit or Delete button beside the menu.
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete server/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /more actions for everything/i }));
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
+    expect(items[0]).toBe('Edit');
+    expect(items.at(-1)).toBe('Delete server');
+  });
+
   it('shows masked stored headers when editing an http server', async () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
@@ -166,7 +248,8 @@ describe('McpSettingsPage', () => {
     render(<McpSettingsPage />);
 
     await screen.findByText('Remote');
-    await user.click(screen.getByRole('button', { name: /edit/i }));
+    await user.click(screen.getByRole('button', { name: /more actions for remote/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^edit$/i }));
 
     expect(screen.getByText('Authorization')).toBeInTheDocument();
     expect(screen.getByText('value saved')).toBeInTheDocument();
@@ -199,6 +282,41 @@ describe('McpSettingsPage', () => {
     expect(await screen.findByText(/2 tools available/i)).toBeInTheDocument();
   });
 
+  it('writes the cause of an error status on the card instead of only in a tooltip', async () => {
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [HTTP_SERVER] },
+    });
+
+    render(<McpSettingsPage />);
+
+    expect(await screen.findByText('connect ECONNREFUSED')).toBeInTheDocument();
+    // Stored state rather than an answer the user just asked for: not announced.
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    // The failure says which server and what to do, and offers the way to do it.
+    expect(screen.getByText('Could not connect to “Remote”')).toBeInTheDocument();
+    expect(screen.getByText(/check its address and credentials/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument();
+  });
+
+  it('replaces the stored cause with the answer of a new test, never showing both', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [HTTP_SERVER] },
+    });
+    fetchScenario.respondWithJson('POST', '/api/mcp/servers/srv-http/test', {
+      body: { ok: false, status: 'error', error: 'Handshake timed out' },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('connect ECONNREFUSED');
+    await user.click(screen.getByRole('button', { name: /^test$/i }));
+
+    expect(await screen.findByText('Handshake timed out')).toBeInTheDocument();
+    expect(screen.queryByText('connect ECONNREFUSED')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Handshake timed out');
+  });
+
   it('deletes a server after confirmation', async () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
@@ -211,7 +329,8 @@ describe('McpSettingsPage', () => {
     render(<McpSettingsPage />);
 
     await screen.findByText('Everything');
-    await user.click(screen.getByRole('button', { name: /delete server/i }));
+    await user.click(screen.getByRole('button', { name: /more actions for everything/i }));
+    await user.click(screen.getByRole('menuitem', { name: /delete server/i }));
     // Confirm inside the dialog (its confirm button carries the same label).
     const dialogButtons = screen.getAllByRole('button', { name: /delete server/i });
     await user.click(dialogButtons[dialogButtons.length - 1]);
@@ -444,7 +563,7 @@ describe('McpSettingsPage', () => {
 
     expect(await screen.findByText('echo')).toBeInTheDocument();
 
-    const toggle = screen.getByRole('checkbox', { name: 'echo' });
+    const toggle = screen.getByRole('switch', { name: 'echo' });
     expect(toggle).not.toBeChecked();
     await user.click(toggle);
 

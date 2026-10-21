@@ -10,8 +10,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { DEFAULT_APP_SETTINGS, onboardingFor } from '@mangostudio/shared/app-settings';
+import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { en } from '@mangostudio/shared/i18n';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -133,7 +134,7 @@ describe('OnboardingWizard', () => {
     render(<OnboardingWizard onDone={() => undefined} />);
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
         /runs coding agents on your own machine/i
       )
     );
@@ -188,7 +189,7 @@ describe('OnboardingWizard', () => {
     // Folder is satisfied — the environment exists and a path is stored — so
     // the toolchain is the first real question left.
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/toolchain/i)
     );
   });
 
@@ -236,7 +237,7 @@ describe('OnboardingWizard', () => {
     await userEvent.click(screen.getByTestId('onboarding-step-toolchain'));
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/toolchain/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/toolchain/i)
     );
   });
 
@@ -289,11 +290,160 @@ describe('OnboardingWizard', () => {
     expect(screen.queryByText(en.onboarding.agents.noneFound)).not.toBeInTheDocument();
   });
 
+  it('keeps an unusable runner readable instead of fading the row, with a warning that says why', async () => {
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        agents: [
+          {
+            targetId: 'codex',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'determined',
+            authState: 'signed-out',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_790_000_000_000, attempts: 1 },
+          },
+        ],
+      },
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-agents')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-agents'));
+
+    const radio = await screen.findByTestId('onboarding-runner-codex');
+    expect(radio).toBeDisabled();
+    const row = radio.closest('label') as HTMLElement;
+    // Nothing fades (decision 17): not the row, and not the identity dot, which
+    // keeps its hue at full strength. The name steps down to `fg-muted`.
+    expect(row.className).not.toContain('opacity');
+    const dot = row.querySelector('[data-tone]');
+    expect(dot).toHaveClass('bg-agent-codex');
+    expect(dot?.className).not.toContain('opacity');
+    expect(within(row).getByText('Codex').closest('.text-fg-muted')).not.toBeNull();
+    // Signed out is a state the person can fix, so it is a `warning` badge.
+    expect(within(row).getByText(en.onboarding.agents.signedOut)).toHaveClass('text-warning');
+  });
+
+  it('offers the runners as one radio group and names the agent a sign-in command is for', async () => {
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        agents: [
+          {
+            targetId: 'codex',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'determined',
+            authState: 'signed-in',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_790_000_000_000, attempts: 1 },
+          },
+          {
+            targetId: 'claude',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'determined',
+            authState: 'signed-out',
+            loginCommand: 'claude auth login',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_790_000_000_000, attempts: 1 },
+          },
+        ],
+      },
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-agents')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-agents'));
+
+    const claude = await screen.findByTestId('onboarding-runner-claude');
+    const codex = screen.getByTestId('onboarding-runner-codex');
+    // One choice, so one named radio group holding MangoStudio and every CLI:
+    // radios, not a set of pressed toggles.
+    const group = screen.getByRole('radiogroup', { name: en.onboarding.agents.title });
+    expect(within(group).getAllByRole('radio')).toHaveLength(3);
+    expect(within(group).getByTestId('onboarding-runner-mangostudio')).toHaveAttribute(
+      'type',
+      'radio'
+    );
+    expect(screen.queryByRole('button', { pressed: false })).toBeNull();
+    // Nothing is stored yet, so nothing is shown as chosen.
+    for (const radio of within(group).getAllByRole('radio')) expect(radio).not.toBeChecked();
+    // Each is led by the runner's own hue.
+    expect(claude.closest('label')?.querySelector('[data-tone]')).toHaveClass('bg-agent-claude');
+    expect(codex.closest('label')?.querySelector('[data-tone]')).toHaveClass('bg-agent-codex');
+
+    // The command is nested under the one row it belongs to and says whose it is,
+    // although Codex is listed above it.
+    const command = screen.getByText('claude auth login');
+    expect(claude.closest('li')).toContainElement(command);
+    expect(codex.closest('li')).not.toContainElement(command);
+    // The row names the agent, so the hint does not repeat it.
+    expect(
+      within(claude.closest('li') as HTMLElement).getByText(/^Sign in from a terminal/)
+    ).toBeInTheDocument();
+    expect(
+      within(codex.closest('li') as HTMLElement).queryByText(/sign in from a terminal/i)
+    ).toBeNull();
+  });
+
+  it('stores the runner picked from the radio group, and refuses an unusable one', async () => {
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        agents: [
+          {
+            targetId: 'codex',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'determined',
+            authState: 'signed-in',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_790_000_000_000, attempts: 1 },
+          },
+        ],
+      },
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-agents')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-agents'));
+
+    // No model is configured in this scenario, so MangoStudio cannot be taken.
+    await waitFor(() => expect(screen.getByTestId('onboarding-runner-mangostudio')).toBeDisabled());
+    await userEvent.click(await screen.findByRole('radio', { name: /Codex/ }));
+
+    await waitFor(() => {
+      const put = scenario.fetchMock.mock.calls.find(
+        (call) => String(call[1]?.method).toUpperCase() === 'PUT'
+      );
+      expect(put).toBeDefined();
+      const body = JSON.parse(String(put?.[1]?.body)) as {
+        profileSettings: { default: { onboarding: { runner?: unknown } } };
+      };
+      expect(body.profileSettings.default.onboarding.runner).toEqual({
+        kind: 'external',
+        targetId: 'codex',
+      });
+    });
+  });
+
   it('refuses a second skip while the first write is still open', async () => {
     // Every write is built on the cached record, and nothing is cached until
     // the server answers: a second click during the first PUT would send the
     // state from before it, dropping the skip that is already in flight.
     hangEveryPut();
+    // Past the welcome step, which has nothing to skip: the first step that is
+    // still asking something is the folder.
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
 
     render(<OnboardingWizard onDone={() => undefined} />);
     await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
@@ -320,6 +470,45 @@ describe('OnboardingWizard', () => {
       expect(screen.getByTestId('onboarding-toolchain-failed')).toBeInTheDocument()
     );
     expect(screen.queryByTestId('onboarding-runtime-node')).not.toBeInTheDocument();
+  });
+
+  it('prints every runtime version in one form, without the prefix Node reports', async () => {
+    const installation = (version: string) => ({
+      path: '/usr/bin/runtime',
+      rawPath: '/usr/bin/runtime',
+      version,
+      origin: 'path',
+      effective: true,
+    });
+    scenario.respondWithJson('GET', '/api/environments/runtimes', {
+      body: [
+        {
+          id: 'node',
+          health: 'ok',
+          installations: [],
+          findings: [],
+          effective: installation('v22.22.0'),
+        },
+        {
+          id: 'bun',
+          health: 'ok',
+          installations: [],
+          findings: [],
+          effective: installation('1.4.2'),
+        },
+      ],
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-step-toolchain')).toBeInTheDocument()
+    );
+    await userEvent.click(screen.getByTestId('onboarding-step-toolchain'));
+
+    const node = await screen.findByTestId('onboarding-runtime-node');
+    await waitFor(() => expect(node).toHaveTextContent('22.22.0'));
+    expect(node).not.toHaveTextContent('v22');
+    expect(screen.getByTestId('onboarding-runtime-bun')).toHaveTextContent('1.4.2');
   });
 
   it('refuses to open the folder picker while a write is still open', async () => {
@@ -369,14 +558,106 @@ describe('OnboardingWizard', () => {
     expect(screen.getByTestId('onboarding-skip-step')).toBeDisabled();
   });
 
-  it('advances past a skipped step and remembers the skip', async () => {
+  it('has nothing to go back to on the first step, and a Back control on every other', async () => {
     render(<OnboardingWizard onDone={() => undefined} />);
-    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('onboarding-continue')).toBeInTheDocument());
+    expect(screen.queryByTestId('onboarding-back')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('onboarding-continue'));
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-back')).toBeEnabled());
+  });
+
+  it('draws the whole footer row at one height, so no border sits inside another button', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-continue')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-continue'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-back')).toBeEnabled());
+
+    for (const id of ['onboarding-back', 'onboarding-skip-step', 'onboarding-continue']) {
+      expect(screen.getByTestId(id)).toHaveClass('h-10');
+    }
+  });
+
+  it('names the step in the progress line, which is all a phone gets of the step list', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-continue')).toBeInTheDocument());
+    const welcomeLine = screen.getByText(`Step 1 of 6 · ${en.onboarding.steps.welcome}`, {
+      exact: false,
+    });
+    expect(welcomeLine).toBeInTheDocument();
+    // From `sm` up the step list beside the card says the same thing, so the
+    // line is for the phone alone.
+    expect(welcomeLine).toHaveClass('sm:hidden');
+
+    await userEvent.click(screen.getByTestId('onboarding-continue'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(`Step 2 of 6 · ${en.onboarding.steps.folder}`, { exact: false })
+      ).toBeInTheDocument()
+    );
+    // The list itself is for `sm` and up: it is in the document, behind a class.
+    expect(screen.getByRole('navigation', { name: en.onboarding.stepList })).toHaveClass('hidden');
+  });
+
+  it('keeps one primary in the folder step: the step\u2019s own until a folder is chosen', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-folder')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-folder'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-choose-folder')).toBeInTheDocument());
+
+    expect(screen.getByTestId('onboarding-choose-folder')).toHaveClass('bg-accent');
+    expect(screen.getByTestId('onboarding-continue')).not.toHaveClass('bg-accent');
+    // Stepping down changes the look and nothing else: setup stays skippable.
+    expect(screen.getByTestId('onboarding-continue')).toBeEnabled();
+  });
+
+  it('hands the primary to Continue once the folder is chosen', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true, workdir: '/home/dev/project' }),
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-folder')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-folder'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-choose-folder')).toBeInTheDocument());
+
+    expect(screen.getByTestId('onboarding-choose-folder')).not.toHaveClass('bg-accent');
+    expect(screen.getByTestId('onboarding-continue')).toHaveClass('bg-accent');
+  });
+
+  it('puts Send ahead of Open MangoStudio on the first-chat step until the prompt is answered', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true, workdir: '/home/dev/project' }),
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-chat')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-chat'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-send-prompt')).toBeInTheDocument());
+
+    expect(screen.getByTestId('onboarding-send-prompt')).toHaveClass('bg-accent');
+    expect(screen.getByTestId('onboarding-continue')).not.toHaveClass('bg-accent');
+  });
+
+  it('advances past a skipped step and remembers the skip', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/folder/i)
+    );
 
     await userEvent.click(screen.getByTestId('onboarding-skip-step'));
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/folder/i)
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/toolchain/i)
     );
     const put = scenario.fetchMock.mock.calls.find(
       (call) => String(call[1]?.method).toUpperCase() === 'PUT'
@@ -384,6 +665,103 @@ describe('OnboardingWizard', () => {
     const body = JSON.parse(String(put?.[1]?.body)) as {
       profileSettings: { default: { onboarding: { skippedSteps: string[] } } };
     };
-    expect(body.profileSettings.default.onboarding.skippedSteps).toEqual(['welcome']);
+    expect(body.profileSettings.default.onboarding.skippedSteps).toEqual(['folder']);
+  });
+
+  it('offers no skip on the welcome step, which asks nothing', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-continue')).toBeInTheDocument());
+
+    expect(screen.getByTestId('onboarding-continue')).toHaveTextContent(
+      en.onboarding.welcome.action
+    );
+    expect(screen.queryByTestId('onboarding-skip-step')).not.toBeInTheDocument();
+  });
+
+  it('offers no skip on a step the machine already satisfies', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({
+        welcomeAcknowledged: true,
+        workdir: '/home/dev/project',
+        environmentId: 'local',
+      }),
+    });
+    scenario.respondWithJson('GET', '/api/environments', {
+      body: [
+        {
+          id: 'local',
+          name: 'Local',
+          kind: 'local',
+          transportKind: 'local',
+          status: { state: 'connected' },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+    render(<OnboardingWizard onDone={() => undefined} />);
+    // Resume lands on the toolchain, the first step the machine cannot satisfy.
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/toolchain/i)
+    );
+    expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument();
+
+    // The folder is done: the person can look at it, and Continue is the way on.
+    await userEvent.click(screen.getByTestId('onboarding-step-folder'));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/folder/i)
+    );
+    expect(screen.queryByTestId('onboarding-skip-step')).not.toBeInTheDocument();
+    expect(screen.getByTestId('onboarding-continue')).toBeEnabled();
+  });
+
+  it('keeps both account-level exits together in the header, off the card', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-skip-all')).toBeInTheDocument());
+
+    const header = screen.getByRole('banner');
+    expect(within(header).getByTestId('onboarding-skip-all')).toBeInTheDocument();
+    expect(within(header).getByTestId('logout-button')).toBeInTheDocument();
+    expect(screen.getByTestId('onboarding-skip-all').parentElement).toBe(
+      screen.getByTestId('logout-button').parentElement
+    );
+    // The header is a wordmark, not a heading: the step's own headline is the
+    // page's one `h1`.
+    expect(within(header).queryByRole('heading')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('puts a way back to the folder step on the notice that says there is none', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-chat')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-chat'));
+
+    const notice = await screen.findByTestId('onboarding-chat-needs-folder');
+    // Nowhere to send a message yet, so the field does not invite one.
+    expect(screen.getByTestId('onboarding-prompt')).toBeDisabled();
+    expect(screen.getByTestId('onboarding-send-prompt')).toBeDisabled();
+
+    await userEvent.click(
+      within(notice).getByRole('button', { name: en.onboarding.chat.goToFolder })
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/folder/i)
+    );
+  });
+
+  it('lets the first message be written once there is a folder to send it in', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true, workdir: '/home/dev/project' }),
+    });
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-chat')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-chat'));
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-prompt')).toBeEnabled());
+    expect(screen.queryByTestId('onboarding-chat-needs-folder')).not.toBeInTheDocument();
   });
 });

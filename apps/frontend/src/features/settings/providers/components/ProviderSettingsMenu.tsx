@@ -1,66 +1,49 @@
 /**
- * Provider settings menu — lists all providers with their status.
+ * Provider settings menu — every provider as a row that opens its own page.
  */
 
-import { Link } from '@tanstack/react-router';
+import { SlidersHorizontal } from 'lucide-react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { useProviderSettingsList } from '../hooks/use-provider-settings';
-import { ProviderSettingsCard } from './ProviderSettingsCard';
+import { ProviderSettingsRow } from './ProviderSettingsRow';
 
+/**
+ * The providers are one divided card, not a card each: a row here only
+ * navigates and carries no action of its own, so it is a settings row that
+ * leads to a page, and a card per row would draw eight boxes to list eight
+ * names. `overflow-hidden` clips each row's hover fill to the card's corners.
+ */
 export function ProviderSettingsMenu() {
   const { t } = useI18n();
+  const s = t.settings.providers;
   const { providers, isLoading, error, refetch } = useProviderSettingsList();
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-error">{t.settings.providers.loadError}</p>
-        <button
-          type="button"
-          onClick={() => void refetch()}
-          className="text-xs text-primary underline underline-offset-2 hover:no-underline"
-        >
-          {t.common.retry}
-        </button>
-      </div>
-    );
-  }
-
-  if (providers.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.settings.providers.noProviders}</p>
-      </div>
-    );
-  }
-
   return (
-    <Card variant="solid" className="p-4 sm:p-6 space-y-4">
-      <h2 className="text-xs uppercase tracking-widest font-bold text-on-surface">
-        {t.settings.providers.title}
-      </h2>
-      <p className="text-xs text-on-surface-variant">{t.settings.providers.perProviderSettings}</p>
-      <div className="grid grid-cols-1 gap-3">
-        {providers.map((descriptor) => (
-          <Link
-            key={descriptor.provider}
-            to="/settings/providers/$provider"
-            params={{ provider: descriptor.provider }}
-            className="block"
-          >
-            <ProviderSettingsCard descriptor={descriptor} />
-          </Link>
-        ))}
-      </div>
-    </Card>
+    <SettingsPage title={s.title} description={s.perProviderSettings}>
+      {isLoading ? (
+        <SettingsLoading />
+      ) : error ? (
+        <SettingsLoadError message={s.loadError} onRetry={() => void refetch()} />
+      ) : providers.length === 0 ? (
+        <Card padded={false}>
+          <EmptyState icon={<SlidersHorizontal size={ICON_LG} />} title={s.noProviders} />
+        </Card>
+      ) : (
+        <Card padded={false} className="overflow-hidden">
+          <ul className="divide-y divide-stroke">
+            {providers.map((descriptor) => (
+              <li key={descriptor.provider}>
+                <ProviderSettingsRow descriptor={descriptor} />
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+    </SettingsPage>
   );
 }

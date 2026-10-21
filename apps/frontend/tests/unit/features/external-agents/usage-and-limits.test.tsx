@@ -56,6 +56,27 @@ describe('ExternalUsageDisplay', () => {
     expect(panel?.className).toContain('group-focus-within:visible');
   });
 
+  // The hover panel is the same surface every menu on the strip opens, not a
+  // hand-spelt copy of it: a hairline, a raised fill, a radius and a shadow that
+  // would each drift on their own the next time `.dropdown-panel` is retuned.
+  it('draws the hover panel as a dropdown panel rather than spelling the surface out', () => {
+    const { container } = render(
+      <ExternalUsageDisplay
+        turn={{ totalTokens: 30_000 }}
+        thread={{ last: { totalTokens: 30_000 }, contextWindowTokens: 272_000 }}
+      />
+    );
+    const panel = container.querySelector('[data-testid="external-usage-turn"]')?.parentElement
+      ?.parentElement;
+    const tokens = panel?.className.split(' ') ?? [];
+
+    expect(tokens).toContain('dropdown-panel');
+    for (const respelt of ['border', 'border-stroke', 'bg-surface-raised', 'shadow-popover']) {
+      expect(tokens).not.toContain(respelt);
+    }
+    expect(tokens).not.toContain('rounded-md');
+  });
+
   it('falls back to a total instead of a percentage when no window is reported', () => {
     const { container } = render(
       <ExternalUsageDisplay

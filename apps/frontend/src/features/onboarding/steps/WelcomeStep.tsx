@@ -7,6 +7,7 @@
 
 import { FolderTree, ShieldCheck, Sparkles } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { StepFrame } from '../StepFrame';
 
 export function WelcomeStep() {
@@ -23,8 +24,8 @@ export function WelcomeStep() {
       <ul className="space-y-3">
         {points.map(({ key, Icon, text }) => (
           <li key={key} className="flex items-start gap-3">
-            <Icon aria-hidden size={16} className="mt-0.5 shrink-0 text-primary" />
-            <span className="text-on-surface-variant text-sm leading-relaxed">{text}</span>
+            <Icon aria-hidden size={ICON_MD} className="mt-0.5 shrink-0 text-fg-muted" />
+            <span className="text-sm text-fg">{text}</span>
           </li>
         ))}
       </ul>

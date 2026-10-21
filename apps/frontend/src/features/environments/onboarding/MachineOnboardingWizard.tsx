@@ -14,10 +14,15 @@
 
 import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { X } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useState } from 'react';
 
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { useEnvironmentEntitiesQuery, useRuntimeLifecycleQuery } from '../queries';
 import type { SshFormFields } from '../ssh-form';
 import { emptySshForm } from '../ssh-form';
@@ -45,7 +50,6 @@ interface MachineOnboardingWizardProps {
 export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboardingWizardProps) {
   const { t } = useI18n();
   const labels = t.environments.onboarding;
-  const titleId = useId();
 
   const environments = useEnvironmentEntitiesQuery();
   const [createdId, setCreatedId] = useState<string | null>(environmentId ?? null);
@@ -86,85 +90,66 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus; a backdrop click closes the same way the X button does.
-    <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-background/80 p-4 fade-in backdrop-blur-sm duration-200"
-      data-testid="machine-onboarding-wizard"
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
-        event.stopPropagation();
-        onClose();
-      }}
-      onClick={(event) => {
-        // Only the backdrop itself, never a bubbled click from the panel —
-        // this listener sits above every step's own buttons and inputs.
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="max-h-full w-full max-w-lg space-y-5 overflow-y-auto rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8"
-      >
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h3 id={titleId} className="font-bold text-lg text-on-surface">
-              {labels.title}
-            </h3>
-            <p className="text-on-surface-variant/60 text-xs">
-              {formatMessage(labels.progress, {
-                step: String(index + 1),
-                total: String(steps.length),
-                name: labels.steps[step],
-              })}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            data-testid="machine-onboarding-close"
-            className="shrink-0 rounded-xl p-1.5 text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface"
-            aria-label={labels.close}
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <ol className="flex list-none flex-wrap gap-1.5" aria-label={labels.title}>
+    <Dialog
+      testId="machine-onboarding-wizard"
+      title={labels.title}
+      description={formatMessage(labels.progress, {
+        step: String(index + 1),
+        total: String(steps.length),
+        name: labels.steps[step],
+      })}
+      onClose={onClose}
+      headerAction={
+        <Button
+          variant="subtle"
+          size="icon"
+          onClick={onClose}
+          data-testid="machine-onboarding-close"
+          aria-label={labels.close}
+        >
+          <X size={ICON_MD} />
+        </Button>
+      }
+      // One segment per step: the finished ones in the control line, the
+      // current one in the accent, the rest in the hairline. The names are
+      // for assistive technology; the sentence above already names the
+      // current step for everyone else.
+      toolbar={
+        <ol className="flex list-none gap-1" aria-label={labels.title}>
           {steps.map((candidate, position) => (
             <li
               key={candidate}
               aria-current={candidate === step ? 'step' : undefined}
-              className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+              className={cn(
+                'h-1 flex-1 rounded-full',
                 position < index
-                  ? 'bg-primary/10 text-primary'
+                  ? 'bg-stroke-strong'
                   : candidate === step
-                    ? 'bg-primary/15 text-primary'
-                    : 'bg-surface-container-lowest text-on-surface-variant/50'
-              }`}
+                    ? 'bg-accent'
+                    : 'bg-stroke'
+              )}
             >
-              {labels.steps[candidate]}
+              <span className="sr-only">{labels.steps[candidate]}</span>
             </li>
           ))}
         </ol>
-
-        <StepBody
-          step={step}
-          ssh={ssh}
-          endState={endState}
-          consent={consent}
-          environment={environment}
-          onSsh={setSsh}
-          onEndState={setEndState}
-          onConsent={setConsent}
-          onCreated={setCreatedId}
-          onAdvance={advance}
-          onGoTo={goTo}
-          onClose={onClose}
-        />
-      </div>
-    </div>
+      }
+    >
+      <StepBody
+        step={step}
+        ssh={ssh}
+        endState={endState}
+        consent={consent}
+        environment={environment}
+        onSsh={setSsh}
+        onEndState={setEndState}
+        onConsent={setConsent}
+        onCreated={setCreatedId}
+        onAdvance={advance}
+        onGoTo={goTo}
+        onClose={onClose}
+      />
+    </Dialog>
   );
 }
 
@@ -266,8 +251,8 @@ function StepBody(props: StepBodyProps) {
  */
 function MissingEnvironment({ message }: { readonly message: string }) {
   return (
-    <p className="text-error text-xs" role="alert">
+    <Callout tone="danger" role="alert">
       {message}
-    </p>
+    </Callout>
   );
 }

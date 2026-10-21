@@ -27,7 +27,7 @@ describe('matchScore', () => {
     const prefix = matchScore('git commit messages', 'git');
     const wordStart = matchScore('Settings · Git', 'git');
     const substring = matchScore('digital', 'git');
-    const subsequence = matchScore('generate images tab', 'git');
+    const subsequence = matchScore('gain it', 'git');
 
     expect(exact).toBeGreaterThan(prefix as number);
     expect(prefix).toBeGreaterThan(wordStart as number);
@@ -40,20 +40,45 @@ describe('matchScore', () => {
   });
 
   it('prefers the tighter run when both are subsequences', () => {
-    const tight = matchScore('command palette', 'cmdp');
-    const scattered = matchScore('cannot mind deeply the peculiar', 'cmdp');
-    expect(tight).toBeGreaterThan(scattered as number);
+    const tight = matchScore('cmd palette', 'cmdp');
+    const looser = matchScore('command palette', 'cmdp');
+    expect(looser).not.toBeNull();
+    expect(tight).toBeGreaterThan(looser as number);
   });
 
   it('measures the tightest span, not the one starting at the first character', () => {
-    // `abc` matches from either `a`. Scoring the earliest one spans the whole
-    // string; the later `a…b…c` is four characters wide and is what the tier is
-    // meant to reward.
-    const tightSpanLater = matchScore('abxxxxaxbc', 'abc');
+    // `abc` matches from either `a`. Scoring the earliest one spans nine
+    // characters; the later `a…b…c` is four wide and is what the tier is meant
+    // to reward.
+    const tightSpanLater = matchScore('abxxxaxbc', 'abc');
     expect(tightSpanLater).toBe(matchScore('axbc', 'abc'));
-    // Same first-character position, same length, but no second start to find —
-    // scoring from the first `a` alone would give these two the same score.
-    expect(tightSpanLater).toBeGreaterThan(matchScore('abxxxxxxxc', 'abc') as number);
+    // Same first-character position, but no second start to find — scoring from
+    // the first `a` alone would give these two the same score.
+    expect(tightSpanLater).toBeGreaterThan(matchScore('abxxxxxxc', 'abc') as number);
+  });
+
+  describe('a scattered subsequence', () => {
+    it('still reaches an abbreviation of a label', () => {
+      expect(matchScore('command palette', 'cmdp')).not.toBeNull();
+    });
+
+    it('is not a match when the letters merely occur in order somewhere in a long title', () => {
+      // The screenshot that prompted the bound: four letters, found in order
+      // across a whole sentence, listed above the Settings tabs they are not.
+      expect(matchScore('Postgres connection pooling notes', 'sett')).toBeNull();
+      expect(matchScore('Move the sidebar rows to flat tokens', 'sett')).toBeNull();
+    });
+
+    it('needs three letters, because two always find something', () => {
+      expect(matchScore('gain it', 'gt')).toBeNull();
+      expect(matchScore('gain it', 'git')).not.toBeNull();
+    });
+
+    it('stops at three times the query length', () => {
+      // `git` allows a run of nine: g…i…t at nine characters is in, ten is out.
+      expect(matchScore('gaaaaaait', 'git')).not.toBeNull();
+      expect(matchScore('gaaaaaaait', 'git')).toBeNull();
+    });
   });
 
   it('returns null when the characters are not there in order', () => {
@@ -96,6 +121,16 @@ describe('scoreCommand', () => {
     );
     expect(scoreCommand(item({ id: 'c', label: 'Untitled' }), 'codex')).toBeNull();
   });
+
+  it('reads the hint and keywords literally, never as scattered letters', () => {
+    // `mgs` is a subsequence of the hint, and of nothing a person would call
+    // the folder: a path is found by what it contains, not by its consonants.
+    const row = item({ id: 'a', label: 'Untitled', hint: 'mangostudio', keywords: 'codex' });
+    expect(scoreCommand(row, 'mgs')).toBeNull();
+    expect(scoreCommand(row, 'studio')).not.toBeNull();
+    // Nor across the seam between the two: `ioc` would need the newline.
+    expect(scoreCommand(row, 'ioc')).toBeNull();
+  });
 });
 
 describe('rankCommands', () => {
@@ -106,7 +141,7 @@ describe('rankCommands', () => {
     // Matches "git" only as a substring of "digit" — the weakest tier that
     // still matches, so the navigate row below outscores it.
     item({ id: 's4', section: 'sessions', label: 'Refactoring the digit parser' }),
-    item({ id: 'a1', section: 'actions', label: 'New Chat' }),
+    item({ id: 'a1', section: 'actions', label: 'New chat' }),
     item({ id: 'n1', section: 'navigate', label: 'Settings · Git' }),
     item({ id: 'e1', section: 'environments', label: 'Local' }),
   ];
@@ -118,6 +153,19 @@ describe('rankCommands', () => {
     // "git" scores higher in navigate, but navigate does not jump the queue.
     expect(sections('git')).toEqual(['sessions', 'navigate']);
     expect(sections('')).toEqual(['sessions', 'actions', 'navigate', 'environments']);
+  });
+
+  it('lists the tabs a query names above chats that only contain its letters', () => {
+    const noisy = [
+      item({ id: 'p', section: 'sessions', label: 'Postgres connection pooling notes' }),
+      item({ id: 'm', section: 'sessions', label: 'Move the sidebar rows to flat tokens' }),
+      item({ id: 'g', section: 'navigate', label: 'Settings · General' }),
+      item({ id: 'c', section: 'navigate', label: 'Settings · MCP' }),
+    ];
+    const { flat, bestIndex } = rankCommands(noisy, 'sett');
+    expect(flat.map((entry) => entry.id)).toEqual(['c', 'g']);
+    // Shorter first within the tier, and the armed row is the first one on screen.
+    expect(bestIndex).toBe(0);
   });
 
   it('drops sections with no match rather than rendering an empty heading', () => {

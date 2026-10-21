@@ -1,5 +1,6 @@
 import type { ModelOption } from '@mangostudio/shared/catalog';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { CheckboxRow } from '@/components/settings/CheckboxRow';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 
 interface ModelToggleListProps {
   readonly title: string;
@@ -18,51 +19,23 @@ export function ModelToggleList({
   if (models.length === 0) return null;
 
   return (
-    <div className="space-y-3">
-      <h4 className="text-[10px] uppercase tracking-widest font-bold text-on-surface-variant/60">
+    <div className="space-y-2">
+      <MicroLabel as="h4" className="block">
         {title}
-      </h4>
+      </MicroLabel>
       <div className="grid grid-cols-1 gap-2">
         {models.map((model) => (
-          <ModelToggleRow
+          <CheckboxRow
             key={model.modelId}
-            model={model}
-            isEnabled={enabledModelIds.has(model.modelId)}
-            onToggleModel={onToggleModel}
+            label={model.displayName}
+            description={model.modelId}
+            checked={enabledModelIds.has(model.modelId)}
+            onChange={(checked) => {
+              void onToggleModel(model.modelId, checked);
+            }}
           />
         ))}
       </div>
     </div>
-  );
-}
-
-interface ModelToggleRowProps {
-  readonly model: ModelOption;
-  readonly isEnabled: boolean;
-  readonly onToggleModel: (modelId: string, checked: boolean) => void | Promise<void>;
-}
-
-function ModelToggleRow({ model, isEnabled, onToggleModel }: ModelToggleRowProps) {
-  return (
-    <label
-      className={`flex items-center gap-4 p-4 rounded-xl border cursor-pointer transition-all ${
-        isEnabled
-          ? 'bg-primary/10 border-primary/30'
-          : 'bg-surface-container-lowest border-outline-variant/10 hover:border-outline-variant/30'
-      }`}
-    >
-      <Checkbox
-        checked={isEnabled}
-        onChange={(event) => {
-          void onToggleModel(model.modelId, event.target.checked);
-        }}
-      />
-      <div className="space-y-0.5">
-        <div className={`text-sm font-bold ${isEnabled ? 'text-primary' : 'text-on-surface'}`}>
-          {model.displayName}
-        </div>
-        <div className="text-[10px] font-mono text-on-surface-variant/60">{model.modelId}</div>
-      </div>
-    </label>
   );
 }

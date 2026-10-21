@@ -9,13 +9,13 @@
  */
 
 import type { MachineActionResponse, MachineServiceAction } from '@mangostudio/shared/machine';
-import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
-import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
+import { EnvironmentScopeHeader } from '../../components/EnvironmentScopeHeader';
 import type { MachineActionResult } from '../api';
 import { refusalMessage } from '../format';
 import {
@@ -66,18 +66,11 @@ export function MachinePage() {
     service.mutate(action, { onSuccess: settle, onError: fail });
 
   const header = (
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <p className="text-sm text-on-surface-variant/60">{m.description}</p>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => void status.refetch()}
-        loading={status.isFetching && Boolean(status.data)}
-      >
-        <RefreshCw size={14} />
-        {m.refresh}
-      </Button>
-    </div>
+    <EnvironmentScopeHeader
+      description={m.description}
+      onRefresh={() => void status.refetch()}
+      refreshing={status.isFetching && Boolean(status.data)}
+    />
   );
 
   if (status.isPending && !status.data) {
@@ -106,42 +99,39 @@ export function MachinePage() {
     <div className="space-y-4">
       {header}
 
-      {/* `awaitingChange` only ever follows a `setNotice` on the accepted path,
-          so the notice is the banner's condition; the window adds a suffix. */}
-      {notice && (
-        <div
-          className="rounded-2xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-on-surface"
-          data-testid="machine-notice"
-        >
-          {notice}
-          {status.awaitingChange && status.error && (
-            <span className="text-on-surface-variant/70"> {m.reconnecting}</span>
-          )}
+      {/* 24px between cards, as on the Toolchains and Agents tabs. */}
+      <div className="space-y-6">
+        {/* `awaitingChange` only ever follows a `setNotice` on the accepted path,
+            so the notice is the banner's condition; the window adds a suffix. */}
+        {notice && (
+          <Callout tone="info" title={notice} data-testid="machine-notice">
+            {status.awaitingChange && status.error ? m.reconnecting : null}
+          </Callout>
+        )}
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <HubProcessCard
+            status={status.data}
+            isRestarting={restart.isPending}
+            onRestart={onRestart}
+          />
+          <ServiceCard
+            status={status.data}
+            isPending={service.isPending}
+            onInstall={() => onService('install')}
+            onUninstall={() => onService('uninstall')}
+          />
         </div>
-      )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <HubProcessCard
-          status={status.data}
-          isRestarting={restart.isPending}
-          onRestart={onRestart}
-        />
-        <ServiceCard
-          status={status.data}
-          isPending={service.isPending}
-          onInstall={() => onService('install')}
-          onUninstall={() => onService('uninstall')}
-        />
+        {/* Nothing while the query is pending or failed: the update card is
+            extra context on top of a page that already works without it, not
+            something worth a loading state of its own. */}
+        {update.data && <UpdateCard status={update.data} onUpgraded={status.expectChange} />}
+
+        <InstallFactsCard status={status.data} />
+        <DoctorSection />
+        <LogTail />
       </div>
-
-      {/* Nothing while the query is pending or failed: the update card is
-          extra context on top of a page that already works without it, not
-          something worth a loading state of its own. */}
-      {update.data && <UpdateCard status={update.data} onUpgraded={status.expectChange} />}
-
-      <InstallFactsCard status={status.data} />
-      <DoctorSection />
-      <LogTail />
     </div>
   );
 }

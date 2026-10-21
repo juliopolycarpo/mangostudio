@@ -45,7 +45,7 @@ describe('InputBar — chat-only composer', () => {
       onReasoningEffortChange: jest.fn(),
     });
 
-    expect(screen.queryByRole('button', { name: 'Thinking' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reasoning' })).toBeNull();
     unmount();
 
     renderInputBar({
@@ -54,7 +54,7 @@ describe('InputBar — chat-only composer', () => {
       onReasoningEffortChange: jest.fn(),
     });
 
-    expect(screen.getByRole('button', { name: 'Thinking' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reasoning' })).toBeInTheDocument();
   });
 
   const agents = [
@@ -94,8 +94,10 @@ describe('InputBar — chat-only composer', () => {
   });
 
   // The first prompt settles who runs the chat; from then on the chip is a
-  // fact, and switching lives in the header as "continue in a new chat".
-  it('locks the agent chip once the chat has turns and says why', () => {
+  // fact, and switching lives in the header as "continue in a new chat". A fact
+  // is not a control: no combobox, no chevron promising a menu that cannot open,
+  // and no disabled-looking half-opacity chip that fails its own contrast.
+  it('turns the agent chip into a plain statement once the chat has turns, and says why', () => {
     renderInputBar({
       selectedAgentId: 'default',
       agents,
@@ -103,9 +105,27 @@ describe('InputBar — chat-only composer', () => {
       hasTurns: true,
     });
 
-    const chip = screen.getByRole('combobox', { name: 'Select agent' });
-    expect(chip).toBeDisabled();
-    expect(chip.getAttribute('title')).toContain('Locked after the first turn');
+    expect(screen.queryByRole('combobox', { name: 'Select agent' })).toBeNull();
+
+    const chip = screen.getByTitle(/Locked after the first turn/);
+    expect(chip).toHaveTextContent('agent:');
+    expect(chip).toHaveTextContent('Default');
+    expect(chip.querySelector('svg')).toBeNull();
+    expect(chip.className).not.toContain('opacity-50');
+    // The sentence is also text, because a tooltip on a plain element is not
+    // announced and does not exist on touch.
+    expect(chip.querySelector('.sr-only')).toHaveTextContent(/Locked after the first turn/);
+  });
+
+  it('names the locked agent from the whole listing, not only the selectable ones', () => {
+    renderInputBar({
+      selectedAgentId: 'explore',
+      agents: [{ ...agents[0], id: 'explore', name: 'Reviewer', role: 'subagent' }],
+      onSelectedAgentIdChange: jest.fn(),
+      hasTurns: true,
+    });
+
+    expect(screen.getByTitle(/Locked after the first turn/)).toHaveTextContent('Reviewer');
   });
 
   // The env and dir chips moved to the header — the composer's status line
@@ -172,6 +192,54 @@ describe('InputBar — chat-only composer', () => {
     await user.type(screen.getByRole('textbox'), 'hello');
 
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+});
+
+/**
+ * The footer says a vendor CLI controls its own tools and permissions, so the
+ * controls that steer MangoStudio's tools are not offered on its turns.
+ */
+describe('InputBar — tools that belong to MangoStudio', () => {
+  const EXTERNAL_RUNNER = { kind: 'external', targetId: 'codex' } as const;
+
+  it('offers the capability inspector and the image toggle to a MangoStudio runner', () => {
+    renderInputBar({
+      runner: { kind: 'mangostudio', agentId: 'default' },
+      onImageToolIntentChange: jest.fn(),
+    });
+
+    expect(screen.getByRole('button', { name: 'Capabilities' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create images' })).toBeInTheDocument();
+  });
+
+  it('offers neither to an external runner, and keeps the MCP menu', () => {
+    renderInputBar({ runner: EXTERNAL_RUNNER, onImageToolIntentChange: jest.fn() });
+
+    expect(screen.queryByRole('button', { name: 'Capabilities' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create images' })).toBeNull();
+    expect(screen.getByRole('button', { name: /MCP/i })).toBeInTheDocument();
+  });
+
+  it('drops an image intent left on in the chat the person came from', () => {
+    const onImageToolIntentChange = jest.fn();
+    renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      imageToolIntent: true,
+      onImageToolIntentChange,
+    });
+
+    expect(onImageToolIntentChange).toHaveBeenCalledWith(false);
+  });
+
+  it('leaves the intent alone on a MangoStudio runner', () => {
+    const onImageToolIntentChange = jest.fn();
+    renderInputBar({
+      runner: { kind: 'mangostudio', agentId: 'default' },
+      imageToolIntent: true,
+      onImageToolIntentChange,
+    });
+
+    expect(onImageToolIntentChange).not.toHaveBeenCalled();
   });
 });
 
@@ -275,6 +343,20 @@ describe('InputBar — mid-turn steering', () => {
     expect(screen.getByRole('button', { name: 'Steer' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+  });
+
+  it('draws Steer as a secondary button, so it is never read as the product Send', () => {
+    renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      externalDescriptor: steerableDescriptor(),
+      isGenerating: true,
+      disabled: true,
+    });
+
+    const steer = screen.getByRole('button', { name: 'Steer' });
+    expect(steer.className).toContain('bg-control');
+    expect(steer.className).not.toContain('bg-accent');
+    expect(steer.getAttribute('style')).toBeNull();
   });
 
   it('disables the composer as usual while generating on an adapter that cannot steer', () => {
@@ -527,6 +609,23 @@ describe('InputBar — the runner it is dressed as', () => {
     );
   });
 
+  // One primary action, one colour (docs/design/decisions.md #7): the runner shows
+  // on the frame, the prompt mark, the caret and its chip, never on Send. The old
+  // button painted `var(--composer-send-fill)` inline, which is what this pins gone.
+  it('keeps Send on the product accent whichever runner answers', () => {
+    for (const runner of [
+      { kind: 'mangostudio', agentId: 'default' },
+      { kind: 'external', targetId: 'codex' },
+    ] as const) {
+      const { unmount } = renderInputBar({ runner });
+
+      const send = screen.getByRole('button', { name: 'Send' });
+      expect(send.className).toContain('bg-accent');
+      expect(send.getAttribute('style')).toBeNull();
+      unmount();
+    }
+  });
+
   it('names the vendor in the placeholder, and only the vendor', () => {
     const { unmount } = renderInputBar({ runner: { kind: 'external', targetId: 'claude' } });
     expect(screen.getByRole('textbox')).toHaveAttribute('placeholder', 'Message Claude Code…');
@@ -537,7 +636,7 @@ describe('InputBar — the runner it is dressed as', () => {
     renderInputBar({ runner: { kind: 'mangostudio', agentId: 'default' } });
     expect(screen.getByRole('textbox')).toHaveAttribute(
       'placeholder',
-      'Ask the AI model anything...'
+      'Ask the AI model anything…'
     );
   });
 });

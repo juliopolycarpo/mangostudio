@@ -4,12 +4,17 @@
  */
 
 import type { McpServer } from '@mangostudio/shared/mcp';
-import { FileDown, FileUp, Plus } from 'lucide-react';
+import { FileDown, FileUp, Plus, Server } from 'lucide-react';
 import { useState } from 'react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   useAddMcpServer,
@@ -81,52 +86,54 @@ export function McpSettingsPage() {
     });
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-error">{s.loadError}</p>
-        <Button variant="ghost" size="sm" onClick={() => void refetch()}>
-          {t.common.retry}
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-        <p className="text-sm text-on-surface-variant/60">{s.description}</p>
-        <div className="flex gap-2 shrink-0">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={servers.length === 0}
-            onClick={() => setExportOpen(true)}
-          >
-            <FileUp size={14} />
-            {s.portability.exportButton}
-          </Button>
-          <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
-            <FileDown size={14} />
-            {s.import.button}
-          </Button>
-          <Button size="sm" onClick={() => setFormMode({ kind: 'add' })}>
-            <Plus size={14} />
-            {s.addServer}
-          </Button>
-        </div>
-      </div>
-
-      {servers.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/60 text-center py-8">{s.empty}</p>
+    <SettingsPage
+      title={s.title}
+      description={s.description}
+      actions={
+        isLoading || error ? undefined : (
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={servers.length === 0}
+              onClick={() => setExportOpen(true)}
+            >
+              <FileUp size={ICON_SM} />
+              {s.portability.exportButton}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
+              <FileDown size={ICON_SM} />
+              {s.import.button}
+            </Button>
+            {/* The empty state carries its own Add, so the header's is not drawn beside it. */}
+            {servers.length > 0 && (
+              <Button variant="secondary" size="sm" onClick={() => setFormMode({ kind: 'add' })}>
+                <Plus size={ICON_SM} />
+                {s.addServer}
+              </Button>
+            )}
+          </div>
+        )
+      }
+    >
+      {isLoading ? (
+        <SettingsLoading shape="card" count={2} />
+      ) : error ? (
+        <SettingsLoadError message={s.loadError} onRetry={() => void refetch()} />
+      ) : servers.length === 0 ? (
+        <Card padded={false}>
+          <EmptyState
+            icon={<Server size={ICON_LG} />}
+            title={s.empty}
+            action={
+              <Button variant="secondary" size="sm" onClick={() => setFormMode({ kind: 'add' })}>
+                <Plus size={ICON_SM} />
+                {s.addServer}
+              </Button>
+            }
+          />
+        </Card>
       ) : (
         <div className="space-y-3">
           {servers.map((server) => (
@@ -159,7 +166,7 @@ export function McpSettingsPage() {
 
       {serverToDelete && (
         <ConfirmDialog
-          title={s.deleteServer}
+          title={s.deleteTitle}
           description={s.deleteConfirm}
           entityName={serverToDelete.name}
           confirmLabel={s.deleteServer}
@@ -169,6 +176,6 @@ export function McpSettingsPage() {
           onCancel={() => setServerToDelete(null)}
         />
       )}
-    </div>
+    </SettingsPage>
   );
 }

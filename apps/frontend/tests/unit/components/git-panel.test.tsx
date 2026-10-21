@@ -9,8 +9,9 @@ import type {
   GitWorktreeListResponse,
 } from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { RailPanel } from '../../../src/features/workspace/rail/RailPanel';
 import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
 import { render } from '../../support/harness/render';
@@ -208,6 +209,9 @@ beforeEach(() => {
  * The panel reads the app's runner to decide whether to offer the agent's own
  * review of the working tree. Only the fields that decision needs are supplied,
  * and the runner is MangoStudio's own — the review action has its own suite.
+ *
+ * Mounted in a `RailPanel`, as it is in the app: its refresh and overflow menu
+ * are drawn into that panel's header.
  */
 function Panel({ chatId = 'chat-1' }: { readonly chatId?: string }) {
   const app = {
@@ -219,7 +223,14 @@ function Panel({ chatId = 'chat-1' }: { readonly chatId?: string }) {
   };
   return (
     <AppContext value={app as never}>
-      <GitPanel chatId={chatId} />
+      <RailPanel
+        title="Repository"
+        closeMode="collapse"
+        closeLabel="Collapse agent side panel"
+        onClose={() => undefined}
+      >
+        <GitPanel chatId={chatId} />
+      </RailPanel>
     </AppContext>
   );
 }
@@ -240,7 +251,6 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    expect(screen.getByText('mangostudio')).toBeInTheDocument();
     expect(screen.getByText('feat/git-panel')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Push 2 commits' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pull 1 commits' })).toBeInTheDocument();
@@ -251,11 +261,18 @@ describe('GitPanel', () => {
     // status glyph is what distinguishes them.
     const changesGroup = screen.getByRole('heading', { name: /^Changes/ });
     expect(changesGroup).toHaveTextContent('2');
-    expect(screen.getByText('src/panel.tsx')).toBeInTheDocument();
-    expect(screen.getByText('notes.txt')).toBeInTheDocument();
-    expect(screen.getByText('src/conflict.ts')).toBeInTheDocument();
-    expect(screen.getByText('src/old.ts')).toBeInTheDocument();
-    expect(screen.getByText('src/new.ts')).toBeInTheDocument();
+    // A path is laid out name first, so the tooltip is what carries the whole of it.
+    const panel = within(screen.getByTitle('src/panel.tsx'));
+    expect(panel.getByText('panel.tsx')).toBeInTheDocument();
+    expect(panel.getByText('src')).toBeInTheDocument();
+    expect(screen.getByTitle('notes.txt')).toBeInTheDocument();
+    expect(
+      within(screen.getByTitle('src/conflict.ts')).getByText('conflict.ts')
+    ).toBeInTheDocument();
+    // A rename keeps what changed visible: the old name struck through, then the new one.
+    const renamed = within(screen.getByTitle('src/old.ts → src/new.ts'));
+    expect(renamed.getByText('old.ts')).toHaveClass('line-through');
+    expect(renamed.getByText('new.ts')).toBeInTheDocument();
   });
 
   it('offers stash-first recovery when local changes block a branch switch', async () => {
@@ -400,6 +417,61 @@ describe('GitPanel', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
   });
 
+  it('names only the remote under a branch that tracks its namesake there', () => {
+    hooks.data = repoState({
+      status: {
+        branch: {
+          name: 'feat/rate-limit-buckets',
+          upstream: 'origin/feat/rate-limit-buckets',
+          ahead: 0,
+          behind: 0,
+        },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    });
+    const { unmount } = render(<Panel />);
+
+    // The branch name is already above; repeating it in full said nothing new.
+    const tracking = screen.getByTitle('origin/feat/rate-limit-buckets');
+    expect(tracking).toHaveTextContent(/^Tracking origin$/);
+    unmount();
+
+    // An upstream with another name is named in full.
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'feat/git-panel', upstream: 'origin/main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    });
+    render(<Panel />);
+    expect(screen.getByTitle('origin/main')).toHaveTextContent(/^Tracking origin\/main$/);
+  });
+
+  it('labels a detached HEAD with the seven-character hash', () => {
+    hooks.data = repoState({
+      status: {
+        branch: { name: null, detachedAt: '7a46b996c0ffee00', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    });
+
+    render(<Panel />);
+
+    expect(screen.getByText('Detached at 7a46b99')).toBeInTheDocument();
+  });
+
   it('reduces the branch pull request to a one-line chip', async () => {
     hooks.data = repoState({
       status: {
@@ -537,7 +609,14 @@ describe('GitPanel', () => {
     });
 
     render(<Panel />);
-    await user.click(screen.getByRole('button', { name: 'Discard everything in Changes' }));
+    // The bulk discard is in the group's menu, last, after the two narrower ones.
+    await user.click(screen.getByRole('button', { name: 'More actions in Changes' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Discard tracked changes',
+      'Delete untracked files',
+      'Discard everything in Changes',
+    ]);
+    await user.click(screen.getByRole('menuitem', { name: 'Discard everything in Changes' }));
 
     const dialog = screen.getByRole('dialog', { name: 'Discard changes and delete files?' });
     expect(dialog).toHaveTextContent('deletes untracked files from disk');
@@ -551,6 +630,58 @@ describe('GitPanel', () => {
       mode: 'tracked',
     });
     expect(hooks.discard).toHaveBeenNthCalledWith(2, { paths: ['notes.txt'], mode: 'untracked' });
+  });
+
+  // One kind in the group means one narrower item: "everything" would repeat it.
+  // The menu is always there, so the bulk discard has one home whatever the mix.
+  it('offers only the matching bulk discard for a group of one kind, with no standalone discard button', async () => {
+    const user = userEvent.setup();
+    hooks.discard.mockResolvedValue(undefined);
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [{ path: 'notes.txt', status: 'untracked' }],
+        conflicted: [],
+        clean: false,
+      },
+    });
+
+    render(<Panel />);
+    expect(screen.queryByRole('button', { name: /Discard everything in/ })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'More actions in Changes' }));
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Delete untracked files',
+    ]);
+    await user.click(screen.getByRole('menuitem', { name: 'Delete untracked files' }));
+    await user.click(screen.getByRole('button', { name: 'Delete files' }));
+
+    expect(hooks.discard).toHaveBeenCalledWith({ paths: ['notes.txt'], mode: 'untracked' });
+  });
+
+  // One refresh, in the rail header beside the collapse chevron, and it reads
+  // everything the panel shows: the repository, GitHub and the worktrees.
+  it('refreshes the repository, GitHub and the worktrees from the one header button', async () => {
+    const user = userEvent.setup();
+    hooks.data = repoState();
+    hooks.refetch.mockResolvedValue(undefined);
+    hooks.githubRefetch.mockResolvedValue(undefined);
+    hooks.worktreesRefetch.mockResolvedValue(undefined);
+
+    render(<Panel />);
+
+    expect(screen.getAllByRole('button', { name: /refresh/i })).toHaveLength(1);
+    const header = screen.getByRole('banner');
+    await user.click(within(header).getByRole('button', { name: 'Refresh repository state' }));
+
+    expect(hooks.refetch).toHaveBeenCalledTimes(1);
+    expect(hooks.githubRefetch).toHaveBeenCalledTimes(1);
+    expect(hooks.worktreesRefetch).toHaveBeenCalledTimes(1);
+    // The overflow menu holds the panel's settings, not a second Refresh.
+    await user.click(within(header).getByRole('button', { name: 'More repository actions' }));
+    expect(screen.queryByRole('menuitem', { name: 'Refresh' })).toBeNull();
   });
 
   it('deletes a single untracked file after confirming', async () => {
@@ -608,7 +739,7 @@ describe('GitPanel', () => {
     // not a blank panel, is what's on screen at this point.
     fireEvent.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
 
-    expect(screen.getByText('Loading diff...')).toBeVisible();
+    expect(screen.getByText('Loading diff…')).toBeVisible();
     expect(screen.queryByRole('region', { name: 'View diff for src/panel.tsx' })).toBeNull();
 
     // Await the chunk itself: a cold import can exceed findByRole's deadline.
@@ -650,6 +781,44 @@ describe('GitPanel', () => {
     expect(screen.getAllByText('4')).toHaveLength(2);
   });
 
+  it('keeps one line-number gutter per row for a narrow rail and a tooltip on the hunk header', async () => {
+    const user = userEvent.setup();
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'feat/git-panel', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    });
+    hooks.diff = {
+      path: 'src/panel.tsx',
+      binary: false,
+      diff: '@@ -4,2 +4,2 @@ export function Panel() {\n-old title\n+new title\n',
+    };
+
+    render(<Panel />);
+    await user.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
+    await act(async () => {
+      await import('../../../src/features/workspace/DiffViewer');
+    });
+
+    // The whole header is the tooltip: it truncates to one line like the code rows.
+    const header = screen.getByText('@@ -4,2 +4,2 @@ export function Panel() {');
+    expect(header).toHaveAttribute('title', '@@ -4,2 +4,2 @@ export function Panel() {');
+    expect(header).toHaveClass('truncate');
+
+    // `@max-sm` is a container query: it hides one gutter of the two, and the
+    // survivor is the one that holds a number (old for a deletion, new otherwise).
+    const [deletionNumber, additionNumber] = screen.getAllByText('4');
+    expect(deletionNumber).not.toHaveClass('@max-sm:hidden');
+    expect(deletionNumber?.nextElementSibling).toHaveClass('@max-sm:hidden');
+    expect(additionNumber).not.toHaveClass('@max-sm:hidden');
+    expect(additionNumber?.previousElementSibling).toHaveClass('@max-sm:hidden');
+  });
+
   it('navigates commit history and opens a commit file diff', async () => {
     const user = userEvent.setup();
     const commit = {
@@ -680,12 +849,120 @@ describe('GitPanel', () => {
     await user.click(screen.getByRole('button', { name: /Ship repository navigation/ }));
 
     expect(screen.getByRole('region', { name: 'Commit details' })).toBeVisible();
-    expect(screen.getByText('1234567890abcdef')).toBeVisible();
+    // The short hash is what is read; the whole of it is the tooltip, not a
+    // 40-character token wrapping mid-hash.
+    expect(screen.getByText('1234567')).toHaveAttribute('title', '1234567890abcdef');
+    expect(screen.queryByText('1234567890abcdef')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /src\/git\.ts/ }));
     await act(async () => {
       await import('../../../src/features/workspace/DiffViewer');
     });
-    expect(screen.getByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
+    const diff = screen.getByRole('region', { name: 'View diff for src/git.ts' });
+    expect(diff).toBeVisible();
+    // The diff names the commit with the same seven characters the list did.
+    expect(within(diff).getByText('1234567')).toHaveAttribute('title', '1234567890abcdef');
+  });
+
+  it('sizes a commit on one grouped, signed line instead of three spelled-out clauses', async () => {
+    const user = userEvent.setup();
+    const base = {
+      shortHash: '1234567',
+      author: 'Mango Maintainer',
+      authoredAt: '2026-07-21T12:00:00.000Z',
+      refs: [],
+    };
+    hooks.data = repoState();
+    hooks.historyPages = [
+      {
+        commits: [
+          {
+            ...base,
+            hash: '1111111111111111',
+            subject: 'Tiny fix',
+            changedFiles: 1,
+            additions: 1,
+            deletions: 1,
+          },
+          {
+            ...base,
+            hash: '2222222222222222',
+            subject: 'Huge refactor',
+            changedFiles: 352,
+            additions: 10826,
+            deletions: 10006,
+          },
+        ],
+      },
+    ];
+
+    render(<Panel />);
+    await user.click(screen.getByRole('tab', { name: 'History' }));
+
+    // One file is "1 file changed", not "1 files changed".
+    expect(screen.getByText('1 file changed')).toBeVisible();
+    expect(screen.getByText('352 files changed')).toBeVisible();
+    // Grouped by the locale, and a real minus rather than a hyphen.
+    expect(screen.getByText('+10,826')).toBeVisible();
+    expect(screen.getByText('\u221210,006')).toBeVisible();
+    // The words stay for assistive tech, so the colour is never the only signal.
+    expect(screen.getByText('Additions: 10,826')).toHaveClass('sr-only');
+    expect(screen.getByText('Deletions: 10,006')).toHaveClass('sr-only');
+  });
+
+  it('puts the file name first in a commit and calls a binary change binary', async () => {
+    const user = userEvent.setup();
+    const commit = {
+      hash: '1234567890abcdef',
+      shortHash: '1234567',
+      subject: 'Add the logo',
+      author: 'Mango Maintainer',
+      authoredAt: '2026-07-21T12:00:00.000Z',
+      refs: [],
+      changedFiles: 2,
+      additions: 12345,
+      deletions: 7,
+    };
+    hooks.data = repoState();
+    hooks.historyPages = [{ commits: [commit] }];
+    hooks.commitDetails = {
+      commit,
+      files: [
+        {
+          path: 'apps/frontend/src/features/workspace/RepositoryHistory.tsx',
+          status: 'modified',
+          additions: 12000,
+          deletions: 0,
+        },
+        {
+          path: 'apps/frontend/public/logo.png',
+          status: 'added',
+          additions: null,
+          deletions: null,
+        },
+      ],
+    };
+
+    render(<Panel />);
+    await user.click(screen.getByRole('tab', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: /Add the logo/ }));
+
+    // The counts at the row's edge leave a side-by-side directory a few
+    // characters, so in a commit's file list the name is one line and the
+    // directory the line under it: neither is squeezed by the other.
+    const source = within(
+      screen.getByTitle('apps/frontend/src/features/workspace/RepositoryHistory.tsx')
+    );
+    const name = source.getByText('RepositoryHistory.tsx');
+    const directory = source.getByText('apps/frontend/src/features/workspace');
+    expect(name.parentElement).toHaveClass('flex-col');
+    expect(name).toHaveClass('truncate');
+    expect(directory).toHaveClass('truncate');
+    expect(name.compareDocumentPosition(directory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('+12,000')).toBeVisible();
+    expect(screen.getByText('\u22120')).toBeVisible();
+    // No "+— -—": a binary file has no lines to count.
+    expect(screen.getByText('Binary')).toBeVisible();
+    expect(screen.queryByText('+—')).not.toBeInTheDocument();
   });
 
   it('commits staged changes from the split button and reports the short hash', async () => {
@@ -704,8 +981,11 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship Git writes');
-    await user.type(screen.getByRole('textbox', { name: 'Commit body' }), 'Includes UI actions.');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship Git writes');
+    await user.type(
+      screen.getByRole('textbox', { name: 'Description (optional)' }),
+      'Includes UI actions.'
+    );
     await user.click(screen.getByRole('button', { name: 'Commit changes' }));
 
     expect(hooks.commit).toHaveBeenCalledWith({
@@ -713,8 +993,34 @@ describe('GitPanel', () => {
       body: 'Includes UI actions.',
       amend: false,
     });
-    expect(await screen.findByText('Committed abcdef12')).toBeInTheDocument();
+    expect(await screen.findByText('Committed abcdef1')).toBeInTheDocument();
     expect(hooks.gitPush).not.toHaveBeenCalled();
+  });
+
+  // The counter sits on the title field's trailing edge and only near the
+  // limit; a row of its own under an empty field cost the file list 20px.
+  it('shows the title length only once it nears the limit', async () => {
+    const user = userEvent.setup();
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    });
+
+    render(<Panel />);
+    const title = screen.getByRole('textbox', { name: 'Summary' });
+
+    await user.type(title, 'Short');
+    expect(screen.queryByText('5/72')).not.toBeInTheDocument();
+
+    await user.clear(title);
+    await user.type(title, 'x'.repeat(50));
+    expect(screen.getByText('50/72')).toBeInTheDocument();
   });
 
   it('commits with Ctrl+Enter from the message inputs', async () => {
@@ -733,7 +1039,7 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    const titleInput = screen.getByRole('textbox', { name: 'Commit title' });
+    const titleInput = screen.getByRole('textbox', { name: 'Summary' });
     await user.type(titleInput, 'Ship Git writes');
     await user.keyboard('{Control>}{Enter}{/Control}');
 
@@ -760,12 +1066,116 @@ describe('GitPanel', () => {
     });
 
     render(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Stage all and commit' }));
 
     expect(hooks.stage).toHaveBeenCalledWith({ all: true });
     await waitFor(() => expect(hooks.commit).toHaveBeenCalledTimes(1));
+  });
+
+  it('says why Commit changes is unavailable when only unstaged work exists', async () => {
+    const user = userEvent.setup();
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    });
+    const hint = 'Nothing is staged. Stage files, or choose "Stage all and commit" in the menu.';
+
+    render(<Panel />);
+
+    // An empty title already explains the dead button, so the hint waits for one.
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
+
+    expect(screen.getByRole('button', { name: 'Commit changes' })).toBeDisabled();
+    expect(screen.getByText(hint)).toBeVisible();
+  });
+
+  it('drops the staging hint once something is staged, the author amends, or nothing is left to stage', async () => {
+    const user = userEvent.setup();
+    hooks.headMessage = { hash: 'abcdef1234567890', title: 'previous', body: '' };
+    sessionStorage.setItem('mangostudio.git.amend-confirmed', 'true');
+    const hint = 'Nothing is staged. Stage files, or choose "Stage all and commit" in the menu.';
+
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        unstaged: [{ path: 'src/other.ts', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    });
+    const staged = render(<Panel />);
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+    staged.unmount();
+
+    // Nothing at all to stage: a clean tree draws no commit form, so no hint either.
+    hooks.data = repoState();
+    const clean = render(<Panel />);
+    expect(screen.queryByRole('textbox', { name: 'Summary' })).not.toBeInTheDocument();
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+    clean.unmount();
+
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    });
+    render(<Panel />);
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
+    expect(screen.getByText(hint)).toBeVisible();
+
+    // Amending commits with nothing staged, so the explanation no longer applies.
+    await openCommitMenu(user);
+    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit' }));
+    expect(await screen.findByRole('button', { name: 'Leave amend mode' })).toBeVisible();
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+  });
+
+  it('keeps the row actions out of the layout until the row is hovered or focused', () => {
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
+        untracked: [],
+        conflicted: [],
+        clean: false,
+      },
+    });
+
+    render(<Panel />);
+
+    const stage = screen.getByRole('button', { name: 'Stage src/panel.tsx' });
+    const discard = screen.getByRole('button', {
+      name: 'Discard worktree changes in src/panel.tsx',
+    });
+    // One wrapper for both: while it is `hidden` the file name has the whole row,
+    // and `group-focus-within` is what keeps the buttons reachable by keyboard.
+    expect(discard.parentElement).toBe(stage.parentElement);
+    expect(stage.parentElement).toHaveClass(
+      'hidden',
+      'group-hover:flex',
+      'group-focus-within:flex',
+      'pointer-coarse:flex'
+    );
+    expect(stage.closest('li')).toHaveClass('group');
   });
 
   it('pushes after a successful commit and stops when the commit fails', async () => {
@@ -784,17 +1194,17 @@ describe('GitPanel', () => {
     });
 
     const { rerender } = render(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Commit and push' }));
 
     await waitFor(() => expect(hooks.gitPush).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('Committed and pushed abcdef12')).toBeInTheDocument();
+    expect(await screen.findByText('Committed and pushed abcdef1')).toBeInTheDocument();
 
     hooks.commit.mockRejectedValue(new Error('hook rejected the commit'));
     hooks.gitPush.mockClear();
     rerender(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Second');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Second');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Commit and push' }));
 
@@ -825,10 +1235,10 @@ describe('GitPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Generate message' }));
 
     expect(hooks.generate).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('textbox', { name: 'Commit title' })).toHaveValue(
+    expect(screen.getByRole('textbox', { name: 'Summary' })).toHaveValue(
       'feat(git): generate commit messages'
     );
-    expect(screen.getByRole('textbox', { name: 'Commit body' })).toHaveValue(
+    expect(screen.getByRole('textbox', { name: 'Description (optional)' })).toHaveValue(
       'Build the message from worktree context.'
     );
     expect(
@@ -855,7 +1265,7 @@ describe('GitPanel', () => {
     });
 
     render(<Panel />);
-    const titleInput = screen.getByRole('textbox', { name: 'Commit title' });
+    const titleInput = screen.getByRole('textbox', { name: 'Summary' });
     await user.type(titleInput, 'manual title');
     await user.click(screen.getByRole('button', { name: 'Generate message' }));
 
@@ -863,7 +1273,24 @@ describe('GitPanel', () => {
     expect(titleInput).toHaveValue('manual title');
     await user.click(screen.getByRole('button', { name: 'Use suggestion' }));
     expect(titleInput).toHaveValue('generated title');
-    expect(screen.getByRole('textbox', { name: 'Commit body' })).toHaveValue('generated body');
+    expect(screen.getByRole('textbox', { name: 'Description (optional)' })).toHaveValue(
+      'generated body'
+    );
+  });
+
+  it('draws no commit form on a clean tree, only the clean state', () => {
+    hooks.data = repoState();
+
+    render(<Panel />);
+
+    expect(screen.getByText('Working tree clean')).toBeVisible();
+    // Nothing can be committed, so none of the commit controls are drawn.
+    expect(screen.queryByRole('textbox', { name: 'Summary' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('textbox', { name: 'Description (optional)' })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Commit changes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Generate message' })).not.toBeInTheDocument();
   });
 
   it('confirms amend once per session, then prefills the HEAD message', async () => {
@@ -878,18 +1305,19 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    await openCommitMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit' }));
+    // A clean tree has no commit form, so amend is entered from the panel menu.
+    await user.click(screen.getByRole('button', { name: 'More repository actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit…' }));
     expect(screen.getByRole('dialog', { name: 'Amend rewrites history' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Confirm amend' }));
     expect(sessionStorage.getItem('mangostudio.git.amend-confirmed')).toBe('true');
 
     // The mode is visible, and the form shows exactly what would be replaced.
-    expect(await screen.findByRole('textbox', { name: 'Commit title' })).toHaveValue(
-      'previous title'
+    expect(await screen.findByRole('textbox', { name: 'Summary' })).toHaveValue('previous title');
+    expect(screen.getByRole('textbox', { name: 'Description (optional)' })).toHaveValue(
+      'previous body'
     );
-    expect(screen.getByRole('textbox', { name: 'Commit body' })).toHaveValue('previous body');
     expect(screen.getByRole('button', { name: 'Leave amend mode' })).toBeVisible();
 
     // Amending commits with nothing staged, which a plain commit refuses.
@@ -899,6 +1327,26 @@ describe('GitPanel', () => {
       body: 'previous body',
       amend: true,
     });
+  });
+
+  it('brings the amend form into view when amend is chosen from History', async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem('mangostudio.git.amend-confirmed', 'true');
+    hooks.headMessage = { hash: 'abcdef1234567890', title: 'previous title', body: '' };
+    hooks.data = repoState();
+
+    render(<Panel />);
+    await user.click(screen.getByRole('tab', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: 'More repository actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit…' }));
+
+    expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('textbox', { name: 'Summary' })).toHaveValue('previous title');
+
+    // Leaving the mode on a clean tree takes the form away again.
+    await user.click(screen.getByRole('button', { name: 'Leave amend mode' }));
+    expect(screen.queryByRole('textbox', { name: 'Summary' })).not.toBeInTheDocument();
+    expect(screen.getByText('Working tree clean')).toBeVisible();
   });
 
   it('leaves amend mode when the HEAD message cannot be read', async () => {
@@ -912,8 +1360,8 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    await openCommitMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit' }));
+    await user.click(screen.getByRole('button', { name: 'More repository actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit…' }));
 
     expect(await screen.findByText('There is no commit to amend.')).toBeInTheDocument();
     await waitFor(() =>
@@ -938,7 +1386,7 @@ describe('GitPanel', () => {
     render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Stashes...' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Stashes…' }));
     const sheet = screen.getByRole('dialog', { name: 'Stashes' });
     expect(sheet).toBeVisible();
 
@@ -968,7 +1416,7 @@ describe('GitPanel', () => {
     render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Stashes...' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Stashes…' }));
     await user.click(screen.getByRole('button', { name: 'Drop the stash Agent draft' }));
 
     expect(screen.getByRole('dialog', { name: 'Drop this stash?' })).toBeVisible();
@@ -986,7 +1434,7 @@ describe('GitPanel', () => {
     render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
-    const prune = screen.getByRole('menuitemcheckbox', { name: 'Prune stale branches' });
+    const prune = screen.getByRole('menuitemcheckbox', { name: 'Prune deleted branches on fetch' });
     expect(prune).toBeChecked();
 
     await user.click(prune);

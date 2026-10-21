@@ -14,10 +14,11 @@
  * only ever names the *transition* into that state, never the reading itself.
  */
 
+import { Badge } from '@/components/ui/Badge';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { HubSkeletonLines } from '@/features/home/widgets/HubSkeletonLines';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
+import { usePlural } from '@/hooks/use-plural';
 import { ActivityFeed } from './ActivityFeed';
 import { countNewSince } from './lib/group-activity';
 import { useActivityBookmark } from './use-activity-bookmark';
@@ -43,6 +44,7 @@ export interface ActivityCardProps {
 
 export function ActivityCard({ limit, compact = false, className }: ActivityCardProps) {
   const { t } = useI18n();
+  const plural = usePlural();
   const labels = t.home.activity;
   const { events, isLoading, isError } = useActivity({ limit });
   const lastSeenAt = useActivityBookmark();
@@ -50,7 +52,7 @@ export function ActivityCard({ limit, compact = false, className }: ActivityCard
   if (isError) return null;
   if (isLoading) {
     return (
-      <SectionCard label={labels.label} tone="accent" className={className}>
+      <SectionCard label={labels.label} tone="neutral" className={className}>
         <HubSkeletonLines />
       </SectionCard>
     );
@@ -65,13 +67,13 @@ export function ActivityCard({ limit, compact = false, className }: ActivityCard
   return (
     <SectionCard
       label={labels.label}
-      tone="accent"
+      tone="neutral"
       className={className}
       action={
         newCount > 0 ? (
-          <span className="micro-label text-primary/80">
-            {formatMessage(labels.newCount, { count: String(newCount) })}
-          </span>
+          <Badge variant="accent">
+            {plural({ one: labels.newCountOne, other: labels.newCountOther }, newCount)}
+          </Badge>
         ) : undefined
       }
     >

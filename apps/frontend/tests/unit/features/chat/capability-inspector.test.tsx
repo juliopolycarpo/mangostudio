@@ -154,20 +154,31 @@ describe('CapabilityInspector', () => {
     await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
 
     await waitFor(() => {
-      expect(screen.getByText('Image generation')).toBeInTheDocument();
+      expect(screen.getByText('Bash')).toBeInTheDocument();
     });
 
-    // Model/agent summary and context usage come straight from the response.
-    expect(screen.getByText('gpt-test')).toBeInTheDocument();
-    expect(screen.getByText('42%')).toBeInTheDocument();
+    // The enabled row waits behind the section's fold, one press away.
+    expect(screen.queryByText('Image generation')).not.toBeInTheDocument();
+    // Built-in tools come first; the skills section folds its one enabled row too.
+    await userEvent.click(screen.getAllByRole('button', { name: 'Show 1 enabled' })[0]);
+    expect(screen.getByText('Image generation')).toBeInTheDocument();
+
+    // The status line under the composer already says model, agent and context,
+    // so the panel does not repeat them as chips.
+    expect(screen.queryByText('gpt-test')).not.toBeInTheDocument();
+    expect(screen.queryByText('42%')).not.toBeInTheDocument();
 
     // Disabled builtin renders its typed reason as a translated string.
     expect(screen.getByText('Bash')).toBeInTheDocument();
     expect(screen.getByText('disabled in tool settings')).toBeInTheDocument();
-    expect(screen.getByText('not in the agent tool allowlist')).toHaveAttribute(
+    // The reason is plain words; the agent's settings are offered once, on the
+    // section's heading line, beside the section's own settings link.
+    expect(screen.getByText('not in the agent tool allowlist').closest('a')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Agent settings' })).toHaveAttribute(
       'href',
       '/settings/agents'
     );
+    expect(screen.getAllByRole('link', { name: 'Agent settings' })).toHaveLength(1);
 
     // MCP servers show health and their tools; disabled server shows a reason.
     expect(screen.getByText(/GitHub/)).toBeInTheDocument();
@@ -256,7 +267,9 @@ describe('CapabilityInspector', () => {
     await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent('Failed to load capabilities');
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Could not load capabilities. Try again.'
+      );
     });
     expect(screen.queryByText('boom')).not.toBeInTheDocument();
   });
@@ -291,7 +304,7 @@ describe('CapabilityInspector', () => {
 
     const inspectorButton = screen.getByRole('button', { name: /capabilities/i });
     await userEvent.click(inspectorButton);
-    expect(await screen.findByText('Image generation')).toBeInTheDocument();
+    expect(await screen.findByText('Bash')).toBeInTheDocument();
     await userEvent.click(inspectorButton);
 
     scenario.respondWithJson('GET', capabilitiesPath, { body: disabledResponse });
@@ -309,5 +322,93 @@ describe('CapabilityInspector', () => {
       return new URL(url, 'http://localhost').pathname === '/api/chats/chat-1/capabilities';
     });
     expect(capabilityRequests).toHaveLength(2);
+  });
+
+  describe('the quiet normal state', () => {
+    async function openWith(response: ChatCapabilitiesResponse) {
+      scenario.respondWithJson('GET', '/api/chats/chat-1/capabilities?model=gpt-test', {
+        body: response,
+      });
+      render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" />);
+      await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
+      await screen.findByText(/Built-in tools/);
+    }
+
+    const ALL_ON: ChatCapabilitiesResponse = {
+      ...RESPONSE,
+      tools: RESPONSE.tools.map((tool) => ({ ...tool, state: 'enabled', reason: undefined })),
+      mcpServers: RESPONSE.mcpServers.map((server) => ({
+        ...server,
+        state: 'enabled',
+        reason: undefined,
+        health: 'connected',
+      })),
+      skills: RESPONSE.skills.map((skill) => ({ ...skill, state: 'enabled', reason: undefined })),
+    };
+
+    it('collapses a section where everything is on to its count line', async () => {
+      await openWith(ALL_ON);
+
+      const builtins = screen.getByRole('button', { name: /Built-in tools/ });
+      expect(builtins).toHaveAttribute('aria-expanded', 'false');
+      expect(builtins).toHaveTextContent('3/3 enabled');
+      expect(screen.queryByText('Image generation')).not.toBeInTheDocument();
+
+      await userEvent.click(builtins);
+
+      expect(builtins).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByText('Image generation')).toBeInTheDocument();
+    });
+
+    it('opens by itself the section that holds something not enabled', async () => {
+      await openWith(RESPONSE);
+
+      expect(screen.getByRole('button', { name: /Built-in tools/ })).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      );
+    });
+
+    it('marks only the rows that need explaining, and lists those first', async () => {
+      await openWith(RESPONSE);
+      await userEvent.click(screen.getAllByRole('button', { name: 'Show 1 enabled' })[0]);
+
+      const enabledRow = screen.getByText('Image generation').closest('div.flex');
+      const disabledRow = screen.getByText('Bash').closest('div.flex');
+      // A dot is the signal; an enabled row has the space for one and no dot in it.
+      expect(enabledRow?.querySelector('[data-tone]')).toBeNull();
+      expect(disabledRow?.querySelector('[data-tone="neutral"]')).not.toBeNull();
+
+      const order = screen
+        .getAllByText(/Image generation|Bash|Todo/)
+        .map((node) => node.textContent);
+      expect(order.at(-1)).toContain('Image generation');
+    });
+
+    it('lists what needs explaining and folds the enabled rows behind a count', async () => {
+      await openWith(RESPONSE);
+
+      expect(screen.getByText('Bash')).toBeInTheDocument();
+      expect(screen.getByText('Todo')).toBeInTheDocument();
+      expect(screen.queryByText('Image generation')).not.toBeInTheDocument();
+
+      const [fold] = screen.getAllByRole('button', { name: 'Show 1 enabled' });
+      expect(fold).toHaveAttribute('aria-expanded', 'false');
+      await userEvent.click(fold);
+
+      expect(screen.getByRole('button', { name: 'Hide 1 enabled' })).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      );
+      expect(screen.getByText('Image generation')).toBeInTheDocument();
+    });
+
+    it('does not repeat the model, the agent or the context usage as chips', async () => {
+      await openWith(RESPONSE);
+
+      expect(screen.queryByText('gpt-test')).not.toBeInTheDocument();
+      expect(screen.queryByText('Default')).not.toBeInTheDocument();
+      expect(screen.queryByText('42%')).not.toBeInTheDocument();
+    });
   });
 });

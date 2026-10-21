@@ -124,16 +124,29 @@ describe('WorktreeSection', () => {
 
     renderSection();
 
-    expect(screen.getByText(labels.detached.replace('{commit}', 'abcdef12'))).toBeInTheDocument();
+    expect(screen.getByText(labels.detached.replace('{commit}', 'abcdef1'))).toBeInTheDocument();
     expect(screen.getByText(labels.badges.detached)).toBeInTheDocument();
   });
 
-  it('says a lone main worktree is all there is', () => {
+  it('says a lone main worktree is all there is, without a count of one', () => {
     hooks.data = { worktrees: [mainWorktree] };
 
     renderSection();
 
     expect(screen.getByText(labels.empty)).toBeInTheDocument();
+    // A standing fact, not an empty list: one quiet line under the title, and
+    // no "1" badge beside it.
+    expect(screen.getByRole('heading', { name: labels.title })).toHaveTextContent(
+      new RegExp(`^${labels.title}$`)
+    );
+  });
+
+  it('counts the worktrees once there is more than the main one', () => {
+    hooks.data = { worktrees: [mainWorktree, linkedWorktree] };
+
+    renderSection();
+
+    expect(screen.getByRole('heading', { name: new RegExp(labels.title) })).toHaveTextContent('2');
   });
 
   it('creates a worktree from the form and closes it', async () => {
@@ -195,14 +208,15 @@ describe('WorktreeSection', () => {
     );
   });
 
-  it('refreshes on demand rather than polling', async () => {
-    const user = userEvent.setup();
+  // The Repository panel's header has the one refresh, and it refetches this
+  // list with the rest (see git-panel.test.tsx); a second icon here was the
+  // third way to do the same thing.
+  it('has no refresh of its own', () => {
     hooks.data = { worktrees: [mainWorktree, linkedWorktree] };
 
     renderSection();
-    await user.click(screen.getByRole('button', { name: labels.refresh }));
 
-    expect(hooks.refetch).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: /refresh/i })).toBeNull();
   });
 
   it('offers a retry when the list cannot be read', async () => {

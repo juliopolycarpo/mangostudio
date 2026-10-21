@@ -10,8 +10,10 @@
 import { useNavigate } from '@tanstack/react-router';
 import { RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { useOnboardingProgress } from './use-onboarding-progress';
 
 export function RerunSetupCard() {
@@ -21,12 +23,10 @@ export function RerunSetupCard() {
   const progress = useOnboardingProgress();
 
   return (
-    <Card variant="solid" className="space-y-4 p-4 sm:p-6">
+    <Card className="space-y-4">
       <div className="space-y-1">
-        <h3 className="font-label font-bold text-on-surface-variant/80 text-xs uppercase tracking-widest">
-          {s.title}
-        </h3>
-        <p className="text-on-surface-variant/60 text-sm">{s.description}</p>
+        <h3 className="text-sm font-semibold text-fg">{s.title}</h3>
+        <p className="text-sm text-fg-muted">{s.description}</p>
       </div>
       <Button
         variant="secondary"
@@ -43,13 +43,13 @@ export function RerunSetupCard() {
             .catch(() => undefined);
         }}
       >
-        <RotateCcw aria-hidden size={15} />
+        <RotateCcw aria-hidden size={ICON_MD} />
         {s.action}
       </Button>
       {progress.saveFailed ? (
-        <p className="text-error text-sm" data-testid="rerun-setup-failed">
+        <Callout tone="danger" data-testid="rerun-setup-failed">
           {t.onboarding.saveFailed}
-        </p>
+        </Callout>
       ) : null}
     </Card>
   );

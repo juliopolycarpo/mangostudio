@@ -5,7 +5,7 @@
  * 'manual'` with the old process still running.
  */
 
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 import type {
   MachineUpdateStatus,
   UpgradeReport,
@@ -80,10 +80,6 @@ function openOutcome(): void {
   render(<UpgradeDialog status={STATUS} onClose={() => undefined} />);
   fireEvent.click(screen.getByRole('button', { name: /upgrade/i }));
 }
-
-afterEach(() => {
-  document.body.innerHTML = '';
-});
 
 describe('UpgradeDialog terminal outcome', () => {
   it('says the server is restarting when the engine scheduled one', () => {

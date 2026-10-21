@@ -4,32 +4,12 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
-import { FindingIcon } from '../../components/FindingList';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
+import { MachineCard, MachineFact, type MachineFactPart, MachineFacts } from './MachineCard';
 
 interface InstallFactsCardProps {
   readonly status: MachineStatus;
-}
-
-function Fact({
-  label,
-  value,
-  severity,
-}: {
-  readonly label: string;
-  readonly value: string;
-  readonly severity?: 'warn' | 'fail';
-}) {
-  return (
-    <div className="flex items-start gap-2 text-sm">
-      {severity && <FindingIcon severity={severity} />}
-      <div className="min-w-0">
-        <p className="text-on-surface-variant/70">{label}</p>
-        <p className="break-all font-mono text-xs text-on-surface">{value}</p>
-      </div>
-    </div>
-  );
 }
 
 export function InstallFactsCard({ status }: InstallFactsCardProps) {
@@ -37,14 +17,27 @@ export function InstallFactsCard({ status }: InstallFactsCardProps) {
   const m = t.environments.machine;
   const { runtimeBinary, hostSlot } = status;
 
-  const runtimeValue =
+  // The path and whatever the OS said about it are technical; the words this
+  // page adds around them ("not built", "missing", the profile) are prose.
+  const runtimeValue: string | readonly MachineFactPart[] =
     runtimeBinary.path === null
       ? m.runtime.notBuilt
       : runtimeBinary.error
-        ? `${runtimeBinary.path} — ${runtimeBinary.error}`
+        ? [{ text: `${runtimeBinary.path} — ${runtimeBinary.error}`, code: true }]
         : runtimeBinary.present
-          ? `${runtimeBinary.path}${runtimeBinary.version ? ` (${runtimeBinary.version})` : ''}`
-          : `${runtimeBinary.path} — ${m.runtime.missing}`;
+          ? [
+              {
+                text: `${runtimeBinary.path}${runtimeBinary.version ? ` (${runtimeBinary.version})` : ''}`,
+                code: true,
+              },
+            ]
+          : [{ text: runtimeBinary.path, code: true }, { text: ` — ${m.runtime.missing}` }];
+  const hostSlotValue: readonly MachineFactPart[] = hostSlot.error
+    ? [{ text: `${hostSlot.directory} — ${hostSlot.error}`, code: true }]
+    : [
+        { text: `${m.hostSlot.profile[hostSlot.profile]} · ` },
+        hostSlot.present ? { text: hostSlot.directory, code: true } : { text: m.hostSlot.absent },
+      ];
   // Local has no other runtime, so a binary that is not there is a failure.
   const runtimeSeverity =
     runtimeBinary.path === null || runtimeBinary.error || !runtimeBinary.present
@@ -54,36 +47,38 @@ export function InstallFactsCard({ status }: InstallFactsCardProps) {
         : undefined;
 
   return (
-    <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-install-card">
-      <CardSectionLabel>{m.install.title}</CardSectionLabel>
-      <div className="space-y-3">
-        <Fact label={m.runtime.title} value={runtimeValue} severity={runtimeSeverity} />
-        {runtimeBinary.versionMatches === false && (
-          <p className="text-sm text-warning">{m.runtime.versionMismatch}</p>
-        )}
-        <Fact
+    <MachineCard title={m.install.title} testId="machine-install-card">
+      {runtimeBinary.versionMatches === false && (
+        <Callout tone="warning">{m.runtime.versionMismatch}</Callout>
+      )}
+      <MachineFacts>
+        <MachineFact label={m.runtime.title} value={runtimeValue} severity={runtimeSeverity} />
+        <MachineFact
           label={m.hostSlot.title}
-          value={
-            hostSlot.error
-              ? `${hostSlot.directory} — ${hostSlot.error}`
-              : hostSlot.present
-                ? `${m.hostSlot.profile[hostSlot.profile]} · ${hostSlot.directory}`
-                : `${m.hostSlot.profile[hostSlot.profile]} · ${m.hostSlot.absent}`
-          }
+          value={hostSlotValue}
           severity={hostSlot.error ? 'fail' : undefined}
         />
-        <Fact label={m.install.home} value={status.homeDir} />
-        <Fact label={m.install.logsDir} value={status.logsDir} />
-        <Fact label={m.install.configFile} value={status.configFile ?? m.install.noConfigFile} />
-        <Fact
+        <MachineFact label={m.install.home} value={status.homeDir} mono />
+        <MachineFact label={m.install.logsDir} value={status.logsDir} mono />
+        <MachineFact
+          label={m.install.configFile}
+          value={status.configFile ?? m.install.noConfigFile}
+          mono={status.configFile !== null}
+        />
+        <MachineFact
           label={m.install.build}
           value={[
-            status.platform,
-            status.standalone ? m.install.standalone : m.install.sourceCheckout,
-            ...(status.container ? [m.install.container] : []),
-          ].join(' · ')}
+            { text: status.platform, code: true },
+            {
+              text: [
+                '',
+                status.standalone ? m.install.standalone : m.install.sourceCheckout,
+                ...(status.container ? [m.install.container] : []),
+              ].join(' · '),
+            },
+          ]}
         />
-      </div>
-    </section>
+      </MachineFacts>
+    </MachineCard>
   );
 }

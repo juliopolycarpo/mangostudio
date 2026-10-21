@@ -109,15 +109,16 @@ describe('Observability settings pages', () => {
 
     const englishDate = /Nov \d{1,2}, 2023/;
     const portugueseDate = /\d{1,2} de nov\. de 2023/;
-    expect(await screen.findAllByText(englishDate)).toHaveLength(3);
+    // Both pages' "Last updated" captions, the probe entry and the discovery time.
+    expect(await screen.findAllByText(englishDate)).toHaveLength(4);
 
     act(() => screen.getByRole('button', { name: 'Use Portuguese' }).click());
-    expect(await screen.findAllByText(portugueseDate)).toHaveLength(3);
+    expect(await screen.findAllByText(portugueseDate)).toHaveLength(4);
     expect(screen.queryAllByText(englishDate)).toHaveLength(0);
     expect(screen.getByText(/A verificação não confirmou este agente/)).toBeInTheDocument();
 
     act(() => screen.getByRole('button', { name: 'Use English' }).click());
-    expect(await screen.findAllByText(englishDate)).toHaveLength(3);
+    expect(await screen.findAllByText(englishDate)).toHaveLength(4);
     expect(screen.queryAllByText(portugueseDate)).toHaveLength(0);
   });
 
@@ -146,9 +147,14 @@ describe('Observability settings pages', () => {
     render(<MetricsSettingsPage />);
 
     await screen.findByText('OpenAI');
-    expect(screen.getByText('Cache Hit Rate')).toBeInTheDocument();
+    expect(screen.getByText('Cache hit rate')).toBeInTheDocument();
     expect(screen.getByText('SDK client')).toBeInTheDocument();
     expect(screen.getByText('80%')).toBeInTheDocument();
+    // Digits are compared down a column, so the numeric ones share a right edge.
+    expect(screen.getByRole('cell', { name: '80%' })).toHaveClass('text-right', 'tabular-nums');
+    for (const name of ['Hits', 'Misses', 'Hit rate']) {
+      expect(screen.getByRole('columnheader', { name })).toHaveClass('text-right');
+    }
   });
 
   it('renders the usage row when a provider has recorded turns', async () => {
@@ -188,6 +194,40 @@ describe('Observability settings pages', () => {
     expect(screen.getByText('Image generations')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.getByText('~Tokens')).toBeInTheDocument();
+  });
+
+  /** "0%" reads as a cache that always misses; a cache nothing has asked has no rate. */
+  it('shows a dash for a cache nobody has asked, and no breakdown of zero timeouts', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/metrics', {
+      body: {
+        generatedAt: 1_700_000_000_000,
+        providers: [
+          {
+            provider: 'openai',
+            totalProbeTimeouts: 0,
+            caches: [
+              { cacheName: 'sdk-client', hits: 4, misses: 1, hitRate: 0.8 },
+              { cacheName: 'prepared-runtime', hits: 0, misses: 0, hitRate: 0 },
+              { cacheName: 'provider-route', hits: 0, misses: 0, hitRate: 0 },
+            ],
+            probeTimeouts: [
+              { operation: 'healthcheck', timeoutCount: 0 },
+              { operation: 'model-list', timeoutCount: 0 },
+            ],
+          },
+        ],
+      },
+    });
+
+    render(<MetricsSettingsPage />);
+
+    await screen.findByText('OpenAI');
+    expect(screen.getByText('80%')).toBeInTheDocument();
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    // The heading already says "Probe timeouts: 0".
+    expect(screen.getByText('Probe timeouts: 0')).toBeInTheDocument();
+    expect(screen.queryByText('Probe timeouts by operation')).not.toBeInTheDocument();
   });
 
   it('hides the usage row for providers that were never used', async () => {

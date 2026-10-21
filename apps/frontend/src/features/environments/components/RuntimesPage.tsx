@@ -80,7 +80,7 @@ export function RuntimesPage() {
           hint={e.runtimes.emptyHint}
         />
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {runtimes.map((runtime) =>
             // winget is never installed or updated by MangoStudio — it only
             // ever appears as something the other Windows recipes need, so it

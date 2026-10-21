@@ -9,6 +9,13 @@
  * Below the concepts sits the list of files those rows were read from, which is
  * where a subtree the snapshot deliberately never walked gets said out loud. The
  * comparison cannot say it: it keeps only the paths its concepts name.
+ *
+ * The cards are sized by how many there are, not by how many agents exist: a
+ * fixed number of columns left an empty one at the end of every row. And an
+ * agent with nothing to compare is one caption under the section's cards (or
+ * under its heading, when no agent has any), not a card of its own that only
+ * repeats the state. Sections stand `space-y-8` apart and keep `space-y-3`
+ * inside, so a caption always reads as part of the section above it.
  */
 
 import type {
@@ -20,16 +27,24 @@ import type {
 } from '@mangostudio/shared/library';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Ban, EyeOff } from 'lucide-react';
-import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
+import type { ReactNode } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { Card } from '@/components/ui/Card';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatList, formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import {
   libraryLocationsQueryOptions,
   settingsComparisonQueryOptions,
   settingsSnapshotsQueryOptions,
 } from '../queries';
+import { InlineNote } from './InlineNote';
 import { LibraryPageState } from './LibraryPageState';
+
+/** One row of cards that share the width between them, however many there are. */
+const CARD_GRID = 'grid grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-3';
 
 export function SettingsComparison() {
   const { t } = useI18n();
@@ -37,19 +52,8 @@ export function SettingsComparison() {
   const scope = useEnvironmentScope();
   const query = useQuery(settingsComparisonQueryOptions(scope.environmentId));
 
-  // No description: the library section layout already renders the subtitle
-  // directly above the tab strip this page sits under.
-  const header = <EnvironmentScopeHeader scope={scope} onRefresh={() => void query.refetch()} />;
-
-  const framed = (body: React.ReactNode) => (
-    <div className="space-y-4">
-      {header}
-      {body}
-    </div>
-  );
-
   if (scope.environment && !scope.permitsLibrary) {
-    return framed(
+    return (
       <EnvironmentScopeNotice
         environment={scope.environment}
         reason="not-permitted"
@@ -61,7 +65,7 @@ export function SettingsComparison() {
   // A settings table describing the wrong machine is not a cosmetic problem:
   // it is what someone reads before deciding to change a setting.
   if (scope.environment && !scope.isConnected) {
-    return framed(
+    return (
       <EnvironmentScopeNotice
         environment={scope.environment}
         reason="disconnected"
@@ -70,22 +74,21 @@ export function SettingsComparison() {
     );
   }
 
-  if (query.isPending) return framed(<LibraryPageState variant="loading" />);
+  if (query.isPending) return <LibraryPageState variant="loading" />;
   if (query.error) {
-    return framed(<LibraryPageState variant="error" onRetry={() => void query.refetch()} />);
+    return <LibraryPageState variant="error" onRetry={() => void query.refetch()} />;
   }
 
   const comparisons = query.data ?? [];
   if (comparisons.length === 0) {
-    return framed(<LibraryPageState variant="empty" title={l.settings.empty} />);
+    return <LibraryPageState variant="empty" title={l.settings.empty} />;
   }
 
   return (
-    <div className="space-y-4" data-testid="settings-comparison">
-      {header}
-      <div className="space-y-1">
-        <p className="text-on-surface text-sm">{l.settings.description}</p>
-        <p className="text-[11px] text-tertiary">{l.settings.comparability}</p>
+    <div className="space-y-8" data-testid="settings-comparison">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p className="text-fg-muted text-sm">{l.settings.description}</p>
+        <Badge>{l.settings.comparability}</Badge>
       </div>
 
       {comparisons.map((comparison) => (
@@ -152,20 +155,16 @@ export function SettingsSourcePanel({
   if (populated.length === 0) return null;
 
   return (
-    <section
-      className="space-y-2 rounded-xl border border-outline-variant/15 bg-surface-container-high p-3"
-      data-testid="settings-sources"
-    >
-      <h3 className="font-semibold text-on-surface text-sm">{l.settings.sourceHeading}</h3>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+    <section className="space-y-3" data-testid="settings-sources">
+      <h3 className="font-semibold text-base text-fg">{l.settings.sourceHeading}</h3>
+      <div className={CARD_GRID}>
         {populated.map((snapshot) => (
-          <div
+          <TargetCard
             key={snapshot.targetId}
-            className="space-y-1 rounded-lg border border-outline-variant/10 bg-surface-container p-2.5"
-            data-testid="settings-source-target"
-            data-target-id={snapshot.targetId}
+            title={l.targets[snapshot.targetId]}
+            testId="settings-source-target"
+            targetId={snapshot.targetId}
           >
-            <p className="font-medium text-on-surface text-xs">{l.targets[snapshot.targetId]}</p>
             {snapshot.sources.map((source) => (
               <SettingsSourceRow
                 key={source.locationId}
@@ -173,7 +172,7 @@ export function SettingsSourcePanel({
                 label={locationLabel(source.locationId)}
               />
             ))}
-          </div>
+          </TargetCard>
         ))}
       </div>
     </section>
@@ -193,19 +192,15 @@ function SettingsSourceRow({
 
   return (
     <div
-      className="min-w-0 space-y-0.5"
+      className="min-w-0 space-y-1"
       data-testid="settings-source"
       data-location-id={source.locationId}
       data-present={source.present}
     >
-      <p className="truncate font-mono text-[10px] text-on-surface-variant/50">{label}</p>
-      {!source.present && (
-        <p className="text-[11px] text-on-surface-variant/70 italic">{l.settings.sourceAbsent}</p>
-      )}
+      <p className="truncate font-mono text-fg-subtle text-micro">{label}</p>
+      {!source.present && <p className="text-fg-muted text-xs italic">{l.settings.sourceAbsent}</p>}
       {source.present && source.failureReason !== undefined && (
-        <p className="text-[11px] text-error italic">
-          {l.settings.parseFailure[source.failureReason]}
-        </p>
+        <InlineNote tone="danger">{l.settings.parseFailure[source.failureReason]}</InlineNote>
       )}
       {omitted.map((field) => (
         <SettingsFieldValue key={field.path} field={field} />
@@ -215,23 +210,48 @@ function SettingsSourceRow({
 }
 
 function ConceptSection({ comparison }: { readonly comparison: ConceptComparison }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const l = t.library;
 
+  const cards: ConceptComparisonEntry[] = [];
+  const quiet = new Map<'not-detected' | 'not-applicable', string[]>();
+  for (const entry of comparison.entries) {
+    if (entry.state !== 'detected' && entry.fields.length === 0) {
+      quiet.set(entry.state, [...(quiet.get(entry.state) ?? []), l.targets[entry.targetId]]);
+    } else {
+      cards.push(entry);
+    }
+  }
+
+  // Said once per state, as one caption under whatever the section has above it:
+  // its cards, or only its heading when no agent has anything here. The same
+  // fact is drawn the same way in every section.
   return (
-    <section
-      className="space-y-2 rounded-xl border border-outline-variant/15 bg-surface-container-high p-3"
-      data-testid="concept-section"
-      data-concept={comparison.concept}
-    >
-      <h3 className="font-semibold text-on-surface text-sm">
-        {l.settings.concept[comparison.concept]}
-      </h3>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {comparison.entries.map((entry) => (
-          <ConceptEntry key={entry.targetId} entry={entry} />
-        ))}
-      </div>
+    <section className="space-y-3" data-testid="concept-section" data-concept={comparison.concept}>
+      <h3 className="font-semibold text-base text-fg">{l.settings.concept[comparison.concept]}</h3>
+      {cards.length > 0 && (
+        <div className={CARD_GRID}>
+          {cards.map((entry) => (
+            <ConceptEntry key={entry.targetId} entry={entry} />
+          ))}
+        </div>
+      )}
+      {quiet.size > 0 && (
+        <div className="space-y-1">
+          {[...quiet].map(([state, agents]) => (
+            <p
+              key={state}
+              className="text-fg-muted text-xs"
+              data-testid="concept-quiet"
+              data-state={state}
+            >
+              {formatMessage(l.settings.undetectedLine[state], {
+                agents: formatList(agents, locale),
+              })}
+            </p>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -241,19 +261,48 @@ function ConceptEntry({ entry }: { readonly entry: ConceptComparisonEntry }) {
   const l = t.library;
 
   return (
-    <div
-      className="space-y-1 rounded-lg border border-outline-variant/10 bg-surface-container p-2.5"
-      data-testid="concept-entry"
-      data-target-id={entry.targetId}
-      data-state={entry.state}
+    <TargetCard
+      title={l.targets[entry.targetId]}
+      testId="concept-entry"
+      targetId={entry.targetId}
+      state={entry.state}
     >
-      <p className="font-medium text-on-surface text-xs">{l.targets[entry.targetId]}</p>
-      <p className="text-[11px] text-on-surface-variant/60">
-        {l.settings.conceptState[entry.state]}
-      </p>
+      {/* A card exists because something was detected, so only the other
+          states are worth a line: a card of fields that reads "Detected" says
+          what the card already is. */}
+      {entry.state !== 'detected' && (
+        <p className="text-fg-muted text-xs">{l.settings.conceptState[entry.state]}</p>
+      )}
       {entry.fields.map((field) => (
         <SettingsFieldValue key={field.path} field={field} />
       ))}
+    </TargetCard>
+  );
+}
+
+/**
+ * One agent's card in a comparison grid: the shared `Card` surface at the
+ * compact padding a grid of them needs, the agent's name, then its rows.
+ */
+function TargetCard({
+  title,
+  testId,
+  targetId,
+  state,
+  children,
+}: {
+  readonly title: string;
+  readonly testId: string;
+  readonly targetId: string;
+  readonly state?: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div data-testid={testId} data-target-id={targetId} data-state={state}>
+      <Card padded={false} className="h-full min-w-0 space-y-2 p-4">
+        <p className="font-medium text-fg text-sm">{title}</p>
+        {children}
+      </Card>
     </div>
   );
 }
@@ -276,12 +325,12 @@ export function SettingsFieldValue({ field }: { readonly field: SettingsField })
 
   return (
     <div className="min-w-0" data-testid="settings-field" data-presentation={field.presentation}>
-      <p className="truncate font-mono text-[10px] text-on-surface-variant/50">{field.path}</p>
+      <p className="truncate font-mono text-fg-subtle text-micro">{field.path}</p>
       {field.presentation === 'value' ? (
-        <p className="break-all font-mono text-[11px] text-on-surface">{field.value}</p>
+        <p className="break-all font-mono text-fg text-xs">{field.value}</p>
       ) : (
-        <p className="flex items-center gap-1 text-[11px] text-on-surface-variant/70 italic">
-          <Glyph size={10} className="shrink-0" />
+        <p className="flex items-center gap-1.5 text-fg-muted text-xs italic">
+          <Glyph size={ICON_SM} aria-hidden="true" className="shrink-0" />
           {field.presentation === 'redacted'
             ? l.settings.presentation.redacted
             : l.settings.presentation.omitted}

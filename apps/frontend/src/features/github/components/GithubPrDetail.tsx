@@ -1,9 +1,11 @@
 import type { GithubCheckBucket } from '@mangostudio/shared/github';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CheckCircle2, MessageSquareQuote, RefreshCw } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, MessageSquareQuote } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Spinner } from '@/components/ui/Spinner';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
 import {
@@ -13,7 +15,7 @@ import {
 } from '@/features/chat/lib/composer-draft-store';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { markPullRequestReady } from '../api';
 import { reviewThreadsToTask } from '../lib/review-thread-task';
@@ -52,14 +54,10 @@ export function GithubPrDetail({ chatId, number, onBack }: GithubPrDetailProps) 
 
   return (
     <div data-testid={GITHUB_PR_DETAIL_TESTID} className="space-y-2">
-      <button
-        type="button"
-        onClick={onBack}
-        className="flex cursor-pointer items-center gap-1 text-[10px] font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary"
-      >
-        <ArrowLeft size={12} aria-hidden="true" />
+      <Button type="button" variant="subtle" size="sm" onClick={onBack} className="-ml-2">
+        <ArrowLeft size={ICON_SM} aria-hidden="true" />
         {t.github.panel.back}
-      </button>
+      </Button>
       <DetailBody chatId={chatId} number={number} />
     </div>
   );
@@ -75,16 +73,10 @@ function DetailBody({ chatId, number }: { readonly chatId: string; readonly numb
   const query = useQuery(githubPrDetailQueryOptions(chatId, number));
 
   if (query.isPending) {
-    return (
-      <EmptyState
-        icon={<RefreshCw size={ICON_LG} className="animate-spin" />}
-        title={t.github.loading}
-        className="min-h-24 py-4"
-      />
-    );
+    return <EmptyState icon={<Spinner />} title={t.github.loading} className="min-h-24 py-4" />;
   }
   if (query.isError || !query.data) {
-    return <EmptyState title={t.github.errors.prs} tone="error" className="min-h-24 py-4" />;
+    return <Callout tone="danger" title={t.github.errors.prs} />;
   }
   if (query.data.state !== 'ok') return <GithubNotConnected state={query.data.state} />;
 
@@ -92,26 +84,26 @@ function DetailBody({ chatId, number }: { readonly chatId: string; readonly numb
 
   return (
     <div className="space-y-3">
-      <div>
+      <div className="space-y-1">
         <a
           href={pr.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs font-semibold leading-4 text-on-surface hover:text-primary"
+          className="text-sm font-semibold text-fg hover:underline"
         >
           {formatMessage(t.github.row.number, { number: String(pr.number) })} {pr.title}
         </a>
-        <p className="mt-1 text-[10px] text-on-surface-variant">
+        <p className="text-xs text-fg-muted">
           {formatMessage(t.github.row.diffStat, {
             additions: String(pr.additions),
             deletions: String(pr.deletions),
             files: String(pr.changedFiles),
           })}
         </p>
-        <p className="mt-0.5 text-[10px] text-on-surface-variant">
+        <p className="text-xs text-fg-muted">
           {t.github.mergeState[pr.mergeStateStatus]} · {t.github.mergeable[pr.mergeable]}
         </p>
-        <p className="mt-0.5 text-[10px] text-on-surface-variant">
+        <p className="text-xs text-fg-muted">
           {pr.reviewDecision
             ? t.github.reviewDecision[pr.reviewDecision]
             : t.github.reviewDecisionNone}
@@ -174,8 +166,8 @@ function MarkReadyAction({
  *
  * The rail's header refresh button refetches the *list* query behind whichever
  * tab is open, not the three this view runs, so a checks or threads read that
- * failed on its own has no other way back. One line rather than an `EmptyState`
- * because it sits between two blocks that are already rendering.
+ * failed on its own has no other way back. A `Callout` rather than an
+ * `EmptyState` because it sits between two blocks that are already rendering.
  *
  * @example
  * <DetailQueryError label={t.github.errors.checks} onRetry={query.refetch} />
@@ -190,16 +182,15 @@ function DetailQueryError({
   const { t } = useI18n();
 
   return (
-    <p className="text-[10px] text-error">
-      {label}{' '}
-      <button
-        type="button"
-        onClick={() => void onRetry()}
-        className="cursor-pointer font-semibold underline hover:text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
-      >
-        {t.common.retry}
-      </button>
-    </p>
+    <Callout
+      tone="danger"
+      title={label}
+      action={
+        <Button type="button" variant="secondary" size="sm" onClick={() => void onRetry()}>
+          {t.common.retry}
+        </Button>
+      }
+    />
   );
 }
 
@@ -229,7 +220,7 @@ function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly num
   // in a 360px rail is noise.
   if (query.data?.state !== 'ok') return null;
   if (query.data.checks.length === 0) {
-    return <p className="text-[10px] text-on-surface-variant">{t.github.empty.checks}</p>;
+    return <p className="text-xs text-fg-muted">{t.github.empty.checks}</p>;
   }
 
   return (
@@ -254,16 +245,14 @@ function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly num
                 href={check.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="min-w-0 flex-1 truncate text-[10px] text-on-surface hover:text-primary"
+                className="min-w-0 flex-1 truncate text-xs text-fg hover:underline"
               >
                 {check.name}
               </a>
             ) : (
-              <span className="min-w-0 flex-1 truncate text-[10px] text-on-surface">
-                {check.name}
-              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-fg">{check.name}</span>
             )}
-            <span className="shrink-0 text-[10px] text-on-surface-variant">
+            <span className="shrink-0 text-xs text-fg-muted">
               {t.github.checkBucket[check.bucket]}
             </span>
           </li>
@@ -310,7 +299,7 @@ function ReviewThreadsAction({
   // sentence from "this pull request was never reviewed" but reads the same to
   // somebody looking for work to do.
   if (!task) {
-    return <p className="text-[10px] text-on-surface-variant">{t.github.empty.threads}</p>;
+    return <p className="text-xs text-fg-muted">{t.github.empty.threads}</p>;
   }
 
   const send = () => {

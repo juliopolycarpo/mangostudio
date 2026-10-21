@@ -16,9 +16,11 @@ import {
   formatBytes,
   formatDuration,
   groupInstallations,
+  healthCountClass,
   healthRollup,
   type IdentityResolver,
   installStep,
+  isQuietFinding,
   keyedFindings,
   nodeInstallStep,
   nodeUpdateAffordance,
@@ -179,6 +181,12 @@ describe('findingSeverity', () => {
     ).toBe('warn');
   });
 
+  it('marks only the informational findings as quiet, so they are drawn without a warning', () => {
+    expect(isQuietFinding({ code: 'cli-not-installed', params: {}, severity: 'info' })).toBe(true);
+    expect(isQuietFinding({ code: 'cli-not-installed', params: {} })).toBe(false);
+    expect(isQuietFinding({ code: 'outdated-lts', params: {}, severity: 'warn' })).toBe(false);
+  });
+
   it('still fails the same finding about the binary that actually runs', () => {
     expect(
       findingSeverity({
@@ -227,6 +235,21 @@ describe('worstFinding', () => {
     expect(finding?.code).toBe('outdated-lts');
   });
 
+  // A card with room for one line spends it on what could be wrong, not on the
+  // detail the analyzer marked informational.
+  it('leads with a warning over informational detail', () => {
+    const finding = worstFinding([
+      {
+        code: 'multiple-versions',
+        params: { runtime: 'node', versions: '18, 22' },
+        severity: 'info',
+      },
+      { code: 'outdated-lts', params: { version: '18.19.0', ltsStatus: 'lts-superseded' } },
+    ]);
+
+    expect(finding?.code).toBe('outdated-lts');
+  });
+
   it('has nothing to lead with when nothing is wrong', () => {
     expect(worstFinding([])).toBeUndefined();
   });
@@ -247,6 +270,21 @@ describe('healthRollup', () => {
   });
 });
 
+describe('healthCountClass', () => {
+  it('colours a state by its status only while something is in it', () => {
+    expect(healthCountClass('error', 2)).toBe('text-danger');
+    expect(healthCountClass('warn', 1)).toBe('text-warning');
+    expect(healthCountClass('ok', 4)).toBe('text-success');
+    expect(healthCountClass('missing', 3)).toBe('text-fg-muted');
+  });
+
+  it('keeps an empty state muted so a zero never reads as an alert', () => {
+    for (const health of ['ok', 'warn', 'missing', 'error'] as const) {
+      expect(healthCountClass(health, 0)).toBe('text-fg-muted');
+    }
+  });
+});
+
 describe('formatting helpers', () => {
   it('renders PATH positions one-based', () => {
     expect(pathPosition(0)).toBe(1);
@@ -254,8 +292,13 @@ describe('formatting helpers', () => {
 
   it('formats installer sizes', () => {
     expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(2048)).toBe('2.0 KiB');
-    expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MiB');
+    // One decimal at most, and none when it would be a zero.
+    expect(formatBytes(2048)).toBe('2 KiB');
+    expect(formatBytes(1536)).toBe('1.5 KiB');
+    expect(formatBytes(3 * 1024 * 1024)).toBe('3 MiB');
+    expect(formatBytes(512 * 1024 * 1024)).toBe('512 MiB');
+    // Rounded before it is compared with the MiB boundary, never "1024 KiB".
+    expect(formatBytes(1024 * 1024 - 1)).toBe('1 MiB');
   });
 
   it('formats install durations', () => {

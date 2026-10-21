@@ -14,7 +14,9 @@ import type { Environment } from '@mangostudio/shared/environments';
 import { Box, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   type ContainerFormFields,
@@ -24,6 +26,7 @@ import {
 } from '../container-form';
 import { useUpdateEnvironmentMutation } from '../queries';
 import { ContainerConfigFields } from './ContainerConfigFields';
+import { EntityPanel } from './EntityPanel';
 
 interface ContainerPanelProps {
   readonly environment: Environment;
@@ -64,32 +67,22 @@ export function ContainerPanel({ environment }: ContainerPanelProps) {
   };
 
   return (
-    <section
-      className="space-y-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 p-3"
-      data-testid="container-panel"
+    <EntityPanel
+      testId="container-panel"
+      icon={<Box size={ICON_MD} />}
+      title={labels.title}
+      description={labels.description}
     >
-      <div className="flex items-start gap-2">
-        <Box size={14} className="mt-0.5 shrink-0 text-primary" />
-        <div className="min-w-0 space-y-0.5">
-          <p className="font-semibold text-on-surface text-xs">{labels.title}</p>
-          <p className="text-[11px] text-on-surface-variant/70">{labels.description}</p>
-        </div>
-      </div>
+      <Callout tone="info" icon={<ShieldCheck size={ICON_MD} />}>
+        {labels.isolationNote}
+      </Callout>
 
-      <div className="flex items-start gap-2 rounded-lg border border-primary/35 bg-primary/5 px-2.5 py-2">
-        <ShieldCheck size={13} className="mt-0.5 shrink-0 text-primary" />
-        <p className="text-[11px] text-on-surface-variant">{labels.isolationNote}</p>
-      </div>
-
-      <p className="text-[11px] text-on-surface-variant/70">{labels.ephemeralNote}</p>
+      <p className="text-xs text-fg-muted">{labels.ephemeralNote}</p>
 
       {environment.status.containerFailureReason ? (
-        <p
-          className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant"
-          data-testid="container-failure-reason"
-        >
+        <Callout tone="warning" data-testid="container-failure-reason">
           {labels.reason[environment.status.containerFailureReason]}
-        </p>
+        </Callout>
       ) : null}
 
       <ContainerConfigFields
@@ -103,20 +96,19 @@ export function ContainerPanel({ environment }: ContainerPanelProps) {
       />
 
       {error ? (
-        <p className="text-[11px] text-error" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
 
       <Button
         variant="secondary"
-        className="h-8 px-2.5 text-xs"
         disabled={!changed || invalid}
         loading={update.isPending}
         onClick={() => void save()}
       >
         {labels.save}
       </Button>
-    </section>
+    </EntityPanel>
   );
 }

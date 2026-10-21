@@ -4,10 +4,13 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+import type { UserServiceErrorCode } from '@mangostudio/shared/runtime-home';
+import { Badge } from '@/components/ui/Badge';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { supervisorLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';
+import { MachineCard, MachineFact, MachineFacts } from './MachineCard';
 
 interface ServiceCardProps {
   readonly status: MachineStatus;
@@ -16,6 +19,19 @@ interface ServiceCardProps {
   readonly onUninstall: () => void;
 }
 
+/**
+ * How loudly each reason the project itself raises should say it. Neither is a
+ * fault: the person can fix a session bus that is out of reach (open a desktop
+ * session, enable linger), which is a `warning`, and a machine with no systemd
+ * is a standing fact about it, which is `info`. Only a line the supervisor
+ * printed for itself, with no code, is an actual failure.
+ */
+const SERVICE_ERROR_TONE = {
+  'no-systemd': 'info',
+  'no-session-bus': 'warning',
+} as const satisfies Record<UserServiceErrorCode, 'info' | 'warning'>;
+
+/** A yes/no fact as a badge: the word carries it, and "no" is neutral rather than red. */
 function Flag({
   on,
   yes,
@@ -25,90 +41,49 @@ function Flag({
   readonly yes: string;
   readonly no: string;
 }) {
-  return (
-    <span className={`text-sm font-bold ${on ? 'text-primary' : 'text-on-surface-variant/70'}`}>
-      {on ? yes : no}
-    </span>
-  );
+  return <Badge variant={on ? 'success' : 'neutral'}>{on ? yes : no}</Badge>;
 }
 
 export function ServiceCard({ status, isPending, onInstall, onUninstall }: ServiceCardProps) {
   const { t } = useI18n();
   const m = t.environments.machine;
   const { service } = status;
+  // The card's own notice says the supervisor could not be asked; the refusal under
+  // it would only say so again, in less detail.
+  // A neutral word rather than no badge: a card that sometimes has one reads as broken.
+  const isOn = !service.error && service.installed && service.running;
+  const alreadyStated = service.error ? (['service-unreadable'] as const) : undefined;
 
   return (
-    <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-service-card">
-      <div>
-        <CardSectionLabel>{m.service.title}</CardSectionLabel>
-        <p className="font-headline text-lg font-bold text-on-surface">
-          {service.installed ? m.service.installed : m.service.notInstalled}
-        </p>
-        <p className="text-sm text-on-surface-variant/70">
-          {supervisorLabel(t, service.platform)} · {service.unitName}
-        </p>
-      </div>
-
-      <p className="text-sm text-on-surface-variant">{m.service.description}</p>
-
-      {service.error ? (
-        <div className="space-y-1" data-testid="machine-service-error">
-          {/* Coded reasons are ours and have a sentence in every locale; the
-              raw line is whatever the supervisor printed, which no dictionary
-              can hold, so it stays as the diagnostic beneath. */}
-          {service.errorCode ? (
-            <>
-              <p className="text-sm text-error">{m.service.errors[service.errorCode]}</p>
-              <p className="font-mono text-xs text-on-surface-variant/70">{service.error}</p>
-            </>
-          ) : (
-            <p className="text-sm text-error">{service.error}</p>
-          )}
-        </div>
-      ) : (
-        service.installed && (
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
-            <div>
-              <dt className="text-on-surface-variant/70">{m.service.enabledLabel}</dt>
-              <dd>
-                <Flag on={service.enabled} yes={m.service.enabled} no={m.service.disabled} />
-              </dd>
-            </div>
-            <div>
-              <dt className="text-on-surface-variant/70">{m.service.runningLabel}</dt>
-              <dd>
-                <Flag on={service.running} yes={m.service.running} no={m.service.stopped} />
-              </dd>
-            </div>
-            {service.linger !== undefined && (
-              <div>
-                <dt className="text-on-surface-variant/70">{m.service.lingerLabel}</dt>
-                <dd>
-                  <Flag on={service.linger} yes={m.service.lingerOn} no={m.service.lingerOff} />
-                </dd>
-              </div>
-            )}
-            {service.execPath && (
-              <div className="col-span-full">
-                <dt className="text-on-surface-variant/70">{m.service.runs}</dt>
-                <dd className="truncate font-mono text-xs text-on-surface">{service.execPath}</dd>
-              </div>
-            )}
-          </dl>
-        )
-      )}
-
-      <div className="border-t border-outline-variant/15 pt-4">
-        {service.installed ? (
+    <MachineCard
+      title={m.service.title}
+      // A supervisor that could not be asked has not said whether the unit is
+      // there, so the headline does not guess; the notice below says why.
+      headline={
+        service.error
+          ? m.service.unknown
+          : service.installed
+            ? m.service.installed
+            : m.service.notInstalled
+      }
+      description={`${supervisorLabel(t, service.platform)} · ${service.unitName}`}
+      action={
+        <Badge variant={isOn ? 'success' : 'neutral'} data-testid="machine-service-state">
+          {service.error ? m.service.stateUnknown : isOn ? m.service.stateOn : m.service.stateOff}
+        </Badge>
+      }
+      testId="machine-service-card"
+      footer={
+        service.installed ? (
           <MachineActionButton
             status={status}
             action="uninstallService"
             label={m.actions.uninstallService}
             confirmTitle={m.actions.confirmUninstallTitle}
             confirmDescription={m.actions.confirmUninstallDescription}
-            variant="danger"
             isPending={isPending}
             onConfirm={onUninstall}
+            alreadyStated={alreadyStated}
             testId="machine-service-uninstall"
           />
         ) : (
@@ -121,10 +96,49 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
             variant="primary"
             isPending={isPending}
             onConfirm={onInstall}
+            alreadyStated={alreadyStated}
             testId="machine-service-install"
           />
-        )}
-      </div>
-    </section>
+        )
+      }
+    >
+      <p className="text-sm text-fg-muted">{m.service.description}</p>
+
+      {service.error ? (
+        // Coded reasons are ours and have a sentence in every locale; the raw
+        // line is whatever the supervisor printed, which no dictionary can
+        // hold, so it stays as the diagnostic beneath.
+        <Callout
+          tone={service.errorCode ? SERVICE_ERROR_TONE[service.errorCode] : 'danger'}
+          title={service.errorCode ? m.service.errors[service.errorCode] : undefined}
+          data-testid="machine-service-error"
+        >
+          {service.errorCode ? (
+            <p className="break-all font-mono text-xs">{service.error}</p>
+          ) : (
+            service.error
+          )}
+        </Callout>
+      ) : (
+        service.installed && (
+          <MachineFacts>
+            <MachineFact label={m.service.enabledLabel}>
+              <Flag on={service.enabled} yes={m.service.enabled} no={m.service.disabled} />
+            </MachineFact>
+            <MachineFact label={m.service.runningLabel}>
+              <Flag on={service.running} yes={m.service.running} no={m.service.stopped} />
+            </MachineFact>
+            {service.linger !== undefined && (
+              <MachineFact label={m.service.lingerLabel}>
+                <Flag on={service.linger} yes={m.service.lingerOn} no={m.service.lingerOff} />
+              </MachineFact>
+            )}
+            {service.execPath && (
+              <MachineFact label={m.service.runs} value={service.execPath} mono />
+            )}
+          </MachineFacts>
+        )
+      )}
+    </MachineCard>
   );
 }

@@ -38,7 +38,7 @@ export function OverviewLibrarySnapshot() {
 
   return (
     <OverviewSection
-      title={e.tabs.library}
+      tab="library"
       to="/environments/library"
       testId="overview-library"
       isPending={(resources.isPending || targets.isPending) && !hasData}
@@ -51,7 +51,7 @@ export function OverviewLibrarySnapshot() {
       {summaries.length === 0 ? (
         <EnvironmentPageState variant="empty" size="section" title={e.overview.libraryEmpty} />
       ) : (
-        <ul className={`${TOOL_CARD_SURFACE} divide-y divide-outline-variant/10`}>
+        <ul className={`${TOOL_CARD_SURFACE} divide-y divide-stroke`}>
           {summaries.map((summary) => {
             const identity = resolve(
               'agent',
@@ -72,23 +72,19 @@ export function OverviewLibrarySnapshot() {
                   image={identity.image}
                   size="sm"
                 />
-                <span className="min-w-0 flex-1 truncate text-sm text-on-surface">
-                  {identity.name}
-                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-fg">{identity.name}</span>
                 {summary.present === 0 ? (
-                  <span className="text-xs text-on-surface-variant/60">
-                    {e.overview.libraryNone}
-                  </span>
+                  <span className="text-xs text-fg-muted">{e.overview.libraryNone}</span>
                 ) : (
                   <span className="flex items-baseline gap-2 text-xs">
                     {summary.divergent > 0 && (
-                      <span className="text-tertiary" data-testid="library-divergent-count">
+                      <span className="text-info" data-testid="library-divergent-count">
                         {formatMessage(e.overview.libraryDivergent, {
                           count: String(summary.divergent),
                         })}
                       </span>
                     )}
-                    <span className="text-on-surface-variant/60">
+                    <span className="text-fg-muted">
                       {formatMessage(e.overview.libraryPresent, {
                         count: String(summary.present),
                       })}

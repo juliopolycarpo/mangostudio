@@ -8,7 +8,9 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
 import type { SlashCommandEntry } from '../lib/slash-commands';
 
 interface Props {
@@ -64,7 +66,7 @@ export function SlashCommandMenu({
   const empty = entries.length === 0;
 
   return (
-    <div
+    <ComposerPopover
       id={listId}
       // The composer keeps focus throughout, so the list is driven entirely
       // through `aria-activedescendant` on the textarea. `tabIndex={-1}` makes
@@ -81,12 +83,16 @@ export function SlashCommandMenu({
       // of them would blur the textarea, which the composer answers by
       // dismissing the palette out from under the pointer mid-click.
       onMouseDown={(event) => event.preventDefault()}
-      className={`absolute bottom-full left-0 z-40 mb-2 w-80 rounded-2xl border border-outline-variant/20 bg-surface-container-high shadow-2xl ${
+      // The width of the composer it rises from, not a fixed 320px: a
+      // description fits on one line there, and on a phone the panel meets both
+      // edges of the frame instead of floating off them.
+      className={cn(
+        'inset-x-0 w-auto',
         empty ? 'p-3' : 'app-scrollbar max-h-72 overflow-y-auto p-1'
-      }`}
+      )}
     >
       {empty && (
-        <p className="text-xs text-on-surface-variant/70">
+        <p className="text-xs text-fg-muted">
           {pending ? labels.slashMenuLoading : labels.slashMenuEmpty}
         </p>
       )}
@@ -106,23 +112,25 @@ export function SlashCommandMenu({
             onSelect(entry);
           }}
           onMouseMove={() => onHighlight(index)}
-          className={`flex cursor-pointer flex-col gap-0.5 rounded-xl px-2.5 py-1.5 text-left ${
-            index === activeIndex ? 'bg-surface-container-highest' : 'hover:bg-surface-container'
-          }`}
+          className={cn(
+            'flex cursor-pointer flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left transition-colors',
+            // The keyboard's row is the hover wash, as in every other menu:
+            // `fill-selected` is for the item that was chosen, and nothing here
+            // is until Enter.
+            index === activeIndex ? 'bg-fill-hover' : 'hover:bg-fill-hover'
+          )}
         >
           <span className="flex items-baseline gap-2">
-            <span className="font-mono text-xs text-on-surface">/{entry.name}</span>
-            <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-on-surface-variant/60">
+            <span className="font-mono text-sm text-fg">/{entry.name}</span>
+            <span className="ml-auto shrink-0 font-mono text-micro text-fg-subtle">
               {labels.slashMenuOrigin[entry.origin]}
             </span>
           </span>
           {entry.description && (
-            <span className="line-clamp-2 text-[11px] text-on-surface-variant">
-              {entry.description}
-            </span>
+            <span className="line-clamp-2 text-xs text-fg-muted">{entry.description}</span>
           )}
         </div>
       ))}
-    </div>
+    </ComposerPopover>
   );
 }

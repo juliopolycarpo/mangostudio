@@ -16,7 +16,11 @@ import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
 import { render } from '../../support/harness/render';
 import { ToolIdentitiesProbe } from '../../support/mocks/tool-identities';
 
-function renderSeparator(modelName: string | undefined, parts: MessagePart[] = []) {
+function renderSeparator(
+  modelName: string | undefined,
+  parts: MessagePart[] = [],
+  modelNames?: ReadonlyMap<string, string>
+) {
   const msg = createMockMessage({ role: 'ai', modelName, isGenerating: false });
   return render(
     <ToolIdentitiesProbe>
@@ -27,6 +31,7 @@ function renderSeparator(modelName: string | undefined, parts: MessagePart[] = [
           status={deriveTurnStatus(parts, false)}
           isImageTurn={false}
           toolIdentities={toolIdentities}
+          modelNames={modelNames}
         />
       )}
     </ToolIdentitiesProbe>
@@ -61,6 +66,34 @@ describe('TurnSeparator model name', () => {
     renderSeparator(undefined);
 
     expect(screen.getByText('AI model')).toBeInTheDocument();
+  });
+});
+
+/**
+ * The composer states the model as `Claude Sonnet 4.5`; the turn header used to
+ * print the stored id (`claude-sonnet-4-5-20250929`) in the interface font, so one
+ * model had two names and the long one ate the header on a phone.
+ */
+describe('TurnSeparator model name from the catalog', () => {
+  const NAMES = new Map([['claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5']]);
+
+  it('names the model the way the composer does, with the exact id as its title', () => {
+    renderSeparator('claude-sonnet-4-5-20250929', [], NAMES);
+
+    const name = screen.getByText('Claude Sonnet 4.5');
+    expect(name).toHaveAttribute('title', 'claude-sonnet-4-5-20250929');
+    expect(name.className).not.toContain('font-mono');
+    expect(screen.queryByText('claude-sonnet-4-5-20250929')).not.toBeInTheDocument();
+  });
+
+  it('shows an id the catalog no longer lists as the technical value it is', () => {
+    renderSeparator('claude-sonnet-4-5-20250929', [], new Map());
+
+    const name = screen.getByText('claude-sonnet-4-5-20250929');
+    expect(name.className).toContain('font-mono');
+    expect(name.className).toContain('text-micro');
+    // And it gives way, rather than pushing the actions off a phone.
+    expect(name.className).toContain('truncate');
   });
 });
 

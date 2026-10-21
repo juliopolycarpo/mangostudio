@@ -170,9 +170,8 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
     });
   };
 
-  // `chat.feed.thoughtFor` is the same sentence an image turn already prints
-  // for its own elapsed time; a second key holding the same string would only
-  // give the two translations a way to drift apart.
+  // `chat.feed.thoughtFor` names a thought's own elapsed time and nothing else:
+  // an image's is `generatedIn`, and a turn's is its closing line.
   const label = thinkingLabel(
     { isStreaming, hasText, durationMs },
     {
@@ -189,14 +188,12 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
           empty status column is what sets it apart from the calls around it. */}
       <TimelineRow expanded={isExpanded} onToggle={handleToggle} disclosable={hasText}>
         <span
-          className={`truncate ${isStreaming ? 'animate-pulse text-on-surface-variant' : 'text-on-surface-variant/55'}`}
+          className={`truncate ${isStreaming ? 'animate-pulse text-fg-muted' : 'text-fg-subtle'}`}
         >
           {label}
         </span>
         {incomplete && !isStreaming ? (
-          <span className="shrink-0 text-on-surface-variant/40">
-            · {t.externalAgents.turn.incomplete}
-          </span>
+          <span className="shrink-0 text-fg-subtle">· {t.externalAgents.turn.incomplete}</span>
         ) : null}
       </TimelineRow>
       {hasText ? (
@@ -204,9 +201,9 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
           <div
             ref={scrollRef}
             onScroll={handleScroll}
-            className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
+            className="app-scrollbar max-h-48 overflow-y-auto p-3 sm:max-h-72 md:max-h-96"
           >
-            <div className="markdown-content--thinking text-xs leading-relaxed text-on-surface-variant/60">
+            <div className="markdown-content--thinking text-xs leading-relaxed text-fg-muted">
               <MarkdownContent
                 content={text}
                 isStreaming={isStreaming}

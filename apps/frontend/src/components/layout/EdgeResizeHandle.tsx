@@ -102,11 +102,14 @@ export function EdgeResizeHandle({
         onBlur={endKeyboardResize}
         // `h-auto` beats the Tailwind preflight `hr { height: 0 }`, which would otherwise
         // override the `inset-y-0` stretch and leave a 0px-tall, unhittable handle.
-        className={`peer absolute inset-y-0 z-10 m-0 h-auto w-2 cursor-col-resize touch-none border-0 bg-transparent transition-colors hover:bg-primary/15 focus-visible:bg-primary/20 focus-visible:outline-none ${positionClass}`}
+        className={`peer absolute inset-y-0 z-10 m-0 h-auto w-2 cursor-col-resize touch-none border-0 bg-transparent focus-visible:outline-none ${positionClass}`}
       />
+      {/* Drawn on hover and on keyboard focus only: at rest a pill on every
+          sidebar edge read as a stray scrollbar thumb, the only decorative
+          mark on the shell. The 8px hit area is there all the time. */}
       <span
         aria-hidden="true"
-        className={`pointer-events-none absolute top-1/2 z-10 h-12 w-1 -translate-y-1/2 rounded-full bg-outline-variant/50 transition-colors peer-hover:bg-primary/70 peer-focus-visible:bg-primary/70 ${positionClass}`}
+        className={`pointer-events-none absolute top-1/2 z-10 h-12 w-1 -translate-y-1/2 rounded-xs bg-stroke opacity-0 transition-[opacity,background-color] peer-hover:bg-stroke-strong peer-hover:opacity-100 peer-focus-visible:bg-focus peer-focus-visible:opacity-100 ${positionClass}`}
       />
     </>
   );

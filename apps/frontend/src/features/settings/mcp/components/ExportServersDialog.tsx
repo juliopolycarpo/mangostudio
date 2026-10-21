@@ -1,10 +1,15 @@
 import type { ExportMcpServersResponse, McpServer } from '@mangostudio/shared/mcp';
-import { Check, Copy, Download, X } from 'lucide-react';
+import { Copy, Download } from 'lucide-react';
 import { useState } from 'react';
+import { CheckboxRow } from '@/components/settings/CheckboxRow';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
+import { Textarea } from '@/components/ui/Textarea';
 import { useToast } from '@/components/ui/Toast';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useExportPortableMcpServers } from '../hooks/use-mcp-servers';
 
@@ -68,114 +73,86 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-surface-container-high w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-xl font-bold text-on-surface">{s.portability.exportTitle}</h3>
-            <p className="mt-1 text-sm text-on-surface-variant/70">
-              {s.portability.exportDescription}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" aria-label={s.cancelButton} onClick={onClose}>
-            <X size={16} />
-          </Button>
-        </div>
-
-        {preview ? (
-          <div className="space-y-3">
-            <textarea
-              readOnly
-              aria-label={s.portability.exportTitle}
-              value={preview.content}
-              rows={18}
-              className="w-full rounded-2xl px-4 py-3 text-xs font-mono bg-surface-container-low text-on-surface border border-outline-variant/20 focus:outline-none resize-y"
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" onClick={() => void copyJson()}>
-                <Copy size={14} />
-                {s.portability.copyJson}
+    <Dialog
+      title={s.portability.exportTitle}
+      description={s.portability.exportDescription}
+      closeDisabled={exportMutation.isPending}
+      onClose={onClose}
+      toolbar={
+        preview ? undefined : (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-fg-muted">
+              {s.portability.selectedCount.replace('{count}', String(selected.size))}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => setSelected(new Set(servers.map((server) => server.id)))}
+              >
+                {s.portability.selectAll}
               </Button>
-              <Button size="sm" onClick={downloadJson}>
-                <Download size={14} />
-                {s.portability.downloadJson}
+              <Button variant="subtle" size="sm" onClick={() => setSelected(new Set())}>
+                {s.portability.selectNone}
               </Button>
             </div>
           </div>
+        )
+      }
+      notice={error ? <Callout tone="danger">{error}</Callout> : undefined}
+      footer={
+        preview ? (
+          <>
+            <Button variant="secondary" onClick={onClose}>
+              {s.portability.done}
+            </Button>
+            <Button variant="secondary" onClick={() => void copyJson()}>
+              <Copy size={ICON_SM} />
+              {s.portability.copyJson}
+            </Button>
+            <Button onClick={downloadJson}>
+              <Download size={ICON_SM} />
+              {s.portability.downloadJson}
+            </Button>
+          </>
         ) : (
           <>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-on-surface-variant">
-                {s.portability.selectedCount.replace('{count}', String(selected.size))}
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelected(new Set(servers.map((server) => server.id)))}
-                >
-                  {s.portability.selectAll}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                  {s.portability.selectNone}
-                </Button>
-              </div>
-            </div>
-            <ul className="space-y-2">
-              {servers.map((server) => {
-                const checked = selected.has(server.id);
-                return (
-                  <li key={server.id}>
-                    <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-outline-variant/20 px-4 py-3 hover:border-primary/40 transition-colors">
-                      <input
-                        type="checkbox"
-                        className="sr-only"
-                        checked={checked}
-                        onChange={() => toggleServer(server.id)}
-                      />
-                      <span
-                        className={`grid size-5 place-items-center rounded-md border ${
-                          checked
-                            ? 'border-primary bg-primary text-on-primary'
-                            : 'border-outline-variant/60'
-                        }`}
-                      >
-                        {checked && <Check size={13} />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-medium text-on-surface">
-                          {server.name}
-                        </span>
-                        <span className="block truncate text-xs font-mono text-on-surface-variant/60">
-                          {server.slug} · {s.transports[server.transport]}
-                        </span>
-                      </span>
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          </>
-        )}
-
-        {error && <p className="text-sm text-error">{error}</p>}
-
-        <div className="flex gap-3 pt-2">
-          <Button variant="secondary" className="flex-1" onClick={onClose}>
-            {preview ? s.portability.done : s.cancelButton}
-          </Button>
-          {!preview && (
+            <Button variant="secondary" onClick={onClose}>
+              {s.cancelButton}
+            </Button>
             <Button
-              className="flex-1"
               disabled={selected.size === 0}
               loading={exportMutation.isPending}
               onClick={handlePreview}
             >
               {exportMutation.isPending ? s.portability.exporting : s.portability.previewExport}
             </Button>
-          )}
-        </div>
-      </div>
-    </div>
+          </>
+        )
+      }
+    >
+      {preview ? (
+        <Textarea
+          readOnly
+          aria-label={s.portability.exportTitle}
+          value={preview.content}
+          rows={18}
+          className="font-mono text-xs"
+        />
+      ) : (
+        <ul className="space-y-2">
+          {servers.map((server) => (
+            <li key={server.id}>
+              <CheckboxRow
+                label={server.name}
+                description={`${server.slug} · ${s.transports[server.transport]}`}
+                checked={selected.has(server.id)}
+                onChange={() => toggleServer(server.id)}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Dialog>
   );
 }

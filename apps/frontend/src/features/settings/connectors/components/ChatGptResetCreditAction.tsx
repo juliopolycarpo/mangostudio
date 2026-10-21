@@ -1,9 +1,12 @@
 import type { Connector } from '@mangostudio/shared/connectors';
-import { RefreshCw, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { useChatGptResetRedeem } from '../hooks/use-chatgpt-reset-redeem';
 
 interface ChatGptResetCreditActionProps {
@@ -18,13 +21,15 @@ interface ChatGptResetCreditActionProps {
  * a confirmation dialog because redeeming spends an irreversible perk.
  */
 export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptResetCreditActionProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const plural = usePlural();
   const { toast } = useToast();
   const s = t.settings.connectors;
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const { redeem, isRedeeming, lastWindowsReset } = useChatGptResetRedeem({
     connectorId: connector.id,
     messages: s,
+    locale,
     toast,
     onSettled: onRedeemed,
   });
@@ -37,57 +42,47 @@ export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptReset
     void redeem();
   };
 
+  const confirmBody = [
+    s.chatgptRedeemConfirmBody.replace('{count}', String(availableCount)),
+    lastWindowsReset !== null && lastWindowsReset > 0
+      ? plural(
+          { one: s.chatgptRedeemConfirmRestoresOne, other: s.chatgptRedeemConfirmRestoresOther },
+          lastWindowsReset
+        )
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className="mt-1.5">
+    <div>
       <Button
         variant="secondary"
         size="sm"
         onClick={() => setIsConfirmOpen(true)}
-        disabled={isRedeeming}
+        loading={isRedeeming}
       >
-        {isRedeeming ? (
-          <>
-            <RefreshCw size={14} className="animate-spin" />
-            {s.chatgptRedeeming}
-          </>
-        ) : (
-          <>
-            <Zap size={14} />
-            {s.chatgptRedeemButton}
-          </>
-        )}
+        {isRedeeming ? null : <Zap size={ICON_SM} />}
+        {isRedeeming ? s.chatgptRedeeming : s.chatgptRedeemButton}
       </Button>
 
       {isConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-surface-container-high w-full max-w-sm rounded-3xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-5 sm:space-y-6">
-            <div className="space-y-2 text-center">
-              <div className="p-4 bg-primary/10 rounded-full w-fit mx-auto text-primary mb-2">
-                <Zap size={32} />
-              </div>
-              <h3 className="text-xl font-bold text-on-surface">{s.chatgptRedeemConfirmTitle}</h3>
-              <p className="text-sm text-on-surface-variant/70">
-                {s.chatgptRedeemConfirmBody.replace('{count}', String(availableCount))}
-                {lastWindowsReset !== null &&
-                  lastWindowsReset > 0 &&
-                  ` ${s.chatgptRedeemConfirmRestores.replace('{count}', String(lastWindowsReset))}`}
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <Button
-                variant="secondary"
-                onClick={() => setIsConfirmOpen(false)}
-                className="flex-1"
-              >
+        <Dialog
+          size="sm"
+          title={s.chatgptRedeemConfirmTitle}
+          description={confirmBody}
+          onClose={() => setIsConfirmOpen(false)}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setIsConfirmOpen(false)}>
                 {s.cancelButton}
               </Button>
-              <Button variant="primary" onClick={handleConfirm} className="flex-1">
+              <Button variant="primary" onClick={handleConfirm}>
                 {s.chatgptRedeemConfirmAction}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
       )}
     </div>
   );

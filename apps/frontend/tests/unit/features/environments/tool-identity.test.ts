@@ -128,7 +128,9 @@ describe('toolAvatarPalette', () => {
     expect(toolAvatarPalette('agent:claude').slot).toBe('orange');
     expect(toolAvatarPalette('agent:codex').slot).toBe('teal');
     expect(toolAvatarPalette('agent:cursor').slot).toBe('violet');
-    expect(toolAvatarPalette('runtime:bun').slot).toBe('amber');
+    // MangoStudio's own runner wears the mango family, as its `agent-mango` dot does.
+    expect(toolAvatarPalette('agent:mangostudio').slot).toBe('amber');
+    expect(toolAvatarPalette('runtime:bun').slot).toBe('blue');
     expect(toolAvatarPalette('runtime:node').slot).toBe('green');
   });
 

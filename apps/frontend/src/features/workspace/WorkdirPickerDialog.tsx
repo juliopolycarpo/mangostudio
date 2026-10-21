@@ -2,21 +2,30 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { WorkdirValidationReason } from '@mangostudio/shared/workspaces';
 import {
   ArrowUp,
+  CircleX,
   Eye,
   EyeOff,
   Folder,
   FolderOpen,
   HardDrive,
   Home,
-  LoaderCircle,
   Server,
   X,
 } from 'lucide-react';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, useEffect, useId, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Select } from '@/components/ui/Select';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
-import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { workdirLabel } from '@/lib/paths';
+import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
+import { IconButton } from './components/IconButton';
 import { useDirectoryListing, validateWorkspacePath } from './use-directory-listing';
 
 interface WorkdirPickerDialogProps {
@@ -110,6 +119,8 @@ export function WorkdirPickerDialog({
   const [isValidating, setIsValidating] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const manualPathId = useId();
+  const restrictToolsId = useId();
   const scope = useMemo(
     () => (chatId ? { chatId } : environmentId ? { environmentId } : undefined),
     [chatId, environmentId]
@@ -132,13 +143,6 @@ export function WorkdirPickerDialog({
     if (!listing.data?.path) return;
     setManualPath(listing.data.path);
   }, [listing.data?.path]);
-
-  // The palette that opens this dialog hands off focus to it mid-exit-animation
-  // rather than after unmount, so the dialog has to take focus itself instead of
-  // relying on whatever last had it. Also traps Tab and takes Escape, replacing
-  // the old window-level Escape listener — see the hook for why a stacked
-  // overlay needs the `defaultPrevented` guard it carries.
-  const dialogRef = useFocusTrap(onClose);
 
   if (!open) return null;
 
@@ -186,225 +190,44 @@ export function WorkdirPickerDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm sm:p-6">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="workdir-picker-title"
-        tabIndex={-1}
-        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-outline-variant/20 bg-surface-container-high shadow-2xl outline-none"
-      >
-        <header className="flex items-start justify-between gap-4 border-b border-outline-variant/15 px-5 py-4 sm:px-6 sm:py-5">
-          <div className="min-w-0 space-y-1">
-            <div className="flex items-center gap-2 text-primary">
-              <Server size={16} />
-              <span className="font-label text-[10px] font-bold uppercase tracking-[0.18em]">
-                {s.serverLabel}
-              </span>
-            </div>
-            <h2 id="workdir-picker-title" className="text-xl font-bold text-on-surface">
-              {s.title}
-            </h2>
-            <p className="text-sm text-on-surface-variant/65">{s.description}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl p-2 text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface"
-            aria-label={s.close}
+    // The palette that opens this dialog hands off focus mid-exit-animation
+    // rather than after unmount; the dialog's trap takes focus itself instead of
+    // relying on whatever last had it.
+    <Dialog
+      size="lg"
+      flush
+      eyebrow={
+        <MicroLabel className="flex items-center gap-1.5">
+          <Server size={ICON_SM} />
+          {s.serverLabel}
+        </MicroLabel>
+      }
+      title={s.title}
+      description={s.description}
+      headerAction={
+        <IconButton label={s.close} onClick={onClose}>
+          <X size={ICON_MD} />
+        </IconButton>
+      }
+      onClose={onClose}
+      footer={
+        <>
+          <div
+            className="flex min-h-5 min-w-0 basis-full items-center gap-1.5 text-xs text-danger sm:flex-1 sm:basis-0"
+            role="alert"
           >
-            <X size={18} />
-          </button>
-        </header>
-
-        <form
-          onSubmit={(event) => void handleManualBrowse(event)}
-          className="flex flex-col gap-2 border-b border-outline-variant/15 bg-surface-container-lowest/50 px-5 py-3 sm:flex-row sm:items-end sm:px-6"
-        >
-          <label className="min-w-0 flex-1 space-y-1.5">
-            <span className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-              {s.manualPathLabel}
-            </span>
-            <input
-              value={manualPath}
-              onChange={(event) => setManualPath(event.target.value)}
-              placeholder={s.manualPathPlaceholder}
-              className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-high px-3 py-2 font-mono text-sm text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/35 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-            />
-          </label>
-          <Button type="submit" variant="secondary" loading={isValidating}>
-            <FolderOpen size={15} />
-            {s.browse}
-          </Button>
-        </form>
-
-        <div className="grid min-h-0 flex-1 sm:grid-cols-[14rem_minmax(0,1fr)]">
-          <aside className="hidden min-h-0 overflow-y-auto border-r border-outline-variant/15 bg-surface-container-lowest/35 p-3 sm:block">
-            <nav className="space-y-4" aria-label={s.title}>
-              {listing.data ? (
-                <PathSection label={s.home}>
-                  <PathButton
-                    icon={<Home size={14} />}
-                    label={s.home}
-                    path={listing.data.home}
-                    onClick={browse}
-                  />
-                </PathSection>
-              ) : null}
-
-              {listing.data?.roots.length ? (
-                <PathSection label={s.roots}>
-                  {listing.data.roots.map((root) => (
-                    <PathButton
-                      key={root}
-                      icon={<HardDrive size={14} />}
-                      label={root}
-                      path={root}
-                      onClick={browse}
-                    />
-                  ))}
-                </PathSection>
-              ) : null}
-
-              <PathSection label={s.recent}>
-                {recentWorkdirs.length > 0 ? (
-                  recentWorkdirs.map((path) => (
-                    <PathButton
-                      key={path}
-                      icon={<Folder size={14} />}
-                      label={path}
-                      path={path}
-                      onClick={browse}
-                    />
-                  ))
-                ) : (
-                  <p className="px-2 text-xs text-on-surface-variant/45">{s.noRecent}</p>
-                )}
-              </PathSection>
-            </nav>
-          </aside>
-
-          <main className="flex min-h-[20rem] min-w-0 flex-col">
-            <div className="flex items-center gap-2 border-b border-outline-variant/15 px-4 py-3 sm:px-5">
-              <button
-                type="button"
-                onClick={() => listing.data?.parent && browse(listing.data.parent)}
-                disabled={!listing.data?.parent}
-                className="rounded-lg p-1.5 text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface disabled:opacity-30"
-                aria-label={s.parent}
-              >
-                <ArrowUp size={16} />
-              </button>
-              <div className="min-w-0 flex-1 rounded-lg border border-outline-variant/15 bg-surface-container-lowest px-3 py-1.5 font-mono text-xs text-on-surface-variant">
-                <span className="block truncate" title={listing.data?.path ?? manualPath}>
-                  {listing.data?.path ?? manualPath}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowHidden((current) => !current)}
-                className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface"
-                aria-pressed={showHidden}
-                title={showHidden ? s.hideHidden : s.showHidden}
-              >
-                {showHidden ? <EyeOff size={15} /> : <Eye size={15} />}
-                <span className="hidden md:inline">{showHidden ? s.hideHidden : s.showHidden}</span>
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
-              {/* Hoisted above the list branches: hidden entries can consume the whole
-                  cap, leaving a visibly empty folder that is nonetheless truncated. */}
-              {listing.data?.truncated ? (
-                <p
-                  role="status"
-                  className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface-variant"
-                >
-                  {s.truncatedNotice.replace('{count}', String(listing.data.entries.length))}
-                </p>
-              ) : null}
-              {listing.isLoading ? (
-                <div className="flex h-full min-h-48 items-center justify-center gap-2 text-sm text-on-surface-variant">
-                  <LoaderCircle size={18} className="animate-spin text-primary" />
-                  {s.loading}
-                </div>
-              ) : listing.isError ? (
-                <div className="flex h-full min-h-48 items-center justify-center text-center text-sm text-error">
-                  {browseErrorMessage(listing.error, s)}
-                </div>
-              ) : visibleEntries.length === 0 ? (
-                <div className="flex h-full min-h-48 items-center justify-center text-center text-sm text-on-surface-variant/60">
-                  {s.empty}
-                </div>
-              ) : (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {visibleEntries.map((entry) => (
-                    <button
-                      key={entry.path}
-                      type="button"
-                      onClick={() => browse(entry.path)}
-                      className="group flex min-w-0 items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-lowest px-3 py-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
-                      title={entry.path}
-                    >
-                      <span className="rounded-lg bg-primary/10 p-2 text-primary transition-colors group-hover:bg-primary/15">
-                        <Folder size={17} fill="currentColor" className="fill-primary/20" />
-                      </span>
-                      <span className="min-w-0 truncate text-sm font-medium text-on-surface">
-                        {entry.name}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </main>
-        </div>
-
-        {showRestrictToolsOverride && onRestrictToolsToWorkdirOverrideChange ? (
-          <div className="border-t border-outline-variant/15 px-5 py-4 sm:px-6">
-            <label
-              htmlFor="restrict-tools-override"
-              className="mb-2 block font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70"
-            >
-              {s.restrictToolsChatOverrideLabel}
-            </label>
-            <select
-              id="restrict-tools-override"
-              value={
-                restrictToolsToWorkdirOverride === null
-                  ? 'inherit'
-                  : restrictToolsToWorkdirOverride
-                    ? 'on'
-                    : 'off'
-              }
-              onChange={(event) => {
-                const next = event.target.value === 'inherit' ? null : event.target.value === 'on';
-                void onRestrictToolsToWorkdirOverrideChange(next);
-              }}
-              className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
-            >
-              <option value="inherit">
-                {s.restrictToolsInherit.replace(
-                  '{state}',
-                  globalRestrictToolsToWorkdir ? s.restrictToolsGlobalOn : s.restrictToolsGlobalOff
-                )}
-              </option>
-              <option value="on">{s.restrictToolsOn}</option>
-              <option value="off">{s.restrictToolsOff}</option>
-            </select>
-          </div>
-        ) : null}
-
-        <footer className="flex flex-col gap-3 border-t border-outline-variant/15 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div className="min-h-5 text-xs text-error" role="alert">
-            {actionError}
+            {actionError ? (
+              <>
+                <CircleX size={ICON_SM} className="shrink-0" aria-hidden="true" />
+                {actionError}
+              </>
+            ) : null}
           </div>
           <div className="flex justify-end gap-2">
             {showUseDefault && defaultWorkdir ? (
               <Button
                 type="button"
-                variant="ghost"
+                variant="subtle"
                 disabled={isSelecting}
                 onClick={() => void handleSelect(defaultWorkdir)}
               >
@@ -417,47 +240,233 @@ export function WorkdirPickerDialog({
               loading={isSelecting}
               onClick={() => listing.data?.path && void handleSelect(listing.data.path)}
             >
-              <FolderOpen size={15} />
+              <FolderOpen size={ICON_MD} />
               {s.selectFolder}
             </Button>
           </div>
-        </footer>
+        </>
+      }
+    >
+      <form
+        onSubmit={(event) => void handleManualBrowse(event)}
+        className="flex flex-col gap-2 border-b border-stroke px-6 py-3 sm:flex-row sm:items-end"
+      >
+        {/* The one place the current folder is written: browsing a folder fills
+            this field, and typing a path then Enter (or Open) goes there. */}
+        <div className="min-w-0 flex-1">
+          <Input
+            id={manualPathId}
+            label={s.manualPathLabel}
+            value={manualPath}
+            onChange={(event) => setManualPath(event.target.value)}
+            placeholder={s.manualPathPlaceholder}
+            className="font-mono"
+          />
+        </div>
+        <Button type="submit" variant="secondary" loading={isValidating}>
+          <FolderOpen size={ICON_MD} />
+          {s.browse}
+        </Button>
+      </form>
+
+      <div className="grid min-h-0 flex-1 sm:grid-cols-[14rem_minmax(0,1fr)]">
+        <aside className="app-scrollbar hidden min-h-0 overflow-y-auto border-r border-stroke p-4 sm:block">
+          <nav className="space-y-4" aria-label={s.title}>
+            {/* Home and the filesystem roots are one group: under a heading each
+                they were two one-row sections whose labels only restated the row
+                (`HOME` over “Home”). */}
+            {listing.data ? (
+              <PathSection label={s.places}>
+                <PathButton
+                  icon={<Home size={ICON_MD} />}
+                  label={s.home}
+                  path={listing.data.home}
+                  onClick={browse}
+                />
+                {listing.data.roots.map((root) => (
+                  <PathButton
+                    key={root}
+                    icon={<HardDrive size={ICON_MD} />}
+                    label={root}
+                    path={root}
+                    onClick={browse}
+                  />
+                ))}
+              </PathSection>
+            ) : null}
+
+            <PathSection label={s.recent}>
+              {recentWorkdirs.length > 0 ? (
+                recentWorkdirs.map((path) => (
+                  <PathButton
+                    key={path}
+                    icon={<Folder size={ICON_MD} />}
+                    label={workdirLabel(path) ?? path}
+                    detail={parentPath(path)}
+                    path={path}
+                    onClick={browse}
+                  />
+                ))
+              ) : (
+                <p className="px-2 text-xs text-fg-subtle">{s.noRecent}</p>
+              )}
+            </PathSection>
+          </nav>
+        </aside>
+
+        <main className="flex min-h-[20rem] min-w-0 flex-col">
+          <div className="flex items-center justify-between gap-2 border-b border-stroke px-6 py-3">
+            <IconButton
+              label={s.parent}
+              onClick={() => listing.data?.parent && browse(listing.data.parent)}
+              disabled={!listing.data?.parent}
+            >
+              <ArrowUp size={ICON_MD} />
+            </IconButton>
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              onClick={() => setShowHidden((current) => !current)}
+              aria-pressed={showHidden}
+              title={showHidden ? s.hideHidden : s.showHidden}
+              className="text-fg-muted aria-pressed:bg-fill-selected aria-pressed:text-fg"
+            >
+              {showHidden ? <EyeOff size={ICON_SM} /> : <Eye size={ICON_SM} />}
+              <span className="hidden md:inline">{showHidden ? s.hideHidden : s.showHidden}</span>
+            </Button>
+          </div>
+
+          <div className="app-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+            {/* Hoisted above the list branches: hidden entries can consume the whole
+                cap, leaving a visibly empty folder that is nonetheless truncated. */}
+            {listing.data?.truncated ? (
+              <Callout tone="info" role="status">
+                {s.truncatedNotice.replace('{count}', String(listing.data.entries.length))}
+              </Callout>
+            ) : null}
+            {listing.isLoading ? (
+              <EmptyState icon={<Spinner />} title={s.loading} className="h-full min-h-48" />
+            ) : listing.isError ? (
+              <Callout tone="danger">{browseErrorMessage(listing.error, s)}</Callout>
+            ) : visibleEntries.length === 0 ? (
+              <EmptyState title={s.empty} className="h-full min-h-48" />
+            ) : (
+              // A list is a stack of rows with a hover wash, the way the rail beside
+              // it is drawn; a bordered button per folder made the heaviest pane in
+              // the app out of a directory listing.
+              <div className="space-y-0.5">
+                {visibleEntries.map((entry) => (
+                  <PathButton
+                    key={entry.path}
+                    icon={<Folder size={ICON_MD} />}
+                    label={entry.name}
+                    path={entry.path}
+                    onClick={browse}
+                    className="text-fg"
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </main>
       </div>
-    </div>
+
+      {showRestrictToolsOverride && onRestrictToolsToWorkdirOverrideChange ? (
+        <div className="space-y-1 border-t border-stroke px-6 py-4">
+          <label htmlFor={restrictToolsId} className="block text-sm font-medium text-fg">
+            {s.restrictToolsChatOverrideLabel}
+          </label>
+          <Select
+            id={restrictToolsId}
+            value={
+              restrictToolsToWorkdirOverride === null
+                ? 'inherit'
+                : restrictToolsToWorkdirOverride
+                  ? 'on'
+                  : 'off'
+            }
+            onChange={(value) => {
+              const next = value === 'inherit' ? null : value === 'on';
+              void onRestrictToolsToWorkdirOverrideChange(next);
+            }}
+            options={[
+              {
+                value: 'inherit',
+                label: s.restrictToolsInherit.replace(
+                  '{state}',
+                  globalRestrictToolsToWorkdir ? s.restrictToolsGlobalOn : s.restrictToolsGlobalOff
+                ),
+              },
+              { value: 'on', label: s.restrictToolsOn },
+              { value: 'off', label: s.restrictToolsOff },
+            ]}
+          />
+        </div>
+      ) : null}
+    </Dialog>
   );
 }
 
 function PathSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-1.5">
-      <h3 className="px-2 font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/55">
+    <section className="space-y-1">
+      <MicroLabel as="h3" className="block px-2">
         {label}
-      </h3>
-      <div className="space-y-1">{children}</div>
+      </MicroLabel>
+      <div>{children}</div>
     </section>
   );
 }
 
+/**
+ * The folder above a path, for the line under a name that is not enough alone
+ * (`/tmp/mangostudio-visual-1` and `-2` share a parent, so the parent is only
+ * worth showing dimmed). Null for a root-level path, which has no parent worth
+ * naming.
+ */
+function parentPath(path: string): string | null {
+  const trimmed = path.replace(/[\\/]+$/, '');
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  return cut > 0 ? trimmed.slice(0, cut) : null;
+}
+
+/**
+ * One folder as a row: icon, its name, and optionally its parent path dimmed on
+ * a second line. The name comes first because it is the part that tells two
+ * folders apart — a path truncated at the end cut exactly that off.
+ */
 function PathButton({
   icon,
   label,
+  detail = null,
   path,
   onClick,
+  className,
 }: {
   icon: React.ReactNode;
   label: string;
+  /** The parent folder, shown under the name in `fg-subtle`. */
+  detail?: string | null;
   path: string;
   onClick: (path: string) => void;
+  className?: string;
 }) {
   return (
     <button
       type="button"
       onClick={() => onClick(path)}
-      className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+      className={cn(
+        'flex min-h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 py-0.5 text-left text-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg',
+        className
+      )}
       title={path}
     >
-      <span className="shrink-0 text-primary/75">{icon}</span>
-      <span className="truncate">{label}</span>
+      <span className="shrink-0">{icon}</span>
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate">{label}</span>
+        {detail ? <span className="truncate text-xs text-fg-subtle">{detail}</span> : null}
+      </span>
     </button>
   );
 }

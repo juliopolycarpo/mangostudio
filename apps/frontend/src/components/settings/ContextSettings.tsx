@@ -3,8 +3,12 @@ import type {
   ContextCompactionBehavior,
   ContextSettings as ContextSettingsValue,
 } from '@mangostudio/shared/chat';
-import { Card } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { SettingsSliderRow } from '@/components/settings/SettingsSliderRow';
+import { SettingToggle } from '@/components/settings/SettingToggle';
+import { Callout } from '@/components/ui/Callout';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { modelSelectOptions } from '@/lib/model-select-options';
@@ -22,10 +26,6 @@ interface ContextSettingsProps {
 
 const THRESHOLD_MIN = 50;
 const THRESHOLD_MAX = 99;
-
-function formatThreshold(value: number, hint: string): string {
-  return hint.replace('{value}', String(Math.round(value * 100)));
-}
 
 function toPercentValue(value: number): number {
   return Math.round(value * 100);
@@ -51,137 +51,76 @@ export function ContextSettings({
       : [];
 
   return (
-    <div className="space-y-4">
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h2 className="text-lg font-bold text-on-surface">{s.title}</h2>
-        <p className="text-sm text-on-surface-variant/70">{s.description}</p>
-        <p className="text-sm text-on-surface-variant/60">{s.keepHistory}</p>
-      </Card>
-
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {s.behaviorLabel}
-        </h3>
-        <p className="text-sm text-on-surface-variant/60">{s.behaviorDescription}</p>
-        <Select
-          value={settings.compactionBehavior}
-          onChange={(value) => setCompactionBehavior(value as ContextCompactionBehavior)}
-          ariaLabel={s.behaviorLabel}
-          options={[
-            { value: 'ask', label: s.behaviorOptions.ask },
-            { value: 'auto_compact_current_chat', label: s.behaviorOptions.autoCompact },
-            { value: 'continue_with_summary_new_chat', label: s.behaviorOptions.newChat },
-            { value: 'off', label: s.behaviorOptions.off },
-          ]}
-        />
-      </Card>
-
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-              {s.providerCompactionLabel}
-            </h3>
-            <p className="text-sm text-on-surface-variant/60">{s.providerCompactionDescription}</p>
-          </div>
-          <Checkbox
-            checked={settings.providerCompactionEnabled}
-            onChange={(event) => setProviderCompactionEnabled(event.target.checked)}
-            aria-label={s.providerCompactionLabel}
-            className="mt-1"
+    <SettingsPage title={s.title} description={s.description}>
+      {/* A note about a card is that card's `notice`, so it sits with it. */}
+      <SettingsSection notice={<Callout tone="info">{s.keepHistory}</Callout>}>
+        <SettingsRow label={s.behaviorLabel} hint={s.behaviorDescription} layout="field">
+          <Select
+            value={settings.compactionBehavior}
+            onChange={(value) => setCompactionBehavior(value as ContextCompactionBehavior)}
+            ariaLabel={s.behaviorLabel}
+            options={[
+              { value: 'ask', label: s.behaviorOptions.ask },
+              { value: 'auto_compact_current_chat', label: s.behaviorOptions.autoCompact },
+              { value: 'continue_with_summary_new_chat', label: s.behaviorOptions.newChat },
+              { value: 'off', label: s.behaviorOptions.off },
+            ]}
           />
-        </div>
-      </Card>
+        </SettingsRow>
+        <SettingToggle
+          label={s.providerCompactionLabel}
+          description={s.providerCompactionDescription}
+          checked={settings.providerCompactionEnabled}
+          onChange={setProviderCompactionEnabled}
+        />
+        <SettingsRow label={s.summaryModelLabel} hint={s.summaryModelDescription} layout="field">
+          <Select
+            value={settings.preferredSummaryModel}
+            onChange={setPreferredSummaryModel}
+            ariaLabel={s.summaryModelLabel}
+            options={modelSelectOptions(
+              { value: 'current_model', label: s.summaryModelCurrent },
+              missingModelOption,
+              availableModels
+            )}
+          />
+        </SettingsRow>
+      </SettingsSection>
 
-      <Card variant="solid" className="space-y-5 p-4 sm:p-6">
-        <ThresholdControl
+      {/* The number field beside each slider shows the value, and the hint says it
+          is a percentage, so the rows carry no readout of their own. */}
+      <SettingsSection title={s.thresholdsLabel} description={s.thresholdsDescription}>
+        <SettingsSliderRow
+          id="context-warning-threshold"
           label={s.warningThresholdLabel}
-          description={s.warningThresholdDescription}
-          hint={formatThreshold(settings.warningThreshold, s.thresholdHint)}
+          hint={s.warningThresholdDescription}
           value={toPercentValue(settings.warningThreshold)}
+          min={THRESHOLD_MIN}
+          max={THRESHOLD_MAX}
           onChange={(value) => setWarningThreshold(value / 100)}
+          withNumberInput
         />
-        <ThresholdControl
+        <SettingsSliderRow
+          id="context-danger-threshold"
           label={s.dangerThresholdLabel}
-          description={s.dangerThresholdDescription}
-          hint={formatThreshold(settings.dangerThreshold, s.thresholdHint)}
+          hint={s.dangerThresholdDescription}
           value={toPercentValue(settings.dangerThreshold)}
+          min={THRESHOLD_MIN}
+          max={THRESHOLD_MAX}
           onChange={(value) => setDangerThreshold(value / 100)}
+          withNumberInput
         />
-        <ThresholdControl
+        <SettingsSliderRow
+          id="context-hard-stop-threshold"
           label={s.hardStopThresholdLabel}
-          description={s.hardStopThresholdDescription}
-          hint={formatThreshold(settings.hardStopThreshold, s.thresholdHint)}
+          hint={s.hardStopThresholdDescription}
           value={toPercentValue(settings.hardStopThreshold)}
+          min={THRESHOLD_MIN}
+          max={THRESHOLD_MAX}
           onChange={(value) => setHardStopThreshold(value / 100)}
+          withNumberInput
         />
-      </Card>
-
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {s.summaryModelLabel}
-        </h3>
-        <p className="text-sm text-on-surface-variant/60">{s.summaryModelDescription}</p>
-        <Select
-          value={settings.preferredSummaryModel}
-          onChange={setPreferredSummaryModel}
-          ariaLabel={s.summaryModelLabel}
-          options={modelSelectOptions(
-            { value: 'current_model', label: s.summaryModelCurrent },
-            missingModelOption,
-            availableModels
-          )}
-        />
-      </Card>
-    </div>
-  );
-}
-
-function ThresholdControl({
-  label,
-  description,
-  hint,
-  value,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  hint: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {label}
-        </h3>
-        <span className="text-sm font-medium text-on-surface">{hint}</span>
-      </div>
-      <p className="text-sm text-on-surface-variant/60">{description}</p>
-      <div className="flex items-center gap-4">
-        <input
-          type="range"
-          min={THRESHOLD_MIN}
-          max={THRESHOLD_MAX}
-          step={1}
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
-          aria-label={label}
-          className="range-input flex-1"
-        />
-        <input
-          type="number"
-          min={THRESHOLD_MIN}
-          max={THRESHOLD_MAX}
-          step={1}
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
-          onBlur={(event) => onChange(Number(event.target.value))}
-          aria-label={label}
-          className="w-20 rounded-xl px-3 py-2 text-sm text-center bg-surface-container-lowest text-on-surface border border-outline-variant/20 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-primary/20 transition-colors"
-        />
-      </div>
-    </div>
+      </SettingsSection>
+    </SettingsPage>
   );
 }

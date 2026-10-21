@@ -14,7 +14,7 @@ interface LayoutProps {
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onUpdateChatTitle: (chatId: string, title: string) => void;
-  onDeleteChat: (chatId: string) => void;
+  onDeleteChat: (chatId: string) => Promise<void>;
   onNewChat: () => void;
   contextCache?: Map<string, ContextInfo>;
   gitSummaries?: Record<string, GitSummary | null>;
@@ -53,7 +53,7 @@ export function Layout({
 
   return (
     <div
-      className="flex h-screen overflow-hidden bg-surface text-on-surface font-body selection:bg-primary/30"
+      className="flex h-screen overflow-hidden bg-canvas text-fg selection:bg-accent-subtle"
       style={{ ['--chat-sidebar-width' as string]: `${previewWidth}px` }}
     >
       <Sidebar
@@ -74,7 +74,7 @@ export function Layout({
         onWidthPreview={setPreviewWidth}
         onWidthChange={onChatSidebarWidthChange}
       />
-      <main className="flex-1 md:ml-[var(--chat-sidebar-width)] flex flex-col h-full relative w-full min-w-0">
+      <main className="relative flex h-full w-full min-w-0 flex-1 flex-col md:ml-(--chat-sidebar-width)">
         {children}
       </main>
     </div>

@@ -12,8 +12,10 @@ import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { useMachineUpdate } from '../queries';
 import { dismissUpdateVersion, readDismissedUpdateVersion } from '../update-dismissal';
 import { UpdateAction } from './UpdateAction';
@@ -39,37 +41,37 @@ export function UpdateBanner() {
   };
 
   return (
-    <div
-      className="flex flex-wrap items-center justify-between gap-3 border-b border-primary/20 bg-primary/5 px-4 py-2 text-sm text-on-surface"
-      data-testid="machine-update-banner"
-    >
-      <div className="flex flex-wrap items-center gap-3">
-        <p>
-          {formatMessage(m.available, {
-            latest: latestVersion,
-            current: data.check.currentVersion,
-          })}
-        </p>
-        <Link
-          to="/environments/machine"
-          className="micro-label text-primary/80 transition-colors hover:text-primary"
-        >
-          {m.details}
-        </Link>
-      </div>
-      <div className="flex items-center gap-2">
-        <UpdateAction status={data} testId="machine-update-banner-action" />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleDismiss}
-          aria-label={m.dismissAria}
-          data-testid="machine-update-banner-dismiss"
-        >
-          <X size={14} />
-          {m.dismiss}
-        </Button>
-      </div>
+    <div className="shrink-0 px-4 py-3">
+      <Callout
+        tone="info"
+        title={formatMessage(m.available, {
+          latest: latestVersion,
+          current: data.check.currentVersion,
+        })}
+        action={
+          <Button
+            variant="subtle"
+            size="sm"
+            onClick={handleDismiss}
+            aria-label={m.dismissAria}
+            data-testid="machine-update-banner-dismiss"
+          >
+            <X size={ICON_SM} />
+            {m.dismiss}
+          </Button>
+        }
+        data-testid="machine-update-banner"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <UpdateAction status={data} testId="machine-update-banner-action" />
+          <Link
+            to="/environments/machine"
+            className="text-sm font-medium text-accent-fg hover:underline"
+          >
+            {m.details}
+          </Link>
+        </div>
+      </Callout>
     </div>
   );
 }

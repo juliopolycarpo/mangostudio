@@ -26,6 +26,31 @@ import { TimelineItem } from './TimelineItem';
 import { TodoListPart } from './TodoListPart';
 import { planToolGroups } from './tool-call-grouping';
 
+/**
+ * Folds each `tool_loop_exhausted` system event into the error part that follows it.
+ *
+ * The turn reports that failure twice — the event carries the numbers ("Reached N iterations
+ * with M pending tool calls"), the error part the sentence — and drawing both put a red-glyph
+ * divider directly above a danger card that said the same thing. The card carries the failure
+ * and the event's detail becomes its second line; an event with no error after it (a row a
+ * different build wrote) still draws as its own marker rather than vanishing.
+ */
+function pairLoopExhaustion(parts: readonly MessagePart[]): {
+  detailByError: ReadonlyMap<number, string | undefined>;
+  folded: ReadonlySet<number>;
+} {
+  const detailByError = new Map<number, string | undefined>();
+  const folded = new Set<number>();
+  parts.forEach((part, idx) => {
+    if (part.type !== 'system_event' || part.event !== 'tool_loop_exhausted') return;
+    const errorIdx = parts.findIndex((later, laterIdx) => laterIdx > idx && later.type === 'error');
+    if (errorIdx === -1 || detailByError.has(errorIdx)) return;
+    detailByError.set(errorIdx, part.detail);
+    folded.add(idx);
+  });
+  return { detailByError, folded };
+}
+
 interface MessagePartsProps {
   parts: MessagePart[];
   messageId: string;
@@ -54,9 +79,15 @@ export function MessageParts({
     [parts, isStreaming]
   );
   const latestFileChangeId = useMemo(() => findLatestFileChangeId(parts), [parts]);
+  const loopExhaustion = useMemo(() => pairLoopExhaustion(parts), [parts]);
   // The turn record is written first so nothing is ever a bare text blob with no
   // record of who produced it, but it *reads* as a summary, so it renders last.
   const externalTurn = useMemo(() => parts.find((part) => part.type === 'external_turn'), [parts]);
+  // A turn the person stopped is told so once, on its closing line. Marking the
+  // prose it cut off as well said the same thing a third time, beside the row's
+  // own "Cancelled".
+  const stoppedByUser =
+    externalTurn?.type === 'external_turn' && externalTurn.terminalReason === 'cancelled-by-user';
   return (
     <>
       <div className="chat-timeline min-w-0">
@@ -76,7 +107,7 @@ export function MessageParts({
               );
             case 'external_approval':
               return (
-                <TimelineItem key={`${part.requestId}-approval`} variant="block">
+                <TimelineItem key={`${part.requestId}-approval`} variant="card">
                   <ExternalApprovalCard part={part} chatId={chatId} />
                 </TimelineItem>
               );
@@ -91,7 +122,7 @@ export function MessageParts({
                 <TimelineItem
                   // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                   key={`${messageId}-notice-${idx}`}
-                  variant="block"
+                  variant="card"
                 >
                   <ExternalNoticeBlock part={part} />
                 </TimelineItem>
@@ -111,7 +142,7 @@ export function MessageParts({
                   messageId={blockId}
                   text={part.text}
                   isStreaming={idx === status.livePartIndex}
-                  incomplete={part.incomplete}
+                  incomplete={stoppedByUser ? undefined : part.incomplete}
                 />
               );
             }
@@ -151,19 +182,19 @@ export function MessageParts({
               );
             case 'question':
               return (
-                <TimelineItem key={`${part.toolCallId}-question`} variant="block" tone="active">
+                <TimelineItem key={`${part.toolCallId}-question`} variant="card" tone="active">
                   <QuestionCard part={part} onSubmit={isStreaming ? undefined : onQuestionSubmit} />
                 </TimelineItem>
               );
             case 'mcp_elicitation':
               return (
-                <TimelineItem key={part.elicitationId} variant="block" tone="active">
+                <TimelineItem key={part.elicitationId} variant="card" tone="active">
                   <ElicitationCard part={part} />
                 </TimelineItem>
               );
             case 'todo':
               return (
-                <TimelineItem key={`${part.toolCallId}-todo`} variant="block">
+                <TimelineItem key={`${part.toolCallId}-todo`} variant="card">
                   <TodoListPart part={part} />
                 </TimelineItem>
               );
@@ -193,11 +224,12 @@ export function MessageParts({
                   <AssistantProsePart
                     text={part.text}
                     isStreaming={idx === status.livePartIndex}
-                    incomplete={part.incomplete}
+                    incomplete={stoppedByUser ? undefined : part.incomplete}
                   />
                 </TimelineItem>
               );
             case 'system_event':
+              if (loopExhaustion.folded.has(idx)) return null;
               return (
                 <TimelineItem
                   // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
@@ -230,7 +262,7 @@ export function MessageParts({
                 <TimelineItem
                   // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
                   key={`${messageId}-error-${idx}`}
-                  variant="block"
+                  variant="card"
                   tone="error"
                 >
                   <ErrorPart
@@ -239,6 +271,7 @@ export function MessageParts({
                     remedy={part.remedy}
                     requiredVersion={part.requiredVersion}
                     code={part.code}
+                    detail={loopExhaustion.detailByError.get(idx)}
                   />
                 </TimelineItem>
               );
@@ -254,9 +287,7 @@ export function MessageParts({
         })}
         {status.showWorkingRow ? <TurnWorkingRow /> : null}
       </div>
-      {externalTurn?.type === 'external_turn' ? (
-        <ExternalTurnFooter part={externalTurn} isStreaming={isStreaming} />
-      ) : null}
+      {externalTurn?.type === 'external_turn' ? <ExternalTurnFooter part={externalTurn} /> : null}
     </>
   );
 }

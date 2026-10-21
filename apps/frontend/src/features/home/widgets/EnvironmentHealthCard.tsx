@@ -15,6 +15,7 @@ import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { environmentScopeRoute } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { environmentAlerts } from '../lib/environment-health';
+import { CARD_LINK_CLASS } from './card-link';
 
 const NO_ENVIRONMENTS: readonly Environment[] = [];
 
@@ -41,21 +42,18 @@ export function EnvironmentHealthCard({ activeEnvironmentId }: EnvironmentHealth
       label={labels.label}
       tone={alerts.some((alert) => alert.severity === 'error') ? 'error' : 'warning'}
     >
-      <ul className="space-y-1.5">
+      <ul className="space-y-2">
         {alerts.map((alert) => (
-          <li key={alert.environmentId} className="flex min-w-0 items-center gap-2 text-xs">
+          <li key={alert.environmentId} className="flex min-w-0 items-center gap-2 text-sm">
             <StatusDot tone={alert.severity === 'error' ? 'error' : 'warning'} />
-            <span className="truncate text-on-surface">{alert.name}</span>
-            <span className="shrink-0 font-mono text-on-surface-variant/70">
+            <span className="min-w-0 flex-1 truncate text-fg">{alert.name}</span>
+            <span className="shrink-0 text-xs text-fg-muted">
               {alert.severity === 'error' ? labels.failed : labels.disconnected}
             </span>
           </li>
         ))}
       </ul>
-      <Link
-        {...environmentScopeRoute(alerts[0].environmentId)}
-        className="micro-label w-fit text-primary/80 transition-colors hover:text-primary"
-      >
+      <Link {...environmentScopeRoute(alerts[0].environmentId)} className={CARD_LINK_CLASS}>
         {labels.open}
       </Link>
     </SectionCard>

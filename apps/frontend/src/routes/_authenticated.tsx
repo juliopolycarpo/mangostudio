@@ -31,6 +31,7 @@ import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { WorkspaceBreadcrumb } from '@/features/workspace/components/WorkspaceBreadcrumb';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useAppState } from '@/hooks/use-app-state';
+import { useI18n } from '@/hooks/use-i18n';
 import { activePageForPath } from '@/lib/active-page';
 import { AppContext } from '@/lib/app-context';
 import { isNewChatShortcut } from '@/lib/keyboard';
@@ -101,6 +102,16 @@ export const Route = createFileRoute('/_authenticated')({
   component: AuthenticatedLayout,
   errorComponent: BootstrapErrorPanel,
 });
+
+/** What the shell shows while a lazy page's chunk is on its way. */
+function RouteFallback() {
+  const { t } = useI18n();
+  return (
+    <div className="flex items-center justify-center h-full">
+      <Spinner size="lg" label={t.common.loading} />
+    </div>
+  );
+}
 
 function AuthenticatedLayout() {
   const { auth } = Route.useRouteContext();
@@ -186,7 +197,7 @@ function AuthenticatedLayout() {
         currentChatId={app.currentChatId}
         onSelectChat={app.handleSelectChat}
         onUpdateChatTitle={(chatId, title) => void app.handleUpdateChatTitle(chatId, title)}
-        onDeleteChat={(chatId) => void app.handleDeleteChat(chatId)}
+        onDeleteChat={app.handleDeleteChat}
         onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
         gitSummaries={gitSummaries}
@@ -208,7 +219,7 @@ function AuthenticatedLayout() {
             activePage === 'chat' && app.currentChatId && app.currentEnvironmentId ? (
               <EnvironmentSelector
                 environmentId={app.currentEnvironmentId}
-                disabled={app.isGenerating || chatHasTurns}
+                locked={app.isGenerating || chatHasTurns}
                 onEnvironmentChange={(environmentId) =>
                   app.updateChatEnvironment(app.currentChatId as string, environmentId)
                 }
@@ -270,13 +281,7 @@ function AuthenticatedLayout() {
         >
           {/* A shell request that failed replaces the page, not the shell. */}
           <BootstrapShellContent bootstrap={bootstrap}>
-            <Suspense
-              fallback={
-                <div className="flex items-center justify-center h-full">
-                  <Spinner size="lg" />
-                </div>
-              }
-            >
+            <Suspense fallback={<RouteFallback />}>
               <Outlet />
             </Suspense>
           </BootstrapShellContent>

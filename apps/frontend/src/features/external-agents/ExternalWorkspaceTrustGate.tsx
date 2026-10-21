@@ -13,10 +13,11 @@
  * it, because only the machine running the vendor can.
  */
 
-import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { trustExternalWorkspace } from '@/services/external-agent-service';
 import {
@@ -78,54 +79,34 @@ interface TrustDialogProps {
 function TrustDialog({ workspacePath, busy, onAccept, onCancel }: TrustDialogProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.workspaceTrust;
-  const dialogRef = useFocusTrap(onCancel);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        aria-label={labels.title}
-        className="w-full max-w-lg space-y-4 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-5 text-sm text-on-surface shadow-2xl outline-none"
-      >
-        <h2 className="text-base font-semibold">{labels.title}</h2>
-
-        <p className="break-all rounded-xl bg-surface-container-lowest px-3 py-2 font-mono text-xs text-on-surface-variant">
-          {workspacePath}
-        </p>
-
-        <ul className="space-y-2 text-xs leading-relaxed text-on-surface-variant">
-          <li>{labels.rules}</li>
-          <li>{labels.mcp}</li>
-          <li>{labels.scope}</li>
-        </ul>
-
-        <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
-          <AlertTriangle size={14} className="mt-px shrink-0" />
-          {labels.warning}
-        </p>
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="cursor-pointer rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:cursor-default disabled:opacity-50"
-          >
+    <Dialog
+      title={labels.title}
+      onClose={onCancel}
+      closeDisabled={busy}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel} disabled={busy}>
             {labels.cancel}
-          </button>
-          <button
-            type="button"
-            onClick={onAccept}
-            disabled={busy}
-            className="cursor-pointer rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
-          >
+          </Button>
+          <Button variant="primary" onClick={onAccept} loading={busy}>
             {busy ? labels.saving : labels.accept}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </>
+      }
+    >
+      <p className="break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg">
+        {workspacePath}
+      </p>
+
+      <ul className="space-y-2 text-sm text-fg-muted">
+        <li>{labels.rules}</li>
+        <li>{labels.mcp}</li>
+        <li>{labels.scope}</li>
+      </ul>
+
+      <Callout tone="warning">{labels.warning}</Callout>
+    </Dialog>
   );
 }

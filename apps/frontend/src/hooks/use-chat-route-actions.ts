@@ -6,7 +6,14 @@ import { useToast } from '@/components/ui/Toast';
 import type { useChats } from '@/features/chat/hooks/use-chats';
 import { useI18n } from '@/hooks/use-i18n';
 
-export type AppPage = 'home' | 'chat' | 'environments' | 'gallery' | 'settings' | 'studio';
+export type AppPage =
+  | 'home'
+  | 'chat'
+  | 'environments'
+  | 'gallery'
+  | 'settings'
+  | 'studio'
+  | 'terminal';
 
 interface UseChatRouteActionsParams {
   readonly chats: ReturnType<typeof useChats>;
@@ -185,6 +192,9 @@ export function useChatRouteActions({
         gallery: '/gallery',
         settings: '/settings',
         studio: '/studio',
+        // No nav entry points here (the page is reached by its URL), but the map
+        // is exhaustive over `AppPage`, so the destination still has to be named.
+        terminal: '/terminal',
       } as const;
       void navigate({ to: routes[page] });
     },

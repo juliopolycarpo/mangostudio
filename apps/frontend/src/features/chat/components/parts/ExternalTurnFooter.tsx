@@ -1,4 +1,6 @@
 import type { ExternalTurnPart } from '@mangostudio/shared/types';
+import { Callout } from '@/components/ui/Callout';
+import { Chip } from '@/components/ui/Chip';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
@@ -7,19 +9,21 @@ import { formatTokensCompact } from '@/lib/format-tokens';
 
 interface ExternalTurnFooterProps {
   part: ExternalTurnPart;
-  isStreaming: boolean;
 }
 
 /**
- * What the vendor spent and why the turn stopped.
+ * What the vendor spent, and what went wrong if anything did.
  *
  * Usage renders only the fields the vendor reported, and no total is computed
  * from them: an adapter reports what its vendor reports, and a sum MangoStudio
  * invented would read as the vendor's own number. Cost is out of scope entirely.
  *
- * // Usage: <ExternalTurnFooter part={externalTurn} isStreaming={isStreaming} />
+ * Why the turn ended is not said here: it is the turn's closing line
+ * (`AssistantMessageBlock`), the same row that closes every other turn.
+ *
+ * // Usage: <ExternalTurnFooter part={externalTurn} />
  */
-export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProps) {
+export function ExternalTurnFooter({ part }: ExternalTurnFooterProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.turn;
   const usage = part.usage;
@@ -36,12 +40,7 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
       ).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
     : [];
 
-  const terminalNotice =
-    part.status === 'terminal' && part.terminalReason && part.terminalReason !== 'completed'
-      ? labels.terminal[part.terminalReason]
-      : null;
-
-  if (fields.length === 0 && !terminalNotice && !part.error && !part.conversationReset) return null;
+  if (fields.length === 0 && !part.error && !part.conversationReset) return null;
 
   // An error the hub can present is shown the way the selector shows the same state: its words,
   // the sign-in command to copy, or the install and update link. Two sources name it: the reason
@@ -54,41 +53,35 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
   return (
     <div className="mt-2 max-w-2xl space-y-1.5 pl-4">
       {part.conversationReset ? (
-        <p
-          role="status"
-          data-conversation-reset={part.conversationReset}
-          className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
-        >
+        <Callout tone="warning" role="status" data-conversation-reset={part.conversationReset}>
           {labels.conversationReset[part.conversationReset]}
-        </p>
+        </Callout>
       ) : null}
       {fields.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {fields.map(([label, value]) => (
-            <span
-              key={label}
-              className="rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 py-0.5 text-[10px] tabular-nums text-on-surface-variant"
-            >
+            <Chip key={label} className="tabular-nums">
               {`${label} ${formatTokensCompact(value)}`}
-            </span>
+            </Chip>
           ))}
         </div>
       ) : null}
       {part.error && presentedReason ? (
-        <div className="space-y-1.5 rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">
-          <p>{externalUnavailableText(presentedReason, t, part.requiredVersion)}</p>
-          {signIn?.command ? <SignInCommand command={signIn.command} /> : null}
-          {part.remedy ? <ExternalRemedyLink remedy={part.remedy} /> : null}
-        </div>
+        <Callout tone="danger">
+          <div className="space-y-1.5">
+            <p className="text-fg">
+              {externalUnavailableText(presentedReason, t, part.requiredVersion)}
+            </p>
+            {signIn?.command ? <SignInCommand command={signIn.command} /> : null}
+            {part.remedy ? <ExternalRemedyLink remedy={part.remedy} /> : null}
+          </div>
+        </Callout>
       ) : part.error ? (
-        <p className="rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">
+        <Callout tone="danger">
           {/* The vendor's own code and message, inert and unflattened. */}
           <span className="font-mono">{part.error.code}</span>
           {` — ${part.error.message}`}
-        </p>
-      ) : null}
-      {terminalNotice && !isStreaming ? (
-        <p className="text-xs text-on-surface-variant/70">{terminalNotice}</p>
+        </Callout>
       ) : null}
     </div>
   );

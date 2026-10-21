@@ -105,6 +105,20 @@ describe('ChatPage context warning', () => {
     expect(sendButton).toBeEnabled();
   });
 
+  // Two stacked callouts are taller than a phone. A dock that grows with them
+  // pushes the composer off the screen, so the notices scroll in a region of
+  // their own and the composer stays outside it.
+  it('keeps the notices in a capped scroll region that leaves the composer out', () => {
+    renderChatPage();
+
+    const region = screen
+      .getByRole('button', { name: 'Continue anyway' })
+      .closest('.overflow-y-auto');
+    expect(region).not.toBeNull();
+    expect(region?.className).toContain('max-h-[60dvh]');
+    expect(region).not.toContainElement(screen.getByTestId('composer'));
+  });
+
   it('does not show the warning when compaction prompts are turned off', async () => {
     const user = userEvent.setup();
     renderChatPage({

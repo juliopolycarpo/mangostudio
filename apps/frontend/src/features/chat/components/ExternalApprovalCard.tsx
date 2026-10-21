@@ -14,13 +14,23 @@
  *
  * An approval that outlived its turn renders **expired**: a dead card is honest,
  * a live control that will never resolve is not.
+ *
+ * Once an option has been chosen the card becomes a record of it: the chosen
+ * option's own label, and nothing to press. The "never removes a choice" rule is
+ * about the question; an answered card is no longer asking one, and three grey
+ * tiles beside a faint check would leave the reader to work out which of them
+ * was the authorisation.
  */
 
 import type { ExternalApprovalOption } from '@mangostudio/shared/external-agents';
 import type { ExternalApprovalPart } from '@mangostudio/shared/types';
-import { AlertTriangle, ShieldQuestion } from 'lucide-react';
+import { AlertTriangle, Check } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { SectionCard } from '@/components/ui/SectionCard';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { answerExternalApproval } from '@/services/external-agent-service';
 
 export interface ExternalApprovalCardProps {
@@ -46,6 +56,13 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
   const decision = part.decision ?? optimisticDecision;
   const pending = decisionSource === undefined && optimisticDecision === null;
   const interactive = pending && !expired && chatId !== null;
+  const settled = decisionSource === 'expired' || decisionSource === 'cancelled' || expired;
+  // The record is only for an answer someone gave. A dead card keeps its row of
+  // inert options, and so does a decision naming an option the part does not
+  // carry: nothing here may claim an authorisation it cannot show.
+  const answeredOption = settled
+    ? undefined
+    : part.options.find((option) => option.id === decision);
 
   const answer = async (optionId: string) => {
     if (!interactive || submitting || !chatId) return;
@@ -72,49 +89,49 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
   };
 
   return (
-    <div className="max-w-2xl w-full space-y-3 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-4 text-sm text-on-surface sm:p-5">
-      <div className="flex flex-wrap items-center gap-2 text-on-surface-variant">
-        <ShieldQuestion size={16} className="text-primary" />
-        <span className="text-xs font-bold uppercase tracking-widest">
-          {headingFor(decisionSource ?? (expired ? 'expired' : undefined), labels)}
-        </span>
-      </div>
-
+    <SectionCard
+      label={headingFor(
+        decisionSource ?? (expired ? 'expired' : answeredOption ? 'user' : undefined),
+        labels
+      )}
+      className="w-full max-w-(--timeline-card-max) text-sm text-fg"
+    >
       {/* Vendor text, rendered inert. */}
-      <p className="whitespace-pre-wrap font-medium text-on-surface">{part.title}</p>
+      <p className="whitespace-pre-wrap font-medium text-fg">{part.title}</p>
       {part.detail ? (
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-surface-container-high px-3 py-2 text-[11px] text-on-surface-variant">
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-canvas p-3 font-mono text-xs text-fg-muted">
           {part.detail}
         </pre>
       ) : null}
-      {part.truncated ? (
-        <p className="text-xs text-on-surface-variant/70">{labels.truncatedHint}</p>
-      ) : null}
+      {part.truncated ? <p className="text-xs text-fg-muted">{labels.truncatedHint}</p> : null}
 
-      {error ? <p className="text-xs text-error">{error}</p> : null}
+      {error ? <Callout tone="danger" title={error} /> : null}
 
-      <div className="flex flex-wrap gap-2">
-        {part.options.map((option) => (
-          <OptionButton
-            key={option.id}
-            option={option}
-            label={optionLabel(option, labels)}
-            chosen={decision === option.id}
-            interactive={interactive && !submitting}
-            onClick={() => void answer(option.id)}
-          />
-        ))}
-      </div>
+      {answeredOption ? (
+        <AnsweredOption option={answeredOption} label={optionLabel(answeredOption, labels)} />
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {part.options.map((option) => (
+            <OptionButton
+              key={option.id}
+              option={option}
+              label={optionLabel(option, labels)}
+              interactive={interactive && !submitting}
+              onClick={() => void answer(option.id)}
+            />
+          ))}
+        </div>
+      )}
 
-      {decisionSource === 'expired' || decisionSource === 'cancelled' || expired ? (
-        <p className="text-xs text-on-surface-variant/70">
+      {settled ? (
+        <p className="text-xs text-fg-muted">
           {decisionSource === 'cancelled' ? labels.cancelledHint : labels.expiredHint}
         </p>
       ) : null}
       {decisionSource === 'auto-review' ? (
-        <p className="text-xs text-warning">{labels.autoReviewedHint}</p>
+        <Callout tone="warning">{labels.autoReviewedHint}</Callout>
       ) : null}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -148,37 +165,55 @@ function useApprovalExpiry(part: ExternalApprovalPart): boolean {
 function OptionButton({
   option,
   label,
-  chosen,
   interactive,
   onClick,
 }: {
   option: ExternalApprovalOption;
   label: string;
-  chosen: boolean;
   interactive: boolean;
   onClick: () => void;
 }) {
-  const tone = chosen
-    ? 'border-primary/50 bg-primary/10 text-on-surface'
-    : option.isDestructive
-      ? 'border-error/40 text-error'
-      : 'border-outline-variant/20 text-on-surface-variant';
-
   return (
-    <button
+    <Button
       type="button"
+      variant="secondary"
       disabled={!interactive}
       onClick={onClick}
       data-destructive={option.isDestructive ? 'true' : undefined}
-      className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors ${tone} ${
-        interactive ? 'cursor-pointer hover:bg-surface-container-high' : 'cursor-default opacity-70'
-      }`}
     >
       {/* Weight, not removal: a destructive choice the vendor offered stays
-          offered, and hiding it would leave the user unable to answer. */}
-      {option.isDestructive ? <AlertTriangle size={13} className="shrink-0" /> : null}
+          offered, and hiding it would leave the user unable to answer. The
+          glyph carries the warning; the label stays the vendor's own words. */}
+      {option.isDestructive ? (
+        <AlertTriangle size={ICON_MD} className="shrink-0 text-danger" />
+      ) : null}
       <span>{label}</span>
-    </button>
+    </Button>
+  );
+}
+
+/**
+ * What an answered approval says: the option that was chosen, as a line of text.
+ *
+ * Not a button, because there is nothing left to press, and not a disabled one,
+ * because a disabled tile is how this card draws an option that *cannot* be
+ * chosen. The check is the contract's selection mark, in the accent text colour;
+ * it is not a verdict, so a chosen "Deny" gets the same one as a chosen "Allow".
+ * `isDestructive` says the option is risky, not that it was refused, so it keeps
+ * the same warning glyph it wore as a button and nothing more.
+ */
+function AnsweredOption({ option, label }: { option: ExternalApprovalOption; label: string }) {
+  return (
+    <p
+      data-destructive={option.isDestructive ? 'true' : undefined}
+      className="flex items-center gap-2 font-medium text-fg"
+    >
+      <Check size={ICON_MD} className="shrink-0 text-accent-fg" />
+      {option.isDestructive ? (
+        <AlertTriangle size={ICON_MD} className="shrink-0 text-danger" />
+      ) : null}
+      <span className="min-w-0 break-words">{label}</span>
+    </p>
   );
 }
 

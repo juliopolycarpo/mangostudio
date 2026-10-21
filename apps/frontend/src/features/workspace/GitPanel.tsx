@@ -8,9 +8,13 @@ import type { GithubContext } from '@mangostudio/shared/github';
 import type { Messages } from '@mangostudio/shared/i18n';
 import {
   AlertTriangle,
+  Archive,
   Check,
+  Eraser,
   FileCode2,
   FolderGit2,
+  GitBranch,
+  History,
   Minus,
   MoreHorizontal,
   Plus,
@@ -18,21 +22,27 @@ import {
   RotateCcw,
   Trash2,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
-import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Spinner } from '@/components/ui/Spinner';
+import { Tabs } from '@/components/ui/Tabs';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_SM } from '@/lib/icon-sizes';
-import { workdirBasename } from '@/lib/paths';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
 import { CommitForm } from './CommitForm';
+import { DialogPathList } from './components/DialogBlocks';
+import { FilePathLabel } from './components/FilePathLabel';
+import { GroupHeading } from './components/GroupHeading';
+import { IconButton } from './components/IconButton';
+import { RowList } from './components/RowList';
 import type { DiffSelection } from './DiffViewer';
 import { readGitPanelPrefs, writeGitPanelPrefs } from './git-panel-prefs';
 import {
@@ -40,6 +50,7 @@ import {
   useDiscardPaths,
   useGitRealtimeInvalidation,
   useGitState,
+  useGitWorktrees,
   useInitRepo,
   useStagePaths,
   useUnstagePaths,
@@ -48,7 +59,10 @@ import { useGithubContext } from './hooks/use-github-context';
 import { LazyDiffViewer } from './LazyDiffViewer';
 import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
+import { RailPanelActions } from './rail/RailPanel';
 import { StashSheet } from './StashSheet';
+import { shortHash } from './short-hash';
+import { type AmendMode, useAmendMode } from './use-amend-mode';
 import { WorktreeSection } from './WorktreeSection';
 
 interface GitPanelProps {
@@ -64,11 +78,11 @@ interface StatusPresentation {
 const STATUS_PRESENTATION: Readonly<Record<GitFileStatus, StatusPresentation>> = {
   modified: { glyph: 'M', labelKey: 'modified', color: 'text-warning' },
   added: { glyph: 'A', labelKey: 'added', color: 'text-success' },
-  deleted: { glyph: 'D', labelKey: 'deleted', color: 'text-error' },
-  renamed: { glyph: 'R', labelKey: 'renamed', color: 'text-primary' },
-  copied: { glyph: 'C', labelKey: 'copied', color: 'text-primary' },
-  untracked: { glyph: '?', labelKey: 'untracked', color: 'text-on-surface-variant' },
-  conflicted: { glyph: '!', labelKey: 'conflicted', color: 'text-error' },
+  deleted: { glyph: 'D', labelKey: 'deleted', color: 'text-danger' },
+  renamed: { glyph: 'R', labelKey: 'renamed', color: 'text-info' },
+  copied: { glyph: 'C', labelKey: 'copied', color: 'text-info' },
+  untracked: { glyph: '?', labelKey: 'untracked', color: 'text-fg-muted' },
+  conflicted: { glyph: '!', labelKey: 'conflicted', color: 'text-danger' },
   'type-changed': { glyph: 'T', labelKey: 'typeChanged', color: 'text-warning' },
 };
 
@@ -82,12 +96,16 @@ export function GitPanel({ chatId }: GitPanelProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [stashOpen, setStashOpen] = useState(false);
   const [prefs, setPrefs] = useState(readGitPanelPrefs);
-  const isFetching = stateQuery.isFetching || githubQuery.isFetching;
+  const amend = useAmendMode(chatId);
   const isRepo = stateQuery.data?.state === 'repo';
+  // Read here as well as by the worktree section below: both observe one cache
+  // entry, and the header's refresh is the only refresh the panel has.
+  const worktreesQuery = useGitWorktrees(chatId, isRepo);
+  const isFetching = stateQuery.isFetching || githubQuery.isFetching || worktreesQuery.isFetching;
 
   const refresh = async () => {
     const requests: Array<Promise<unknown>> = [stateQuery.refetch()];
-    if (stateQuery.data?.state === 'repo') requests.push(githubQuery.refetch());
+    if (isRepo) requests.push(githubQuery.refetch(), worktreesQuery.refetch());
     await Promise.all(requests);
   };
 
@@ -99,40 +117,38 @@ export function GitPanel({ chatId }: GitPanelProps) {
 
   return (
     <section aria-label={labels.title} className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-outline-variant/15 px-3">
-        <div className="min-w-0 flex-1 text-on-surface-variant">
-          <RepositoryName state={stateQuery.data} />
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
+      {/*
+        Refresh and the overflow menu live in the rail's own header, beside the
+        collapse chevron. The repository's name used to sit in a bar of its own
+        here to hold them; the header already says which folder and branch the
+        chat is in, so the bar was a row of chrome for two buttons.
+      */}
+      <RailPanelActions>
+        <IconButton
+          label={labels.refresh}
           onClick={() => void refresh()}
-          aria-label={labels.refresh}
-          title={labels.refresh}
           disabled={isFetching}
-          className="size-7 text-on-surface-variant disabled:cursor-wait focus-visible:outline-2 focus-visible:outline-primary"
+          busy={isFetching}
         >
           <RefreshCw size={ICON_SM} className={isFetching ? 'animate-spin' : undefined} />
-        </Button>
+        </IconButton>
         <Menu
           open={menuOpen}
           onOpenChange={setMenuOpen}
           trigger={(triggerProps) => (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={labels.menu.open}
-              title={labels.menu.open}
-              className="size-7 text-on-surface-variant focus-visible:outline-2 focus-visible:outline-primary"
-              {...triggerProps}
-            >
+            <IconButton label={labels.menu.open} {...triggerProps}>
               <MoreHorizontal size={ICON_SM} />
-            </Button>
+            </IconButton>
           )}
         >
+          {/*
+            Actions first, then the one preference, below a separator: the
+            check on a toggle reads as "on", and beside an action it read as
+            "done". Amend is here as well as under the commit button because a
+            clean tree draws no commit form, and rewording HEAD needs no changes.
+          */}
           <MenuItem
+            icon={<Archive size={ICON_MD} />}
             disabled={!isRepo}
             onSelect={() => {
               setMenuOpen(false);
@@ -141,21 +157,26 @@ export function GitPanel({ chatId }: GitPanelProps) {
           >
             {labels.menu.stash}
           </MenuItem>
-          <MenuItem checked={prefs.pruneOnFetch} onSelect={togglePrune}>
-            {labels.menu.prune}
+          <MenuItem
+            icon={<History size={ICON_MD} />}
+            disabled={!isRepo || amend.active}
+            onSelect={() => {
+              setMenuOpen(false);
+              amend.request();
+            }}
+          >
+            {labels.menu.amend}
           </MenuItem>
           <MenuSeparator />
           <MenuItem
-            disabled={isFetching}
-            onSelect={() => {
-              setMenuOpen(false);
-              void refresh();
-            }}
+            icon={<GitBranch size={ICON_MD} />}
+            checked={prefs.pruneOnFetch}
+            onSelect={togglePrune}
           >
-            {labels.menu.refresh}
+            {labels.menu.prune}
           </MenuItem>
         </Menu>
-      </div>
+      </RailPanelActions>
 
       {/*
         No live region here: the file list re-renders on every refetch, and
@@ -169,6 +190,7 @@ export function GitPanel({ chatId }: GitPanelProps) {
           loading={stateQuery.isLoading}
           error={stateQuery.error}
           githubContext={githubQuery.data}
+          amend={amend}
           initPending={initMutation.isPending}
           initError={initMutation.error}
           onInitialize={() => initMutation.mutate()}
@@ -179,17 +201,8 @@ export function GitPanel({ chatId }: GitPanelProps) {
       {stashOpen && isRepo ? (
         <StashSheet chatId={chatId} onClose={() => setStashOpen(false)} />
       ) : null}
+      {amend.dialog}
     </section>
-  );
-}
-
-function RepositoryName({ state }: { readonly state: GitRepoState | undefined }) {
-  if (!state || (state.state !== 'repo' && state.state !== 'not-a-repo')) return null;
-  const path = state.state === 'repo' ? state.root : state.workdir;
-  return (
-    <p className="truncate font-mono text-[11px] text-on-surface-variant" title={path}>
-      {basename(path)}
-    </p>
   );
 }
 
@@ -199,6 +212,7 @@ interface GitPanelContentProps {
   readonly loading: boolean;
   readonly error: Error | null;
   readonly githubContext: GithubContext | undefined;
+  readonly amend: AmendMode;
   readonly initPending: boolean;
   readonly initError: Error | null;
   readonly onInitialize: () => void;
@@ -211,6 +225,7 @@ function GitPanelContent({
   loading,
   error,
   githubContext,
+  amend,
   initPending,
   initError,
   onInitialize,
@@ -221,10 +236,9 @@ function GitPanelContent({
 
   if (error) {
     return (
-      <EmptyState
-        icon={<AlertTriangle size={20} />}
+      <Callout
+        tone="danger"
         title={labels.loadError}
-        tone="error"
         action={
           <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
             {t.common.retry}
@@ -234,33 +248,32 @@ function GitPanelContent({
     );
   }
   if (loading || !state) {
-    return (
-      <EmptyState icon={<RefreshCw size={20} className="animate-spin" />} title={labels.loading} />
-    );
+    return <EmptyState icon={<Spinner />} title={labels.loading} />;
   }
 
   switch (state.state) {
     case 'git-unavailable':
       return (
         <EmptyState
-          icon={<AlertTriangle size={20} />}
+          icon={<AlertTriangle size={ICON_LG} />}
           title={labels.unavailableTitle}
           hint={labels.unavailableHint}
           tone="warning"
         />
       );
     case 'no-workdir':
-      return <EmptyState icon={<FolderGit2 size={20} />} title={labels.noWorkdir} />;
+      return <EmptyState icon={<FolderGit2 size={ICON_LG} />} title={labels.noWorkdir} />;
     case 'not-a-repo':
       return (
         <EmptyState
-          icon={<FolderGit2 size={22} />}
+          icon={<FolderGit2 size={ICON_LG} />}
           title={labels.noRepositoryTitle}
           hint={labels.noRepositoryHint}
           action={
             <>
               <Button
                 type="button"
+                variant="secondary"
                 size="sm"
                 onClick={onInitialize}
                 loading={initPending}
@@ -268,7 +281,7 @@ function GitPanelContent({
               >
                 {initPending ? labels.initializing : labels.initialize}
               </Button>
-              {initError ? <p className="text-xs text-error">{labels.initializeFailed}</p> : null}
+              {initError ? <p className="text-xs text-danger">{labels.initializeFailed}</p> : null}
             </>
           }
         />
@@ -282,6 +295,7 @@ function GitPanelContent({
           status={state.status}
           repoRoot={state.root}
           githubContext={githubContext}
+          amend={amend}
         />
       );
   }
@@ -292,11 +306,13 @@ function RepositoryStatus({
   status,
   repoRoot,
   githubContext,
+  amend,
 }: {
   readonly chatId: string;
   readonly status: GitStatus;
   readonly repoRoot: string;
   readonly githubContext: GithubContext | undefined;
+  readonly amend: AmendMode;
 }) {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -314,7 +330,24 @@ function RepositoryStatus({
   const [remoteFailure, setRemoteFailure] = useState<unknown>(null);
   const branchName = status.branch.name
     ? status.branch.name
-    : labels.detachedAt.replace('{commit}', status.branch.detachedAt?.slice(0, 8) ?? 'HEAD');
+    : labels.detachedAt.replace(
+        '{commit}',
+        status.branch.detachedAt ? shortHash(status.branch.detachedAt) : 'HEAD'
+      );
+  const upstream = status.branch.upstream;
+  const [trackingBefore, trackingAfter = ''] = labels.branch.tracking.split('{upstream}');
+
+  // Amend entered from the panel menu while History is showing brings the form
+  // it fills into view. Adjusted during render, on the change itself, so a
+  // later visit to History while amending stays where the person put it.
+  const [amendShown, setAmendShown] = useState(amend.active);
+  if (amend.active !== amendShown) {
+    setAmendShown(amend.active);
+    if (amend.active && view === 'history') {
+      setView('changes');
+      setDiffSelection(null);
+    }
+  }
 
   // A rejected remote operation describes the branch it was rejected on. Its
   // guidance — and the leased force push it can offer — must not survive a
@@ -352,6 +385,11 @@ function RepositoryStatus({
   const hasUnstagedWork = changes.length > 0 || status.conflicted.length > 0;
   const anyPending =
     stageMutation.isPending || unstageMutation.isPending || discardMutation.isPending;
+  const discardText = discardRequest ? discardCopy(discardRequest, labels.discard) : null;
+  const viewTabs = (['changes', 'history'] as const).map((id) => ({
+    id,
+    label: labels.navigation[id],
+  }));
 
   return (
     <div className="space-y-4">
@@ -365,37 +403,29 @@ function RepositoryStatus({
           failure={remoteFailure}
           onFailureChange={setRemoteFailure}
         />
-        {status.branch.upstream ? (
-          <p
-            className="w-full truncate pl-6 font-mono text-[11px] text-on-surface-variant"
-            title={status.branch.upstream}
-          >
-            {status.branch.upstream}
+        {/*
+          The trigger above truncates a long branch name, and this line used to
+          repeat it in full as `origin/<branch>`. When the upstream is the same
+          branch on its remote, the remote is all that is new; the full ref is
+          shown only when it names something else, and is always a hover away.
+        */}
+        {upstream ? (
+          <p className="w-full min-w-0 truncate pl-8 text-micro text-fg-subtle" title={upstream}>
+            {trackingBefore}
+            <span className="font-mono">{upstreamLabel(upstream, status.branch.name)}</span>
+            {trackingAfter}
           </p>
         ) : null}
       </section>
 
-      <div className="grid grid-cols-2 rounded-xl bg-surface-container/60 p-1" role="tablist">
-        {(['changes', 'history'] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={view === tab}
-            onClick={() => {
-              setView(tab);
-              setDiffSelection(null);
-            }}
-            className={`cursor-pointer rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-              view === tab
-                ? 'bg-surface-container-highest text-on-surface shadow-sm'
-                : 'text-on-surface-variant hover:text-on-surface'
-            }`}
-          >
-            {labels.navigation[tab]}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={viewTabs}
+        active={view}
+        onSelect={(next) => {
+          setView(next);
+          setDiffSelection(null);
+        }}
+      />
 
       {view === 'history' ? (
         diffSelection ? (
@@ -410,6 +440,9 @@ function RepositoryStatus({
       ) : (
         // CommitForm stays mounted while a diff is open: it holds the in-progress
         // commit message in local state, and unmounting it would discard the draft.
+        // A clean tree has nothing to commit, so it draws no form: an empty
+        // summary and a dead "Commit changes" above "Working tree clean" read as
+        // an invitation. Amending needs no changes, so amend mode brings it back.
         <>
           {/*
             Above the commit form, because reviewing comes before committing —
@@ -417,14 +450,19 @@ function RepositoryStatus({
             "Auto-review" option means something else entirely.
           */}
           <ExternalReviewAction chatId={chatId} hasChanges={!status.clean} />
-          <CommitForm
-            chatId={chatId}
-            branch={status.branch}
-            hasChanges={!status.clean}
-            hasStagedChanges={status.staged.length > 0}
-            hasUnstagedWork={hasUnstagedWork}
-            onRemoteFailure={setRemoteFailure}
-          />
+          {status.clean && !amend.active ? null : (
+            <CommitForm
+              chatId={chatId}
+              branch={status.branch}
+              hasChanges={!status.clean}
+              hasStagedChanges={status.staged.length > 0}
+              hasUnstagedWork={hasUnstagedWork}
+              amend={amend.active}
+              onEnterAmend={amend.request}
+              onExitAmend={amend.exit}
+              onRemoteFailure={setRemoteFailure}
+            />
+          )}
           {diffSelection ? (
             <LazyDiffViewer
               chatId={chatId}
@@ -432,18 +470,19 @@ function RepositoryStatus({
               onClose={() => setDiffSelection(null)}
             />
           ) : status.clean ? (
+            // The region's own message, top-anchored like the terminal rail's
+            // empty state, unless the amend form sits above it.
             <EmptyState
-              icon={<Check size={22} />}
+              icon={<Check size={ICON_LG} />}
               title={labels.cleanTitle}
               hint={labels.cleanHint}
               tone="success"
+              className={amend.active ? undefined : 'justify-start pt-12'}
             />
           ) : (
             <div className="space-y-4">
               {status.conflicted.length > 0 ? (
-                <div className="rounded-xl border border-error/30 bg-error/10 px-3 py-2.5 text-[11px] leading-4 text-error">
-                  {labels.conflicts.hint}
-                </div>
+                <Callout tone="danger">{labels.conflicts.hint}</Callout>
               ) : null}
               <ChangeGroup
                 title={labels.groups.conflicted}
@@ -489,54 +528,45 @@ function RepositoryStatus({
 
       <BranchPrChip chatId={chatId} context={githubContext} />
 
-      {discardRequest ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="git-discard-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
-        >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
-            <div className="space-y-2">
-              <h3 id="git-discard-title" className="text-lg font-bold text-on-surface">
-                {discardCopy(discardRequest, labels.discard).title}
-              </h3>
-              <p className="text-sm leading-5 text-on-surface-variant">
-                {discardCopy(discardRequest, labels.discard).hint}
-              </p>
-            </div>
-            <ul className="max-h-32 overflow-y-auto rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
-              {discardRequest
-                .flatMap((selection) => selection.paths)
-                .map((path) => (
-                  <li key={path} className="truncate py-0.5" title={path}>
-                    {path}
-                  </li>
-                ))}
-            </ul>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setDiscardRequest(null)}
-              >
+      {discardRequest && discardText ? (
+        <Dialog
+          size="sm"
+          title={discardText.title}
+          description={discardText.hint}
+          onClose={() => setDiscardRequest(null)}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setDiscardRequest(null)}>
                 {labels.discard.cancel}
               </Button>
               <Button
                 type="button"
-                className="flex-1"
+                variant="danger"
                 loading={discardMutation.isPending}
                 onClick={() => void confirmDiscard()}
               >
-                {discardCopy(discardRequest, labels.discard).confirm}
+                {discardText.confirm}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <DialogPathList paths={discardRequest.flatMap((selection) => selection.paths)} />
+        </Dialog>
       ) : null}
     </div>
   );
+}
+
+/**
+ * The upstream as the line under the branch names it: just the remote when it
+ * tracks the branch of the same name there (`origin` for `origin/<branch>`),
+ * the full ref when it tracks anything else.
+ */
+function upstreamLabel(upstream: string, branch: string | null): string {
+  if (branch && upstream.endsWith(`/${branch}`) && upstream.length > branch.length + 1) {
+    return upstream.slice(0, -(branch.length + 1));
+  }
+  return upstream;
 }
 
 type DiscardLabels = Messages['git']['discard'];
@@ -609,68 +639,83 @@ function ChangeGroup({
       ? t.git.actions.stageAll.replace('{group}', title)
       : t.git.actions.unstageAll.replace('{group}', title);
   const selections = onDiscard ? splitDiscardSelections(changes) : [];
-  // The narrower variants only mean something once the group holds both kinds.
+  // "Everything" only means something once the group holds both kinds; with one
+  // kind it would repeat the item above it.
   const mixed = selections.length > 1;
 
   return (
     <section>
-      <MicroLabel as="h3" className="mb-1.5 flex items-center gap-2 font-bold tracking-[0.12em]">
-        <span>{title}</span>
-        <span className="rounded-full bg-surface-container-high px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
-          {changes.length}
-        </span>
-        <span className="ml-auto flex items-center gap-0.5">
-          {mixed && onDiscard ? (
-            <Menu
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
-              panelClassName="w-56"
-              trigger={(triggerProps) => (
-                <GroupButton
-                  label={t.git.actions.groupMenu.replace('{group}', title)}
-                  disabled={pending}
-                  {...triggerProps}
-                >
-                  <MoreHorizontal size={13} />
-                </GroupButton>
-              )}
-            >
-              {selections.map((selection) => (
+      <GroupHeading title={title} count={changes.length}>
+        {/*
+          The bulk discard lives in this menu and not beside the stage button: a
+          bare counter-clockwise arrow reads as "refresh" at rest and sat one
+          28px target from "+", the control a person reaches for most. The
+          destructive items come last, as every menu in the app orders them.
+          Each carries the glyph its row action wears (a file's restore arrow,
+          its trash can), so a menu of three red items is scanned by shape.
+        */}
+        {onDiscard ? (
+          <Menu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            panelClassName="w-max min-w-56 max-w-72"
+            trigger={(triggerProps) => (
+              <IconButton
+                label={t.git.actions.groupMenu.replace('{group}', title)}
+                disabled={pending}
+                {...triggerProps}
+              >
+                <MoreHorizontal size={ICON_SM} />
+              </IconButton>
+            )}
+          >
+            {selections.map((selection) => (
+              <MenuItem
+                key={selection.mode}
+                tone="danger"
+                icon={
+                  selection.mode === 'untracked' ? (
+                    <Trash2 size={ICON_MD} />
+                  ) : (
+                    <RotateCcw size={ICON_MD} />
+                  )
+                }
+                onSelect={() => {
+                  setMenuOpen(false);
+                  onDiscard([selection]);
+                }}
+              >
+                {selection.mode === 'untracked'
+                  ? t.git.discard.deleteAllButton
+                  : t.git.discard.restoreAllButton}
+              </MenuItem>
+            ))}
+            {mixed ? (
+              <>
+                <MenuSeparator />
                 <MenuItem
-                  key={selection.mode}
                   tone="danger"
+                  icon={<Eraser size={ICON_MD} />}
                   onSelect={() => {
                     setMenuOpen(false);
-                    onDiscard([selection]);
+                    onDiscard(selections);
                   }}
                 >
-                  {selection.mode === 'untracked'
-                    ? t.git.discard.deleteAllButton
-                    : t.git.discard.restoreAllButton}
+                  {t.git.discard.discardAll.replace('{group}', title)}
                 </MenuItem>
-              ))}
-            </Menu>
-          ) : null}
-          {onDiscard ? (
-            <GroupButton
-              label={t.git.discard.discardAll.replace('{group}', title)}
-              tone="danger"
-              disabled={pending}
-              onClick={() => onDiscard(selections)}
-            >
-              <RotateCcw size={13} />
-            </GroupButton>
-          ) : null}
-          <GroupButton
-            label={allLabel}
-            disabled={pending}
-            onClick={() => onAction(changePaths(changes))}
-          >
-            {action === 'stage' ? <Plus size={13} /> : <Minus size={13} />}
-          </GroupButton>
-        </span>
-      </MicroLabel>
-      <ul className="overflow-hidden rounded-xl border border-outline-variant/15 bg-surface-container-lowest/40">
+              </>
+            ) : null}
+          </Menu>
+        ) : null}
+        <IconButton
+          label={allLabel}
+          disabled={pending}
+          onClick={() => onAction(changePaths(changes))}
+        >
+          {action === 'stage' ? <Plus size={ICON_SM} /> : <Minus size={ICON_SM} />}
+        </IconButton>
+      </GroupHeading>
+      <RowList>
         {changes.map((change) => (
           <FileChangeRow
             key={`${change.status}:${change.oldPath ?? ''}:${change.path}`}
@@ -686,39 +731,8 @@ function ChangeGroup({
             onDiff={() => onDiff(change.path)}
           />
         ))}
-      </ul>
+      </RowList>
     </section>
-  );
-}
-
-function GroupButton({
-  label,
-  tone = 'default',
-  disabled,
-  children,
-  ...props
-}: {
-  readonly label: string;
-  readonly tone?: 'default' | 'danger';
-  readonly disabled: boolean;
-  readonly children: ReactNode;
-  readonly onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      className={`flex size-6 cursor-pointer items-center justify-center rounded tracking-normal transition-colors disabled:cursor-wait disabled:opacity-50 ${
-        tone === 'danger'
-          ? 'text-on-surface-variant hover:bg-error/10 hover:text-error'
-          : 'text-on-surface-variant hover:bg-primary/10 hover:text-primary'
-      }`}
-      {...props}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -750,53 +764,43 @@ function FileChangeRow({
     change.path
   );
   return (
-    <li className="group flex min-w-0 items-start gap-2 border-b border-outline-variant/10 px-2.5 py-2 last:border-b-0">
+    <li className="group flex min-h-8 min-w-0 items-center gap-2 px-3 py-0.5 transition-colors hover:bg-fill-hover">
       <span
-        className={`w-3 shrink-0 pt-px text-center font-mono text-[11px] font-bold ${presentation.color}`}
+        className={cn('w-4 shrink-0 text-center font-mono text-xs font-medium', presentation.color)}
         title={statusLabel}
         aria-hidden="true"
       >
         {presentation.glyph}
       </span>
       <span className="sr-only">{statusLabel}</span>
-      <FileCode2 size={13} className="mt-0.5 shrink-0 text-on-surface-variant/70" />
+      <FileCode2 size={ICON_SM} className="shrink-0 text-fg-muted" />
       <button
         type="button"
         onClick={onDiff}
         aria-label={t.git.actions.viewDiff.replace('{path}', change.path)}
-        title={change.path}
-        className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[11px] leading-4 text-on-surface hover:text-primary"
+        className="flex min-w-0 flex-1 cursor-pointer text-left"
       >
-        {change.oldPath ? (
-          <>
-            <span className="text-on-surface-variant line-through">{change.oldPath}</span>
-            <span className="px-1 text-on-surface-variant">→</span>
-          </>
+        <FilePathLabel path={change.path} oldPath={change.oldPath} className="flex-1" />
+      </button>
+      {/*
+        The row actions take no room until they are wanted, so the file name —
+        what this list is scanned for — keeps the width instead of ending in an
+        ellipsis after a dozen characters, and the destructive discard is not
+        parked a gap away from stage on every row. Shown on hover and, because
+        the diff button is tabbable, on focus-within: that is what keeps them
+        reachable from the keyboard. A coarse pointer has no hover, so they
+        stay up there (the same swap the sidebar's chat rows make).
+      */}
+      <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex group-focus-within:flex pointer-coarse:flex">
+        {onDiscard ? (
+          <IconButton label={discardLabel} tone="danger" disabled={pending} onClick={onDiscard}>
+            {untracked ? <Trash2 size={ICON_SM} /> : <RotateCcw size={ICON_SM} />}
+          </IconButton>
         ) : null}
-        {change.path}
-      </button>
-      {onDiscard ? (
-        <button
-          type="button"
-          aria-label={discardLabel}
-          title={discardLabel}
-          disabled={pending}
-          onClick={onDiscard}
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant opacity-60 transition-colors hover:bg-error/10 hover:text-error group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
-        >
-          {untracked ? <Trash2 size={12} /> : <RotateCcw size={12} />}
-        </button>
-      ) : null}
-      <button
-        type="button"
-        aria-label={actionLabel}
-        title={actionLabel}
-        disabled={pending}
-        onClick={onAction}
-        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant opacity-60 transition-colors hover:bg-surface-container-high hover:text-primary group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
-      >
-        {action === 'stage' ? <Plus size={13} /> : <Minus size={13} />}
-      </button>
+        <IconButton label={actionLabel} disabled={pending} onClick={onAction}>
+          {action === 'stage' ? <Plus size={ICON_SM} /> : <Minus size={ICON_SM} />}
+        </IconButton>
+      </div>
     </li>
   );
 }
@@ -807,9 +811,4 @@ function changePaths(changes: readonly GitFileChange[]): string[] {
       changes.flatMap((change) => (change.oldPath ? [change.oldPath, change.path] : [change.path]))
     ),
   ];
-}
-
-/** Shared segment split; a path that is all separators falls back to itself. */
-function basename(path: string): string {
-  return workdirBasename(path) ?? path;
 }

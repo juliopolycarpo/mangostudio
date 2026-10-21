@@ -15,18 +15,11 @@ import { useChatGptUsageAlerts } from './hooks/use-chatgpt-usage-alerts';
 import { useConnectorForm } from './hooks/use-connector-form';
 import { useConnectors } from './hooks/use-connectors';
 import { useModelSelection } from './hooks/use-model-selection';
+import { isReadOnlySharedConnector } from './lib/shared-connector';
 
 interface ConnectorsSettingsProps {
   modelCatalog: ModelCatalogResponse;
   reloadModelCatalog: () => Promise<void>;
-}
-
-function isReadOnlySharedConnector(connector: Connector): boolean {
-  return (
-    connector.userId === null &&
-    connector.source !== 'config-file' &&
-    connector.source !== 'environment'
-  );
 }
 
 export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: ConnectorsSettingsProps) {
@@ -86,7 +79,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   };
 
   return (
-    <div className="space-y-4">
+    <>
       <ConnectorList
         connectors={connectors}
         alertThreshold={usageAlerts.threshold}
@@ -143,7 +136,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
       {connectorToDelete && (
         <ConfirmDialog
-          title={s.deleteConnector}
+          title={s.deleteTitle}
           description={s.deleteConfirm}
           entityName={connectorToDelete.name}
           confirmLabel={s.deleteConnector}
@@ -153,6 +146,6 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
           onCancel={() => setConnectorToDelete(null)}
         />
       )}
-    </div>
+    </>
   );
 }

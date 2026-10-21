@@ -1,8 +1,12 @@
 import { getActiveTodo, summarizeTodos } from '@mangostudio/shared/todos';
-import { ChevronDown, ChevronUp, ListTodo } from 'lucide-react';
+import { ListTodo } from 'lucide-react';
 import { useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { ChatDockNotice } from './ChatPageNotices';
+import { DisclosureChevron } from './DisclosureChevron';
 import { TodoItemRow } from './TodoItemRow';
 
 interface PinnedTodoPanelProps {
@@ -27,32 +31,28 @@ export function PinnedTodoPanel({ chatId }: PinnedTodoPanelProps) {
   const active = getActiveTodo(todos);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 sm:px-6">
-      <div className="rounded-2xl border border-outline-variant/15 bg-surface-container-low text-sm text-on-surface">
+    <ChatDockNotice>
+      <div className="overflow-hidden rounded-md border border-stroke bg-surface text-sm text-fg">
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
           aria-label={expanded ? labels.panelCollapse : labels.panelExpand}
-          className="flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left"
+          className="flex h-10 w-full cursor-pointer items-center gap-2 px-4 text-left transition-colors hover:bg-fill-hover"
         >
-          <ListTodo size={16} className="shrink-0 text-on-surface-variant" />
+          <ListTodo size={ICON_MD} className="shrink-0 text-fg-muted" />
           <span className="font-semibold">{labels.title}</span>
-          <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">
+          <Badge>
             {labels.summary
               .replace('{completed}', String(summary.completed))
               .replace('{total}', String(summary.total))}
-          </span>
+          </Badge>
           {active && (
-            <span className="min-w-0 flex-1 truncate text-xs text-on-surface-variant">
+            <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">
               {labels.panelCurrent.replace('{task}', active.content)}
             </span>
           )}
-          {expanded ? (
-            <ChevronUp size={16} className="ml-auto shrink-0 text-on-surface-variant" />
-          ) : (
-            <ChevronDown size={16} className="ml-auto shrink-0 text-on-surface-variant" />
-          )}
+          <DisclosureChevron expanded={expanded} className="ml-auto" />
         </button>
         {expanded && (
           <ul className="space-y-1.5 px-4 pb-3">
@@ -63,6 +63,6 @@ export function PinnedTodoPanel({ chatId }: PinnedTodoPanelProps) {
           </ul>
         )}
       </div>
-    </div>
+    </ChatDockNotice>
   );
 }

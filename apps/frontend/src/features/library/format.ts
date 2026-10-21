@@ -2,7 +2,7 @@
  * Pure presentation logic for the library surface.
  *
  * Deliberately free of React so the rules that carry the most meaning — which
- * glyph a cell earns, what counts as divergent, what is merely shadowed — can
+ * state a cell earns, what counts as divergent, what is merely shadowed — can
  * be asserted directly instead of through a rendered tree.
  *
  * The vocabulary here never says "missing". A resource Cursor does not have is
@@ -21,6 +21,8 @@ import type {
   ResourceKind,
   ValidLibraryInstance,
 } from '@mangostudio/shared/library';
+import { parseResourceKey } from '@mangostudio/shared/library';
+import { formatMessage } from '@/lib/i18n-format';
 
 /**
  * What one matrix cell says about one target.
@@ -37,16 +39,6 @@ export type CoverageCellState =
   | 'only-here'
   | 'incomparable';
 
-/** Characters carrying each state. Never the only signal — every cell is also labelled. */
-export const CELL_GLYPHS: Readonly<Record<CoverageCellState, string>> = {
-  present: '✓',
-  absent: '—',
-  shadowed: '⧉',
-  divergent: '⚠',
-  'only-here': '★',
-  incomparable: '?',
-};
-
 export interface CoverageCell {
   readonly targetId: LibraryTargetId;
   readonly state: CoverageCellState;
@@ -56,6 +48,37 @@ export interface CoverageCell {
   readonly contentHash?: string;
   readonly path?: string;
   readonly modifiedAtMs?: number;
+}
+
+/**
+ * A resource key worded for a person: `skill:git-hygiene` is an internal id, and
+ * the kind in front of the name is what keeps `release` the skill apart from
+ * `release` the command. `kinds` is the label dictionary the caller wants — the
+ * capitalised `kinds` for a list, `kindsInline` for the middle of a sentence.
+ * A key that is not one (an id from a newer hub) is shown as it came.
+ *
+ * // Usage: resourceKeyLabel('skill:gh', t.library.kinds) // "Skill gh"
+ */
+export function resourceKeyLabel(key: string, kinds: Readonly<Record<ResourceKind, string>>) {
+  const ref = parseResourceKey(key);
+  return ref ? `${kinds[ref.kind]} ${ref.slug}` : key;
+}
+
+/**
+ * Fills a `{kind} {resource}` title template from a resource key, for the
+ * wizards' headings. A key that is not one has no kind to name, so the template
+ * keeps only the key rather than printing a gap where the kind would go.
+ *
+ * // Usage: resourceTitle(t.library.wizard.titleOne, t.library.kindsInline, 'skill:gh')
+ */
+export function resourceTitle(
+  template: string,
+  kinds: Readonly<Record<ResourceKind, string>>,
+  key: string
+): string {
+  const ref = parseResourceKey(key);
+  const parts = ref ? { kind: kinds[ref.kind], resource: ref.slug } : { kind: '', resource: key };
+  return formatMessage(template, parts).replace(/ {2,}/g, ' ');
 }
 
 /** First characters of a content hash — enough to tell two versions apart on screen. */
@@ -144,6 +167,30 @@ export function coverageCells(resource: LibraryResource): CoverageCell[] {
   return resource.coverage.map((coverage) => coverageCell(resource, coverage));
 }
 
+/**
+ * How a shadowed copy compares with the copy its target actually reads.
+ * `unknown` when either copy has no readable hash, or when the hashes come from
+ * different runtime versions and "identical" would be a guess.
+ */
+export type ShadowedCopyComparison = 'identical' | 'differs' | 'unknown';
+
+/**
+ * Compares one shadowed location's copy with the effective one (the cell's own
+ * hash), for the badge the detail page prints beside that location.
+ *
+ * // Usage: shadowedCopyComparison(resource, cell, 'claude-skills') // 'differs'
+ */
+export function shadowedCopyComparison(
+  resource: LibraryResource,
+  cell: CoverageCell,
+  shadowedLocationId: LibraryLocationId
+): ShadowedCopyComparison {
+  if (resource.divergence === 'incomparable') return 'unknown';
+  const shadowedHash = instanceAt(resource, shadowedLocationId)?.contentHash;
+  if (cell.contentHash === undefined || shadowedHash === undefined) return 'unknown';
+  return cell.contentHash === shadowedHash ? 'identical' : 'differs';
+}
+
 export interface TargetCoverageSummary {
   readonly targetId: LibraryTargetId;
   /** Resources this target reads at least one copy of. */
@@ -190,6 +237,29 @@ function newestModifiedAtMs(resource: LibraryResource): number {
     (newest, instance) => Math.max(newest, instance.modifiedAtMs),
     0
   );
+}
+
+/**
+ * The library tab a kind of resource is listed under — the page its back link
+ * returns to. Settings and hooks share one tab: the settings page shows both.
+ *
+ * Exhaustive on purpose: a `default` here sends a kind nobody wired up to the
+ * skills tab, which looks like a working link and is not one.
+ */
+export function libraryKindPath(kind: ResourceKind) {
+  switch (kind) {
+    case 'skill':
+      return '/environments/library/skills' as const;
+    case 'subagent':
+      return '/environments/library/subagents' as const;
+    case 'command':
+      return '/environments/library/commands' as const;
+    case 'instruction':
+      return '/environments/library/instructions' as const;
+    case 'setting':
+    case 'hook':
+      return '/environments/library/settings' as const;
+  }
 }
 
 export function validInstances(resource: LibraryResource): ValidLibraryInstance[] {
@@ -336,12 +406,4 @@ export function groupResourcesByLocation(resources: readonly LibraryResource[]):
     else groups.set(locationId, [resource]);
   }
   return [...groups].map(([locationId, grouped]) => ({ locationId, resources: grouped }));
-}
-
-/** Human-readable byte count for content group sizes. */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kib = bytes / 1024;
-  if (kib < 1024) return `${kib.toFixed(1)} KiB`;
-  return `${(kib / 1024).toFixed(1)} MiB`;
 }

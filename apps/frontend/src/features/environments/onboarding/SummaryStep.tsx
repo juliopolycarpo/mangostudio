@@ -13,6 +13,7 @@
 
 import { DEFAULT_SSH_RUNTIME_PATH, type Environment } from '@mangostudio/shared/environments';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { CopyLine } from '../components/CopyLine';
@@ -65,23 +66,23 @@ export function SummaryStep({ environment, endState, onDone }: SummaryStepProps)
 
   return (
     <div className="space-y-4" data-testid="onboarding-summary-step">
-      <p className="text-on-surface-variant/70 text-xs">
+      <Callout tone={connected ? 'success' : 'warning'}>
         {formatMessage(connected ? labels.summaryReady : labels.summaryPending, {
           name: environment.name,
         })}
-      </p>
+      </Callout>
 
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5">
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-md border border-stroke p-3">
         {rows.map((row) => (
           <div key={row.label} className="contents">
-            <dt className="text-on-surface-variant/60 text-xs">{row.label}</dt>
-            <dd className="truncate font-mono text-[11px] text-on-surface-variant">{row.value}</dd>
+            <dt className="text-xs text-fg-muted">{row.label}</dt>
+            <dd className="truncate font-mono text-xs text-fg">{row.value}</dd>
           </div>
         ))}
       </dl>
 
       <div className="space-y-2">
-        <p className="text-on-surface-variant/70 text-xs">{labels.summaryAudit}</p>
+        <p className="text-sm text-fg-muted">{labels.summaryAudit}</p>
         <CopyLine
           label={entities.permissions.setupCommand}
           value={runtimeCommand(health, 'setup --slot remote')}

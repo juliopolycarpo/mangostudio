@@ -56,17 +56,18 @@ const TOKEN_COLORS: Record<CodeThemeId, Record<TokenType, string>> = {
 };
 
 /**
- * Renders a syntax-highlighted code sample for the given Shiki theme.
+ * A syntax-highlighted code sample drawn in the given Shiki theme's own colours.
  *
- * The output is kept pixel-identical to the previous static HTML previews
- * so the settings page looks the same after the refactor.
+ * The background and token colours are literal on purpose: they show what a
+ * code block will look like in that theme, so they must not follow the app's
+ * tokens.
  */
 export function ThemePreviewSample({ themeId }: { readonly themeId: CodeThemeId }) {
   const c = TOKEN_COLORS[themeId];
 
   return (
     <pre
-      className="p-3 text-[11px] leading-normal font-mono overflow-hidden"
+      className="overflow-hidden p-3 font-mono text-micro leading-normal"
       style={{ background: THEME_BACKGROUND[themeId] }}
     >
       <code>

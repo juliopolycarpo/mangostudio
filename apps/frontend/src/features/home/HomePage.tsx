@@ -34,7 +34,7 @@ import { LibraryDivergenceCard } from './widgets/LibraryDivergenceCard';
 import { MachinesCard } from './widgets/MachinesCard';
 import { ToolchainHealthCard } from './widgets/ToolchainHealthCard';
 import { UncommittedWorkCard } from './widgets/UncommittedWorkCard';
-import { WorkspacesGrid } from './widgets/WorkspacesGrid';
+import { WorkspacesList } from './widgets/WorkspacesList';
 
 export interface HomePageProps {
   readonly userName: string;
@@ -63,7 +63,7 @@ export function HomePage({
       className="app-scrollbar flex flex-1 flex-col overflow-y-auto px-4 py-8 sm:px-6"
       data-testid="home-dashboard"
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8">
         <GreetingHeader userName={userName} subtitle={t.home.greeting.dashboardSubtitle} />
 
         {/* Twelve columns from `lg` up, one below it. The activity column is
@@ -73,9 +73,9 @@ export function HomePage({
         {/* Drives every `SectionCard` below through motion's variant context,
             which reaches them past these two plain column wrappers — the cards
             take no prop and no index for it. */}
-        <motion.div {...cardGrid} className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          <div className="flex flex-col gap-4 lg:col-span-8">
-            <WorkspacesGrid
+        <motion.div {...cardGrid} className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+          <div className="flex flex-col gap-6 lg:col-span-8">
+            <WorkspacesList
               recentWorkdirs={recentWorkdirs}
               onSelectChat={onSelectChat}
               onNewChat={onNewChat}
@@ -91,7 +91,7 @@ export function HomePage({
             <LibraryDivergenceCard environmentId={null} />
           </div>
 
-          <div className="flex flex-col gap-4 lg:col-span-4">
+          <div className="flex flex-col gap-6 lg:col-span-4">
             {/* Null scope drops the "the machine this chat runs on is offline"
                 warning and leaves the fault list, which is exactly right on a
                 surface that is not a chat. */}

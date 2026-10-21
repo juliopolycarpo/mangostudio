@@ -1,19 +1,26 @@
 /**
  * The image side of the product, as a landing rather than a promise.
  *
- * Two ways in and a look at what came out: creating an image happens in the
+ * One way in and a look at what came out: creating an image happens in the
  * chat, where the model and its tools already live, so this hands over to the
  * composer instead of growing a second generation surface. The recent strip is
  * the gallery's own query and the gallery's own tiles — the first page, which
- * the gallery has usually already cached.
+ * the gallery has usually already cached — and its "View all" is the way on to
+ * the gallery, so the page does not repeat what the sidebar already offers.
+ *
+ * Centred in a `max-w-6xl` column with the gutter every self-scrolling page
+ * shares (`p-4 sm:p-6`, the gallery's and the terminal's), so its heading starts
+ * at the same x and y as theirs and does not jump when the sidebar switches page.
  */
 
 import type { GalleryItem } from '@mangostudio/shared/types';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { Image, ImagePlus, LayoutGrid } from 'lucide-react';
+import { Image, ImagePlus } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { GalleryLightbox } from '@/features/gallery/components/GalleryLightbox';
@@ -21,6 +28,7 @@ import { GalleryTile } from '@/features/gallery/components/GalleryTile';
 import { useGalleryQuery } from '@/features/gallery/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 
 /** One row on the widest layout, and never a second page's worth of scrolling. */
 const RECENT_LIMIT = 4;
@@ -30,24 +38,14 @@ export function StudioPage() {
   const [selectedImage, setSelectedImage] = useState<GalleryItem | null>(null);
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <div className="rounded-2xl bg-primary-container p-2.5 text-on-primary-container sm:p-3">
-            <Image size={24} />
-          </div>
-          <div className="min-w-0">
-            <h1 className="font-headline text-2xl font-bold text-on-background sm:text-3xl">
-              {t.studio.title}
-            </h1>
-            <p className="text-sm text-on-surface-variant/70">{t.studio.subtitle}</p>
-          </div>
+    <div className="h-full overflow-y-auto p-4 sm:p-6">
+      <div className="mx-auto w-full max-w-6xl space-y-8">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-title font-semibold text-fg">{t.studio.title}</h1>
+          <p className="text-sm text-fg-muted">{t.studio.subtitle}</p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <GenerateCard />
-          <GalleryCard />
-        </div>
+        <GenerateCard />
 
         <RecentImages onView={setSelectedImage} />
       </div>
@@ -70,8 +68,8 @@ function GenerateCard() {
   const navigate = useNavigate();
 
   return (
-    <SectionCard label={t.studio.generate.label} className="justify-between">
-      <p className="text-sm text-on-surface-variant">{t.studio.generate.description}</p>
+    <SectionCard label={t.studio.generate.label}>
+      <p className="text-sm text-fg-muted">{t.studio.generate.description}</p>
       <Button
         onClick={() => {
           setImageToolIntent(true);
@@ -79,26 +77,9 @@ function GenerateCard() {
         }}
         className="self-start"
       >
-        <ImagePlus size={16} />
+        <ImagePlus size={ICON_MD} />
         {t.studio.generate.action}
       </Button>
-    </SectionCard>
-  );
-}
-
-function GalleryCard() {
-  const { t } = useI18n();
-
-  return (
-    <SectionCard label={t.studio.gallery.label} className="justify-between">
-      <p className="text-sm text-on-surface-variant">{t.studio.gallery.description}</p>
-      <Link
-        to="/gallery"
-        className="inline-flex items-center gap-2 self-start rounded-lg bg-surface-container-high px-4 py-2 text-sm font-bold text-on-surface transition-colors hover:bg-surface-container-highest"
-      >
-        <LayoutGrid size={16} />
-        {t.studio.gallery.action}
-      </Link>
     </SectionCard>
   );
 }
@@ -115,21 +96,26 @@ function RecentImages({ onView }: { onView: (item: GalleryItem) => void }) {
   const items = data?.pages[0]?.items.slice(0, RECENT_LIMIT) ?? [];
 
   return (
-    <SectionCard
-      label={t.studio.recent.label}
-      action={
-        items.length > 0 ? (
+    // No card around the tiles: they are bordered and rounded themselves, and a
+    // card around them read as cards nested in a card. The heading row is the
+    // card's header without the card, on the canvas like the gallery's grid.
+    <section className="min-w-0 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <MicroLabel as="h2">{t.studio.recent.label}</MicroLabel>
+        {items.length > 0 ? (
+          // `inline-flex items-center`: on a touch screen every link is a 44px
+          // box, and a plain link in this header floated its text to the top of
+          // it, a dozen pixels above the label it sits beside.
           <Link
             to="/gallery"
-            className="text-xs font-medium text-primary transition-opacity hover:opacity-80"
+            className="inline-flex items-center text-xs font-medium text-accent-fg hover:underline"
           >
             {t.studio.recent.viewAll}
           </Link>
-        ) : null
-      }
-    >
+        ) : null}
+      </div>
       <RecentStrip status={status} items={items} onView={onView} />
-    </SectionCard>
+    </section>
   );
 }
 
@@ -153,35 +139,27 @@ function RecentStrip({
 
   if (status === 'pending') {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-6">
         {Array.from({ length: RECENT_LIMIT }, (_, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
-          <Skeleton key={index} className="aspect-square rounded-2xl" />
+          <Skeleton key={index} className="aspect-square rounded-md" />
         ))}
       </div>
     );
   }
 
   if (status === 'error') {
-    return (
-      <EmptyState
-        icon={<Image size={32} className="opacity-50" />}
-        title={t.studio.recent.error}
-        tone="error"
-      />
-    );
+    return <Callout tone="danger">{t.studio.recent.error}</Callout>;
   }
 
   if (items.length === 0) {
-    return (
-      <EmptyState icon={<Image size={32} className="opacity-50" />} title={t.studio.recent.empty} />
-    );
+    return <EmptyState icon={<Image size={ICON_LG} />} title={t.studio.recent.empty} />;
   }
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-6">
       {items.map((item) => (
-        <GalleryTile key={item.id} item={item} onView={onView} />
+        <GalleryTile key={item.id} item={item} onView={onView} compact />
       ))}
     </div>
   );

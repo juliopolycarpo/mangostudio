@@ -1,20 +1,22 @@
-import { useQuery } from '@tanstack/react-query';
-import { Inbox, RefreshCw } from 'lucide-react';
+import { Inbox } from 'lucide-react';
+import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
-import { useApp } from '@/lib/app-context';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
-import { useForceRefresh } from '../hooks/use-force-refresh';
-import { githubInboxQueryOptions } from '../queries';
+import type { GithubInbox } from '../hooks/use-github-inbox';
 import { GithubNotConnected } from './GithubNotConnected';
 import { GithubPrBadge } from './GithubPrBadge';
 import { GithubRowMenu } from './GithubRowMenu';
+import { GithubRowShell } from './GithubRowShell';
 import { GithubSection } from './GithubSection';
 import { GithubRefreshButton, GithubStaleness } from './GithubStaleness';
 
 interface GithubInboxSectionProps {
   readonly chatId: string;
+  /** The panel's read of the queue; the panel owns it to tell a signed-out `gh` from an empty queue. */
+  readonly inbox: GithubInbox;
   readonly collapsed: boolean;
   readonly onToggle: () => void;
 }
@@ -30,21 +32,16 @@ const GITHUB_INBOX_TESTID = 'github-inbox-section';
  * a review request does not stop mattering because you switched projects.
  *
  * @example
- * <GithubInboxSection chatId={chatId} collapsed={false} onToggle={toggleInbox} />
+ * <GithubInboxSection chatId={chatId} inbox={inbox} collapsed={false} onToggle={toggleInbox} />
  */
-export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxSectionProps) {
+export function GithubInboxSection({
+  chatId,
+  inbox,
+  collapsed,
+  onToggle,
+}: GithubInboxSectionProps) {
   const { t } = useI18n();
-  // The source chat's own record first, and the shell's current environment
-  // only as a fallback — same resolution `useIssueToNewChat` uses, since a
-  // chat pinned to WSL/SSH/a container has `gh` credentials that live on that
-  // machine, not on the hub's. Resolved once here and threaded to `InboxBody`
-  // too, so the staleness stamp above and the rows below always read the same
-  // cache entry.
-  const { chats, currentEnvironmentId } = useApp();
-  const environmentId =
-    chats.find((chat) => chat.id === chatId)?.environmentId ?? currentEnvironmentId ?? undefined;
-  const forceRefresh = useForceRefresh();
-  const query = useQuery(githubInboxQueryOptions(environmentId, forceRefresh.read));
+  const { query, refresh } = inbox;
   const data = query.data;
 
   return (
@@ -59,14 +56,11 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
             cachedAt={data?.state === 'ok' ? data.cachedAt : null}
             refreshing={query.isFetching}
           />
-          <GithubRefreshButton
-            onRefresh={() => void forceRefresh.trigger(query.refetch)}
-            refreshing={query.isFetching}
-          />
+          <GithubRefreshButton onRefresh={refresh} refreshing={query.isFetching} />
         </>
       }
     >
-      <InboxBody chatId={chatId} environmentId={environmentId} forceRefresh={forceRefresh.read} />
+      <InboxBody chatId={chatId} query={query} />
     </GithubSection>
   );
 }
@@ -77,27 +71,18 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
  */
 function InboxBody({
   chatId,
-  environmentId,
-  forceRefresh,
+  query,
 }: {
   readonly chatId: string;
-  readonly environmentId: string | undefined;
-  readonly forceRefresh: () => boolean;
+  readonly query: GithubInbox['query'];
 }) {
   const { t } = useI18n();
-  const query = useQuery(githubInboxQueryOptions(environmentId, forceRefresh));
 
   if (query.isPending) {
-    return (
-      <EmptyState
-        icon={<RefreshCw size={ICON_LG} className="animate-spin" />}
-        title={t.github.loading}
-        className="min-h-24 py-4"
-      />
-    );
+    return <EmptyState icon={<Spinner />} title={t.github.loading} className="min-h-24 py-4" />;
   }
   if (query.isError || !query.data) {
-    return <EmptyState title={t.github.errors.inbox} tone="error" className="min-h-24 py-4" />;
+    return <Callout tone="danger" title={t.github.errors.inbox} />;
   }
   if (query.data.state !== 'ok') return <GithubNotConnected state={query.data.state} />;
   if (query.data.items.length === 0) {
@@ -113,23 +98,13 @@ function InboxBody({
   return (
     <ul className="space-y-0.5">
       {query.data.items.map((item) => (
-        <li
-          key={item.url}
-          className="group flex items-start gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-surface-container-high/50"
-        >
+        <GithubRowShell key={item.url}>
           {/* An anchor, not a button: an inbox row is in another repository,
               so there is no local detail view to open — the browser is the
               destination and middle-click should behave like one. */}
-          <a
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-primary"
-          >
-            <span className="block truncate text-xs font-semibold text-on-surface">
-              {item.title}
-            </span>
-            <span className="mt-0.5 block truncate font-mono text-[10px] text-on-surface-variant">
+          <a href={item.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-fg">{item.title}</span>
+            <span className="mt-0.5 block truncate font-mono text-xs text-fg-muted">
               {formatMessage(t.home.github.row, {
                 repo: item.repository.nameWithOwner,
                 number: String(item.number),
@@ -145,7 +120,7 @@ function InboxBody({
               nameWithOwner: item.repository.nameWithOwner,
             }}
           />
-        </li>
+        </GithubRowShell>
       ))}
     </ul>
   );

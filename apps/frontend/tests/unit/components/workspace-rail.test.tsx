@@ -61,6 +61,17 @@ function setDesktopMediaQuery(matches: boolean) {
   })) as unknown as typeof globalThis.matchMedia;
 }
 
+/**
+ * The slot the chat page's composer hands the rail below `lg`. A rail given none
+ * draws no trigger, so the mobile tests need a real element to portal into.
+ */
+function mountTriggerSlot(): HTMLElement {
+  const slot = document.createElement('span');
+  slot.dataset.testSlot = '';
+  document.body.appendChild(slot);
+  return slot;
+}
+
 function renderRail(overrides: Partial<React.ComponentProps<typeof WorkspaceRail>> = {}) {
   return render(
     <WorkspaceRail
@@ -79,6 +90,7 @@ describe('WorkspaceRail', () => {
   });
 
   afterEach(() => {
+    for (const slot of document.querySelectorAll('[data-test-slot]')) slot.remove();
     globalThis.matchMedia = harnessMatchMedia;
   });
 
@@ -111,6 +123,31 @@ describe('WorkspaceRail', () => {
     await user.click(screen.getByRole('button', { name: 'Show Repository panel' }));
     expect(screen.getByTestId('git-panel-content')).toBeVisible();
     expect(window.localStorage.getItem(railCollapsedStorageKey('chat-1'))).toBeNull();
+  });
+
+  // The current-item mark says "this panel is open". Folded down to the dock,
+  // nothing is open, and a mark on whichever panel happened to be selected read
+  // as a choice the person never made.
+  it('marks the open panel in the dock, and no panel while the rail is collapsed', async () => {
+    const user = userEvent.setup();
+    renderRail();
+
+    const repository = screen.getByRole('button', { name: 'Show Repository panel' });
+    expect(repository).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Collapse agent side panel' }));
+
+    for (const button of screen.getAllByRole('button', { name: /^Show .* panel$/ })) {
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+    }
+    expect(repository).not.toHaveClass('bg-fill-selected');
+
+    // The icon the person presses next still opens that panel, and marks it.
+    await user.click(repository);
+    expect(screen.getByRole('button', { name: 'Show Repository panel' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
   });
 
   it('resizes from the keyboard and persists the clamped width', async () => {
@@ -148,7 +185,7 @@ describe('WorkspaceRail', () => {
   it('opens the same panels in a mobile slide-over', async () => {
     const user = userEvent.setup();
     setDesktopMediaQuery(false);
-    renderRail();
+    renderRail({ triggerSlot: mountTriggerSlot() });
 
     expect(screen.queryByRole('dialog', { name: 'Agent side panel' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Open agent side panel' }));
@@ -157,6 +194,29 @@ describe('WorkspaceRail', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close agent side panel' }));
     expect(screen.queryByRole('dialog', { name: 'Agent side panel' })).not.toBeInTheDocument();
+    // Closing hands focus back to the trigger that opened the drawer.
+    expect(screen.getByRole('button', { name: 'Open agent side panel' })).toHaveFocus();
+  });
+
+  it('draws the mobile trigger into the composer slot, and nowhere else', () => {
+    setDesktopMediaQuery(false);
+    const slot = mountTriggerSlot();
+    renderRail({ triggerSlot: slot });
+
+    // A tool chip beside the composer's other controls: nothing floats over the
+    // transcript, so the transcript keeps the composer's edges.
+    const trigger = screen.getByRole('button', { name: 'Open agent side panel' });
+    expect(slot).toContainElement(trigger);
+    expect(trigger.className).toContain('composer-tool-chip');
+    expect(trigger.className).not.toContain('absolute');
+    expect(trigger.className).not.toContain('fixed');
+  });
+
+  it('draws no trigger below lg when the page offers no slot', () => {
+    setDesktopMediaQuery(false);
+    renderRail();
+
+    expect(screen.queryByRole('button', { name: 'Open agent side panel' })).not.toBeInTheDocument();
   });
 
   /**

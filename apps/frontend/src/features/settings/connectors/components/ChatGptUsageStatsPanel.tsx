@@ -1,10 +1,14 @@
 import type { ChatGptUsageStats } from '@mangostudio/shared/connectors';
 import type { Locale, Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, RefreshCw, TriangleAlert } from 'lucide-react';
+import { BarChart3, RefreshCw } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { getChatGptUsageStats } from '../api';
 
 type ConnectorMessages = Messages['settings']['connectors'];
@@ -64,9 +68,9 @@ function hasStats(stats: ChatGptUsageStats, dailyUsage: DailyUsageBucket[]): boo
 
 function StatCell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-lg border border-outline-variant/10 bg-surface-container-high/50 px-2.5 py-2">
-      <p className="truncate text-[10px] font-medium text-on-surface-variant/55">{label}</p>
-      <p className="mt-0.5 truncate font-mono text-sm text-on-surface">{value}</p>
+    <div className="min-w-0">
+      <dt className="truncate text-xs text-fg-muted">{label}</dt>
+      <dd className="mt-0.5 truncate font-mono text-sm text-fg">{value}</dd>
     </div>
   );
 }
@@ -84,13 +88,13 @@ function UsageStatsChart({
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-medium uppercase text-on-surface-variant/55">
-        {s.chatgptStatsChartTitle}
-      </p>
+      <p className="text-xs font-medium text-fg-muted">{s.chatgptStatsChartTitle}</p>
+      {/* The bars are the accent's text variant, the one that clears 3:1 on a
+          white surface; the baseline is the plot's only frame. */}
       <div
         role="img"
         aria-label={s.chatgptStatsChartTitle}
-        className="flex h-20 items-end gap-1 rounded-lg border border-outline-variant/10 bg-surface-container-high/35 px-2 py-2"
+        className="flex h-20 items-end gap-1 border-b border-stroke"
       >
         {buckets.map((bucket) => {
           const percent = maxTokens > 0 ? (bucket.tokens / maxTokens) * 100 : 0;
@@ -102,7 +106,7 @@ function UsageStatsChart({
             <div
               key={`${bucket.startDate}:${bucket.tokens}`}
               title={label}
-              className="min-w-1 flex-1 rounded-sm bg-primary/65"
+              className="min-w-1 flex-1 rounded-t-xs bg-accent-fg"
               style={{ height: bucket.tokens > 0 ? `${Math.max(8, percent)}%` : '2px' }}
             >
               <span className="sr-only">{label}</span>
@@ -125,15 +129,15 @@ function StatsBody({
 }) {
   const dailyUsage = useMemo(() => (stats ? normalizeDailyUsage(stats) : []), [stats]);
   if (!stats || !hasStats(stats, dailyUsage)) {
-    return <p className="text-[11px] text-on-surface-variant/60">{s.chatgptStatsEmpty}</p>;
+    return <p className="text-xs text-fg-muted">{s.chatgptStatsEmpty}</p>;
   }
 
   const streakValue = (days: number) =>
     s.chatgptStatsStreakValue.replace('{days}', formatTokenCount(days, locale));
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
+    <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
         {stats.lifetimeTokens !== undefined && (
           <StatCell
             label={s.chatgptStatsLifetime}
@@ -164,7 +168,7 @@ function StatsBody({
             value={streakValue(stats.longestStreakDays)}
           />
         )}
-      </div>
+      </dl>
       {dailyUsage.length > 0 && <UsageStatsChart buckets={dailyUsage} locale={locale} s={s} />}
     </div>
   );
@@ -178,7 +182,6 @@ function StatsBody({
 export function ChatGptUsageStatsPanel({ connectorId }: { connectorId: string }) {
   const { t, locale } = useI18n();
   const s = t.settings.connectors;
-  const panelId = `chatgpt-usage-stats-${connectorId}`;
   const statsQuery = useQuery({
     queryKey: statsQueryKey(connectorId),
     queryFn: () => getChatGptUsageStats(connectorId),
@@ -187,36 +190,32 @@ export function ChatGptUsageStatsPanel({ connectorId }: { connectorId: string })
   });
 
   return (
-    <div className="space-y-2">
-      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-on-surface-variant/55">
-        <BarChart3 size={13} />
+    <section className="space-y-3">
+      <MicroLabel as="h4" className="flex items-center gap-1.5">
+        <BarChart3 size={ICON_SM} />
         {s.chatgptStatsToggle}
-      </p>
+      </MicroLabel>
 
-      <div
-        id={panelId}
-        className="space-y-3 rounded-xl border border-outline-variant/10 bg-surface-container-low px-3 py-3"
-      >
-        {statsQuery.isLoading ? (
-          <p className="flex items-center gap-2 text-[11px] text-on-surface-variant/60">
-            <RefreshCw size={13} className="animate-spin" />
-            {s.chatgptStatsLoading}
-          </p>
-        ) : statsQuery.isError ? (
-          <div className="flex items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-[11px] text-error">
-              <TriangleAlert size={13} />
-              {s.failedToLoad}
-            </p>
-            <Button variant="ghost" size="sm" onClick={() => void statsQuery.refetch()}>
-              <RefreshCw size={13} />
+      {statsQuery.isLoading ? (
+        <div role="status" className="flex items-center gap-2 text-xs text-fg-muted">
+          <Spinner size="sm" />
+          {s.chatgptStatsLoading}
+        </div>
+      ) : statsQuery.isError ? (
+        <Callout
+          tone="danger"
+          action={
+            <Button variant="subtle" size="sm" onClick={() => void statsQuery.refetch()}>
+              <RefreshCw size={ICON_SM} />
               {t.common.retry}
             </Button>
-          </div>
-        ) : (
-          <StatsBody stats={statsQuery.data?.stats ?? null} locale={locale} s={s} />
-        )}
-      </div>
-    </div>
+          }
+        >
+          {s.failedToLoad}
+        </Callout>
+      ) : (
+        <StatsBody stats={statsQuery.data?.stats ?? null} locale={locale} s={s} />
+      )}
+    </section>
   );
 }

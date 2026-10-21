@@ -1,27 +1,37 @@
 /**
  * Health screen: every finding across runtimes, version managers, and agent
- * CLIs as one flat list, worst first — the page to open when something is
- * broken and you do not know where.
+ * CLIs, split by whether anything has to be done — what needs action first, what
+ * can wait after it, and what is only worth knowing last — the page to open
+ * when something is broken and you do not know where. Each row opens the tab
+ * that can fix it.
  *
  * Findings are per machine, so the list names one. Compare mode is the other
  * question this page can answer: not "what is wrong here" but "what does this
  * machine have that the other one does not".
  */
 
-import { Columns2 } from 'lucide-react';
-import { useState } from 'react';
-import { Button } from '@/components/ui/Button';
+import { Link } from '@tanstack/react-router';
+import { ChevronRight, Columns2 } from 'lucide-react';
+import { useId, useState } from 'react';
+import { Button, buttonClassName } from '@/components/ui/Button';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { describeFinding } from '../format';
-import { useEnvironmentHealth } from '../hooks/use-runtime-status';
+import {
+  type HealthEntry,
+  type HealthScope,
+  useEnvironmentHealth,
+} from '../hooks/use-runtime-status';
 import { useToolIdentities } from '../identity/use-tool-identities';
-import { useEnvironmentScope } from '../use-environment-scope';
+import { environmentScopeSearch, useEnvironmentScope } from '../use-environment-scope';
 import { CapabilityDiff } from './CapabilityDiff';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { EnvironmentScopeHeader } from './EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from './EnvironmentScopeNotice';
 import { FindingIcon } from './FindingList';
+import { TOOL_CARD_SURFACE } from './ToolCard';
 
 export function HealthPage() {
   const { t } = useI18n();
@@ -33,9 +43,6 @@ export function HealthPage() {
     // entities fetch; a known disconnected machine must not be woken up.
     scope.permitsProbing && (scope.environment === undefined || scope.isConnected)
   );
-  // The health scopes are exactly the static identity kinds, so an entry names
-  // its subject the same way that subject's own card does.
-  const { resolve, lookup } = useToolIdentities();
   const [comparison, setComparison] = useState<{ left: string; right: string } | null>(null);
 
   const openComparison = () => {
@@ -47,8 +54,8 @@ export function HealthPage() {
   const header = (
     <EnvironmentScopeHeader description={e.health.description} scope={scope} onRefresh={refetch}>
       {scope.hasChoice && !comparison && (
-        <Button variant="ghost" size="sm" onClick={openComparison}>
-          <Columns2 size={14} />
+        <Button variant="subtle" size="sm" onClick={openComparison}>
+          <Columns2 size={ICON_MD} />
           {e.scope.compare}
         </Button>
       )}
@@ -110,32 +117,116 @@ export function HealthPage() {
       {entries.length === 0 ? (
         <EnvironmentPageState variant="empty" title={e.health.empty} hint={e.health.emptyHint} />
       ) : (
-        <>
-          <p className="text-sm text-on-surface-variant/70">
-            {formatMessage(e.health.findingCount, { count: String(entries.length) })}
-          </p>
-          <ul className="space-y-2" data-testid="health-list">
-            {entries.map((entry) => (
-              <li
-                key={entry.key}
-                className="flex items-start gap-3 rounded-2xl border border-outline-variant/15 bg-surface-container-high p-4"
-                data-testid="health-entry"
-                data-severity={entry.severity}
-              >
-                <FindingIcon severity={entry.severity} size={18} />
-                <div className="min-w-0 space-y-1">
-                  <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
-                    {e.health.scope[entry.scope]} · {resolve(entry.scope, entry.subjectId).name}
-                  </p>
-                  <p className="text-sm text-on-surface-variant">
-                    {describeFinding(t, entry.finding, lookup)}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
+        <HealthGroups entries={entries} environmentId={scope.environmentId} />
       )}
     </div>
+  );
+}
+
+/**
+ * The findings split by what they ask of the person: a failure blocks
+ * something, a warning can wait, and an informational finding (an optional
+ * tool that is simply not there) asks for nothing at all, so it sits last
+ * under its own heading with the neutral glyph. When nothing asks for action
+ * the page says so in one muted line rather than an empty state, because the
+ * list below it is not empty.
+ */
+function HealthGroups({
+  entries,
+  environmentId,
+}: {
+  readonly entries: readonly HealthEntry[];
+  readonly environmentId: string;
+}) {
+  const { t } = useI18n();
+  const e = t.environments;
+  const needsAction = entries.filter((entry) => entry.severity === 'fail');
+  const canWait = entries.filter((entry) => entry.severity === 'warn' && !entry.quiet);
+  const informational = entries.filter((entry) => entry.severity === 'warn' && entry.quiet);
+
+  return (
+    <div className="space-y-6">
+      {needsAction.length === 0 && canWait.length === 0 && (
+        <p className="text-sm text-fg-muted" data-testid="health-nothing-needs-action">
+          {e.health.nothingNeedsAction}
+        </p>
+      )}
+      <HealthGroup
+        label={e.health.needsAction}
+        entries={needsAction}
+        environmentId={environmentId}
+      />
+      <HealthGroup label={e.health.canWait} entries={canWait} environmentId={environmentId} />
+      <HealthGroup
+        label={e.health.forInformation}
+        entries={informational}
+        environmentId={environmentId}
+      />
+    </div>
+  );
+}
+
+/** The tab that can act on a finding: the card for that tool lives there. */
+const FIX_TAB = {
+  runtime: { to: '/environments/runtimes', tab: 'runtimes' },
+  'version-manager': { to: '/environments/runtimes', tab: 'runtimes' },
+  agent: { to: '/environments/agents', tab: 'agents' },
+} as const satisfies Record<HealthScope, { to: string; tab: 'runtimes' | 'agents' }>;
+
+/** One severity's findings under its heading; nothing at all when it has none. */
+function HealthGroup({
+  label,
+  entries,
+  environmentId,
+}: {
+  readonly label: string;
+  readonly entries: readonly HealthEntry[];
+  readonly environmentId: string;
+}) {
+  const { t } = useI18n();
+  const e = t.environments;
+  // The health scopes are exactly the static identity kinds, so an entry names
+  // its subject the same way that subject's own card does.
+  const { resolve, lookup } = useToolIdentities();
+  const headingId = useId();
+
+  if (entries.length === 0) return null;
+
+  return (
+    <section aria-labelledby={headingId} className="space-y-2">
+      <MicroLabel as="h2" id={headingId}>
+        {label}
+      </MicroLabel>
+      <ul className={cn(TOOL_CARD_SURFACE, 'divide-y divide-stroke')} data-testid="health-list">
+        {entries.map((entry) => {
+          const fix = FIX_TAB[entry.scope];
+          return (
+            <li
+              key={entry.key}
+              className="flex items-start gap-3 p-4"
+              data-testid="health-entry"
+              data-severity={entry.severity}
+            >
+              <FindingIcon severity={entry.severity} quiet={entry.quiet} size={ICON_MD} />
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-sm font-medium text-fg">
+                  {e.health.scope[entry.scope]} · {resolve(entry.scope, entry.subjectId).name}
+                </p>
+                <p className="text-xs text-fg-muted">{describeFinding(t, entry.finding, lookup)}</p>
+              </div>
+              <Link
+                to={fix.to}
+                search={environmentScopeSearch(environmentId)}
+                className={cn(buttonClassName('subtle', 'sm'), 'shrink-0')}
+                data-testid="health-entry-link"
+              >
+                {e.overview.open[fix.tab]}
+                <ChevronRight size={ICON_SM} aria-hidden="true" />
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

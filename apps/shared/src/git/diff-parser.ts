@@ -18,7 +18,18 @@ export interface GitDiffHunk {
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
 
-/** Parses unified diff hunks without interpreting file headers as content. */
+/**
+ * Parses unified diff hunks without interpreting file headers as content.
+ *
+ * A hunk's body is bounded by the counts in its header, not by the next line
+ * that happens to lack a prefix: `git diff` output ends in a newline, so a
+ * plain `split('\n')` leaves a trailing `''` that would otherwise read as one
+ * more context line, numbered one past the hunk. While either count is still
+ * owed, an empty line *is* context (a blank line whose leading space was
+ * stripped on the way here); once both are spent, every line is ignored until
+ * the next `@@` header, except the `\ No newline at end of file` marker that
+ * git writes after a hunk's last line.
+ */
 export function parseGitDiff(diff: string): readonly GitDiffHunk[] {
   const hunks: GitDiffHunk[] = [];
   let current: {
@@ -30,6 +41,8 @@ export function parseGitDiff(diff: string): readonly GitDiffHunk[] {
     lines: GitDiffLine[];
     oldLine: number;
     newLine: number;
+    remainingOld: number;
+    remainingNew: number;
   } | null = null;
 
   for (const rawLine of diff.split('\n')) {
@@ -38,39 +51,50 @@ export function parseGitDiff(diff: string): readonly GitDiffHunk[] {
       if (current) hunks.push(finalizeHunk(current));
       const oldStart = Number(header[1]);
       const newStart = Number(header[3]);
+      const oldLines = Number(header[2] ?? 1);
+      const newLines = Number(header[4] ?? 1);
       current = {
         header: rawLine,
         oldStart,
-        oldLines: Number(header[2] ?? 1),
+        oldLines,
         newStart,
-        newLines: Number(header[4] ?? 1),
+        newLines,
         lines: [],
         oldLine: oldStart,
         newLine: newStart,
+        remainingOld: oldLines,
+        remainingNew: newLines,
       };
       continue;
     }
     if (!current) continue;
 
-    if (rawLine.startsWith('\\ No newline at end of file')) {
+    if (rawLine.startsWith('\\')) {
       current.lines.push({ type: 'metadata', content: rawLine });
-    } else if (rawLine.startsWith('+')) {
+      continue;
+    }
+    if (current.remainingOld <= 0 && current.remainingNew <= 0) continue;
+
+    if (rawLine.startsWith('+')) {
+      current.remainingNew--;
       current.lines.push({
         type: 'addition',
         content: rawLine.slice(1),
         newLine: current.newLine++,
       });
     } else if (rawLine.startsWith('-')) {
+      current.remainingOld--;
       current.lines.push({
         type: 'deletion',
         content: rawLine.slice(1),
         oldLine: current.oldLine++,
       });
-    } else {
-      const content = rawLine.startsWith(' ') ? rawLine.slice(1) : rawLine;
+    } else if (rawLine.startsWith(' ') || rawLine === '') {
+      current.remainingOld--;
+      current.remainingNew--;
       current.lines.push({
         type: 'context',
-        content,
+        content: rawLine.slice(1),
         oldLine: current.oldLine++,
         newLine: current.newLine++,
       });

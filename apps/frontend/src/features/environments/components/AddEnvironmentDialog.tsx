@@ -15,10 +15,16 @@ import {
   shouldWarnPlaintextHttpRuntime,
   sshPreflightCommands,
 } from '@mangostudio/shared/environments';
-import { useEffect, useId, useState } from 'react';
+import { Cable, Container, Globe, KeyRound, Laptop, SquareTerminal } from 'lucide-react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
+import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   type ContainerFormFields,
@@ -78,7 +84,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
   const { t } = useI18n();
   const labels = t.environments.entities.add;
   const create = useCreateEnvironmentMutation();
-  const titleId = useId();
+  const reachGroupName = useId();
 
   const [kind, setKind] = useState<ReachabilityChoice>('stdio');
   const [name, setName] = useState('');
@@ -160,13 +166,27 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
     containerInvalid ||
     (kind === 'wsl' && !selectionOffered);
 
-  const choices: { readonly value: ReachabilityChoice; readonly label: string }[] = [
-    { value: 'stdio', label: labels.reachLocal },
-    ...(wslOffered ? [{ value: 'wsl' as const, label: labels.reachWsl }] : []),
-    ...(containerOffered ? [{ value: 'container' as const, label: labels.reachContainer }] : []),
-    { value: 'websocket', label: labels.reachPaired },
-    { value: 'http', label: labels.reachDirect },
-    { value: 'ssh', label: labels.reachSsh },
+  const choices: {
+    readonly value: ReachabilityChoice;
+    readonly label: string;
+    readonly icon: ReactNode;
+  }[] = [
+    { value: 'stdio', label: labels.reachLocal, icon: <Laptop size={ICON_MD} /> },
+    ...(wslOffered
+      ? [{ value: 'wsl' as const, label: labels.reachWsl, icon: <SquareTerminal size={ICON_MD} /> }]
+      : []),
+    ...(containerOffered
+      ? [
+          {
+            value: 'container' as const,
+            label: labels.reachContainer,
+            icon: <Container size={ICON_MD} />,
+          },
+        ]
+      : []),
+    { value: 'websocket', label: labels.reachPaired, icon: <Cable size={ICON_MD} /> },
+    { value: 'http', label: labels.reachDirect, icon: <Globe size={ICON_MD} /> },
+    { value: 'ssh', label: labels.reachSsh, icon: <KeyRound size={ICON_MD} /> },
   ];
   const hints: Record<ReachabilityChoice, string> = {
     stdio: labels.stdioHint,
@@ -243,186 +263,179 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus.
-    <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-background/80 p-4 fade-in backdrop-blur-sm duration-200"
-      data-testid="add-environment-dialog"
-      onKeyDown={(event) => {
-        if (event.key !== 'Escape') return;
-        event.stopPropagation();
-        onClose();
-      }}
+    <Dialog
+      testId="add-environment-dialog"
+      title={labels.title}
+      description={labels.description}
+      onClose={onClose}
+      footer={
+        <>
+          {/* On the left, away from the actions: it leaves rather than selects.
+              The guided flow asks these same questions in an order that suits
+              somebody who has a bare machine and no environment yet, so it is
+              not one of the answers above and not a button of this form. The
+              ellipsis says a flow opens; what it walks through is the hover. */}
+          {onStartOnboarding ? (
+            <Button
+              variant="subtle"
+              onClick={onStartOnboarding}
+              title={labels.newMachineHint}
+              className="mr-auto"
+              data-testid="add-environment-onboarding"
+            >
+              {labels.reachNewMachine}
+            </Button>
+          ) : null}
+          <Button variant="secondary" onClick={onClose}>
+            {labels.cancel}
+          </Button>
+          <Button
+            variant="primary"
+            disabled={blocked}
+            loading={create.isPending}
+            onClick={() => void handleSubmit()}
+          >
+            {labels.submit}
+          </Button>
+        </>
+      }
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="max-h-full w-full max-w-md space-y-5 overflow-y-auto rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8"
-      >
-        <div className="space-y-1">
-          <h3 id={titleId} className="font-bold text-lg text-on-surface">
-            {labels.title}
-          </h3>
-          <p className="text-on-surface-variant/60 text-xs">{labels.description}</p>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <p className="font-medium text-on-surface-variant text-sm">{labels.reachLabel}</p>
-            <div className="grid gap-2" role="tablist">
+      <div className="space-y-4">
+        <div className="space-y-2">
+          {/* Real radios: one choice out of several, arrow keys between them,
+              announced as a group under its question. The current row wears the
+              navigation's mark (fill and 3px accent bar), as in every pick-one list. */}
+          <fieldset className="min-w-0 space-y-2">
+            <legend className="text-sm font-medium text-fg">{labels.reachLabel}</legend>
+            <div className="grid gap-2">
               {choices.map((choice) => (
-                <ReachabilityOption
+                <PickOneRow
                   key={choice.value}
-                  active={kind === choice.value}
-                  label={choice.label}
+                  name={reachGroupName}
+                  checked={kind === choice.value}
                   onSelect={() => setKind(choice.value)}
+                  icon={choice.icon}
+                  title={choice.label}
                 />
               ))}
             </div>
-            {/* Last, and it leaves rather than selects: the guided flow asks
-                these same questions in an order that suits somebody who has a
-                bare machine and no environment yet. Sibling to the tablist, not
-                inside it: it is not a tab and does not select a choice. */}
-            {onStartOnboarding ? (
-              <button
-                type="button"
-                onClick={onStartOnboarding}
-                data-testid="add-environment-onboarding"
-                className="mt-2 block w-full rounded-xl border border-outline-variant/20 border-dashed px-3 py-2 text-left font-semibold text-on-surface-variant/70 text-sm transition-colors hover:bg-surface-container-highest"
-              >
-                {labels.reachNewMachine}
-                <span className="mt-0.5 block font-normal text-on-surface-variant/55 text-xs">
-                  {labels.newMachineHint}
-                </span>
-              </button>
-            ) : null}
-            <div className="rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-              <p className="text-on-surface-variant/70 text-xs">{hints[kind]}</p>
-            </div>
-          </div>
+          </fieldset>
+          {/* Straight under the tiles: it explains the answer just picked. */}
+          <Callout tone="neutral">{hints[kind]}</Callout>
+        </div>
 
-          {kind === 'wsl' ? (
-            <div className="space-y-1">
-              <p className="font-medium text-on-surface-variant text-sm">{labels.wslDistroLabel}</p>
-              <WslDistributionPicker
-                distributions={distributions}
-                selected={selectedDistro}
-                onSelect={setDistro}
-              />
-            </div>
-          ) : null}
-
-          <Input
-            id="add-environment-name"
-            label={labels.nameLabel}
-            value={name}
-            autoFocus
-            maxLength={ENVIRONMENT_NAME_MAX_LENGTH}
-            // Only once something was typed: a blank untouched field is the
-            // starting state, not a mistake worth flagging.
-            error={name.length > 0 && trimmedName.length === 0 ? labels.nameRequired : undefined}
-            onChange={(event) => {
-              setNameEdited(true);
-              setName(event.target.value);
-            }}
-          />
-
+        {kind === 'wsl' ? (
           <div className="space-y-1">
-            <Input
-              id="add-environment-id"
-              label={labels.idLabel}
-              value={effectiveId}
-              maxLength={ENVIRONMENT_ID_MAX_LENGTH}
-              error={idInvalid ? labels.idInvalid : undefined}
-              onChange={(event) => {
-                setIdEdited(true);
-                setId(event.target.value);
-              }}
+            <p className="text-sm font-medium text-fg">{labels.wslDistroLabel}</p>
+            <WslDistributionPicker
+              distributions={distributions}
+              selected={selectedDistro}
+              onSelect={setDistro}
             />
-            {!idInvalid && <p className="text-on-surface-variant/60 text-xs">{labels.idHint}</p>}
           </div>
+        ) : null}
 
-          {kind === 'stdio' ? (
-            <>
-              <div className="space-y-1">
-                <Input
-                  id="add-environment-binary-path"
-                  label={`${labels.binaryPathLabel} · ${labels.optional}`}
-                  value={binaryPath}
-                  onChange={(event) => setBinaryPath(event.target.value)}
-                />
-                <p className="text-on-surface-variant/60 text-xs">{labels.binaryPathHint}</p>
-              </div>
+        <Input
+          id="add-environment-name"
+          label={labels.nameLabel}
+          value={name}
+          autoFocus
+          maxLength={ENVIRONMENT_NAME_MAX_LENGTH}
+          // Only once something was typed: a blank untouched field is the
+          // starting state, not a mistake worth flagging.
+          error={name.length > 0 && trimmedName.length === 0 ? labels.nameRequired : undefined}
+          onChange={(event) => {
+            setNameEdited(true);
+            setName(event.target.value);
+          }}
+        />
 
-              <div className="space-y-1">
-                <Input
-                  id="add-environment-cwd"
-                  label={`${labels.cwdLabel} · ${labels.optional}`}
-                  value={cwd}
-                  onChange={(event) => setCwd(event.target.value)}
-                />
-                <p className="text-on-surface-variant/60 text-xs">{labels.cwdHint}</p>
-              </div>
-            </>
-          ) : null}
+        <Input
+          id="add-environment-id"
+          label={labels.idLabel}
+          value={effectiveId}
+          maxLength={ENVIRONMENT_ID_MAX_LENGTH}
+          error={idInvalid ? labels.idInvalid : undefined}
+          onChange={(event) => {
+            setIdEdited(true);
+            setId(event.target.value);
+          }}
+          hint={labels.idHint}
+        />
 
-          {kind === 'container' ? (
-            <ContainerConfigFields
-              idPrefix="add-environment-container"
-              form={container}
-              errors={containerErrors}
-              detection={containers.data}
-              onChange={(patch) => setContainer((current) => ({ ...current, ...patch }))}
+        {kind === 'stdio' ? (
+          <OptionalFields label={labels.optional}>
+            <Input
+              id="add-environment-binary-path"
+              label={labels.binaryPathLabel}
+              value={binaryPath}
+              onChange={(event) => setBinaryPath(event.target.value)}
+              hint={labels.binaryPathHint}
             />
-          ) : null}
 
-          {kind === 'websocket' ? (
-            <p className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5 text-on-surface-variant/70 text-xs">
-              {labels.pairedNext}
-            </p>
-          ) : null}
+            <Input
+              id="add-environment-cwd"
+              label={labels.cwdLabel}
+              value={cwd}
+              onChange={(event) => setCwd(event.target.value)}
+              hint={labels.cwdHint}
+            />
+          </OptionalFields>
+        ) : null}
 
-          {kind === 'http' ? (
-            <>
-              <Input
-                id="add-environment-base-url"
-                label={labels.directBaseUrlLabel}
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-              />
-              {shouldWarnPlaintextHttpRuntime(trimmedBaseUrl) ? (
-                <p className="rounded-xl border border-warning/35 bg-warning/5 px-3 py-2.5 text-on-surface-variant text-xs">
-                  {labels.directPlaintextWarning}
-                </p>
-              ) : null}
-              <Input
-                id="add-environment-token"
-                label={labels.directTokenLabel}
-                type="password"
-                autoComplete="off"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-              />
-            </>
-          ) : null}
+        {kind === 'container' ? (
+          <ContainerConfigFields
+            idPrefix="add-environment-container"
+            form={container}
+            errors={containerErrors}
+            detection={containers.data}
+            onChange={(patch) => setContainer((current) => ({ ...current, ...patch }))}
+          />
+        ) : null}
 
-          {kind === 'ssh' ? (
-            <>
+        {kind === 'websocket' ? <Callout tone="info">{labels.pairedNext}</Callout> : null}
+
+        {kind === 'http' ? (
+          <>
+            <Input
+              id="add-environment-base-url"
+              label={labels.directBaseUrlLabel}
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+            />
+            {shouldWarnPlaintextHttpRuntime(trimmedBaseUrl) ? (
+              <Callout tone="warning">{labels.directPlaintextWarning}</Callout>
+            ) : null}
+            <Input
+              id="add-environment-token"
+              label={labels.directTokenLabel}
+              type="password"
+              autoComplete="off"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+            />
+          </>
+        ) : null}
+
+        {kind === 'ssh' ? (
+          <>
+            <Input
+              id="add-environment-ssh-host"
+              label={labels.sshHostLabel}
+              value={sshHost}
+              error={
+                sshHost.trim().length > 0 && SSH_LEADING_DASH.test(sshHost.trim())
+                  ? labels.sshDashInvalid
+                  : undefined
+              }
+              onChange={(event) => setSshHost(event.target.value)}
+            />
+
+            <OptionalFields label={labels.optional}>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Input
-                  id="add-environment-ssh-host"
-                  label={labels.sshHostLabel}
-                  value={sshHost}
-                  error={
-                    sshHost.trim().length > 0 && SSH_LEADING_DASH.test(sshHost.trim())
-                      ? labels.sshDashInvalid
-                      : undefined
-                  }
-                  onChange={(event) => setSshHost(event.target.value)}
-                />
-                <Input
                   id="add-environment-ssh-user"
-                  label={`${labels.sshUserLabel} · ${labels.optional}`}
+                  label={labels.sshUserLabel}
                   value={sshUser}
                   error={
                     sshUser.trim().length > 0 && SSH_LEADING_DASH.test(sshUser.trim())
@@ -433,7 +446,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                 />
                 <Input
                   id="add-environment-ssh-port"
-                  label={`${labels.sshPortLabel} · ${labels.optional}`}
+                  label={labels.sshPortLabel}
                   inputMode="numeric"
                   placeholder="22"
                   value={sshPort}
@@ -446,7 +459,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                 />
                 <Input
                   id="add-environment-ssh-identity"
-                  label={`${labels.sshIdentityFileLabel} · ${labels.optional}`}
+                  label={labels.sshIdentityFileLabel}
                   value={sshIdentityFile}
                   error={
                     sshIdentityFile.trim().length > 0 &&
@@ -458,82 +471,60 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                 />
               </div>
 
-              <div className="space-y-1">
-                <Input
-                  id="add-environment-ssh-runtime-path"
-                  label={`${labels.sshRuntimePathLabel} · ${labels.optional}`}
-                  placeholder={DEFAULT_SSH_RUNTIME_PATH}
-                  value={sshRuntimePath}
-                  error={
-                    sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
-                      ? labels.sshDashInvalid
-                      : undefined
-                  }
-                  onChange={(event) => setSshRuntimePath(event.target.value)}
+              <Input
+                id="add-environment-ssh-runtime-path"
+                label={labels.sshRuntimePathLabel}
+                placeholder={DEFAULT_SSH_RUNTIME_PATH}
+                value={sshRuntimePath}
+                error={
+                  sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
+                    ? labels.sshDashInvalid
+                    : undefined
+                }
+                onChange={(event) => setSshRuntimePath(event.target.value)}
+                hint={labels.sshRuntimePathHint}
+              />
+            </OptionalFields>
+
+            {sshConfig.host ? (
+              <div className="space-y-2">
+                <Callout tone="info">{labels.sshPreflight}</Callout>
+                <CopyLine
+                  label={labels.sshPreflightReach}
+                  value={sshPreflightCommands(sshConfig).reach}
                 />
-                <p className="text-on-surface-variant/60 text-xs">{labels.sshRuntimePathHint}</p>
               </div>
-
-              {sshConfig.host ? (
-                <div className="space-y-2 rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-                  <p className="text-on-surface-variant/70 text-xs">{labels.sshPreflight}</p>
-                  <CopyLine
-                    label={labels.sshPreflightReach}
-                    value={sshPreflightCommands(sshConfig).reach}
-                  />
-                </div>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-
-        {error ? (
-          <p className="text-error text-xs" role="alert">
-            {error}
-          </p>
+            ) : null}
+          </>
         ) : null}
-
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onClose} className="flex-1">
-            {labels.cancel}
-          </Button>
-          <Button
-            variant="primary"
-            className="flex-1"
-            disabled={blocked}
-            loading={create.isPending}
-            onClick={() => void handleSubmit()}
-          >
-            {labels.submit}
-          </Button>
-        </div>
       </div>
-    </div>
+
+      {error ? (
+        <Callout tone="danger" role="alert">
+          {error}
+        </Callout>
+      ) : null}
+    </Dialog>
   );
 }
 
-function ReachabilityOption({
-  active,
+/**
+ * Fields the request does without. The heading says so once; a suffix on every
+ * label said it again four times over, in the label's own weight and colour.
+ */
+function OptionalFields({
   label,
-  onSelect,
+  children,
 }: {
-  readonly active: boolean;
   readonly label: string;
-  readonly onSelect: () => void;
+  readonly children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onSelect}
-      className={`rounded-xl border px-3 py-2 text-left font-semibold text-sm transition-colors ${
-        active
-          ? 'border-primary/45 bg-primary/10 text-on-surface'
-          : 'border-outline-variant/20 text-on-surface-variant/70 hover:bg-surface-container-highest'
-      }`}
-    >
-      {label}
-    </button>
+    <fieldset className="min-w-0 space-y-3">
+      <legend className="mb-2">
+        <MicroLabel>{label}</MicroLabel>
+      </legend>
+      {children}
+    </fieldset>
   );
 }

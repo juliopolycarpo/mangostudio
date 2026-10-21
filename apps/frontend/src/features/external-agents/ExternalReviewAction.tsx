@@ -26,6 +26,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
 import { ExternalRefusalError } from '@/lib/external-refusal-error';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import { externalRefusalLine } from './external-unavailable-text';
 import { useExternalAgents } from './useExternalAgents';
@@ -64,7 +65,7 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
   };
 
   return (
-    <div className="space-y-1.5 rounded-xl border border-outline-variant/15 bg-surface-container/35 p-3">
+    <div className="space-y-2 rounded-md border border-stroke bg-surface p-3">
       <Button
         type="button"
         variant="secondary"
@@ -74,10 +75,10 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
         loading={pending}
         onClick={() => void startReview()}
       >
-        <ScanSearch size={14} aria-hidden="true" />
+        <ScanSearch size={ICON_SM} aria-hidden="true" />
         {pending ? labels.running : labels.button}
       </Button>
-      <p className="text-[11px] leading-4 text-on-surface-variant">
+      <p className="text-xs text-fg-muted">
         {hasChanges
           ? labels.hint.replace('{vendor}', t.externalAgents.target[targetId])
           : labels.noChanges}

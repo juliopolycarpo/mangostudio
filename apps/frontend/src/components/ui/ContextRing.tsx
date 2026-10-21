@@ -4,35 +4,53 @@ import { useI18n } from '@/hooks/use-i18n';
 interface ContextRingProps {
   ratio: number;
   severity: ContextSeverity;
+  /**
+   * Draws the percentage inside the ring. Turn it off where the caller prints
+   * the figure beside the ring in running text, as the composer's chip does: a
+   * digit that fits a 20px ring is 8px tall, which nobody reads at arm's length.
+   */
+  showValue?: boolean;
 }
 
 /**
  * Arc colour per band. A record rather than a ternary chain so adding a sixth
  * band to the schema is a type error here instead of a ring that silently
  * stays green.
+ *
+ * `normal` and `info` are `fg`, not the accent: mango is for the primary
+ * action, the current item and focus, and a healthy 62% is none of them. It
+ * also sat a shade from `warning`, so a ring that had escalated barely looked
+ * different from one that had not.
+ *
+ * The track is `stroke`, the hairline token, not `fg-subtle`: a gauge's track
+ * is structure, like a card's edge. Against `fg-subtle` the arc was 2.4:1 (dark)
+ * and 3:1 (light), and two 2.5px antialiased strokes that close in value fused
+ * into one band at 16px, so a 62% ring read as a full circle. Against `stroke`
+ * the `fg` arc is 10.5:1 and 12.8:1, and the open segment reads as open.
  */
 const SEVERITY_STROKE: Record<ContextSeverity, string> = {
-  normal: 'stroke-primary',
-  info: 'stroke-primary',
+  normal: 'stroke-fg',
+  info: 'stroke-fg',
   warning: 'stroke-warning',
-  danger: 'stroke-error',
-  critical: 'stroke-error',
+  danger: 'stroke-danger',
+  critical: 'stroke-danger',
 };
 
 /**
  * Tiny circular progress ring for context usage.
  *
- * One size for every surface. The composer briefly drew a smaller one and it
- * was the wrong lever: what made the chip unreadable was contrast, not
- * diameter, and two sizes only meant two sets of numbers to keep legible.
+ * With the figure inside it the ring is 20px on every surface: the composer
+ * briefly drew a smaller one and it was the wrong lever, since what made the
+ * chip unreadable was contrast, not diameter. Without the figure
+ * (`showValue={false}`) it is a 16px glyph, the size of the icons around it.
  *
  * Callers that already name the ring — a button with its own `aria-label`, or
  * an `aria-hidden` wrapper — swallow the SVG `<title>` below, which is what
  * both of the current call sites do.
  */
-export function ContextRing({ ratio, severity }: ContextRingProps) {
+export function ContextRing({ ratio, severity, showValue = true }: ContextRingProps) {
   const { t } = useI18n();
-  const size = 20;
+  const size = showValue ? 20 : 16;
   const stroke = 2.5;
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
@@ -54,11 +72,13 @@ export function ContextRing({ ratio, severity }: ContextRingProps) {
           r={r}
           fill="none"
           // A tenth of an opacity was enough on the sidebar's own surface and
-          // vanished on the composer's accent-tinted band: with nothing to see
-          // but a 1px arc, a chat under 15% of its window read as an empty gap
-          // where the chip should be. The track is the thing that says "there
-          // is a ring here" at every value, so it has to survive both surfaces.
-          className="stroke-on-surface/25"
+          // vanished on the composer's band: with nothing to see but a 1px arc,
+          // a chat under 15% of its window read as an empty gap where the chip
+          // should be. The track is the thing that says "there is a ring here"
+          // at every value, so it is a solid token — the same `stroke` hairline
+          // that draws the composer's own frame — rather than a faded one, and
+          // a step quieter than the arc so the unused part reads as unused.
+          className="stroke-stroke"
           strokeWidth={stroke}
         />
         <circle
@@ -74,9 +94,14 @@ export function ContextRing({ ratio, severity }: ContextRingProps) {
         />
       </svg>
       {/* The number carries the value at low percentages, where the arc is a
-          dot; `on-surface` rather than the muted variant because 8px of muted
-          text on a tinted band is not a number anyone reads. */}
-      <span className="absolute text-[8px] font-bold tabular-nums text-on-surface">{pct}</span>
+          dot; `fg` rather than the muted variant because 8px of muted text is
+          not a number anyone reads. It is a glyph drawn inside the ring, not
+          running text, which is why it is below the type scale's floor — and
+          why the composer, which has room, prints its figure beside the ring
+          at a real size instead. */}
+      {showValue && (
+        <span className="absolute text-[8px] font-semibold tabular-nums text-fg">{pct}</span>
+      )}
     </div>
   );
 }

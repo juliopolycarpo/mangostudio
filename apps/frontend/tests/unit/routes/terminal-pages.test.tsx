@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { render, screen, waitFor, within } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
@@ -91,7 +91,19 @@ describe('/terminal route', () => {
 
     render(<TerminalIndexPage />);
 
-    expect(await screen.findByText('No terminals are open for this environment.')).toBeVisible();
+    expect(await screen.findByText('No terminals are open for this environment')).toBeVisible();
+  });
+
+  // The same empty state the chat's rail panel draws: what is missing, how to
+  // get some, and the one button that does it. The header does not repeat it.
+  it('offers a single New terminal action, in the empty state, when nothing is open', async () => {
+    mockLocalEnvironment();
+
+    render(<TerminalIndexPage />);
+
+    expect(await screen.findByText('Open one to run commands in this environment.')).toBeVisible();
+    expect(screen.getAllByRole('button', { name: 'New terminal' })).toHaveLength(1);
+    expect(screen.queryByRole('heading', { name: 'Sessions' })).toBeNull();
   });
 
   function postCount(): number {
@@ -111,7 +123,7 @@ describe('/terminal route', () => {
     });
 
     render(<TerminalIndexPage />);
-    await screen.findByText('No terminals are open for this environment.');
+    await screen.findByText('No terminals are open for this environment');
     await user.click(screen.getByRole('button', { name: 'New terminal' }));
 
     expect(
@@ -129,7 +141,7 @@ describe('/terminal route', () => {
     fetchScenario.failWithNetworkError('POST', '/api/terminals');
 
     render(<TerminalIndexPage />);
-    await screen.findByText('No terminals are open for this environment.');
+    await screen.findByText('No terminals are open for this environment');
     await user.click(screen.getByRole('button', { name: 'New terminal' }));
 
     expect(await screen.findByText('Could not open a terminal. Try again.')).toBeVisible();
@@ -160,6 +172,139 @@ describe('/terminal route', () => {
         )
       ).toBeVisible()
     );
+    // A refusal that belongs to this environment keeps the chip: another one may work.
+    expect(screen.getByText('Local')).toBeInTheDocument();
+  });
+
+  it('shows only the notice when the environment refuses and nothing is open', async () => {
+    fetchScenario.respondWithJson('GET', '/api/environments', {
+      body: [{ id: 'local', name: 'Local', enabled: true, status: { state: 'connected' } }],
+    });
+    fetchScenario.respondWithJson('GET', '/api/terminals/availability?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        available: false,
+        reason: 'disabled',
+        shells: [],
+        openSessions: 0,
+        maxSessions: 0,
+      },
+    });
+    fetchScenario.respondWithJson('GET', '/api/terminals?environmentId=local', {
+      body: { sessions: [] },
+    });
+
+    render(<TerminalIndexPage />);
+
+    expect(await screen.findByText('Terminal is unavailable')).toBeVisible();
+    expect(screen.getByText('Terminals are turned off on this hub.')).toBeVisible();
+    // Nothing to list and nothing to press: the controls the refusal makes inert
+    // are not drawn beside it.
+    await waitFor(() => expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.queryByRole('heading', { name: 'Sessions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New terminal' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('No terminals are open for this environment')
+    ).not.toBeInTheDocument();
+    // Switched off on the hub is off everywhere, so the environment chip is not drawn either.
+    expect(screen.queryByText('Local')).not.toBeInTheDocument();
+  });
+
+  it('marks the row whose terminal is open', async () => {
+    const user = userEvent.setup();
+    mockLocalEnvironment();
+    fetchScenario.respondWithJson('GET', '/api/terminals?environmentId=local', {
+      body: {
+        sessions: ['term-1', 'term-2'].map((id, index) => ({
+          id,
+          environmentId: 'local',
+          chatId: null,
+          title: `Terminal ${index + 1}`,
+          shell: 'bash',
+          cwd: null,
+          cols: 80,
+          rows: 24,
+          status: 'running',
+          attached: false,
+          createdAt: 1,
+          lastActivityAt: 1,
+        })),
+      },
+    });
+
+    render(<TerminalIndexPage />);
+    const rows = await screen.findAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).not.toHaveClass('bg-fill-selected');
+
+    await user.click(within(rows[1]).getByRole('button', { name: 'Open here' }));
+
+    // The selected fill (with the accent bar) is the sighted cue, and the
+    // row's action says what it does now: it is the way to put the view away,
+    // not a second "Open here" with a pressed state nobody can see.
+    expect(rows[1]).toHaveClass('bg-fill-selected');
+    expect(within(rows[1]).queryByRole('button', { name: 'Open here' })).toBeNull();
+    expect(within(rows[1]).getByRole('button', { name: 'Hide' })).not.toHaveAttribute(
+      'aria-pressed'
+    );
+    expect(rows[0]).not.toHaveClass('bg-fill-selected');
+    expect(within(rows[0]).getByRole('button', { name: 'Open here' })).toBeEnabled();
+
+    await user.click(within(rows[1]).getByRole('button', { name: 'Hide' }));
+
+    expect(rows[1]).not.toHaveClass('bg-fill-selected');
+    expect(within(rows[1]).getByRole('button', { name: 'Open here' })).toBeEnabled();
+  });
+
+  // The cap is per user and only this page lists every session, so a row that
+  // can only be hidden leaves "maximum number of open terminals" with no way out.
+  it('closes a session from its row after a confirmation, and puts the open view away', async () => {
+    const user = userEvent.setup();
+    mockLocalEnvironment();
+    const listUrl = '/api/terminals?environmentId=local';
+    fetchScenario.respondWithJson('GET', listUrl, {
+      body: {
+        sessions: [
+          {
+            id: 'term-1',
+            environmentId: 'local',
+            chatId: null,
+            title: 'Terminal 1',
+            shell: 'bash',
+            cwd: null,
+            cols: 80,
+            rows: 24,
+            status: 'running',
+            attached: false,
+            createdAt: 1,
+            lastActivityAt: 1,
+          },
+        ],
+      },
+    });
+    fetchScenario.respondWithJson('DELETE', '/api/terminals/term-1', { status: 204 });
+
+    render(<TerminalIndexPage />);
+    const row = (await screen.findAllByRole('listitem'))[0];
+    await user.click(within(row).getByRole('button', { name: 'Open here' }));
+    expect(screen.getByTestId('terminal-view-stub')).toHaveTextContent('term-1');
+
+    await user.click(within(row).getByRole('button', { name: 'Close terminal' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Close this terminal?' });
+    expect(fetchScenario.fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(
+      false
+    );
+
+    fetchScenario.respondWithJson('GET', listUrl, { body: { sessions: [] } });
+    await user.click(within(dialog).getByRole('button', { name: 'Close terminal' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Close this terminal?' })).not.toBeInTheDocument()
+    );
+    expect(fetchScenario.fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(
+      true
+    );
+    expect(screen.queryByTestId('terminal-view-stub')).not.toBeInTheDocument();
   });
 
   it('still lists the sessions that fill the per-user cap, refusing only a new one', async () => {

@@ -2,10 +2,17 @@
  * Skills settings page: third-party source opt-ins plus per-skill toggles.
  */
 
-import { Button } from '@/components/ui/Button';
+import { Sparkles } from 'lucide-react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
+import { Callout } from '@/components/ui/Callout';
+import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { useSkillSettings } from '../hooks/use-skill-settings';
-import { SkillCard } from './SkillCard';
+import { SkillRow } from './SkillRow';
 import { SkillSourceToggles } from './SkillSourceToggles';
 
 export function SkillsSettingsPage() {
@@ -13,40 +20,36 @@ export function SkillsSettingsPage() {
   const s = t.settings.skills;
   const { skills, sources, isLoading, error, refetch } = useSkillSettings();
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
-      </div>
-    );
-  }
-
-  if (error || !sources) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-error">{s.loadError}</p>
-        <Button variant="ghost" size="sm" onClick={() => void refetch()}>
-          {t.common.retry}
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <p className="text-sm text-on-surface-variant/60">{s.description}</p>
-
-      <SkillSourceToggles sources={sources} />
-
-      {skills.length === 0 ? (
-        <p className="text-sm text-on-surface-variant/60 text-center py-8">{s.noSkills}</p>
+    <SettingsPage title={s.title} description={s.description}>
+      {isLoading ? (
+        <SettingsLoading shape="card" count={2} />
+      ) : error || !sources ? (
+        <SettingsLoadError message={s.loadError} onRetry={() => void refetch()} />
       ) : (
-        <div className="space-y-3">
-          {skills.map((skill) => (
-            <SkillCard key={skill.key} descriptor={skill} />
-          ))}
-        </div>
+        <>
+          <SkillSourceToggles sources={sources} />
+
+          {skills.length === 0 ? (
+            <Card padded={false}>
+              <EmptyState icon={<Sparkles size={ICON_LG} />} title={s.noSkills} />
+            </Card>
+          ) : (
+            <SettingsSection
+              title={s.installedTitle}
+              notice={
+                skills.some((skill) => skill.shadowed) ? (
+                  <Callout tone="info">{s.shadowedNotice}</Callout>
+                ) : undefined
+              }
+            >
+              {skills.map((skill) => (
+                <SkillRow key={skill.key} descriptor={skill} />
+              ))}
+            </SettingsSection>
+          )}
+        </>
       )}
-    </div>
+    </SettingsPage>
   );
 }

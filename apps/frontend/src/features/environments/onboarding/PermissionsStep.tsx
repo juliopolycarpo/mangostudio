@@ -18,8 +18,11 @@
 import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { RuntimeConsentDialog } from '../components/RuntimeConsentDialog';
 import { useRuntimeSetupMutation } from '../queries';
@@ -68,25 +71,26 @@ export function PermissionsStep({
 
   return (
     <div className="space-y-4" data-testid="onboarding-permissions-step">
-      <p className="text-on-surface-variant/70 text-xs">
+      <p className="text-sm text-fg-muted">
         {endState === 'paired' ? labels.permissionsPairedIntro : labels.permissionsSshIntro}
       </p>
 
-      <div className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5">
-        <p className="flex items-center gap-1.5 font-semibold text-on-surface text-sm">
-          <ShieldCheck size={14} className="text-primary/80" aria-hidden="true" />
+      <div className="flex items-center justify-between gap-3 rounded-md border border-stroke p-3">
+        <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-fg">
+          <ShieldCheck size={ICON_MD} className="shrink-0 text-fg-muted" aria-hidden="true" />
           {consent
             ? formatMessage(labels.permissionsChosen, { profile: profiles[consent.profile] })
             : labels.permissionsNone}
         </p>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => setOpen(true)}
           data-testid="onboarding-open-consent"
-          className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary/10 px-2 font-semibold text-[11px] text-primary transition-colors hover:bg-primary/15"
+          className="shrink-0"
         >
           {consent ? labels.permissionsChange : labels.permissionsChoose}
-        </button>
+        </Button>
       </div>
 
       {open ? (
@@ -101,9 +105,9 @@ export function PermissionsStep({
       ) : null}
 
       {error ? (
-        <p className="text-error text-xs" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
 
       <StepActions

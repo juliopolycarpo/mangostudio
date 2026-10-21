@@ -1,6 +1,9 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { Check, Copy } from 'lucide-react';
 import { useClipboard } from '@/hooks/use-clipboard';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
+import { TURN_ACTION_REVEAL } from '../lib/turn-action-reveal';
 import { extractRawMarkdown } from './message-content';
 
 interface CopyMessageButtonProps {
@@ -27,10 +30,15 @@ export function CopyMessageButton({ msg, label, copiedLabel }: CopyMessageButton
     <button
       type="button"
       onClick={() => void handleCopy()}
-      className="opacity-0 group-hover:opacity-70 hover:!opacity-100 transition-opacity duration-200 text-on-surface-variant/60 hover:text-on-surface-variant cursor-pointer"
+      // Revealed with the turn's other actions. The negative margin keeps the
+      // 24px target from making the separator row taller once the turn settles.
+      className={cn(
+        '-my-0.5 flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg',
+        TURN_ACTION_REVEAL
+      )}
       title={copied ? copiedLabel : label}
     >
-      {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+      {copied ? <Check size={ICON_SM} className="text-success" /> : <Copy size={ICON_SM} />}
     </button>
   );
 }

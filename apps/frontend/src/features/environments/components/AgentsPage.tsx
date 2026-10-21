@@ -66,7 +66,7 @@ export function AgentsPage() {
       {statuses.length === 0 ? (
         <EnvironmentPageState variant="empty" title={e.agents.empty} hint={e.agents.emptyHint} />
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {statuses.map((status) => (
             <AgentCliCard
               key={status.targetId}

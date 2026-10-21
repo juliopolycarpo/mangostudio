@@ -23,6 +23,7 @@ Useful docs:
 - `docs/protocol/` — Mango Protocol guides; `packages/protocol/AGENTS.md` is its contributor guide
 - `docs/architecture/external-agents.md` — hosting vendor CLIs: ownership, discovery, permissions
 - `docs/architecture/frontend-build.md` — how the frontend bundle is built, served, and embedded
+- `docs/design/` — flat design system: tokens, primitives, patterns; conformance test enforces it
 - `docs/reference/testing.md` — test taxonomy and harness rules
 - `docs/reference/agent-playbooks.md` — detailed file maps by feature area
 - `docs/reference/releasing.md` — changelog (`bun run changelog`) and release pipeline

@@ -13,9 +13,12 @@
 import type { Environment } from '@mangostudio/shared/environments';
 import { PlugZap, ShieldOff } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { useConnectEnvironmentMutation } from '../queries';
+import { TOOL_CARD_SURFACE } from './ToolCard';
 
 interface EnvironmentScopeNoticeProps {
   readonly environment: Environment;
@@ -50,32 +53,29 @@ export function EnvironmentScopeNotice({
 
   return (
     <div
-      className="flex flex-col items-center gap-2 rounded-2xl border border-outline-variant/15 bg-surface-container-high py-10 text-center"
+      className={TOOL_CARD_SURFACE}
       data-testid="environment-scope-notice"
       data-reason={reason}
       data-surface={surface}
     >
-      {notPermitted ? (
-        <ShieldOff size={26} className="text-on-surface-variant/50" />
-      ) : (
-        <PlugZap size={26} className="text-warning" />
-      )}
-      <p className="text-sm font-semibold text-on-surface">
-        {formatMessage(title, {
-          environment: environment.name,
-        })}
-      </p>
-      <p className="max-w-md text-sm text-on-surface-variant/60">{hint}</p>
-      {!notPermitted && (
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={connect.isPending}
-          onClick={() => connect.mutate(environment.id)}
-        >
-          {e.scope.connect}
-        </Button>
-      )}
+      <EmptyState
+        icon={notPermitted ? <ShieldOff size={ICON_LG} /> : <PlugZap size={ICON_LG} />}
+        tone={notPermitted ? 'neutral' : 'warning'}
+        title={formatMessage(title, { environment: environment.name })}
+        hint={hint}
+        action={
+          notPermitted ? undefined : (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={connect.isPending}
+              onClick={() => connect.mutate(environment.id)}
+            >
+              {e.scope.connect}
+            </Button>
+          )
+        }
+      />
     </div>
   );
 }

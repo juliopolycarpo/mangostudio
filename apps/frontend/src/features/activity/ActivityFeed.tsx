@@ -10,9 +10,12 @@
 
 import type { ActivityEvent } from '@mangostudio/shared/activity';
 import type { Messages } from '@mangostudio/shared/i18n';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import type { StatusDotTone } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatRelativeTime } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { compactElapsed } from './lib/compact-time';
 import { describeActivity } from './lib/describe-activity';
 import {
   activityDayGroupLabel,
@@ -30,12 +33,14 @@ export interface ActivityFeedProps {
   readonly lastSeenAt?: number | null;
 }
 
-const TONE_ICON_CLASS: Record<StatusDotTone, string> = {
-  accent: 'text-primary',
+/**
+ * Only a status earns a colour; every other tone reads as a resting icon. The
+ * accent is not a status, so an event that merely happened is not tinted.
+ */
+const STATUS_ICON_CLASS: Partial<Record<StatusDotTone, string>> = {
   success: 'text-success',
   warning: 'text-warning',
-  error: 'text-error',
-  neutral: 'text-on-surface-variant/60',
+  error: 'text-danger',
 };
 
 export function ActivityFeed({
@@ -49,7 +54,7 @@ export function ActivityFeed({
   const rows = maxRows !== undefined ? events.slice(0, maxRows) : events;
 
   if (rows.length === 0) {
-    return <p className="text-xs text-on-surface-variant/70">{labels.empty}</p>;
+    return <p className="text-xs text-fg-muted">{labels.empty}</p>;
   }
 
   if (compact) {
@@ -74,18 +79,17 @@ export function ActivityFeed({
     <div className="space-y-4">
       {groups.map((group) => (
         <div key={group.key} className="space-y-2">
-          <p className="micro-label text-on-surface-variant/60">
-            {activityDayGroupLabel(group, labels, locale)}
-          </p>
+          <MicroLabel as="p">{activityDayGroupLabel(group, labels, locale)}</MicroLabel>
           <ul className="space-y-2">
             {group.events.map((event) => {
               const showDivider = event.id === dividerEventId;
               return (
                 <li key={event.id}>
                   {showDivider ? (
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-primary/70">
-                      {labels.sinceLastVisit}
-                    </p>
+                    <div className="mb-2 flex items-center gap-2">
+                      <MicroLabel as="p">{labels.sinceLastVisit}</MicroLabel>
+                      <span aria-hidden="true" className="h-px flex-1 bg-stroke" />
+                    </div>
                   ) : null}
                   <ActivityRow event={event} locale={locale} t={t} />
                 </li>
@@ -100,15 +104,31 @@ export function ActivityFeed({
 
 function ActivityRow({ event, locale, t }: { event: ActivityEvent; locale: string; t: Messages }) {
   const { text, icon: Icon, tone } = describeActivity(event, t, locale);
+  const when = formatRelativeTime(event.createdAt, locale);
   return (
-    <div className="flex min-w-0 items-start gap-2 text-sm">
-      <Icon aria-hidden="true" className={`mt-0.5 size-3.5 shrink-0 ${TONE_ICON_CLASS[tone]}`} />
-      <p className="min-w-0 flex-1 truncate text-on-surface-variant">{text}</p>
+    // `items-start`: a subject that wraps to a second line keeps the glyph and the
+    // time on the first one, where the sentence begins.
+    <div className="flex min-w-0 items-start gap-2 text-xs">
+      <Icon
+        aria-hidden="true"
+        size={ICON_SM}
+        className={`mt-0.5 shrink-0 ${STATUS_ICON_CLASS[tone] ?? 'text-fg-muted'}`}
+      />
+      {/* What happened comes first and gets the room: two lines before it is cut,
+          and the whole sentence on hover. */}
+      <p className="line-clamp-2 min-w-0 flex-1 break-words text-fg-muted" title={text}>
+        {text}
+      </p>
+      {/* A fixed column, so every subject ends at the same x whatever its age. The
+          short form is for the eye; the full phrase is the tooltip and what a
+          screen reader hears ("37m" reads as a letter). */}
       <time
         dateTime={new Date(event.createdAt).toISOString()}
-        className="shrink-0 text-xs text-on-surface-variant/50"
+        title={when}
+        className="w-10 shrink-0 text-right tabular-nums text-fg-subtle"
       >
-        {formatRelativeTime(event.createdAt, locale)}
+        <span aria-hidden="true">{compactElapsed(event.createdAt, t.home.activity)}</span>
+        <span className="sr-only">{when}</span>
       </time>
     </div>
   );

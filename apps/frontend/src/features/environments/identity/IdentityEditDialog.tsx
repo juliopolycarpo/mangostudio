@@ -8,8 +8,10 @@
  */
 
 import { normalizeMonogram, TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
-import { type KeyboardEvent, useEffect, useId, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { ToolAvatar, type ToolImageDisplay } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
@@ -59,7 +61,6 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   const { t } = useI18n();
   const labels = t.environments.identity;
   const save = useSaveToolIdentity();
-  const titleId = useId();
 
   // Seeded from the stored overrides, never from the resolved values: a stored
   // monogram that happens to equal the derived one still has to come back as
@@ -126,105 +127,80 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
     );
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Escape') return;
-    event.stopPropagation();
-    onClose();
-  };
-
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus.
-    <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-background/80 p-4 fade-in backdrop-blur-sm duration-200"
-      data-testid="identity-edit-dialog"
-      onKeyDown={handleKeyDown}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="max-h-full w-full max-w-md space-y-5 overflow-y-auto rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8"
-      >
-        <div className="flex items-center gap-3">
-          <ToolAvatar
-            subjectKey={identity.subjectKey}
-            monogram={previewMonogram}
-            name={previewName}
-            image={previewImage}
-            size="lg"
-          />
-          <div className="min-w-0 space-y-0.5">
-            <h3 id={titleId} className="truncate font-bold text-lg text-on-surface">
-              {formatMessage(labels.dialogTitle, { name: identity.name })}
-            </h3>
-            <p className="text-on-surface-variant/60 text-xs">{labels.preview}</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <Input
-              id="tool-identity-name"
-              label={labels.nameLabel}
-              value={name}
-              // The dialog exists to edit this field; opening it and landing
-              // outside the form is the keyboard user's version of a dead end.
-              autoFocus
-              maxLength={64}
-              placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
-              onChange={(event) => setName(event.target.value)}
-            />
-            <p className="text-on-surface-variant/60 text-xs">{labels.nameHint}</p>
-          </div>
-
-          <div className="space-y-1">
-            <Input
-              id="tool-identity-monogram"
-              label={labels.monogramLabel}
-              value={monogram}
-              maxLength={2}
-              placeholder={deriveMonogram(previewName)}
-              error={monogramInvalid ? labels.monogramInvalid : undefined}
-              onChange={(event) => setMonogram(event.target.value)}
-            />
-            {!monogramInvalid && (
-              <p className="text-on-surface-variant/60 text-xs">{labels.monogramHint}</p>
-            )}
-          </div>
-
-          <ToolImageFields
-            mode={imageMode}
-            onModeChange={setImageMode}
-            file={file}
-            onFileChange={setFile}
-            hasStoredUpload={hasStoredUpload}
-            fileTooLarge={fileTooLarge}
-            url={imageUrl}
-            onUrlChange={setImageUrl}
-            cache={cacheImage}
-            onCacheChange={setCacheImage}
-            urlInvalid={urlInvalid && trimmedUrl.length > 0}
-          />
-        </div>
-
-        {save.isError && <p className="text-error text-xs">{labels.saveFailed}</p>}
-
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onClose} className="flex-1">
+    <Dialog
+      testId="identity-edit-dialog"
+      onClose={onClose}
+      title={formatMessage(labels.dialogTitle, { name: identity.name })}
+      truncateTitle
+      description={labels.preview}
+      leading={
+        <ToolAvatar
+          subjectKey={identity.subjectKey}
+          monogram={previewMonogram}
+          name={previewName}
+          image={previewImage}
+          size="lg"
+        />
+      }
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
             {labels.cancel}
           </Button>
           <Button
             variant="primary"
-            className="flex-1"
             disabled={blocked}
             loading={save.isPending}
             onClick={handleSave}
           >
             {labels.save}
           </Button>
-        </div>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Input
+          id="tool-identity-name"
+          label={labels.nameLabel}
+          value={name}
+          // The dialog exists to edit this field; opening it and landing
+          // outside the form is the keyboard user's version of a dead end.
+          autoFocus
+          maxLength={64}
+          placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
+          onChange={(event) => setName(event.target.value)}
+          hint={labels.nameHint}
+        />
+
+        <Input
+          id="tool-identity-monogram"
+          label={labels.monogramLabel}
+          value={monogram}
+          maxLength={2}
+          placeholder={deriveMonogram(previewName)}
+          error={monogramInvalid ? labels.monogramInvalid : undefined}
+          onChange={(event) => setMonogram(event.target.value)}
+          hint={labels.monogramHint}
+        />
+
+        <ToolImageFields
+          mode={imageMode}
+          onModeChange={setImageMode}
+          file={file}
+          onFileChange={setFile}
+          hasStoredUpload={hasStoredUpload}
+          fileTooLarge={fileTooLarge}
+          url={imageUrl}
+          onUrlChange={setImageUrl}
+          cache={cacheImage}
+          onCacheChange={setCacheImage}
+          urlInvalid={urlInvalid && trimmedUrl.length > 0}
+        />
       </div>
-    </div>
+
+      {save.isError && <Callout tone="danger">{labels.saveFailed}</Callout>}
+    </Dialog>
   );
 }
 

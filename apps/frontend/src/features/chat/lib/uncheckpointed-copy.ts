@@ -1,6 +1,6 @@
 import type { UncheckpointedWriteSource } from '@mangostudio/shared/file-checkpoints';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { formatMessage } from '@/lib/i18n-format';
+import { type PluralForms, pluralMessage } from '@/hooks/use-plural';
 
 type FileCheckpointLabels = Messages['chat']['fileCheckpoints'];
 
@@ -43,13 +43,21 @@ export function uncheckpointedWarning(
   return variant ? labels[`uncheckpointed${variant}`] : null;
 }
 
-/** The post-revert result, restated rather than reported as a bare count. */
+/**
+ * The post-revert result, restated rather than reported as a bare count.
+ *
+ * Each combination has a `One` and an `Other` sentence, so the count agrees
+ * with its noun in the viewer's language.
+ */
 export function revertedMessage(
   revertedFiles: number,
   sources: ReadonlyArray<UncheckpointedWriteSource>,
-  labels: FileCheckpointLabels
+  labels: FileCheckpointLabels,
+  locale: string
 ): string {
   const variant = variantOf(sources);
-  const template = variant ? labels[`revertedWith${variant}`] : labels.reverted;
-  return formatMessage(template, { count: String(revertedFiles) });
+  const forms: PluralForms = variant
+    ? { one: labels[`revertedWith${variant}One`], other: labels[`revertedWith${variant}Other`] }
+    : { one: labels.revertedOne, other: labels.revertedOther };
+  return pluralMessage(forms, revertedFiles, locale);
 }

@@ -2,7 +2,11 @@ import type { TerminalSession } from '@mangostudio/shared/terminal';
 import { ExternalLink, Pencil, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { FIELD_CLASS } from '@/components/ui/Input';
+import { Tabs } from '@/components/ui/Tabs';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 export interface SessionTabsProps {
   readonly sessions: readonly TerminalSession[];
@@ -18,6 +22,15 @@ export interface SessionTabsProps {
   readonly onRename: (id: string, title: string) => void;
   readonly onPopOut: (id: string) => void;
 }
+
+/**
+ * Rename and pop out take no room until the tab is hovered or holds focus (and
+ * always on a touch screen, which has no hover). Faded out with `opacity-0`
+ * they still held 48px, so a resting "bash" was followed by a gap with the
+ * accent rule stretched under it. Close stays, as a tab's close always does.
+ */
+const TAB_ACTION_ON_DEMAND =
+  'size-6 hidden group-hover:inline-flex group-focus-within:inline-flex pointer-coarse:inline-flex';
 
 /**
  * The chat's open terminal sessions as a tab strip: select, rename inline,
@@ -66,96 +79,87 @@ export function SessionTabs({
     if (trimmed.length > 0) onRename(id, trimmed);
   }
 
+  // `pl-1`: the tab pads its label 12px, so the first label lands on the
+  // panel title's 16px edge; the old `px-2` put it 4px to the right of it.
   return (
-    <div
-      role="tablist"
-      aria-label={t.terminal.tabs}
-      className="flex items-center gap-1 overflow-x-auto border-b border-outline-variant/15 bg-surface-container-lowest px-1"
-    >
-      {sessions.map((session) => {
-        const active = session.id === activeId;
-        const editing = editingId === session.id;
-        return (
-          <div
-            key={session.id}
-            data-testid={`terminal-tab-${session.id}`}
-            className={`group flex shrink-0 items-center gap-1 rounded-t-lg px-2 py-1.5 text-sm ${
-              active
-                ? 'bg-surface-container text-on-surface'
-                : 'text-on-surface-variant hover:bg-surface-container/60'
-            }`}
-          >
-            {editing ? (
-              <input
-                ref={editingInputRef}
-                value={draftTitle}
-                aria-label={t.terminal.renameLabel}
-                onChange={(event) => setDraftTitle(event.target.value)}
-                onBlur={commitEditing}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') commitEditing();
-                  if (event.key === 'Escape') setEditingId(null);
-                }}
-                className="w-28 rounded border border-outline-variant/40 bg-surface-container-lowest px-1 text-sm text-on-surface outline-none"
-              />
-            ) : (
-              <button
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => onSelect(session.id)}
-                onDoubleClick={() => startEditing(session)}
-                className="max-w-32 truncate"
-                title={session.title}
-              >
-                {session.title}
-              </button>
-            )}
+    <Tabs
+      label={t.terminal.tabs}
+      className="pl-1 pr-2"
+      tabs={sessions.map((session) => ({
+        id: session.id,
+        label: session.title,
+        title: session.title,
+        testId: `terminal-tab-${session.id}`,
+        onDoubleClick: () => startEditing(session),
+        editor:
+          editingId === session.id ? (
+            <input
+              ref={editingInputRef}
+              value={draftTitle}
+              aria-label={t.terminal.renameLabel}
+              onChange={(event) => setDraftTitle(event.target.value)}
+              onBlur={commitEditing}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') commitEditing();
+                if (event.key === 'Escape') setEditingId(null);
+              }}
+              className={cn(FIELD_CLASS, 'h-7 w-32 px-2')}
+            />
+          ) : undefined,
+        actions: (
+          <>
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="icon"
               onClick={() => startEditing(session)}
               aria-label={t.terminal.rename}
-              className="size-5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              title={t.terminal.rename}
+              className={TAB_ACTION_ON_DEMAND}
             >
-              <Pencil size={11} />
+              <Pencil size={ICON_SM} />
             </Button>
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="icon"
               onClick={() => onPopOut(session.id)}
               aria-label={t.terminal.popOut}
-              className="size-5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              title={t.terminal.popOut}
+              className={TAB_ACTION_ON_DEMAND}
             >
-              <ExternalLink size={11} />
+              <ExternalLink size={ICON_SM} />
             </Button>
             <Button
               type="button"
-              variant="ghost"
+              variant="subtle"
               size="icon"
               onClick={() => onRequestClose(session.id)}
               aria-label={t.terminal.closeSession}
-              className="size-5"
+              title={t.terminal.closeSession}
+              className="size-6"
             >
-              <X size={12} />
+              <X size={ICON_SM} />
             </Button>
-          </div>
-        );
-      })}
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={onNew}
-        disabled={newSessionPending || newSessionDisabled}
-        aria-label={t.terminal.newSession}
-        title={newSessionDisabled && newSessionHint ? newSessionHint : t.terminal.newSession}
-        className="size-7 shrink-0"
-      >
-        <Plus size={15} />
-      </Button>
-    </div>
+          </>
+        ),
+      }))}
+      active={activeId}
+      onSelect={onSelect}
+      trailing={
+        <Button
+          type="button"
+          variant="subtle"
+          size="icon"
+          onClick={onNew}
+          disabled={newSessionPending || newSessionDisabled}
+          aria-label={t.terminal.newSession}
+          title={newSessionDisabled && newSessionHint ? newSessionHint : t.terminal.newSession}
+          className="size-7 shrink-0"
+        >
+          <Plus size={ICON_MD} />
+        </Button>
+      }
+    />
   );
 }

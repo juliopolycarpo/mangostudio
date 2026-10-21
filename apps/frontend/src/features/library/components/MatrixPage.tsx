@@ -10,11 +10,11 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ResourceKind } from '@mangostudio/shared/library';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import { useLibraryMatrix } from '../hooks/use-library-matrix';
 import { CoverageMatrix, MatrixLegend } from './CoverageMatrix';
@@ -43,59 +43,39 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
    */
   const candidates = useCandidateLocations(matrix.locations, kind);
 
-  // No description: the library section layout already renders the subtitle
-  // directly above the tab strip this page sits under.
-  const header = <EnvironmentScopeHeader scope={scope} onRefresh={matrix.refetch} />;
-
   if (scope.environment && !scope.permitsLibrary) {
     return (
-      <div className="space-y-4">
-        {header}
-        <EnvironmentScopeNotice
-          environment={scope.environment}
-          reason="not-permitted"
-          surface="library"
-        />
-      </div>
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="not-permitted"
+        surface="library"
+      />
     );
   }
 
   if (matrix.isPending && matrix.resources.length === 0) {
-    return (
-      <div className="space-y-4">
-        {header}
-        <LibraryPageState variant="loading" />
-      </div>
-    );
+    return <LibraryPageState variant="loading" />;
   }
 
   if (matrix.error && matrix.resources.length === 0) {
-    return (
-      <div className="space-y-4">
-        {header}
-        {scope.environment && !scope.isConnected ? (
-          <EnvironmentScopeNotice
-            environment={scope.environment}
-            reason="disconnected"
-            surface="library"
-          />
-        ) : (
-          <LibraryPageState variant="error" onRetry={matrix.refetch} />
-        )}
-      </div>
+    return scope.environment && !scope.isConnected ? (
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="disconnected"
+        surface="library"
+      />
+    ) : (
+      <LibraryPageState variant="error" onRetry={matrix.refetch} />
     );
   }
 
   if (!isLocal && scope.environment && !scope.isConnected) {
     return (
-      <div className="space-y-4">
-        {header}
-        <EnvironmentScopeNotice
-          environment={scope.environment}
-          reason="disconnected"
-          surface="library"
-        />
-      </div>
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="disconnected"
+        surface="library"
+      />
     );
   }
 
@@ -103,8 +83,6 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
 
   return (
     <div className="space-y-4">
-      {header}
-
       <MatrixFilters
         filters={matrix.filters}
         targets={matrix.targets}
@@ -112,22 +90,26 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         onChange={matrix.setFilters}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* From `xl` the legend is not drawn, so with nothing selected this row has
+          nothing in it and must not leave a gap of its own. */}
+      <div
+        className={cn(
+          'flex flex-wrap items-center justify-between gap-2',
+          selectedCount === 0 && 'xl:hidden'
+        )}
+      >
         <MatrixLegend />
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={matrix.rescan} disabled={matrix.isRescanning}>
-            {matrix.isRescanning ? l.matrix.rescanning : l.matrix.rescan}
-          </Button>
           {selectedCount > 0 && (
             <>
-              <span className="text-on-surface-variant text-xs" data-testid="selected-count">
+              <span className="text-fg-muted text-xs" data-testid="selected-count">
                 {formatMessage(l.matrix.selectedCount, { count: String(selectedCount) })}
               </span>
-              <Button variant="ghost" size="sm" onClick={matrix.clearSelection}>
+              <Button variant="subtle" size="sm" onClick={matrix.clearSelection}>
                 {l.matrix.clearSelection}
               </Button>
               {candidates.isDetecting && (
-                <span className="text-on-surface-variant/60 text-xs" data-testid="detecting-agents">
+                <span className="text-fg-muted text-xs" data-testid="detecting-agents">
                   {l.locationSettings.detecting}
                 </span>
               )}

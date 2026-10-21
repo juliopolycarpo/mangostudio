@@ -27,14 +27,23 @@
 
 import type { PropagationBackupSet, PropagationUndo } from '@mangostudio/shared/library';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pin, Server, Timer, Trash2, Undo2 } from 'lucide-react';
-import { useState } from 'react';
+import { Link } from '@tanstack/react-router';
+import { Archive, ArrowLeft, Pin, Server, Timer, Trash2, Undo2 } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { formatBytes } from '@/features/environments/format';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { purgeBackup, undoPropagation } from '../api';
-import { formatBytes } from '../format';
+import { resourceKeyLabel } from '../format';
 import { backupUsageQueryOptions, libraryKeys } from '../queries';
+import { BackupSummary, formatBackupUsage } from './BackupSummary';
+import { InlineNote } from './InlineNote';
 import { LibraryPageState } from './LibraryPageState';
 
 /** One set on one machine. Backup ids are minted per store, so neither half identifies a row. */
@@ -113,47 +122,59 @@ export function BackupList() {
 
   return (
     <div className="space-y-4" data-testid="backup-list">
-      <div className="space-y-1">
-        <h2 className="font-semibold text-base text-on-surface">{l.backups.title}</h2>
-        <p className="text-on-surface text-sm">{l.backups.description}</p>
-        <p className="text-[11px] text-on-surface-variant/60">
-          {formatMessage(l.backups.usage, {
-            count: String(usage.setCount),
-            size: formatBytes(usage.sizeBytes),
-          })}{' '}
-          {formatMessage(l.backups.retention, {
-            count: String(usage.retentionCount),
-            size: formatBytes(usage.retentionBytes),
-          })}{' '}
-          {l.backups.retentionPerMachine}
-        </p>
-        {usage.unreachableEnvironmentIds.length > 0 && (
-          <p className="text-[11px] text-on-surface-variant/60" data-testid="backup-unreachable">
-            {formatMessage(l.backups.unreachable, {
-              machines: usage.unreachableEnvironmentIds.map(nameOf).join(', '),
-            })}
-          </p>
-        )}
-        {/*
-          Pinned bytes are charged against the budget first and never evicted,
-          so they are why retention can feel tighter than the numbers above
-          suggest. Stating them is what makes the eviction badges add up.
-        */}
-        {pinnedCount > 0 && (
-          <p className="text-[11px] text-tertiary" data-testid="backup-pinned-summary">
-            {formatMessage(l.backups.pinned, {
-              count: String(pinnedCount),
-              size: formatBytes(usage.pinnedSizeBytes),
-            })}{' '}
-            {l.backups.pinnedHint}
-          </p>
-        )}
+      <div className="space-y-2">
+        {/* Backups span every kind, so they are no tab of the strip above; this
+            is the way back to where the sets came from. */}
+        <Link
+          to="/environments/library/skills"
+          className="inline-flex items-center gap-1.5 text-fg-muted text-xs hover:text-fg"
+          data-testid="backups-back"
+        >
+          <ArrowLeft size={ICON_SM} aria-hidden="true" />
+          {l.backups.back}
+        </Link>
+        <h2 className="font-semibold text-base text-fg">{l.backups.title}</h2>
+        <p className="text-fg-muted text-sm">{l.backups.description}</p>
       </div>
 
+      {/* What the sets cost and the rule that trims them is a note in its own
+          right: stacked under the description at 4px it read as a fourth line of
+          the same block, and the page has two text levels, not three. */}
+      <Callout tone="neutral" data-testid="backup-usage-note">
+        <BackupSummary usage={usage} perMachine className="text-sm" />
+      </Callout>
+
+      {usage.unreachableEnvironmentIds.length > 0 && (
+        <Callout
+          tone="warning"
+          title={formatMessage(l.backups.unreachable, {
+            machines: usage.unreachableEnvironmentIds.map(nameOf).join(', '),
+          })}
+          data-testid="backup-unreachable"
+        />
+      )}
+      {/*
+        Pinned bytes are charged against the budget first and never evicted,
+        so they are why retention can feel tighter than the numbers above
+        suggest. Stating them is what makes the eviction badges add up.
+      */}
+      {pinnedCount > 0 && (
+        <Callout
+          tone="info"
+          title={formatMessage(l.backups.pinned, {
+            count: String(pinnedCount),
+            size: formatBytes(usage.pinnedSizeBytes),
+          })}
+          data-testid="backup-pinned-summary"
+        >
+          {l.backups.pinnedHint}
+        </Callout>
+      )}
+
       {usage.sets.length === 0 && (
-        <p className="text-on-surface-variant/70 text-sm" data-testid="backup-list-empty">
-          {l.backups.empty}
-        </p>
+        <div data-testid="backup-list-empty">
+          <EmptyState icon={<Archive size={ICON_LG} />} title={l.backups.empty} />
+        </div>
       )}
 
       {machines.map(([environmentId, sets]) => (
@@ -163,15 +184,20 @@ export function BackupList() {
           data-testid="backup-machine"
           data-environment-id={environmentId}
         >
-          <h3 className="flex items-center gap-1.5 font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
-            <Server size={11} aria-hidden="true" />
+          <h3 className="flex items-center gap-2 font-semibold text-fg text-sm">
+            <Server size={ICON_MD} aria-hidden="true" className="shrink-0 text-fg-muted" />
             {nameOf(environmentId)}
-            <span className="font-normal normal-case tracking-normal text-on-surface-variant/50">
-              {formatMessage(l.backups.usage, {
-                count: String(sets.length),
-                size: formatBytes(sets.reduce((total, set) => total + set.sizeBytes, 0)),
-              })}
-            </span>
+            {/* One machine's figures are the page's figures, already stated under the
+                description; a second copy of them beside the name only repeats it. */}
+            {machines.length > 1 && (
+              <span className="font-normal text-fg-muted text-xs">
+                {formatBackupUsage(
+                  l.backups,
+                  sets.length,
+                  sets.reduce((total, set) => total + set.sizeBytes, 0)
+                )}
+              </span>
+            )}
           </h3>
           <ul className="space-y-2">
             {sets.map((set) => {
@@ -208,7 +234,7 @@ export function BackupList() {
         </section>
       ))}
 
-      <p className="text-[11px] text-on-surface-variant/50">{l.backups.bulkHint}</p>
+      <p className="text-fg-subtle text-xs">{l.backups.bulkHint}</p>
     </div>
   );
 }
@@ -257,55 +283,55 @@ function BackupRow({
 
   return (
     <li
-      className="space-y-2 rounded-xl border border-outline-variant/15 bg-surface-container-high p-3"
+      className="space-y-3 rounded-md border border-stroke bg-surface p-4"
       data-testid="backup-row"
       data-backup-id={set.backupId}
       data-operation={set.operation}
       data-availability={set.availability}
     >
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
-        <span className="text-on-surface" data-testid="backup-created">
-          <span className="text-on-surface-variant/50">{l.backups.columnCreated} </span>
+      {/*
+        Key and value are two elements, not one run of words: "Origin Apply"
+        read as a phrase when only a gap divided the pairs. The key is a quiet
+        12px label with its colon, the value the 14px text, so the size step
+        itself says where one pair ends and the next begins.
+      */}
+      <dl className="flex flex-wrap gap-x-5 gap-y-1">
+        <BackupFact label={l.backups.columnCreated} testId="backup-created">
           {formatRelativeTime(set.createdAtMs, locale)}
-        </span>
+        </BackupFact>
         {/*
           Only the machine knows what a set holds, so a row assembled from the
           hub's index omits the cell entirely. Printing "0 entries" there would
           state as fact the one thing an index row cannot know.
         */}
         {set.availability === 'available' && (
-          <span className="text-on-surface" data-testid="backup-contents">
-            <span className="text-on-surface-variant/50">{l.backups.columnContents} </span>
+          <BackupFact label={l.backups.columnContents} testId="backup-contents">
             {/*
               A v1 manifest carries no resource keys, so the row falls back to the
               entry count rather than printing an empty cell that reads as "this
-              backup holds nothing".
+              backup holds nothing". The kind stays in front of each name: a skill
+              and a command can both be called `release`.
             */}
             {set.resourceKeys.length > 0
-              ? set.resourceKeys.join(', ')
+              ? set.resourceKeys.map((key) => resourceKeyLabel(key, l.kinds)).join(', ')
               : formatMessage(l.backups.contentsUnknown, { count: String(set.entryCount) })}
-          </span>
+          </BackupFact>
         )}
-        <span className="text-on-surface-variant/70" data-testid="backup-size">
-          <span className="text-on-surface-variant/50">{l.backups.columnSize} </span>
+        <BackupFact label={l.backups.columnSize} testId="backup-size">
           {formatBytes(set.sizeBytes)}
-        </span>
-        <span className="text-on-surface-variant/70" data-testid="backup-origin">
-          <span className="text-on-surface-variant/50">{l.backups.columnOrigin} </span>
+        </BackupFact>
+        <BackupFact label={l.backups.columnOrigin} testId="backup-origin">
           {l.backups.origin[set.operation]}
-        </span>
-      </div>
+        </BackupFact>
+      </dl>
 
-      <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <span className="break-all font-mono text-on-surface-variant/50">{set.backupId}</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="break-all font-mono text-fg-subtle text-micro">{set.backupId}</span>
         {set.pinned && (
-          <span
-            className="inline-flex items-center gap-1 text-tertiary"
-            data-testid="backup-pinned"
-          >
-            <Pin size={11} />
+          <Badge data-testid="backup-pinned">
+            <Pin size={ICON_SM} aria-hidden="true" />
             {l.backups.pinnedBadge}
-          </span>
+          </Badge>
         )}
         {/*
           Retention evicts on the next apply, so a set is named before it goes
@@ -313,112 +339,133 @@ function BackupRow({
           outside every automatic eviction path.
         */}
         {set.evictsNext && (
-          <span
-            className="inline-flex items-center gap-1 text-error"
+          <Badge
+            variant="warning"
             data-testid="backup-evicts-next"
             title={l.backups.evictsNextHint}
           >
-            <Timer size={11} />
+            <Timer size={ICON_SM} aria-hidden="true" />
             {l.backups.evictsNext}
-          </span>
+          </Badge>
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <button
-          type="button"
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={onRestore}
-          disabled={restorePending || blockedReason !== null}
-          className="inline-flex items-center gap-1 text-primary hover:underline disabled:opacity-50"
+          disabled={blockedReason !== null}
+          loading={restorePending}
           data-testid="restore-backup"
           title={
             blockedReason ?? (set.operation === 'unknown' ? l.backups.undoUnknownHint : undefined)
           }
         >
-          <Undo2 size={11} />
+          <Undo2 size={ICON_MD} />
           {restorePending ? l.backups.restoring : undoLabel(set.operation, l.backups)}
-        </button>
+        </Button>
 
         {confirming ? (
-          <span className="inline-flex items-center gap-2">
-            <button
-              type="button"
+          <>
+            <Button
+              variant="danger"
+              size="sm"
               onClick={onPurge}
-              disabled={purgePending}
-              className="inline-flex items-center gap-1 font-semibold text-error hover:underline disabled:opacity-50"
+              loading={purgePending}
               data-testid="purge-backup-confirm"
             >
-              <Trash2 size={11} />
+              <Trash2 size={ICON_MD} />
               {l.backups.purgeConfirm}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="subtle"
+              size="sm"
               onClick={onCancelConfirm}
-              className="text-on-surface-variant/70 hover:underline"
               data-testid="purge-backup-cancel"
             >
               {l.backups.purgeCancel}
-            </button>
-          </span>
+            </Button>
+          </>
         ) : (
-          <button
-            type="button"
+          <Button
+            variant="subtle-danger"
+            size="sm"
             onClick={onConfirm}
             disabled={purgePending}
-            className="inline-flex items-center gap-1 text-error hover:underline disabled:opacity-50"
             data-testid="purge-backup"
           >
-            <Trash2 size={11} />
+            <Trash2 size={ICON_MD} />
             {l.backups.purge}
-          </button>
-        )}
-
-        {/*
-          Restored and removed are counted apart, never summed into one "put
-          back". Undoing a propagation set deletes the paths that apply created,
-          and reporting that as content restored would describe a deletion as a
-          recovery. A restore that touched nothing at all — every destination
-          changed after the apply — also looks exactly like one that worked
-          unless the counts are stated.
-        */}
-        {result && (
-          <span className="text-on-surface-variant/70" data-testid="restore-backup-result">
-            {formatMessage(l.result.undone, {
-              restored: String(result.restored.length),
-              removed: String(result.removed.length),
-            })}
-            {result.skipped.length > 0 &&
-              ` ${formatMessage(l.result.undoSkipped, { count: String(result.skipped.length) })}`}
-          </span>
-        )}
-        {restoreFailed && (
-          <span className="text-error" data-testid="restore-backup-error">
-            {l.backups.restoreError}
-          </span>
-        )}
-        {/*
-          A failed purge that says nothing is indistinguishable from one that
-          worked, and the set is still on disk counting against the budget.
-        */}
-        {purgeFailed && (
-          <span className="text-error" data-testid="purge-backup-error">
-            {l.backups.purgeError}
-          </span>
+          </Button>
         )}
       </div>
 
+      {/*
+        Restored and removed are counted apart, never summed into one "put
+        back". Undoing a propagation set deletes the paths that apply created,
+        and reporting that as content restored would describe a deletion as a
+        recovery. A restore that touched nothing at all — every destination
+        changed after the apply — also looks exactly like one that worked
+        unless the counts are stated.
+      */}
+      {result && (
+        <p className="text-fg-muted text-sm" data-testid="restore-backup-result">
+          {formatMessage(l.result.undone, {
+            restored: String(result.restored.length),
+            removed: String(result.removed.length),
+          })}
+          {result.skipped.length > 0 &&
+            ` ${formatMessage(l.result.undoSkipped, { count: String(result.skipped.length) })}`}
+        </p>
+      )}
+      {restoreFailed && (
+        <InlineNote tone="danger" data-testid="restore-backup-error">
+          {l.backups.restoreError}
+        </InlineNote>
+      )}
+      {/*
+        A failed purge that says nothing is indistinguishable from one that
+        worked, and the set is still on disk counting against the budget.
+      */}
+      {purgeFailed && (
+        <InlineNote tone="danger" data-testid="purge-backup-error">
+          {l.backups.purgeError}
+        </InlineNote>
+      )}
+
       {blockedReason !== null && (
-        <p className="text-[11px] text-on-surface-variant/70" data-testid="backup-unavailable">
+        <p className="text-fg-muted text-xs" data-testid="backup-unavailable">
           {blockedReason}
         </p>
       )}
 
       {set.operation === 'unknown' && blockedReason === null && (
-        <p className="text-[11px] text-on-surface-variant/50" data-testid="backup-unknown-hint">
+        <p className="text-fg-subtle text-xs" data-testid="backup-unknown-hint">
           {l.backups.undoUnknownHint}
         </p>
       )}
     </li>
+  );
+}
+
+/** One `key: value` pair of a backup row: a 12px label, then the 14px value. */
+function BackupFact({
+  label,
+  testId,
+  children,
+}: {
+  readonly label: string;
+  readonly testId: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-1.5">
+      <dt className="shrink-0 text-fg-subtle text-xs after:content-[':']">{label}</dt>
+      <dd className="min-w-0 text-fg text-sm" data-testid={testId}>
+        {children}
+      </dd>
+    </div>
   );
 }
 

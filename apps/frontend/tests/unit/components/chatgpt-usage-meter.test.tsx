@@ -9,6 +9,8 @@ mock.module('@/hooks/use-i18n', () => {
     ...actual,
     useI18n: () => ({
       t: {
+        // Read by the toast stack the render harness mounts around every test.
+        common: { notifications: 'Notifications' },
         settings: {
           connectors: {
             chatgptUsageWindowHours: '{hours}h limit',

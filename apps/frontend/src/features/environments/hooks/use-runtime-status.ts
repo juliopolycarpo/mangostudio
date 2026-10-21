@@ -22,7 +22,7 @@ import {
 } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { probeAgentCli, probeRuntime, probeVersionManager } from '../api';
-import { findingSeverity } from '../format';
+import { findingSeverity, isQuietFinding } from '../format';
 import {
   agentCliStatusesQueryOptions,
   environmentKeys,
@@ -152,16 +152,22 @@ export function useProbeAgentCli(environmentId?: string) {
 
 export type HealthScope = 'runtime' | 'version-manager' | 'agent';
 
-interface HealthEntry {
+export interface HealthEntry {
   readonly key: string;
   readonly scope: HealthScope;
   /** Runtime id, version manager id, or agent target id. */
   readonly subjectId: string;
   readonly finding: RuntimeFinding;
   readonly severity: ReturnType<typeof findingSeverity>;
+  /** The analyzer called it informational: listed with the warnings, drawn without their glyph. */
+  readonly quiet: boolean;
 }
 
-const SEVERITY_RANK: Record<HealthEntry['severity'], number> = { fail: 0, warn: 1 };
+/** Fails first, then warnings, then the informational detail that can wait longest. */
+function healthRank(entry: HealthEntry): number {
+  if (entry.severity === 'fail') return 0;
+  return entry.quiet ? 2 : 1;
+}
 
 /**
  * Every finding across runtimes, version managers, and agent CLIs as one flat
@@ -192,19 +198,33 @@ export function useEnvironmentHealth(environmentId?: string, enabled = true) {
           subjectId,
           finding,
           severity: findingSeverity(finding),
+          quiet: isQuietFinding(finding),
         });
       });
     };
 
-    for (const runtime of runtimes.data ?? []) collect('runtime', runtime.id, runtime.findings);
+    // A version manager is probed twice — as a binary, then for what it manages —
+    // and a missing one raises the same finding both times. The manager's own entry
+    // names it more exactly, so the runtime's copy of the same finding is dropped
+    // rather than listing one absent tool as two problems.
+    const managerFindings = new Set(
+      (versionManagers.data ?? []).flatMap((manager) =>
+        manager.findings.map((finding) => `${manager.id}:${finding.code}`)
+      )
+    );
+    for (const runtime of runtimes.data ?? []) {
+      collect(
+        'runtime',
+        runtime.id,
+        runtime.findings.filter((finding) => !managerFindings.has(`${runtime.id}:${finding.code}`))
+      );
+    }
     for (const manager of versionManagers.data ?? []) {
       collect('version-manager', manager.id, manager.findings);
     }
     for (const agent of agents.data ?? []) collect('agent', agent.targetId, agent.findings);
 
-    return collected.sort(
-      (left, right) => SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity]
-    );
+    return collected.sort((left, right) => healthRank(left) - healthRank(right));
   }, [runtimes.data, versionManagers.data, agents.data]);
 
   return {

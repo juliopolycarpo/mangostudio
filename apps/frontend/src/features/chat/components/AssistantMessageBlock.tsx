@@ -1,7 +1,8 @@
 import type { Message } from '@mangostudio/shared/chat';
+import type { ExternalTurnTerminalReason } from '@mangostudio/shared/external-agents';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import type { MessagePart } from '@mangostudio/shared/types';
-import { Sparkles } from 'lucide-react';
+import { CircleStop, CircleX, type LucideIcon, Sparkles } from 'lucide-react';
 import { useMemo } from 'react';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
@@ -10,6 +11,7 @@ import { deriveTurnStatus, type TurnStatus } from '../lib/turn-status';
 import { AssistantImageTurn } from './AssistantImageTurn';
 import { AssistantTurnBody } from './AssistantTurnBody';
 import { messagePartsFromMessage } from './message-content';
+import { TurnMetaRow } from './TurnMetaRow';
 import { TurnSeparator } from './TurnSeparator';
 
 interface AssistantMessageBlockProps {
@@ -22,6 +24,8 @@ interface AssistantMessageBlockProps {
   onQuestionSubmit?: (prompt: string) => void;
   /** Resolved once per feed by `ChatFeed`, threaded down to every row. */
   toolIdentities: ToolIdentityResolver;
+  /** Catalog names by model id, resolved once per feed and read by the turn header. */
+  modelNames?: ReadonlyMap<string, string>;
 }
 
 /** What the block derives once and every child below it reads. */
@@ -31,17 +35,115 @@ interface DerivedTurn {
   isStreaming: boolean;
 }
 
+/** How a turn ended, as far as its own parts can say. */
+type TurnOutcome = 'completed' | 'failed' | 'stopped';
+
+const OUTCOME_ICON: Record<TurnOutcome, LucideIcon> = {
+  completed: Sparkles,
+  failed: CircleX,
+  stopped: CircleStop,
+};
+
 /**
- * The turn's own cost, closing it out below the last step rather than above the
- * first one — it is not knowable until the turn is over.
+ * How an external agent's turn ended, on the same three-way scale. Only the
+ * vendor's own failure is a failure; everything else that cut the turn short —
+ * the person, the vendor, the connection, the hub — stopped it.
+ *
+ * Exhaustive on purpose: a reason added to the contract fails the build here.
  */
-function TurnCostRow({ generationTime }: { generationTime: string }) {
+const EXTERNAL_OUTCOME: Record<ExternalTurnTerminalReason, TurnOutcome> = {
+  completed: 'completed',
+  'cancelled-by-user': 'stopped',
+  interrupted: 'stopped',
+  'vendor-error': 'failed',
+  'runtime-disconnected': 'stopped',
+  'hub-restarted': 'stopped',
+  'sequence-gap': 'stopped',
+  'limit-exceeded': 'stopped',
+  'consent-revoked': 'stopped',
+  'session-lost': 'stopped',
+  'acceptance-unknown': 'stopped',
+};
+
+/** The reason an external turn ended, once it has; absent for any other turn. */
+function externalTerminalReason(
+  parts: readonly MessagePart[]
+): ExternalTurnTerminalReason | undefined {
+  const turn = parts.find((part) => part.type === 'external_turn');
+  return turn?.type === 'external_turn' && turn.status === 'terminal'
+    ? turn.terminalReason
+    : undefined;
+}
+
+/**
+ * A turn that carries an error part failed; one with an interrupted checkpoint
+ * was stopped partway; an external turn ends the way its record says. A legacy
+ * image turn with words and no picture is the failure its words describe.
+ * Anything else is a turn that finished.
+ */
+function turnOutcome(
+  msg: Message,
+  parts: readonly MessagePart[],
+  isImageTurn: boolean
+): TurnOutcome {
+  if (parts.some((part) => part.type === 'error')) return 'failed';
+  if (parts.some((part) => part.type === 'turn_checkpoint' && part.status === 'interrupted')) {
+    return 'stopped';
+  }
+  const external = externalTerminalReason(parts);
+  if (external) return EXTERNAL_OUTCOME[external];
+  if (isImageTurn && !msg.imageUrl && msg.text) return 'failed';
+  return 'completed';
+}
+
+/**
+ * The line that closes a settled turn, below its last step rather than above the
+ * first one — none of it is knowable until the turn is over.
+ *
+ * It says how the turn ended as well as how long it took: "Responded in 12.8s"
+ * under a rate-limit error told the reader the turn above had succeeded. An
+ * external turn the hub or the person cut short says why in the same row ("You
+ * stopped this turn."), with the time after it, so the ending is told once.
+ */
+function TurnClosingRow({
+  msg,
+  parts,
+  isImageTurn,
+}: {
+  msg: Message;
+  parts: readonly MessagePart[];
+  isImageTurn: boolean;
+}) {
   const { t } = useI18n();
+  const outcome = turnOutcome(msg, parts, isImageTurn);
+  const reason = externalTerminalReason(parts);
+  const cause = reason && reason !== 'completed' ? t.externalAgents.turn.terminal[reason] : null;
+  const time = msg.generationTime;
+  if (!cause && !time) return null;
+
+  const icon = OUTCOME_ICON[outcome];
+  if (cause) {
+    return (
+      <TurnMetaRow icon={icon}>
+        <span>{cause}</span>
+        {time ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="shrink-0 tabular-nums">{time}</span>
+          </>
+        ) : null}
+      </TurnMetaRow>
+    );
+  }
+  const message = {
+    completed: t.chat.feed.respondedIn,
+    failed: t.chat.feed.failedAfter,
+    stopped: t.chat.feed.stoppedAfter,
+  }[outcome];
   return (
-    <div className="flex w-fit items-center gap-1.5 pl-4 text-[11px] text-on-surface-variant/50">
-      <Sparkles size={11} className="text-primary/60" />
-      <span>{formatMessage(t.chat.feed.respondedIn, { time: generationTime })}</span>
-    </div>
+    <TurnMetaRow icon={icon}>
+      <span>{formatMessage(message, { time: time ?? '' })}</span>
+    </TurnMetaRow>
   );
 }
 
@@ -64,25 +166,25 @@ function AssistantTurnSection({
   onQuestionSubmit,
   toolIdentities,
 }: AssistantTurnSectionProps) {
-  // A settled image turn is its picture plus the controls that act on it, none
-  // of which belong on a timeline.
-  if (isImageTurn && !isStreaming) return <AssistantImageTurn msg={msg} />;
-
   return (
     <div className={isStreaming ? 'flex flex-col gap-3' : 'flex flex-col gap-1'}>
-      <AssistantTurnBody
-        parts={parts}
-        status={status}
-        messageId={msg.id}
-        isStreaming={isStreaming}
-        isImageTurn={isImageTurn}
-        chatId={chatId}
-        onQuestionSubmit={onQuestionSubmit}
-        toolIdentities={toolIdentities}
-      />
-      {!isStreaming && msg.generationTime ? (
-        <TurnCostRow generationTime={msg.generationTime} />
-      ) : null}
+      {/* A settled image turn is its picture plus the controls that act on it,
+          none of which belong on a timeline; it still closes on the same line. */}
+      {isImageTurn && !isStreaming ? (
+        <AssistantImageTurn msg={msg} />
+      ) : (
+        <AssistantTurnBody
+          parts={parts}
+          status={status}
+          messageId={msg.id}
+          isStreaming={isStreaming}
+          isImageTurn={isImageTurn}
+          chatId={chatId}
+          onQuestionSubmit={onQuestionSubmit}
+          toolIdentities={toolIdentities}
+        />
+      )}
+      {isStreaming ? null : <TurnClosingRow msg={msg} parts={parts} isImageTurn={isImageTurn} />}
     </div>
   );
 }
@@ -103,6 +205,7 @@ export function AssistantMessageBlock({
   fileCheckpoint,
   onQuestionSubmit,
   toolIdentities,
+  modelNames,
 }: AssistantMessageBlockProps) {
   const parts = useMemo(() => messagePartsFromMessage(msg), [msg]);
   const isStreaming = msg.isGenerating ?? false;
@@ -118,6 +221,7 @@ export function AssistantMessageBlock({
         chatId={chatId}
         fileCheckpoint={fileCheckpoint}
         toolIdentities={toolIdentities}
+        modelNames={modelNames}
       />
       <AssistantTurnSection
         msg={msg}

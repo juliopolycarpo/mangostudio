@@ -11,7 +11,10 @@ import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agent
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ExternalComposerControls } from '../../../src/features/external-agents/ExternalComposerControls';
+import {
+  ExternalComposerControls,
+  hasExternalComposerControls,
+} from '../../../src/features/external-agents/ExternalComposerControls';
 import { render } from '../../support/harness/render';
 
 function descriptor(
@@ -133,9 +136,9 @@ describe('ExternalComposerControls effort picker', () => {
     const { props } = renderControls({ descriptor: descriptor(CODEX_MODELS) });
 
     const picker = screen.getByRole('combobox', { name: 'Reasoning effort' });
-    expect(picker).toHaveTextContent('effort:medium');
+    expect(picker).toHaveTextContent('effort:Medium');
     await user.click(picker);
-    await user.click(screen.getByRole('option', { name: 'high' }));
+    await user.click(screen.getByRole('option', { name: 'High' }));
 
     expect(props.onEffortChange).toHaveBeenCalledWith('high');
   });
@@ -144,5 +147,85 @@ describe('ExternalComposerControls effort picker', () => {
     renderControls({ descriptor: descriptor(CODEX_MODELS), model: 'gpt-5' });
 
     expect(screen.queryByRole('combobox', { name: 'Reasoning effort' })).toBeNull();
+  });
+});
+
+/**
+ * A vendor that sends bare ids still reads in the words MangoStudio's own menus
+ * use, so the two runners do not disagree about what `xhigh` or `opus` is called.
+ */
+describe('ExternalComposerControls labels without a displayName', () => {
+  const BARE_MODELS: ExternalAgentDescriptor['models'] = [
+    {
+      id: 'opus',
+      isDefault: true,
+      supportedReasoningEfforts: [{ id: 'low' }, { id: 'xhigh' }, { id: 'max' }],
+    },
+    { id: 'sonnet' },
+    { id: 'claude-3-7-sonnet' },
+  ];
+
+  it('sentence-cases model ids that are plain words and leaves versioned ids alone', async () => {
+    const user = userEvent.setup();
+    renderControls({ descriptor: descriptor(BARE_MODELS) });
+
+    const picker = screen.getByRole('combobox', { name: 'Agent model' });
+    expect(picker).toHaveTextContent('model:Opus');
+    await user.click(picker);
+    expect(screen.getByRole('option', { name: 'Sonnet' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'claude-3-7-sonnet' })).toBeInTheDocument();
+  });
+
+  it("names efforts the way MangoStudio's own effort menu does", async () => {
+    const user = userEvent.setup();
+    renderControls({ descriptor: descriptor(BARE_MODELS) });
+
+    await user.click(screen.getByRole('combobox', { name: 'Reasoning effort' }));
+    expect(screen.getByRole('option', { name: 'Low' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Extra high' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Maximum' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * The status line asks this before it draws a strip for the controls, so it has
+ * to say "nothing to draw" exactly when the component would draw nothing: a
+ * runner that is not installed answers no catalog and no permission pairs, and a
+ * strip around that was twelve pixels of padding and a hairline above the prompt.
+ */
+describe('hasExternalComposerControls', () => {
+  it('has nothing to draw for a descriptor with no catalog and no permission pairs', () => {
+    expect(hasExternalComposerControls(descriptor(undefined, { installed: false }))).toBe(false);
+    expect(hasExternalComposerControls(descriptor([]))).toBe(false);
+  });
+
+  it('has nothing to draw while the descriptor has not landed', () => {
+    expect(hasExternalComposerControls(undefined)).toBe(false);
+  });
+
+  it('does not count a catalog the vendor marked entirely hidden', () => {
+    expect(
+      hasExternalComposerControls(
+        descriptor([{ id: 'internal', displayName: 'Internal', hidden: true }])
+      )
+    ).toBe(false);
+  });
+
+  it('has a model picker to draw for a visible model', () => {
+    expect(hasExternalComposerControls(descriptor([{ id: 'gpt-5', displayName: 'GPT-5' }]))).toBe(
+      true
+    );
+  });
+
+  it('has the permission control to draw for a vendor with pairs but no catalog', () => {
+    expect(
+      hasExternalComposerControls(
+        descriptor(undefined, {
+          supportedConfigurations: [
+            { level: 'default', routing: 'user', supported: true, unattended: false },
+          ],
+        })
+      )
+    ).toBe(true);
   });
 });

@@ -1,8 +1,12 @@
 import { formatQuestionAnswers, type QuestionAnswer } from '@mangostudio/shared/questions';
 import type { MessagePart } from '@mangostudio/shared/types';
-import { Check, CircleHelp } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Chip } from '@/components/ui/Chip';
+import { SectionCard } from '@/components/ui/SectionCard';
+import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
+import { ChoiceButton } from './ChoiceButton';
 
 type QuestionPart = Extract<MessagePart, { type: 'question' }>;
 
@@ -17,8 +21,6 @@ interface QuestionCardProps {
   onSubmit?: (prompt: string) => void;
 }
 
-const OPTION_LETTERS = ['a', 'b', 'c', 'd'];
-
 /**
  * Interactive card for an ask_user_question tool call: option buttons plus a
  * free-text "own answer" per question, submitted as one user message. Renders
@@ -29,6 +31,7 @@ const OPTION_LETTERS = ['a', 'b', 'c', 'd'];
 export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
   const { t } = useI18n();
   const labels = t.chat.question;
+  const idBase = useId();
   const [drafts, setDrafts] = useState<ReadonlyArray<QuestionAnswerDraft>>(() =>
     part.questions.map(() => ({ selectedLabels: [], freeText: '' }))
   );
@@ -74,14 +77,10 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
   };
 
   return (
-    <div className="max-w-2xl w-full rounded-2xl border border-outline-variant/15 bg-surface-container-low p-4 sm:p-5 text-sm text-on-surface space-y-4">
-      <div className="flex items-center gap-2 text-on-surface-variant">
-        <CircleHelp size={16} className="text-primary" />
-        <span className="text-xs font-bold uppercase tracking-widest">
-          {interactive ? labels.title : labels.answered}
-        </span>
-      </div>
-
+    <SectionCard
+      label={interactive ? labels.title : labels.answered}
+      className="w-full max-w-(--timeline-card-max) gap-4 text-sm text-fg"
+    >
       {part.questions.map((question, questionIndex) => {
         const draft = drafts[questionIndex];
         return (
@@ -93,57 +92,59 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
             className="space-y-2"
           >
             <div className="flex flex-wrap items-center gap-2">
-              {question.header && (
-                <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">
-                  {question.header}
-                </span>
-              )}
-              <p className="font-medium text-on-surface">{question.question}</p>
+              {/* A category tag, not a status: the square chip, so the only round
+                  thing near the question is not mistaken for an outcome. */}
+              {question.header && <Chip>{question.header}</Chip>}
+              <p id={`${idBase}-q${questionIndex}`} className="font-medium text-fg">
+                {question.question}
+              </p>
             </div>
             {question.allowMultiple && (
-              <p className="text-xs text-on-surface-variant/70">{labels.multiSelectHint}</p>
+              <p id={`${idBase}-q${questionIndex}-hint`} className="text-xs text-fg-muted">
+                {labels.multiSelectHint}
+              </p>
             )}
-            <div className="space-y-1.5">
-              {question.options.map((option, optionIndex) => {
-                const selected = draft?.selectedLabels.includes(option.label) ?? false;
-                return (
-                  <button
-                    key={option.label}
-                    type="button"
-                    disabled={!interactive}
-                    onClick={() =>
-                      toggleOption(questionIndex, option.label, question.allowMultiple ?? false)
-                    }
-                    className={`flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors duration-150 ${
-                      selected
-                        ? 'border-primary/50 bg-primary/10'
-                        : 'border-outline-variant/15 bg-surface-container-high'
-                    } ${interactive ? 'cursor-pointer hover:border-outline-variant/40' : 'cursor-default opacity-70'}`}
-                  >
-                    <span
-                      className={`mt-0.5 text-xs font-semibold ${selected ? 'text-primary' : 'text-on-surface-variant/70'}`}
-                    >
-                      {selected ? <Check size={14} /> : `${OPTION_LETTERS[optionIndex] ?? ''})`}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-on-surface">{option.label}</span>
-                      {option.description && (
-                        <span className="block text-xs text-on-surface-variant/80">
-                          {option.description}
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            {/* The options are one answer to the question above them, so they are
+                a group named by it (and described by the "select one or more"
+                line when that applies), and each option's face is a circle or a
+                square: a single-select and a multi-select no longer sound or
+                look the same. */}
+            <fieldset
+              aria-labelledby={`${idBase}-q${questionIndex}`}
+              aria-describedby={
+                question.allowMultiple ? `${idBase}-q${questionIndex}-hint` : undefined
+              }
+              className="min-w-0 space-y-2"
+            >
+              {question.options.map((option) => (
+                <ChoiceButton
+                  key={option.label}
+                  kind={question.allowMultiple ? 'several' : 'one'}
+                  selected={draft?.selectedLabels.includes(option.label) ?? false}
+                  disabled={!interactive}
+                  onClick={() =>
+                    toggleOption(questionIndex, option.label, question.allowMultiple ?? false)
+                  }
+                >
+                  <span className="block font-medium text-fg">{option.label}</span>
+                  {option.description && (
+                    <span className="block text-xs text-fg-muted">{option.description}</span>
+                  )}
+                </ChoiceButton>
+              ))}
+            </fieldset>
             {interactive && (
-              <textarea
+              <Textarea
                 value={draft?.freeText ?? ''}
                 onChange={(event) => updateDraft(questionIndex, { freeText: event.target.value })}
                 placeholder={labels.ownAnswerPlaceholder}
                 rows={1}
-                className="w-full resize-y rounded-xl border border-outline-variant/15 bg-surface-container-high px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-variant/50 focus:border-primary/50 focus:outline-none"
+                // One line that grows with what is typed, up to a cap. The
+                // resize grip is for a field that is meant to be dragged
+                // taller; on a one-row answer box it read as a stray glyph in
+                // the corner. Engines without `field-sizing` keep the single
+                // row and scroll inside it.
+                className="field-sizing-content max-h-40 min-h-8 resize-none"
               />
             )}
           </div>
@@ -152,16 +153,11 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
 
       {interactive && (
         <div className="flex justify-end">
-          <button
-            type="button"
-            disabled={!allAnswered}
-            onClick={handleSubmit}
-            className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity duration-150 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-          >
+          <Button type="button" disabled={!allAnswered} onClick={handleSubmit}>
             {labels.submit}
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 }

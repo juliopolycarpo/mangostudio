@@ -14,13 +14,15 @@
 
 import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import { useQueryClient } from '@tanstack/react-query';
-import { CircleCheck, CircleX, LoaderCircle } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { Dialog } from '@/components/ui/Dialog';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { machineGuardReasonLabel, upgradeRefusalReasonLabel } from '../format';
 import { type UseUpgradeStreamResult, useUpgradeStream } from '../hooks/use-upgrade-stream';
 import { invalidateMachineUpdate } from '../queries';
@@ -95,66 +97,59 @@ function UpgradeProgress({
 }) {
   const { t } = useI18n();
   const m = t.environments.machine.update;
-  const dialogRef = useFocusTrap(() => {
-    if (isTerminal) onClose();
-  });
   const isRunning = stream.phase === 'connecting' || stream.phase === 'streaming';
   const currentStage = stream.stages.at(-1);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={m.upgrade}
-        tabIndex={-1}
-        className="bg-surface-container-high w-full max-w-md rounded-2xl p-5 sm:p-8 shadow-2xl border border-outline-variant/20 space-y-4 outline-none"
-      >
+    <Dialog
+      ariaLabel={m.upgrade}
+      onClose={onClose}
+      // While the stream is live there is no way back: aborting the fetch only
+      // stops this tab from watching, so Escape and the backdrop wait for a
+      // terminal state, as the missing close control does.
+      closeDisabled={!isTerminal}
+      footer={
+        isTerminal ? (
+          <Button variant="secondary" onClick={onClose}>
+            {t.environments.install.close}
+          </Button>
+        ) : undefined
+      }
+    >
+      {isRunning && (
         <header className="flex items-center gap-2">
-          <OutcomeIcon phase={stream.phase} outcome={stream.report?.outcome} />
-          <span className="text-sm font-semibold text-on-surface">
-            {isRunning && currentStage
-              ? m.stage[currentStage.stage]
-              : isRunning
-                ? m.stage.resolve
-                : null}
+          <Spinner size="sm" />
+          <span className="text-sm font-medium text-fg">
+            {currentStage ? m.stage[currentStage.stage] : m.stage.resolve}
           </span>
         </header>
+      )}
 
-        <div
-          className="max-h-56 overflow-y-auto rounded-xl bg-surface-container-highest p-3 font-mono text-xs leading-relaxed"
-          role="log"
-          aria-live="polite"
-          data-testid="upgrade-console"
-        >
-          {stream.lines.length === 0 ? (
-            <p className="text-on-surface-variant/50">…</p>
-          ) : (
-            stream.lines.map((line) => (
-              <div
-                key={line.id}
-                className={`whitespace-pre-wrap break-all ${
-                  line.stream === 'stderr' ? 'text-error' : 'text-on-surface-variant'
-                }`}
-              >
-                {line.text}
-              </div>
-            ))
-          )}
-        </div>
-
-        <UpgradeOutcome stream={stream} />
-
-        {isTerminal && (
-          <div className="flex justify-end">
-            <Button variant="secondary" size="sm" onClick={onClose}>
-              {t.environments.install.close}
-            </Button>
-          </div>
+      <div
+        className="app-scrollbar max-h-56 overflow-y-auto rounded-md border border-stroke bg-canvas p-3 font-mono text-xs leading-relaxed"
+        role="log"
+        aria-live="polite"
+        data-testid="upgrade-console"
+      >
+        {stream.lines.length === 0 ? (
+          <p className="text-fg-subtle">…</p>
+        ) : (
+          stream.lines.map((line) => (
+            <div
+              key={line.id}
+              className={cn(
+                'whitespace-pre-wrap break-all',
+                line.stream === 'stderr' ? 'text-danger' : 'text-fg-muted'
+              )}
+            >
+              {line.text}
+            </div>
+          ))
         )}
       </div>
-    </div>
+
+      <UpgradeOutcome stream={stream} />
+    </Dialog>
   );
 }
 
@@ -176,7 +171,7 @@ function UpgradeOutcome({ stream }: { readonly stream: UseUpgradeStreamResult })
   }
 
   if (stream.phase === 'failed') {
-    return <p className="text-sm text-error">{stream.streamError ?? m.streamEnded}</p>;
+    return <Callout tone="danger">{stream.streamError ?? m.streamEnded}</Callout>;
   }
 
   if (stream.phase === 'done' && stream.report) {
@@ -185,31 +180,23 @@ function UpgradeOutcome({ stream }: { readonly stream: UseUpgradeStreamResult })
       // Installed is not activated: a foreground hub or a Windows Scheduled
       // Task comes back as `restart: 'manual'` with the old process still
       // serving, and `--no-restart` as `'skipped'`. Showing only the success
-      // line reads as finished when it is not.
+      // line reads as finished when it is not, so anything but a scheduled
+      // restart turns the notice into a warning.
       return (
-        <div className="space-y-1">
-          <p className="text-sm text-on-surface">
-            {formatMessage(m.outcome.upgraded, {
-              version: report.target?.version ?? report.currentVersion,
-            })}
-          </p>
+        <Callout
+          tone={report.restart && report.restart !== 'scheduled' ? 'warning' : 'success'}
+          title={formatMessage(m.outcome.upgraded, {
+            version: report.target?.version ?? report.currentVersion,
+          })}
+        >
           {report.restart ? (
-            <p
-              className={
-                report.restart === 'scheduled'
-                  ? 'text-sm text-on-surface-variant'
-                  : 'text-sm text-warning'
-              }
-              data-testid="upgrade-restart-note"
-            >
-              {m.outcome.restart[report.restart]}
-            </p>
+            <p data-testid="upgrade-restart-note">{m.outcome.restart[report.restart]}</p>
           ) : null}
-        </div>
+        </Callout>
       );
     }
     if (report.outcome === 'already-current') {
-      return <p className="text-sm text-on-surface">{m.outcome.alreadyCurrent}</p>;
+      return <Callout tone="success">{m.outcome.alreadyCurrent}</Callout>;
     }
     if (report.outcome === 'refused') {
       return (
@@ -220,24 +207,8 @@ function UpgradeOutcome({ stream }: { readonly stream: UseUpgradeStreamResult })
       );
     }
     // `failed`
-    return <p className="text-sm text-error">{report.message ?? m.outcome.failedGeneric}</p>;
+    return <Callout tone="danger">{report.message ?? m.outcome.failedGeneric}</Callout>;
   }
 
   return null;
-}
-
-function OutcomeIcon({
-  phase,
-  outcome,
-}: {
-  readonly phase: UseUpgradeStreamResult['phase'];
-  readonly outcome: string | undefined;
-}) {
-  if (phase === 'connecting' || phase === 'streaming') {
-    return <LoaderCircle size={16} className="animate-spin text-primary" />;
-  }
-  if (phase === 'done' && (outcome === 'upgraded' || outcome === 'already-current')) {
-    return <CircleCheck size={16} className="text-primary" />;
-  }
-  return <CircleX size={16} className="text-error" />;
 }

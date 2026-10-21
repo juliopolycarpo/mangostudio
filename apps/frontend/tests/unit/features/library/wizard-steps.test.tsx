@@ -8,6 +8,7 @@
 
 import { describe, expect, it, jest } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
+import userEvent from '@testing-library/user-event';
 import { ConflictStep } from '../../../../src/features/library/components/ConflictStep';
 import { DestinationStep } from '../../../../src/features/library/components/DestinationStep';
 import { ReviewStep } from '../../../../src/features/library/components/ReviewStep';
@@ -16,6 +17,7 @@ import {
   initialDraft,
   unresolvedEntries,
 } from '../../../../src/features/library/propagation';
+import { formatMessage } from '../../../../src/lib/i18n-format';
 import { flushAsyncRender, screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { destination, location, preview, previewEntry, sourceGroup } from './fixtures';
@@ -136,8 +138,11 @@ describe('DestinationStep', () => {
     // One write covers both; without this notice a user also checks the Codex
     // directory and ends up with a second copy to keep in sync.
     const notice = screen.getByTestId('serves-multiple-targets');
-    expect(notice).toHaveTextContent(en.library.targets.codex);
-    expect(notice).toHaveTextContent('/home/dev/.agents/skills');
+    expect(notice).toHaveTextContent(
+      formatMessage(en.library.destination.servesMultipleTargets, {
+        targets: en.library.targets.codex,
+      })
+    );
   });
 
   it('disables a read-only destination and says why', async () => {
@@ -201,8 +206,11 @@ describe('DestinationStep', () => {
     ).toHaveAttribute('href', expect.stringContaining('/environments/agents'));
   });
 
-  it('asks for at least one destination before continuing', async () => {
+  // The reminder answers an emptied list. On a screen nobody has touched it is
+  // the only warning-toned thing in the dialog, and Continue is already disabled.
+  it('asks for at least one destination only once the list has been touched', async () => {
     const single = preview();
+    const user = userEvent.setup();
 
     await renderWithRouter(
       <DestinationStep
@@ -213,6 +221,10 @@ describe('DestinationStep', () => {
         onToggle={() => undefined}
       />
     );
+
+    expect(screen.queryByTestId('no-destination-selected')).toBeNull();
+
+    await user.click(screen.getAllByRole('checkbox')[0]);
 
     expect(screen.getByTestId('no-destination-selected')).toBeInTheDocument();
   });

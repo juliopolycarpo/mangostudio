@@ -7,7 +7,8 @@ import type { ToolIdentityResolver } from '@/features/environments/identity/use-
 import { useI18n } from '@/hooks/use-i18n';
 import { MANGO_IDENTITY } from '@/lib/agent-identity';
 import { formatClockTime } from '@/lib/i18n-format';
-import { deriveTurnIdentity } from '../lib/turn-identity';
+import { cn } from '@/lib/utils';
+import { agentRunnerName, deriveTurnIdentity } from '../lib/turn-identity';
 import type { TurnStatus } from '../lib/turn-status';
 import { CopyMessageButton } from './CopyMessageButton';
 import { RevertFileChangesButton } from './RevertFileChangesButton';
@@ -23,10 +24,12 @@ interface TurnSeparatorProps {
   fileCheckpoint?: ChatFileCheckpointSummary;
   /** Resolved once per feed by `ChatFeed`, not once per row. */
   toolIdentities: ToolIdentityResolver;
+  /** Catalog names by model id, resolved once per feed; an id it lacks is shown as stored. */
+  modelNames?: ReadonlyMap<string, string>;
 }
 
 /**
- * A model's monogram, tinted with MangoStudio's own hue.
+ * A model's monogram, in MangoStudio's own hue on a neutral fill.
  *
  * Not a `ToolAvatar`: that draws a *subject*, and the identity kinds are a
  * closed union with no `model` member. A `model:gpt-5` subject key would be a
@@ -39,11 +42,11 @@ function ModelMonogram({ monogram }: { monogram: string }) {
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center font-semibold ${TOOL_AVATAR_SIZE_CLASS.xs}`}
-      style={{
-        backgroundColor: `color-mix(in srgb, ${MANGO_IDENTITY.colorVar} 18%, transparent)`,
-        color: MANGO_IDENTITY.colorVar,
-      }}
+      className={cn(
+        'flex shrink-0 items-center justify-center bg-fill-selected font-semibold',
+        TOOL_AVATAR_SIZE_CLASS.xs
+      )}
+      style={{ color: MANGO_IDENTITY.colorVar }}
     >
       {monogram}
     </span>
@@ -61,6 +64,11 @@ function ModelMonogram({ monogram }: { monogram: string }) {
  * boundary; what the turn is *doing* is derived rather than stored, so it can
  * only be said while it is true.
  *
+ * The rule runs the whole width of the column. The actions sit on top of its
+ * right end instead of in the row, so showing or hiding them reflows nothing:
+ * with the copy and revert buttons in flow, they held their width at
+ * `opacity: 0` and the rule stopped 86px short of the event rules below it.
+ *
  * Usage: <TurnSeparator msg={msg} parts={parts} status={status} isImageTurn={false} toolIdentities={identities} />
  */
 export function TurnSeparator({
@@ -71,6 +79,7 @@ export function TurnSeparator({
   chatId,
   fileCheckpoint,
   toolIdentities,
+  modelNames,
 }: TurnSeparatorProps) {
   const { t, locale } = useI18n();
   const { resolve } = toolIdentities;
@@ -78,14 +87,20 @@ export function TurnSeparator({
     msg,
     parts,
     t.externalAgents.target,
-    t.chat.feed.modelFallback
+    t.chat.feed.modelFallback,
+    modelNames
   );
   // `agent:<targetId>` is a real identity subject with storage, an edit dialog
   // and an avatar palette, so renaming Codex in Environments renames it here for
   // free — and the same resolver feeds both the name and the avatar, so they
   // cannot disagree.
   const agent = identity.kind === 'agent' ? resolve('agent', identity.targetId) : null;
-  const name = agent?.name ?? (identity.kind === 'model' ? identity.name : '');
+  const name =
+    identity.kind === 'agent'
+      ? agent
+        ? agentRunnerName(agent, identity.targetId, t.externalAgents.target)
+        : ''
+      : identity.name;
   // `msg.isGenerating` is only *this session* receiving tokens — a vendor turn
   // reopened mid-flight reads false on reload even though `deriveTurnStatus`
   // still reports `working` from the turn record. The derived phase is what
@@ -96,47 +111,79 @@ export function TurnSeparator({
   // turn still running has nothing settled enough to act on.
   const showTurnActions = turnIsSettledEnoughForActions && !isImageTurn;
 
+  // A name that is the stored id itself — the catalog no longer lists the model —
+  // is technical content, so it is drawn as such rather than in the interface font.
+  const nameIsRawId =
+    identity.kind === 'model' && identity.modelId !== null && identity.name === identity.modelId;
+
   return (
-    <div className="flex items-center gap-2">
-      {identity.kind === 'agent' && agent ? (
-        <ToolAvatar
-          subjectKey={toolSubjectKey('agent', identity.targetId)}
-          monogram={agent.monogram}
-          name={agent.name}
-          image={agent.image}
-          size="xs"
-          className="shrink-0"
-        />
-      ) : (
-        <ModelMonogram monogram={identity.kind === 'model' ? identity.monogram : ''} />
-      )}
-      <span className="shrink-0 text-[11px] text-on-surface-variant/70">{name}</span>
-      {/* The chip yields to the working row, but an image turn never draws one:
-          `AssistantTurnBody` swaps the whole timeline for the generating
-          placeholder, so deferring to it here would leave the separator silent
-          for the one turn kind that has nothing else to say. */}
-      <TurnStatusChip phase={status.phase} showWorkingRow={status.showWorkingRow && !isImageTurn} />
-      {/* The rule takes the slack, so the actions stay pinned right however
-          long the name is. */}
-      <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-outline-variant/25" />
-      {showTurnActions && (
-        <CopyMessageButton
-          msg={msg}
-          label={t.chat.copyMessage}
-          copiedLabel={t.chat.messageCopied}
-        />
-      )}
-      {showTurnActions && chatId && fileCheckpoint && (
-        <RevertFileChangesButton
-          chatId={chatId}
-          messageId={msg.id}
-          uncheckpointedSources={fileCheckpoint.uncheckpointedSources}
-        />
-      )}
-      {turnIsSettledEnoughForActions && (
-        <span className="shrink-0 font-label text-[10px] text-on-surface-variant/50 opacity-0 transition-opacity duration-(--duration-base) group-hover:opacity-100">
-          {formatClockTime(msg.timestamp, locale)}
+    <div className="relative flex items-center gap-2">
+      {/* Who is answering. Capped while the actions are on screen, so a long
+          name truncates instead of running under them. */}
+      <div
+        className={cn(
+          'flex min-w-0 items-center gap-2',
+          turnIsSettledEnoughForActions && 'max-w-[calc(100%-10rem)]'
+        )}
+      >
+        {identity.kind === 'agent' && agent ? (
+          <ToolAvatar
+            subjectKey={toolSubjectKey('agent', identity.targetId)}
+            monogram={agent.monogram}
+            name={name}
+            image={agent.image}
+            size="xs"
+            className="shrink-0"
+          />
+        ) : (
+          <ModelMonogram monogram={identity.kind === 'model' ? identity.monogram : ''} />
+        )}
+        <span
+          title={identity.kind === 'model' ? (identity.modelId ?? undefined) : undefined}
+          className={cn(
+            'min-w-0 truncate text-xs font-medium text-fg-muted',
+            nameIsRawId && 'font-mono text-micro text-fg-subtle'
+          )}
+        >
+          {name}
         </span>
+        {/* The chip yields to the working row, but an image turn never draws one:
+            `AssistantTurnBody` swaps the whole timeline for the generating
+            placeholder, so deferring to it here would leave the separator silent
+            for the one turn kind that has nothing else to say. */}
+        <TurnStatusChip
+          phase={status.phase}
+          showWorkingRow={status.showWorkingRow && !isImageTurn}
+        />
+      </div>
+      <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-stroke" />
+      {turnIsSettledEnoughForActions && (
+        <div className="absolute right-0 flex items-center">
+          {/* The buttons reveal themselves; this backdrop is opaque only when
+              they are, so at rest the rule runs on behind them. Not an opacity
+              on the wrapper: the revert confirmation is a child of it. */}
+          {showTurnActions && (
+            <div className="flex items-center gap-1 bg-transparent pl-2 transition-colors group-focus-within:bg-canvas group-hover:bg-canvas pointer-coarse:bg-canvas">
+              <CopyMessageButton
+                msg={msg}
+                label={t.chat.copyMessage}
+                copiedLabel={t.chat.messageCopied}
+              />
+              {chatId && fileCheckpoint && (
+                <RevertFileChangesButton
+                  chatId={chatId}
+                  messageId={msg.id}
+                  uncheckpointedSources={fileCheckpoint.uncheckpointedSources}
+                />
+              )}
+            </div>
+          )}
+          {/* Always on screen, like a user bubble's: the same fact should not be
+              there on one side of the conversation and hover-only on the other. */}
+          <span className="shrink-0 bg-canvas pl-2 font-mono text-micro text-fg-subtle">
+            {formatClockTime(msg.timestamp, locale)}
+          </span>
+        </div>
       )}
     </div>
   );

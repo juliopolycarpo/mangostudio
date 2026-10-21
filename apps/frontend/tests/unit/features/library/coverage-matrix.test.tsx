@@ -2,8 +2,8 @@
  * CoverageMatrix: one column per target, and a cell nobody has to decode.
  *
  * The accessible name is asserted alongside the glyph because colour or symbol
- * alone is not an answer — a user who cannot tell ⧉ from ⚠ still has to be able
- * to read the state.
+ * alone is not an answer — a user who cannot tell Shadowed from Differs by its
+ * icon still has to be able to read the state.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -105,6 +105,61 @@ describe('CoverageMatrix', () => {
     );
   });
 
+  // The word printed beside the glyph is short enough for a column that is a
+  // fraction of the table; the sentence stays on the cell's name and tooltip.
+  it('prints a short word beside the glyph and keeps the sentence in the name', async () => {
+    await renderMatrix([
+      resource({
+        key: 'skill:divergent',
+        ref: { kind: 'skill', slug: 'divergent' },
+        instances: [
+          instance({ locationId: 'agents-skills', contentHash: 'a3f9c1' }),
+          instance({ locationId: 'claude-skills', contentHash: 'a3f9c1' }),
+          instance({ locationId: 'cursor-skills', contentHash: '7c21e8' }),
+        ],
+        coverage: fullCoverage({
+          mangostudio: { state: 'present', effectiveLocationId: 'agents-skills' },
+          claude: { state: 'present', effectiveLocationId: 'claude-skills' },
+          cursor: { state: 'present', effectiveLocationId: 'cursor-skills' },
+        }),
+        divergence: 'divergent',
+      }),
+    ]);
+
+    const cell = cellFor('skill:divergent', 'cursor');
+    expect(cell).toHaveTextContent(en.library.cellStateShort.divergent);
+    expect(cell).not.toHaveTextContent(en.library.cellState.divergent);
+    expect(cell.getAttribute('aria-label')).toContain(en.library.cellState.divergent);
+  });
+
+  it('lays the columns out as a fixed grid, one equal share per agent', async () => {
+    await renderMatrix([resource()]);
+
+    const table = screen.getByTestId('coverage-matrix').querySelector('table');
+    expect(table).toHaveClass('table-fixed');
+    const columns = [...(table?.querySelectorAll('col') ?? [])];
+    expect(columns).toHaveLength(TARGETS.length + 2);
+    // Only the two leading columns are sized. The agents split what is left, so
+    // the same header lands in the same place on every tab and for any count.
+    expect(columns.slice(2).map((column) => column.className)).toEqual(TARGETS.map(() => ''));
+  });
+
+  // A slug is an identifier: `changelog-writer` broken at its hyphen reads as
+  // two words. It stays on one line, and one too long for the column keeps its
+  // whole name in the tooltip.
+  it('keeps a resource name on one line, with the whole name in its tooltip', async () => {
+    await renderMatrix([resource({ ref: { kind: 'skill', slug: 'changelog-writer' } })]);
+
+    const name = screen.getByRole('link', { name: /changelog-writer/ });
+    // The slug truncates inside a flex link, so the text centres in a row grown
+    // to the 44px touch floor instead of sitting on its top line.
+    const slug = within(name).getByText('changelog-writer');
+    expect(slug).toHaveClass('truncate');
+    expect(slug).not.toHaveClass('break-words');
+    expect(name).toHaveClass('items-center');
+    expect(name).toHaveAttribute('title', 'changelog-writer');
+  });
+
   it('never calls an absence "missing"', async () => {
     await renderMatrix([resource()]);
 
@@ -199,8 +254,10 @@ describe('CoverageMatrix', () => {
     );
     render(<MatrixLegend />);
 
+    // The words the cells print themselves: the key is only drawn where the cells
+    // are glyphs alone, and the full sentence for each state is its tooltip.
     for (const state of ['present', 'absent', 'shadowed', 'divergent', 'only-here'] as const) {
-      expect(screen.getByText(en.library.cellState[state])).toBeInTheDocument();
+      expect(screen.getByText(en.library.cellStateShort[state])).toBeInTheDocument();
     }
   });
 });

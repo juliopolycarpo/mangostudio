@@ -136,7 +136,22 @@ function createRenderer(
   renderer.image = renderImage;
   renderer.html = (token) => escapeHtml('text' in token ? token.text : '');
   renderer.code = (token) => renderCode(token.text, token.lang, theme, copyCodeLabel, highlighter);
+  renderer.table = renderTable;
   return renderer;
+}
+
+/**
+ * Seats a table in a box that scrolls sideways when its columns need more room
+ * than the bubble has. Scrolling the `<table>` itself would mean
+ * `display: block`, which shrink-wraps a narrow table and strips its table
+ * semantics from some screen readers; a wrapper leaves the table a table.
+ *
+ * `this` is the renderer `marked` runs the call on, which carries the `parser`
+ * the default `table` needs — a copy bound to the one built here would have
+ * none. // Usage: renderer.table = renderTable
+ */
+function renderTable(this: Renderer, token: Parameters<Renderer['table']>[0]): string {
+  return `<div class="markdown-table-scroll">${Renderer.prototype.table.call(this, token)}</div>`;
 }
 
 /**

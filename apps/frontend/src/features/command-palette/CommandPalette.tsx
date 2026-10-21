@@ -17,10 +17,11 @@
  * behaviour is testable without a router, a query client or the app context.
  */
 
-import { Search, SearchX } from 'lucide-react';
+import { ArrowRightToLine, ArrowUpDown, Search, SearchX } from 'lucide-react';
 import { motion } from 'motion/react';
 import {
   memo,
+  type ReactNode,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -29,16 +30,18 @@ import {
   useRef,
   useState,
 } from 'react';
+import { DIALOG_SURFACE_CLASS } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { KbdHint } from '@/components/ui/KbdHint';
+import { KbdHint, ReturnKey } from '@/components/ui/KbdHint';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { onFocusTrapEngaged } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
+import { cn } from '@/lib/utils';
 import type { CommandItem } from './lib/command-item';
 import { activeCommandIndex, rankCommands } from './lib/match';
 
@@ -228,7 +231,7 @@ export const CommandPalette = memo(function CommandPalette({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop only dismisses; Escape on the dialog is its keyboard equivalent.
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-background/70 px-4 pt-[10vh] backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-scrim px-4 pt-[10vh]"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -249,15 +252,11 @@ export const CommandPalette = memo(function CommandPalette({
           if (event.target !== inputRef.current) event.preventDefault();
         }}
         {...dialogPanel}
-        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-highest shadow-2xl"
+        className={cn('flex w-full max-w-2xl flex-col overflow-hidden', DIALOG_SURFACE_CLASS)}
         data-testid="command-palette"
       >
-        <div className="flex items-center gap-3 border-b border-outline-variant/15 px-4 py-3">
-          <Search
-            size={ICON_MD}
-            aria-hidden="true"
-            className="shrink-0 text-on-surface-variant/60"
-          />
+        <div className="flex h-12 items-center gap-3 border-b border-stroke px-4">
+          <Search size={ICON_MD} aria-hidden="true" className="shrink-0 text-fg-muted" />
           <input
             ref={inputRef}
             type="text"
@@ -276,7 +275,7 @@ export const CommandPalette = memo(function CommandPalette({
               setPinnedId(null);
             }}
             placeholder={labels.placeholder}
-            className="min-w-0 flex-1 bg-transparent text-sm text-on-surface outline-none placeholder:text-on-surface-variant/50"
+            className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
           />
           <KbdHint keys={labels.keys.escape} />
         </div>
@@ -286,11 +285,7 @@ export const CommandPalette = memo(function CommandPalette({
             {groups.map((group, groupIndex) => (
               // biome-ignore lint/a11y/useSemanticElements: `group` is the role ARIA defines for a listbox's own sections; `<fieldset>` groups form controls and is not a valid listbox child.
               <div key={group.section} role="group" aria-labelledby={`${listId}-${group.section}`}>
-                <MicroLabel
-                  as="div"
-                  id={`${listId}-${group.section}`}
-                  className="px-4 pb-1 pt-2 text-on-surface-variant/60"
-                >
+                <MicroLabel as="div" id={`${listId}-${group.section}`} className="px-4 pb-1 pt-2">
                   {labels.sections[group.section]}
                 </MicroLabel>
                 {group.items.map((item, itemIndex) => {
@@ -318,17 +313,22 @@ export const CommandPalette = memo(function CommandPalette({
 
           {showEmpty ? (
             <EmptyState
-              icon={<SearchX size={20} />}
+              icon={<SearchX size={ICON_LG} />}
               title={formatMessage(t.common.noResultsFor, { query: deferredQuery.trim() })}
               hint={labels.emptyHint}
             />
           ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-outline-variant/15 px-4 py-2 text-[11px] text-on-surface-variant/60">
-          <FooterHint keys="↑↓" label={labels.hints.navigate} />
-          <FooterHint keys="⏎" label={labels.hints.run} />
-          <FooterHint keys="⇥" label={labels.hints.sections} />
+        {/* Keyboard hints: a touch screen has neither arrows nor Tab, so the
+            footer is not drawn on a coarse pointer. The keys are icons, like
+            Return: `↑↓` and `⇥` as text glyphs render hairline-thin and about
+            half the size of the arrow beside them, which left the keycap
+            looking empty. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-xs text-fg-muted pointer-coarse:hidden">
+          <FooterHint keys={<ArrowUpDown size={ICON_SM} />} label={labels.hints.navigate} />
+          <FooterHint keys={<ReturnKey />} label={labels.hints.run} />
+          <FooterHint keys={<ArrowRightToLine size={ICON_SM} />} label={labels.hints.sections} />
         </div>
       </motion.div>
     </div>
@@ -356,7 +356,7 @@ function optionId(listId: string, item: CommandItem): string {
   return `${listId}-${item.id}`;
 }
 
-function FooterHint({ keys, label }: { keys: string; label: string }) {
+function FooterHint({ keys, label }: { keys: ReactNode; label: string }) {
   return (
     <span className="flex items-center gap-1.5">
       <KbdHint keys={keys} />
@@ -391,36 +391,47 @@ function CommandRow({
       // about which row Enter would run.
       onMouseMove={onActivate}
       onClick={() => void item.run()}
-      className={`mx-2 flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm ${
-        active ? 'bg-primary/10 text-on-surface' : 'text-on-surface/80'
-      }`}
+      className={cn(
+        'mx-2 flex h-10 cursor-pointer items-center gap-3 rounded-sm px-2 text-sm text-fg',
+        active && 'bg-fill-selected'
+      )}
     >
       {Icon ? (
         <Icon
-          size={ICON_SM}
+          size={ICON_MD}
           aria-hidden="true"
-          className={`shrink-0 ${active ? 'text-primary' : 'text-on-surface-variant/70'}`}
+          className={cn('shrink-0', active ? 'text-fg' : 'text-fg-muted')}
         />
       ) : null}
       <span className="truncate">{item.label}</span>
+      {/* Below `sm` the folder steps back like the timestamp does, for the same
+          reason: the label is what the reader scans for. Visually only; the words
+          stay in the accessibility tree and in what the search matches. */}
       {item.hint ? (
-        <span className="min-w-0 shrink truncate font-mono text-xs text-on-surface-variant/50">
+        <span
+          className={cn(
+            'min-w-0 shrink truncate text-xs text-fg-subtle max-sm:sr-only',
+            item.hintIsPath && 'font-mono'
+          )}
+        >
           {item.hint}
         </span>
       ) : null}
       <span className="ml-auto flex shrink-0 items-center gap-2">
         {item.badge ? (
-          <span className="micro-label flex items-center gap-1.5 normal-case tracking-normal">
+          <span className="flex items-center gap-1.5 font-mono text-micro text-fg-subtle">
             <StatusDot tone="neutral" className={item.badge.dotClassName} />
-            {item.badge.label}
+            {/* The dot stays: it is the harness's identity at any width. */}
+            <span className="max-sm:sr-only">{item.badge.label}</span>
           </span>
         ) : null}
         {/* Hidden below `sm`, but only visually: on a 390px row the label, the
-            folder and the harness badge all truncate to fight over the space a
-            timestamp is taking, and the label is what the reader is scanning
-            for. The words stay in the accessibility tree at every width. */}
+            folder and the harness badge all truncate to fight over the space, and
+            the label is what the reader is scanning for. The timestamp, the folder
+            above and the badge's word all step back; the words stay in the
+            accessibility tree at every width. */}
         {item.meta ? (
-          <span className="text-[11px] text-on-surface-variant/50 max-sm:sr-only">{item.meta}</span>
+          <span className="font-mono text-micro text-fg-subtle max-sm:sr-only">{item.meta}</span>
         ) : null}
         {item.shortcut ? <KbdHint keys={item.shortcut} /> : null}
       </span>

@@ -27,11 +27,12 @@ function items(): CommandItem[] {
       section: 'sessions',
       label: 'Plugin LSP TypeScript',
       hint: 'mango-lsp-store',
+      hintIsPath: true,
       meta: 'an hour ago',
       badge: { label: 'codex', dotClassName: 'bg-agent-codex' },
       run: runs.session,
     },
-    { id: 'action:new-chat', section: 'actions', label: 'New Chat', run: runs.newChat },
+    { id: 'action:new-chat', section: 'actions', label: 'New chat', run: runs.newChat },
     {
       id: 'navigate:/gallery',
       section: 'navigate',
@@ -43,6 +44,7 @@ function items(): CommandItem[] {
       id: 'environment:local',
       section: 'environments',
       label: 'Local',
+      hint: 'Hub-launched',
       run: runs.environment,
     },
   ];
@@ -50,10 +52,10 @@ function items(): CommandItem[] {
 
 /** Any `useFocusTrap` consumer; this one is the cheapest to mount. */
 const confirmProps = {
-  title: 'Delete Connector',
+  title: 'Delete connector',
   description: 'Are you sure you want to delete',
   entityName: 'My OpenAI Key',
-  confirmLabel: 'Delete Connector',
+  confirmLabel: 'Delete connector',
   cancelLabel: 'Cancel',
   onConfirm: jest.fn(),
   onCancel: jest.fn(),
@@ -174,7 +176,7 @@ describe('command palette shell', () => {
     const headings = screen
       .getAllByRole('group')
       .map((group) => group.firstElementChild?.textContent);
-    expect(headings).toEqual(['Sessions', 'Actions', 'Go to', 'Environments']);
+    expect(headings).toEqual(['Chats', 'Actions', 'Go to', 'Environments']);
   });
 
   it('shows the session badge, folder and relative time on the row', () => {
@@ -190,7 +192,7 @@ describe('command palette keyboard', () => {
   it('moves the active row with the arrows and wraps at both ends', () => {
     renderPalette();
     fireEvent.keyDown(input(), { key: 'ArrowDown' });
-    expect(activeOptionLabel()).toContain('New Chat');
+    expect(activeOptionLabel()).toContain('New chat');
 
     fireEvent.keyDown(input(), { key: 'ArrowUp' });
     expect(activeOptionLabel()).toContain('Plugin LSP TypeScript');
@@ -203,7 +205,7 @@ describe('command palette keyboard', () => {
   it('jumps between sections on Tab and never lets focus leave the input', () => {
     renderPalette();
     fireEvent.keyDown(input(), { key: 'Tab' });
-    expect(activeOptionLabel()).toContain('New Chat');
+    expect(activeOptionLabel()).toContain('New chat');
 
     fireEvent.keyDown(input(), { key: 'Tab', shiftKey: true });
     expect(activeOptionLabel()).toContain('Plugin LSP TypeScript');
@@ -246,7 +248,7 @@ describe('command palette filtering', () => {
 
     expect(screen.getAllByRole('option')).toHaveLength(1);
     expect(screen.getByRole('option', { name: /Gallery/ })).toBeInTheDocument();
-    expect(screen.queryByText('Sessions')).not.toBeInTheDocument();
+    expect(screen.queryByText('Chats')).not.toBeInTheDocument();
   });
 
   it('finds a session by its folder, which the label never mentions', () => {
@@ -261,7 +263,7 @@ describe('command palette filtering', () => {
     expect(activeOptionLabel()).toContain('Local');
 
     fireEvent.change(input(), { target: { value: 'new' } });
-    expect(activeOptionLabel()).toContain('New Chat');
+    expect(activeOptionLabel()).toContain('New chat');
   });
 
   it('activates the best match anywhere, not the first row on screen', () => {
@@ -272,14 +274,37 @@ describe('command palette filtering', () => {
     expect(activeOptionLabel()).toContain('Gallery');
 
     fireEvent.change(input(), { target: { value: 'chat' } });
-    expect(activeOptionLabel()).toContain('New Chat');
+    expect(activeOptionLabel()).toContain('New chat');
+  });
+
+  it('sets a folder hint in mono and a hint meant for reading in sans', () => {
+    renderPalette();
+    const session = screen.getByRole('option', { name: /Plugin LSP TypeScript/ });
+    expect(within(session).getByText('mango-lsp-store')).toHaveClass('font-mono');
+    const environment = screen.getByRole('option', { name: /Local/ });
+    expect(within(environment).getByText('Hub-launched')).not.toHaveClass('font-mono');
   });
 
   it('offers the no-results state rather than an empty panel', () => {
     renderPalette();
     fireEvent.change(input(), { target: { value: 'zzzqqq' } });
     expect(screen.queryAllByRole('option')).toHaveLength(0);
-    expect(screen.getByText('No results for "zzzqqq"')).toBeInTheDocument();
+    expect(screen.getByText('No results for “zzzqqq”')).toBeInTheDocument();
+  });
+
+  it('steps the folder, the runner word and the age back below sm, keeping the title and the dot', () => {
+    renderPalette();
+    const row = screen.getByRole('option', { name: /Plugin LSP TypeScript/ });
+    // Visually only: all three stay in the accessibility tree, and the search
+    // still matches the folder.
+    expect(within(row).getByText('mango-lsp-store')).toHaveClass('max-sm:sr-only');
+    expect(within(row).getByText('codex')).toHaveClass('max-sm:sr-only');
+    expect(within(row).getByText('an hour ago')).toHaveClass('max-sm:sr-only');
+    expect(within(row).getByText('codex').previousElementSibling).toHaveAttribute(
+      'data-tone',
+      'neutral'
+    );
+    expect(within(row).getByText('Plugin LSP TypeScript')).not.toHaveClass('max-sm:sr-only');
   });
 
   it('shows a skeleton while a source is still answering, without blocking the rest', () => {

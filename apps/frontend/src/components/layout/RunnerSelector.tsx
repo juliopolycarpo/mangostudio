@@ -21,11 +21,26 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
-import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentDescriptor,
+  ExternalAgentUnavailableReason,
+} from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { Check, ChevronDown, CornerUpRight, History } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
-import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
+import {
+  Check,
+  ChevronDown,
+  CircleX,
+  CornerUpRight,
+  History,
+  Info,
+  TriangleAlert,
+} from 'lucide-react';
+import { type ReactNode, useId, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Spinner } from '@/components/ui/Spinner';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
@@ -34,7 +49,51 @@ import {
   externalAgentSelectable,
   externalUnavailableText,
 } from '@/features/external-agents/useExternalAgents';
+import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
+import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
+
+/** How loud the trigger's availability glyph is; `loading` is a wait, not a verdict. */
+type AvailabilityCue = 'loading' | 'neutral' | 'warning' | 'error';
+
+/**
+ * How loud the trigger's availability glyph is for each reason an agent cannot
+ * take a turn, by the product's severity ladder: absent and optional is neutral,
+ * a thing the person can fix is warning, and error is for a fault. A healthy
+ * account that simply has not installed Codex must not open on red in the header.
+ *
+ * Exhaustive on purpose: a reason added to the contract fails the build here
+ * instead of defaulting to a colour nobody chose.
+ */
+const UNAVAILABLE_TONE: Record<
+  ExternalAgentUnavailableReason,
+  Exclude<AvailabilityCue, 'loading'>
+> = {
+  'not-installed': 'neutral',
+  'runtime-unsupported': 'neutral',
+  'signed-out': 'warning',
+  'disclosure-required': 'warning',
+  'version-unsupported': 'warning',
+  'installed-but-unusable': 'warning',
+  'runtime-denied': 'warning',
+  'environment-unreachable': 'error',
+  'isolation-unproven': 'error',
+};
+
+/**
+ * The reason a descriptor is unusable when it names none: discovery reports an
+ * agent that is not there, or is signed out, without a typed `unavailableReason`.
+ */
+function impliedUnavailableReason(
+  descriptor: ExternalAgentDescriptor
+): ExternalAgentUnavailableReason | undefined {
+  if (descriptor.unavailableReason) return descriptor.unavailableReason;
+  if (!descriptor.installed) return 'not-installed';
+  if (descriptor.authState === 'signed-out') return 'signed-out';
+  return undefined;
+}
 
 export interface RunnerSelectorProps {
   runner: ChatRunnerConfiguration;
@@ -42,7 +101,7 @@ export interface RunnerSelectorProps {
   isAgentListLoading: boolean;
   externalAgents: readonly ExternalAgentDescriptor[];
   /**
-   * True while discovery is still answering. Load-bearing for the pill's dot: a
+   * True while discovery is still answering. Load-bearing for the trigger's glyph: a
    * missing descriptor and a refused one are the same shape, so without this an
    * unanswered query reads as "this agent cannot run here".
    */
@@ -94,23 +153,7 @@ export function RunnerSelector({
   const { t } = useI18n();
   const labels = t.externalAgents.selector;
   const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  const { containerRef, triggerRef, onKeyDown } = useDismissable(open, () => setOpen(false));
 
   // Exactly the filter the composer's agent picker already applies: a subagent
   // is not something a chat can be handed to.
@@ -122,19 +165,21 @@ export function RunnerSelector({
     runner.kind === 'mangostudio'
       ? (selectableAgents.find((agent) => agent.id === runner.agentId)?.name ?? runner.agentId)
       : // A target this bundle predates still names itself: its raw id beats a
-        // blank pill, and the sidebar badge already degrades the same way.
+        // blank trigger, and the sidebar badge already degrades the same way.
         (t.externalAgents.target[runner.targetId] ?? runner.targetId);
 
-  // The pill's dot answers "can this runner take a turn right now": MangoStudio
-  // always can (accent), an external runner grades from signed-in through
-  // auth-unknown to not-selectable-here.
+  // The trigger's dot says *who* runs the chat, in the runner's identity colour —
+  // the same dot the sidebar, the palette and Home draw for it. Whether that runner
+  // can take a turn right now is a separate glyph after the name, drawn only when
+  // the answer is not "yes": MangoStudio always can, and an external runner grades
+  // from signed-in (no glyph) through auth-unknown to not-selectable-here.
   const activeDescriptor =
     runner.kind === 'external'
       ? externalAgents.find((agent) => agent.targetId === runner.targetId)
       : undefined;
   // `disclosure-required` is checked on top of `externalAgentSelectable`, which
   // deliberately leaves such a descriptor selectable so the picker can route the
-  // user into the notice. The pill answers a different question — can this runner
+  // user into the notice. The trigger answers a different question — can this runner
   // take a turn right now — and the answer is no until the notice is accepted, so
   // a green dot reading "signed in" would promise a send that the turn-start gate
   // refuses. Same extra condition the composer applies.
@@ -148,45 +193,79 @@ export function RunnerSelector({
   // The unanswered-discovery arm comes first because a missing descriptor and a
   // refused one are indistinguishable here. Painting the refusal while the query
   // is still in flight told every reader "pick another agent" on every mount.
-  const availability: { tone: StatusDotTone; text: string | null } =
+  //
+  // An unusable agent grades by *why* (`UNAVAILABLE_TONE`) and says why, in the
+  // selector's own sentence for that reason. Only an agent the environment does
+  // not know at all, or one that names no reason, stays an error with the generic
+  // line: nothing says it is merely absent or fixable.
+  const unavailableReason = activeDescriptor
+    ? impliedUnavailableReason(activeDescriptor)
+    : undefined;
+  const unusable: { cue: AvailabilityCue; text: string } = unavailableReason
+    ? {
+        cue: UNAVAILABLE_TONE[unavailableReason],
+        text: externalUnavailableText(unavailableReason, t, activeDescriptor?.requiredVersion),
+      }
+    : { cue: 'error', text: labels.unavailableHere };
+  // `cue: null` is a runner that is ready: no glyph, only the sentence for a
+  // screen reader, so a healthy header carries no status colour at all.
+  const availability: { cue: AvailabilityCue | null; text: string | null } =
     runner.kind === 'mangostudio'
-      ? { tone: 'accent', text: null }
+      ? { cue: null, text: null }
       : !activeDescriptor && isExternalAgentListLoading
-        ? { tone: 'neutral', text: labels.loading }
+        ? { cue: 'loading', text: labels.loading }
         : !activeUsable
-          ? { tone: 'error', text: labels.unavailableHere }
+          ? unusable
           : activeDescriptor?.discoveryState === 'undetermined'
-            ? { tone: 'warning', text: labels.discoveryUndetermined }
+            ? { cue: 'warning', text: labels.discoveryUndetermined }
             : activeDescriptor?.authState === 'signed-in'
-              ? { tone: 'success', text: labels.signedIn }
-              : { tone: 'warning', text: labels.authUnknown };
+              ? { cue: null, text: labels.signedIn }
+              : { cue: 'warning', text: labels.authUnknown };
+  const identityDot =
+    runner.kind === 'mangostudio'
+      ? MANGO_IDENTITY.dotClass
+      : agentIdentityTokens(runner.targetId).dotClass;
+  // The trigger's name is its `aria-label` ("Who runs this chat"), which hides
+  // anything written inside it; the availability sentence is its description.
+  const availabilityId = useId();
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    <div ref={containerRef} onKeyDown={onKeyDown} className="relative">
+      <Button
+        ref={triggerRef}
         type="button"
+        variant="subtle"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={labels.label}
-        className="flex h-9 max-w-full items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-3 text-sm font-medium text-on-surface transition-colors hover:border-primary/30 disabled:opacity-50"
+        aria-describedby={availability.text ? availabilityId : undefined}
+        className="max-w-full px-2 aria-expanded:bg-fill-selected"
       >
-        <StatusDot tone={availability.tone} />
-        {availability.text ? <span className="sr-only">{availability.text}</span> : null}
+        <StatusDot tone="neutral" className={identityDot} />
         <span className="truncate">{activeLabel}</span>
-        <ChevronDown size={14} className="shrink-0 text-on-surface-variant" />
-      </button>
+        {availability.cue ? (
+          <AvailabilityGlyph cue={availability.cue} title={availability.text ?? undefined} />
+        ) : null}
+        {availability.text ? (
+          <span id={availabilityId} className="sr-only">
+            {availability.text}
+          </span>
+        ) : null}
+        <ChevronDown size={ICON_MD} className="shrink-0 text-fg-muted" />
+      </Button>
 
       {open ? (
         <div
           role="listbox"
           aria-label={labels.label}
-          className="absolute left-0 z-50 mt-2 max-h-[70vh] w-80 overflow-auto rounded-2xl border border-outline-variant/15 bg-surface-container-low p-2 shadow-2xl"
+          className="dropdown-panel app-scrollbar absolute top-full left-0 mt-1 max-h-[70vh] w-80 overflow-y-auto p-1"
         >
           <GroupHeading>{labels.mangostudioGroup}</GroupHeading>
           {isAgentListLoading ? (
-            <p className="px-3 py-2 text-xs text-on-surface-variant/70">{labels.loading}</p>
+            <p className="px-2 py-2 text-xs text-fg-muted">{labels.loading}</p>
           ) : null}
           {selectableAgents.map((agent) => {
             const active = runner.kind === 'mangostudio' && runner.agentId === agent.id;
@@ -217,7 +296,7 @@ export function RunnerSelector({
 
           <GroupHeading>{labels.externalGroup}</GroupHeading>
           {externalAgents.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-on-surface-variant/70">{labels.noneDiscovered}</p>
+            <p className="px-2 py-2 text-xs text-fg-muted">{labels.noneDiscovered}</p>
           ) : null}
           {externalAgents.map((descriptor) => (
             <ExternalRow
@@ -252,9 +331,9 @@ export function RunnerSelector({
                 setOpen(false);
                 onBrowseSessions();
               }}
-              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high"
+              className="flex min-h-8 w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg transition-colors hover:bg-fill-hover"
             >
-              <History size={13} className="shrink-0 text-primary/80" />
+              <History size={ICON_MD} className="shrink-0 text-fg-muted" />
               <span className="min-w-0 flex-1 truncate">{t.externalAgents.sessions.entry}</span>
             </button>
           ) : null}
@@ -264,11 +343,31 @@ export function RunnerSelector({
   );
 }
 
+const AVAILABILITY_GLYPH: Record<Exclude<AvailabilityCue, 'loading'>, ReactNode> = {
+  neutral: <Info size={ICON_SM} className="text-fg-muted" />,
+  warning: <TriangleAlert size={ICON_SM} className="text-warning" />,
+  error: <CircleX size={ICON_SM} className="text-danger" />,
+};
+
+/**
+ * Why the runner named beside it cannot take a turn, as a glyph in the status
+ * colour — never the identity dot, which only says who the runner is. The words
+ * are the trigger's description for a screen reader and the glyph's tooltip for
+ * everyone else, so the colour is never the whole signal.
+ */
+function AvailabilityGlyph({ cue, title }: { cue: AvailabilityCue; title?: string }) {
+  return (
+    <span aria-hidden="true" data-availability={cue} title={title} className="flex shrink-0">
+      {cue === 'loading' ? <Spinner size="sm" /> : AVAILABILITY_GLYPH[cue]}
+    </span>
+  );
+}
+
 function GroupHeading({ children }: { children: string }) {
   return (
-    <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+    <MicroLabel as="p" className="px-2 pb-1 pt-2">
       {children}
-    </p>
+    </MicroLabel>
   );
 }
 
@@ -289,16 +388,22 @@ function RunnerRow({
       role="option"
       aria-selected={active}
       onClick={onSelect}
-      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-container-high"
+      className={cn(
+        'flex min-h-8 w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg transition-colors',
+        active ? 'bg-fill-selected' : 'hover:bg-fill-hover'
+      )}
     >
+      {/* Who answers, in the colour the trigger, the sidebar and Home draw it.
+          Every MangoStudio agent is MangoStudio running it, so they share one. */}
+      <StatusDot tone="neutral" className={MANGO_IDENTITY.dotClass} />
       <span className="min-w-0 flex-1 truncate">{name}</span>
       {forkLabel ? (
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
-          <CornerUpRight size={11} />
+        <span className="flex shrink-0 items-center gap-1 text-xs text-fg-muted">
+          <CornerUpRight size={ICON_SM} />
           {forkLabel}
         </span>
       ) : null}
-      {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
+      {active ? <Check size={ICON_MD} className="shrink-0 text-accent-fg" /> : null}
     </button>
   );
 }
@@ -358,6 +463,9 @@ function ExternalRow({
 }) {
   const { t } = useI18n();
   const labels = t.externalAgents;
+  const nameId = useId();
+  const forkId = useId();
+  const statusId = useId();
 
   const reason = descriptor.unavailableReason;
   const signedOut = descriptor.installed && descriptor.authState === 'signed-out';
@@ -377,83 +485,152 @@ function ExternalRow({
         : descriptor.discoveryState === 'undetermined'
           ? labels.selector.discoveryUndeterminedHint
           : null;
+  // Who the agent is signed in as, or that nobody can tell. A line under the name
+  // rather than a badge beside it: on the name's line it left the name, the only
+  // part allowed to shrink, as "C…" in a 320px panel.
+  const account =
+    descriptor.authState === 'signed-in'
+      ? (descriptor.account?.label ?? labels.selector.signedIn)
+      : null;
+  const authUnknown = selectable && descriptor.authState === 'unknown';
+  const hasStatus = account !== null || authUnknown || explanation !== null;
+
+  // The notice is the one refusal this menu clears itself: picking the row opens
+  // it (the container routes a pick, and a fork, through the notice first). Its
+  // way through stands where "Continue in a new chat" would, so the row offers
+  // the step it will actually take rather than promising a chat it cannot open.
+  const disclosureRequired = reason === 'disclosure-required';
+  const forkHint = selectable && forks && !disclosureRequired;
 
   return (
-    <div className="rounded-xl px-1">
-      <div className="flex w-full items-center gap-1">
+    <div>
+      {/* The actions beside the row centre on its name's 32px line, not on the
+          whole block, so they stay level with the name when status lines follow. */}
+      <div className="flex w-full items-start gap-1">
         <button
           type="button"
           role="option"
           aria-selected={active}
+          aria-labelledby={forkHint ? `${nameId} ${forkId}` : nameId}
+          aria-describedby={hasStatus ? statusId : undefined}
           disabled={!selectable}
           onClick={() => onSelect(forks)}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors enabled:hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+          className={cn(
+            // A runner this machine cannot use is not faded: its name says which
+            // agents exist, and the lines under it say why it is out of reach.
+            // The name steps down a text colour instead.
+            'flex min-h-8 min-w-0 flex-1 items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg transition-colors disabled:cursor-not-allowed disabled:text-fg-muted',
+            active ? 'bg-fill-selected' : 'enabled:hover:bg-fill-hover'
+          )}
         >
-          <span className="min-w-0 flex-1 truncate">{labels.target[descriptor.targetId]}</span>
-          {descriptor.authState === 'signed-in' ? (
-            <span className="flex shrink-0 items-center gap-1 text-[10px] text-success">
-              <Check size={11} />
-              {descriptor.account?.label ?? labels.selector.signedIn}
+          {/* Who the runner is, in the hue the trigger, the sidebar and Home use.
+              A background, so a disabled row keeps it at full strength: an
+              agent's identity stays its colour while its name steps down. */}
+          <StatusDot
+            tone="neutral"
+            className={cn('mt-1.5', agentIdentityTokens(descriptor.targetId).dotClass)}
+          />
+          {/* The name and what is true of it are one block, like a permission
+              option's title and description: the status lines sit 2px under the
+              name, so they read as this row's and not as the gap between two. */}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-2">
+              {/* A vendor's product name is short and is the row's whole identity:
+                  it never yields. The hint after it does, if anything has to. */}
+              <span id={nameId} className="shrink-0">
+                {labels.target[descriptor.targetId]}
+              </span>
+              {forkHint ? (
+                <span
+                  id={forkId}
+                  className="ml-auto flex min-w-0 items-center gap-1 text-xs text-fg-muted"
+                >
+                  <CornerUpRight size={ICON_SM} aria-hidden="true" className="shrink-0" />
+                  <span className="truncate">{labels.selector.continueInNewChat}</span>
+                </span>
+              ) : null}
+              {active ? <Check size={ICON_MD} className="ml-auto shrink-0 text-accent-fg" /> : null}
             </span>
-          ) : null}
-          {selectable && descriptor.authState === 'unknown' ? (
-            <span className="shrink-0 text-[10px] text-on-surface-variant/70">
-              {labels.selector.authUnknown}
-            </span>
-          ) : null}
-          {selectable && forks ? (
-            <span className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
-              <CornerUpRight size={11} />
-              {labels.selector.continueInNewChat}
-            </span>
-          ) : null}
-          {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
+            {hasStatus ? (
+              <span
+                id={statusId}
+                className="mt-0.5 block space-y-0.5 text-xs leading-4 text-fg-muted"
+              >
+                {account !== null ? (
+                  // The status pattern: a glyph in the status colour with the
+                  // words in the ordinary text colour.
+                  <span className="flex min-w-0 items-center gap-1">
+                    <Check size={ICON_SM} aria-hidden="true" className="shrink-0 text-success" />
+                    <span className="truncate">{account}</span>
+                  </span>
+                ) : null}
+                {authUnknown ? <span className="block">{labels.selector.authUnknown}</span> : null}
+                {explanation && disclosureRequired ? (
+                  // A runner that cannot answer until its notice is read is a
+                  // thing to fix: the warning the trigger and Home show for it.
+                  <span className="flex items-start gap-1">
+                    <TriangleAlert
+                      size={ICON_SM}
+                      aria-hidden="true"
+                      className="mt-px shrink-0 text-warning"
+                    />
+                    <span>{explanation}</span>
+                  </span>
+                ) : explanation ? (
+                  <span className="block">{explanation}</span>
+                ) : null}
+              </span>
+            ) : null}
+          </span>
         </button>
         {descriptor.capabilities.accountUsage && selectable ? (
-          <div className="shrink-0 pr-2">
+          <div className="flex h-8 shrink-0 items-center pr-2">
             <ExternalAccountLimitsChipFor descriptor={descriptor} />
           </div>
         ) : null}
+        {/* The remedies MangoStudio can act on. Install and update link into the
+            surface that already owns the recipes rather than growing a second
+            install affordance here — `claude.install` and `claude.update` and
+            their Codex and Cursor equivalents live there, keyed by the same
+            target id. The notice is read through the row's own pick, so its
+            button does what clicking the row does. Every other remedy either has
+            its own control below (sign-in), its own panel (isolation), or
+            nothing to offer. On the name's line, right-aligned, as "Continue in
+            a new chat" is on a usable row: a runner that is not installed is a
+            name, the reason under it, and the way out beside it. It takes no
+            inset of its own: the small button's padding already ends its label
+            8px from the edge, where the row button's padding ends the fork hint. */}
+        {disclosureRequired && selectable ? (
+          <div className="flex h-8 shrink-0 items-center">
+            <Button type="button" variant="subtle" size="sm" onClick={() => onSelect(forks)}>
+              {labels.remedy['accept-disclosure']}
+            </Button>
+          </div>
+        ) : descriptor.remedy ? (
+          <ExternalRemedyLink
+            remedy={descriptor.remedy}
+            className="flex h-8 shrink-0 items-center"
+          />
+        ) : null}
       </div>
-
-      {explanation ? (
-        <p className="px-2 pb-2 text-[10px] leading-relaxed text-on-surface-variant/70">
-          {explanation}
-        </p>
-      ) : null}
 
       {/* The one refusal whose fix is an administrative change to a machine
           rather than a click. A one-line "this machine has not proven it keeps
           credentials separate" leaves the reader with nothing to do about it. */}
       {reason === 'isolation-unproven' ? (
-        <div className="mx-2 mb-2 space-y-1 rounded-xl border border-outline-variant/15 bg-surface-container-lowest px-2 py-2">
-          <p className="text-[10px] font-medium text-on-surface">{labels.isolation.title}</p>
-          <p className="text-[10px] leading-relaxed text-on-surface-variant/70">
-            {labels.isolation.why}
-          </p>
-          <p className="pt-1 text-[10px] font-medium text-on-surface">
-            {labels.isolation.nextStep}
-          </p>
-          <p className="text-[10px] leading-relaxed text-on-surface-variant/70">
+        <Callout tone="neutral" title={labels.isolation.title} className="mx-2 mb-2">
+          <p className="text-xs leading-relaxed">{labels.isolation.why}</p>
+          <p className="pt-1 text-xs font-medium text-fg">{labels.isolation.nextStep}</p>
+          <p className="text-xs leading-relaxed">
             {labels.isolation.next[isolationFixFor(transportKind)]}
           </p>
-        </div>
-      ) : null}
-
-      {/* The two remedies MangoStudio can act on. Both link into the surface
-          that already owns the install recipes rather than growing a second
-          install affordance here — `claude.install` and `claude.update` and
-          their Codex and Cursor equivalents live there, keyed by the same
-          target id. Every other remedy either has its own control below
-          (sign-in), its own panel above (isolation), or nothing to offer. */}
-      {descriptor.remedy ? (
-        <ExternalRemedyLink remedy={descriptor.remedy} className="mb-2 px-2" />
+        </Callout>
       ) : null}
 
       {/* The vendor's own login command, with a copy button: the user has to run
           it on *that* machine, which MangoStudio cannot do for them. */}
       {signedOut && descriptor.loginCommand ? (
-        <SignInCommand command={descriptor.loginCommand} className="mb-2 px-2" />
+        <SignInCommand command={descriptor.loginCommand} className="mx-2 mb-2" />
       ) : null}
     </div>
   );

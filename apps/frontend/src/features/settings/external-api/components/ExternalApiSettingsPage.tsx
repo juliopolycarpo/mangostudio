@@ -4,19 +4,26 @@
 
 import { API_KEY_MAX_PER_USER, type ApiKeySummary } from '@mangostudio/shared/api-keys';
 import type { ExternalApiSettings } from '@mangostudio/shared/app-settings';
-import { Plus, Trash2 } from 'lucide-react';
+import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingToggle } from '@/components/settings/SettingToggle';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import {
   displayKeyName,
   formatApiKeyDate,
   formatKeyHint,
+  hasKeyHint,
   isKeyActive,
   isKeyExpired,
   scopeLabel,
@@ -45,6 +52,10 @@ export function ExternalApiSettingsPage({
   const [keyToRevoke, setKeyToRevoke] = useState<ApiKeySummary | null>(null);
 
   const activeCount = keys.filter((key) => isKeyActive(key)).length;
+  // Keys created before the hint carried random characters all store the bare
+  // prefix. A column of identical dashes says nothing, so it appears only once
+  // some key has a hint that tells it apart.
+  const showKeyColumn = keys.some((key) => hasKeyHint(key.start));
   const atCap = activeCount >= API_KEY_MAX_PER_USER;
   const atCapMessage = formatMessage(s.createDisabledAtCap, {
     max: String(API_KEY_MAX_PER_USER),
@@ -60,68 +71,82 @@ export function ExternalApiSettingsPage({
   };
 
   return (
-    <div className="space-y-4">
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h2 className="text-lg font-bold text-on-surface">{s.title}</h2>
-        <p className="text-sm text-on-surface-variant/70">{s.description}</p>
-      </Card>
-
+    <SettingsPage title={s.title} description={s.description}>
       {/* The toggle is the kill switch for every key on the account, so it stays
           reachable even when the key list is still loading or failed to load. */}
-      <Card variant="solid" className="space-y-5 p-4 sm:p-6">
+      <SettingsSection
+        notice={!enabled ? <Callout tone="warning">{s.disabledNotice}</Callout> : undefined}
+      >
         <SettingToggle
           label={s.enableLabel}
           description={s.enableDescription}
           checked={enabled}
           onChange={setExternalApiEnabled}
         />
-        {!enabled && (
-          <p className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-on-surface">
-            {s.disabledNotice}
-          </p>
-        )}
-      </Card>
+      </SettingsSection>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
-            <h3 className="text-base font-bold text-on-surface">{s.keysTitle}</h3>
-            {atCap && <p className="text-xs text-on-surface-variant/60">{atCapMessage}</p>}
-          </div>
+      <SettingsSection
+        padded
+        title={s.keysTitle}
+        description={atCap ? atCapMessage : undefined}
+        action={
           <Button
+            variant="secondary"
             size="sm"
             disabled={atCap || isLoading || Boolean(error)}
             title={atCap ? atCapMessage : undefined}
             onClick={() => setCreateOpen(true)}
           >
-            <Plus size={14} />
+            <Plus size={ICON_SM} />
             {s.createKey}
           </Button>
-        </div>
-
+        }
+      >
         {isLoading ? (
-          <p className="py-8 text-center text-sm text-on-surface-variant">{t.common.loading}</p>
-        ) : error ? (
-          <div className="flex flex-col items-center gap-3 py-8">
-            <p className="text-sm text-error">{s.loadError}</p>
-            <Button variant="ghost" size="sm" onClick={() => void refetch()}>
-              {t.common.retry}
-            </Button>
+          <div role="status" className="space-y-2">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <span className="sr-only">{t.common.loading}</span>
           </div>
+        ) : error ? (
+          <Callout
+            tone="danger"
+            action={
+              <Button variant="secondary" size="sm" onClick={() => void refetch()}>
+                {t.common.retry}
+              </Button>
+            }
+          >
+            {s.loadError}
+          </Callout>
         ) : keys.length === 0 ? (
-          <p className="py-8 text-center text-sm text-on-surface-variant/60">{s.empty}</p>
+          <EmptyState icon={<KeyRound size={ICON_LG} />} title={s.empty} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-outline-variant/20 text-xs uppercase tracking-wide text-on-surface-variant/60">
-                  <th className="px-2 py-2 font-semibold">{s.columns.name}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.scope}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.key}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.created}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.expires}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.lastUsed}</th>
-                  <th className="px-2 py-2 font-semibold">
+                <tr className="border-b border-stroke text-xs text-fg-muted">
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
+                    {s.columns.name}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
+                    {s.columns.scope}
+                  </th>
+                  {showKeyColumn && (
+                    <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
+                      {s.columns.key}
+                    </th>
+                  )}
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
+                    {s.columns.created}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
+                    {s.columns.expires}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
+                    {s.columns.lastUsed}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium first:pl-0 last:pr-0">
                     <span className="sr-only">{s.columns.actions}</span>
                   </th>
                 </tr>
@@ -131,49 +156,51 @@ export function ExternalApiSettingsPage({
                   const expired = isKeyExpired(apiKey);
                   const inactive = !enabled || expired;
                   return (
-                    <tr
-                      key={apiKey.id}
-                      className={`border-b border-outline-variant/10 ${
-                        inactive ? 'opacity-60' : ''
-                      }`}
-                    >
-                      <td className="px-2 py-3 align-top">
+                    <tr key={apiKey.id} className="border-b border-stroke last:border-b-0">
+                      <td className="px-2 py-3 align-baseline first:pl-0 last:pr-0">
                         <div className="space-y-1">
-                          <span className="font-medium text-on-surface">
+                          <span
+                            className={cn('font-medium', inactive ? 'text-fg-muted' : 'text-fg')}
+                          >
                             {displayKeyName(t, apiKey.name)}
                           </span>
                           {inactive && (
-                            <span className="block text-xs text-on-surface-variant/70">
-                              {!enabled ? s.inactive : s.expired}
+                            <span className="block">
+                              <Badge variant={!enabled ? 'neutral' : 'warning'}>
+                                {!enabled ? s.inactive : s.expired}
+                              </Badge>
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className="px-2 py-3 align-top">
-                        <span className="inline-flex rounded-full bg-surface-container-high px-2 py-0.5 text-xs font-medium text-on-surface-variant">
-                          {scopeLabel(t, apiKey.scope)}
-                        </span>
+                      <td className="px-2 py-3 align-baseline first:pl-0 last:pr-0">
+                        <Badge>{scopeLabel(t, apiKey.scope)}</Badge>
                       </td>
-                      <td className="px-2 py-3 align-top font-mono text-xs text-on-surface-variant">
-                        {formatKeyHint(apiKey.start)}
-                      </td>
-                      <td className="px-2 py-3 align-top text-on-surface-variant">
+                      {showKeyColumn && (
+                        <td className="whitespace-nowrap px-2 py-3 align-baseline font-mono text-xs text-fg-muted first:pl-0 last:pr-0">
+                          {formatKeyHint(apiKey.start)}
+                        </td>
+                      )}
+                      <td className="px-2 py-3 align-baseline text-fg-muted first:pl-0 last:pr-0">
                         {formatApiKeyDate(apiKey.createdAt, locale, '—')}
                       </td>
-                      <td className="px-2 py-3 align-top text-on-surface-variant">
+                      <td className="px-2 py-3 align-baseline text-fg-muted first:pl-0 last:pr-0">
                         {formatApiKeyDate(apiKey.expiresAt, locale, s.neverExpires)}
                       </td>
-                      <td className="px-2 py-3 align-top text-on-surface-variant">
+                      <td className="px-2 py-3 align-baseline text-fg-muted first:pl-0 last:pr-0">
                         {formatApiKeyDate(apiKey.lastUsedAt, locale, s.neverUsed)}
                       </td>
-                      <td className="px-2 py-3 align-top text-right">
+                      {/* The cells above sit 12px down a 20px line, so 6px above the 32px
+                          button centres it on that first line, whatever else the row holds. */}
+                      <td className="px-2 py-1.5 text-right align-top first:pl-0 last:pr-0">
                         <Button
-                          variant="ghost"
-                          size="sm"
+                          variant="subtle-danger"
+                          size="icon"
                           aria-label={`${s.revoke.confirmButton}: ${displayKeyName(t, apiKey.name)}`}
+                          title={s.revoke.confirmButton}
                           onClick={() => setKeyToRevoke(apiKey)}
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={ICON_MD} />
                         </Button>
                       </td>
                     </tr>
@@ -183,7 +210,7 @@ export function ExternalApiSettingsPage({
             </table>
           </div>
         )}
-      </Card>
+      </SettingsSection>
 
       {createOpen && <CreateApiKeyDialog onClose={() => setCreateOpen(false)} />}
 
@@ -195,6 +222,6 @@ export function ExternalApiSettingsPage({
           onCancel={() => setKeyToRevoke(null)}
         />
       )}
-    </div>
+    </SettingsPage>
   );
 }

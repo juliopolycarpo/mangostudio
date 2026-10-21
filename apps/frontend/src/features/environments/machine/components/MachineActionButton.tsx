@@ -3,9 +3,12 @@
  * API says the page may not do it — the sentence explaining why and the CLI
  * command to type instead. Refusing quietly would leave the user with a
  * greyed button and no way forward.
+ *
+ * The button that opens the confirmation is never `danger`: that variant is the
+ * dialog's own final "yes", and a destructive-looking trigger would say it twice.
  */
 
-import type { MachineStatus } from '@mangostudio/shared/machine';
+import type { MachineActionReason, MachineStatus } from '@mangostudio/shared/machine';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -19,9 +22,15 @@ interface MachineActionButtonProps {
   readonly label: string;
   readonly confirmTitle: string;
   readonly confirmDescription: string;
-  readonly variant?: 'primary' | 'secondary' | 'danger';
+  readonly variant?: 'primary' | 'secondary';
   readonly isPending: boolean;
   readonly onConfirm: () => void;
+  /**
+   * Refusal reasons the card already says in a notice of its own. The command to
+   * run instead is still offered; only the sentence that would repeat the notice
+   * is left out.
+   */
+  readonly alreadyStated?: readonly MachineActionReason[];
   readonly testId: string;
 }
 
@@ -34,19 +43,23 @@ export function MachineActionButton({
   variant = 'secondary',
   isPending,
   onConfirm,
+  alreadyStated,
   testId,
 }: MachineActionButtonProps) {
   const { t } = useI18n();
   const m = t.environments.machine.actions;
   const [confirming, setConfirming] = useState(false);
   const entry = status.actions[action];
-  const refusals = actionRefusalLines(t, status, action);
+  const refusals =
+    entry.reason && alreadyStated?.includes(entry.reason)
+      ? []
+      : actionRefusalLines(t, status, action);
 
   if (!entry.available) {
     return (
       <div className="space-y-2" data-testid={`${testId}-refused`}>
         {refusals.map((line) => (
-          <p key={line} className="text-sm text-on-surface-variant">
+          <p key={line} className="text-sm text-fg-muted">
             {line}
           </p>
         ))}

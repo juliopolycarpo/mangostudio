@@ -17,9 +17,8 @@
 .markdown-content h4,
 .markdown-content h5,
 .markdown-content h6 {
-  font-family: var(--font-headline);
-  font-weight: 700;
-  color: var(--color-on-surface);
+  font-weight: 600;
+  color: var(--color-fg);
   margin-top: 1.25em;
   margin-bottom: 0.5em;
   line-height: 1.3;
@@ -71,18 +70,19 @@
 .markdown-content code {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.875em;
-  background: var(--color-surface-container-high);
+  background: var(--color-fill-selected);
   padding: 0.15em 0.4em;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-xs);
 }
 
 .markdown-content pre {
   position: relative;
   margin-top: 0.75em;
   margin-bottom: 0.75em;
-  background: var(--color-surface-container-highest);
+  background: var(--color-surface);
+  border: 1px solid var(--color-stroke);
   padding: 1em;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-md);
   overflow-x: auto;
 }
 
@@ -91,22 +91,30 @@
   background: unset;
 }
 
+.markdown-content pre[data-lang] {
+  /* A labelled block gets a header row of its own: the label and the copy
+   * button sit in the 2.5rem above the first line of code, so a long first
+   * line can never run underneath either. An unlabelled snippet keeps the
+   * plain `1em` padding. */
+  padding-top: 2.5rem;
+}
+
 .markdown-content pre[data-lang]::before {
   content: attr(data-lang);
   position: absolute;
-  top: 0.5em;
-  right: 2.75em;
-  font-size: 0.7em;
+  /* The label's box is the copy button's (`.copy-code-btn`: a 0.5rem inset and
+   * 28px, in `rem` and `px` so neither moves with the block's font size), so
+   * the two share one vertical centre. The label takes the left of the row and
+   * the button the right. */
+  top: 0.5rem;
+  left: 1rem;
+  height: 28px;
+  line-height: 28px;
+  font-size: max(var(--text-micro), 0.7em);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-on-surface-variant);
-  opacity: 0.4;
-  font-family: var(--font-label);
-  transition: opacity 0.15s ease;
-}
-
-.markdown-content pre[data-lang]:hover::before {
-  opacity: 0;
+  letter-spacing: 0.06em;
+  color: var(--color-fg-subtle);
+  font-family: var(--font-mono);
 }
 
 .markdown-content pre code {
@@ -117,46 +125,90 @@
 }
 
 .markdown-content blockquote {
-  border-left: 3px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
+  border-left: 3px solid var(--color-stroke-strong);
   padding-left: 1em;
   margin-top: 0.5em;
   margin-bottom: 0.5em;
   font-style: italic;
-  color: var(--color-on-surface-variant);
+  color: var(--color-fg-muted);
 }
 
 .markdown-content a {
-  color: var(--color-primary);
+  color: var(--color-accent-fg);
   text-decoration: none;
 }
 .markdown-content a:hover {
   text-decoration: underline;
 }
 
+/* A table is wider than a phone's bubble as soon as it has a column of tokens.
+ * The renderer seats it in this box, which scrolls sideways instead of squeezing
+ * the columns until each cell is a tower of broken lines. The vertical margin
+ * lives here rather than on the table, and the selector is deliberately a lone
+ * class so `.markdown-content > :first-child` still resets it at the top. */
+.markdown-table-scroll {
+  overflow-x: auto;
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+
+/* The cue that there is more to the right. A table cut off at its third column
+ * with no bar reads as a clipped table, and the platform's overlay scrollbar
+ * (macOS, Android, an emulated phone) is gone the moment nobody is scrolling.
+ * A styled `::-webkit-scrollbar` is the one kind those engines draw all the
+ * time, so this is written as that, with a track so the bar's extent shows at
+ * rest. Where the engine has no such pseudo (Firefox) the standard properties do
+ * the same job, as `.app-scrollbar` does. Not an edge fade: gradients are out
+ * of the contract. */
+.markdown-table-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.markdown-table-scroll::-webkit-scrollbar-track {
+  background: var(--color-fill-selected);
+  border-radius: 9999px;
+}
+.markdown-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--color-stroke-strong);
+  border-radius: 9999px;
+}
+.markdown-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fg-muted);
+}
+@supports not selector(::-webkit-scrollbar) {
+  .markdown-table-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-stroke-strong) var(--color-fill-selected);
+  }
+}
 .markdown-content table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 0.75em;
-  margin-bottom: 0.75em;
   font-size: 0.9em;
 }
 .markdown-content th,
 .markdown-content td {
-  border: 1px solid var(--color-outline-variant);
+  /* Below this a column is not worth reading; the box scrolls instead. */
+  min-width: 6rem;
+  border: 1px solid var(--color-stroke);
   padding: 0.5em 0.75em;
   text-align: left;
 }
+/* A token is the thing to scan for in a table, so it never splits at a hyphen. */
+.markdown-content th code,
+.markdown-content td code {
+  white-space: nowrap;
+}
 .markdown-content th {
-  background: var(--color-surface-container-high);
+  background: var(--color-fill-selected);
   font-weight: 600;
 }
 .markdown-content tr:nth-child(even) {
-  background: color-mix(in srgb, var(--color-surface-container-low) 50%, transparent);
+  background: var(--color-fill-hover);
 }
 
 .markdown-content hr {
   border: none;
-  border-top: 1px solid var(--color-outline-variant);
+  border-top: 1px solid var(--color-stroke);
   margin: 1em 0;
 }
 
@@ -190,7 +242,7 @@
   font-size: 0.85em;
 }
 .markdown-content--thinking .markdown-content pre {
-  background: color-mix(in srgb, var(--color-surface-container-highest) 60%, transparent);
+  background: var(--color-fill-selected);
 }
 .markdown-content--thinking .markdown-content pre.shiki {
   background: unset;
@@ -215,18 +267,20 @@
   vertical-align: text-bottom;
   /* Inherited from the block being streamed into, so a thought's caret is as
    * quiet as the prose it trails. */
-  background: var(--streaming-caret-color, var(--color-primary));
+  background: var(--streaming-caret-color, var(--color-accent));
   animation: var(--animate-blink);
 }
 
 /* A list or a quote opens a line *under* its last line rather than trailing it,
  * so the caret hops down to whatever holds that line. Code blocks and tables
  * have no line to trail at all: inside `<pre>` the caret would land in the
- * highlighted source, next to the copy button. */
-.markdown-content--streaming > :is(ul, ol, blockquote, pre, table):last-child::after {
+ * highlighted source, next to the copy button, and after a table's scroll box it
+ * would hang on a line of its own. */
+.markdown-content--streaming
+> :is(ul, ol, blockquote, pre, .markdown-table-scroll):last-child::after {
   content: none;
 }
 
 .markdown-content--thinking {
-  --streaming-caret-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  --streaming-caret-color: var(--color-fg-subtle);
 }

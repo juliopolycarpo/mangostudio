@@ -39,6 +39,21 @@ describe('GalleryLightbox', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // The close control lives in the caption card with the download link, not
+  // pinned to the window's corner, where it landed on the header's account
+  // button. A press on it is one close, not one for the button and one for the
+  // overlay behind it.
+  it('closes once from a button inside the panel', () => {
+    const onClose = jest.fn();
+    render(<GalleryLightbox item={ITEM} onClose={onClose} />);
+
+    const close = screen.getByRole('button', { name: 'Close image' });
+    expect(close.closest('[role="dialog"] > div')).not.toBeNull();
+    fireEvent.click(close);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('takes focus, so the keyboard is inside the overlay and not behind it', () => {
     render(<GalleryLightbox item={ITEM} onClose={jest.fn()} />);
 
@@ -53,6 +68,38 @@ describe('GalleryLightbox', () => {
     fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
 
     expect(document.activeElement).toBe(screen.getByRole('link'));
+  });
+
+  // A picture is not themed, so neither is the ground it is viewed on nor the
+  // text laid on that ground: `canvas` made the viewer a near-white sheet in the
+  // light theme, and `surface` / `fg` made the caption a white card.
+  describe('media veil', () => {
+    it('sits on the theme-independent media veil, not on the theme’s canvas', () => {
+      render(<GalleryLightbox item={ITEM} onClose={jest.fn()} />);
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveClass('bg-scrim-media');
+      expect(dialog).not.toHaveClass('bg-canvas');
+    });
+
+    it('reads the prompt in on-scrim-media text', () => {
+      render(<GalleryLightbox item={ITEM} onClose={jest.fn()} />);
+
+      const prompt = screen.getByText(ITEM.prompt);
+      expect(prompt).toHaveClass('text-on-scrim-media');
+      expect(prompt).not.toHaveClass('text-fg');
+    });
+
+    // The global ring is the theme's `focus`: dark brown in the light theme, on
+    // a dark veil.
+    it('draws its controls’ focus ring in on-scrim-media', () => {
+      render(<GalleryLightbox item={ITEM} onClose={jest.fn()} />);
+
+      expect(screen.getByRole('button', { name: 'Close image' })).toHaveClass(
+        'focus-visible:outline-on-scrim-media'
+      );
+      expect(screen.getByRole('link')).toHaveClass('focus-visible:outline-on-scrim-media');
+    });
   });
 
   it('renders nothing at all when no image is selected', () => {

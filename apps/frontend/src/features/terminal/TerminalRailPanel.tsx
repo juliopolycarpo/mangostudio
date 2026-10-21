@@ -1,10 +1,14 @@
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
+import { Plus, TerminalSquare } from 'lucide-react';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Button, buttonClassName } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
+import { CloseTerminalDialog } from './CloseTerminalDialog';
 import { LazyTerminalView } from './LazyTerminalView';
 import { openFailureMessage } from './open-failure-message';
 import { SessionTabs } from './SessionTabs';
@@ -43,7 +47,12 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   const [activeId, setActiveId] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
 
-  const { unavailable, message: unavailableHint } = useTerminalAvailability(environmentId);
+  const {
+    unavailable,
+    message: unavailableHint,
+    tone: unavailableTone,
+    reason: unavailableReason,
+  } = useTerminalAvailability(environmentId);
   const sessionsQuery = useTerminalSessionsQuery(
     environmentId ?? '',
     chatId,
@@ -92,7 +101,10 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   function confirmClose(): void {
     if (!closingId) return;
     const id = closingId;
-    closeMutation.mutate(id, { onSuccess: () => setClosingId(null) });
+    closeMutation.mutate(id, {
+      onSuccess: () => setClosingId(null),
+      onError: () => toast(t.terminal.closeFailed, 'error'),
+    });
   }
 
   function popOut(id: string): void {
@@ -105,23 +117,57 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
     return queryClient.invalidateQueries({ queryKey: terminalKeys.all });
   }
 
+  // The rail body is edge-to-edge, so the notice brings its own gutter and sits
+  // at the top where the eye lands, instead of floating mid-panel.
   if (!environmentId || (unavailable && sessions.length === 0)) {
-    return <TerminalUnavailableNotice message={unavailableHint} className="h-full" />;
+    return (
+      <div className="p-4">
+        <TerminalUnavailableNotice
+          message={unavailableHint}
+          tone={unavailableTone}
+          reason={unavailableReason}
+          action={
+            // At the cap with nothing open in this chat, the terminals filling
+            // it belong to other chats, and nothing in this rail can close
+            // them. `/terminal` lists every session on the machine.
+            environmentId && unavailable && unavailableReason === 'limit' ? (
+              <Link
+                to="/terminal"
+                search={{
+                  environmentId: environmentId === LOCAL_ENVIRONMENT_ID ? undefined : environmentId,
+                }}
+                className={buttonClassName('secondary', 'sm')}
+              >
+                {t.terminal.manageSessions}
+              </Link>
+            ) : undefined
+          }
+        />
+      </div>
+    );
   }
 
   if (sessionsQuery.isSuccess && sessions.length === 0) {
     return (
+      // Top-anchored like the unavailable notice above, and with the page's
+      // icon: a title and a button floating mid-column in a tall empty dock read
+      // as a different empty state from `/terminal`'s.
       <EmptyState
-        className="h-full"
+        icon={<TerminalSquare size={ICON_LG} />}
+        className="justify-start pt-12"
         title={t.terminal.empty}
         hint={t.terminal.emptyHint}
         action={
+          // `secondary`, as every empty state's way in is: mango marks the one
+          // primary action of the screen, and in the dock that is the chat's.
           <Button
             type="button"
-            variant="primary"
+            variant="secondary"
+            size="sm"
             onClick={openSession}
             loading={openMutation.isPending}
           >
+            <Plus size={ICON_SM} />
             {t.terminal.newSession}
           </Button>
         }
@@ -145,7 +191,11 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
         onRename={(id, title) => renameMutation.mutate({ id, body: { title } })}
         onPopOut={popOut}
       />
-      <div className="min-h-0 flex-1">
+      {/* `pl-2` on top of the view's own 8px inset: the panel's gutter is 16px
+          (the title above, the tab label), and the terminal text began 8px to
+          the left of it, the only edge in the dock that did not line up. The
+          wrapper paints `canvas` so the extra strip matches the view. */}
+      <div className="min-h-0 flex-1 bg-canvas pl-2">
         {activeId ? (
           <Suspense fallback={null}>
             <LazyTerminalView key={activeId} sessionId={activeId} onExit={refreshAfterExit} />
@@ -153,12 +203,8 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
         ) : null}
       </div>
       {closingSession ? (
-        <ConfirmDialog
-          title={t.terminal.closeConfirmTitle}
-          description={t.terminal.closeConfirmDescription}
-          entityName={closingSession.title}
-          confirmLabel={t.terminal.closeSession}
-          cancelLabel={t.terminal.cancel}
+        <CloseTerminalDialog
+          session={closingSession}
           isPending={closeMutation.isPending}
           onConfirm={confirmClose}
           onCancel={() => setClosingId(null)}

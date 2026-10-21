@@ -29,14 +29,23 @@ import {
   X,
 } from 'lucide-react';
 import { useState } from 'react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
+import { SettingsSliderRow } from '@/components/settings/SettingsSliderRow';
+import { SettingToggle } from '@/components/settings/SettingToggle';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Chip } from '@/components/ui/Chip';
+import { FIELD_CLASS, Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { RerunSetupCard } from '@/features/onboarding/RerunSetupCard';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { modelSelectOptions } from '@/lib/model-select-options';
+import { cn } from '@/lib/utils';
 
 interface GeneralSettingsProps {
   imageQuality: string;
@@ -64,7 +73,10 @@ interface GeneralSettingsProps {
   addRecentWorkdir: (value: string) => void;
 }
 
-const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'] as const;
+const IMAGE_QUALITY_OPTIONS = ['512px', '1K', '2K', '4K'].map((quality) => ({
+  value: quality,
+  label: quality,
+}));
 
 const LOCALE_OPTIONS: { value: Locale; label: string }[] = [
   { value: 'en', label: 'English' },
@@ -76,7 +88,8 @@ const PROMPT_PREFIX_LENGTH_MAX = 80;
 const TIMEOUT_STEP_MS = 30_000;
 
 /**
- * General settings tab: language selector, image quality grid.
+ * General settings page: language, image quality, working directory, side
+ * panels, multi-agent turns and chat titles.
  */
 export function GeneralSettings({
   imageQuality,
@@ -131,77 +144,76 @@ export function GeneralSettings({
       : [];
 
   return (
-    <div className="space-y-4">
-      {/* ── Language ── */}
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {s.languageLabel}
-        </h3>
-        <p className="text-sm text-on-surface-variant/60">{s.languageDescription}</p>
-        <Select
-          id="language-select"
-          value={locale}
-          onChange={(value) => setLocale(value as Locale)}
-          ariaLabel={s.languageLabel}
-          options={LOCALE_OPTIONS}
-        />
-      </Card>
+    <SettingsPage title={t.settings.tabs.general}>
+      <SettingsSection>
+        <SettingsRow
+          label={s.languageLabel}
+          hint={s.languageDescription}
+          htmlFor="language-select"
+          layout="field"
+        >
+          <Select
+            id="language-select"
+            value={locale}
+            onChange={(value) => setLocale(value as Locale)}
+            ariaLabel={s.languageLabel}
+            options={LOCALE_OPTIONS}
+          />
+        </SettingsRow>
+        <SettingsRow label={s.imageQualityLabel} layout="stacked">
+          <SettingsSegmented
+            ariaLabel={s.imageQualityLabel}
+            value={imageQuality}
+            options={IMAGE_QUALITY_OPTIONS}
+            onChange={setImageQuality}
+          />
+        </SettingsRow>
+      </SettingsSection>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="space-y-1">
-          <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-            {workspace.settingsLabel}
-          </h3>
-          <p className="text-sm text-on-surface-variant/60">{workspace.settingsDescription}</p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            onClick={() => setWorkdirPickerOpen(true)}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2.5 text-left transition-colors hover:border-primary/35"
-            title={workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
-          >
-            <FolderOpen size={17} className="shrink-0 text-primary/80" />
-            <span className="min-w-0 flex-1">
-              <span className="block font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/55">
-                {workspace.defaultLabel}
-              </span>
-              <span className="block truncate font-mono text-xs text-on-surface">
+      <SettingsSection title={workspace.settingsLabel} description={workspace.settingsDescription}>
+        <SettingsRow label={workspace.defaultLabel} layout="stacked">
+          {/* Below `sm` the path takes the first line and its two buttons the
+              second, as one group: the clear button never wraps off on its own. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setWorkdirPickerOpen(true)}
+              className={cn(
+                FIELD_CLASS,
+                'flex min-w-0 flex-1 basis-full cursor-pointer items-center gap-2 text-left sm:basis-48'
+              )}
+              title={workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
+            >
+              <FolderOpen size={ICON_MD} className="shrink-0 text-fg-muted" />
+              <span className="min-w-0 flex-1 truncate font-mono text-xs">
                 {workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
               </span>
-            </span>
-          </button>
-          <div className="flex gap-2">
-            <Button type="button" variant="secondary" onClick={() => setWorkdirPickerOpen(true)}>
-              {workspace.changeDefault}
-            </Button>
-            {workspaceSettings.defaultWorkdir ? (
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setDefaultWorkdir('')}
-                aria-label={workspace.clearDefault}
-                title={workspace.clearDefault}
-              >
-                <X size={16} />
+            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" variant="secondary" onClick={() => setWorkdirPickerOpen(true)}>
+                {workspace.changeDefault}
               </Button>
-            ) : null}
+              {workspaceSettings.defaultWorkdir ? (
+                <Button
+                  type="button"
+                  variant="subtle"
+                  size="icon"
+                  onClick={() => setDefaultWorkdir('')}
+                  aria-label={workspace.clearDefault}
+                  title={workspace.clearDefault}
+                >
+                  <X size={ICON_MD} />
+                </Button>
+              ) : null}
+            </div>
           </div>
-        </div>
-        <div className="flex items-start justify-between gap-4 border-t border-outline-variant/15 pt-4">
-          <div className="space-y-1">
-            <p className="text-sm font-medium text-on-surface">{workspace.restrictToolsLabel}</p>
-            <p className="text-sm text-on-surface-variant/60">
-              {workspace.restrictToolsDescription}
-            </p>
-          </div>
-          <Checkbox
-            checked={workspaceSettings.restrictToolsToWorkdir}
-            onChange={(event) => setRestrictToolsToWorkdir(event.target.checked)}
-            aria-label={workspace.restrictToolsLabel}
-            className="mt-1"
-          />
-        </div>
+        </SettingsRow>
+        <SettingToggle
+          label={workspace.restrictToolsLabel}
+          description={workspace.restrictToolsDescription}
+          checked={workspaceSettings.restrictToolsToWorkdir}
+          onChange={setRestrictToolsToWorkdir}
+        />
         <WorkdirPickerDialog
           open={isWorkdirPickerOpen}
           initialPath={workspaceSettings.defaultWorkdir}
@@ -214,237 +226,146 @@ export function GeneralSettings({
           }}
           onClose={() => setWorkdirPickerOpen(false)}
         />
-      </Card>
+      </SettingsSection>
 
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="space-y-1">
-          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
-            {workspace.chatSidebarTitle}
-          </h3>
-          <p className="text-sm text-on-surface-variant/60">{workspace.chatSidebarDescription}</p>
-        </div>
-        <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant/60">
-          <span>
-            {workspace.chatSidebarWidth.replace(
-              '{width}',
-              String(workspaceSettings.chatSidebarWidth)
-            )}
-          </span>
-          {workspaceSettings.chatSidebarWidth !== CHAT_SIDEBAR_WIDTH_DEFAULT ? (
-            <button
-              type="button"
-              onClick={() => setChatSidebarWidth(CHAT_SIDEBAR_WIDTH_DEFAULT)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+      <SettingsSection
+        title={workspace.chatSidebarTitle}
+        description={workspace.chatSidebarDescription}
+      >
+        <WidthRow
+          width={workspaceSettings.chatSidebarWidth}
+          defaultWidth={CHAT_SIDEBAR_WIDTH_DEFAULT}
+          resetLabel={workspace.chatSidebarResetWidth}
+          onReset={() => setChatSidebarWidth(CHAT_SIDEBAR_WIDTH_DEFAULT)}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title={workspace.sidePanelTitle}
+        description={workspace.sidePanelDescription}
+      >
+        {workspaceSettings.sidePanel.panelOrder.map((panelId, index) => {
+          const Icon = panelIcons[panelId];
+          const label = panelLabels[panelId];
+          const isVisible = workspaceSettings.sidePanel.visiblePanelIds.includes(panelId);
+          return (
+            <SettingsRow
+              key={panelId}
+              label={
+                <span className="flex items-center gap-2">
+                  <Icon size={ICON_MD} className="shrink-0 text-fg-muted" />
+                  <span className="truncate">{label}</span>
+                </span>
+              }
             >
-              <RotateCcw size={13} />
-              {workspace.chatSidebarResetWidth}
-            </button>
-          ) : null}
-        </div>
-      </Card>
-
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="space-y-1">
-          <h3 className="font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant/80">
-            {workspace.sidePanelTitle}
-          </h3>
-          <p className="text-sm text-on-surface-variant/60">{workspace.sidePanelDescription}</p>
-        </div>
-
-        <div className="overflow-hidden rounded-2xl border border-outline-variant/20 bg-surface-container-lowest">
-          {workspaceSettings.sidePanel.panelOrder.map((panelId, index) => {
-            const Icon = panelIcons[panelId];
-            const label = panelLabels[panelId];
-            const isVisible = workspaceSettings.sidePanel.visiblePanelIds.includes(panelId);
-            return (
-              <div
-                key={panelId}
-                className="flex items-center gap-3 border-b border-outline-variant/15 px-3 py-2.5 last:border-b-0"
-              >
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="subtle"
+                  size="icon"
+                  onClick={() => moveWorkspacePanel(panelId, 'up')}
+                  disabled={index === 0}
+                  aria-label={workspace.sidePanelMoveUp.replace('{panel}', label)}
+                >
+                  <ArrowUp size={ICON_MD} />
+                </Button>
+                <Button
+                  type="button"
+                  variant="subtle"
+                  size="icon"
+                  onClick={() => moveWorkspacePanel(panelId, 'down')}
+                  disabled={index === workspaceSettings.sidePanel.panelOrder.length - 1}
+                  aria-label={workspace.sidePanelMoveDown.replace('{panel}', label)}
+                >
+                  <ArrowDown size={ICON_MD} />
+                </Button>
                 <Checkbox
                   checked={isVisible}
                   onChange={(event) => setWorkspacePanelVisible(panelId, event.target.checked)}
                   aria-label={workspace.sidePanelShow.replace('{panel}', label)}
+                  className="ml-3"
                 />
-                <Icon size={17} className="shrink-0 text-primary/80" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-on-surface">
-                  {label}
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => moveWorkspacePanel(panelId, 'up')}
-                    disabled={index === 0}
-                    aria-label={workspace.sidePanelMoveUp.replace('{panel}', label)}
-                    className="flex size-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-25"
-                  >
-                    <ArrowUp size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveWorkspacePanel(panelId, 'down')}
-                    disabled={index === workspaceSettings.sidePanel.panelOrder.length - 1}
-                    aria-label={workspace.sidePanelMoveDown.replace('{panel}', label)}
-                    className="flex size-8 items-center justify-center rounded-lg text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-25"
-                  >
-                    <ArrowDown size={15} />
-                  </button>
-                </div>
               </div>
-            );
-          })}
-        </div>
+            </SettingsRow>
+          );
+        })}
+        <WidthRow
+          width={workspaceSettings.sidePanel.width}
+          defaultWidth={WORKSPACE_PANEL_WIDTH_DEFAULT}
+          resetLabel={workspace.sidePanelResetWidth}
+          onReset={() => setWorkspacePanelWidth(WORKSPACE_PANEL_WIDTH_DEFAULT)}
+        />
+      </SettingsSection>
 
-        <div className="flex items-center justify-between gap-3 text-xs text-on-surface-variant/60">
-          <span>
-            {workspace.sidePanelWidth.replace('{width}', String(workspaceSettings.sidePanel.width))}
-          </span>
-          {workspaceSettings.sidePanel.width !== WORKSPACE_PANEL_WIDTH_DEFAULT ? (
-            <button
-              type="button"
-              onClick={() => setWorkspacePanelWidth(WORKSPACE_PANEL_WIDTH_DEFAULT)}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
-            >
-              <RotateCcw size={13} />
-              {workspace.sidePanelResetWidth}
-            </button>
-          ) : null}
-        </div>
-      </Card>
-
-      {/* ── Default Image Quality ── */}
-      <Card variant="solid" className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-          {s.imageQualityLabel}
-        </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {IMAGE_QUALITY_OPTIONS.map((q) => (
-            <Button
-              key={q}
-              variant={imageQuality === q ? 'primary' : 'secondary'}
-              size="md"
-              onClick={() => setImageQuality(q)}
-            >
-              {q}
-            </Button>
-          ))}
-        </div>
-      </Card>
-
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-              {s.multiAgentLabel}
-            </h3>
-            <p className="text-sm text-on-surface-variant/60">{s.multiAgentDescription}</p>
-          </div>
-          <Checkbox
-            checked={multiAgentSettings.enabled}
-            onChange={(event) => setMultiAgentEnabled(event.target.checked)}
-            aria-label={s.multiAgentEnabledLabel}
-            className="mt-1"
-          />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {/* A `<div>` and not the `<label>` this was: the control is now a
-              button, and a label wrapping a button names it through a path no
-              static check can follow. `ariaLabel` says it outright. */}
-          <div className="space-y-2">
-            <span className="text-sm font-semibold text-on-surface">{s.traceVisibilityLabel}</span>
-            <Select
-              value={multiAgentSettings.traceVisibility}
-              onChange={(value) =>
-                setTraceVisibility(value as MultiAgentSettings['traceVisibility'])
-              }
-              disabled={!multiAgentSettings.enabled}
-              ariaLabel={s.traceVisibilityLabel}
-              options={[
-                { value: 'compact', label: s.traceVisibilityCompact },
-                { value: 'full', label: s.traceVisibilityFull },
-                { value: 'off', label: s.traceVisibilityOff },
-              ]}
-            />
-          </div>
-          <NumberSetting
-            label={s.maxDepthLabel}
-            value={multiAgentSettings.maxDepth}
-            min={0}
-            max={3}
+      <SettingsSection title={s.multiAgentLabel} description={s.multiAgentDescription}>
+        <SettingToggle
+          label={s.multiAgentEnabledLabel}
+          checked={multiAgentSettings.enabled}
+          onChange={setMultiAgentEnabled}
+        />
+        <SettingsRow label={s.traceVisibilityLabel} layout="field">
+          <Select
+            value={multiAgentSettings.traceVisibility}
+            onChange={(value) => setTraceVisibility(value as MultiAgentSettings['traceVisibility'])}
             disabled={!multiAgentSettings.enabled}
-            onChange={setMaxDelegationDepth}
+            ariaLabel={s.traceVisibilityLabel}
+            options={[
+              { value: 'compact', label: s.traceVisibilityCompact },
+              { value: 'full', label: s.traceVisibilityFull },
+              { value: 'off', label: s.traceVisibilityOff },
+            ]}
           />
-          <NumberSetting
-            label={s.maxSubagentCallsLabel}
-            value={multiAgentSettings.maxSubagentCalls}
-            min={MAX_SUBAGENT_CALLS_MIN}
-            max={MAX_SUBAGENT_CALLS_MAX}
-            disabled={!multiAgentSettings.enabled}
-            onChange={setMaxSubagentCalls}
-          />
-          <NumberSetting
-            label={s.defaultMaxTurnsLabel}
-            value={multiAgentSettings.defaultMaxTurns}
-            min={SUBAGENT_MAX_TURNS_MIN}
-            max={SUBAGENT_MAX_TURNS_MAX}
-            disabled={!multiAgentSettings.enabled}
-            onChange={setDefaultSubagentMaxTurns}
-          />
-        </div>
+        </SettingsRow>
+        <NumberSetting
+          id="multi-agent-max-depth"
+          label={s.maxDepthLabel}
+          value={multiAgentSettings.maxDepth}
+          min={0}
+          max={3}
+          disabled={!multiAgentSettings.enabled}
+          onChange={setMaxDelegationDepth}
+        />
+        <NumberSetting
+          id="multi-agent-max-calls"
+          label={s.maxSubagentCallsLabel}
+          value={multiAgentSettings.maxSubagentCalls}
+          min={MAX_SUBAGENT_CALLS_MIN}
+          max={MAX_SUBAGENT_CALLS_MAX}
+          disabled={!multiAgentSettings.enabled}
+          onChange={setMaxSubagentCalls}
+        />
+        <NumberSetting
+          id="multi-agent-default-turns"
+          label={s.defaultMaxTurnsLabel}
+          value={multiAgentSettings.defaultMaxTurns}
+          min={SUBAGENT_MAX_TURNS_MIN}
+          max={SUBAGENT_MAX_TURNS_MAX}
+          disabled={!multiAgentSettings.enabled}
+          onChange={setDefaultSubagentMaxTurns}
+        />
+        <SettingsSliderRow
+          id="subagent-timeout"
+          label={s.timeoutLabel}
+          readout={s.secondsHint.replace(
+            '{value}',
+            String(Math.round(multiAgentSettings.timeoutMs / 1000))
+          )}
+          min={30_000}
+          max={900_000}
+          step={TIMEOUT_STEP_MS}
+          value={multiAgentSettings.timeoutMs}
+          onChange={setSubagentTimeoutMs}
+          disabled={!multiAgentSettings.enabled}
+        />
+      </SettingsSection>
 
-        <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
-            <label
-              htmlFor="subagent-timeout"
-              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
-            >
-              {s.timeoutLabel}
-            </label>
-            <span className="text-sm font-medium text-on-surface">
-              {s.secondsHint.replace(
-                '{value}',
-                String(Math.round(multiAgentSettings.timeoutMs / 1000))
-              )}
-            </span>
-          </div>
-          <input
-            id="subagent-timeout"
-            type="range"
-            min={30_000}
-            max={900_000}
-            step={TIMEOUT_STEP_MS}
-            value={multiAgentSettings.timeoutMs}
-            onChange={(event) => setSubagentTimeoutMs(Number(event.target.value))}
-            disabled={!multiAgentSettings.enabled}
-            className="range-input w-full"
-          />
-        </div>
-      </Card>
-
-      <Card variant="solid" className="space-y-4 p-4 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label">
-              {s.chatTitlesLabel}
-            </h3>
-            <p className="text-sm text-on-surface-variant/60">{s.chatTitlesDescription}</p>
-          </div>
-          <Checkbox
-            checked={chatTitleSettings.autoRenameEnabled}
-            onChange={(event) => setChatAutoRenameEnabled(event.target.checked)}
-            aria-label={s.chatTitlesToggleLabel}
-            className="mt-1"
-          />
-        </div>
-
-        <div className="space-y-3">
-          <label
-            htmlFor="chat-title-strategy"
-            className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
-          >
-            {s.chatTitleSourceLabel}
-          </label>
+      <SettingsSection title={s.chatTitlesLabel} description={s.chatTitlesDescription}>
+        <SettingToggle
+          label={s.chatTitlesToggleLabel}
+          checked={chatTitleSettings.autoRenameEnabled}
+          onChange={setChatAutoRenameEnabled}
+        />
+        <SettingsRow label={s.chatTitleSourceLabel} htmlFor="chat-title-strategy" layout="field">
           <Select
             id="chat-title-strategy"
             value={chatTitleSettings.strategy}
@@ -456,17 +377,14 @@ export function GeneralSettings({
               { value: 'model', label: s.chatTitleSourceModel },
             ]}
           />
-        </div>
-
+        </SettingsRow>
         {chatTitleSettings.strategy === 'model' ? (
-          <div className="space-y-3">
-            <label
-              htmlFor="chat-title-model"
-              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
-            >
-              {s.chatTitleModelLabel}
-            </label>
-            <p className="text-sm text-on-surface-variant/60">{s.chatTitleModelDescription}</p>
+          <SettingsRow
+            label={s.chatTitleModelLabel}
+            hint={s.chatTitleModelDescription}
+            htmlFor="chat-title-model"
+            layout="field"
+          >
             <Select
               id="chat-title-model"
               value={chatTitleSettings.preferredModel}
@@ -479,45 +397,69 @@ export function GeneralSettings({
                 availableTitleModels
               )}
             />
-          </div>
+          </SettingsRow>
         ) : null}
-
-        <div className="space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
-            <label
-              htmlFor="chat-title-prefix-length"
-              className="text-xs uppercase tracking-widest font-bold text-on-surface-variant/80 font-label"
-            >
-              {s.chatTitlePrefixLengthLabel}
-            </label>
-            <span className="text-sm font-medium text-on-surface">
-              {s.chatTitlePrefixLengthHint.replace(
-                '{value}',
-                String(chatTitleSettings.promptPrefixLength)
-              )}
-            </span>
-          </div>
-          <p className="text-sm text-on-surface-variant/60">{s.chatTitlePrefixLengthDescription}</p>
-          <input
-            id="chat-title-prefix-length"
-            type="range"
-            min={PROMPT_PREFIX_LENGTH_MIN}
-            max={PROMPT_PREFIX_LENGTH_MAX}
-            step={1}
-            value={chatTitleSettings.promptPrefixLength}
-            onChange={(event) => setChatTitlePromptPrefixLength(Number(event.target.value))}
-            disabled={!chatTitleSettings.autoRenameEnabled}
-            className="range-input w-full"
-          />
-        </div>
-      </Card>
+        <SettingsSliderRow
+          id="chat-title-prefix-length"
+          label={s.chatTitlePrefixLengthLabel}
+          hint={s.chatTitlePrefixLengthDescription}
+          readout={s.chatTitlePrefixLengthHint.replace(
+            '{value}',
+            String(chatTitleSettings.promptPrefixLength)
+          )}
+          min={PROMPT_PREFIX_LENGTH_MIN}
+          max={PROMPT_PREFIX_LENGTH_MAX}
+          value={chatTitleSettings.promptPrefixLength}
+          onChange={setChatTitlePromptPrefixLength}
+          disabled={!chatTitleSettings.autoRenameEnabled}
+        />
+      </SettingsSection>
 
       <RerunSetupCard />
-    </div>
+    </SettingsPage>
+  );
+}
+
+/**
+ * A width the user sets by dragging an edge elsewhere, shown here as a value with
+ * its way back. The value is last and fixed-width, so it stays flush with the
+ * control edge; Reset grows in to its left only once the width is not the default.
+ */
+function WidthRow({
+  width,
+  defaultWidth,
+  resetLabel,
+  onReset,
+}: {
+  width: number;
+  defaultWidth: number;
+  resetLabel: string;
+  onReset: () => void;
+}) {
+  const { t } = useI18n();
+  const workspace = t.workspace;
+  const isDefault = width === defaultWidth;
+
+  return (
+    <SettingsRow
+      label={workspace.widthLabel}
+      hint={workspace.widthDefaultHint.replace('{width}', String(defaultWidth))}
+    >
+      <div className="flex items-center gap-3">
+        {isDefault ? null : (
+          <Button type="button" variant="subtle" size="sm" onClick={onReset}>
+            <RotateCcw size={ICON_SM} />
+            {resetLabel}
+          </Button>
+        )}
+        <Chip className="tabular-nums">{width}px</Chip>
+      </div>
+    </SettingsRow>
   );
 }
 
 function NumberSetting({
+  id,
   label,
   value,
   min,
@@ -525,6 +467,7 @@ function NumberSetting({
   disabled,
   onChange,
 }: {
+  id: string;
   label: string;
   value: number;
   min: number;
@@ -533,17 +476,17 @@ function NumberSetting({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-semibold text-on-surface">{label}</span>
-      <input
+    <SettingsRow label={label} htmlFor={id}>
+      <Input
+        id={id}
         type="number"
         min={min}
         max={max}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface focus:border-primary/60 focus:outline-none focus:ring-1 focus:ring-primary/20 disabled:opacity-50"
+        className="w-32 text-center"
       />
-    </label>
+    </SettingsRow>
   );
 }
