@@ -258,6 +258,7 @@ mangostudio/
 │   ├── README.md                   # Hub da documentação
 │   ├── architecture/              # Arquitetura e fluxos transversais
 │   ├── features/                  # Documentação por área do produto
+│   ├── design/                    # Design system flat: tokens, componentes, padrões
 │   ├── providers/                 # Guias e notas por provedor
 │   ├── reference/                 # API, testes e mapas de arquivos
 │   ├── guides/                    # Guias práticos para contribuição
@@ -451,6 +452,7 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 - [`./README.md`](./README.md) — hub da documentação em Português
 - [`./guides/contributor-quickstart.md`](./guides/contributor-quickstart.md) — onboarding rápido para contribuidores
 - [`./architecture/continuation.md`](./architecture/continuation.md) — arquitetura de continuação
+- [`./design/README.md`](./design/README.md) — design system flat: princípios, índice e testes que o fazem valer
 - [`./providers/development.md`](./providers/development.md) — guia de integração de provedores
 - [`./reference/cli.md`](./reference/cli.md) — referência da CLI e canais de instalação
 - [`./reference/ci.md`](./reference/ci.md) — gates agregados e checks obrigatórios
@@ -469,6 +471,7 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 
 - `architecture/`
 - `features/`
+- `design/`
 - `providers/`
 - `reference/`
 - `guides/`

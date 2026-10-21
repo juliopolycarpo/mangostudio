@@ -764,6 +764,40 @@ Open these first:
 - `apps/frontend/src/services/`
 - `apps/frontend/src/index.css`
 
+## Frontend UI And Design System
+
+Open these first:
+
+- `docs/design/README.md` (principles, page index, the enforcing tests), then the page
+  that matches the task: `foundations.md` (tokens), `components.md` (primitives),
+  `patterns.md` (pages, forms, notices, copy), `decisions.md` (why a rule exists)
+- `apps/frontend/src/index.css` (the tokens: dark in `@theme`, light under
+  `[data-theme="light"]`; the hand-written component classes such as `.composer-chip` and
+  `.range-input`; the touch-target floor)
+- `apps/frontend/src/components/ui/` (`Button`, `Callout`, `Dialog`, `Menu`, `Tabs`, `Toast`
+  and the other primitives) and `apps/frontend/src/components/settings/` (`SettingsSection`,
+  `SettingsRow`, `PickOneRow`, `SettingsSegmented`)
+- `apps/frontend/src/lib/icon-sizes.ts` (`ICON_SM` / `ICON_MD` / `ICON_LG`) and
+  `apps/frontend/src/lib/utils.ts` (`cn`)
+
+Tests that hold the system:
+
+- `apps/frontend/tests/unit/design-system-conformance.test.ts` scans every source file for
+  classes outside the vocabulary; a deliberate exception goes in its `ALLOWED` map with a
+  reason
+- `apps/frontend/tests/unit/design-tokens-doc.test.ts` parses the colour table in
+  `docs/design/foundations.md` against `index.css`, so a token change updates both
+- `apps/frontend/tests/unit/design-token-contrast.test.ts`,
+  `stylesheet-cascade.test.ts` and `stylesheet-downlevel.test.ts` (status and media text
+  contrast, the unlayered rules and touch-floor exemptions, no `color-mix()` in stylesheets)
+- `apps/frontend/tests/unit/components/ui/` (component tests for the primitives)
+- `apps/shared/tests/unit/i18n-copy-rules.test.ts` (the copy rules of `patterns.md`)
+
+A new colour token touches `index.css`, the colour table in `foundations.md`, the
+`SEMANTIC_COLORS` list in the conformance test (so its opacity-modifier rule covers the
+token) and, when it has a native counterpart, `native-ports.md`. A rule change gets a new numbered entry in
+`decisions.md`.
+
 ## Frontend Build, Dev Server, And Test Harness
 
 Open these first:

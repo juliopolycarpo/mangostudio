@@ -21,6 +21,7 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
 - Keep using Eden Treaty + TanStack Query for normal API access. Use direct `fetch` only in service modules when streaming, uploads, or browser-native APIs require it.
 - Do not hardcode user-visible strings. Use `useI18n()` with keys from `apps/shared/src/i18n/pt-BR.ts` and `apps/shared/src/i18n/en.ts`.
 - Prefer existing UI primitives in `src/components/ui/` before creating new ones.
+- Read `docs/design/` before UI work. Off-system classes fail `tests/unit/design-system-conformance.test.ts`; a deliberate exception goes in its `ALLOWED` map with the reason.
 - Keep business logic in hooks and services; routes and components should mostly compose them.
 - Use the existing styling stack: Tailwind utilities plus tokens and helpers in `src/index.css`. Do not add CSS-in-JS or a second styling system.
 - Do not edit `src/routeTree.gen.ts`; it is generated.
@@ -29,6 +30,7 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
 
 - Unit or component: `bun run --filter @mangostudio/frontend test:unit`
 - Integration: `bun run --filter @mangostudio/frontend test:integration`
+- Design system: `bun test tests/unit/design-system-conformance.test.ts tests/unit/design-tokens-doc.test.ts` from `apps/frontend`.
 - Coverage-sensitive work: `bun run --filter @mangostudio/frontend test:coverage`
 - Use `apps/frontend/tests/support/mocks/create-fetch-scenario.ts` only for happy-dom hook tests that must mock `fetch` behind Eden Treaty, not for API contract testing.
 - A test that needs a session calls `setTestSession` (or `setTestSignIn` / `setTestSignUp` / `setTestSignOut`) from `tests/support/setup/auth-client-stub.ts` **by relative path**. Never `mock.module('@/lib/auth-client', …)`: the alias already resolves to the stub, so that mock targets a module the components never import and silently tests nothing.
