@@ -4,10 +4,12 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+import { Badge } from '@/components/ui/Badge';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { supervisorLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';
+import { MachineCard } from './MachineCard';
 
 interface ServiceCardProps {
   readonly status: MachineStatus;
@@ -16,6 +18,7 @@ interface ServiceCardProps {
   readonly onUninstall: () => void;
 }
 
+/** A yes/no fact as a badge: the word carries it, and "no" is neutral rather than red. */
 function Flag({
   on,
   yes,
@@ -25,11 +28,7 @@ function Flag({
   readonly yes: string;
   readonly no: string;
 }) {
-  return (
-    <span className={`text-sm font-bold ${on ? 'text-accent-fg' : 'text-fg-muted'}`}>
-      {on ? yes : no}
-    </span>
-  );
+  return <Badge variant={on ? 'success' : 'neutral'}>{on ? yes : no}</Badge>;
 }
 
 export function ServiceCard({ status, isPending, onInstall, onUninstall }: ServiceCardProps) {
@@ -38,50 +37,46 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
   const { service } = status;
 
   return (
-    <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-service-card">
-      <div>
-        <CardSectionLabel>{m.service.title}</CardSectionLabel>
-        <p className="text-lg font-bold text-fg">
-          {service.installed ? m.service.installed : m.service.notInstalled}
-        </p>
-        <p className="text-sm text-fg-muted">
-          {supervisorLabel(t, service.platform)} · {service.unitName}
-        </p>
-      </div>
-
+    <MachineCard
+      title={m.service.title}
+      headline={service.installed ? m.service.installed : m.service.notInstalled}
+      description={`${supervisorLabel(t, service.platform)} · ${service.unitName}`}
+      testId="machine-service-card"
+    >
       <p className="text-sm text-fg-muted">{m.service.description}</p>
 
       {service.error ? (
-        <div className="space-y-1" data-testid="machine-service-error">
-          {/* Coded reasons are ours and have a sentence in every locale; the
-              raw line is whatever the supervisor printed, which no dictionary
-              can hold, so it stays as the diagnostic beneath. */}
+        // Coded reasons are ours and have a sentence in every locale; the raw
+        // line is whatever the supervisor printed, which no dictionary can
+        // hold, so it stays as the diagnostic beneath.
+        <Callout
+          tone="danger"
+          title={service.errorCode ? m.service.errors[service.errorCode] : undefined}
+          data-testid="machine-service-error"
+        >
           {service.errorCode ? (
-            <>
-              <p className="text-sm text-danger">{m.service.errors[service.errorCode]}</p>
-              <p className="font-mono text-xs text-fg-muted">{service.error}</p>
-            </>
+            <p className="break-all font-mono text-xs">{service.error}</p>
           ) : (
-            <p className="text-sm text-danger">{service.error}</p>
+            service.error
           )}
-        </div>
+        </Callout>
       ) : (
         service.installed && (
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
-            <div>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
+            <div className="space-y-1">
               <dt className="text-fg-muted">{m.service.enabledLabel}</dt>
               <dd>
                 <Flag on={service.enabled} yes={m.service.enabled} no={m.service.disabled} />
               </dd>
             </div>
-            <div>
+            <div className="space-y-1">
               <dt className="text-fg-muted">{m.service.runningLabel}</dt>
               <dd>
                 <Flag on={service.running} yes={m.service.running} no={m.service.stopped} />
               </dd>
             </div>
             {service.linger !== undefined && (
-              <div>
+              <div className="space-y-1">
                 <dt className="text-fg-muted">{m.service.lingerLabel}</dt>
                 <dd>
                   <Flag on={service.linger} yes={m.service.lingerOn} no={m.service.lingerOff} />
@@ -89,7 +84,7 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
               </div>
             )}
             {service.execPath && (
-              <div className="col-span-full">
+              <div className="col-span-full space-y-1">
                 <dt className="text-fg-muted">{m.service.runs}</dt>
                 <dd className="truncate font-mono text-xs text-fg">{service.execPath}</dd>
               </div>
@@ -106,7 +101,6 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
             label={m.actions.uninstallService}
             confirmTitle={m.actions.confirmUninstallTitle}
             confirmDescription={m.actions.confirmUninstallDescription}
-            variant="danger"
             isPending={isPending}
             onConfirm={onUninstall}
             testId="machine-service-uninstall"
@@ -125,6 +119,6 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
           />
         )}
       </div>
-    </section>
+    </MachineCard>
   );
 }

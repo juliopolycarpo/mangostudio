@@ -10,6 +10,7 @@
 import type { LibraryLocationId, PropagationSourceGroup } from '@mangostudio/shared/library';
 import { useI18n } from '@/hooks/use-i18n';
 import { hashPrefix } from '../format';
+import { ChoiceRow } from './ChoiceRow';
 
 interface ContentGroupListProps {
   readonly groups: readonly PropagationSourceGroup[];
@@ -30,7 +31,7 @@ export function ContentGroupList({
   const l = t.library;
 
   return (
-    <ul className="space-y-1.5" data-testid="content-group-list">
+    <ul className={onSelect ? 'space-y-1' : 'space-y-2'} data-testid="content-group-list">
       {groups.map((group) => {
         const locations = group.locationIds
           .map((locationId) => locationLabel?.(locationId) ?? locationId)
@@ -38,12 +39,14 @@ export function ContentGroupList({
         const body = (
           <>
             <span className="flex flex-wrap items-baseline gap-x-2">
-              <span className="font-mono font-semibold text-fg text-xs">
+              <span className="font-medium font-mono text-fg text-xs">
                 {hashPrefix(group.contentHash)}…
               </span>
-              <span className="text-[11px] text-fg-muted">{renderMeta(group)}</span>
+              <span className="text-fg-muted text-xs">{renderMeta(group)}</span>
             </span>
-            <span className="mt-0.5 block break-all text-[11px] text-fg-muted">{locations}</span>
+            <span className="mt-0.5 block break-all font-mono text-fg-muted text-micro">
+              {locations}
+            </span>
           </>
         );
 
@@ -51,7 +54,7 @@ export function ContentGroupList({
           return (
             <li
               key={group.contentHash}
-              className="rounded-lg border border-stroke bg-surface p-2.5"
+              className="rounded-md border border-stroke bg-surface px-3 py-2"
               data-testid="content-group"
               data-content-hash={group.contentHash}
             >
@@ -66,24 +69,16 @@ export function ContentGroupList({
             data-testid="content-group"
             data-content-hash={group.contentHash}
           >
-            <label
-              className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-colors ${
-                selectedHash === group.contentHash
-                  ? 'border-accent bg-accent-subtle'
-                  : 'border-stroke bg-surface hover:border-stroke'
-              }`}
+            <ChoiceRow
+              control="radio"
+              name={`group:${group.locationIds.join('|')}`}
+              checked={selectedHash === group.contentHash}
+              onChange={() => onSelect(group.contentHash)}
+              aria-label={l.conflict.adopt}
+              data-testid="adopt-group"
             >
-              <input
-                type="radio"
-                name={`group:${group.locationIds.join('|')}`}
-                checked={selectedHash === group.contentHash}
-                onChange={() => onSelect(group.contentHash)}
-                aria-label={l.conflict.adopt}
-                data-testid="adopt-group"
-                className="mt-0.5 size-3.5 accent-accent"
-              />
-              <span className="min-w-0 flex-1">{body}</span>
-            </label>
+              {body}
+            </ChoiceRow>
           </li>
         );
       })}

@@ -34,17 +34,17 @@ export function GithubInboxCard() {
 
   return (
     <SectionCard label={t.home.github.label} tone="warning">
-      <ul className="space-y-1.5">
+      <ul className="-mx-2 space-y-0.5">
         {data.items.slice(0, HOME_INBOX_ROWS).map((item) => (
           <li key={item.url} className="min-w-0">
             <a
               href={item.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="block min-w-0 focus-visible:outline-2 focus-visible:outline-focus"
+              className="block min-w-0 rounded-sm px-2 py-1 transition-colors hover:bg-fill-hover"
             >
-              <span className="block truncate text-xs text-fg">{item.title}</span>
-              <span className="block truncate font-mono text-[10px] text-fg-muted">
+              <span className="block truncate text-sm text-fg">{item.title}</span>
+              <span className="block truncate font-mono text-micro text-fg-subtle">
                 {formatMessage(t.home.github.row, {
                   repo: item.repository.nameWithOwner,
                   number: String(item.number),

@@ -6,6 +6,7 @@ import { useMemo } from 'react';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { deriveTurnStatus, type TurnStatus } from '../lib/turn-status';
 import { AssistantImageTurn } from './AssistantImageTurn';
 import { AssistantTurnBody } from './AssistantTurnBody';
@@ -38,8 +39,8 @@ interface DerivedTurn {
 function TurnCostRow({ generationTime }: { generationTime: string }) {
   const { t } = useI18n();
   return (
-    <div className="flex w-fit items-center gap-1.5 pl-4 text-[11px] text-fg-subtle">
-      <Sparkles size={11} className="text-accent-fg" />
+    <div className="flex w-fit items-center gap-1.5 pl-4 font-mono text-micro text-fg-subtle">
+      <Sparkles size={ICON_SM} />
       <span>{formatMessage(t.chat.feed.respondedIn, { time: generationTime })}</span>
     </div>
   );

@@ -2,7 +2,10 @@ import type { TerminalSession } from '@mangostudio/shared/terminal';
 import { ExternalLink, Pencil, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { FIELD_CLASS } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 export interface SessionTabsProps {
   readonly sessions: readonly TerminalSession[];
@@ -70,7 +73,7 @@ export function SessionTabs({
     <div
       role="tablist"
       aria-label={t.terminal.tabs}
-      className="flex items-center gap-1 overflow-x-auto border-b border-stroke bg-control px-1"
+      className="flex items-center gap-1 overflow-x-auto border-b border-stroke px-2"
     >
       {sessions.map((session) => {
         const active = session.id === activeId;
@@ -79,9 +82,14 @@ export function SessionTabs({
           <div
             key={session.id}
             data-testid={`terminal-tab-${session.id}`}
-            className={`group flex shrink-0 items-center gap-1 rounded-t-lg px-2 py-1.5 text-sm ${
-              active ? 'bg-surface text-fg' : 'text-fg-muted hover:bg-fill-hover'
-            }`}
+            className={cn(
+              'group relative flex h-9 shrink-0 items-center gap-1 rounded-t-sm px-2 text-sm transition-colors',
+              // The same mark as `TabNav`: the 2px accent rule is the only
+              // signal of the current tab, drawn on the strip's own divider.
+              active
+                ? 'font-medium text-fg after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-accent'
+                : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
+            )}
           >
             {editing ? (
               <input
@@ -94,7 +102,7 @@ export function SessionTabs({
                   if (event.key === 'Enter') commitEditing();
                   if (event.key === 'Escape') setEditingId(null);
                 }}
-                className="w-28 rounded border border-stroke bg-control px-1 text-sm text-fg outline-none"
+                className={cn(FIELD_CLASS, 'h-7 w-32 px-2')}
               />
             ) : (
               <button
@@ -115,9 +123,9 @@ export function SessionTabs({
               size="icon"
               onClick={() => startEditing(session)}
               aria-label={t.terminal.rename}
-              className="size-5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              className="size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             >
-              <Pencil size={11} />
+              <Pencil size={ICON_SM} />
             </Button>
             <Button
               type="button"
@@ -125,9 +133,9 @@ export function SessionTabs({
               size="icon"
               onClick={() => onPopOut(session.id)}
               aria-label={t.terminal.popOut}
-              className="size-5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+              className="size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
             >
-              <ExternalLink size={11} />
+              <ExternalLink size={ICON_SM} />
             </Button>
             <Button
               type="button"
@@ -135,9 +143,9 @@ export function SessionTabs({
               size="icon"
               onClick={() => onRequestClose(session.id)}
               aria-label={t.terminal.closeSession}
-              className="size-5"
+              className="size-6"
             >
-              <X size={12} />
+              <X size={ICON_SM} />
             </Button>
           </div>
         );
@@ -152,7 +160,7 @@ export function SessionTabs({
         title={newSessionDisabled && newSessionHint ? newSessionHint : t.terminal.newSession}
         className="size-7 shrink-0"
       >
-        <Plus size={15} />
+        <Plus size={ICON_MD} />
       </Button>
     </div>
   );

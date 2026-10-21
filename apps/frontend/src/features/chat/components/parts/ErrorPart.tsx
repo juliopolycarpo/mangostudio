@@ -4,6 +4,7 @@ import {
   type ExternalAgentUnavailableReason,
   isExternalAgentKindCode,
 } from '@mangostudio/shared/external-agents';
+import { Callout } from '@/components/ui/Callout';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
@@ -54,11 +55,13 @@ export function ErrorPart({
       ? t.externalAgents.openFailure.capacity
       : text;
   return (
-    <div className="max-w-2xl space-y-1.5 rounded-xl border border-danger bg-danger-subtle p-4 text-sm text-danger">
-      <p>{sentence}</p>
-      {kind ? <span className="block font-mono text-[10px] opacity-70">{kind}</span> : null}
-      {command ? <SignInCommand command={command} /> : null}
-      {unavailableReason && remedy ? <ExternalRemedyLink remedy={remedy} /> : null}
-    </div>
+    <Callout tone="danger" className="max-w-2xl">
+      <div className="space-y-1.5">
+        <p className="text-fg">{sentence}</p>
+        {kind ? <span className="block font-mono text-micro text-fg-subtle">{kind}</span> : null}
+        {command ? <SignInCommand command={command} /> : null}
+        {unavailableReason && remedy ? <ExternalRemedyLink remedy={remedy} /> : null}
+      </div>
+    </Callout>
   );
 }

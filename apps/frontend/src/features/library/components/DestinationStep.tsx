@@ -24,11 +24,16 @@ import type {
 import { Link } from '@tanstack/react-router';
 import { Server } from 'lucide-react';
 import { useMemo } from 'react';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { hashPrefix } from '../format';
 import { destinationKey, destinationsByEnvironment, type WizardDraft } from '../propagation';
 import { BlockedReason } from './BlockedReason';
+import { ChoiceRow } from './ChoiceRow';
+import { InlineNote } from './InlineNote';
 
 interface DestinationStepProps {
   readonly preview: PropagationPreview;
@@ -73,23 +78,21 @@ export function DestinationStep({
 
   return (
     <div className="space-y-4" data-testid="destination-step">
-      <p className="text-fg text-sm">{l.destination.description}</p>
+      <p className="text-fg-muted text-sm">{l.destination.description}</p>
       {machines.map(([environmentId, machineDestinations]) => (
         <section
           key={environmentId}
-          className="space-y-2"
+          className="space-y-3"
           data-testid="destination-machine"
           data-environment-id={environmentId}
         >
-          <h3 className="flex items-center gap-1.5 font-semibold text-fg text-xs">
-            <Server size={12} aria-hidden="true" />
+          <h3 className="flex items-center gap-2 font-semibold text-fg text-sm">
+            <Server size={ICON_MD} aria-hidden="true" className="text-fg-muted" />
             {environmentName(environmentId)}
           </h3>
           {groupByTarget(machineDestinations).map(([targetId, group]) => (
             <div key={targetId} className="space-y-1.5">
-              <h4 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-                {l.targets[targetId]}
-              </h4>
+              <MicroLabel as="h4">{l.targets[targetId]}</MicroLabel>
               {group.map((destination) => (
                 <DestinationRow
                   key={destinationKey(destination.environmentId, destination.locationId)}
@@ -113,9 +116,9 @@ export function DestinationStep({
         </section>
       ))}
       {draft.destinations.size === 0 && (
-        <p className="text-danger text-xs" data-testid="no-destination-selected">
+        <InlineNote tone="warning" data-testid="no-destination-selected">
           {l.destination.noneSelected}
-        </p>
+        </InlineNote>
       )}
     </div>
   );
@@ -138,31 +141,28 @@ function DestinationRow({
   const otherTargets = destination.targetIds.slice(1);
 
   return (
-    <label
-      className={`flex items-start gap-2 rounded-lg border p-2.5 ${
-        blocked
-          ? 'cursor-not-allowed border-stroke bg-surface opacity-70'
-          : 'cursor-pointer border-stroke bg-surface'
-      }`}
-      data-testid="destination-row"
-      data-environment-id={destination.environmentId}
-      data-location-id={destination.locationId}
-      data-blocked={blocked}
+    <ChoiceRow
+      control="checkbox"
+      bordered
+      row={{
+        'data-testid': 'destination-row',
+        'data-environment-id': destination.environmentId,
+        'data-location-id': destination.locationId,
+        'data-blocked': blocked,
+      }}
+      checked={checked && !blocked}
+      // A blocked destination can never be applied — the apply route rejects
+      // it outright — so the checkbox is disabled rather than merely warned about.
+      disabled={blocked}
+      onChange={() => onToggle(destination.environmentId, destination.locationId)}
     >
-      <input
-        type="checkbox"
-        checked={checked && !blocked}
-        // A blocked destination can never be applied — the apply route rejects
-        // it outright — so the checkbox is disabled rather than merely warned about.
-        disabled={blocked}
-        onChange={() => onToggle(destination.environmentId, destination.locationId)}
-        className="mt-0.5 size-3.5 accent-accent"
-      />
-      <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block break-all font-mono text-fg text-xs">
+      <span className="block space-y-1">
+        <span
+          className={cn('block break-all font-mono text-xs', blocked ? 'text-fg-muted' : 'text-fg')}
+        >
           {destination.path ?? destination.locationId}
         </span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-fg-muted">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-fg-muted text-xs">
           <span>{l.format[destination.toFormat]}</span>
           <span>
             {destination.currentContentHash
@@ -175,12 +175,12 @@ function DestinationRow({
         </span>
 
         {otherTargets.length > 0 && (
-          <span className="block text-[11px] text-accent-fg" data-testid="serves-multiple-targets">
+          <InlineNote tone="info" data-testid="serves-multiple-targets">
             {formatMessage(l.destination.servesMultipleTargets, {
               location: destination.path ?? destination.locationId,
               targets: otherTargets.map((targetId) => l.targets[targetId]).join(', '),
             })}
-          </span>
+          </InlineNote>
         )}
 
         {destination.blockedReason && (
@@ -203,6 +203,6 @@ function DestinationRow({
           </span>
         )}
       </span>
-    </label>
+    </ChoiceRow>
   );
 }

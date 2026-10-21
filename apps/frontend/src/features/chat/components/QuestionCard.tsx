@@ -1,8 +1,12 @@
 import { formatQuestionAnswers, type QuestionAnswer } from '@mangostudio/shared/questions';
 import type { MessagePart } from '@mangostudio/shared/types';
-import { Check, CircleHelp } from 'lucide-react';
 import { useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { SectionCard } from '@/components/ui/SectionCard';
+import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
+import { ChoiceButton } from './ChoiceButton';
 
 type QuestionPart = Extract<MessagePart, { type: 'question' }>;
 
@@ -74,14 +78,10 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
   };
 
   return (
-    <div className="max-w-2xl w-full rounded-2xl border border-stroke bg-surface p-4 sm:p-5 text-sm text-fg space-y-4">
-      <div className="flex items-center gap-2 text-fg-muted">
-        <CircleHelp size={16} className="text-accent-fg" />
-        <span className="text-xs font-bold uppercase tracking-widest">
-          {interactive ? labels.title : labels.answered}
-        </span>
-      </div>
-
+    <SectionCard
+      label={interactive ? labels.title : labels.answered}
+      className="w-full max-w-2xl gap-4 text-sm text-fg"
+    >
       {part.questions.map((question, questionIndex) => {
         const draft = drafts[questionIndex];
         return (
@@ -93,53 +93,37 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
             className="space-y-2"
           >
             <div className="flex flex-wrap items-center gap-2">
-              {question.header && (
-                <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-fg-muted">
-                  {question.header}
-                </span>
-              )}
+              {question.header && <Badge variant="neutral">{question.header}</Badge>}
               <p className="font-medium text-fg">{question.question}</p>
             </div>
             {question.allowMultiple && (
               <p className="text-xs text-fg-muted">{labels.multiSelectHint}</p>
             )}
-            <div className="space-y-1.5">
-              {question.options.map((option, optionIndex) => {
-                const selected = draft?.selectedLabels.includes(option.label) ?? false;
-                return (
-                  <button
-                    key={option.label}
-                    type="button"
-                    disabled={!interactive}
-                    onClick={() =>
-                      toggleOption(questionIndex, option.label, question.allowMultiple ?? false)
-                    }
-                    className={`flex w-full items-start gap-2.5 rounded-xl border px-3 py-2 text-left transition-colors duration-150 ${
-                      selected ? 'border-accent bg-accent-subtle' : 'border-stroke bg-surface'
-                    } ${interactive ? 'cursor-pointer hover:border-stroke' : 'cursor-default opacity-70'}`}
-                  >
-                    <span
-                      className={`mt-0.5 text-xs font-semibold ${selected ? 'text-accent-fg' : 'text-fg-muted'}`}
-                    >
-                      {selected ? <Check size={14} /> : `${OPTION_LETTERS[optionIndex] ?? ''})`}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium text-fg">{option.label}</span>
-                      {option.description && (
-                        <span className="block text-xs text-fg-muted">{option.description}</span>
-                      )}
-                    </span>
-                  </button>
-                );
-              })}
+            <div className="space-y-2">
+              {question.options.map((option, optionIndex) => (
+                <ChoiceButton
+                  key={option.label}
+                  selected={draft?.selectedLabels.includes(option.label) ?? false}
+                  disabled={!interactive}
+                  marker={`${OPTION_LETTERS[optionIndex] ?? ''})`}
+                  onClick={() =>
+                    toggleOption(questionIndex, option.label, question.allowMultiple ?? false)
+                  }
+                >
+                  <span className="block font-medium text-fg">{option.label}</span>
+                  {option.description && (
+                    <span className="block text-xs text-fg-muted">{option.description}</span>
+                  )}
+                </ChoiceButton>
+              ))}
             </div>
             {interactive && (
-              <textarea
+              <Textarea
                 value={draft?.freeText ?? ''}
                 onChange={(event) => updateDraft(questionIndex, { freeText: event.target.value })}
                 placeholder={labels.ownAnswerPlaceholder}
                 rows={1}
-                className="w-full resize-y rounded-xl border border-stroke bg-surface px-3 py-2 text-sm text-fg placeholder:text-fg-subtle focus:border-focus focus:outline-none"
+                className="min-h-8"
               />
             )}
           </div>
@@ -148,16 +132,11 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
 
       {interactive && (
         <div className="flex justify-end">
-          <button
-            type="button"
-            disabled={!allAnswered}
-            onClick={handleSubmit}
-            className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity duration-150 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-          >
+          <Button type="button" disabled={!allAnswered} onClick={handleSubmit}>
             {labels.submit}
-          </button>
+          </Button>
         </div>
       )}
-    </div>
+    </SectionCard>
   );
 }

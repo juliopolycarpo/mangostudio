@@ -3,13 +3,18 @@
  */
 
 import type { ToolSettingsCategory } from '@mangostudio/shared/tool-settings';
+import { Wrench } from 'lucide-react';
 import { useMemo } from 'react';
-import { Button } from '@/components/ui/Button';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { SettingsSliderRow } from '@/components/settings/SettingsSliderRow';
+import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { useToolSettings } from '../hooks/use-tool-settings';
-import { ToolSettingsCard } from './ToolSettingsCard';
+import { ToolSettingsRow } from './ToolSettingsRow';
 
 interface ToolSettingsPageProps {
   maxToolIterations: number;
@@ -41,89 +46,47 @@ export function ToolSettingsPage({
 
   const hintText = s.maxToolIterationsHint.replace('{value}', String(maxToolIterations));
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-fg-muted">{t.common.loading}</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-danger">{s.loadError}</p>
-        <Button variant="subtle" size="sm" onClick={() => void refetch()}>
-          {t.common.retry}
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      {/* ── Execution section ── */}
-      <Card className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {s.executionTitle}
-        </h3>
-        <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
-          <h4 className="text-sm text-fg font-medium">{s.maxToolIterationsLabel}</h4>
-          <span className="text-sm font-medium text-fg">{hintText}</span>
-        </div>
-        <p className="text-sm text-fg-muted">{s.maxToolIterationsDescription}</p>
-        <div className="flex items-center gap-4">
-          <input
-            type="range"
-            min={MAX_TOOL_ITERATIONS_MIN}
-            max={MAX_TOOL_ITERATIONS_MAX}
-            step={1}
-            value={maxToolIterations}
-            onChange={(e) => setMaxToolIterations(Number(e.target.value))}
-            aria-label={s.maxToolIterationsLabel}
-            className="range-input flex-1"
-          />
-          <input
-            type="number"
-            min={MAX_TOOL_ITERATIONS_MIN}
-            max={MAX_TOOL_ITERATIONS_MAX}
-            step={1}
-            value={maxToolIterations}
-            onChange={(e) => setMaxToolIterations(Number(e.target.value))}
-            onBlur={(e) => setMaxToolIterations(Number(e.target.value))}
-            aria-label={s.maxToolIterationsLabel}
-            className="
-              w-20 rounded-xl px-3 py-2 text-sm text-center
-              bg-control text-fg
-              border border-stroke
-              focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus
-              transition-colors
-            "
-          />
-        </div>
-      </Card>
-
-      {/* ── Tool cards by category ── */}
-      {descriptors.length === 0 ? (
-        <p className="text-sm text-fg-muted text-center py-8">{s.noTools}</p>
+    <SettingsPage title={s.title} description={s.description}>
+      {isLoading ? (
+        <SettingsLoading />
+      ) : error ? (
+        <SettingsLoadError message={s.loadError} onRetry={() => void refetch()} />
       ) : (
-        CATEGORIES.map((category) => {
-          const tools = grouped[category];
-          if (tools.length === 0) return null;
-          return (
-            <section key={category} className="space-y-3">
-              <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted px-1">
-                {s.categories[category]}
-              </h3>
-              <div className="space-y-3">
-                {tools.map((tool) => (
-                  <ToolSettingsCard key={tool.name} descriptor={tool} />
-                ))}
-              </div>
-            </section>
-          );
-        })
+        <>
+          <SettingsSection title={s.executionTitle}>
+            <SettingsSliderRow
+              id="tool-max-iterations"
+              label={s.maxToolIterationsLabel}
+              hint={s.maxToolIterationsDescription}
+              readout={hintText}
+              value={maxToolIterations}
+              min={MAX_TOOL_ITERATIONS_MIN}
+              max={MAX_TOOL_ITERATIONS_MAX}
+              onChange={setMaxToolIterations}
+              withNumberInput
+            />
+          </SettingsSection>
+
+          {descriptors.length === 0 ? (
+            <Card padded={false}>
+              <EmptyState icon={<Wrench size={24} />} title={s.noTools} />
+            </Card>
+          ) : (
+            CATEGORIES.map((category) => {
+              const tools = grouped[category];
+              if (tools.length === 0) return null;
+              return (
+                <SettingsSection key={category} title={s.categories[category]}>
+                  {tools.map((tool) => (
+                    <ToolSettingsRow key={tool.name} descriptor={tool} />
+                  ))}
+                </SettingsSection>
+              );
+            })
+          )}
+        </>
       )}
-    </div>
+    </SettingsPage>
   );
 }

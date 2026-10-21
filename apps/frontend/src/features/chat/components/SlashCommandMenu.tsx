@@ -9,7 +9,9 @@
 
 import { useEffect, useRef } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
 import type { SlashCommandEntry } from '../lib/slash-commands';
+import { ComposerPopover } from './ComposerPopover';
 
 interface Props {
   readonly entries: readonly SlashCommandEntry[];
@@ -64,7 +66,7 @@ export function SlashCommandMenu({
   const empty = entries.length === 0;
 
   return (
-    <div
+    <ComposerPopover
       id={listId}
       // The composer keeps focus throughout, so the list is driven entirely
       // through `aria-activedescendant` on the textarea. `tabIndex={-1}` makes
@@ -81,9 +83,7 @@ export function SlashCommandMenu({
       // of them would blur the textarea, which the composer answers by
       // dismissing the palette out from under the pointer mid-click.
       onMouseDown={(event) => event.preventDefault()}
-      className={`absolute bottom-full left-0 z-40 mb-2 w-80 rounded-2xl border border-stroke bg-surface shadow-2xl ${
-        empty ? 'p-3' : 'app-scrollbar max-h-72 overflow-y-auto p-1'
-      }`}
+      className={empty ? 'p-3' : 'app-scrollbar max-h-72 overflow-y-auto p-1'}
     >
       {empty && (
         <p className="text-xs text-fg-muted">
@@ -106,21 +106,22 @@ export function SlashCommandMenu({
             onSelect(entry);
           }}
           onMouseMove={() => onHighlight(index)}
-          className={`flex cursor-pointer flex-col gap-0.5 rounded-xl px-2.5 py-1.5 text-left ${
+          className={cn(
+            'flex cursor-pointer flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left transition-colors',
             index === activeIndex ? 'bg-fill-selected' : 'hover:bg-fill-hover'
-          }`}
+          )}
         >
           <span className="flex items-baseline gap-2">
-            <span className="font-mono text-xs text-fg">/{entry.name}</span>
-            <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-fg-muted">
+            <span className="font-mono text-sm text-fg">/{entry.name}</span>
+            <span className="ml-auto shrink-0 font-mono text-micro text-fg-subtle">
               {labels.slashMenuOrigin[entry.origin]}
             </span>
           </span>
           {entry.description && (
-            <span className="line-clamp-2 text-[11px] text-fg-muted">{entry.description}</span>
+            <span className="line-clamp-2 text-xs text-fg-muted">{entry.description}</span>
           )}
         </div>
       ))}
-    </div>
+    </ComposerPopover>
   );
 }

@@ -14,6 +14,7 @@
 import type { LibraryLocationId, ResourceKind } from '@mangostudio/shared/library';
 import { useQueries } from '@tanstack/react-query';
 import { useMemo } from 'react';
+import { Callout } from '@/components/ui/Callout';
 import { FileChangePreviewBody } from '@/features/chat/components/FileChangePreview';
 import { diffTextLines } from '@/features/chat/components/file-change-preview';
 import { useI18n } from '@/hooks/use-i18n';
@@ -92,23 +93,27 @@ export function InstanceDiff({
   const noVisibleDifference = preview.files[0].lines.length === 0;
 
   return (
-    <div className="space-y-2 text-[11px]" data-testid="instance-diff">
+    <div className="space-y-3 text-xs" data-testid="instance-diff">
       {/*
         001 deliberately does not normalize line endings, so a CRLF/LF split is a
         real divergence that a line diff renders as nothing at all. Without this
         banner that is simply baffling.
       */}
       {whitespaceOnly && (
-        <Banner tone="warn" testId="whitespace-only-banner" title={l.detail.whitespaceOnlyTitle}>
+        <Callout
+          tone="info"
+          title={l.detail.whitespaceOnlyTitle}
+          data-testid="whitespace-only-banner"
+        >
           {l.detail.whitespaceOnlyDescription}
-        </Banner>
+        </Callout>
       )}
       {kind === 'skill' && (
         <p className="text-fg-muted" data-testid="entrypoint-only-note">
           {l.detail.entrypointOnly}
         </p>
       )}
-      {truncated && <p className="text-info">{l.diff.truncated}</p>}
+      {truncated && <Callout tone="info" title={l.diff.truncated} />}
       {noVisibleDifference ? (
         <p className="text-fg-muted" data-testid="diff-identical">
           {kind === 'skill' ? l.detail.identicalEntrypoint : l.diff.identical}
@@ -116,32 +121,6 @@ export function InstanceDiff({
       ) : (
         <FileChangePreviewBody preview={preview} />
       )}
-    </div>
-  );
-}
-
-function Banner({
-  tone,
-  title,
-  testId,
-  children,
-}: {
-  readonly tone: 'warn' | 'info';
-  readonly title: string;
-  readonly testId?: string;
-  readonly children: React.ReactNode;
-}) {
-  return (
-    <div
-      data-testid={testId}
-      className={`rounded-lg border p-2.5 ${
-        tone === 'warn'
-          ? 'border-info bg-info-subtle text-fg'
-          : 'border-stroke bg-surface text-fg-muted'
-      }`}
-    >
-      <p className="font-semibold text-[11px]">{title}</p>
-      <p className="mt-0.5 text-[11px] text-fg-muted">{children}</p>
     </div>
   );
 }

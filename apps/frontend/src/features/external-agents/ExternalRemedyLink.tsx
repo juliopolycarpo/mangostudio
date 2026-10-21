@@ -25,7 +25,7 @@ export function ExternalRemedyLink({ remedy, className }: ExternalRemedyLinkProp
     <div className={className}>
       <Link
         to="/environments/agents"
-        className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-accent-fg transition-colors hover:bg-fill-hover"
+        className="inline-flex h-7 items-center gap-1 rounded-sm px-2 text-xs font-medium text-accent-fg transition-colors hover:bg-fill-hover"
       >
         {t.externalAgents.remedy[remedy.kind]}
       </Link>

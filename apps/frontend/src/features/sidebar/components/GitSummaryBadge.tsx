@@ -11,6 +11,7 @@ import { StatusDot } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { branchLabel } from '@/lib/git-branch';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 export function GitSummaryBadge({ summary }: { summary: GitSummary }) {
   const { t } = useI18n();
@@ -32,7 +33,7 @@ export function GitSummaryBadge({ summary }: { summary: GitSummary }) {
       className="flex min-w-0 items-center gap-1 overflow-hidden"
       data-testid="git-summary-badge"
     >
-      <GitBranch size={10} aria-hidden="true" className="shrink-0" />
+      <GitBranch size={ICON_SM} aria-hidden="true" className="shrink-0" />
       {/* Absorbs the squeeze first (the huge shrink factor, against the tail's 1),
           so the label ellipsizes before the markers lose room. */}
       <span className="max-w-24 shrink-[100000] truncate" title={branch}>

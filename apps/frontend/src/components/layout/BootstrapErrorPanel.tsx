@@ -19,9 +19,11 @@ import { useRouter } from '@tanstack/react-router';
 import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { isRateLimited, type ShellResponsibility } from '@/features/bootstrap/shell-bootstrap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatList, formatMessage } from '@/lib/i18n-format';
+import { ICON_LG } from '@/lib/icon-sizes';
 
 /**
  * The raw line shown beneath the headline. The router types a boundary's error
@@ -80,34 +82,32 @@ export function BootstrapErrorPanel({
 
   return (
     <div className={PLACEMENT_CLASSES[placement]} data-placement={placement}>
-      <div
-        role="alert"
-        data-testid="bootstrap-error"
-        className="w-full max-w-md space-y-4 rounded-3xl border border-stroke bg-surface p-6 text-center"
-      >
-        <TriangleAlert aria-hidden size={24} className="mx-auto text-danger" />
-        <h1 className="font-bold text-lg text-fg">{s.title}</h1>
-        <p className="text-fg-muted text-sm">{isRateLimited(error) ? s.rateLimited : s.lead}</p>
-        {failedItems.length > 0 ? (
-          <p data-testid="bootstrap-error-failed" className="text-fg-muted text-sm">
-            {formatMessage(s.failed, { items: formatList(failedItems, locale) })}
-          </p>
-        ) : null}
-        <Button
-          data-testid="bootstrap-error-retry"
-          loading={isRetrying}
-          onClick={() => {
-            setRetrying(true);
-            void retry().finally(() => setRetrying(false));
-          }}
-        >
-          {s.retry}
-        </Button>
-        {detail ? (
-          <p className="break-words text-fg-subtle text-xs">
-            {formatMessage(s.detail, { message: detail })}
-          </p>
-        ) : null}
+      <div role="alert" data-testid="bootstrap-error" className="w-full max-w-md">
+        <Card className="space-y-4 text-center">
+          <TriangleAlert aria-hidden size={ICON_LG} className="mx-auto text-danger" />
+          <h1 className="text-title font-semibold text-fg">{s.title}</h1>
+          <p className="text-sm text-fg-muted">{isRateLimited(error) ? s.rateLimited : s.lead}</p>
+          {failedItems.length > 0 ? (
+            <p data-testid="bootstrap-error-failed" className="text-sm text-fg-muted">
+              {formatMessage(s.failed, { items: formatList(failedItems, locale) })}
+            </p>
+          ) : null}
+          <Button
+            data-testid="bootstrap-error-retry"
+            loading={isRetrying}
+            onClick={() => {
+              setRetrying(true);
+              void retry().finally(() => setRetrying(false));
+            }}
+          >
+            {s.retry}
+          </Button>
+          {detail ? (
+            <p className="break-words text-xs text-fg-subtle">
+              {formatMessage(s.detail, { message: detail })}
+            </p>
+          ) : null}
+        </Card>
       </div>
     </div>
   );

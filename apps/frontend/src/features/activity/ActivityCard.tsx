@@ -14,6 +14,7 @@
  * only ever names the *transition* into that state, never the reading itself.
  */
 
+import { Badge } from '@/components/ui/Badge';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { HubSkeletonLines } from '@/features/home/widgets/HubSkeletonLines';
 import { useI18n } from '@/hooks/use-i18n';
@@ -50,7 +51,7 @@ export function ActivityCard({ limit, compact = false, className }: ActivityCard
   if (isError) return null;
   if (isLoading) {
     return (
-      <SectionCard label={labels.label} tone="accent" className={className}>
+      <SectionCard label={labels.label} tone="neutral" className={className}>
         <HubSkeletonLines />
       </SectionCard>
     );
@@ -65,13 +66,13 @@ export function ActivityCard({ limit, compact = false, className }: ActivityCard
   return (
     <SectionCard
       label={labels.label}
-      tone="accent"
+      tone="neutral"
       className={className}
       action={
         newCount > 0 ? (
-          <span className="micro-label text-accent-fg">
+          <Badge variant="accent">
             {formatMessage(labels.newCount, { count: String(newCount) })}
-          </span>
+          </Badge>
         ) : undefined
       }
     >

@@ -3,7 +3,7 @@
  * wording and weight each of the three always carries.
  *
  * Every card offering these was spelling out the same `InstallAction` call per
- * action, so the primary/ghost split and the "Install {runtime}" label were
+ * action, so the primary/subtle split and the "Install {runtime}" label were
  * restated at each site. Here the action names its own presentation, and a
  * card only has to answer which step (if any) it has.
  */
@@ -12,12 +12,13 @@ import type { InstallRecipePreview } from '@mangostudio/shared/environments';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import type { InstallChainStep } from '../install-chain';
 import { InstallAction } from './InstallAction';
 
 /** Install is the card's call to action; update is ordinary; uninstall is deliberately quiet. */
 const ACTION_PRESENTATION = {
-  install: { variant: 'primary', icon: <Download size={14} /> },
+  install: { variant: 'primary', icon: <Download size={ICON_MD} /> },
   update: {},
   uninstall: { variant: 'subtle' },
 } as const satisfies Record<string, { variant?: 'primary' | 'subtle'; icon?: React.ReactNode }>;

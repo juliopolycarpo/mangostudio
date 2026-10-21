@@ -299,22 +299,26 @@ body {
   font-family: var(--font-sans);
 }
 
-/* ── Reusable floating panel (menus, listboxes, popovers) ──
- * A solid surface with a hairline and the popover shadow — no transparency,
- * no backdrop blur. WinUI flyouts and libadwaita popovers are drawn the same
- * way, so a native port does not have to un-do a material effect. */
-.dropdown-panel {
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-stroke);
-  border-radius: var(--radius-md);
-  box-shadow: var(--elevation-popover);
-  overflow: hidden;
-  z-index: 100;
-}
-
 /* ── Mono micro-labels & terminal-style chips ── */
 /* Layered so Tailwind utilities can override individual properties at call sites. */
 @layer components {
+  /* ── Reusable floating panel (menus, listboxes, popovers) ──
+   * A solid surface with a hairline and the popover shadow — no transparency,
+   * no backdrop blur. WinUI flyouts and libadwaita popovers are drawn the same
+   * way, so a native port does not have to un-do a material effect.
+   *
+   * It lives in the components layer so a call site can add `overflow-y-auto`
+   * and have it win: unlayered, this rule's `overflow: hidden` beat every
+   * utility. */
+  .dropdown-panel {
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-stroke);
+    border-radius: var(--radius-md);
+    box-shadow: var(--elevation-popover);
+    overflow: hidden;
+    z-index: 100;
+  }
+
   /* The one place text is upper-cased: a group heading. Everything else —
    * badges, buttons, values — is sentence case. */
   .micro-label {

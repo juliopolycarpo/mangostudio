@@ -15,7 +15,8 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
-import { Card } from '@/components/ui/Card';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import {
   externalAgentSelectable,
   useExternalAgents,
@@ -37,48 +38,48 @@ export function ExternalAgentDiscoveryLog() {
   const labels = t.settings.logs.externalAgentDiscovery;
 
   return (
-    <Card className="space-y-4 p-4 sm:p-6">
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold text-fg">{labels.title}</h2>
-        <p className="text-sm text-fg-muted">{labels.description}</p>
-      </div>
-
+    <SettingsSection title={labels.title} description={labels.description}>
       {external.isLoading ? (
         // "No agents" is a verdict, and this query outlives the page's other
         // one: claiming it before discovery answers would read as a machine
         // with nothing installed.
-        <p className="text-sm text-fg-muted">{t.common.loading}</p>
+        <p className="px-4 py-3 text-sm text-fg-muted">{t.common.loading}</p>
       ) : external.agents.length === 0 ? (
-        <p className="text-sm text-fg-muted">{labels.empty}</p>
+        <p className="px-4 py-3 text-sm text-fg-muted">{labels.empty}</p>
       ) : (
-        <ul className="space-y-2">
-          {external.agents.map((agent) => (
-            <li key={agent.targetId} className="rounded-xl bg-control px-4 py-3 text-sm">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="font-medium text-fg">
-                  {t.externalAgents.target[agent.targetId]}
-                </span>
-                <span className="text-xs text-fg-muted">{summary(agent, labels)}</span>
-              </div>
-              {agent.discoveryState === 'undetermined' && externalAgentSelectable(agent) ? (
-                <p className="mt-1 text-xs text-fg-muted">
-                  {t.externalAgents.selector.discoveryUndeterminedHint}
-                </p>
-              ) : null}
-              {agent.discovery ? (
-                <p className="mt-1 text-xs text-fg-muted">
-                  {formatTimestamp(agent.discovery.probedAtMs, locale)}
-                  {agent.discovery.attempts > 1
-                    ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`
-                    : ''}
-                  {agent.discovery.failureCode ? ` · ${agent.discovery.failureCode}` : ''}
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        external.agents.map((agent) => {
+          const undetermined =
+            agent.discoveryState === 'undetermined' && externalAgentSelectable(agent);
+          return (
+            <SettingsRow
+              key={agent.targetId}
+              label={t.externalAgents.target[agent.targetId]}
+              aside={<span className="text-xs text-fg-muted">{summary(agent, labels)}</span>}
+              hint={
+                undetermined || agent.discovery ? (
+                  <>
+                    {undetermined ? (
+                      <span className="block">
+                        {t.externalAgents.selector.discoveryUndeterminedHint}
+                      </span>
+                    ) : null}
+                    {agent.discovery ? (
+                      <span className="block">
+                        {formatTimestamp(agent.discovery.probedAtMs, locale)}
+                        {agent.discovery.attempts > 1
+                          ? ` · ${labels.attempts.replace('{count}', String(agent.discovery.attempts))}`
+                          : ''}
+                        {agent.discovery.failureCode ? ` · ${agent.discovery.failureCode}` : ''}
+                      </span>
+                    ) : null}
+                  </>
+                ) : undefined
+              }
+            />
+          );
+        })
       )}
-    </Card>
+    </SettingsSection>
   );
 }
 

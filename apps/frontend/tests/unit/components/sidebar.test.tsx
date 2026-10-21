@@ -300,7 +300,7 @@ describe('sidebar shell', () => {
   it('highlights Studio when it is the current page', () => {
     renderSidebar({ currentPage: 'studio' });
     const studioButtons = screen.getAllByRole('button', { name: /studio/i });
-    expect(studioButtons[0]?.className).toContain('text-accent-fg');
+    expect(studioButtons[0]?.className).toContain('bg-fill-selected');
   });
 
   it('calls onNavigate with "studio" when Studio is clicked', () => {

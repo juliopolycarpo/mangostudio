@@ -22,6 +22,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { type ReactNode, useId } from 'react';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 
@@ -116,7 +117,7 @@ export function ChipSelect({
         <span className={cn('composer-chip-value', valueClassName)}>
           {selected?.label ?? placeholder ?? value}
         </span>
-        <ChevronDown size={11} className="shrink-0" />
+        <ChevronDown size={ICON_SM} className="shrink-0" />
       </button>
 
       <AnimatePresence>
@@ -165,7 +166,7 @@ export function ChipSelect({
                       ) : null}
                     </span>
                     {isSelected ? (
-                      <Check size={13} className="mt-0.5 shrink-0 text-accent-fg" />
+                      <Check size={ICON_SM} className="mt-0.5 shrink-0 text-accent-fg" />
                     ) : null}
                   </button>
                 );

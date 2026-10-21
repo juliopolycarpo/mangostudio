@@ -10,9 +10,11 @@
 
 import type { ActivityEvent } from '@mangostudio/shared/activity';
 import type { Messages } from '@mangostudio/shared/i18n';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import type { StatusDotTone } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatRelativeTime } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { describeActivity } from './lib/describe-activity';
 import {
   activityDayGroupLabel,
@@ -30,12 +32,14 @@ export interface ActivityFeedProps {
   readonly lastSeenAt?: number | null;
 }
 
-const TONE_ICON_CLASS: Record<StatusDotTone, string> = {
-  accent: 'text-accent-fg',
+/**
+ * Only a status earns a colour; every other tone reads as a resting icon. The
+ * accent is not a status, so an event that merely happened is not tinted.
+ */
+const STATUS_ICON_CLASS: Partial<Record<StatusDotTone, string>> = {
   success: 'text-success',
   warning: 'text-warning',
   error: 'text-danger',
-  neutral: 'text-fg-muted',
 };
 
 export function ActivityFeed({
@@ -74,18 +78,17 @@ export function ActivityFeed({
     <div className="space-y-4">
       {groups.map((group) => (
         <div key={group.key} className="space-y-2">
-          <p className="micro-label text-fg-muted">
-            {activityDayGroupLabel(group, labels, locale)}
-          </p>
+          <MicroLabel as="p">{activityDayGroupLabel(group, labels, locale)}</MicroLabel>
           <ul className="space-y-2">
             {group.events.map((event) => {
               const showDivider = event.id === dividerEventId;
               return (
                 <li key={event.id}>
                   {showDivider ? (
-                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-accent-fg">
-                      {labels.sinceLastVisit}
-                    </p>
+                    <div className="mb-2 flex items-center gap-2">
+                      <MicroLabel as="p">{labels.sinceLastVisit}</MicroLabel>
+                      <span aria-hidden="true" className="h-px flex-1 bg-stroke" />
+                    </div>
                   ) : null}
                   <ActivityRow event={event} locale={locale} t={t} />
                 </li>
@@ -101,8 +104,12 @@ export function ActivityFeed({
 function ActivityRow({ event, locale, t }: { event: ActivityEvent; locale: string; t: Messages }) {
   const { text, icon: Icon, tone } = describeActivity(event, t, locale);
   return (
-    <div className="flex min-w-0 items-start gap-2 text-sm">
-      <Icon aria-hidden="true" className={`mt-0.5 size-3.5 shrink-0 ${TONE_ICON_CLASS[tone]}`} />
+    <div className="flex min-w-0 items-center gap-2 text-sm">
+      <Icon
+        aria-hidden="true"
+        size={ICON_SM}
+        className={`shrink-0 ${STATUS_ICON_CLASS[tone] ?? 'text-fg-muted'}`}
+      />
       <p className="min-w-0 flex-1 truncate text-fg-muted">{text}</p>
       <time
         dateTime={new Date(event.createdAt).toISOString()}

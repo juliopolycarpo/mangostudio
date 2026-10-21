@@ -1,9 +1,13 @@
 import type { ChatGptUsageSample } from '@mangostudio/shared/connectors';
 import type { Locale, Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
-import { History, RefreshCw, TriangleAlert } from 'lucide-react';
+import { History, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { getChatGptUsageHistory } from '../api';
 
 type ConnectorMessages = Messages['settings']['connectors'];
@@ -76,16 +80,19 @@ function UsageHistoryChart({
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-medium uppercase text-fg-subtle">{title}</p>
+      <p className="text-xs font-medium text-fg-muted">{title}</p>
+      {/* Marks use the accent's text variant, which clears 3:1 on a white
+          surface where the button fill does not; the area under the line is
+          its translucent wash, so the series still reads against either theme. */}
       <svg
         role="img"
         aria-label={title}
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-        className="h-20 w-full rounded-lg border border-stroke bg-surface"
+        className="h-20 w-full border-b border-stroke"
         preserveAspectRatio="none"
       >
         {points.length > 1 && (
-          <polygon points={areaPath} className="fill-accent-fg" stroke="none" />
+          <polygon points={areaPath} className="fill-accent-subtle" stroke="none" />
         )}
         {points.length > 1 && (
           <polyline
@@ -127,7 +134,7 @@ function UsageHistoryChart({
           );
         })}
       </svg>
-      <p className="text-[10px] text-fg-subtle">{s.chatgptHistoryDisclaimer}</p>
+      <p className="text-xs text-fg-subtle">{s.chatgptHistoryDisclaimer}</p>
     </div>
   );
 }
@@ -140,7 +147,6 @@ function UsageHistoryChart({
 export function ChatGptUsageHistoryPanel({ connectorId }: { connectorId: string }) {
   const { t, locale } = useI18n();
   const s = t.settings.connectors;
-  const panelId = `chatgpt-usage-history-${connectorId}`;
   const historyQuery = useQuery({
     queryKey: historyQueryKey(connectorId),
     queryFn: () => getChatGptUsageHistory(connectorId, { window: 'secondary', days: HISTORY_DAYS }),
@@ -150,35 +156,34 @@ export function ChatGptUsageHistoryPanel({ connectorId }: { connectorId: string 
   const samples = historyQuery.data?.samples ?? [];
 
   return (
-    <div className="space-y-2">
-      <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase text-fg-subtle">
-        <History size={13} />
+    <section className="space-y-3">
+      <MicroLabel as="h4" className="flex items-center gap-1.5">
+        <History size={ICON_SM} />
         {s.chatgptHistoryToggle}
-      </p>
+      </MicroLabel>
 
-      <div id={panelId} className="space-y-3 rounded-xl border border-stroke bg-surface px-3 py-3">
-        {historyQuery.isLoading ? (
-          <p className="flex items-center gap-2 text-[11px] text-fg-muted">
-            <RefreshCw size={13} className="animate-spin" />
-            {s.chatgptHistoryLoading}
-          </p>
-        ) : historyQuery.isError ? (
-          <div className="flex items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-[11px] text-danger">
-              <TriangleAlert size={13} />
-              {s.failedToLoad}
-            </p>
+      {historyQuery.isLoading ? (
+        <div role="status" className="flex items-center gap-2 text-xs text-fg-muted">
+          <Spinner size="sm" />
+          {s.chatgptHistoryLoading}
+        </div>
+      ) : historyQuery.isError ? (
+        <Callout
+          tone="danger"
+          action={
             <Button variant="subtle" size="sm" onClick={() => void historyQuery.refetch()}>
-              <RefreshCw size={13} />
+              <RefreshCw size={ICON_MD} />
               {t.common.retry}
             </Button>
-          </div>
-        ) : samples.length === 0 ? (
-          <p className="text-[11px] text-fg-muted">{s.chatgptHistoryEmpty}</p>
-        ) : (
-          <UsageHistoryChart samples={samples} locale={locale} s={s} />
-        )}
-      </div>
-    </div>
+          }
+        >
+          {s.failedToLoad}
+        </Callout>
+      ) : samples.length === 0 ? (
+        <p className="text-xs text-fg-muted">{s.chatgptHistoryEmpty}</p>
+      ) : (
+        <UsageHistoryChart samples={samples} locale={locale} s={s} />
+      )}
+    </section>
   );
 }

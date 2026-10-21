@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
 
 /**
  * Node colour. Mirrors the lifecycle of whatever the entry represents rather
@@ -49,7 +50,7 @@ const VARIANT_CLASS: Record<TimelineVariant, string> = {
  */
 export function TimelineItem({ children, tone = 'neutral', variant = 'row' }: TimelineItemProps) {
   return (
-    <div className={`chat-timeline-item ${VARIANT_CLASS[variant]} ${TONE_CLASS[tone]}`.trimEnd()}>
+    <div className={cn('chat-timeline-item', VARIANT_CLASS[variant], TONE_CLASS[tone])}>
       {children}
     </div>
   );

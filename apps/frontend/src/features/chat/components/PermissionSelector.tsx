@@ -41,7 +41,11 @@ import {
 } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, Check, ChevronDown, Lock } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
+import { ComposerPopover } from './ComposerPopover';
 
 export interface PermissionSelectorProps {
   configurations: readonly ExternalSupportedConfiguration[];
@@ -157,24 +161,22 @@ export function PermissionSelector({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={labels.label}
-        className={`composer-chip max-w-[13rem] disabled:opacity-50 ${
-          unattended ? 'border-warning text-warning' : ''
-        }`}
+        className="composer-chip max-w-[13rem] disabled:opacity-50"
       >
         {unattended ? (
-          <AlertTriangle size={11} className="shrink-0" />
+          <AlertTriangle size={ICON_SM} className="shrink-0 text-warning" />
         ) : (
-          <Lock size={11} className="composer-chip-icon shrink-0" />
+          <Lock size={ICON_SM} className="composer-chip-icon shrink-0" />
         )}
-        <span className="composer-chip-key opacity-70">{`${labels.modeKey}:`}</span>
-        <span className={`composer-chip-value ${unattended ? 'text-warning' : ''}`}>
+        <span className="composer-chip-key text-fg-muted">{`${labels.modeKey}:`}</span>
+        <span className={cn('composer-chip-value', unattended && 'text-warning')}>
           {labels.levelName[level]}
         </span>
-        <ChevronDown size={11} className="shrink-0" />
+        <ChevronDown size={ICON_SM} className="shrink-0" />
       </button>
 
       {open ? (
-        <div className="absolute bottom-full z-50 mb-2 w-80 space-y-3 rounded-2xl border border-stroke bg-surface p-3 shadow-2xl">
+        <ComposerPopover className="max-h-[70vh] space-y-3 overflow-y-auto p-3">
           {hasPresets ? (
             <Axis heading={labels.presetHeading}>
               {presets.map((preset) => (
@@ -204,12 +206,9 @@ export function PermissionSelector({
               type="button"
               onClick={() => setShowMatrix((value) => !value)}
               aria-expanded={showMatrix}
-              className="flex w-full items-center gap-1 px-1 text-[11px] text-fg-muted hover:text-fg"
+              className="flex h-7 w-full items-center gap-1 rounded-sm px-1 text-xs text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
             >
-              <ChevronDown
-                size={11}
-                className={`shrink-0 transition-transform ${showMatrix ? '' : '-rotate-90'}`}
-              />
+              <ChevronDown size={ICON_SM} className={cn('shrink-0', !showMatrix && '-rotate-90')} />
               {labels.advanced}
             </button>
           ) : null}
@@ -255,7 +254,7 @@ export function PermissionSelector({
               </Axis>
             </>
           ) : null}
-        </div>
+        </ComposerPopover>
       ) : null}
     </div>
   );
@@ -285,12 +284,14 @@ function unattendedWarning(
 
 function Axis({ heading, children }: { heading: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      {/* The capitals are this element's, not the catalog's: a screen reader
-          announcing an all-caps string letter by letter is reading styling, and
-          a locale that does not want capitals for this role can drop the class
-          without rewriting its copy. */}
-      <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">{heading}</p>
+    <div className="space-y-1">
+      {/* The capitals are the micro-label class's, not the catalog's: a screen
+          reader announcing an all-caps string letter by letter is reading
+          styling, and a locale that does not want capitals for this role can
+          drop the class without rewriting its copy. */}
+      <MicroLabel as="p" className="px-2">
+        {heading}
+      </MicroLabel>
       {children}
     </div>
   );
@@ -319,24 +320,37 @@ function Option({
       aria-pressed={selected}
       disabled={!supported}
       onClick={onSelect}
-      className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
-        selected ? 'border-accent bg-accent-subtle' : 'border-stroke'
-      } enabled:hover:border-stroke disabled:cursor-not-allowed disabled:opacity-60`}
+      className={cn(
+        'flex w-full items-start gap-2 rounded-sm px-2 py-2 text-left transition-colors disabled:cursor-not-allowed',
+        selected ? 'bg-fill-selected' : 'enabled:hover:bg-fill-hover'
+      )}
     >
-      <span className={`mt-0.5 shrink-0 ${selected ? 'text-accent-fg' : 'text-fg-muted'}`}>
-        {selected ? <Check size={13} /> : '○'}
+      {/* A fixed column, so the check and the empty circle sit on one axis down
+          the list. */}
+      <span
+        className={cn(
+          'mt-0.5 flex size-4 shrink-0 items-center justify-center',
+          selected ? 'text-accent-fg' : 'text-fg-muted'
+        )}
+      >
+        {selected ? <Check size={ICON_SM} /> : '○'}
       </span>
       <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block text-xs font-medium text-fg">{name}</span>
-        <span className="block text-[10px] leading-relaxed text-fg-muted">{description}</span>
+        {/* A refused pair is not faded: the reason under it is the thing to read.
+            The name steps down a text colour instead. */}
+        <span className={cn('block text-sm font-medium', supported ? 'text-fg' : 'text-fg-muted')}>
+          {name}
+        </span>
+        <span className="block text-xs text-fg-muted">{description}</span>
         {!supported && unsupportedReason ? (
-          <span className="block text-[10px] leading-relaxed text-fg-muted">
-            {unsupportedReason}
-          </span>
+          <span className="block text-xs text-fg-muted">{unsupportedReason}</span>
         ) : null}
         {supported && warning ? (
-          <span className="flex items-start gap-1 text-[10px] leading-relaxed text-warning">
-            <AlertTriangle size={11} className="mt-px shrink-0" />
+          // The glyph carries the tone and the words stay in the primary text
+          // colour — one step above the description they follow, so the risk
+          // is never the quietest line in the row.
+          <span className="flex items-start gap-1 text-xs text-fg">
+            <AlertTriangle size={ICON_SM} className="mt-px shrink-0 text-warning" />
             {warning}
           </span>
         ) : null}

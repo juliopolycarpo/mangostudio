@@ -277,6 +277,20 @@ describe('InputBar — mid-turn steering', () => {
     expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
   });
 
+  it('draws Steer as a secondary button, so it is never read as the product Send', () => {
+    renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      externalDescriptor: steerableDescriptor(),
+      isGenerating: true,
+      disabled: true,
+    });
+
+    const steer = screen.getByRole('button', { name: 'Steer' });
+    expect(steer.className).toContain('bg-control');
+    expect(steer.className).not.toContain('bg-accent');
+    expect(steer.getAttribute('style')).toBeNull();
+  });
+
   it('disables the composer as usual while generating on an adapter that cannot steer', () => {
     renderInputBar({
       runner: EXTERNAL_RUNNER,
@@ -525,6 +539,23 @@ describe('InputBar — the runner it is dressed as', () => {
     expect(screen.getByTestId('composer').style.getPropertyValue('--composer-accent')).toBe(
       'var(--color-agent-codex)'
     );
+  });
+
+  // One primary action, one colour (docs/design/decisions.md #7): the runner shows
+  // on the frame, the prompt mark, the caret and its chip, never on Send. The old
+  // button painted `var(--composer-send-fill)` inline, which is what this pins gone.
+  it('keeps Send on the product accent whichever runner answers', () => {
+    for (const runner of [
+      { kind: 'mangostudio', agentId: 'default' },
+      { kind: 'external', targetId: 'codex' },
+    ] as const) {
+      const { unmount } = renderInputBar({ runner });
+
+      const send = screen.getByRole('button', { name: 'Send' });
+      expect(send.className).toContain('bg-accent');
+      expect(send.getAttribute('style')).toBeNull();
+      unmount();
+    }
   });
 
   it('names the vendor in the placeholder, and only the vendor', () => {

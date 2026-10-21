@@ -1,6 +1,7 @@
 import { createLazyFileRoute, Link, useRouter } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Logo } from '@/components/ui/Logo';
@@ -47,8 +48,9 @@ function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-canvas px-4">
-      <Card className="w-full max-w-sm">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-canvas px-4 py-8">
+      <Logo className="size-12" />
+      <Card className="w-full max-w-sm rounded-lg">
         <form
           id="login-form"
           onSubmit={(e) => void handleSubmit(e)}
@@ -56,46 +58,45 @@ function LoginPage() {
           action="#"
           className="space-y-5"
         >
-          <div className="flex flex-col items-center gap-2 mb-4">
-            <Logo className="w-24 h-24" />
-            <h1 className="text-2xl font-semibold text-center text-fg">{t.auth.loginTitle}</h1>
-          </div>
+          <h1 className="text-title font-semibold text-fg">{t.auth.loginTitle}</h1>
 
           {error && (
-            <p className="text-xs text-danger text-center bg-danger-subtle rounded-lg px-3 py-2">
+            <Callout tone="danger" role="alert">
               {error}
-            </p>
+            </Callout>
           )}
 
-          <Input
-            type="email"
-            id="email"
-            name="email"
-            label={t.auth.emailLabel}
-            placeholder={t.auth.emailPlaceholder}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            required
-          />
+          <div className="space-y-3">
+            <Input
+              type="email"
+              id="email"
+              name="email"
+              label={t.auth.emailLabel}
+              placeholder={t.auth.emailPlaceholder}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
 
-          <Input
-            type="password"
-            id="password"
-            name="password"
-            label={t.auth.passwordLabel}
-            placeholder={t.auth.passwordPlaceholder}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-          />
+            <Input
+              type="password"
+              id="password"
+              name="password"
+              label={t.auth.passwordLabel}
+              placeholder={t.auth.passwordPlaceholder}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
 
-          <Button type="submit" variant="primary" loading={loading} className="w-full">
+          <Button type="submit" size="lg" loading={loading} className="w-full">
             {loading ? t.auth.loginLoading : t.auth.loginButton}
           </Button>
 
-          <p className="text-sm text-center text-fg-muted">
+          <p className="text-center text-sm text-fg-muted">
             {t.auth.noAccount}{' '}
             <Link to="/signup" className="text-accent-fg hover:underline">
               {t.auth.signupLink}

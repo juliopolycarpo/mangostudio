@@ -16,8 +16,12 @@ import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environm
 import { X } from 'lucide-react';
 import { useId, useState } from 'react';
 
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { useEnvironmentEntitiesQuery, useRuntimeLifecycleQuery } from '../queries';
 import type { SshFormFields } from '../ssh-form';
 import { emptySshForm } from '../ssh-form';
@@ -105,64 +109,73 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="max-h-full w-full max-w-lg space-y-5 overflow-y-auto rounded-3xl border border-stroke bg-surface p-5 shadow-2xl sm:p-8"
+        className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-lg border border-stroke bg-surface-raised shadow-dialog"
       >
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h3 id={titleId} className="font-bold text-lg text-fg">
-              {labels.title}
-            </h3>
-            <p className="text-fg-muted text-xs">
-              {formatMessage(labels.progress, {
-                step: String(index + 1),
-                total: String(steps.length),
-                name: labels.steps[step],
-              })}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            data-testid="machine-onboarding-close"
-            className="shrink-0 rounded-xl p-1.5 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
-            aria-label={labels.close}
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        <ol className="flex list-none flex-wrap gap-1.5" aria-label={labels.title}>
-          {steps.map((candidate, position) => (
-            <li
-              key={candidate}
-              aria-current={candidate === step ? 'step' : undefined}
-              className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
-                position < index
-                  ? 'bg-accent-subtle text-accent-fg'
-                  : candidate === step
-                    ? 'bg-accent-subtle text-accent-fg'
-                    : 'bg-control text-fg-subtle'
-              }`}
+        <header className="shrink-0 space-y-4 px-6 pt-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 space-y-1">
+              <h3 id={titleId} className="text-title font-semibold text-fg">
+                {labels.title}
+              </h3>
+              <p className="text-sm text-fg-muted">
+                {formatMessage(labels.progress, {
+                  step: String(index + 1),
+                  total: String(steps.length),
+                  name: labels.steps[step],
+                })}
+              </p>
+            </div>
+            <Button
+              variant="subtle"
+              size="icon"
+              onClick={onClose}
+              data-testid="machine-onboarding-close"
+              aria-label={labels.close}
             >
-              {labels.steps[candidate]}
-            </li>
-          ))}
-        </ol>
+              <X size={ICON_MD} />
+            </Button>
+          </div>
 
-        <StepBody
-          step={step}
-          ssh={ssh}
-          endState={endState}
-          consent={consent}
-          environment={environment}
-          onSsh={setSsh}
-          onEndState={setEndState}
-          onConsent={setConsent}
-          onCreated={setCreatedId}
-          onAdvance={advance}
-          onGoTo={goTo}
-          onClose={onClose}
-        />
+          {/* One segment per step: the finished ones in the control line, the
+              current one in the accent, the rest in the hairline. The names are
+              for assistive technology; the sentence above already names the
+              current step for everyone else. */}
+          <ol className="flex list-none gap-1" aria-label={labels.title}>
+            {steps.map((candidate, position) => (
+              <li
+                key={candidate}
+                aria-current={candidate === step ? 'step' : undefined}
+                className={cn(
+                  'h-1 flex-1 rounded-full',
+                  position < index
+                    ? 'bg-stroke-strong'
+                    : candidate === step
+                      ? 'bg-accent'
+                      : 'bg-stroke'
+                )}
+              >
+                <span className="sr-only">{labels.steps[candidate]}</span>
+              </li>
+            ))}
+          </ol>
+        </header>
+
+        <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto p-6">
+          <StepBody
+            step={step}
+            ssh={ssh}
+            endState={endState}
+            consent={consent}
+            environment={environment}
+            onSsh={setSsh}
+            onEndState={setEndState}
+            onConsent={setConsent}
+            onCreated={setCreatedId}
+            onAdvance={advance}
+            onGoTo={goTo}
+            onClose={onClose}
+          />
+        </div>
       </div>
     </div>
   );
@@ -266,8 +279,8 @@ function StepBody(props: StepBodyProps) {
  */
 function MissingEnvironment({ message }: { readonly message: string }) {
   return (
-    <p className="text-danger text-xs" role="alert">
+    <Callout tone="danger" role="alert">
       {message}
-    </p>
+    </Callout>
   );
 }

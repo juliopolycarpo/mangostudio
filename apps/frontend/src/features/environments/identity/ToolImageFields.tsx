@@ -10,8 +10,12 @@
 import type { ChangeEvent } from 'react';
 import { useId, useRef } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
+import { choiceClass } from '../components/choice-class';
 
 export type ToolImageMode = 'monogram' | 'upload' | 'url';
 
@@ -65,7 +69,7 @@ export function ToolImageFields({
 
   return (
     <fieldset className="space-y-3">
-      <legend className="font-medium text-fg-muted text-sm">{labels.imageLabel}</legend>
+      <legend className="text-sm font-medium text-fg">{labels.imageLabel}</legend>
 
       {/* Real radios rather than styled buttons: arrow-key navigation between
           the three modes comes free, and the group reads as one control. */}
@@ -73,11 +77,12 @@ export function ToolImageFields({
         {modes.map((option) => (
           <label
             key={option.value}
-            className={`flex-1 cursor-pointer rounded-xl border px-3 py-2 text-center text-xs transition-colors focus-within:ring-1 focus-within:ring-focus ${
-              mode === option.value
-                ? 'border-accent bg-accent-subtle text-fg'
-                : 'border-stroke text-fg-muted hover:bg-fill-hover'
-            }`}
+            className={cn(
+              'flex flex-1 cursor-pointer items-center justify-center',
+              choiceClass(mode === option.value),
+              // The radio is visually hidden, so the tile carries its focus mark.
+              'text-center has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus'
+            )}
           >
             <input
               type="radio"
@@ -106,17 +111,17 @@ export function ToolImageFields({
             <Button variant="secondary" onClick={() => fileInput.current?.click()}>
               {hasStoredUpload || file ? labels.imageReplaceFile : labels.imageChoose}
             </Button>
-            <span className="min-w-0 truncate text-fg-muted text-xs">
+            <span className="min-w-0 truncate text-xs text-fg-muted">
               {file?.name ?? (hasStoredUpload ? labels.imageStoredFile : labels.imageNoFile)}
             </span>
           </div>
           {fileTooLarge ? (
-            <p className="text-danger text-xs">{labels.imageFileTooLarge}</p>
+            <p className="text-xs text-danger">{labels.imageFileTooLarge}</p>
           ) : (
-            <p className="text-fg-muted text-xs">{labels.imageFileHint}</p>
+            <p className="text-xs text-fg-muted">{labels.imageFileHint}</p>
           )}
           {/* Owner-specified: uploading is the user asserting a right they have. */}
-          <p className="text-fg-muted text-xs">{labels.imageRightsNotice}</p>
+          <p className="text-xs text-fg-muted">{labels.imageRightsNotice}</p>
         </div>
       )}
 
@@ -135,26 +140,22 @@ export function ToolImageFields({
 
           <label
             htmlFor={cacheId}
-            className="flex cursor-pointer items-start gap-2 text-fg text-xs"
+            className="flex cursor-pointer items-start gap-2 text-sm text-fg"
           >
-            <input
+            <Checkbox
               id={cacheId}
-              type="checkbox"
               checked={cache}
-              className="mt-0.5 cursor-pointer accent-accent"
+              className="mt-0.5"
               onChange={(event) => onCacheChange(event.target.checked)}
             />
             <span>{labels.imageCacheLabel}</span>
           </label>
 
-          {/* The risk is the whole reason the checkbox exists, so the copy
-              changes with it rather than sitting underneath as fine print. */}
-          <p
-            data-testid="tool-image-url-notice"
-            className={`text-xs ${cache ? 'text-fg-muted' : 'text-warning'}`}
-          >
+          {/* The risk is the whole reason the checkbox exists, so the notice
+              changes tone with it rather than sitting underneath as fine print. */}
+          <Callout tone={cache ? 'neutral' : 'warning'} data-testid="tool-image-url-notice">
             {cache ? labels.imageCacheOnNotice : labels.imageCacheOffNotice}
-          </p>
+          </Callout>
         </div>
       )}
     </fieldset>

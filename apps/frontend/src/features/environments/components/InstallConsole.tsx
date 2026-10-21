@@ -1,16 +1,20 @@
 /**
- * Live install log.
+ * Live install log: a status line over the output, which is mono on `canvas`
+ * inside whatever card the install was started from.
  *
  * Lines are appended verbatim. Autoscroll follows the tail until the user
  * scrolls up — reading the line that just failed must not be fought by the
  * viewport — and re-engages when they scroll back to the bottom.
  */
 
-import { CircleCheck, CircleX, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { CircleCheck, CircleX, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { formatDuration } from '../format';
 import type { InstallStreamState } from '../hooks/use-install-stream';
 
@@ -26,7 +30,7 @@ interface InstallConsoleProps {
 const AUTOSCROLL_THRESHOLD_PX = 32;
 
 const STREAM_STYLES = {
-  stdout: 'text-fg-muted',
+  stdout: 'text-fg',
   stderr: 'text-danger',
   system: 'text-fg-muted italic',
 } as const;
@@ -55,14 +59,11 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
   const exit = stream.exit;
 
   return (
-    <section
-      className="space-y-3 rounded-2xl border border-stroke bg-control p-4"
-      data-testid="install-console"
-    >
+    <section className="space-y-3" data-testid="install-console">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <StatusIcon phase={stream.phase} exitStatus={exit?.status} />
-          <span className="text-sm font-semibold text-fg">
+          <span className="text-sm font-medium text-fg">
             {exit ? s.runStatus[exit.status] : s.runStatus.running}
           </span>
           {stepLabel && (
@@ -72,12 +73,10 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
           )}
         </div>
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1.5 text-xs text-fg-muted">
-            <input
-              type="checkbox"
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-fg-muted">
+            <Checkbox
               checked={autoscroll}
               onChange={(event) => setAutoscroll(event.target.checked)}
-              className="accent-accent"
             />
             {s.autoscroll}
           </label>
@@ -93,7 +92,7 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
         </div>
       </header>
 
-      {stream.reconnecting && <p className="text-xs text-info">{s.reconnecting}</p>}
+      {stream.reconnecting && <p className="text-xs text-fg-muted">{s.reconnecting}</p>}
       {stream.droppedLines > 0 && (
         <p className="text-xs text-fg-muted">
           {formatMessage(s.linesDropped, { count: String(stream.droppedLines) })}
@@ -103,7 +102,7 @@ export function InstallConsole({ stream, stepLabel, onCancel, onClose }: Install
       <div
         ref={logRef}
         onScroll={handleScroll}
-        className="max-h-72 overflow-y-auto rounded-xl bg-fill-selected p-3 font-mono text-xs leading-relaxed"
+        className="app-scrollbar max-h-72 overflow-y-auto rounded-md border border-stroke bg-canvas p-3 font-mono text-xs leading-relaxed"
         // A `log` role is the live region for append-only output, so a screen
         // reader hears progress without the user having to poll it.
         role="log"
@@ -152,9 +151,10 @@ function StatusIcon({
   exitStatus: string | undefined;
 }) {
   if (phase === 'connecting' || phase === 'streaming') {
-    return <LoaderCircle size={16} className="animate-spin text-accent-fg" />;
+    return <Spinner size="sm" />;
   }
-  if (exitStatus === 'succeeded') return <CircleCheck size={16} className="text-accent-fg" />;
-  if (exitStatus === 'interrupted') return <TriangleAlert size={16} className="text-info" />;
-  return <CircleX size={16} className="text-danger" />;
+  if (exitStatus === 'succeeded') return <CircleCheck size={ICON_MD} className="text-success" />;
+  if (exitStatus === 'interrupted')
+    return <TriangleAlert size={ICON_MD} className="text-warning" />;
+  return <CircleX size={ICON_MD} className="text-danger" />;
 }

@@ -12,9 +12,11 @@ import type { MachineActionResponse, MachineServiceAction } from '@mangostudio/s
 import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import type { MachineActionResult } from '../api';
 import { refusalMessage } from '../format';
@@ -74,7 +76,7 @@ export function MachinePage() {
         onClick={() => void status.refetch()}
         loading={status.isFetching && Boolean(status.data)}
       >
-        <RefreshCw size={14} />
+        <RefreshCw size={ICON_SM} />
         {m.refresh}
       </Button>
     </div>
@@ -109,15 +111,9 @@ export function MachinePage() {
       {/* `awaitingChange` only ever follows a `setNotice` on the accepted path,
           so the notice is the banner's condition; the window adds a suffix. */}
       {notice && (
-        <div
-          className="rounded-2xl border border-accent bg-accent-subtle px-4 py-3 text-sm text-fg"
-          data-testid="machine-notice"
-        >
-          {notice}
-          {status.awaitingChange && status.error && (
-            <span className="text-fg-muted"> {m.reconnecting}</span>
-          )}
-        </div>
+        <Callout tone="info" title={notice} data-testid="machine-notice">
+          {status.awaitingChange && status.error ? m.reconnecting : null}
+        </Callout>
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">

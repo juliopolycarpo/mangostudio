@@ -9,7 +9,9 @@
 
 import type { Environment } from '@mangostudio/shared/environments';
 import { Server } from 'lucide-react';
+import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 
 interface EnvironmentScopePickerProps {
   readonly environmentId: string;
@@ -26,25 +28,23 @@ export function EnvironmentScopePicker({
   const e = t.environments;
 
   return (
-    <label
-      className="flex h-8 items-center gap-2 rounded-full border border-stroke bg-control pl-3 text-xs font-medium text-fg-muted transition-colors hover:border-accent hover:text-fg"
+    <div
+      className="flex items-center gap-2"
       data-testid="environment-scope-picker"
       data-environment-id={environmentId}
     >
-      <Server size={13} className="shrink-0 text-accent-fg" aria-hidden="true" />
-      <span className="sr-only">{e.scope.label}</span>
-      <select
+      <Server size={ICON_MD} className="shrink-0 text-fg-muted" aria-hidden="true" />
+      <Select
         value={environmentId}
-        onChange={(event) => onSelect(event.target.value)}
-        aria-label={e.scope.label}
-        className="min-w-0 max-w-[11rem] appearance-none bg-transparent py-1 pr-3 text-inherit outline-none"
-      >
-        {environments.map((environment) => (
-          <option key={environment.id} value={environment.id} disabled={!environment.enabled}>
-            {environment.name}
-          </option>
-        ))}
-      </select>
-    </label>
+        options={environments.map((environment) => ({
+          value: environment.id,
+          label: environment.name,
+          disabled: !environment.enabled,
+        }))}
+        onChange={onSelect}
+        ariaLabel={e.scope.label}
+        className="w-48"
+      />
+    </div>
   );
 }

@@ -31,18 +31,18 @@ export function hubHealthLabel(t: Messages, health: HubHealth): string {
 
 /**
  * How each health reads at a glance, in one place so the card and the overview
- * rollup cannot disagree. `unprobed` is not a failure — a hub bound to one LAN
- * address simply cannot be measured from here — so it is neutral, not red.
+ * rollup cannot disagree: a `Badge` variant for the card, a text colour for the
+ * rollup's figure. `unprobed` is not a failure — a hub bound to one LAN address
+ * simply cannot be measured from here — so it is neutral, not red.
  */
-export const HUB_HEALTH_TONE: Record<HubHealth, { readonly badge: string; readonly text: string }> =
-  {
-    ok: { badge: 'bg-accent-subtle text-accent-fg', text: 'text-accent-fg' },
-    unreachable: { badge: 'bg-danger-subtle text-danger', text: 'text-danger' },
-    unprobed: {
-      badge: 'bg-fill-selected text-fg-muted',
-      text: 'text-fg-muted',
-    },
-  };
+export const HUB_HEALTH_TONE: Record<
+  HubHealth,
+  { readonly badge: 'success' | 'error' | 'neutral'; readonly text: string }
+> = {
+  ok: { badge: 'success', text: 'text-success' },
+  unreachable: { badge: 'error', text: 'text-danger' },
+  unprobed: { badge: 'neutral', text: 'text-fg-muted' },
+};
 
 export function supervisorLabel(t: Messages, platform: UserServicePlatform): string {
   return t.environments.machine.service.supervisor[platform];

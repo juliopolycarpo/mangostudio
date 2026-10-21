@@ -18,9 +18,13 @@
 
 import type { ExternalApprovalOption } from '@mangostudio/shared/external-agents';
 import type { ExternalApprovalPart } from '@mangostudio/shared/types';
-import { AlertTriangle, ShieldQuestion } from 'lucide-react';
+import { AlertTriangle, Check } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { SectionCard } from '@/components/ui/SectionCard';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { answerExternalApproval } from '@/services/external-agent-service';
 
 export interface ExternalApprovalCardProps {
@@ -72,24 +76,20 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
   };
 
   return (
-    <div className="max-w-2xl w-full space-y-3 rounded-2xl border border-stroke bg-surface p-4 text-sm text-fg sm:p-5">
-      <div className="flex flex-wrap items-center gap-2 text-fg-muted">
-        <ShieldQuestion size={16} className="text-accent-fg" />
-        <span className="text-xs font-bold uppercase tracking-widest">
-          {headingFor(decisionSource ?? (expired ? 'expired' : undefined), labels)}
-        </span>
-      </div>
-
+    <SectionCard
+      label={headingFor(decisionSource ?? (expired ? 'expired' : undefined), labels)}
+      className="w-full max-w-2xl text-sm text-fg"
+    >
       {/* Vendor text, rendered inert. */}
       <p className="whitespace-pre-wrap font-medium text-fg">{part.title}</p>
       {part.detail ? (
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-surface px-3 py-2 text-[11px] text-fg-muted">
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-canvas p-3 font-mono text-xs text-fg-muted">
           {part.detail}
         </pre>
       ) : null}
       {part.truncated ? <p className="text-xs text-fg-muted">{labels.truncatedHint}</p> : null}
 
-      {error ? <p className="text-xs text-danger">{error}</p> : null}
+      {error ? <Callout tone="danger" title={error} /> : null}
 
       <div className="flex flex-wrap gap-2">
         {part.options.map((option) => (
@@ -110,9 +110,9 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
         </p>
       ) : null}
       {decisionSource === 'auto-review' ? (
-        <p className="text-xs text-warning">{labels.autoReviewedHint}</p>
+        <Callout tone="warning">{labels.autoReviewedHint}</Callout>
       ) : null}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -156,27 +156,24 @@ function OptionButton({
   interactive: boolean;
   onClick: () => void;
 }) {
-  const tone = chosen
-    ? 'border-accent bg-accent-subtle text-fg'
-    : option.isDestructive
-      ? 'border-danger text-danger'
-      : 'border-stroke text-fg-muted';
-
   return (
-    <button
+    <Button
       type="button"
+      variant="secondary"
       disabled={!interactive}
       onClick={onClick}
       data-destructive={option.isDestructive ? 'true' : undefined}
-      className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm transition-colors ${tone} ${
-        interactive ? 'cursor-pointer hover:bg-fill-hover' : 'cursor-default opacity-70'
-      }`}
+      className={chosen ? 'bg-fill-selected' : undefined}
     >
       {/* Weight, not removal: a destructive choice the vendor offered stays
-          offered, and hiding it would leave the user unable to answer. */}
-      {option.isDestructive ? <AlertTriangle size={13} className="shrink-0" /> : null}
+          offered, and hiding it would leave the user unable to answer. The
+          glyph carries the warning; the label stays the vendor's own words. */}
+      {option.isDestructive ? (
+        <AlertTriangle size={ICON_MD} className="shrink-0 text-danger" />
+      ) : null}
+      {chosen ? <Check size={ICON_MD} className="shrink-0 text-accent-fg" /> : null}
       <span>{label}</span>
-    </button>
+    </Button>
   );
 }
 

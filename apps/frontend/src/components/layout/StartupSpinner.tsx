@@ -1,3 +1,5 @@
+import { Spinner } from '@/components/ui/Spinner';
+
 /**
  * The full-screen spinner shown while the app has nothing to render yet: the
  * session check, then (rarely) the startup locale's dictionary. It has no text,
@@ -8,10 +10,10 @@
 export function StartupSpinner() {
   return (
     <div
-      className="min-h-screen bg-canvas flex items-center justify-center"
+      className="flex min-h-screen items-center justify-center bg-canvas"
       data-testid="startup-spinner"
     >
-      <div className="w-6 h-6 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+      <Spinner size="md" />
     </div>
   );
 }

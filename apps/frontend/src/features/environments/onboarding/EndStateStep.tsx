@@ -11,11 +11,15 @@
  */
 
 import type { CreateEnvironmentBody, Environment } from '@mangostudio/shared/environments';
+import { Check } from 'lucide-react';
 import { useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
+import { choiceClass } from '../components/choice-class';
 import { useCreateEnvironmentMutation, useRuntimePairingQuery } from '../queries';
 import type { SshFormFields } from '../ssh-form';
 import { sshFormToConfig } from '../ssh-form';
@@ -135,18 +139,18 @@ export function EndStateStep({
   return (
     <div className="space-y-4" data-testid="onboarding-end-state-step">
       <fieldset className="space-y-2">
-        <legend className="font-medium text-fg-muted text-sm">{labels.endStateLabel}</legend>
+        <legend className="text-sm font-medium text-fg">{labels.endStateLabel}</legend>
         {/* Real radios rather than styled buttons: this is one choice out of
-            two, and arrow-key navigation and the announced group come free. */}
+            two, and arrow-key navigation and the announced group come free.
+            The input is hidden, so the tile wears the focus outline for it. */}
         <div className="grid gap-2">
           {choices.map((choice) => (
             <label
               key={choice.value}
-              className={`cursor-pointer rounded-xl border px-3 py-2 text-left font-semibold text-sm transition-colors has-disabled:cursor-default has-disabled:opacity-60 ${
-                endState === choice.value
-                  ? 'border-accent bg-accent-subtle text-fg'
-                  : 'border-stroke text-fg-muted hover:bg-fill-hover'
-              }`}
+              className={cn(
+                choiceClass(endState === choice.value),
+                'flex cursor-pointer items-center justify-between gap-2 has-disabled:cursor-default has-disabled:opacity-50 has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus'
+              )}
             >
               <input
                 type="radio"
@@ -158,42 +162,41 @@ export function EndStateStep({
                 className="sr-only"
               />
               {choice.label}
+              {endState === choice.value ? (
+                <Check size={ICON_MD} className="shrink-0 text-accent-fg" aria-hidden="true" />
+              ) : null}
             </label>
           ))}
         </div>
-        <div className="rounded-xl border border-accent bg-accent-subtle px-3 py-2.5">
-          <p className="text-fg-muted text-xs">
-            {endState === 'paired' ? labels.endStatePairedHint : labels.endStateSshHint}
-          </p>
-        </div>
+        <p className="text-xs text-fg-muted">
+          {endState === 'paired' ? labels.endStatePairedHint : labels.endStateSshHint}
+        </p>
       </fieldset>
 
       {dialEndpointMissing ? (
-        <p
-          className="rounded-xl border border-warning bg-warning-subtle px-3 py-2.5 text-fg-muted text-xs"
-          role="alert"
-          data-testid="onboarding-public-url-gate"
-        >
+        <Callout tone="warning" role="alert" data-testid="onboarding-public-url-gate">
           {t.environments.entities.pairing.endpointUnset}
-        </p>
+        </Callout>
       ) : null}
 
       {dialEndpointFailed ? (
-        <div
-          className="space-y-2 rounded-xl border border-danger bg-danger-subtle px-3 py-2.5"
+        <Callout
+          tone="danger"
           role="alert"
           data-testid="onboarding-pairing-error"
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={pairing.isFetching}
+              onClick={() => void pairing.refetch()}
+            >
+              {labels.endStatePairingRetry}
+            </Button>
+          }
         >
-          <p className="text-fg-muted text-xs">{labels.endStatePairingUnavailable}</p>
-          <Button
-            variant="secondary"
-            className="w-full"
-            loading={pairing.isFetching}
-            onClick={() => void pairing.refetch()}
-          >
-            {labels.endStatePairingRetry}
-          </Button>
-        </div>
+          {labels.endStatePairingUnavailable}
+        </Callout>
       ) : null}
 
       {existing ? null : (
@@ -218,15 +221,15 @@ export function EndStateStep({
                 setId(event.target.value);
               }}
             />
-            {!idInvalid && <p className="text-fg-muted text-xs">{add.idHint}</p>}
+            {!idInvalid && <p className="text-xs text-fg-muted">{add.idHint}</p>}
           </div>
         </>
       )}
 
       {error ? (
-        <p className="text-danger text-xs" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
 
       <StepActions

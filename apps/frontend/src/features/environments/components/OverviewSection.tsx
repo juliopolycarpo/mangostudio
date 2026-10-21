@@ -13,6 +13,7 @@ import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { EnvironmentPageState } from './EnvironmentPageState';
 
 interface OverviewSectionProps {
@@ -40,13 +41,13 @@ export function OverviewSection({
   return (
     <section className="space-y-3" data-testid={testId}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-bold text-fg">{title}</h2>
+        <h2 className="text-base font-semibold text-fg">{title}</h2>
         <Link
           to={to}
-          className="flex items-center gap-1 rounded-lg px-2 py-1 text-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-accent-fg"
+          className="inline-flex items-center gap-1 text-sm font-medium text-accent-fg hover:underline"
         >
           {formatMessage(t.environments.overview.open, { section: title })}
-          <ChevronRight size={14} />
+          <ChevronRight size={ICON_SM} />
         </Link>
       </div>
 

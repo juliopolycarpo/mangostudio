@@ -21,6 +21,8 @@ import {
 } from '@mangostudio/shared/onboarding';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Card } from '@/components/ui/Card';
 import { Logo } from '@/components/ui/Logo';
 import { Spinner } from '@/components/ui/Spinner';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
@@ -28,6 +30,7 @@ import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalW
 import { useI18n } from '@/hooks/use-i18n';
 import { useSignOut } from '@/hooks/use-sign-out';
 import { formatMessage } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { StepStatusChip } from './StepStatusChip';
 import { AgentsStep } from './steps/AgentsStep';
 import { FirstChatStep } from './steps/FirstChatStep';
@@ -81,7 +84,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
     return (
       <div className="flex min-h-screen items-center justify-center gap-3 bg-canvas">
         <Spinner size="lg" />
-        <span className="text-fg-muted text-sm">{s.deciding}</span>
+        <span className="text-sm text-fg-muted">{s.deciding}</span>
       </div>
     );
   }
@@ -140,17 +143,17 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
               {isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton}
             </Button>
           </div>
-          <Logo className="mx-auto size-14" />
-          <h1 className="font-bold text-2xl text-fg">{s.title}</h1>
-          <p className="mx-auto max-w-xl text-fg-muted text-sm">{s.subtitle}</p>
+          <Logo className="mx-auto size-12" />
+          <h1 className="text-title font-semibold text-fg">{s.title}</h1>
+          <p className="mx-auto max-w-xl text-sm text-fg-muted">{s.subtitle}</p>
         </header>
 
-        <div className="grid gap-5 sm:grid-cols-[13rem_1fr]">
+        <div className="grid gap-6 sm:grid-cols-[13rem_1fr]">
           {/* `min-w-0` on both tracks: a grid item defaults to `min-width:
               auto`, so the horizontally scrolling step list below would widen
               its own column past the viewport and take the panel with it. */}
           <nav aria-label={s.stepList} className="min-w-0">
-            <ol className="flex gap-1.5 overflow-x-auto sm:flex-col sm:overflow-visible">
+            <ol className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
               {ONBOARDING_STEP_IDS.map((candidate, position) => (
                 <li key={candidate} className="shrink-0 sm:shrink">
                   <button
@@ -158,15 +161,18 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                     aria-current={candidate === step ? 'step' : undefined}
                     data-testid={`onboarding-step-${candidate}`}
                     onClick={() => setStep(candidate)}
-                    className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left transition-colors ${
+                    className={cn(
+                      'relative flex h-8 w-full items-center justify-between gap-2 rounded-sm px-3 text-left text-sm transition-colors',
+                      // The same current-item signal as the sidebar: a neutral
+                      // fill, and the 3px accent bar that carries the colour.
                       candidate === step
-                        ? 'bg-surface text-fg'
-                        : 'text-fg-muted hover:bg-fill-hover'
-                    }`}
+                        ? 'bg-fill-selected font-medium text-fg before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent'
+                        : 'text-fg-muted hover:bg-fill-hover hover:text-fg'
+                    )}
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-2">
-                      <span className="font-mono text-fg-subtle text-xs">{position + 1}</span>
-                      <span className="truncate font-semibold text-sm">{s.steps[candidate]}</span>
+                      <span className="font-mono text-micro text-fg-subtle">{position + 1}</span>
+                      <span className="truncate">{s.steps[candidate]}</span>
                     </span>
                     <StepStatusChip status={statuses[candidate]} />
                   </button>
@@ -175,7 +181,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             </ol>
           </nav>
 
-          <section className="min-w-0 space-y-6 rounded-3xl border border-stroke bg-surface p-5 sm:p-7">
+          <Card className="min-w-0 space-y-6">
             {/* No step chosen means resume is still waiting on a fact. The
                 wizard says so here rather than in place of the whole page: a
                 probe that keeps failing never answers, and the only exits a
@@ -183,10 +189,10 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             {step === null ? (
               <div className="flex items-center gap-3 py-6" data-testid="onboarding-deciding">
                 <Spinner size="lg" />
-                <span className="text-fg-muted text-sm">{s.deciding}</span>
+                <span className="text-sm text-fg-muted">{s.deciding}</span>
               </div>
             ) : (
-              <p className="text-fg-muted text-xs uppercase tracking-widest">
+              <p className="font-mono text-micro text-fg-subtle">
                 {formatMessage(s.progress, {
                   step: String(index + 1),
                   total: String(ONBOARDING_STEP_IDS.length),
@@ -220,38 +226,34 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             ) : null}
 
             {progress.saveFailed ? (
-              <p className="text-danger text-sm" data-testid="onboarding-save-failed">
+              <Callout tone="danger" data-testid="onboarding-save-failed">
                 {s.saveFailed}
-              </p>
+              </Callout>
             ) : null}
 
             {step === null ? null : (
-              <div className="flex flex-wrap items-center justify-between gap-3 border-stroke border-t pt-4">
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    disabled={index === 0}
-                    data-testid="onboarding-back"
-                    onClick={() => {
-                      const previous = ONBOARDING_STEP_IDS[index - 1];
-                      if (previous) setStep(previous);
-                    }}
-                  >
-                    {s.back}
-                  </Button>
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    data-testid="onboarding-skip-step"
-                    disabled={isWriting}
-                    onClick={() => void skipCurrent()}
-                  >
-                    {s.skipStep}
-                  </Button>
-                </div>
-
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-stroke pt-4">
                 <Button
+                  variant="secondary"
+                  disabled={index === 0}
+                  data-testid="onboarding-back"
+                  onClick={() => {
+                    const previous = ONBOARDING_STEP_IDS[index - 1];
+                    if (previous) setStep(previous);
+                  }}
+                >
+                  {s.back}
+                </Button>
+                <Button
+                  variant="subtle"
+                  data-testid="onboarding-skip-step"
+                  disabled={isWriting}
+                  onClick={() => void skipCurrent()}
+                >
+                  {s.skipStep}
+                </Button>
+                <Button
+                  size="lg"
                   data-testid="onboarding-continue"
                   loading={isWriting}
                   onClick={() => void continueFromStep()}
@@ -260,7 +262,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 </Button>
               </div>
             )}
-          </section>
+          </Card>
         </div>
 
         {/* The first chat is a real send, so it meets the same two consents any
@@ -273,15 +275,17 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
           {/* Guarded like Continue: both write the same record, and a second
               click while the first write is open builds its update on the value
               the first one has not replaced yet. */}
-          <button
+          <Button
             type="button"
+            variant="subtle"
+            size="sm"
             data-testid="onboarding-skip-all"
             disabled={isWriting}
             onClick={() => void complete()}
-            className="text-fg-muted text-xs underline underline-offset-4 hover:text-fg-muted"
+            className="text-fg-muted"
           >
             {s.skipAll}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

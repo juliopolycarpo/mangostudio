@@ -15,9 +15,11 @@
 
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
-import { ArrowRight, TriangleAlert } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 interface DeprecatedModelNoticeProps {
   readonly details: ModelUnavailableDetails;
@@ -41,29 +43,20 @@ export function DeprecatedModelNotice({
   return (
     <div className="px-6 pt-4">
       <div className="mx-auto max-w-4xl">
-        <div
-          className="flex flex-col gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4 sm:flex-row sm:items-start sm:justify-between"
+        <Callout
+          tone="warning"
           role="status"
           aria-live="polite"
+          className="p-4"
+          title={labels.title.replace('{provider}', details.provider ?? '')}
         >
-          <div className="flex items-start gap-3">
-            <TriangleAlert size={18} className="mt-0.5 shrink-0 text-amber-200" />
-            <div className="space-y-1">
-              <p className="text-sm font-bold text-fg">
-                {labels.title.replace('{provider}', details.provider ?? '')}
-              </p>
-              <p className="text-xs leading-relaxed text-fg-muted">
-                {labels.body.replace('{model}', details.modelId ?? '')}
-              </p>
-              {targetId && !runnerAvailable ? (
-                <p className="text-xs leading-relaxed text-fg-muted">
-                  {labels.runnerUnavailable.replace('{target}', targetId)}
-                </p>
-              ) : null}
-            </div>
+          <div className="space-y-1">
+            <p className="text-xs">{labels.body.replace('{model}', details.modelId ?? '')}</p>
+            {targetId && !runnerAvailable ? (
+              <p className="text-xs">{labels.runnerUnavailable.replace('{target}', targetId)}</p>
+            ) : null}
           </div>
-
-          <div className="flex shrink-0 items-center gap-2 self-end sm:self-start">
+          <div className="flex flex-wrap items-center gap-2 pt-3">
             <Button variant="secondary" size="sm" onClick={onDismiss}>
               {labels.dismiss}
             </Button>
@@ -76,11 +69,11 @@ export function DeprecatedModelNotice({
                 onClick={() => onContinueWithRunner(targetId)}
               >
                 {labels.continueInNewChat.replace('{target}', targetId)}
-                <ArrowRight size={14} />
+                <ArrowRight size={ICON_SM} />
               </Button>
             ) : null}
           </div>
-        </div>
+        </Callout>
       </div>
     </div>
   );

@@ -35,6 +35,7 @@ import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { TIMELINE_PANEL_CLASS } from './TimelineDisclosure';
 import { TimelineItem, type TimelineTone } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
@@ -48,7 +49,7 @@ import { toneTextClass } from './ToolCallVisuals';
  * else's product.
  */
 function ActivityIcon({ kind, className }: { kind: ExternalActivityKind; className?: string }) {
-  const size = 11;
+  const size = ICON_SM;
   switch (kind) {
     case 'command':
       return <Terminal size={size} className={className} />;
@@ -83,9 +84,9 @@ function statusTone(part: ExternalActivityPart): TimelineTone {
 
 function StatusGlyph({ part }: { part: ExternalActivityPart }) {
   if (part.isError || part.status === 'failed' || part.status === 'cancelled')
-    return <Ban size={11} className="shrink-0" />;
+    return <Ban size={ICON_SM} className="shrink-0" />;
   if (part.status === 'completed')
-    return <Check size={12} className="shrink-0" strokeWidth={2.5} />;
+    return <Check size={ICON_SM} className="shrink-0" strokeWidth={2.5} />;
   return <ActivityIcon kind={part.kind} className="animate-pulse shrink-0" />;
 }
 
@@ -161,7 +162,7 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
 
       {expanded && part.detail ? (
         <pre
-          className={`app-scrollbar max-h-64 overflow-auto whitespace-pre-wrap break-words p-3.5 font-mono text-xs text-fg-muted ${TIMELINE_PANEL_CLASS}`}
+          className={`app-scrollbar max-h-64 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs text-fg-muted ${TIMELINE_PANEL_CLASS}`}
         >
           {part.detail}
         </pre>

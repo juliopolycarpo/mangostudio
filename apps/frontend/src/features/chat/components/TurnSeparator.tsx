@@ -7,6 +7,7 @@ import type { ToolIdentityResolver } from '@/features/environments/identity/use-
 import { useI18n } from '@/hooks/use-i18n';
 import { MANGO_IDENTITY } from '@/lib/agent-identity';
 import { formatClockTime } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { deriveTurnIdentity } from '../lib/turn-identity';
 import type { TurnStatus } from '../lib/turn-status';
 import { CopyMessageButton } from './CopyMessageButton';
@@ -26,7 +27,7 @@ interface TurnSeparatorProps {
 }
 
 /**
- * A model's monogram, tinted with MangoStudio's own hue.
+ * A model's monogram, in MangoStudio's own hue on a neutral fill.
  *
  * Not a `ToolAvatar`: that draws a *subject*, and the identity kinds are a
  * closed union with no `model` member. A `model:gpt-5` subject key would be a
@@ -39,11 +40,11 @@ function ModelMonogram({ monogram }: { monogram: string }) {
   return (
     <span
       aria-hidden="true"
-      className={`flex shrink-0 items-center justify-center font-semibold ${TOOL_AVATAR_SIZE_CLASS.xs}`}
-      style={{
-        backgroundColor: `color-mix(in srgb, ${MANGO_IDENTITY.colorVar} 18%, transparent)`,
-        color: MANGO_IDENTITY.colorVar,
-      }}
+      className={cn(
+        'flex shrink-0 items-center justify-center bg-fill-selected font-semibold',
+        TOOL_AVATAR_SIZE_CLASS.xs
+      )}
+      style={{ color: MANGO_IDENTITY.colorVar }}
     >
       {monogram}
     </span>
@@ -110,7 +111,7 @@ export function TurnSeparator({
       ) : (
         <ModelMonogram monogram={identity.kind === 'model' ? identity.monogram : ''} />
       )}
-      <span className="shrink-0 text-[11px] text-fg-muted">{name}</span>
+      <span className="shrink-0 text-xs font-medium text-fg-muted">{name}</span>
       {/* The chip yields to the working row, but an image turn never draws one:
           `AssistantTurnBody` swaps the whole timeline for the generating
           placeholder, so deferring to it here would leave the separator silent
@@ -134,7 +135,7 @@ export function TurnSeparator({
         />
       )}
       {turnIsSettledEnoughForActions && (
-        <span className="shrink-0 text-[10px] text-fg-subtle opacity-0 transition-opacity duration-(--duration-base) group-hover:opacity-100">
+        <span className="shrink-0 font-mono text-micro text-fg-subtle opacity-0 transition-opacity duration-(--duration-base) group-hover:opacity-100">
           {formatClockTime(msg.timestamp, locale)}
         </span>
       )}

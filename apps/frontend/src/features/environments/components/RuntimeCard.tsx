@@ -14,6 +14,8 @@ import type {
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -41,7 +43,7 @@ import { HealthBadge } from './HealthBadge';
 import { InstallationList } from './InstallationList';
 import { ProbeButton } from './ProbeButton';
 import { RecipeAction } from './RecipeAction';
-import { CardSectionLabel, ToolCard } from './ToolCard';
+import { ToolCard } from './ToolCard';
 import { ToolchainAction } from './ToolchainAction';
 
 interface RuntimeCardProps {
@@ -157,7 +159,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
     >
       {effective ? (
         <section className="space-y-1" data-testid="effective-installation">
-          <CardSectionLabel>{e.runtimes.effectiveLabel}</CardSectionLabel>
+          <MicroLabel as="p">{e.runtimes.effectiveLabel}</MicroLabel>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="font-mono text-base font-semibold text-fg">
               {versionLabel(t, effective.version)}
@@ -216,9 +218,9 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
             </Button>
           )}
           {toolchain.isError && (
-            <p className="text-xs text-danger" role="alert">
+            <Callout tone="danger" role="alert">
               {resolveApiErrorMessage(toolchain.error, e.runtimes.toolchainUpdateFailed)}
-            </p>
+            </Callout>
           )}
         </section>
       )}
@@ -227,7 +229,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
 
       {groups.length > 1 && (
         <section className="space-y-2">
-          <CardSectionLabel>{e.runtimes.otherInstallations}</CardSectionLabel>
+          <MicroLabel as="p">{e.runtimes.otherInstallations}</MicroLabel>
           <InstallationList
             groups={groups.filter((group) => !group.effective)}
             toolchain={

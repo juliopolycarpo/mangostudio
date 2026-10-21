@@ -18,13 +18,15 @@ import type {
 import { Link } from '@tanstack/react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useMemo, useRef } from 'react';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { CELL_GLYPHS, type CoverageCellState, coverageCells, type LocationGroup } from '../format';
 import { libraryEnvironmentSearch } from '../queries';
-import { CoverageCell } from './CoverageCell';
+import { CoverageCell, STATE_TONES } from './CoverageCell';
 
 const ROW_HEIGHT_PX = 40;
 const OVERSCAN_ROWS = 8;
@@ -111,25 +113,21 @@ export function CoverageMatrix({
   return (
     <div
       ref={scrollRef}
-      className="app-scrollbar max-h-[60vh] overflow-auto rounded-2xl border border-stroke bg-surface"
+      className="app-scrollbar max-h-[60vh] overflow-auto rounded-md border border-stroke bg-surface"
       data-testid="coverage-matrix"
     >
       <table className="w-full border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-surface">
           <tr className="border-stroke border-b">
             <th scope="col" className="w-9 px-2 py-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={allSelected}
                 onChange={onToggleAll}
                 aria-label={l.matrix.selectAll}
-                className="size-3.5 accent-accent"
+                className="align-middle"
               />
             </th>
-            <th
-              scope="col"
-              className="px-2 py-2 text-left font-semibold text-[11px] text-fg-muted uppercase tracking-wider"
-            >
+            <th scope="col" className="px-2 py-2 text-left font-medium text-fg-muted text-xs">
               {l.matrix.resourceColumn}
             </th>
             {targets.map((target) => {
@@ -139,7 +137,7 @@ export function CoverageMatrix({
                   key={target.id}
                   scope="col"
                   data-target-id={target.id}
-                  className="px-2 py-2 text-center font-semibold text-[11px] text-fg-muted uppercase tracking-wider"
+                  className="px-2 py-2 text-center font-medium text-fg-muted text-xs"
                 >
                   <span className="flex items-center justify-center gap-1.5">
                     <ToolAvatar
@@ -167,10 +165,7 @@ export function CoverageMatrix({
             if (row.kind === 'group') {
               return (
                 <tr key={row.key} className="bg-surface">
-                  <td
-                    colSpan={targets.length + 2}
-                    className="px-3 py-1.5 font-semibold text-[10px] text-fg-muted uppercase tracking-widest"
-                  >
+                  <td colSpan={targets.length + 2} className="micro-label px-3 py-1.5">
                     {row.label}
                   </td>
                 </tr>
@@ -221,19 +216,21 @@ function ResourceRow({
 
   return (
     <tr
-      className="border-stroke border-b last:border-b-0 hover:bg-fill-hover"
+      className={cn(
+        'border-stroke border-b last:border-b-0 hover:bg-fill-hover',
+        selected && 'bg-fill-selected'
+      )}
       data-testid="matrix-row"
       data-resource-key={resource.key}
       data-divergence={resource.divergence}
       style={{ height: ROW_HEIGHT_PX }}
     >
       <td className="px-2 py-1.5">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={selected}
           onChange={() => onToggleSelected(resource.key)}
           aria-label={formatMessage(l.matrix.selectRow, { resource: resource.ref.slug })}
-          className="size-3.5 accent-accent"
+          className="align-middle"
         />
       </td>
       <td className="min-w-0 px-2 py-1.5">
@@ -242,7 +239,7 @@ function ResourceRow({
           params={{ resourceKey: resource.key }}
           search={libraryEnvironmentSearch(environmentId)}
           aria-label={formatMessage(l.matrix.openDetail, { resource: resource.ref.slug })}
-          className="block truncate font-medium text-fg hover:text-accent-fg"
+          className="block truncate font-medium text-fg hover:underline"
         >
           {resource.ref.slug}
         </Link>
@@ -275,12 +272,14 @@ export function MatrixLegend() {
 
   return (
     <dl
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-fg-muted"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-fg-muted text-xs"
       aria-label={l.matrix.legend}
     >
       {LEGEND_ORDER.map((state) => (
         <div key={state} className="flex items-center gap-1.5">
-          <dt aria-hidden="true">{CELL_GLYPHS[state]}</dt>
+          <dt aria-hidden="true" className={STATE_TONES[state]}>
+            {CELL_GLYPHS[state]}
+          </dt>
           <dd>{l.cellState[state]}</dd>
         </div>
       ))}

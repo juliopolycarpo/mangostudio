@@ -56,12 +56,12 @@ export function WorkspaceHub({
       {/* `my-auto` inside a flex column centres a short hub in the space above
           the composer and does nothing once the cards outgrow it — which
           `justify-center` would not: that clips the top of tall content. */}
-      <div className="mx-auto my-auto flex w-full max-w-4xl flex-col gap-6">
+      <div className="mx-auto my-auto flex w-full max-w-4xl flex-col gap-8">
         <GreetingHeader userName={userName} />
 
         {/* Drives the `SectionCard` each of these renders through, via motion's
             variant context — the cards need no prop and no index. */}
-        <motion.div {...cardGrid} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <motion.div {...cardGrid} className="grid grid-cols-1 gap-6 sm:grid-cols-2">
           {chatId ? (
             <WorkspaceCard chatId={chatId} workdir={workdir} onChooseWorkdir={onChooseWorkdir} />
           ) : null}

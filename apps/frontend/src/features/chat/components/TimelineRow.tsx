@@ -1,5 +1,7 @@
 import { ChevronDown } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 interface TimelineRowProps {
   expanded: boolean;
@@ -20,10 +22,12 @@ interface TimelineRowProps {
   disclosable?: boolean;
 }
 
-/** Shared by both shells so the two branches cannot drift apart on layout. */
-const ROW_CLASS = `group/row -ml-1.5 flex w-full min-h-(--timeline-row-height) items-center gap-2
-                   rounded-md px-1.5 text-left text-xs transition-colors
-                   duration-(--duration-quick)`;
+/**
+ * Shared by both shells so the two branches cannot drift apart on layout. The
+ * row is the thing you press, so it takes the clickable radius.
+ */
+const ROW_CLASS =
+  'group/row -ml-1.5 flex min-h-(--timeline-row-height) w-full items-center gap-2 rounded-sm px-1.5 text-left text-xs transition-colors';
 
 /**
  * The single-line disclosure row every timeline step is built from.
@@ -51,10 +55,10 @@ export function TimelineRow({
   const hasMeta = Boolean(summary) || Boolean(duration);
   const content = (
     <>
-      <span className="flex w-3 shrink-0 items-center justify-center">{glyph}</span>
+      <span className="flex w-4 shrink-0 items-center justify-center">{glyph}</span>
       {children}
       {hasMeta && (
-        <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-[11px] tabular-nums text-fg-subtle">
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-3 font-mono text-micro tabular-nums text-fg-subtle">
           {summary && <span>{summary}</span>}
           {summary && duration && <span aria-hidden="true">·</span>}
           {duration && <span>{duration}</span>}
@@ -67,9 +71,9 @@ export function TimelineRow({
   // resolving from running to done from nudging sideways as its status arrives.
   if (!disclosable) {
     return (
-      <div className={`${ROW_CLASS} cursor-default`}>
+      <div className={cn(ROW_CLASS, 'cursor-default')}>
         {content}
-        <span aria-hidden="true" className={`w-[11px] shrink-0 ${hasMeta ? '' : 'ml-auto'}`} />
+        <span aria-hidden="true" className={cn('w-3.5 shrink-0', !hasMeta && 'ml-auto')} />
       </div>
     );
   }
@@ -79,15 +83,17 @@ export function TimelineRow({
       type="button"
       aria-expanded={expanded}
       onClick={onToggle}
-      className={`${ROW_CLASS} cursor-pointer hover:bg-fill-hover`}
+      className={cn(ROW_CLASS, 'cursor-pointer hover:bg-fill-hover')}
     >
       {content}
       <ChevronDown
-        size={11}
+        size={ICON_SM}
         aria-hidden="true"
-        className={`shrink-0 text-fg-subtle transition-all duration-(--duration-base)
-                    ${hasMeta ? '' : 'ml-auto'}
-                    ${expanded ? 'rotate-180 opacity-100' : 'opacity-0 group-hover/row:opacity-100'}`}
+        className={cn(
+          'shrink-0 text-fg-subtle transition-[opacity,transform] duration-(--duration-base)',
+          !hasMeta && 'ml-auto',
+          expanded ? 'rotate-180 opacity-100' : 'opacity-0 group-hover/row:opacity-100'
+        )}
       />
     </button>
   );

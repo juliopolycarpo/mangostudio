@@ -13,6 +13,7 @@ import type {
   PropagationOperation,
   PropagationPreview,
 } from '@mangostudio/shared/library';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { hashPrefix } from '../format';
@@ -108,13 +109,11 @@ export function ReviewStep({
       })}
 
       {kept.length > 0 && (
-        <section className="space-y-1" data-testid="review-kept">
-          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-            {l.skipReason['divergence-acknowledged']}
-          </h3>
+        <section className="space-y-1.5" data-testid="review-kept">
+          <MicroLabel as="h3">{l.skipReason['divergence-acknowledged']}</MicroLabel>
           <ul className="space-y-0.5">
             {kept.map((entry) => (
-              <li key={entry.resourceKey} className="text-fg-muted text-xs">
+              <li key={entry.resourceKey} className="text-fg-muted text-sm">
                 {entry.ref.slug}
               </li>
             ))}
@@ -161,10 +160,8 @@ function ReviewGroupSection({
   // destinations, and silence about them would read as an omission.
   if (group === 'noop') {
     return (
-      <details className="rounded-xl border border-stroke p-3" data-testid="review-noop">
-        <summary className="cursor-pointer font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-          {`${label} (${rows.length})`}
-        </summary>
+      <details className="rounded-md border border-stroke p-4" data-testid="review-noop">
+        <summary className="micro-label cursor-pointer">{`${label} (${rows.length})`}</summary>
         <div className="mt-2">{body}</div>
       </details>
     );
@@ -172,9 +169,7 @@ function ReviewGroupSection({
 
   return (
     <section className="space-y-1.5" data-testid="review-group" data-group={group}>
-      <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-        {`${label} (${rows.length})`}
-      </h3>
+      <MicroLabel as="h3">{`${label} (${rows.length})`}</MicroLabel>
       {body}
     </section>
   );
@@ -206,7 +201,7 @@ function ReviewRow({
 
   return (
     <li
-      className="space-y-2 rounded-lg border border-stroke bg-surface p-2.5"
+      className="space-y-3 rounded-md border border-stroke bg-surface p-4"
       data-testid="review-row"
       data-operation={write.operation}
       data-resource-key={write.resourceKey}
@@ -214,8 +209,8 @@ function ReviewRow({
       data-location-id={write.locationId}
     >
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="font-medium text-fg text-xs">{entry?.ref.slug ?? write.resourceKey}</span>
-        <span className="min-w-0 break-all font-mono text-[11px] text-fg-muted">
+        <span className="font-medium text-fg text-sm">{entry?.ref.slug ?? write.resourceKey}</span>
+        <span className="min-w-0 break-all font-mono text-fg-muted text-micro">
           {write.destination.path ?? write.locationId}
         </span>
       </div>
@@ -244,9 +239,7 @@ function ReviewRow({
       */}
       {write.operation === 'overwrite' && entry && winner && current && (
         <div className="space-y-1" data-testid="overwrite-diff">
-          <p className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-            {l.review.overwriteDiff}
-          </p>
+          <MicroLabel as="p">{l.review.overwriteDiff}</MicroLabel>
           {/*
             Both sides are read from the machines they are on: the current
             content from the destination, the winner from wherever it lives.
@@ -272,7 +265,7 @@ function ReviewRow({
       )}
 
       {write.operation === 'noop' && current && (
-        <p className="text-[11px] text-fg-muted">
+        <p className="text-fg-muted text-xs">
           {formatMessage(l.destination.currentContent, { hash: `${hashPrefix(current)}…` })}
         </p>
       )}

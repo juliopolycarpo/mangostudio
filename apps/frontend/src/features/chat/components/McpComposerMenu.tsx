@@ -8,9 +8,13 @@
 import type { ChatAttachment } from '@mangostudio/shared/chat';
 import type { McpPromptDescriptor, McpServer } from '@mangostudio/shared/mcp';
 import { useQuery } from '@tanstack/react-query';
-import { FileText, Plug, SquareSlash, X } from 'lucide-react';
-import { useState } from 'react';
+import { FileText, Plug, SquareSlash } from 'lucide-react';
+import { type ReactNode, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { FIELD_CLASS } from '@/components/ui/Input';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { getMcpPrompt, readMcpResource } from '@/features/settings/mcp/api';
 import {
   mcpServerListQueryOptions,
@@ -18,12 +22,15 @@ import {
   mcpServerResourcesQueryOptions,
 } from '@/features/settings/mcp/queries';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   flattenMcpPromptText,
   missingRequiredMcpArguments,
   serializeMcpPromptArguments,
 } from '../lib/mcp-prompt-args';
+import { ComposerPopover } from './ComposerPopover';
+import { DialogBody, DialogFooter, DialogFrame } from './DialogFrame';
 
 interface McpComposerMenuProps {
   chatId: string | null;
@@ -111,21 +118,17 @@ export function McpComposerMenu({
         className="terminal-chip composer-tool-chip"
         title={labels.mcpMenuButton}
       >
-        <Plug size={12} className="shrink-0" />
+        <Plug size={ICON_SM} className="shrink-0" />
         <span className="hidden sm:inline">MCP</span>
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-stroke bg-surface p-3 shadow-2xl space-y-3">
+        <ComposerPopover className="max-h-96 space-y-3 overflow-y-auto p-3">
           {serversQuery.isLoading && <p className="text-xs text-fg-muted">{t.common.loading}</p>}
           {!serversQuery.isLoading && servers.length === 0 && (
             <p className="text-xs text-fg-muted">{labels.mcpMenuEmpty}</p>
           )}
-          {errorText && (
-            <p className="text-xs text-danger" role="alert">
-              {errorText}
-            </p>
-          )}
+          {errorText && <Callout tone="danger" role="alert" title={errorText} />}
           {servers.map((server) => (
             <McpServerMenuSection
               key={server.id}
@@ -136,7 +139,7 @@ export function McpComposerMenu({
               onResourceClick={(serverId, uri) => void handleResourceClick(serverId, uri)}
             />
           ))}
-        </div>
+        </ComposerPopover>
       )}
 
       {argumentForm && (
@@ -183,55 +186,71 @@ function McpServerMenuSection({
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">{server.name}</p>
+      <MicroLabel as="p">{server.name}</MicroLabel>
 
       {prompts.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[10px] font-medium text-fg-subtle">{labels.mcpPromptsSection}</p>
+          <p className="text-xs font-medium text-fg-muted">{labels.mcpPromptsSection}</p>
           {prompts.map((prompt) => (
-            <button
+            <McpEntryButton
               key={prompt.name}
-              type="button"
+              icon={<SquareSlash size={ICON_MD} />}
+              title={prompt.name}
+              detail={prompt.description}
               disabled={busy}
               onClick={() => onPromptClick(server.id, prompt)}
-              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-fill-hover transition-colors disabled:opacity-50"
-            >
-              <SquareSlash size={13} className="mt-0.5 shrink-0 text-accent-fg" />
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-fg">{prompt.name}</span>
-                {prompt.description && (
-                  <span className="block truncate text-[11px] text-fg-muted">
-                    {prompt.description}
-                  </span>
-                )}
-              </span>
-            </button>
+            />
           ))}
         </div>
       )}
 
       {resources.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[10px] font-medium text-fg-subtle">{labels.mcpResourcesSection}</p>
-          {!chatId && <p className="px-2 text-[11px] text-fg-muted">{labels.mcpNeedsChat}</p>}
+          <p className="text-xs font-medium text-fg-muted">{labels.mcpResourcesSection}</p>
+          {!chatId && <p className="px-2 text-xs text-fg-muted">{labels.mcpNeedsChat}</p>}
           {resources.map((resource) => (
-            <button
+            <McpEntryButton
               key={resource.uri}
-              type="button"
+              icon={<FileText size={ICON_MD} />}
+              title={resource.name}
+              detail={resource.uri}
               disabled={busy || !chatId}
               onClick={() => onResourceClick(server.id, resource.uri)}
-              className="flex w-full items-start gap-2 rounded-xl px-2 py-1.5 text-left hover:bg-fill-hover transition-colors disabled:opacity-50"
-            >
-              <FileText size={13} className="mt-0.5 shrink-0 text-accent-fg" />
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-fg">{resource.name}</span>
-                <span className="block truncate text-[11px] text-fg-muted">{resource.uri}</span>
-              </span>
-            </button>
+            />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/** One insertable prompt or attachable resource: a glyph, a name and a one-line detail. */
+function McpEntryButton({
+  icon,
+  title,
+  detail,
+  disabled,
+  onClick,
+}: {
+  icon: ReactNode;
+  title: string;
+  detail?: string | null;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-fill-hover disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <span className="mt-0.5 shrink-0 text-fg-muted">{icon}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-fg">{title}</span>
+        {detail ? <span className="block truncate text-xs text-fg-muted">{detail}</span> : null}
+      </span>
+    </button>
   );
 }
 
@@ -254,70 +273,49 @@ function McpPromptArgumentDialog({
   const missing = missingRequiredMcpArguments(prompt.arguments, values);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
-      <div className="bg-surface w-full max-w-sm rounded-3xl p-5 sm:p-6 shadow-2xl border border-stroke space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="text-base font-bold text-fg">{labels.mcpPromptArgsTitle}</h3>
-            <p className="truncate text-xs text-fg-muted">{prompt.name}</p>
+    <DialogFrame>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (missing.length === 0) onSubmit(values);
+        }}
+      >
+        <DialogBody>
+          <div className="min-w-0 space-y-1">
+            <h3 className="text-title font-semibold text-fg">{labels.mcpPromptArgsTitle}</h3>
+            <p className="truncate font-mono text-xs text-fg-muted">{prompt.name}</p>
           </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg p-1 text-fg-muted hover:text-fg"
-            aria-label={labels.mcpPromptCancel}
-          >
-            <X size={16} />
-          </button>
-        </div>
 
-        <form
-          className="space-y-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (missing.length === 0) onSubmit(values);
-          }}
-        >
           {prompt.arguments.map((argument) => (
             <label key={argument.name} className="block space-y-1">
-              <span className="flex items-center gap-2 text-xs font-medium text-fg">
+              <span className="flex items-center gap-2 text-sm font-medium text-fg">
                 {argument.name}
-                {argument.required && (
-                  <span className="rounded-full bg-accent-subtle px-1.5 py-0.5 text-[9px] text-accent-fg">
-                    {labels.mcpArgRequired}
-                  </span>
-                )}
+                {argument.required && <Badge variant="neutral">{labels.mcpArgRequired}</Badge>}
               </span>
-              {argument.description && (
-                <span className="block text-[11px] text-fg-muted">{argument.description}</span>
-              )}
               <input
                 type="text"
                 value={values[argument.name] ?? ''}
                 onChange={(event) =>
                   setValues((current) => ({ ...current, [argument.name]: event.target.value }))
                 }
-                className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg outline-none focus:border-focus"
+                className={FIELD_CLASS}
               />
+              {argument.description && (
+                <span className="block text-xs text-fg-muted">{argument.description}</span>
+              )}
             </label>
           ))}
+        </DialogBody>
 
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="subtle" size="sm" type="button" onClick={onCancel}>
-              {labels.mcpPromptCancel}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              type="submit"
-              loading={busy}
-              disabled={missing.length > 0}
-            >
-              {labels.mcpPromptInsert}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button variant="secondary" type="button" onClick={onCancel}>
+            {labels.mcpPromptCancel}
+          </Button>
+          <Button type="submit" loading={busy} disabled={missing.length > 0}>
+            {labels.mcpPromptInsert}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogFrame>
   );
 }

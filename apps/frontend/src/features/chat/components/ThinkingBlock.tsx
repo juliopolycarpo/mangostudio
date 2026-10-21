@@ -202,7 +202,7 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
           <div
             ref={scrollRef}
             onScroll={handleScroll}
-            className="app-scrollbar max-h-48 overflow-y-auto p-3.5 sm:max-h-72 md:max-h-96"
+            className="app-scrollbar max-h-48 overflow-y-auto p-3 sm:max-h-72 md:max-h-96"
           >
             <div className="markdown-content--thinking text-xs leading-relaxed text-fg-muted">
               <MarkdownContent

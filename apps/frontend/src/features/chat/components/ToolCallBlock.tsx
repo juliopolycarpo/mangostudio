@@ -5,11 +5,16 @@ import {
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
 import { Check, Copy } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { FileChangePreviewBody } from './FileChangePreview';
 import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
 import { TimelineDisclosure } from './TimelineDisclosure';
@@ -128,69 +133,91 @@ export function ToolCallBlock({
         summary={summary ? formatToolSummary(summary, t.tools.summary) : null}
         duration={duration !== undefined && !isActive ? formatToolDuration(duration) : null}
       >
-        <span className={`shrink-0 font-mono font-semibold ${toneTextClass(tone)}`}>{label}</span>
-        {source !== 'builtin' && (
-          <span className="shrink-0 rounded-sm bg-surface px-1 py-px text-[10px] text-fg-muted">
-            {t.tools.sources[source]}
-          </span>
-        )}
+        <span className={cn('shrink-0 font-mono font-medium', toneTextClass(tone))}>{label}</span>
+        {source !== 'builtin' && <Badge>{t.tools.sources[source]}</Badge>}
         {hint && <span className="truncate font-mono text-fg-muted">{hint}</span>}
-        {statusLabel && (
-          <span className={`shrink-0 text-[11px] ${toneTextClass(tone)}`}>{statusLabel}</span>
-        )}
+        {statusLabel && <span className={cn('shrink-0', toneTextClass(tone))}>{statusLabel}</span>}
       </TimelineRow>
 
       <TimelineDisclosure open={expanded}>
-        <div className="app-scrollbar max-h-48 space-y-3 overflow-y-auto p-3.5 font-mono text-xs sm:max-h-72 md:max-h-96">
+        <div className="app-scrollbar max-h-48 overflow-y-auto text-xs sm:max-h-72 md:max-h-96">
           {preview !== null && (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowRaw((v) => !v)}
-                className="cursor-pointer text-[10px] uppercase tracking-wider text-fg-subtle transition-colors duration-200 hover:text-fg-muted"
-              >
+            <div className="flex h-8 items-center justify-end pr-1.5">
+              <Button variant="subtle" size="sm" onClick={() => setShowRaw((v) => !v)}>
                 {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
-              </button>
+              </Button>
             </div>
           )}
-          {preview !== null && !showRaw && <FileChangePreviewBody preview={preview} />}
+          {preview !== null && !showRaw && (
+            <div className="border-t border-stroke bg-canvas p-3">
+              <FileChangePreviewBody preview={preview} />
+            </div>
+          )}
           {(preview === null || showRaw) && Object.keys(args).length > 0 && (
-            <div>
-              <p className="mb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
-                {t.tools.argsLabel}
-              </p>
-              <pre className="whitespace-pre-wrap leading-relaxed text-fg-muted">
+            <ToolOutputSection label={t.tools.argsLabel}>
+              <pre className="whitespace-pre-wrap font-mono leading-relaxed text-fg-muted">
                 {JSON.stringify(args, null, 2)}
               </pre>
-            </div>
+            </ToolOutputSection>
           )}
           {(preview === null || showRaw) && displayedResult !== null && (
-            <div>
-              <div className="mb-1 flex items-center justify-between">
-                <p
-                  className={`text-[10px] uppercase tracking-wider ${isError ? 'text-danger' : 'text-fg-subtle'}`}
-                >
-                  {isError ? t.tools.errorLabel : t.tools.resultLabel}
-                </p>
-                <button
-                  type="button"
+            <ToolOutputSection
+              label={isError ? t.tools.errorLabel : t.tools.resultLabel}
+              danger={isError}
+              action={
+                <Button
+                  variant="subtle"
+                  size="sm"
                   onClick={() => void handleCopyResult()}
                   title={copied ? t.tools.resultCopied : t.tools.copyResult}
-                  className="cursor-pointer text-fg-muted opacity-60 transition-opacity duration-200 hover:opacity-100"
+                  className="size-7 px-0 text-fg-muted"
                 >
-                  {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                </button>
-              </div>
+                  {copied ? (
+                    <Check size={ICON_SM} className="text-success" />
+                  ) : (
+                    <Copy size={ICON_SM} />
+                  )}
+                </Button>
+              }
+            >
               <pre
-                className={`whitespace-pre-wrap leading-relaxed ${isError ? 'text-danger' : 'text-fg-muted'}`}
+                className={cn(
+                  'whitespace-pre-wrap font-mono leading-relaxed',
+                  isError ? 'text-danger' : 'text-fg-muted'
+                )}
               >
                 {displayedResult}
               </pre>
-            </div>
+            </ToolOutputSection>
           )}
         </div>
       </TimelineDisclosure>
     </TimelineItem>
+  );
+}
+
+interface ToolOutputSectionProps {
+  label: string;
+  /** The section reports a failure: its label is read in the error colour. */
+  danger?: boolean;
+  action?: ReactNode;
+  children: ReactNode;
+}
+
+/**
+ * One labelled stretch of a tool's disclosed body: a 32px header on the card,
+ * then the output in mono on `canvas`. Sections divide with a hairline rather
+ * than nesting a card in the card.
+ */
+function ToolOutputSection({ label, danger = false, action, children }: ToolOutputSectionProps) {
+  return (
+    <div className="border-t border-stroke first:border-t-0">
+      <div className="flex h-8 items-center justify-between pr-1.5 pl-3">
+        <MicroLabel className={cn(danger && 'text-danger')}>{label}</MicroLabel>
+        {action}
+      </div>
+      <div className="bg-canvas p-3">{children}</div>
+    </div>
   );
 }
 

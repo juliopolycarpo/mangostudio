@@ -12,6 +12,8 @@ import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agent
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQuery } from '@tanstack/react-query';
 import { Bot, Check, Sparkles } from 'lucide-react';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Spinner } from '@/components/ui/Spinner';
 import { CopyLine } from '@/features/environments/components/CopyLine';
 import {
@@ -20,6 +22,8 @@ import {
 } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { StepFrame } from '../StepFrame';
 
 interface AgentsStepProps {
@@ -71,7 +75,7 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
       <RunnerOption
         title={t.library.targets.mangostudio}
         description={s.modelDescription}
-        icon={<Sparkles aria-hidden size={16} className="text-accent-fg" />}
+        icon={<Sparkles aria-hidden size={ICON_MD} className="text-fg-muted" />}
         selected={sameRunner(state.runner, MANGOSTUDIO_RUNNER)}
         disabled={isSaving || (!catalog.isPending && !hasModel)}
         testId="onboarding-runner-mangostudio"
@@ -79,15 +83,13 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
       />
 
       {!catalog.isPending && !hasModel ? (
-        <p className="text-fg-muted text-sm" data-testid="onboarding-no-models">
+        <Callout tone="warning" data-testid="onboarding-no-models">
           {s.noModels}
-        </p>
+        </Callout>
       ) : null}
 
       <div className="space-y-2 pt-1">
-        <p className="font-semibold text-fg-muted text-xs uppercase tracking-wider">
-          {s.cliHeading}
-        </p>
+        <MicroLabel as="p">{s.cliHeading}</MicroLabel>
         {external.isLoading ? (
           <div className="flex justify-center py-4">
             <Spinner size="md" />
@@ -96,19 +98,19 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
           // A refused probe and a machine with no CLIs on it both arrive as an
           // empty list. Only one of them is an answer, and telling the person
           // "none found" about the other sends them to install what they have.
-          <p className="text-fg-muted text-sm" data-testid="onboarding-agents-failed">
+          <Callout tone="warning" data-testid="onboarding-agents-failed">
             {s.probeFailed}
-          </p>
+          </Callout>
         ) : external.agents.length === 0 ? (
-          <p className="text-fg-muted text-sm">{s.noneFound}</p>
+          <p className="text-sm text-fg-muted">{s.noneFound}</p>
         ) : isolationWithdrawn(external.agents) ? (
           // Local's agent sign-ins belong to the OS account the hub runs as.
           // Once a second person has an account here they are no longer this
           // person's to use, and pretending otherwise would offer a runner
           // every send would refuse.
-          <p className="text-fg-muted text-sm" data-testid="onboarding-agents-isolated">
+          <Callout tone="info" data-testid="onboarding-agents-isolated">
             {s.isolated}
-          </p>
+          </Callout>
         ) : (
           external.agents.map((agent) => (
             <AgentOption
@@ -145,7 +147,7 @@ function AgentOption({
       <RunnerOption
         title={t.library.targets[agent.targetId]}
         description={agent.authState === 'signed-out' ? s.signedOut : s.signedIn}
-        icon={<Bot aria-hidden size={16} className="text-accent-fg" />}
+        icon={<Bot aria-hidden size={ICON_MD} className="text-fg-muted" />}
         selected={selected}
         disabled={busy || !selectable}
         testId={`onboarding-runner-${agent.targetId}`}
@@ -154,9 +156,7 @@ function AgentOption({
       {/* The command is the whole remedy, so it is shown rather than hidden
           behind a disabled control the user cannot learn anything from. */}
       {!selectable && agent.loginCommand ? (
-        <div className="pl-1">
-          <CopyLine label={s.signInHint} value={agent.loginCommand} />
-        </div>
+        <CopyLine label={s.signInHint} value={agent.loginCommand} />
       ) : null}
     </div>
   );
@@ -188,18 +188,23 @@ function RunnerOption({
       data-testid={testId}
       aria-pressed={selected}
       onClick={onSelect}
-      className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        selected ? 'border-accent bg-accent-subtle' : 'border-stroke bg-control hover:bg-fill-hover'
-      }`}
+      className={cn(
+        'relative flex w-full items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+        // The chosen runner is the list's current item: a neutral fill and the
+        // 3px accent bar, the same signal the step list and the sidebar use.
+        selected
+          ? 'bg-fill-selected before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent'
+          : 'bg-control enabled:hover:bg-control-hover'
+      )}
     >
       <span className="shrink-0">{icon}</span>
       <span className="min-w-0 flex-1">
-        <span className="block font-semibold text-fg text-sm">{title}</span>
-        <span className="block truncate text-fg-muted text-xs">{description}</span>
+        <span className="block text-sm font-medium text-fg">{title}</span>
+        <span className="block truncate text-xs text-fg-muted">{description}</span>
       </span>
       {selected ? (
-        <span className="flex shrink-0 items-center gap-1 font-semibold text-accent-fg text-xs">
-          <Check aria-hidden size={13} />
+        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-fg">
+          <Check aria-hidden size={ICON_SM} className="text-accent-fg" />
           {t.onboarding.agents.selected}
         </span>
       ) : null}

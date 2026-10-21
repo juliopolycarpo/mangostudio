@@ -1,7 +1,9 @@
 import { RefreshCw } from 'lucide-react';
+import { IconButton } from '@/features/workspace/components/IconButton';
 import { useI18n } from '@/hooks/use-i18n';
 import { useNow } from '@/hooks/use-now';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 interface GithubStalenessProps {
   /** Epoch ms the hub read this out of `gh`; null before the first answer. */
@@ -35,12 +37,12 @@ export function GithubStaleness({ cachedAt, refreshing }: GithubStalenessProps) 
   const now = useNow(refreshing || cachedAt === null ? null : STALENESS_TICK_MS);
 
   if (refreshing) {
-    return <span className="text-[10px] text-fg-muted">{t.github.staleness.refreshing}</span>;
+    return <span className="text-micro text-fg-subtle">{t.github.staleness.refreshing}</span>;
   }
   if (cachedAt === null) return null;
 
   return (
-    <span className="text-[10px] text-fg-muted" title={new Date(cachedAt).toISOString()}>
+    <span className="text-micro text-fg-subtle" title={new Date(cachedAt).toISOString()}>
       {formatMessage(t.github.staleness.updated, {
         relative: formatRelativeTime(cachedAt, locale, now),
       })}
@@ -59,15 +61,13 @@ export function GithubRefreshButton({
   const { t } = useI18n();
 
   return (
-    <button
-      type="button"
+    <IconButton
+      label={t.github.actions.refresh}
       onClick={onRefresh}
       disabled={refreshing}
-      aria-label={t.github.actions.refresh}
-      title={t.github.actions.refresh}
-      className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg disabled:cursor-wait focus-visible:outline-2 focus-visible:outline-focus"
+      busy={refreshing}
     >
-      <RefreshCw size={13} className={refreshing ? 'animate-spin' : undefined} />
-    </button>
+      <RefreshCw size={ICON_SM} className={refreshing ? 'animate-spin' : undefined} />
+    </IconButton>
   );
 }

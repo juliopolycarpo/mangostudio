@@ -85,7 +85,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // one more step (`--block`), and it draws the same balloon a user gets.
     const bubbleItems = container.querySelectorAll('.chat-timeline-item--bubble');
     expect(bubbleItems).toHaveLength(1);
-    expect(bubbleItems[0]?.querySelector('.rounded-2xl.bg-surface')).not.toBeNull();
+    expect(bubbleItems[0]?.querySelector('.rounded-lg.bg-surface')).not.toBeNull();
     expect(screen.getByText('Created /tmp/probe.txt.')).toBeInTheDocument();
   });
 
@@ -341,7 +341,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
       noResponse: screen.queryByText('No response') !== null,
     }).toEqual({
       severity: 'warning',
-      text: 'WarningRate limit close <b>now</b>Resets in four minutes.',
+      text: 'Warning: Rate limit close <b>now</b>Resets in four minutes.',
       markup: null,
       noResponse: true,
     });

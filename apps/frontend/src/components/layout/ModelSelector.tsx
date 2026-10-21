@@ -1,12 +1,33 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import type { ProviderType } from '@mangostudio/shared/types';
-import { Activity, Check, ChevronDown, Cpu, Lock, Sparkles, Zap } from 'lucide-react';
+import {
+  Activity,
+  Check,
+  ChevronDown,
+  Cpu,
+  Lock,
+  type LucideIcon,
+  Sparkles,
+  Zap,
+} from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 import { getModelSelectorPlaceholder } from '../../utils/model-utils';
+
+/** A glyph by tier, drawn in the row's own colour — the shape tells flash from pro, not a hue. */
+function modelIcon(name: string): LucideIcon {
+  const low = name.toLowerCase();
+  if (low.includes('flash')) return Zap;
+  if (low.includes('pro')) return Cpu;
+  if (low.includes('lite')) return Activity;
+  return Sparkles;
+}
 
 interface ModelSelectorProps {
   activeModel: string;
@@ -77,14 +98,6 @@ export function ModelSelector({
     return key;
   };
 
-  const getModelIcon = (name: string) => {
-    const low = name.toLowerCase();
-    if (low.includes('flash')) return <Zap className="w-3.5 h-3.5 text-amber-400" />;
-    if (low.includes('pro')) return <Cpu className="w-3.5 h-3.5 text-accent-fg" />;
-    if (low.includes('lite')) return <Activity className="w-3.5 h-3.5 text-emerald-400" />;
-    return <Sparkles className="w-3.5 h-3.5 text-blue-400" />;
-  };
-
   return (
     <div className="relative flex items-center" ref={containerRef}>
       <button
@@ -95,22 +108,14 @@ export function ModelSelector({
         aria-expanded={isOpen}
         aria-label={t.chat.input.modelLabel}
         // The open state is styled off `aria-expanded` in `index.css`, so it
-        // follows the composer's runner accent rather than the product primary.
-        className={cn(
-          'composer-chip group max-w-[13rem]',
-          isDisabled && 'opacity-50 cursor-not-allowed'
-        )}
+        // follows the composer's runner accent rather than the product accent.
+        className="composer-chip max-w-[13rem] disabled:cursor-not-allowed disabled:opacity-50"
       >
         <span className="composer-chip-key text-fg-muted">{`${t.chat.input.modelLabel}:`}</span>
         <span className="composer-chip-value composer-chip-runner">
           {selectedModel?.displayName || placeholder}
         </span>
-        <ChevronDown
-          className={cn(
-            'size-3 shrink-0 text-fg-subtle transition-transform duration-200',
-            isOpen && 'rotate-180 text-current'
-          )}
-        />
+        <ChevronDown size={ICON_SM} className="shrink-0" />
       </button>
 
       <AnimatePresence>
@@ -119,22 +124,26 @@ export function ModelSelector({
             {...popoverAbove}
             /* Upward: this control lives in the composer at the foot of the
                viewport, and the downward panel it inherited from the header
-               opened off the bottom of the screen. */
-            className="dropdown-panel absolute left-0 bottom-full mb-2 w-[19rem] max-h-[60vh] hide-scrollbar overflow-y-auto"
+               opened off the bottom of the screen. The panel clips and the
+               list inside it scrolls, because `.dropdown-panel`'s own
+               `overflow: hidden` is unlayered and beats any utility set on it. */
+            className="dropdown-panel absolute bottom-full left-0 mb-2 w-80"
           >
-            <div className="py-2">
+            <div className="hide-scrollbar max-h-[60vh] space-y-1 overflow-y-auto p-1">
               {Object.keys(groups).length === 0 ? (
-                <div className="px-4 py-3 text-sm text-fg-muted italic">
-                  {t.models.noModelsAvailable}
-                </div>
+                <div className="px-2 py-2 text-sm text-fg-muted">{t.models.noModelsAvailable}</div>
               ) : (
                 Object.entries(groups).map(([providerKey, models]) => (
-                  <div key={providerKey} className="mb-2 last:mb-0">
-                    <div className="px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
+                  <div key={providerKey}>
+                    <MicroLabel as="div" className="px-2 pb-1 pt-2">
                       {getProviderLabel(providerKey)}
-                    </div>
+                    </MicroLabel>
                     {models.map((model) => {
                       const isLocked = lockedProvider != null && model.provider !== lockedProvider;
+                      const isSelected = activeModel === model.modelId && !isLocked;
+                      const isPreview = model.modelId.includes('preview');
+                      const showsReasoning = model.capabilities?.reasoning && !isLocked;
+                      const Icon = modelIcon(model.displayName);
                       return (
                         <button
                           type="button"
@@ -142,47 +151,38 @@ export function ModelSelector({
                           onClick={() => !isLocked && handleSelect(model.modelId)}
                           disabled={isLocked}
                           className={cn(
-                            'w-full flex items-center justify-between px-4 py-2.5 text-left transition-all duration-150',
-                            !isLocked && 'hover:bg-accent-hover active:bg-accent-subtle group/item',
-                            activeModel === model.modelId && !isLocked && 'bg-accent-subtle',
-                            isLocked && 'opacity-40 cursor-not-allowed'
+                            'flex min-h-8 w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left transition-colors',
+                            isLocked
+                              ? 'cursor-not-allowed opacity-50'
+                              : 'hover:bg-fill-hover active:bg-fill-pressed',
+                            isSelected && 'bg-fill-selected'
                           )}
                         >
-                          <div className="flex items-center gap-3">
-                            <div className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-                              {isLocked ? (
-                                <Lock className="w-3.5 h-3.5 text-fg-muted" />
-                              ) : (
-                                getModelIcon(model.displayName)
-                              )}
-                            </div>
-                            <div>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
+                              {isLocked ? <Lock size={ICON_MD} /> : <Icon size={ICON_MD} />}
+                            </span>
+                            <div className="min-w-0">
                               <div
                                 className={cn(
-                                  'text-sm font-medium transition-colors',
-                                  activeModel === model.modelId && !isLocked
-                                    ? 'text-accent-fg'
-                                    : 'text-fg group-hover/item:text-fg'
+                                  'truncate text-sm text-fg',
+                                  isSelected && 'font-medium'
                                 )}
                               >
                                 {model.displayName}
                               </div>
-                              <div className="flex items-center gap-1.5">
-                                {model.modelId.includes('preview') && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-fill-selected text-fg-muted border border-stroke">
-                                    {t.models.preview}
-                                  </span>
-                                )}
-                                {model.capabilities?.reasoning && !isLocked && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-subtle text-accent-fg border border-accent">
-                                    {t.thinking.reasoningBadge}
-                                  </span>
-                                )}
-                              </div>
+                              {isPreview || showsReasoning ? (
+                                <div className="mt-0.5 flex items-center gap-1">
+                                  {isPreview && <Badge variant="neutral">{t.models.preview}</Badge>}
+                                  {showsReasoning && (
+                                    <Badge variant="neutral">{t.thinking.reasoningBadge}</Badge>
+                                  )}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
-                          {activeModel === model.modelId && !isLocked && (
-                            <Check className="w-4 h-4 text-accent-fg" />
+                          {isSelected && (
+                            <Check size={ICON_MD} className="shrink-0 text-accent-fg" />
                           )}
                         </button>
                       );

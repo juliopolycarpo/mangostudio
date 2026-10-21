@@ -10,6 +10,7 @@
 
 import { useQueries } from '@tanstack/react-query';
 import { CircleAlert, CircleCheck } from 'lucide-react';
+import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
 import { RecipeAction } from '@/features/environments/components/RecipeAction';
 import { installStep } from '@/features/environments/format';
@@ -19,6 +20,7 @@ import {
   runtimeStatusesQueryOptions,
 } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { StepFrame } from '../StepFrame';
 import { isRuntimeReady, PROJECT_RUNTIME_IDS } from '../use-onboarding-facts';
 
@@ -43,11 +45,11 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
         // A refused probe answers `[]`, exactly like a machine with neither
         // runtime on it. Drawing the list from that tells somebody who has Node
         // installed to install Node, and offers a button that would do it.
-        <p className="text-fg-muted text-sm" data-testid="onboarding-toolchain-failed">
+        <Callout tone="warning" data-testid="onboarding-toolchain-failed">
           {s.probeFailed}
-        </p>
+        </Callout>
       ) : (
-        <ul className="space-y-2">
+        <ul className="divide-y divide-stroke border-y border-stroke">
           {PROJECT_RUNTIME_IDS.map((id) => {
             const runtime = (runtimes.data ?? []).find((candidate) => candidate.id === id);
             const ready = isRuntimeReady(runtime);
@@ -57,23 +59,23 @@ export function ToolchainStep({ environmentId }: { readonly environmentId: strin
                 key={id}
                 data-testid={`onboarding-runtime-${id}`}
                 data-ready={ready}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stroke bg-control px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-3 py-3"
               >
-                <span className="flex items-center gap-2.5">
+                <span className="flex items-center gap-2">
                   {ready ? (
-                    <CircleCheck aria-hidden size={16} className="shrink-0 text-accent-fg" />
+                    <CircleCheck aria-hidden size={ICON_MD} className="shrink-0 text-success" />
                   ) : (
-                    <CircleAlert aria-hidden size={16} className="shrink-0 text-fg-subtle" />
+                    <CircleAlert aria-hidden size={ICON_MD} className="shrink-0 text-fg-subtle" />
                   )}
-                  <span className="font-semibold text-fg text-sm">{name}</span>
+                  <span className="text-sm font-medium text-fg">{name}</span>
                 </span>
                 {ready ? (
-                  <span className="text-fg-muted text-xs">
+                  <span className="text-xs text-fg-muted">
                     {runtime?.effective?.version ?? s.ready}
                   </span>
                 ) : (
                   <span className="flex items-center gap-3">
-                    <span className="text-fg-muted text-xs">{s.missing}</span>
+                    <span className="text-xs text-fg-muted">{s.missing}</span>
                     <RecipeAction
                       step={installStep(recipes.data ?? [], id)}
                       action="install"

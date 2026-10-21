@@ -6,7 +6,9 @@
 
 import type { McpServer, McpServerStatus, TestMcpServerResponse } from '@mangostudio/shared/mcp';
 import { ChevronDown, ChevronRight, Pencil, Server, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { type ComponentProps, useState } from 'react';
+import { StatusNote } from '@/components/settings/StatusNote';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Toggle } from '@/components/ui/Toggle';
@@ -15,6 +17,7 @@ import { ToolIdentityMenu } from '@/features/environments/identity/ToolIdentityM
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useTestMcpServer, useUpdateMcpServer } from '../hooks/use-mcp-servers';
 import { McpServerResources } from './McpServerResources';
@@ -26,11 +29,14 @@ interface McpServerCardProps {
   onDelete: (server: McpServer) => void;
 }
 
-const statusStyles: Record<McpServerStatus, string> = {
-  connected: 'bg-accent-subtle text-accent-fg',
-  connecting: 'bg-fill-selected text-fg-muted',
-  error: 'bg-danger-subtle text-danger',
-  disconnected: 'bg-fill-selected text-fg-muted',
+const STATUS_VARIANT: Record<
+  McpServerStatus,
+  NonNullable<ComponentProps<typeof Badge>['variant']>
+> = {
+  connected: 'success',
+  connecting: 'neutral',
+  error: 'error',
+  disconnected: 'neutral',
 };
 
 export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) {
@@ -68,9 +74,21 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
     updateMutation.mutate({ id: server.id, body: { enabled } });
   };
 
+  // One line for whichever answer the last test produced; a new test clears both.
+  const testOutcome: { ok: boolean; message: string } | null = testError
+    ? { ok: false, message: testError }
+    : testResult
+      ? testResult.ok
+        ? {
+            ok: true,
+            message: s.testSuccess.replace('{count}', String(testResult.tools?.length ?? 0)),
+          }
+        : { ok: false, message: testResult.error ?? s.testFailed }
+      : null;
+
   return (
-    <Card className="space-y-3 p-4 sm:p-6">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+    <Card className="space-y-3">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <ToolAvatar
@@ -80,32 +98,27 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               image={identity.image}
               size="sm"
             />
-            <h4 className="text-sm font-bold text-fg">{identity.name}</h4>
-            <span className="rounded-full bg-fill-selected px-2 py-0.5 text-xs text-fg-muted">
-              {s.transports[server.transport]}
-            </span>
-            <span
-              className="inline-flex items-center gap-1 rounded-full bg-fill-selected px-2 py-0.5 text-xs text-fg-muted"
-              title={`${s.environmentLabel}: ${environmentName}`}
-            >
-              <Server size={11} aria-hidden="true" />
+            <h3 className="text-sm font-semibold text-fg">{identity.name}</h3>
+            <Badge>{s.transports[server.transport]}</Badge>
+            <Badge title={`${s.environmentLabel}: ${environmentName}`}>
+              <Server size={ICON_SM} aria-hidden="true" />
               {environmentName}
-            </span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles[server.status]}`}
+            </Badge>
+            <Badge
+              variant={STATUS_VARIANT[server.status]}
               title={server.status === 'error' ? server.statusError : undefined}
             >
               {s.status[server.status]}
-            </span>
+            </Badge>
           </div>
-          <p className="text-xs text-fg-muted break-all">
+          <p className="break-all font-mono text-xs text-fg-muted">
             {server.transport === 'stdio'
               ? [server.command, ...server.args].filter(Boolean).join(' ')
               : server.url}
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           <Toggle
             id={`mcp-server-enabled-${server.id}`}
             label={server.enabled ? s.enabledLabel : s.disabledLabel}
@@ -115,21 +128,22 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
           />
           <Button
             variant="subtle"
-            size="sm"
+            size="icon"
+            className="size-7"
             aria-label={s.editButton}
             onClick={() => onEdit(server)}
           >
-            <Pencil size={14} />
+            <Pencil size={ICON_MD} />
           </Button>
           <ToolIdentityMenu identity={identity} defaultName={server.name} />
           <Button
             variant="subtle"
-            size="sm"
+            size="icon"
+            className="size-7 text-danger"
             aria-label={s.deleteServer}
-            className="text-danger hover:text-danger"
             onClick={() => onDelete(server)}
           >
-            <Trash2 size={14} />
+            <Trash2 size={ICON_MD} />
           </Button>
         </div>
       </div>
@@ -138,54 +152,36 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
         <Button variant="secondary" size="sm" loading={testMutation.isPending} onClick={handleTest}>
           {testMutation.isPending ? s.testingButton : s.testButton}
         </Button>
-        {testResult &&
-          (testResult.ok ? (
-            <span className="text-xs text-accent-fg" role="status">
-              {s.testSuccess.replace('{count}', String(testResult.tools?.length ?? 0))}
-            </span>
-          ) : (
-            <span className="text-xs text-danger" role="status">
-              {testResult.error ?? s.testFailed}
-            </span>
-          ))}
-        {testError && (
-          <span className="text-xs text-danger" role="status">
-            {testError}
-          </span>
+        {testOutcome && (
+          <StatusNote tone={testOutcome.ok ? 'success' : 'danger'} role="status">
+            {testOutcome.message}
+          </StatusNote>
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => setToolsOpen((open) => !open)}
-        className="flex items-center gap-1.5 text-xs font-medium text-fg-muted hover:text-fg transition-colors"
-        aria-expanded={toolsOpen}
-      >
-        {toolsOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        {toolsOpen ? s.hideTools : s.showTools}
-      </button>
+      <div className="flex flex-wrap gap-1 border-t border-stroke pt-3">
+        <Button
+          variant="subtle"
+          size="sm"
+          aria-expanded={toolsOpen}
+          onClick={() => setToolsOpen((open) => !open)}
+        >
+          {toolsOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
+          {toolsOpen ? s.hideTools : s.showTools}
+        </Button>
+        <Button
+          variant="subtle"
+          size="sm"
+          aria-expanded={resourcesOpen}
+          onClick={() => setResourcesOpen((open) => !open)}
+        >
+          {resourcesOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
+          {resourcesOpen ? s.resources.hide : s.resources.show}
+        </Button>
+      </div>
 
-      {toolsOpen && (
-        <div className="border-t border-stroke">
-          <McpServerTools server={server} />
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={() => setResourcesOpen((open) => !open)}
-        className="flex items-center gap-1.5 text-xs font-medium text-fg-muted hover:text-fg transition-colors"
-        aria-expanded={resourcesOpen}
-      >
-        {resourcesOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        {resourcesOpen ? s.resources.hide : s.resources.show}
-      </button>
-
-      {resourcesOpen && (
-        <div className="border-t border-stroke">
-          <McpServerResources server={server} />
-        </div>
-      )}
+      {toolsOpen && <McpServerTools server={server} />}
+      {resourcesOpen && <McpServerResources server={server} />}
     </Card>
   );
 }

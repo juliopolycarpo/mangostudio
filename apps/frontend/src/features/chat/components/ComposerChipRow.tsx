@@ -4,7 +4,7 @@
  * in the header instead, so the strip carries only the per-turn controls.
  *
  * Rendered as `key: value` chips separated by `·` rather than as a toolbar of
- * bordered pills, because that is what it is — a line you read left to right
+ * bordered chips, because that is what it is — a line you read left to right
  * before you type, whose parts happen to be clickable.
  *
  * Below `sm` it collapses behind a summary chip. The alternative the plan
@@ -31,6 +31,7 @@ import { ExternalComposerControls } from '@/features/external-agents/ExternalCom
 import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
 import { ContextBadge } from './ContextBadge';
 
@@ -96,7 +97,7 @@ export function ComposerChipRow(props: ComposerChipRowProps) {
   if (chips.length === 0) return null;
 
   return (
-    <div className="composer-statusline flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1 px-2 py-1.5">
+    <div className="composer-statusline flex min-w-0 flex-wrap items-center gap-1 px-2 py-1.5">
       <button
         type="button"
         onClick={() => setExpanded((open) => !open)}
@@ -104,10 +105,7 @@ export function ComposerChipRow(props: ComposerChipRowProps) {
         className="composer-chip min-w-0 flex-1 sm:hidden"
       >
         <span className="composer-chip-value flex-1 text-left">{summaryText(props, t)}</span>
-        <ChevronDown
-          size={11}
-          className={`shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
-        />
+        <ChevronDown size={ICON_SM} className={`shrink-0 ${expanded ? 'rotate-180' : ''}`} />
         <span className="sr-only">
           {expanded ? t.chat.input.hideControls : t.chat.input.showControls}
         </span>

@@ -119,7 +119,7 @@ describe('ExternalApiSettingsPage', () => {
       />
     );
 
-    await user.click(await screen.findByRole('checkbox', { name: /enable external api access/i }));
+    await user.click(await screen.findByRole('switch', { name: /enable external api access/i }));
     expect(setExternalApiEnabled).toHaveBeenCalledWith(true);
   });
 

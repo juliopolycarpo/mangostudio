@@ -1,5 +1,6 @@
-import { LoaderCircle } from 'lucide-react';
 import { lazy, Suspense } from 'react';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import type { DiffSelection } from './DiffViewer';
 
@@ -37,10 +38,5 @@ export function LazyDiffViewer(props: LazyDiffViewerProps) {
 function DiffViewerFallback() {
   const { t } = useI18n();
 
-  return (
-    <div className="flex min-h-32 flex-col items-center justify-center gap-2 px-4 text-center text-xs text-fg-muted">
-      <LoaderCircle size={18} className="animate-spin" />
-      <p>{t.git.diff.loading}</p>
-    </div>
-  );
+  return <EmptyState icon={<Spinner />} title={t.git.diff.loading} className="min-h-32" />;
 }

@@ -13,12 +13,14 @@
  * it, because only the machine running the vendor can.
  */
 
-import { AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useToast } from '@/components/ui/Toast';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { trustExternalWorkspace } from '@/services/external-agent-service';
+import { ExternalDialog } from './ExternalDialog';
 import {
   type ExternalWorkspaceTrustRequest,
   onExternalWorkspaceTrustPrompt,
@@ -81,51 +83,32 @@ function TrustDialog({ workspacePath, busy, onAccept, onCancel }: TrustDialogPro
   const dialogRef = useFocusTrap(onCancel);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        aria-label={labels.title}
-        className="w-full max-w-lg space-y-4 rounded-2xl border border-stroke bg-surface p-5 text-sm text-fg shadow-2xl outline-none"
-      >
-        <h2 className="text-base font-semibold">{labels.title}</h2>
-
-        <p className="break-all rounded-xl bg-control px-3 py-2 font-mono text-xs text-fg-muted">
-          {workspacePath}
-        </p>
-
-        <ul className="space-y-2 text-xs leading-relaxed text-fg-muted">
-          <li>{labels.rules}</li>
-          <li>{labels.mcp}</li>
-          <li>{labels.scope}</li>
-        </ul>
-
-        <p className="flex items-start gap-2 rounded-xl border border-warning bg-warning-subtle px-3 py-2 text-xs leading-relaxed text-warning">
-          <AlertTriangle size={14} className="mt-px shrink-0" />
-          {labels.warning}
-        </p>
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="cursor-pointer rounded-xl border border-stroke px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-fill-hover disabled:cursor-default disabled:opacity-50"
-          >
+    <ExternalDialog
+      dialogRef={dialogRef}
+      label={labels.title}
+      title={labels.title}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel} disabled={busy}>
             {labels.cancel}
-          </button>
-          <button
-            type="button"
-            onClick={onAccept}
-            disabled={busy}
-            className="cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
-          >
+          </Button>
+          <Button variant="primary" onClick={onAccept} loading={busy}>
             {busy ? labels.saving : labels.accept}
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </>
+      }
+    >
+      <p className="break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg">
+        {workspacePath}
+      </p>
+
+      <ul className="space-y-2 text-sm text-fg-muted">
+        <li>{labels.rules}</li>
+        <li>{labels.mcp}</li>
+        <li>{labels.scope}</li>
+      </ul>
+
+      <Callout tone="warning">{labels.warning}</Callout>
+    </ExternalDialog>
   );
 }

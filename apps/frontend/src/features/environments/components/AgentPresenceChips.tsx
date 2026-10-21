@@ -13,8 +13,11 @@
 import type { Environment } from '@mangostudio/shared/environments';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import { useQueries } from '@tanstack/react-query';
+import { Check, X } from 'lucide-react';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { agentCliStatusesQueryOptions } from '../queries';
 
 interface AgentPresenceChipsProps {
@@ -54,24 +57,24 @@ export function AgentPresenceChips({ targetId, environments }: AgentPresenceChip
           ? formatMessage(t.environments.scope.presencePresent, { environment: environment.name })
           : formatMessage(t.environments.scope.presenceAbsent, { environment: environment.name });
         return (
-          <span
+          <Badge
             key={environment.id}
+            variant={present ? 'success' : 'neutral'}
             data-testid="agent-presence-chip"
             data-environment-id={environment.id}
             data-present={present}
             title={formatMessage(t.environments.scope.presenceOn, {
               environment: environment.name,
             })}
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-              present
-                ? 'border-accent bg-accent-subtle text-accent-fg'
-                : 'border-stroke text-fg-muted'
-            }`}
           >
             <span aria-hidden="true">{environment.name}</span>
-            <span aria-hidden="true">{present ? '✓' : '✗'}</span>
+            {present ? (
+              <Check size={ICON_SM} aria-hidden="true" />
+            ) : (
+              <X size={ICON_SM} aria-hidden="true" />
+            )}
             <span className="sr-only">{presenceLabel}</span>
-          </span>
+          </Badge>
         );
       })}
     </div>

@@ -4,10 +4,15 @@ import type {
 } from '@mangostudio/shared/prompt-rules';
 import { Plus } from 'lucide-react';
 import { useCallback } from 'react';
-import { RuleFileCard } from '@/components/settings/RuleFileCard';
+import { RuleFileRows } from '@/components/settings/RuleFileRows';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 interface PromptSettingsProps {
   promptSettings: PromptSettingsData;
@@ -54,87 +59,59 @@ export function PromptSettings({
   };
 
   return (
-    <div className="space-y-4">
-      {/* ── Default Prompts ── */}
-      <Card className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {s.defaultPromptsLabel}
-        </h3>
+    <SettingsPage title={t.settings.tabs.prompts}>
+      <SettingsSection title={s.defaultPromptsLabel}>
+        <SettingsRow label={s.textSystemPromptLabel} htmlFor="text-system-prompt" layout="stacked">
+          <Textarea
+            id="text-system-prompt"
+            value={promptSettings.textSystemPrompt}
+            onChange={(e) => onTextSystemPromptChange(e.target.value)}
+            placeholder={s.textSystemPromptPlaceholder}
+            rows={4}
+          />
+        </SettingsRow>
+        <SettingsRow
+          label={s.imageSystemPromptLabel}
+          htmlFor="image-system-prompt"
+          layout="stacked"
+        >
+          <Textarea
+            id="image-system-prompt"
+            value={promptSettings.imageSystemPrompt}
+            onChange={(e) => onImageSystemPromptChange(e.target.value)}
+            placeholder={s.imageSystemPromptPlaceholder}
+            rows={4}
+          />
+        </SettingsRow>
+      </SettingsSection>
 
-        <label className="text-sm font-medium text-fg-muted" htmlFor="text-system-prompt">
-          {s.textSystemPromptLabel}
-        </label>
-        <textarea
-          id="text-system-prompt"
-          value={promptSettings.textSystemPrompt}
-          onChange={(e) => onTextSystemPromptChange(e.target.value)}
-          placeholder={s.textSystemPromptPlaceholder}
-          className="
-            w-full bg-control border border-stroke rounded-xl p-4
-            text-sm text-fg focus:ring-1 focus:ring-focus focus:outline-none
-            focus:border-focus placeholder:text-fg-subtle
-            min-h-25 transition-all resize-none           "
-        />
-
-        <label className="text-sm font-medium text-fg-muted" htmlFor="image-system-prompt">
-          {s.imageSystemPromptLabel}
-        </label>
-        <textarea
-          id="image-system-prompt"
-          value={promptSettings.imageSystemPrompt}
-          onChange={(e) => onImageSystemPromptChange(e.target.value)}
-          placeholder={s.imageSystemPromptPlaceholder}
-          className="
-            w-full bg-control border border-stroke rounded-xl p-4
-            text-sm text-fg focus:ring-1 focus:ring-focus focus:outline-none
-            focus:border-focus placeholder:text-fg-subtle
-            min-h-25 transition-all resize-none           "
-        />
-      </Card>
-
-      {/* ── Rule Files ── */}
-      <Card className="space-y-4 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {s.ruleFilesLabel}
-        </h3>
-
-        <RuleFileCard
+      <SettingsSection title={s.ruleFilesLabel}>
+        <RuleFileRows
           setting={promptSettings.agentsMd}
           isFixed
           onUpdate={handleUpdateAgentsMd}
           labels={ruleLabels}
         />
-
-        <RuleFileCard
+        <RuleFileRows
           setting={promptSettings.claudeMd}
           isFixed
           onUpdate={handleUpdateClaudeMd}
           labels={ruleLabels}
         />
-      </Card>
+      </SettingsSection>
 
-      {/* ── Custom Rules ── */}
-      <Card className="space-y-4 p-4 sm:p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
-          <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-              {s.customRulesLabel}
-            </h3>
-            <p className="text-sm text-fg-muted">{s.customRulesDescription}</p>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onAddCustomRule}
-            className="shrink-0 whitespace-nowrap"
-          >
-            <Plus className="w-3.5 h-3.5" />
+      <SettingsSection
+        title={s.customRulesLabel}
+        description={s.customRulesDescription}
+        action={
+          <Button variant="secondary" size="sm" onClick={onAddCustomRule}>
+            <Plus size={ICON_SM} />
             {s.addRule}
           </Button>
-        </div>
-
+        }
+      >
         {promptSettings.customRules.map((rule) => (
-          <RuleFileCard
+          <RuleFileRows
             key={rule.id}
             setting={rule}
             onUpdate={(updates) => onUpdateRuleFile(rule.id, updates)}
@@ -144,9 +121,9 @@ export function PromptSettings({
         ))}
 
         {promptSettings.customRules.length === 0 && (
-          <p className="text-sm text-fg-subtle text-center py-4">{s.addRule}</p>
+          <EmptyState title={s.addRule} className="min-h-0" />
         )}
-      </Card>
-    </div>
+      </SettingsSection>
+    </SettingsPage>
   );
 }

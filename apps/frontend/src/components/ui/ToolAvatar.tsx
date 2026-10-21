@@ -88,7 +88,7 @@ export function ToolAvatar({
       // announcing it here would say the tool's name twice.
       aria-hidden="true"
       title={name}
-      className={`inline-flex shrink-0 select-none items-center justify-center overflow-hidden font-bold uppercase leading-none ${TOOL_AVATAR_SIZE_CLASS[size]} ${className}`}
+      className={`inline-flex shrink-0 select-none items-center justify-center overflow-hidden font-semibold uppercase leading-none ${TOOL_AVATAR_SIZE_CLASS[size]} ${className}`}
     >
       {showImage ? (
         <img

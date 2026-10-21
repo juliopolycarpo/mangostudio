@@ -8,10 +8,12 @@
 
 import { MoreVertical, Pencil, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
+import { Button } from '@/components/ui/Button';
 import { Menu, MenuItem } from '@/components/ui/Menu';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { IdentityEditDialog } from './IdentityEditDialog';
 import type { ResolvedToolIdentity } from './resolve';
 import { useResetToolIdentity } from './use-tool-identities';
@@ -37,19 +39,21 @@ export function ToolIdentityMenu({ identity, defaultName }: ToolIdentityMenuProp
         onOpenChange={setMenuOpen}
         panelClassName="w-48"
         trigger={(triggerProps) => (
-          <button
+          <Button
             type="button"
+            variant="subtle"
+            size="icon"
             {...triggerProps}
             aria-label={formatMessage(labels.menu, { name: identity.name })}
             data-testid="tool-identity-menu"
-            className="cursor-pointer rounded-lg p-1.5 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
+            className="text-fg-muted"
           >
-            <MoreVertical size={16} />
-          </button>
+            <MoreVertical size={ICON_MD} />
+          </Button>
         )}
       >
         <MenuItem
-          icon={<Pencil size={13} />}
+          icon={<Pencil size={ICON_MD} />}
           onSelect={() => {
             setMenuOpen(false);
             setEditing(true);
@@ -58,7 +62,7 @@ export function ToolIdentityMenu({ identity, defaultName }: ToolIdentityMenuProp
           {labels.rename}
         </MenuItem>
         <MenuItem
-          icon={<RotateCcw size={13} />}
+          icon={<RotateCcw size={ICON_MD} />}
           // Nothing to reset until something is stored; an enabled entry would
           // promise an action that does nothing.
           disabled={!identity.customized || reset.isPending}

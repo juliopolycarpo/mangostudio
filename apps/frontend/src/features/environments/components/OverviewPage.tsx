@@ -34,7 +34,7 @@ export function OverviewPage() {
   const machine = useQuery(machineStatusQueryOptions());
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <p className="text-sm text-fg-muted">{t.environments.overview.description}</p>
 
       <SetupChecklist
@@ -82,7 +82,7 @@ function AgentsOverview() {
           hint={e.overview.agentsEmptyHint}
         />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {statuses.map((status) => (
             <OverviewAgentCard key={status.targetId} status={status} recipes={recipes.data ?? []} />
           ))}
@@ -110,7 +110,7 @@ function ToolchainsOverview() {
       {statuses.length === 0 ? (
         <EnvironmentPageState variant="empty" size="section" title={e.overview.toolchainsEmpty} />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
           {statuses.map((status) => (
             <OverviewToolchainCard key={status.id} status={status} />
           ))}

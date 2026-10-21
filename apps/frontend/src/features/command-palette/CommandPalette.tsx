@@ -37,8 +37,9 @@ import { StatusDot } from '@/components/ui/StatusDot';
 import { onFocusTrapEngaged } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
+import { cn } from '@/lib/utils';
 import type { CommandItem } from './lib/command-item';
 import { activeCommandIndex, rankCommands } from './lib/match';
 
@@ -249,10 +250,10 @@ export const CommandPalette = memo(function CommandPalette({
           if (event.target !== inputRef.current) event.preventDefault();
         }}
         {...dialogPanel}
-        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-stroke bg-fill-selected shadow-2xl"
+        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-stroke bg-surface-raised shadow-dialog"
         data-testid="command-palette"
       >
-        <div className="flex items-center gap-3 border-b border-stroke px-4 py-3">
+        <div className="flex h-12 items-center gap-3 border-b border-stroke px-4">
           <Search size={ICON_MD} aria-hidden="true" className="shrink-0 text-fg-muted" />
           <input
             ref={inputRef}
@@ -282,11 +283,7 @@ export const CommandPalette = memo(function CommandPalette({
             {groups.map((group, groupIndex) => (
               // biome-ignore lint/a11y/useSemanticElements: `group` is the role ARIA defines for a listbox's own sections; `<fieldset>` groups form controls and is not a valid listbox child.
               <div key={group.section} role="group" aria-labelledby={`${listId}-${group.section}`}>
-                <MicroLabel
-                  as="div"
-                  id={`${listId}-${group.section}`}
-                  className="px-4 pb-1 pt-2 text-fg-muted"
-                >
+                <MicroLabel as="div" id={`${listId}-${group.section}`} className="px-4 pb-1 pt-2">
                   {labels.sections[group.section]}
                 </MicroLabel>
                 {group.items.map((item, itemIndex) => {
@@ -314,14 +311,14 @@ export const CommandPalette = memo(function CommandPalette({
 
           {showEmpty ? (
             <EmptyState
-              icon={<SearchX size={20} />}
+              icon={<SearchX size={ICON_LG} />}
               title={formatMessage(t.common.noResultsFor, { query: deferredQuery.trim() })}
               hint={labels.emptyHint}
             />
           ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-[11px] text-fg-muted">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-xs text-fg-muted">
           <FooterHint keys="↑↓" label={labels.hints.navigate} />
           <FooterHint keys="⏎" label={labels.hints.run} />
           <FooterHint keys="⇥" label={labels.hints.sections} />
@@ -387,15 +384,16 @@ function CommandRow({
       // about which row Enter would run.
       onMouseMove={onActivate}
       onClick={() => void item.run()}
-      className={`mx-2 flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm ${
-        active ? 'bg-accent-subtle text-fg' : 'text-fg-muted'
-      }`}
+      className={cn(
+        'mx-2 flex h-10 cursor-pointer items-center gap-3 rounded-sm px-2 text-sm text-fg',
+        active && 'bg-fill-selected'
+      )}
     >
       {Icon ? (
         <Icon
-          size={ICON_SM}
+          size={ICON_MD}
           aria-hidden="true"
-          className={`shrink-0 ${active ? 'text-accent-fg' : 'text-fg-muted'}`}
+          className={cn('shrink-0', active ? 'text-fg' : 'text-fg-muted')}
         />
       ) : null}
       <span className="truncate">{item.label}</span>
@@ -406,7 +404,7 @@ function CommandRow({
       ) : null}
       <span className="ml-auto flex shrink-0 items-center gap-2">
         {item.badge ? (
-          <span className="micro-label flex items-center gap-1.5 normal-case tracking-normal">
+          <span className="flex items-center gap-1.5 font-mono text-micro text-fg-subtle">
             <StatusDot tone="neutral" className={item.badge.dotClassName} />
             {item.badge.label}
           </span>
@@ -416,7 +414,7 @@ function CommandRow({
             timestamp is taking, and the label is what the reader is scanning
             for. The words stay in the accessibility tree at every width. */}
         {item.meta ? (
-          <span className="text-[11px] text-fg-subtle max-sm:sr-only">{item.meta}</span>
+          <span className="font-mono text-micro text-fg-subtle max-sm:sr-only">{item.meta}</span>
         ) : null}
         {item.shortcut ? <KbdHint keys={item.shortcut} /> : null}
       </span>

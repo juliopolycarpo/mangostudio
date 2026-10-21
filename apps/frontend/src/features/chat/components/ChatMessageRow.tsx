@@ -2,6 +2,7 @@ import type { Message } from '@mangostudio/shared/chat';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { memo } from 'react';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
+import { cn } from '@/lib/utils';
 import { AssistantMessageBlock } from './AssistantMessageBlock';
 import { isImageInteraction } from './message-content';
 import { UserMessageBubble } from './UserMessageBubble';
@@ -63,7 +64,12 @@ function ChatMessageRowComponent({
           animate. New rows arrive at the foot of a feed that is already
           scrolling to meet them; there is no entrance to stage. */}
       <div
-        className={`flex flex-col gap-2 ${isUser ? 'items-end ml-auto max-w-[92%] sm:max-w-[85%] md:max-w-[80%]' : 'items-start mr-auto max-w-full'}`}
+        className={cn(
+          'flex flex-col gap-2',
+          isUser
+            ? 'ml-auto max-w-[92%] items-end sm:max-w-[85%] md:max-w-[80%]'
+            : 'mr-auto max-w-full items-start'
+        )}
       >
         {isUser ? (
           <UserMessageBubble msg={message} isImageTurn={isImageTurn} />

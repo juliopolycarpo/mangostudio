@@ -1,8 +1,10 @@
 import { getActiveTodo, summarizeTodos } from '@mangostudio/shared/todos';
 import { ChevronDown, ChevronUp, ListTodo } from 'lucide-react';
 import { useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { TodoItemRow } from './TodoItemRow';
 
 interface PinnedTodoPanelProps {
@@ -28,30 +30,30 @@ export function PinnedTodoPanel({ chatId }: PinnedTodoPanelProps) {
 
   return (
     <div className="mx-auto w-full max-w-3xl px-3 sm:px-6">
-      <div className="rounded-2xl border border-stroke bg-surface text-sm text-fg">
+      <div className="overflow-hidden rounded-md border border-stroke bg-surface text-sm text-fg">
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
           aria-label={expanded ? labels.panelCollapse : labels.panelExpand}
-          className="flex w-full cursor-pointer items-center gap-2 px-4 py-2.5 text-left"
+          className="flex h-10 w-full cursor-pointer items-center gap-2 px-4 text-left transition-colors hover:bg-fill-hover"
         >
-          <ListTodo size={16} className="shrink-0 text-fg-muted" />
+          <ListTodo size={ICON_MD} className="shrink-0 text-fg-muted" />
           <span className="font-semibold">{labels.title}</span>
-          <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-fg-muted">
+          <Badge>
             {labels.summary
               .replace('{completed}', String(summary.completed))
               .replace('{total}', String(summary.total))}
-          </span>
+          </Badge>
           {active && (
             <span className="min-w-0 flex-1 truncate text-xs text-fg-muted">
               {labels.panelCurrent.replace('{task}', active.content)}
             </span>
           )}
           {expanded ? (
-            <ChevronUp size={16} className="ml-auto shrink-0 text-fg-muted" />
+            <ChevronUp size={ICON_MD} className="ml-auto shrink-0 text-fg-muted" />
           ) : (
-            <ChevronDown size={16} className="ml-auto shrink-0 text-fg-muted" />
+            <ChevronDown size={ICON_MD} className="ml-auto shrink-0 text-fg-muted" />
           )}
         </button>
         {expanded && (

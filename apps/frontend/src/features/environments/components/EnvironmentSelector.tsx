@@ -1,18 +1,12 @@
-import type { EnvironmentConnectionState } from '@mangostudio/shared/environments';
 import { Server } from 'lucide-react';
 import { useId, useState } from 'react';
 import { ChipSelect } from '@/components/ui/ChipSelect';
-import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useEnvironmentEntitiesQuery } from '../queries';
-
-const STATUS_TONE: Record<EnvironmentConnectionState, StatusDotTone> = {
-  connected: 'accent',
-  connecting: 'warning',
-  disconnected: 'neutral',
-  error: 'error',
-};
+import { ENVIRONMENT_STATE_TONE } from './environment-status-tone';
 
 interface EnvironmentSelectorProps {
   environmentId: string;
@@ -68,8 +62,10 @@ export function EnvironmentSelector({
         // The chip renders before the listing lands; until it does the only
         // name for the current environment is its id.
         placeholder={unavailable ? t.chat.input.environmentsLoading : environmentId}
-        icon={<Server size={11} className="composer-chip-icon shrink-0" aria-hidden="true" />}
-        adornment={<StatusDot tone={STATUS_TONE[status]} pulse={status === 'connecting'} />}
+        icon={<Server size={ICON_SM} className="composer-chip-icon shrink-0" aria-hidden="true" />}
+        adornment={
+          <StatusDot tone={ENVIRONMENT_STATE_TONE[status]} pulse={status === 'connecting'} />
+        }
         title={actionError ?? selected?.name ?? t.chat.input.selectEnvironment}
         describedBy={statusId}
         className={actionError ? 'border-danger text-danger' : undefined}

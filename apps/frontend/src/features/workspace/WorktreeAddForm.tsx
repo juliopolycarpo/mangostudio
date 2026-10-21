@@ -1,6 +1,9 @@
 import type { AddWorktreeBody } from '@mangostudio/shared/git';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { Radio } from '@/components/ui/Radio';
 import { useI18n } from '@/hooks/use-i18n';
 import type { AddWorktreeInput } from './hooks/use-git-state';
 
@@ -32,6 +35,8 @@ export function WorktreeAddForm({
   const [path, setPath] = useState('');
   const [branch, setBranch] = useState('');
   const [mode, setMode] = useState<WorktreeMode>('new-branch');
+  const pathId = useId();
+  const branchId = useId();
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -42,67 +47,54 @@ export function WorktreeAddForm({
   };
 
   return (
-    <form
-      onSubmit={submit}
-      aria-label={labels.addTitle}
-      className="space-y-2.5 rounded-xl border border-stroke bg-control p-2.5"
-    >
-      <label className="block space-y-1">
-        <span className="text-[10px] font-semibold text-fg-muted">{labels.pathLabel}</span>
-        <input
-          value={path}
-          onChange={(event) => setPath(event.target.value)}
-          placeholder={labels.pathPlaceholder}
-          className="w-full rounded-lg border border-stroke bg-control px-2.5 py-1.5 font-mono text-[11px] text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
-        />
-      </label>
-      <p className="text-[10px] leading-4 text-fg-muted">{labels.pathHint}</p>
+    <form onSubmit={submit} aria-label={labels.addTitle}>
+      <Card padded={false} className="space-y-3 p-3">
+        <div className="space-y-1">
+          <Input
+            id={pathId}
+            label={labels.pathLabel}
+            value={path}
+            onChange={(event) => setPath(event.target.value)}
+            placeholder={labels.pathPlaceholder}
+            className="font-mono"
+          />
+          <p className="text-xs text-fg-muted">{labels.pathHint}</p>
+        </div>
 
-      <label className="block space-y-1">
-        <span className="text-[10px] font-semibold text-fg-muted">{labels.branchLabel}</span>
-        <input
+        <Input
+          id={branchId}
+          label={labels.branchLabel}
           value={branch}
           onChange={(event) => setBranch(event.target.value)}
           placeholder={labels.branchPlaceholder}
-          className="w-full rounded-lg border border-stroke bg-control px-2.5 py-1.5 font-mono text-[11px] text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
+          className="font-mono"
         />
-      </label>
 
-      <fieldset className="space-y-1">
-        <legend className="text-[10px] font-semibold text-fg-muted">{labels.modeLabel}</legend>
-        {MODES.map((option) => (
-          <label
-            key={option}
-            className="flex cursor-pointer items-center gap-2 text-[11px] text-fg-muted"
-          >
-            <input
-              type="radio"
-              name="worktree-branch-mode"
-              value={option}
-              checked={mode === option}
-              onChange={() => setMode(option)}
-              className="accent-accent"
-            />
-            {option === 'new-branch' ? labels.modeNew : labels.modeExisting}
-          </label>
-        ))}
-      </fieldset>
+        <fieldset className="space-y-1">
+          <legend className="mb-1 text-sm font-medium text-fg">{labels.modeLabel}</legend>
+          {MODES.map((option) => (
+            // biome-ignore lint/a11y/noLabelWithoutControl: the radio is a child of this label.
+            <label key={option} className="flex cursor-pointer items-center gap-2 text-sm text-fg">
+              <Radio
+                name="worktree-branch-mode"
+                value={option}
+                checked={mode === option}
+                onChange={() => setMode(option)}
+              />
+              {option === 'new-branch' ? labels.modeNew : labels.modeExisting}
+            </label>
+          ))}
+        </fieldset>
 
-      <div className="flex gap-1.5">
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="flex-1"
-          disabled={pending}
-          onClick={onCancel}
-        >
-          {labels.cancel}
-        </Button>
-        <Button type="submit" size="sm" className="flex-1" loading={pending} disabled={pending}>
-          {pending ? labels.submitting : labels.submit}
-        </Button>
-      </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" size="sm" disabled={pending} onClick={onCancel}>
+            {labels.cancel}
+          </Button>
+          <Button type="submit" size="sm" loading={pending} disabled={pending}>
+            {pending ? labels.submitting : labels.submit}
+          </Button>
+        </div>
+      </Card>
     </form>
   );
 }

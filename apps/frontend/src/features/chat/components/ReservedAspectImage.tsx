@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { cn } from '@/lib/utils';
 
 const DEFAULT_RESERVED_ASPECT_RATIO = '1 / 1';
 
@@ -33,18 +35,21 @@ export function ReservedAspectImage({
   const fitClassName = objectFit === 'contain' ? 'object-contain' : 'object-cover';
 
   return (
-    <div className={`relative overflow-hidden ${className ?? ''}`} style={{ aspectRatio }}>
+    <div className={cn('relative overflow-hidden', className)} style={{ aspectRatio }}>
       <img
         src={src}
         alt={alt}
-        className={`absolute inset-0 w-full h-full ${fitClassName} transition-opacity duration-300 ${
-          isLoaded ? 'opacity-100' : 'opacity-0'
-        } ${imageClassName ?? ''}`}
+        className={cn(
+          'absolute inset-0 size-full transition-opacity duration-300',
+          fitClassName,
+          isLoaded ? 'opacity-100' : 'opacity-0',
+          imageClassName
+        )}
         decoding="async"
         onLoad={() => setIsLoaded(true)}
         onError={onLoadError}
       />
-      {!isLoaded && <div aria-hidden className="absolute inset-0 animate-pulse bg-fill-selected" />}
+      {!isLoaded && <Skeleton className="absolute inset-0 rounded-none" />}
     </div>
   );
 }

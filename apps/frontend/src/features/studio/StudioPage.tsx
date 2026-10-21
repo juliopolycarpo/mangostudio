@@ -13,6 +13,7 @@ import { Link, useNavigate } from '@tanstack/react-router';
 import { Image, ImagePlus, LayoutGrid } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -21,6 +22,7 @@ import { GalleryTile } from '@/features/gallery/components/GalleryTile';
 import { useGalleryQuery } from '@/features/gallery/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 
 /** One row on the widest layout, and never a second page's worth of scrolling. */
 const RECENT_LIMIT = 4;
@@ -31,18 +33,13 @@ export function StudioPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6 sm:px-8 sm:py-8">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <div className="rounded-2xl bg-accent-subtle p-2.5 text-accent-fg sm:p-3">
-            <Image size={24} />
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-fg sm:text-3xl">{t.studio.title}</h1>
-            <p className="text-sm text-fg-muted">{t.studio.subtitle}</p>
-          </div>
+      <div className="mx-auto w-full max-w-5xl space-y-8 px-4 py-6 sm:px-8 sm:py-8">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-title font-semibold text-fg">{t.studio.title}</h1>
+          <p className="text-sm text-fg-muted">{t.studio.subtitle}</p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <GenerateCard />
           <GalleryCard />
         </div>
@@ -77,7 +74,7 @@ function GenerateCard() {
         }}
         className="self-start"
       >
-        <ImagePlus size={16} />
+        <ImagePlus size={ICON_MD} />
         {t.studio.generate.action}
       </Button>
     </SectionCard>
@@ -92,9 +89,9 @@ function GalleryCard() {
       <p className="text-sm text-fg-muted">{t.studio.gallery.description}</p>
       <Link
         to="/gallery"
-        className="inline-flex items-center gap-2 self-start rounded-lg bg-surface px-4 py-2 text-sm font-bold text-fg transition-colors hover:bg-fill-hover"
+        className="inline-flex h-8 items-center gap-2 self-start rounded-sm border border-stroke bg-control px-3 text-sm font-medium text-fg transition-colors hover:bg-control-hover active:bg-control-pressed"
       >
-        <LayoutGrid size={16} />
+        <LayoutGrid size={ICON_MD} />
         {t.studio.gallery.action}
       </Link>
     </SectionCard>
@@ -117,10 +114,7 @@ function RecentImages({ onView }: { onView: (item: GalleryItem) => void }) {
       label={t.studio.recent.label}
       action={
         items.length > 0 ? (
-          <Link
-            to="/gallery"
-            className="text-xs font-medium text-accent-fg transition-opacity hover:opacity-80"
-          >
+          <Link to="/gallery" className="text-xs font-medium text-accent-fg hover:underline">
             {t.studio.recent.viewAll}
           </Link>
         ) : null
@@ -154,26 +148,18 @@ function RecentStrip({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {Array.from({ length: RECENT_LIMIT }, (_, index) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
-          <Skeleton key={index} className="aspect-square rounded-2xl" />
+          <Skeleton key={index} className="aspect-square rounded-md" />
         ))}
       </div>
     );
   }
 
   if (status === 'error') {
-    return (
-      <EmptyState
-        icon={<Image size={32} className="opacity-50" />}
-        title={t.studio.recent.error}
-        tone="error"
-      />
-    );
+    return <Callout tone="danger">{t.studio.recent.error}</Callout>;
   }
 
   if (items.length === 0) {
-    return (
-      <EmptyState icon={<Image size={32} className="opacity-50" />} title={t.studio.recent.empty} />
-    );
+    return <EmptyState icon={<Image size={ICON_LG} />} title={t.studio.recent.empty} />;
   }
 
   return (

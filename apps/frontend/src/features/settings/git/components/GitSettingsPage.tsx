@@ -6,12 +6,18 @@ import {
 } from '@mangostudio/shared/git';
 import { RotateCcw } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingToggle } from '@/components/settings/SettingToggle';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { Callout } from '@/components/ui/Callout';
+import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { modelSelectOptions } from '@/lib/model-select-options';
 
 interface GitSettingsPageProps {
@@ -74,13 +80,8 @@ export function GitSettingsPage({
       : [];
 
   return (
-    <div className="space-y-4">
-      <Card className="space-y-3 p-4 sm:p-6">
-        <h2 className="text-lg font-bold text-fg">{labels.title}</h2>
-        <p className="text-sm text-fg-muted">{labels.description}</p>
-      </Card>
-
-      <Card className="space-y-5 p-4 sm:p-6">
+    <SettingsPage title={labels.title} description={labels.description}>
+      <SettingsSection>
         <SettingToggle
           label={labels.signCommitsLabel}
           description={labels.signCommitsDescription}
@@ -93,22 +94,18 @@ export function GitSettingsPage({
           checked={settings.signOff}
           onChange={setSignOff}
         />
-      </Card>
+      </SettingsSection>
 
-      <Card className="space-y-5 p-4 sm:p-6">
-        <div className="space-y-1">
-          <h3 className="text-base font-bold text-fg">{commitMessageLabels.title}</h3>
-          <p className="text-sm text-fg-muted">{commitMessageLabels.description}</p>
-          <p className="text-xs text-fg-muted">{commitMessageLabels.dataNotice}</p>
-        </div>
-
-        <div className="space-y-2">
-          <span className="block text-sm font-semibold text-fg">
-            {commitMessageLabels.modelLabel}
-          </span>
-          <span className="block text-xs text-fg-muted">
-            {commitMessageLabels.modelDescription}
-          </span>
+      <SettingsSection
+        title={commitMessageLabels.title}
+        description={commitMessageLabels.description}
+        notice={<Callout tone="info">{commitMessageLabels.dataNotice}</Callout>}
+      >
+        <SettingsRow
+          label={commitMessageLabels.modelLabel}
+          hint={commitMessageLabels.modelDescription}
+          layout="field"
+        >
           <Select
             value={settings.commitMessage.preferredModel}
             onChange={setPreferredCommitMessageModel}
@@ -119,45 +116,45 @@ export function GitSettingsPage({
               catalog.textModels
             )}
           />
-        </div>
+        </SettingsRow>
 
-        <label className="block space-y-2">
-          <span className="block text-sm font-semibold text-fg">
-            {commitMessageLabels.promptLabel}
-          </span>
-          <span className="block text-xs text-fg-muted">
-            {commitMessageLabels.promptDescription}
-          </span>
-          <textarea
+        <SettingsRow
+          label={commitMessageLabels.promptLabel}
+          hint={commitMessageLabels.promptDescription}
+          htmlFor="commit-message-prompt"
+          layout="stacked"
+          aside={
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setSystemPromptDraft(DEFAULT_COMMIT_MESSAGE_PROMPT);
+                resetCommitMessageSystemPrompt();
+              }}
+            >
+              <RotateCcw size={ICON_SM} />
+              {commitMessageLabels.resetPrompt}
+            </Button>
+          }
+        >
+          <Textarea
+            id="commit-message-prompt"
             value={systemPromptDraft}
             onChange={(event) => setSystemPromptDraft(event.target.value)}
             onBlur={persistSystemPrompt}
-            aria-label={commitMessageLabels.promptLabel}
             rows={8}
-            className="w-full resize-y rounded-xl border border-stroke bg-control px-4 py-3 font-mono text-xs leading-5 text-fg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus"
+            className="font-mono text-xs"
           />
-        </label>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            setSystemPromptDraft(DEFAULT_COMMIT_MESSAGE_PROMPT);
-            resetCommitMessageSystemPrompt();
-          }}
-        >
-          <RotateCcw size={14} />
-          {commitMessageLabels.resetPrompt}
-        </Button>
+        </SettingsRow>
 
-        <label className="block space-y-2">
-          <span className="block text-sm font-semibold text-fg">
-            {commitMessageLabels.maxDiffLabel}
-          </span>
-          <span className="block text-xs text-fg-muted">
-            {commitMessageLabels.maxDiffDescription}
-          </span>
-          <input
+        <SettingsRow
+          label={commitMessageLabels.maxDiffLabel}
+          hint={commitMessageLabels.maxDiffDescription}
+          htmlFor="commit-message-max-diff"
+        >
+          <Input
+            id="commit-message-max-diff"
             type="number"
             min={COMMIT_MESSAGE_MAX_DIFF_KB_MIN}
             max={COMMIT_MESSAGE_MAX_DIFF_KB_MAX}
@@ -165,11 +162,10 @@ export function GitSettingsPage({
             value={maxDiffKbDraft}
             onChange={(event) => setMaxDiffKbDraft(event.target.value)}
             onBlur={persistMaxDiffKb}
-            aria-label={commitMessageLabels.maxDiffLabel}
-            className="w-full rounded-xl border border-stroke bg-control px-4 py-2.5 text-sm text-fg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus"
+            className="w-24 text-center"
           />
-        </label>
-      </Card>
-    </div>
+        </SettingsRow>
+      </SettingsSection>
+    </SettingsPage>
   );
 }

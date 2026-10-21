@@ -11,8 +11,11 @@ import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environm
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { Link } from '@tanstack/react-router';
 import { LibraryBig } from 'lucide-react';
+import { buttonClassName } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { StepActions } from './StepActions';
 
 interface LibraryStepProps {
@@ -47,24 +50,22 @@ export function LibraryStep({ environment, consent, onContinue }: LibraryStepPro
 
   return (
     <div className="space-y-4" data-testid="onboarding-library-step">
-      <p className="text-fg-muted text-xs">{labels.libraryIntro}</p>
+      <p className="text-sm text-fg-muted">{labels.libraryIntro}</p>
 
       {permitsLibrary ? (
         <Link
           to="/environments/library"
           search={{ environmentId: environment.id }}
           data-testid="onboarding-library-link"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent-subtle px-2.5 font-semibold text-accent-fg text-xs transition-colors hover:bg-accent-hover"
+          className={buttonClassName('secondary')}
         >
-          <LibraryBig size={13} aria-hidden="true" />
+          <LibraryBig size={ICON_MD} aria-hidden="true" />
           {formatMessage(labels.libraryOpen, { name: environment.name })}
         </Link>
       ) : (
         // A machine whose consent excludes the library is not a broken one, and
         // a link that lands on a refusal would say otherwise.
-        <p className="rounded-xl border border-stroke bg-control px-3 py-2.5 text-fg-muted text-xs">
-          {labels.libraryNotPermitted}
-        </p>
+        <Callout tone="info">{labels.libraryNotPermitted}</Callout>
       )}
 
       <StepActions continueLabel={labels.continue} onContinue={onContinue} />

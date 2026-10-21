@@ -8,17 +8,25 @@
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/shared/library';
+import type {
+  LibraryCoverage,
+  LibraryResource,
+  PropagationSourceGroup,
+} from '@mangostudio/shared/library';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { formatBytes, hashPrefix, validInstances } from '../format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import {
@@ -29,10 +37,28 @@ import {
   libraryTargetsQueryOptions,
 } from '../queries';
 import { ContentGroupList } from './ContentGroupList';
+import { InlineNote } from './InlineNote';
 import { InstanceDiff } from './InstanceDiff';
 import { LibraryPageState } from './LibraryPageState';
 import { PropagationWizard } from './PropagationWizard';
 import { RemovalWizard } from './RemovalWizard';
+
+/** Copies that differ, or cannot be compared, are the ones worth a second look. */
+const DIVERGENCE_BADGE: Readonly<
+  Record<LibraryResource['divergence'], 'neutral' | 'success' | 'warning'>
+> = {
+  single: 'neutral',
+  uniform: 'success',
+  divergent: 'warning',
+  'not-comparable': 'neutral',
+  incomparable: 'warning',
+};
+
+const COVERAGE_DOT: Readonly<Record<LibraryCoverage['state'], StatusDotTone>> = {
+  present: 'success',
+  absent: 'neutral',
+  shadowed: 'neutral',
+};
 
 export function ResourceDetail({
   resourceKey,
@@ -158,7 +184,7 @@ export function ResourceDetail({
   const invalid = resource.instances.filter((instance) => !instance.valid);
 
   return (
-    <div className="space-y-5" data-testid="resource-detail" data-resource-key={resource.key}>
+    <div className="space-y-6" data-testid="resource-detail" data-resource-key={resource.key}>
       {header}
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
@@ -167,12 +193,15 @@ export function ResourceDetail({
             search={libraryEnvironmentSearch(scope.environmentId)}
             className="inline-flex items-center gap-1.5 text-fg-muted text-xs hover:text-fg"
           >
-            <ArrowLeft size={12} />
+            <ArrowLeft size={ICON_SM} aria-hidden="true" />
             {l.detail.back}
           </Link>
-          <h2 className="font-bold text-lg text-fg">{resource.key}</h2>
-          <p className="text-fg-muted text-xs">
-            {`${l.kinds[resource.ref.kind]} · ${l.divergence[resource.divergence]}`}
+          <h2 className="font-semibold text-fg text-title">{resource.key}</h2>
+          <p className="flex flex-wrap items-center gap-2 text-fg-muted text-sm">
+            {l.kinds[resource.ref.kind]}
+            <Badge variant={DIVERGENCE_BADGE[resource.divergence]}>
+              {l.divergence[resource.divergence]}
+            </Badge>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -182,7 +211,6 @@ export function ResourceDetail({
             </span>
           )}
           <Button
-            size="sm"
             variant="secondary"
             onClick={() => setRemoving(true)}
             disabled={!candidates.isResolved}
@@ -190,29 +218,27 @@ export function ResourceDetail({
           >
             {l.detail.remove}
           </Button>
-          <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
+          <Button onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
             {l.detail.propagate}
           </Button>
         </div>
       </header>
 
       {resource.divergence === 'not-comparable' && (
-        <p className="text-fg-muted text-xs" data-testid="not-comparable">
+        <Callout tone="neutral" data-testid="not-comparable">
           {l.detail.notComparable}
-        </p>
+        </Callout>
       )}
       {resource.divergence === 'incomparable' && (
-        <p className="text-fg-muted text-xs" data-testid="incomparable">
+        <Callout tone="warning" data-testid="incomparable">
           {l.detail.incomparable}
-        </p>
+        </Callout>
       )}
 
-      <section className="space-y-2">
-        <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-          {l.detail.contentHeading}
-        </h3>
+      <section className="space-y-3">
+        <h3 className="font-semibold text-base text-fg">{l.detail.contentHeading}</h3>
         {groups.length === 0 ? (
-          <p className="text-fg-muted text-xs">{l.detail.notFound}</p>
+          <p className="text-fg-muted text-sm">{l.detail.notFound}</p>
         ) : (
           <ContentGroupList
             groups={groups}
@@ -230,7 +256,7 @@ export function ResourceDetail({
         )}
 
         {groups.length >= 2 && resource.divergence !== 'incomparable' && (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <Button variant="secondary" size="sm" onClick={() => setComparing((open) => !open)}>
               {comparing
                 ? l.detail.compareHide
@@ -255,35 +281,33 @@ export function ResourceDetail({
                 environmentId={scope.environmentId}
               />
             )}
-            {groups.length > 2 && (
-              <p className="text-[11px] text-fg-muted">{l.detail.compareSelect}</p>
-            )}
+            {groups.length > 2 && <p className="text-fg-muted text-xs">{l.detail.compareSelect}</p>}
           </div>
         )}
       </section>
 
       {invalid.length > 0 && (
-        <ul className="space-y-1" data-testid="invalid-instances">
-          {invalid.map((instance) => (
-            <li key={instance.locationId} className="text-[11px] text-danger">
-              {formatMessage(l.detail.invalidInstance, {
-                location: locationLabel(instance.locationId),
-              })}
-              {instance.valid === false && ` — ${l.invalidReason[instance.invalidReason]}`}
-            </li>
-          ))}
-        </ul>
+        <Callout tone="danger" data-testid="invalid-instances">
+          <ul className="space-y-1">
+            {invalid.map((instance) => (
+              <li key={instance.locationId}>
+                {formatMessage(l.detail.invalidInstance, {
+                  location: locationLabel(instance.locationId),
+                })}
+                {instance.valid === false && ` — ${l.invalidReason[instance.invalidReason]}`}
+              </li>
+            ))}
+          </ul>
+        </Callout>
       )}
 
-      <section className="space-y-2">
-        <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-          {l.detail.coverageHeading}
-        </h3>
-        <ul className="space-y-1.5">
+      <section className="space-y-3">
+        <h3 className="font-semibold text-base text-fg">{l.detail.coverageHeading}</h3>
+        <ul className="space-y-2">
           {resource.coverage.map((coverage) => (
             <li
               key={coverage.targetId}
-              className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs"
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm"
               data-testid="coverage-row"
               data-target-id={coverage.targetId}
               data-state={coverage.state}
@@ -291,9 +315,12 @@ export function ResourceDetail({
               <span className="w-28 shrink-0 font-medium text-fg">
                 {l.targets[coverage.targetId]}
               </span>
-              <span className="text-fg-muted">{l.coverage[coverage.state]}</span>
+              <span className="inline-flex items-center gap-2 text-fg-muted">
+                <StatusDot tone={COVERAGE_DOT[coverage.state]} className="self-center" />
+                {l.coverage[coverage.state]}
+              </span>
               {coverage.effectiveLocationId && (
-                <span className="text-fg-muted">
+                <span className="text-fg-muted text-xs">
                   {formatMessage(l.detail.via, {
                     location: locationLabel(coverage.effectiveLocationId),
                   })}
@@ -305,7 +332,7 @@ export function ResourceDetail({
                 where they asked.
               */}
               {coverage.shadowedLocationIds.length > 0 && (
-                <span className="text-fg-muted">
+                <span className="text-fg-muted text-xs">
                   {formatMessage(l.detail.alsoIn, {
                     locations: coverage.shadowedLocationIds.map(locationLabel).join(', '),
                   })}
@@ -314,7 +341,7 @@ export function ResourceDetail({
             </li>
           ))}
         </ul>
-        {targetsQuery.isError && <p className="text-[11px] text-danger">{l.matrix.loadError}</p>}
+        {targetsQuery.isError && <InlineNote tone="danger">{l.matrix.loadError}</InlineNote>}
       </section>
 
       {propagating && (

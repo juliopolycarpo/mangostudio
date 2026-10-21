@@ -3,13 +3,21 @@
  */
 
 import type { ProviderSettingsDescriptor } from '@mangostudio/shared/provider-settings';
+import { ChevronRight } from 'lucide-react';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { EFFORT_LABEL_KEYS } from '../constants';
 
 interface ProviderSettingsCardProps {
   descriptor: ProviderSettingsDescriptor;
 }
 
+/**
+ * The card is a link's face, so the hover fill lives on the link's `group`: the
+ * row answers the pointer with `fill-hover` and the chevron says it leads
+ * somewhere.
+ */
 export function ProviderSettingsCard({ descriptor }: ProviderSettingsCardProps) {
   const { t } = useI18n();
   const providerName = t.providers[descriptor.provider] ?? descriptor.displayName;
@@ -18,42 +26,31 @@ export function ProviderSettingsCard({ descriptor }: ProviderSettingsCardProps) 
     .join(', ');
 
   return (
-    <div className="rounded-2xl border border-stroke bg-control p-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-fg">{providerName}</h3>
-            {descriptor.deprecated ? (
-              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200 border border-amber-500/20">
-                {t.settings.providers.deprecatedBadge}
-              </span>
-            ) : null}
+    <div className="flex items-center gap-4 rounded-md border border-stroke bg-surface p-4 transition-colors group-hover:bg-fill-hover">
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold text-fg">{providerName}</h3>
+          {descriptor.deprecated ? (
+            <Badge variant="warning">{t.settings.providers.deprecatedBadge}</Badge>
+          ) : null}
+        </div>
+        {/* TODO: connectorCount / enabledModelCount when the API returns them */}
+        <p className="text-xs text-fg-muted">
+          {descriptor.deprecated ? t.settings.providers.deprecatedNote : reasoningLabel}
+        </p>
+        {descriptor.deprecated ? null : (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {descriptor.reasoning.thinkingToggleSupported && (
+              <Badge>{t.settings.providers.capabilityThinking}</Badge>
+            )}
+            {descriptor.toolUseSupported && <Badge>{t.settings.providers.capabilityTools}</Badge>}
+            {descriptor.promptCachingSupported && (
+              <Badge>{t.settings.providers.capabilityCaching}</Badge>
+            )}
           </div>
-          {/* TODO: connectorCount / enabledModelCount when the API returns them */}
-          <p className="mt-0.5 text-xs text-fg-muted">
-            {descriptor.deprecated ? t.settings.providers.deprecatedNote : reasoningLabel}
-          </p>
-        </div>
+        )}
       </div>
-      {descriptor.deprecated ? null : (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {descriptor.reasoning.thinkingToggleSupported && (
-            <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-medium text-fg-muted">
-              {t.settings.providers.capabilityThinking}
-            </span>
-          )}
-          {descriptor.toolUseSupported && (
-            <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-medium text-fg-muted">
-              {t.settings.providers.capabilityTools}
-            </span>
-          )}
-          {descriptor.promptCachingSupported && (
-            <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-medium text-fg-muted">
-              {t.settings.providers.capabilityCaching}
-            </span>
-          )}
-        </div>
-      )}
+      <ChevronRight size={ICON_MD} className="shrink-0 text-fg-subtle" aria-hidden="true" />
     </div>
   );
 }

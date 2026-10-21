@@ -5,6 +5,7 @@
 import type { RuntimeFinding } from '@mangostudio/shared/environments';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { describeFinding, type FindingSeverity, findingSeverity, keyedFindings } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 
@@ -22,7 +23,13 @@ const SEVERITY_STYLES: Record<FindingSeverity, string> = {
  * The single place severity turns into a glyph and a colour, so the per-runtime
  * list and the health screen can never drift into disagreeing about it.
  */
-export function FindingIcon({ severity, size = 16 }: { severity: FindingSeverity; size?: number }) {
+export function FindingIcon({
+  severity,
+  size = ICON_MD,
+}: {
+  severity: FindingSeverity;
+  size?: number;
+}) {
   const Icon = severity === 'fail' ? CircleAlert : TriangleAlert;
   return <Icon size={size} className={`mt-0.5 shrink-0 ${SEVERITY_STYLES[severity]}`} />;
 }

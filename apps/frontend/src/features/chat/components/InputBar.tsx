@@ -1,10 +1,9 @@
 import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
-import { AlertTriangle, CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
+import { CornerDownRight, FileText, Send, Square, X } from 'lucide-react';
 import {
   type CSSProperties,
   type DragEvent,
-  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -13,11 +12,13 @@ import {
   useState,
 } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { KbdHint } from '@/components/ui/KbdHint';
+import { Spinner } from '@/components/ui/Spinner';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { steerExternalTurn } from '@/services/external-agent-service';
 import { filesFromClipboard, useComposerAttachments } from '../hooks/use-composer-attachments';
 import { useComposerDraft } from '../hooks/use-composer-draft';
@@ -413,26 +414,30 @@ export function InputBar({
           // machine" and "wait for discovery" are four different things to do,
           // and a composer that goes quiet without saying which leaves the user
           // clicking Send at nothing.
-          <ComposerNotice tone="warning">
-            {externalUnavailableReason
-              ? `${t.externalAgents.unavailable[externalUnavailableReason]} — ${t.externalAgents.selector.unavailableHere}`
-              : t.externalAgents.selector.unavailableHere}
-          </ComposerNotice>
+          <Callout
+            tone="warning"
+            role="status"
+            className="mb-2"
+            title={
+              externalUnavailableReason
+                ? `${t.externalAgents.unavailable[externalUnavailableReason]} — ${t.externalAgents.selector.unavailableHere}`
+                : t.externalAgents.selector.unavailableHere
+            }
+          />
         )}
 
-        {steerError && <ComposerNotice tone="error">{steerError}</ComposerNotice>}
+        {steerError && <Callout tone="danger" role="status" className="mb-2" title={steerError} />}
 
-        {uploads.error && <ComposerNotice tone="error">{uploads.error}</ComposerNotice>}
+        {uploads.error && (
+          <Callout tone="danger" role="status" className="mb-2" title={uploads.error} />
+        )}
 
         {(pendingAttachments.length > 0 || uploads.uploading.length > 0) && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
+          <div className="mb-2 flex flex-wrap gap-2">
             {pendingAttachments.map((attachment) => (
-              <span
-                key={attachment.id}
-                className="flex items-center gap-1.5 rounded-full border border-stroke bg-control px-2.5 py-1 text-[11px] text-fg-muted"
-              >
-                <FileText size={12} className="composer-chip-icon shrink-0" />
-                <span className="max-w-[12rem] truncate">{attachment.originalName}</span>
+              <span key={attachment.id} className="terminal-chip">
+                <FileText size={ICON_SM} className="shrink-0" />
+                <span className="max-w-[12rem] truncate text-fg">{attachment.originalName}</span>
                 <button
                   type="button"
                   onClick={() =>
@@ -440,24 +445,20 @@ export function InputBar({
                       current.filter((pending) => pending.id !== attachment.id)
                     )
                   }
-                  className="text-fg-muted hover:text-fg"
+                  className="flex shrink-0 cursor-pointer items-center rounded-xs transition-colors hover:text-fg"
                   aria-label={t.chat.input.removeAttachment}
                 >
-                  <X size={12} />
+                  <X size={ICON_SM} />
                 </button>
               </span>
             ))}
             {uploads.uploading.map((name) => (
-              <span
-                key={name}
-                role="status"
-                className="flex items-center gap-1.5 rounded-full border border-stroke px-2.5 py-1 text-[11px] text-fg-muted"
-              >
-                <span className="size-3 shrink-0 animate-spin rounded-full border border-current border-t-transparent" />
+              <div key={name} role="status" className="terminal-chip">
+                <Spinner size="sm" className="shrink-0" />
                 <span className="max-w-[12rem] truncate">
                   {formatMessage(t.chat.input.attachUploading, { name })}
                 </span>
-              </span>
+              </div>
             ))}
           </div>
         )}
@@ -482,7 +483,7 @@ export function InputBar({
           // The whole frame reads this one property; nothing below hard-codes a
           // colour. See `lib/composer-accent.ts`.
           style={{ [COMPOSER_ACCENT_PROPERTY]: composerAccent(runner) } as CSSProperties}
-          className="composer-shell shadow-2xl"
+          className="composer-shell"
         >
           <ComposerChipRow
             {...CHIP_ROW_DEFAULTS}
@@ -499,7 +500,7 @@ export function InputBar({
               box grows under it, the way a shell prompt does. The padding
               moved onto this row so the two share a text box and stay on the
               same baseline. */}
-          <div className="relative flex items-start gap-2 px-3 py-2.5">
+          <div className="relative flex items-start gap-2 px-3 py-3">
             {slashOpen && (
               <SlashCommandMenu
                 entries={slashMatches}
@@ -571,7 +572,9 @@ export function InputBar({
               }}
               disabled={inputDisabled}
               style={{ maxHeight: `${TEXTAREA_MAX_HEIGHT_PX}px` }}
-              className="app-scrollbar composer-input min-w-0 flex-1 resize-none bg-transparent p-0 text-sm leading-5 text-fg outline-none placeholder:text-fg-subtle disabled:opacity-60"
+              // No outline of its own: the shell's border is the focus indicator
+              // (`.composer-shell:focus-within`), in the runner's colour.
+              className="app-scrollbar composer-input min-w-0 flex-1 resize-none bg-transparent p-0 text-sm leading-5 text-fg outline-none placeholder:text-fg-subtle disabled:opacity-50"
               placeholder={placeholder}
             />
           </div>
@@ -599,57 +602,53 @@ export function InputBar({
               )}
             </div>
 
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex shrink-0 items-center gap-2">
               {isGenerating && (
                 <Button
                   type="button"
                   variant="secondary"
+                  size="sm"
                   onClick={onStop}
                   title={t.chat.input.stop}
-                  className={`text-xs hover:bg-danger-subtle hover:text-danger shrink-0 ${
-                    showSteerAffordance ? 'size-9 p-0' : 'h-9 gap-1.5 px-3'
-                  }`}
+                  className="shrink-0"
                 >
                   {!showSteerAffordance && (
                     <span className="hidden sm:inline">{t.chat.input.stop}</span>
-                  )}{' '}
-                  <Square size={12} />
+                  )}
+                  <Square size={ICON_SM} />
                 </Button>
               )}
               {/* Same button, different meaning while a steerable turn runs — see
-                  docs/architecture/external-agents.md's steering section. Distinct
-                  styling so nobody reads it as an ordinary send. */}
+                  docs/architecture/external-agents.md's steering section. Secondary
+                  rather than primary so nobody reads it as an ordinary send: Send is
+                  the product accent, and steering only ever happens on a vendor CLI. */}
               {showSteerAffordance ? (
                 <Button
                   type="submit"
-                  variant="subtle"
+                  variant="secondary"
+                  size="sm"
                   disabled={!chatId || steering || !prompt.trim()}
                   title={t.externalAgents.steer.buttonHint}
-                  // Steering only ever happens on a vendor CLI, so the one
-                  // colour it must not be is MangoStudio's.
-                  style={{ borderColor: 'var(--composer-accent)', color: 'var(--composer-accent)' }}
-                  className="h-9 shrink-0 gap-1.5 rounded-full border-2 px-3.5 text-xs hover:bg-fill-hover"
+                  className="shrink-0"
                 >
-                  <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
-                  <CornerDownRight size={ICON_SM} className="sm:hidden" />
-                  <CornerDownRight size={ICON_MD} className="hidden sm:block" />
+                  <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>
+                  <CornerDownRight size={ICON_SM} />
                 </Button>
               ) : !isGenerating ? (
+                // Always the product accent, whoever is answering: one primary
+                // action, one colour. The runner shows on the frame, the prompt
+                // mark, the caret and its chip — not here.
                 <Button
                   type="submit"
+                  size="sm"
                   disabled={disabled || cannotSubmit || !prompt.trim()}
-                  className="h-9 shrink-0 gap-1.5 rounded-full px-3.5 text-xs shadow-none hover:brightness-110 hover:opacity-100"
-                  // A flat fill rather than the mango gradient: the gradient
-                  // names the product, and this button belongs to whoever runs
-                  // the turn. The light theme darkens it a step — see the
-                  // `--composer-send-fill` rules in `index.css`.
-                  style={{ background: 'var(--composer-send-fill)' }}
+                  className="shrink-0"
                 >
-                  <span className="hidden sm:inline">{t.chat.input.send}</span>{' '}
+                  <span className="hidden sm:inline">{t.chat.input.send}</span>
                   <Send size={ICON_SM} className="sm:hidden" />
                   <KbdHint
                     keys="⏎"
-                    className="hidden sm:inline-flex border-transparent bg-on-primary/15 text-on-accent"
+                    className="hidden border-current bg-transparent text-current sm:inline-flex"
                   />
                 </Button>
               ) : null}
@@ -659,14 +658,14 @@ export function InputBar({
           {dragging ? (
             <span
               aria-hidden="true"
-              className="composer-drop-hint pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl font-mono text-xs"
+              className="composer-drop-hint pointer-events-none absolute inset-0 flex items-center justify-center rounded-lg font-mono text-xs"
             >
               {t.chat.input.dropHint}
             </span>
           ) : null}
         </form>
 
-        <p className="mt-2 text-center font-mono text-[10px] text-fg-subtle sm:mt-3">
+        <p className="mt-2 text-center font-mono text-micro text-fg-subtle sm:mt-3">
           {t.common.disclaimer}
           {/* The quiet line the user should never have to guess at: MangoStudio's
               own tool settings do not apply to a turn it is not running. It sits
@@ -683,34 +682,6 @@ export function InputBar({
         </p>
       </div>
     </footer>
-  );
-}
-
-const NOTICE_TONE_CLASS = {
-  warning: 'text-warning',
-  error: 'text-danger',
-} as const;
-
-/**
- * A one-line problem above the composer: the runner cannot start a turn, a
- * steer was refused, an upload failed. One component because the three read as
- * one strip and had drifted into three copies of the same class string.
- */
-function ComposerNotice({
-  tone,
-  children,
-}: {
-  tone: keyof typeof NOTICE_TONE_CLASS;
-  children: ReactNode;
-}) {
-  return (
-    <p
-      role="status"
-      className={`mb-2 flex items-center gap-1.5 text-[11px] ${NOTICE_TONE_CLASS[tone]}`}
-    >
-      <AlertTriangle size={12} className="shrink-0" />
-      {children}
-    </p>
   );
 }
 

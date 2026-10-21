@@ -6,10 +6,13 @@
 
 import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { RefreshCw } from 'lucide-react';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { Callout } from '@/components/ui/Callout';
+import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import {
   type SkillSourceKey,
   useRescanLibrary,
@@ -29,60 +32,56 @@ export function SkillSourceToggles({ sources }: SkillSourceTogglesProps) {
   const rescan = useRescanLibrary();
 
   return (
-    <Card className="space-y-3 p-4 sm:p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-            {s.sourcesTitle}
-          </h3>
-          <p className="text-sm text-fg-muted">{s.sourcesDescription}</p>
-        </div>
+    <SettingsSection
+      title={s.sourcesTitle}
+      description={s.sourcesDescription}
+      action={
         <Button
-          variant="subtle"
+          variant="secondary"
           size="sm"
           loading={rescan.isPending}
           onClick={() => rescan.mutate()}
           aria-label={s.refreshLibrary}
-          className="shrink-0"
         >
-          {!rescan.isPending && <RefreshCw size={14} />}
+          {!rescan.isPending && <RefreshCw size={ICON_SM} />}
           <span className="hidden sm:inline">
             {rescan.isPending ? s.refreshingLibrary : s.refreshLibrary}
           </span>
         </Button>
-      </div>
-      {rescan.isError && (
-        <p className="text-xs text-danger" role="alert">
-          {s.refreshLibraryFailed}
-        </p>
-      )}
-      <div className="space-y-3">
-        {SOURCE_KEYS.map((source) => {
-          const state = sources[source];
-          return (
-            <div key={source} className="flex items-start justify-between gap-4">
-              <div className="space-y-0.5 min-w-0">
-                <h4 className="text-sm font-medium text-fg">{s.sourceLabels[source]}</h4>
-                <p className="text-[11px] text-fg-subtle font-mono break-all">{state.path}</p>
-                {!state.exists && (
-                  <p className="text-xs text-fg-muted italic">{s.sourceNotFound}</p>
-                )}
-              </div>
-              <label className="flex items-center gap-2 shrink-0">
-                <span className="text-xs text-fg-muted">
-                  {state.enabled ? s.enabled : s.disabled}
+      }
+      notice={
+        rescan.isError ? (
+          <Callout tone="danger" role="alert">
+            {s.refreshLibraryFailed}
+          </Callout>
+        ) : undefined
+      }
+    >
+      {SOURCE_KEYS.map((source) => {
+        const state = sources[source];
+        return (
+          <SettingsRow
+            key={source}
+            as="label"
+            label={s.sourceLabels[source]}
+            hint={
+              <>
+                <span className="block break-all font-mono text-micro text-fg-subtle">
+                  {state.path}
                 </span>
-                <Checkbox
-                  checked={state.enabled}
-                  disabled={isPending}
-                  onChange={() => mutate({ source, enabled: !state.enabled })}
-                  aria-label={s.sourceLabels[source]}
-                />
-              </label>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
+                {!state.exists && <span className="block">{s.sourceNotFound}</span>}
+              </>
+            }
+          >
+            <ToggleSwitch
+              checked={state.enabled}
+              disabled={isPending}
+              onChange={() => mutate({ source, enabled: !state.enabled })}
+              aria-label={s.sourceLabels[source]}
+            />
+          </SettingsRow>
+        );
+      })}
+    </SettingsSection>
   );
 }

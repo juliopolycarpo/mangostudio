@@ -112,7 +112,7 @@ rows, `md` (24px) inline, `lg` (40px) for a page waiting on data. `Skeleton` is 
 
 ### `EmptyState`
 
-A centred block: 24px icon in `fg-subtle`, a title at 14px/500, a hint at 12px in
+A centred block: 20px icon (`ICON_LG`) in `fg-subtle`, a title at 14px/500, a hint at 12px in
 `fg-muted` (max 320px) and an optional `secondary` action. No illustrations and no
 coloured disc behind the icon.
 

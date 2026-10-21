@@ -2,9 +2,11 @@ import type { GalleryItem } from '@mangostudio/shared/types';
 import { Download, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useRef } from 'react';
+import { Button } from '@/components/ui/Button';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
 interface GalleryLightboxProps {
@@ -14,7 +16,7 @@ interface GalleryLightboxProps {
 }
 
 /**
- * The full image over a dimmed page, with its prompt and a download link.
+ * The full image over the scrim, with its prompt and a download link.
  *
  * Takes the selected item rather than owning it: the gallery grid and the
  * studio's recent strip both open this, and neither should have to reimplement
@@ -22,8 +24,8 @@ interface GalleryLightboxProps {
  *
  * It carries the same keyboard contract as the app's other overlays, through
  * the same hook: Escape closes, Tab stays inside, and focus returns to the
- * tile that opened it. Without that, a full-screen black overlay is something
- * a keyboard user can neither dismiss nor tab out from behind.
+ * tile that opened it. Without that, a full-screen overlay is something a
+ * keyboard user can neither dismiss nor tab out from behind.
  *
  * // Usage: <GalleryLightbox item={selected} onClose={() => setSelected(null)} />
  */
@@ -49,39 +51,41 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
           // close button in its corner is part of the ring Tab cycles.
           tabIndex={-1}
           {...overlay}
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8 bg-black/90 outline-none"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-scrim p-4 outline-none md:p-8"
           onClick={onClose}
         >
-          <button
+          <Button
             type="button"
+            variant="secondary"
+            size="icon"
             aria-label={t.gallery.close}
-            className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-colors"
+            className="absolute top-4 right-4"
             onClick={onClose}
           >
-            <X size={24} />
-          </button>
+            <X size={ICON_MD} />
+          </Button>
 
           <motion.div
             {...dialogPanel}
-            className="relative max-w-5xl w-full max-h-full flex flex-col items-center"
+            className="relative flex max-h-full w-full max-w-5xl flex-col items-center"
             onClick={(event) => event.stopPropagation()}
           >
             <img
               src={item.imageUrl}
               alt={item.prompt}
-              className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-2xl"
+              className="max-h-[75vh] max-w-full rounded-lg object-contain"
               referrerPolicy="no-referrer"
             />
-            <div className="mt-6 p-4 bg-fill-selected rounded-xl max-w-2xl w-full text-center border border-stroke">
-              <p className="text-fg font-medium">{item.prompt}</p>
+            <div className="mt-4 flex w-full max-w-2xl flex-col gap-4 rounded-md border border-stroke bg-surface-raised p-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="min-w-0 text-sm text-fg">{item.prompt}</p>
               <a
                 href={item.imageUrl}
                 download={buildGeneratedImageFilename(t.common.downloadFilenamePrefix, item.id)}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-accent text-on-accent rounded-full text-sm font-bold hover:bg-accent-hover transition-colors"
+                className="inline-flex h-8 shrink-0 items-center justify-center gap-2 self-start rounded-sm bg-accent px-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-hover active:bg-accent-pressed sm:self-auto"
               >
-                <Download size={16} />
+                <Download size={ICON_MD} />
                 {t.gallery.download}
               </a>
             </div>

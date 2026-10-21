@@ -16,12 +16,14 @@ import type {
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Link } from '@tanstack/react-router';
 import { SectionCard } from '@/components/ui/SectionCard';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { useExternalAccountLimits } from '@/features/external-agents/use-external-account-limits';
 import { useExternalAgents } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { agentIdentityTokens } from '@/lib/agent-identity';
 import { formatMessage } from '@/lib/i18n-format';
+import { CARD_LINK_CLASS } from './card-link';
 import { HubSkeletonLines } from './HubSkeletonLines';
 
 interface AgentsCardProps {
@@ -38,11 +40,6 @@ interface AgentsCardProps {
   className?: string;
 }
 
-const UNAVAILABLE_DOT: Readonly<Record<'warning' | 'error', string>> = {
-  warning: 'bg-warning',
-  error: 'bg-danger',
-};
-
 export function AgentsCard({
   environmentId,
   activeTargetId,
@@ -57,13 +54,10 @@ export function AgentsCard({
   return (
     <SectionCard
       label={labels.label}
-      tone="accent"
+      tone="neutral"
       className={className}
       action={
-        <Link
-          to="/environments/agents"
-          className="micro-label text-accent-fg transition-colors hover:text-accent-fg"
-        >
+        <Link to="/environments/agents" className={CARD_LINK_CLASS}>
           {labels.manage}
         </Link>
       }
@@ -75,7 +69,7 @@ export function AgentsCard({
       ) : null}
 
       {external.agents.length > 0 ? (
-        <ul className="flex flex-wrap gap-1.5">
+        <ul className="flex flex-wrap gap-2">
           {external.agents.map((agent) => (
             <li key={agent.targetId}>
               <AgentPill descriptor={agent} sessionCount={sessionCounts?.[agent.targetId]} />
@@ -114,21 +108,20 @@ function AgentPill({
 
   return (
     <span
-      className={`terminal-chip h-6 max-w-full gap-1.5 ${problem ? 'opacity-70' : ''}`}
+      className="terminal-chip max-w-full gap-1.5"
       title={note}
       data-testid="hub-agent-pill"
       data-target={descriptor.targetId}
       data-availability={problem ?? 'ok'}
     >
       {/* One dot, not two. It carries harness identity while the agent is
-          usable and switches to the problem's colour when it is not — which is
-          the only moment the identity colour has something more urgent to say.
-          The words behind it are in the title and the sr-only span. */}
-      <span
-        aria-hidden="true"
-        className={`inline-block size-1.5 shrink-0 rounded-full ${
-          problem ? UNAVAILABLE_DOT[problem] : agentIdentityTokens(descriptor.targetId).dotClass
-        }`}
+          usable and switches to the problem's status colour when it is not —
+          which is the only moment the identity colour has something more
+          urgent to say. The words behind it are in the title and the sr-only
+          span. */}
+      <StatusDot
+        tone={problem ?? 'neutral'}
+        className={problem ? undefined : agentIdentityTokens(descriptor.targetId).dotClass}
       />
       {/* The harness name never truncates and the version always may: a vendor
           can report anything here (Claude answers `2.1.241 (Claude Code)`) and

@@ -1,10 +1,12 @@
 import type { GitBranchInfo } from '@mangostudio/shared/git';
 import { Check, History, Sparkles } from 'lucide-react';
 import { useState } from 'react';
+import { Button } from '@/components/ui/Button';
 import { MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { SplitButton } from '@/components/ui/SplitButton';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useCommit, useGitPull, useGitPush, useStagePaths } from './hooks/use-git-state';
 
@@ -160,17 +162,19 @@ export function CommitActions({
   };
 
   return (
-    <div className="flex items-stretch gap-1.5">
-      <button
+    <div className="flex items-stretch gap-2">
+      <Button
         type="button"
+        variant="secondary"
+        size="icon"
         aria-label={commitLabels.generate}
         title={generating ? commitLabels.generating : commitLabels.generate}
         disabled={!canGenerate || busy}
         onClick={onGenerate}
-        className="flex w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-surface text-fg-muted transition-colors hover:bg-fill-hover hover:text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"
+        className="size-7 shrink-0 text-fg-muted"
       >
-        <Sparkles size={14} className={generating ? 'animate-pulse' : undefined} />
-      </button>
+        <Sparkles size={ICON_SM} className={generating ? 'animate-pulse' : undefined} />
+      </Button>
       <SplitButton
         className="flex-1"
         onClick={() => void actions.run('commit')}
@@ -204,13 +208,13 @@ export function CommitActions({
               {labels.commitAndSync}
             </MenuItem>
             <MenuSeparator />
-            <MenuItem icon={<History size={13} />} onSelect={() => select('amend')}>
+            <MenuItem icon={<History size={ICON_MD} />} onSelect={() => select('amend')}>
               {commitLabels.amendLabel}
             </MenuItem>
           </>
         }
       >
-        <Check size={14} className="shrink-0" />
+        <Check size={ICON_SM} className="shrink-0" />
         <span className="truncate">
           {actions.pending ? commitLabels.submitting : commitLabels.submit}
         </span>

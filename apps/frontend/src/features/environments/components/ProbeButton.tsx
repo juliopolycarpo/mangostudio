@@ -7,6 +7,7 @@
 import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 
 interface ProbeButtonProps {
   isPending: boolean;
@@ -27,12 +28,13 @@ export function ProbeButton({ isPending, isError, onProbe }: ProbeButtonProps) {
       )}
       <Button
         variant="subtle"
-        size="sm"
+        size="icon"
         loading={isPending}
         onClick={onProbe}
         aria-label={e.actions.refresh}
       >
-        <RefreshCw size={14} />
+        {/* The button's own spinner stands in for the glyph while it runs. */}
+        {isPending ? null : <RefreshCw size={ICON_MD} />}
       </Button>
     </>
   );

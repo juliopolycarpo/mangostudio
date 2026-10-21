@@ -5,6 +5,7 @@
 
 import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import {
@@ -20,7 +21,7 @@ import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { ProbeButton } from './ProbeButton';
 import { RecipeAction } from './RecipeAction';
-import { CardSectionLabel, ToolCard } from './ToolCard';
+import { ToolCard } from './ToolCard';
 
 interface AgentCliCardProps {
   status: AgentCliStatus;
@@ -108,7 +109,7 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
 
       {status.locations.length > 0 && (
         <section className="space-y-2">
-          <CardSectionLabel>{e.agents.locations}</CardSectionLabel>
+          <MicroLabel as="p">{e.agents.locations}</MicroLabel>
           <ul className="space-y-1.5">
             {status.locations.map((location) => (
               <li

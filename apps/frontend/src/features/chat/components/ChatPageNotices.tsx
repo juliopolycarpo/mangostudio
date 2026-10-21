@@ -1,3 +1,4 @@
+import { Callout } from '@/components/ui/Callout';
 import type { FallbackNotice } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
 import { ContextWarningCallout } from './ContextWarningCallout';
@@ -10,19 +11,13 @@ export function ChatFallbackNotice({ notice }: ChatFallbackNoticeProps) {
   const { t } = useI18n();
 
   return (
-    <div className="px-6 py-2 text-xs text-fg-muted bg-surface border-t border-stroke">
+    <div className="px-6 pt-4">
       <div className="mx-auto max-w-4xl">
-        <div className="relative w-full pl-4 text-center" role="status" aria-live="polite">
-          <span
-            aria-hidden="true"
-            className="absolute left-0 top-1/2 -translate-y-1/2 text-fg-muted"
-          >
-            ・
-          </span>
+        <Callout tone="info" role="status" aria-live="polite">
           {notice.to === 'replay'
             ? t.chat.fallback.toReplay
             : t.chat.fallback.generic.replace('{from}', notice.from).replace('{to}', notice.to)}
-        </div>
+        </Callout>
       </div>
     </div>
   );

@@ -10,6 +10,7 @@
 
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
 
 interface AgentAuthStateProps {
   readonly status: AgentCliStatus;
@@ -32,7 +33,7 @@ export function AgentAuthState({ status, showHint = true }: AgentAuthStateProps)
 
   return (
     <p
-      className={`text-sm ${status.authenticated ? 'text-accent-fg' : 'text-info'}`}
+      className={cn('text-sm', status.authenticated ? 'text-success' : 'text-info')}
       data-testid="auth-state"
       data-auth-signal={status.authSignal}
     >

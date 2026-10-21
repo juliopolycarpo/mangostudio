@@ -3,8 +3,12 @@ import type {
   ContextCompactionBehavior,
   ContextSettings as ContextSettingsValue,
 } from '@mangostudio/shared/chat';
-import { Card } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { SettingsSliderRow } from '@/components/settings/SettingsSliderRow';
+import { SettingToggle } from '@/components/settings/SettingToggle';
+import { Callout } from '@/components/ui/Callout';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { modelSelectOptions } from '@/lib/model-select-options';
@@ -51,135 +55,78 @@ export function ContextSettings({
       : [];
 
   return (
-    <div className="space-y-4">
-      <Card className="space-y-3 p-4 sm:p-6">
-        <h2 className="text-lg font-bold text-fg">{s.title}</h2>
-        <p className="text-sm text-fg-muted">{s.description}</p>
-        <p className="text-sm text-fg-muted">{s.keepHistory}</p>
-      </Card>
+    <SettingsPage title={s.title} description={s.description}>
+      <Callout tone="info">{s.keepHistory}</Callout>
 
-      <Card className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {s.behaviorLabel}
-        </h3>
-        <p className="text-sm text-fg-muted">{s.behaviorDescription}</p>
-        <Select
-          value={settings.compactionBehavior}
-          onChange={(value) => setCompactionBehavior(value as ContextCompactionBehavior)}
-          ariaLabel={s.behaviorLabel}
-          options={[
-            { value: 'ask', label: s.behaviorOptions.ask },
-            { value: 'auto_compact_current_chat', label: s.behaviorOptions.autoCompact },
-            { value: 'continue_with_summary_new_chat', label: s.behaviorOptions.newChat },
-            { value: 'off', label: s.behaviorOptions.off },
-          ]}
-        />
-      </Card>
-
-      <Card className="space-y-3 p-4 sm:p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-              {s.providerCompactionLabel}
-            </h3>
-            <p className="text-sm text-fg-muted">{s.providerCompactionDescription}</p>
-          </div>
-          <Checkbox
-            checked={settings.providerCompactionEnabled}
-            onChange={(event) => setProviderCompactionEnabled(event.target.checked)}
-            aria-label={s.providerCompactionLabel}
-            className="mt-1"
+      <SettingsSection>
+        <SettingsRow label={s.behaviorLabel} hint={s.behaviorDescription} layout="field">
+          <Select
+            value={settings.compactionBehavior}
+            onChange={(value) => setCompactionBehavior(value as ContextCompactionBehavior)}
+            ariaLabel={s.behaviorLabel}
+            options={[
+              { value: 'ask', label: s.behaviorOptions.ask },
+              { value: 'auto_compact_current_chat', label: s.behaviorOptions.autoCompact },
+              { value: 'continue_with_summary_new_chat', label: s.behaviorOptions.newChat },
+              { value: 'off', label: s.behaviorOptions.off },
+            ]}
           />
-        </div>
-      </Card>
+        </SettingsRow>
+        <SettingToggle
+          label={s.providerCompactionLabel}
+          description={s.providerCompactionDescription}
+          checked={settings.providerCompactionEnabled}
+          onChange={setProviderCompactionEnabled}
+        />
+        <SettingsRow label={s.summaryModelLabel} hint={s.summaryModelDescription} layout="field">
+          <Select
+            value={settings.preferredSummaryModel}
+            onChange={setPreferredSummaryModel}
+            ariaLabel={s.summaryModelLabel}
+            options={modelSelectOptions(
+              { value: 'current_model', label: s.summaryModelCurrent },
+              missingModelOption,
+              availableModels
+            )}
+          />
+        </SettingsRow>
+      </SettingsSection>
 
-      <Card className="space-y-5 p-4 sm:p-6">
-        <ThresholdControl
+      <SettingsSection>
+        <SettingsSliderRow
+          id="context-warning-threshold"
           label={s.warningThresholdLabel}
-          description={s.warningThresholdDescription}
-          hint={formatThreshold(settings.warningThreshold, s.thresholdHint)}
+          hint={s.warningThresholdDescription}
+          readout={formatThreshold(settings.warningThreshold, s.thresholdHint)}
           value={toPercentValue(settings.warningThreshold)}
+          min={THRESHOLD_MIN}
+          max={THRESHOLD_MAX}
           onChange={(value) => setWarningThreshold(value / 100)}
+          withNumberInput
         />
-        <ThresholdControl
+        <SettingsSliderRow
+          id="context-danger-threshold"
           label={s.dangerThresholdLabel}
-          description={s.dangerThresholdDescription}
-          hint={formatThreshold(settings.dangerThreshold, s.thresholdHint)}
+          hint={s.dangerThresholdDescription}
+          readout={formatThreshold(settings.dangerThreshold, s.thresholdHint)}
           value={toPercentValue(settings.dangerThreshold)}
+          min={THRESHOLD_MIN}
+          max={THRESHOLD_MAX}
           onChange={(value) => setDangerThreshold(value / 100)}
+          withNumberInput
         />
-        <ThresholdControl
+        <SettingsSliderRow
+          id="context-hard-stop-threshold"
           label={s.hardStopThresholdLabel}
-          description={s.hardStopThresholdDescription}
-          hint={formatThreshold(settings.hardStopThreshold, s.thresholdHint)}
+          hint={s.hardStopThresholdDescription}
+          readout={formatThreshold(settings.hardStopThreshold, s.thresholdHint)}
           value={toPercentValue(settings.hardStopThreshold)}
+          min={THRESHOLD_MIN}
+          max={THRESHOLD_MAX}
           onChange={(value) => setHardStopThreshold(value / 100)}
+          withNumberInput
         />
-      </Card>
-
-      <Card className="space-y-3 p-4 sm:p-6">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {s.summaryModelLabel}
-        </h3>
-        <p className="text-sm text-fg-muted">{s.summaryModelDescription}</p>
-        <Select
-          value={settings.preferredSummaryModel}
-          onChange={setPreferredSummaryModel}
-          ariaLabel={s.summaryModelLabel}
-          options={modelSelectOptions(
-            { value: 'current_model', label: s.summaryModelCurrent },
-            missingModelOption,
-            availableModels
-          )}
-        />
-      </Card>
-    </div>
-  );
-}
-
-function ThresholdControl({
-  label,
-  description,
-  hint,
-  value,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  hint: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-4">
-        <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">{label}</h3>
-        <span className="text-sm font-medium text-fg">{hint}</span>
-      </div>
-      <p className="text-sm text-fg-muted">{description}</p>
-      <div className="flex items-center gap-4">
-        <input
-          type="range"
-          min={THRESHOLD_MIN}
-          max={THRESHOLD_MAX}
-          step={1}
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
-          aria-label={label}
-          className="range-input flex-1"
-        />
-        <input
-          type="number"
-          min={THRESHOLD_MIN}
-          max={THRESHOLD_MAX}
-          step={1}
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
-          onBlur={(event) => onChange(Number(event.target.value))}
-          aria-label={label}
-          className="w-20 rounded-xl px-3 py-2 text-sm text-center bg-control text-fg border border-stroke focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors"
-        />
-      </div>
-    </div>
+      </SettingsSection>
+    </SettingsPage>
   );
 }

@@ -7,13 +7,17 @@ import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/prov
 import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useProviderSettings, useUpdateProviderSettings } from '../hooks/use-provider-settings';
 import { CacheSettingsSection } from './CacheSettingsSection';
-import { ProviderAdvancedSection } from './ProviderAdvancedSection';
 import { ReasoningSettingsSection } from './ReasoningSettingsSection';
 import { ToolSettingsSection } from './ToolSettingsSection';
 
@@ -40,6 +44,19 @@ function formFromDescriptor(
   };
 }
 
+/** The way back to the provider list, above the page title it belongs to. */
+function BackToProviders({ label }: { label: string }) {
+  return (
+    <Link
+      to="/settings/providers"
+      className="-ml-2 inline-flex h-7 items-center gap-1.5 rounded-sm px-2 text-xs font-medium text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
+    >
+      <ArrowLeft size={ICON_MD} />
+      {label}
+    </Link>
+  );
+}
+
 export function ProviderSettingsPage() {
   const { provider } = useParams({ from: '/_authenticated/settings/providers/$provider' });
   const { t } = useI18n();
@@ -48,20 +65,26 @@ export function ProviderSettingsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-fg-muted">{t.common.loading}</p>
+      <div role="status" className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-40 w-full rounded-md" />
+        <span className="sr-only">{t.common.loading}</span>
       </div>
     );
   }
 
   if (error || !descriptor) {
     return (
-      <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-danger">{s.loadError}</p>
-        <Button variant="subtle" size="sm" onClick={() => void refetch()}>
-          {t.common.retry}
-        </Button>
-      </div>
+      <Callout
+        tone="danger"
+        action={
+          <Button variant="secondary" size="sm" onClick={() => void refetch()}>
+            {t.common.retry}
+          </Button>
+        }
+      >
+        {s.loadError}
+      </Callout>
     );
   }
 
@@ -70,23 +93,12 @@ export function ProviderSettingsPage() {
   if (descriptor.deprecated) {
     return (
       <div className="space-y-6">
-        <Link
-          to="/settings/providers"
-          className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg transition-colors"
-        >
-          <ArrowLeft size={14} />
-          {s.backToMenu}
-        </Link>
-
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-fg">{providerName}</h2>
-            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200 border border-amber-500/20">
-              {s.deprecatedBadge}
-            </span>
-          </div>
-          <p className="mt-2 text-sm leading-relaxed text-fg-muted">{s.deprecatedNote}</p>
-        </div>
+        <BackToProviders label={s.backToMenu} />
+        <SettingsPage title={providerName}>
+          <Callout tone="warning" title={s.deprecatedBadge}>
+            {s.deprecatedNote}
+          </Callout>
+        </SettingsPage>
       </div>
     );
   }
@@ -196,25 +208,23 @@ function ProviderSettingsEditor({
 
   return (
     <div className="space-y-6">
-      <Link
-        to="/settings/providers"
-        className="inline-flex items-center gap-1.5 text-xs text-fg-muted hover:text-fg transition-colors"
+      <BackToProviders label={s.backToMenu} />
+      <SettingsPage
+        title={providerName}
+        description={s.perProviderSettings}
+        actions={
+          updateMutation.isPending ? (
+            <div
+              className="inline-flex items-center gap-1.5 text-xs text-fg-muted"
+              role="status"
+              aria-live="polite"
+            >
+              <Spinner size="sm" />
+              {s.saving}
+            </div>
+          ) : null
+        }
       >
-        <ArrowLeft size={14} />
-        {s.backToMenu}
-      </Link>
-
-      <div>
-        <h2 className="text-lg font-bold text-fg">{providerName}</h2>
-        <p className="mt-0.5 text-xs text-fg-muted">{s.perProviderSettings}</p>
-        {updateMutation.isPending && (
-          <p className="mt-1 text-xs text-fg-muted" role="status" aria-live="polite">
-            {s.saving}
-          </p>
-        )}
-      </div>
-
-      <div className="space-y-4">
         <ReasoningSettingsSection policy={descriptor.reasoning} form={form} onChange={setForm} />
         <ToolSettingsSection
           maxOutputTokensLimit={descriptor.maxOutputTokensLimit}
@@ -227,8 +237,7 @@ function ProviderSettingsEditor({
           form={form}
           onChange={setForm}
         />
-        <ProviderAdvancedSection />
-      </div>
+      </SettingsPage>
     </div>
   );
 }

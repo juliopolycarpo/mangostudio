@@ -14,6 +14,7 @@ import type { StatusDotTone } from '@/components/ui/StatusDot';
 import { useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
 import { HubSkeletonLines } from './HubSkeletonLines';
 
@@ -59,8 +60,8 @@ export function WorkspaceCard({ chatId, workdir, onChooseWorkdir }: WorkspaceCar
         <div className="space-y-2">
           <p className="text-xs text-fg-muted">{labels.noWorkdir}</p>
           {onChooseWorkdir ? (
-            <Button variant="secondary" size="sm" onClick={onChooseWorkdir} className="gap-1.5">
-              <FolderOpen size={13} />
+            <Button variant="secondary" size="sm" onClick={onChooseWorkdir}>
+              <FolderOpen size={ICON_SM} />
               {labels.chooseWorkdir}
             </Button>
           ) : null}
@@ -88,7 +89,7 @@ function RepoLines({ status }: { status: Extract<GitRepoState, { state: 'repo' }
   return (
     <div className="space-y-1.5 font-mono text-xs">
       <p className="flex min-w-0 items-center gap-1.5 text-fg-muted">
-        <GitBranch size={12} aria-hidden="true" className="shrink-0" />
+        <GitBranch size={ICON_SM} aria-hidden="true" className="shrink-0" />
         <span className="truncate text-fg">
           {branch.name ??
             formatMessage(labels.detached, { hash: branch.detachedAt?.slice(0, 7) ?? '' })}

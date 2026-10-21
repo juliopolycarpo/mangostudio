@@ -10,9 +10,9 @@ import { Skeleton } from '@/components/ui/Skeleton';
  */
 export function HubSkeletonLines() {
   return (
-    <div className="space-y-1.5">
-      <Skeleton className="h-3.5 w-40" />
-      <Skeleton className="h-3.5 w-56 max-w-full" />
+    <div className="space-y-2">
+      <Skeleton className="h-4 w-40" />
+      <Skeleton className="h-4 w-56 max-w-full" />
     </div>
   );
 }

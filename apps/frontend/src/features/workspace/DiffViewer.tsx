@@ -1,9 +1,15 @@
 import { type GitDiffLine, parseGitDiff } from '@mangostudio/shared/git';
-import { AlertTriangle, ArrowLeft, FileDiff, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, FileDiff } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { highlightLineTokens, preloadCodeLanguages } from '@/lib/shiki';
+import { cn } from '@/lib/utils';
+import { IconButton } from './components/IconButton';
 import type { GitDiffInput } from './hooks/use-git-state';
 import { useGitDiff } from './hooks/use-git-state';
 
@@ -42,21 +48,15 @@ export function DiffViewer({
   return (
     <section
       aria-label={selection.title}
-      className="overflow-hidden rounded-xl border border-stroke"
+      className="overflow-hidden rounded-md border border-stroke bg-surface"
     >
-      <div className="flex items-center gap-2 border-b border-stroke bg-surface px-2 py-2">
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t.git.diff.back}
-          className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-fg-muted hover:bg-fill-hover hover:text-fg"
-        >
-          <ArrowLeft size={14} />
-        </button>
-        <FileDiff size={14} className="shrink-0 text-accent-fg" />
+      <div className="flex h-10 items-center gap-2 border-b border-stroke px-2">
+        <IconButton label={t.git.diff.back} onClick={onClose}>
+          <ArrowLeft size={ICON_SM} />
+        </IconButton>
         <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-[11px] font-semibold text-fg">{selection.path}</p>
-          <p className="text-[9px] uppercase tracking-wider text-fg-muted">
+          <p className="truncate font-mono text-xs font-medium text-fg">{selection.path}</p>
+          <p className={cn('text-micro text-fg-subtle', selection.commit && 'font-mono')}>
             {selection.commit
               ? selection.commit.slice(0, 8)
               : selection.staged
@@ -67,22 +67,28 @@ export function DiffViewer({
       </div>
 
       {query.isLoading ? (
-        <DiffMessage icon={<LoaderCircle size={18} className="animate-spin" />}>
-          {t.git.diff.loading}
-        </DiffMessage>
+        <EmptyState icon={<Spinner />} title={t.git.diff.loading} className="min-h-32" />
       ) : query.error ? (
-        <DiffMessage icon={<AlertTriangle size={18} />} tone="error">
-          {t.git.diff.loadError}
-        </DiffMessage>
+        <div className="p-3">
+          <Callout tone="danger" title={t.git.diff.loadError} />
+        </div>
       ) : query.data?.binary ? (
-        <DiffMessage icon={<FileDiff size={18} />}>{t.git.diff.binary}</DiffMessage>
+        <EmptyState
+          icon={<FileDiff size={ICON_LG} />}
+          title={t.git.diff.binary}
+          className="min-h-32"
+        />
       ) : hunks.length === 0 ? (
-        <DiffMessage icon={<FileDiff size={18} />}>{t.git.diff.empty}</DiffMessage>
+        <EmptyState
+          icon={<FileDiff size={ICON_LG} />}
+          title={t.git.diff.empty}
+          className="min-h-32"
+        />
       ) : (
-        <div className="app-scrollbar max-h-[34rem] overflow-auto bg-control font-mono text-[10px] leading-4">
+        <div className="app-scrollbar max-h-[34rem] overflow-auto bg-canvas font-mono text-xs">
           {hunks.map((hunk) => (
             <div key={`${hunk.oldStart}:${hunk.newStart}:${hunk.header}`}>
-              <div className="sticky top-0 z-10 border-y border-accent bg-accent-subtle px-2 py-1 text-accent-fg">
+              <div className="sticky top-0 z-10 border-y border-stroke bg-surface px-2 py-1 text-fg-muted">
                 {hunk.header}
               </div>
               {hunk.lines.map((line) => (
@@ -120,18 +126,23 @@ const DiffLineRow = memo(function DiffLineRow({
     addition: 'bg-success-subtle',
     deletion: 'bg-danger-subtle',
     context: '',
-    metadata: 'bg-surface text-fg-muted italic',
+    metadata: 'text-fg-muted italic',
   }[line.type];
+  // The gutter marker is what says added or removed; the fill only backs it up.
   const marker = line.type === 'addition' ? '+' : line.type === 'deletion' ? '-' : ' ';
+  const markerTone =
+    line.type === 'addition' ? 'text-success' : line.type === 'deletion' ? 'text-danger' : '';
   return (
-    <div className={`flex min-w-max ${tone}`}>
-      <span className="w-8 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle">
+    <div className={cn('flex min-w-max', tone)}>
+      <span className="w-10 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle">
         {line.oldLine ?? ''}
       </span>
-      <span className="w-8 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle">
+      <span className="w-10 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle">
         {line.newLine ?? ''}
       </span>
-      <span className="w-5 shrink-0 select-none text-center text-fg-muted">{marker}</span>
+      <span className={cn('w-5 shrink-0 select-none text-center font-medium', markerTone)}>
+        {marker}
+      </span>
       {highlighted ? (
         <code className="min-w-0 whitespace-pre pr-3">
           {highlighted.map((token) => (
@@ -180,27 +191,6 @@ function inferLanguage(path: string): string | null {
         yml: 'yaml',
       } as const
     )[extension ?? ''] ?? null
-  );
-}
-
-function DiffMessage({
-  icon,
-  tone = 'neutral',
-  children,
-}: {
-  readonly icon: React.ReactNode;
-  readonly tone?: 'neutral' | 'error';
-  readonly children: React.ReactNode;
-}) {
-  return (
-    <div
-      className={`flex min-h-32 flex-col items-center justify-center gap-2 px-4 text-center text-xs ${
-        tone === 'error' ? 'text-danger' : 'text-fg-muted'
-      }`}
-    >
-      {icon}
-      <p>{children}</p>
-    </div>
   );
 }
 

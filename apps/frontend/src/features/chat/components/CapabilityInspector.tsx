@@ -20,12 +20,17 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ListChecks, SlidersHorizontal } from 'lucide-react';
 import { useState } from 'react';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import type { ChatCapabilitiesSelection } from '../hooks/use-chat-capabilities';
 import { chatCapabilitiesQueryOptions } from '../hooks/use-chat-capabilities';
+import { ComposerPopover } from './ComposerPopover';
 
 type CapabilityLabels = Messages['chat']['capabilities'];
 
@@ -45,10 +50,10 @@ const REASON_LABEL_KEY: Record<CapabilityReasonCode, keyof CapabilityLabels['rea
   'skill-tool-disabled': 'skill-tool-disabled',
 };
 
-const STATE_DOT_CLASS: Record<CapabilityState, string> = {
-  enabled: 'bg-accent',
-  disabled: 'bg-stroke',
-  unavailable: 'bg-warning',
+const STATE_DOT_TONE: Record<CapabilityState, StatusDotTone> = {
+  enabled: 'success',
+  disabled: 'neutral',
+  unavailable: 'warning',
 };
 
 /** The dot is decorative; this label is what carries state to assistive tech. */
@@ -103,30 +108,28 @@ export function CapabilityInspector({
         className="terminal-chip composer-tool-chip"
         title={labels.title}
       >
-        <SlidersHorizontal size={12} className="shrink-0" />
+        <SlidersHorizontal size={ICON_SM} className="shrink-0" />
         <span className="hidden sm:inline">{labels.button}</span>
       </button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-40 mb-2 w-80 max-h-96 overflow-y-auto rounded-2xl border border-stroke bg-surface p-3 shadow-2xl space-y-3">
-          <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-fg-muted">
-            <ListChecks size={12} />
+        <ComposerPopover className="max-h-96 space-y-3 overflow-y-auto p-3">
+          <MicroLabel as="p" className="flex items-center gap-1.5">
+            <ListChecks size={ICON_SM} />
             {labels.title}
-          </p>
+          </MicroLabel>
 
           {!chatId && <p className="text-xs text-fg-muted">{labels.needsChat}</p>}
           {chatId && capabilitiesQuery.isLoading && (
             <p className="text-xs text-fg-muted">{t.common.loading}</p>
           )}
           {chatId && capabilitiesQuery.isError && (
-            <p className="text-xs text-danger" role="alert">
-              {labels.loadError}
-            </p>
+            <Callout tone="danger" role="alert" title={labels.loadError} />
           )}
           {chatId && capabilitiesQuery.data && (
             <CapabilityPanel capabilities={capabilitiesQuery.data} labels={labels} />
           )}
-        </div>
+        </ComposerPopover>
       )}
     </div>
   );
@@ -150,7 +153,7 @@ function CapabilityPanel({
 
   return (
     <>
-      <div className="space-y-0.5 text-[11px] text-fg-muted">
+      <div className="space-y-0.5 text-xs text-fg-muted">
         <p className="truncate">
           {labels.modelLabel}: <span className="text-fg">{capabilities.model.modelId}</span>
         </p>
@@ -200,7 +203,7 @@ function CapabilityPanel({
         manageTo="/settings/mcp"
       >
         {capabilities.mcpServers.length === 0 && (
-          <p className="px-2 text-[11px] text-fg-muted">{labels.mcpEmpty}</p>
+          <p className="px-2 text-xs text-fg-muted">{labels.mcpEmpty}</p>
         )}
         {capabilities.mcpServers.map((server) => (
           <McpServerRows
@@ -219,7 +222,7 @@ function CapabilityPanel({
         manageTo="/settings/skills"
       >
         {capabilities.skills.length === 0 && (
-          <p className="px-2 text-[11px] text-fg-muted">{labels.skillsEmpty}</p>
+          <p className="px-2 text-xs text-fg-muted">{labels.skillsEmpty}</p>
         )}
         {capabilities.skills.map((skill: CapabilitySkillEntry) => (
           <CapabilityRow
@@ -307,10 +310,10 @@ function CapabilitySection({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] font-medium text-fg-subtle">
+        <p className="text-xs font-medium text-fg-muted">
           {heading} · {countLabel}
         </p>
-        <Link to={manageTo} className="text-[10px] text-accent-fg hover:text-accent-fg shrink-0">
+        <Link to={manageTo} className="shrink-0 text-xs text-accent-fg hover:underline">
           {manageLabel}
         </Link>
       </div>
@@ -338,11 +341,8 @@ function CapabilityRow({
   reasonManageTo?: '/settings/agents';
 }) {
   return (
-    <div className="flex items-start gap-2 rounded-xl px-2 py-1">
-      <span
-        className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${STATE_DOT_CLASS[state]}`}
-        aria-hidden
-      />
+    <div className="flex items-start gap-2 px-2 py-1">
+      <StatusDot tone={STATE_DOT_TONE[state]} className="mt-1" />
       {avatar}
       <span className="min-w-0">
         <span
@@ -355,13 +355,13 @@ function CapabilityRow({
         {reasonText && reasonManageTo && (
           <Link
             to={reasonManageTo}
-            className="block truncate text-[11px] text-accent-fg hover:text-accent-fg"
+            className="block truncate text-xs text-accent-fg hover:underline"
           >
             {reasonText}
           </Link>
         )}
         {reasonText && !reasonManageTo && (
-          <span className="block truncate text-[11px] text-fg-muted">{reasonText}</span>
+          <span className="block truncate text-xs text-fg-muted">{reasonText}</span>
         )}
       </span>
     </div>

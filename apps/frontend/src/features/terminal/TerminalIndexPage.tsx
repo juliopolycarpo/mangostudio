@@ -1,6 +1,5 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { TerminalSquare } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
@@ -56,12 +55,7 @@ export function TerminalIndexPage() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4 sm:p-6 md:p-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="rounded-2xl bg-accent-subtle p-3 text-accent-fg">
-            <TerminalSquare size={24} />
-          </div>
-          <h1 className="text-2xl font-bold text-fg sm:text-3xl">{t.terminal.page.title}</h1>
-        </div>
+        <h1 className="text-title font-semibold text-fg">{t.terminal.page.title}</h1>
         <EnvironmentSelector
           environmentId={environmentId}
           onEnvironmentChange={changeEnvironment}
@@ -71,7 +65,7 @@ export function TerminalIndexPage() {
       {unavailable ? <TerminalUnavailableNotice message={unavailableHint} /> : null}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-fg-muted">{t.terminal.page.sessions}</h2>
+        <h2 className="text-base font-semibold text-fg">{t.terminal.page.sessions}</h2>
         <Button
           type="button"
           variant="secondary"
@@ -88,11 +82,11 @@ export function TerminalIndexPage() {
       {sessionsQuery.isSuccess && sessions.length === 0 ? (
         <p className="text-sm text-fg-muted">{t.terminal.page.noSessions}</p>
       ) : (
-        <ul className="divide-y divide-stroke rounded-2xl border border-stroke">
+        <ul className="divide-y divide-stroke rounded-md border border-stroke">
           {sessions.map((session) => (
             <li
               key={session.id}
-              className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"
+              className="flex items-center justify-between gap-3 px-4 py-2 text-sm"
             >
               <span className="truncate text-fg">{session.title}</span>
               <Button
@@ -110,7 +104,7 @@ export function TerminalIndexPage() {
       )}
 
       {activeId ? (
-        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-stroke">
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-stroke">
           <Suspense fallback={null}>
             <LazyTerminalView key={activeId} sessionId={activeId} />
           </Suspense>

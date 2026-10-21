@@ -79,13 +79,13 @@ export function WorkspaceBreadcrumbView({
       className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-fg-muted"
       data-testid="workspace-breadcrumb"
     >
-      <span className="shrink-0 text-fg-muted">{t.workspace.breadcrumbIn}</span>
+      <span className="shrink-0">{t.workspace.breadcrumbIn}</span>
       {onChangeWorkdir ? (
         <button
           type="button"
           onClick={onChangeWorkdir}
           aria-label={formatMessage(t.workspace.changeWorkdir, { name: basename })}
-          className="truncate font-medium text-fg underline-offset-2 transition-colors hover:text-accent-fg hover:underline"
+          className="-mx-1 cursor-pointer truncate rounded-sm px-1 font-medium text-fg transition-colors hover:bg-fill-hover"
         >
           {basename}
         </button>
@@ -94,8 +94,8 @@ export function WorkspaceBreadcrumbView({
       )}
       {branch ? (
         <>
-          <span className="shrink-0 text-fg-muted">/</span>
-          <span className="truncate text-accent-fg">{branch}</span>
+          <span className="shrink-0 text-fg-subtle">/</span>
+          <span className="truncate">{branch}</span>
         </>
       ) : null}
       {dirty ? (

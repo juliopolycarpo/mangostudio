@@ -1,9 +1,14 @@
 import type { Connector } from '@mangostudio/shared/connectors';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, Plus } from 'lucide-react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { USAGE_ALERT_THRESHOLDS, type UsageAlertThreshold } from '../lib/usage-alerts';
 import { ConnectorCard } from './ConnectorCard';
 
@@ -31,52 +36,30 @@ export function ConnectorList({
   const hasChatGpt = connectors.some((c) => c.provider === 'chatgpt');
 
   return (
-    <Card className="p-4 sm:p-6 space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="text-xs uppercase tracking-widest font-bold text-fg-muted">{s.title}</h2>
-        <div className="flex items-center gap-3">
-          {hasChatGpt && (
-            <div className="flex items-center gap-1.5 text-[10px] text-fg-muted">
-              {s.chatgptAlertThresholdLabel}
-              <Select
-                value={alertThreshold === null ? 'off' : String(alertThreshold)}
-                onChange={(value) =>
-                  onAlertThresholdChange(value === 'off' ? null : (Number(value) as 75 | 90))
-                }
-                ariaLabel={s.chatgptAlertThresholdLabel}
-                className="w-32"
-                options={[
-                  { value: 'off', label: s.chatgptAlertThresholdOff },
-                  ...USAGE_ALERT_THRESHOLDS.map((percent) => ({
-                    value: String(percent),
-                    label: s.chatgptAlertThresholdOption.replace('{percent}', String(percent)),
-                  })),
-                ]}
-              />
-            </div>
-          )}
-          <Button variant="secondary" size="sm" onClick={onAddConnector} className="gap-1.5">
-            <span className="text-base leading-none">+</span>
-            {s.addButton}
-          </Button>
-        </div>
-      </div>
-
+    <SettingsPage
+      title={s.title}
+      actions={
+        <Button variant="secondary" size="sm" onClick={onAddConnector}>
+          <Plus size={ICON_MD} />
+          {s.addButton}
+        </Button>
+      }
+    >
       {connectors.length === 0 ? (
-        <div className="bg-control border border-dashed border-stroke rounded-2xl p-8 text-center space-y-4">
-          <div className="p-4 bg-surface rounded-full w-fit mx-auto text-fg-subtle">
-            <KeyRound size={32} />
-          </div>
-          <div className="space-y-1">
-            <p className="text-fg font-bold">{s.emptyTitle}</p>
-            <p className="text-sm text-fg-muted">{s.emptyDescription}</p>
-          </div>
-          <Button variant="primary" onClick={onAddConnector}>
-            {s.addConnectorButton}
-          </Button>
-        </div>
+        <Card padded={false}>
+          <EmptyState
+            icon={<KeyRound size={24} />}
+            title={s.emptyTitle}
+            hint={s.emptyDescription}
+            action={
+              <Button variant="primary" onClick={onAddConnector}>
+                {s.addConnectorButton}
+              </Button>
+            }
+          />
+        </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3">
+        <div className="space-y-3">
           {connectors.map((c) => (
             <ConnectorCard
               key={c.id}
@@ -88,6 +71,27 @@ export function ConnectorList({
           ))}
         </div>
       )}
-    </Card>
+
+      {hasChatGpt && (
+        <SettingsSection>
+          <SettingsRow label={s.chatgptAlertThresholdLabel} layout="field">
+            <Select
+              value={alertThreshold === null ? 'off' : String(alertThreshold)}
+              onChange={(value) =>
+                onAlertThresholdChange(value === 'off' ? null : (Number(value) as 75 | 90))
+              }
+              ariaLabel={s.chatgptAlertThresholdLabel}
+              options={[
+                { value: 'off', label: s.chatgptAlertThresholdOff },
+                ...USAGE_ALERT_THRESHOLDS.map((percent) => ({
+                  value: String(percent),
+                  label: s.chatgptAlertThresholdOption.replace('{percent}', String(percent)),
+                })),
+              ]}
+            />
+          </SettingsRow>
+        </SettingsSection>
+      )}
+    </SettingsPage>
   );
 }

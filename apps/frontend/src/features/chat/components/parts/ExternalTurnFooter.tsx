@@ -1,4 +1,6 @@
 import type { ExternalTurnPart } from '@mangostudio/shared/types';
+import { Callout } from '@/components/ui/Callout';
+import { Chip } from '@/components/ui/Chip';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
@@ -54,38 +56,35 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
   return (
     <div className="mt-2 max-w-2xl space-y-1.5 pl-4">
       {part.conversationReset ? (
-        <p
-          role="status"
-          data-conversation-reset={part.conversationReset}
-          className="rounded-xl border border-warning bg-warning-subtle px-3 py-2 text-xs text-warning"
-        >
+        <Callout tone="warning" role="status" data-conversation-reset={part.conversationReset}>
           {labels.conversationReset[part.conversationReset]}
-        </p>
+        </Callout>
       ) : null}
       {fields.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {fields.map(([label, value]) => (
-            <span
-              key={label}
-              className="rounded-full border border-stroke bg-control px-2 py-0.5 text-[10px] tabular-nums text-fg-muted"
-            >
+            <Chip key={label} className="tabular-nums">
               {`${label} ${formatTokensCompact(value)}`}
-            </span>
+            </Chip>
           ))}
         </div>
       ) : null}
       {part.error && presentedReason ? (
-        <div className="space-y-1.5 rounded-xl border border-danger bg-danger-subtle px-3 py-2 text-xs text-danger">
-          <p>{externalUnavailableText(presentedReason, t, part.requiredVersion)}</p>
-          {signIn?.command ? <SignInCommand command={signIn.command} /> : null}
-          {part.remedy ? <ExternalRemedyLink remedy={part.remedy} /> : null}
-        </div>
+        <Callout tone="danger">
+          <div className="space-y-1.5">
+            <p className="text-fg">
+              {externalUnavailableText(presentedReason, t, part.requiredVersion)}
+            </p>
+            {signIn?.command ? <SignInCommand command={signIn.command} /> : null}
+            {part.remedy ? <ExternalRemedyLink remedy={part.remedy} /> : null}
+          </div>
+        </Callout>
       ) : part.error ? (
-        <p className="rounded-xl border border-danger bg-danger-subtle px-3 py-2 text-xs text-danger">
+        <Callout tone="danger">
           {/* The vendor's own code and message, inert and unflattened. */}
           <span className="font-mono">{part.error.code}</span>
           {` — ${part.error.message}`}
-        </p>
+        </Callout>
       ) : null}
       {terminalNotice && !isStreaming ? (
         <p className="text-xs text-fg-muted">{terminalNotice}</p>

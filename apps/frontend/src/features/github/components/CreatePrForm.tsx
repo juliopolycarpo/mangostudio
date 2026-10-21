@@ -1,7 +1,12 @@
 import type { GithubCreatePrResponse } from '@mangostudio/shared/github';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Card } from '@/components/ui/Card';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Input } from '@/components/ui/Input';
+import { Textarea } from '@/components/ui/Textarea';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -52,6 +57,8 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
   const [title, setTitle] = useState(defaultTitle);
   const [body, setBody] = useState('');
   const [draft, setDraft] = useState(false);
+  const titleId = useId();
+  const bodyId = useId();
 
   const mutation = useMutation({
     mutationFn: async (): Promise<GithubCreatePrResponse> => {
@@ -103,60 +110,51 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
   };
 
   return (
-    <form onSubmit={submit} className="space-y-2 rounded-xl bg-surface p-2.5">
-      <label className="block space-y-1">
-        <span className="text-[10px] font-semibold text-fg-muted">
-          {t.github.createPr.titleLabel}
-        </span>
-        <input
+    <form onSubmit={submit}>
+      <Card padded={false} className="space-y-3 p-3">
+        <Input
+          id={titleId}
+          label={t.github.createPr.titleLabel}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           placeholder={t.github.createPr.titlePlaceholder}
           maxLength={256}
-          className="w-full rounded-lg border border-stroke bg-control px-2 py-1.5 text-xs text-fg focus-visible:outline-2 focus-visible:outline-focus"
         />
-      </label>
-      <label className="block space-y-1">
-        <span className="text-[10px] font-semibold text-fg-muted">
-          {t.github.createPr.bodyLabel}
-        </span>
-        <textarea
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
-          placeholder={t.github.createPr.bodyPlaceholder}
-          rows={4}
-          className="w-full resize-y rounded-lg border border-stroke bg-control px-2 py-1.5 text-xs text-fg focus-visible:outline-2 focus-visible:outline-focus"
-        />
-      </label>
-      <label className="flex items-center gap-2 text-[11px] text-fg-muted">
-        <input
-          type="checkbox"
-          checked={draft}
-          onChange={(event) => setDraft(event.target.checked)}
-          className="size-3.5 rounded border-stroke accent-accent"
-        />
-        {t.github.createPr.draftLabel}
-      </label>
-      {needsPush ? (
-        <p className="text-[10px] leading-4 text-warning">{t.github.createPr.pushHint}</p>
-      ) : null}
-      <div className="flex items-center gap-2">
-        <Button type="submit" size="sm" disabled={!title.trim() || mutation.isPending}>
-          {needsPush ? t.github.actions.pushAndCreatePr : t.github.createPr.submit}
-        </Button>
-        {/* Disabled while submitting: onDone only closes the form, it does not
-            abort the push or create request, so an enabled Cancel would let a
-            pull request appear moments after the form it was made in vanished. */}
-        <Button
-          type="button"
-          variant="subtle"
-          size="sm"
-          onClick={onDone}
-          disabled={mutation.isPending}
-        >
-          {t.github.createPr.cancel}
-        </Button>
-      </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={bodyId} className="text-sm font-medium text-fg">
+            {t.github.createPr.bodyLabel}
+          </label>
+          <Textarea
+            id={bodyId}
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            placeholder={t.github.createPr.bodyPlaceholder}
+            rows={4}
+          />
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-fg">
+          <Checkbox checked={draft} onChange={(event) => setDraft(event.target.checked)} />
+          {t.github.createPr.draftLabel}
+        </label>
+        {needsPush ? <Callout tone="warning">{t.github.createPr.pushHint}</Callout> : null}
+        <div className="flex justify-end gap-2">
+          {/* Disabled while submitting: onDone only closes the form, it does not
+              abort the push or create request, so an enabled Cancel would let a
+              pull request appear moments after the form it was made in vanished. */}
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={onDone}
+            disabled={mutation.isPending}
+          >
+            {t.github.createPr.cancel}
+          </Button>
+          <Button type="submit" size="sm" disabled={!title.trim() || mutation.isPending}>
+            {needsPush ? t.github.actions.pushAndCreatePr : t.github.createPr.submit}
+          </Button>
+        </div>
+      </Card>
     </form>
   );
 }

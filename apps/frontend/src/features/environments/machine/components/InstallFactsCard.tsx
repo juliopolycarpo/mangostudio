@@ -4,32 +4,12 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
-import { FindingIcon } from '../../components/FindingList';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
+import { MachineCard, MachineFact } from './MachineCard';
 
 interface InstallFactsCardProps {
   readonly status: MachineStatus;
-}
-
-function Fact({
-  label,
-  value,
-  severity,
-}: {
-  readonly label: string;
-  readonly value: string;
-  readonly severity?: 'warn' | 'fail';
-}) {
-  return (
-    <div className="flex items-start gap-2 text-sm">
-      {severity && <FindingIcon severity={severity} />}
-      <div className="min-w-0">
-        <p className="text-fg-muted">{label}</p>
-        <p className="break-all font-mono text-xs text-fg">{value}</p>
-      </div>
-    </div>
-  );
 }
 
 export function InstallFactsCard({ status }: InstallFactsCardProps) {
@@ -54,14 +34,13 @@ export function InstallFactsCard({ status }: InstallFactsCardProps) {
         : undefined;
 
   return (
-    <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-install-card">
-      <CardSectionLabel>{m.install.title}</CardSectionLabel>
+    <MachineCard title={m.install.title} testId="machine-install-card">
       <div className="space-y-3">
-        <Fact label={m.runtime.title} value={runtimeValue} severity={runtimeSeverity} />
+        <MachineFact label={m.runtime.title} value={runtimeValue} severity={runtimeSeverity} />
         {runtimeBinary.versionMatches === false && (
-          <p className="text-sm text-warning">{m.runtime.versionMismatch}</p>
+          <Callout tone="warning">{m.runtime.versionMismatch}</Callout>
         )}
-        <Fact
+        <MachineFact
           label={m.hostSlot.title}
           value={
             hostSlot.error
@@ -72,10 +51,13 @@ export function InstallFactsCard({ status }: InstallFactsCardProps) {
           }
           severity={hostSlot.error ? 'fail' : undefined}
         />
-        <Fact label={m.install.home} value={status.homeDir} />
-        <Fact label={m.install.logsDir} value={status.logsDir} />
-        <Fact label={m.install.configFile} value={status.configFile ?? m.install.noConfigFile} />
-        <Fact
+        <MachineFact label={m.install.home} value={status.homeDir} />
+        <MachineFact label={m.install.logsDir} value={status.logsDir} />
+        <MachineFact
+          label={m.install.configFile}
+          value={status.configFile ?? m.install.noConfigFile}
+        />
+        <MachineFact
           label={m.install.build}
           value={[
             status.platform,
@@ -84,6 +66,6 @@ export function InstallFactsCard({ status }: InstallFactsCardProps) {
           ].join(' · ')}
         />
       </div>
-    </section>
+    </MachineCard>
   );
 }

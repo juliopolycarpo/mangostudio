@@ -2,6 +2,7 @@ import type { ReasoningEffort } from '@mangostudio/shared/types';
 import { Brain } from 'lucide-react';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 interface ThinkingToggleProps {
   enabled: boolean;
@@ -34,16 +35,16 @@ export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: Th
   };
 
   return (
-    <div className="flex items-center gap-0.5">
+    <div className="flex items-center gap-1">
       <button
         type="button"
         onClick={() => onToggle(!enabled)}
         aria-pressed={enabled}
         // The on state is styled off `aria-pressed` in `index.css`, so it
-        // follows the composer's runner accent rather than the product primary.
+        // follows the composer's runner accent rather than the product accent.
         className="composer-chip"
       >
-        <Brain size={12} className="shrink-0" />
+        <Brain size={ICON_SM} className="shrink-0" />
         <span>{t.thinking.enable}</span>
       </button>
 

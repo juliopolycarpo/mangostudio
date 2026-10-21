@@ -1,5 +1,6 @@
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import { useI18n } from '@/hooks/use-i18n';
+import { EventRule } from './EventRule';
 
 type Severity = 'info' | 'error';
 
@@ -70,14 +71,5 @@ export function SystemEventMarker({ event, detail }: { event: string; detail?: s
   const { t } = useI18n();
   const { label, severity } = resolveLabel(event, detail, t);
 
-  const toneClass = severity === 'error' ? 'text-danger' : 'text-fg-muted';
-  const lineClass = severity === 'error' ? 'bg-danger-subtle' : 'bg-stroke';
-
-  return (
-    <div className={`flex items-center gap-2 py-2 text-xs my-1 ${toneClass}`}>
-      <div className={`flex-1 h-px ${lineClass}`} />
-      <span className="font-medium whitespace-nowrap">{label}</span>
-      <div className={`flex-1 h-px ${lineClass}`} />
-    </div>
-  );
+  return <EventRule tone={severity === 'error' ? 'danger' : 'neutral'}>{label}</EventRule>;
 }

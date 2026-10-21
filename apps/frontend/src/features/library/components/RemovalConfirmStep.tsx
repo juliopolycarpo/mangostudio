@@ -11,8 +11,11 @@
 import type { RemovalPreview } from '@mangostudio/shared/library';
 import { TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';
+import { Callout } from '@/components/ui/Callout';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { hashPrefix } from '../format';
 import { eliminatedGroups, lastCopyEntries, plannedRemovals, type RemovalDraft } from '../removal';
 
@@ -40,15 +43,11 @@ export function RemovalConfirmStep({
         {formatMessage(l.removal.confirmDescription, { count: String(planned.length) })}
       </p>
 
-      <ul className="space-y-1">
+      <ul className="space-y-2">
         {planned.map(({ entry, location }) => (
-          <li
-            key={`${entry.resourceKey}:${location.locationId}`}
-            className="text-xs"
-            data-testid="removal-summary-row"
-          >
-            <span className="text-fg">{entry.resourceKey}</span>
-            <span className="block break-all font-mono text-[11px] text-fg-muted">
+          <li key={`${entry.resourceKey}:${location.locationId}`} data-testid="removal-summary-row">
+            <span className="block text-fg text-sm">{entry.resourceKey}</span>
+            <span className="block break-all font-mono text-fg-muted text-micro">
               {location.path ?? location.locationId}
             </span>
           </li>
@@ -56,14 +55,10 @@ export function RemovalConfirmStep({
       </ul>
 
       {eliminated.length > 0 && (
-        <div className="space-y-1 rounded-lg border border-info bg-info-subtle p-3">
-          <p className="text-info text-xs">{l.removal.eliminatesGroupHeading}</p>
-          <ul className="space-y-0.5">
+        <Callout tone="info" title={l.removal.eliminatesGroupHeading}>
+          <ul className="space-y-0.5 text-xs">
             {eliminated.map(({ entry, location }) => (
-              <li
-                key={`${entry.resourceKey}:${location.locationId}`}
-                className="text-[11px] text-fg-muted"
-              >
+              <li key={`${entry.resourceKey}:${location.locationId}`}>
                 {formatMessage(l.removal.eliminatesGroupRow, {
                   resource: entry.resourceKey,
                   location: location.path ?? location.locationId,
@@ -72,40 +67,38 @@ export function RemovalConfirmStep({
               </li>
             ))}
           </ul>
-        </div>
+        </Callout>
       )}
 
       {lastCopies.length > 0 && (
-        <div
-          className="space-y-2 rounded-lg border border-danger bg-danger-subtle p-3"
+        <Callout
+          tone="danger"
+          icon={<TriangleAlert size={ICON_MD} />}
+          title={l.removal.lastCopyWarning}
           data-testid="last-copy-acknowledgement"
         >
-          <p className="flex items-start gap-2 text-danger text-xs">
-            <TriangleAlert size={14} className="mt-0.5 shrink-0" />
-            {l.removal.lastCopyWarning}
-          </p>
-          {lastCopies.map((entry) => (
-            <label
-              key={entry.resourceKey}
-              className="flex cursor-pointer items-start gap-2 text-xs"
-              data-testid="last-copy-row"
-              data-resource-key={entry.resourceKey}
-            >
-              <input
-                type="checkbox"
-                checked={draft.acknowledged.has(entry.resourceKey)}
-                onChange={() => onToggleAcknowledgement(entry.resourceKey)}
-                className="mt-0.5 size-3.5 accent-danger"
-              />
-              <span className="text-fg">
-                {formatMessage(l.removal.lastCopyAcknowledge, { resource: entry.resourceKey })}
-              </span>
-            </label>
-          ))}
-        </div>
+          <div className="space-y-2 pt-1">
+            {lastCopies.map((entry) => (
+              <label
+                key={entry.resourceKey}
+                className="flex cursor-pointer items-center gap-2 text-fg text-sm"
+                data-testid="last-copy-row"
+                data-resource-key={entry.resourceKey}
+              >
+                <Checkbox
+                  checked={draft.acknowledged.has(entry.resourceKey)}
+                  onChange={() => onToggleAcknowledgement(entry.resourceKey)}
+                />
+                <span>
+                  {formatMessage(l.removal.lastCopyAcknowledge, { resource: entry.resourceKey })}
+                </span>
+              </label>
+            ))}
+          </div>
+        </Callout>
       )}
 
-      <p className="text-[11px] text-fg-muted">{l.removal.backupNote}</p>
+      <p className="text-fg-muted text-xs">{l.removal.backupNote}</p>
     </div>
   );
 }

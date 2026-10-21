@@ -5,15 +5,24 @@ import type {
   ProviderUsageMetrics,
 } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
-import { Card } from '@/components/ui/Card';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { formatCompactDuration } from '@/features/settings/connectors/components/ChatGptUsageMeter';
 import { connectorQueryOptions } from '@/features/settings/connectors/hooks/use-connectors';
 import { useI18n } from '@/hooks/use-i18n';
 import { observabilityMetricsQueryOptions } from '../queries';
-import { formatCompactDuration, formatPercent, formatTimestamp, formatTokenCount } from '../utils';
+import { formatPercent, formatTimestamp, formatTokenCount } from '../utils';
 import { ChatGptMetricsCard } from './ChatGptMetricsCard';
 
 /** ChatGPT usage snapshots are cached ~5 min server-side, so poll leisurely. */
 const CHATGPT_REFETCH_MS = 60_000;
+
+/** A block of a provider's card. The blocks are divided by a hairline, not boxed. */
+const BLOCK = 'space-y-3 border-t border-stroke pt-4 first:border-t-0 first:pt-0';
 
 function CacheMetricsTable(props: {
   cacheLabel: string;
@@ -27,11 +36,19 @@ function CacheMetricsTable(props: {
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-fg-muted">
-            <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.cacheLabel}</th>
-            <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.hitsLabel}</th>
-            <th className="whitespace-nowrap py-2 pr-4 font-medium">{props.missesLabel}</th>
-            <th className="whitespace-nowrap py-2 font-medium">{props.hitRateLabel}</th>
+          <tr className="text-left text-xs text-fg-muted">
+            <th scope="col" className="whitespace-nowrap py-2 pr-4 font-medium">
+              {props.cacheLabel}
+            </th>
+            <th scope="col" className="whitespace-nowrap py-2 pr-4 font-medium">
+              {props.hitsLabel}
+            </th>
+            <th scope="col" className="whitespace-nowrap py-2 pr-4 font-medium">
+              {props.missesLabel}
+            </th>
+            <th scope="col" className="whitespace-nowrap py-2 font-medium">
+              {props.hitRateLabel}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -40,9 +57,11 @@ function CacheMetricsTable(props: {
               <td className="whitespace-nowrap py-2 pr-4 text-fg">
                 {props.cacheLabels[entry.cacheName]}
               </td>
-              <td className="whitespace-nowrap py-2 pr-4 text-fg">{entry.hits}</td>
-              <td className="whitespace-nowrap py-2 pr-4 text-fg">{entry.misses}</td>
-              <td className="whitespace-nowrap py-2 text-fg">{formatPercent(entry.hitRate)}</td>
+              <td className="whitespace-nowrap py-2 pr-4 text-fg tabular-nums">{entry.hits}</td>
+              <td className="whitespace-nowrap py-2 pr-4 text-fg tabular-nums">{entry.misses}</td>
+              <td className="whitespace-nowrap py-2 text-fg tabular-nums">
+                {formatPercent(entry.hitRate)}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -51,7 +70,17 @@ function CacheMetricsTable(props: {
   );
 }
 
-function UsageSummaryRow(props: {
+function UsageStat(props: { label: string; value: string | number; hint?: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-fg-muted">{props.label}</dt>
+      <dd className="mt-0.5 text-base font-medium text-fg tabular-nums">{props.value}</dd>
+      {props.hint ? <dd className="mt-0.5 text-xs text-fg-subtle">{props.hint}</dd> : null}
+    </div>
+  );
+}
+
+function UsageSummary(props: {
   labels: {
     textTurnsLabel: string;
     imageGenerationsLabel: string;
@@ -73,39 +102,16 @@ function UsageSummaryRow(props: {
       : null;
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <div className="rounded-xl bg-control px-4 py-3">
-        <div className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {props.labels.textTurnsLabel}
-        </div>
-        <div className="mt-1 text-sm font-semibold text-fg tabular-nums">
-          {props.usage.textTurns}
-        </div>
-      </div>
-      <div className="rounded-xl bg-control px-4 py-3">
-        <div className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {props.labels.imageGenerationsLabel}
-        </div>
-        <div className="mt-1 text-sm font-semibold text-fg tabular-nums">
-          {props.usage.imageGenerations}
-        </div>
-      </div>
-      <div className="rounded-xl bg-control px-4 py-3">
-        <div className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {props.labels.inputTokensLabel}
-        </div>
-        <div className="mt-1 text-sm font-semibold text-fg tabular-nums">
-          {formatTokenCount(props.usage.inputTokens, props.locale)}
-        </div>
-        <div className="mt-0.5 text-[10px] text-fg-muted">{props.labels.inputTokensHint}</div>
-      </div>
-      <div className="rounded-xl bg-control px-4 py-3">
-        <div className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-          {props.labels.lastUsedLabel}
-        </div>
-        <div className="mt-1 text-sm font-semibold text-fg tabular-nums">{lastUsedAgo ?? '—'}</div>
-      </div>
-    </div>
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+      <UsageStat label={props.labels.textTurnsLabel} value={props.usage.textTurns} />
+      <UsageStat label={props.labels.imageGenerationsLabel} value={props.usage.imageGenerations} />
+      <UsageStat
+        label={props.labels.inputTokensLabel}
+        value={formatTokenCount(props.usage.inputTokens, props.locale)}
+        hint={props.labels.inputTokensHint}
+      />
+      <UsageStat label={props.labels.lastUsedLabel} value={lastUsedAgo ?? '—'} />
+    </dl>
   );
 }
 
@@ -133,15 +139,15 @@ export function MetricsSettingsPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <Card className="space-y-1 p-4 sm:p-6">
-        <h2 className="text-lg font-semibold text-fg">{labels.title}</h2>
-        <p className="text-sm text-fg-muted">{labels.description}</p>
-        <p className="text-xs text-fg-muted">
+    <SettingsPage
+      title={labels.title}
+      description={labels.description}
+      actions={
+        <span className="text-xs text-fg-muted">
           {labels.generatedAtLabel.replace('{value}', generatedAtLabel)}
-        </p>
-      </Card>
-
+        </span>
+      }
+    >
       {chatGptConnectors.map((connector) => (
         <ChatGptMetricsCard
           key={connector.id}
@@ -151,84 +157,83 @@ export function MetricsSettingsPage() {
       ))}
 
       {isLoading ? (
-        <Card className="p-4 sm:p-6 text-sm text-fg-muted">{t.common.loading}</Card>
+        <div role="status" className="space-y-3">
+          <Skeleton className="h-40 w-full rounded-md" />
+          <span className="sr-only">{t.common.loading}</span>
+        </div>
       ) : error ? (
-        <Card className="p-4 sm:p-6 text-sm text-danger">{labels.failedToLoad}</Card>
+        <Callout tone="danger">{labels.failedToLoad}</Callout>
       ) : data?.providers.length ? (
         data.providers.map((providerMetrics) => (
-          <Card key={providerMetrics.provider} className="space-y-4 p-4 sm:p-6">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
-              <h3 className="text-base font-semibold text-fg">
-                {t.providers[providerMetrics.provider]}
-              </h3>
+          <SettingsSection
+            key={providerMetrics.provider}
+            padded
+            title={t.providers[providerMetrics.provider]}
+            action={
               <span className="text-sm text-fg-muted">
                 {labels.totalProbeTimeoutsLabel.replace(
                   '{value}',
                   String(providerMetrics.totalProbeTimeouts)
                 )}
               </span>
-            </div>
-
-            <div className="grid gap-4">
-              {providerMetrics.usage ? (
-                <div className="space-y-3">
-                  <h4 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-                    {labels.usageSectionTitle}
-                  </h4>
-                  <UsageSummaryRow
-                    labels={{
-                      textTurnsLabel: labels.usageTextTurnsLabel,
-                      imageGenerationsLabel: labels.usageImageGenerationsLabel,
-                      inputTokensLabel: labels.usageInputTokensLabel,
-                      inputTokensHint: labels.usageInputTokensHint,
-                      lastUsedLabel: labels.usageLastUsedLabel,
-                      lastUsedAgoLabel: labels.usageLastUsedAgoLabel,
-                    }}
-                    usage={providerMetrics.usage}
-                    now={now}
-                    locale={locale}
-                  />
-                </div>
-              ) : null}
-
-              <div className="space-y-3">
-                <h4 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-                  {labels.cacheSectionTitle}
-                </h4>
-                <CacheMetricsTable
-                  cacheLabel={labels.cacheLabel}
-                  cacheLabels={cacheLabels}
-                  hitRateLabel={labels.hitRateLabel}
-                  hitsLabel={labels.hitsLabel}
-                  missesLabel={labels.missesLabel}
-                  entries={providerMetrics.caches}
+            }
+          >
+            {providerMetrics.usage ? (
+              <section className={BLOCK}>
+                <MicroLabel as="h4" className="block">
+                  {labels.usageSectionTitle}
+                </MicroLabel>
+                <UsageSummary
+                  labels={{
+                    textTurnsLabel: labels.usageTextTurnsLabel,
+                    imageGenerationsLabel: labels.usageImageGenerationsLabel,
+                    inputTokensLabel: labels.usageInputTokensLabel,
+                    inputTokensHint: labels.usageInputTokensHint,
+                    lastUsedLabel: labels.usageLastUsedLabel,
+                    lastUsedAgoLabel: labels.usageLastUsedAgoLabel,
+                  }}
+                  usage={providerMetrics.usage}
+                  now={now}
+                  locale={locale}
                 />
-              </div>
+              </section>
+            ) : null}
 
-              <div className="space-y-3">
-                <h4 className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-                  {labels.probeSectionTitle}
-                </h4>
-                <div className="space-y-2">
-                  {providerMetrics.probeTimeouts.map((entry) => (
-                    <div
-                      key={entry.operation}
-                      className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl bg-control px-4 py-3"
-                    >
-                      <span className="text-sm text-fg">{operationLabels[entry.operation]}</span>
-                      <span className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold text-fg tabular-nums">
-                        {entry.timeoutCount}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </Card>
+            <section className={BLOCK}>
+              <MicroLabel as="h4" className="block">
+                {labels.cacheSectionTitle}
+              </MicroLabel>
+              <CacheMetricsTable
+                cacheLabel={labels.cacheLabel}
+                cacheLabels={cacheLabels}
+                hitRateLabel={labels.hitRateLabel}
+                hitsLabel={labels.hitsLabel}
+                missesLabel={labels.missesLabel}
+                entries={providerMetrics.caches}
+              />
+            </section>
+
+            <section className={BLOCK}>
+              <MicroLabel as="h4" className="block">
+                {labels.probeSectionTitle}
+              </MicroLabel>
+              <ul className="divide-y divide-stroke">
+                {providerMetrics.probeTimeouts.map((entry) => (
+                  <li
+                    key={entry.operation}
+                    className="flex items-center justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0"
+                  >
+                    <span className="text-fg">{operationLabels[entry.operation]}</span>
+                    <span className="font-medium text-fg tabular-nums">{entry.timeoutCount}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </SettingsSection>
         ))
       ) : (
-        <Card className="p-4 sm:p-6 text-sm text-fg-muted">{labels.empty}</Card>
+        <EmptyState title={labels.empty} />
       )}
-    </div>
+    </SettingsPage>
   );
 }

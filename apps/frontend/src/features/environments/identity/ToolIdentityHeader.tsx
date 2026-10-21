@@ -10,6 +10,7 @@ import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import type { ReactNode } from 'react';
 import { ToolAvatar, type ToolAvatarSize } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
 import { displayName } from '../format';
 import { ToolIdentityMenu } from './ToolIdentityMenu';
 import { useToolIdentities } from './use-tool-identities';
@@ -21,6 +22,8 @@ interface ToolIdentityHeaderProps {
   /** Default name for subjects the i18n dictionary does not know (MCP servers). */
   readonly fallbackName?: string;
   readonly avatarSize?: ToolAvatarSize;
+  /** A card in a grid names itself at card-title size; a full-width one at section size. */
+  readonly density?: 'comfortable' | 'compact';
   readonly subtitle?: ReactNode;
   /** Status affordances that sit opposite the name (health, probe). */
   readonly actions?: ReactNode;
@@ -31,6 +34,7 @@ export function ToolIdentityHeader({
   id,
   fallbackName,
   avatarSize = 'md',
+  density = 'comfortable',
   subtitle,
   actions,
 }: ToolIdentityHeaderProps) {
@@ -51,7 +55,14 @@ export function ToolIdentityHeader({
           size={avatarSize}
         />
         <div className="min-w-0 space-y-1">
-          <h2 className="truncate font-bold text-lg text-fg">{identity.name}</h2>
+          <h2
+            className={cn(
+              'truncate font-semibold text-fg',
+              density === 'compact' ? 'text-sm' : 'text-base'
+            )}
+          >
+            {identity.name}
+          </h2>
           {subtitle}
         </div>
       </div>

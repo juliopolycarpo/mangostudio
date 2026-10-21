@@ -3,7 +3,8 @@ import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import { Link } from '@tanstack/react-router';
 import {
   BarChart3,
-  CheckCircle2,
+  CircleCheck,
+  CircleX,
   Database,
   FileCode,
   RefreshCw,
@@ -11,12 +12,16 @@ import {
   ShieldCheck,
   Trash2,
   TriangleAlert,
-  XCircle,
 } from 'lucide-react';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import { formatPlan } from '../lib/format-plan';
+import { isReadOnlySharedConnector } from '../lib/shared-connector';
 import { ChatGptPromoChip } from './ChatGptPromoChip';
 
 interface ConnectorCardProps {
@@ -24,14 +29,6 @@ interface ConnectorCardProps {
   onConfigure: (connector: Connector) => void;
   onDelete: (connector: Connector) => void;
   onReauthenticated: (connector: Connector) => void | Promise<void>;
-}
-
-function isReadOnlySharedConnector(connector: Connector): boolean {
-  return (
-    connector.userId === null &&
-    connector.source !== 'config-file' &&
-    connector.source !== 'environment'
-  );
 }
 
 export function ConnectorCard({
@@ -62,141 +59,116 @@ export function ConnectorCard({
   };
 
   return (
-    <div
-      className={`bg-control border rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 ${
-        c.needsReauth ? 'border-amber-500/30' : 'border-stroke'
-      }`}
-    >
-      <div className="flex items-start gap-4">
-        <div
-          className={`p-2.5 rounded-xl ${
-            c.needsReauth
-              ? 'bg-amber-500/10 text-amber-200'
-              : c.configured
-                ? 'bg-accent-subtle text-accent-fg'
-                : 'bg-danger-subtle text-danger'
-          }`}
-        >
-          {c.needsReauth ? (
-            <TriangleAlert size={20} />
-          ) : c.configured ? (
-            <CheckCircle2 size={20} />
-          ) : (
-            <XCircle size={20} />
-          )}
-        </div>
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-bold text-fg">{c.name}</h3>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface text-fg-muted border border-stroke">
-              {t.providers[c.provider]}
-            </span>
-            {isReadOnlyShared && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-200 border border-amber-500/20">
-                {s.sharedConnector}
-              </span>
-            )}
-            {isDeprecated && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-200 border border-amber-500/20">
-                {s.deprecatedBadge}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span className="flex items-center gap-1 text-fg-muted">
-              {c.source === 'bun-secrets' && <ShieldCheck size={12} />}
-              {c.source === 'config-file' && <FileCode size={12} />}
-              {c.source === 'environment' && <Database size={12} />}
-              {c.source.replace('-', ' ')}
-            </span>
-            <span className="text-fg-subtle">•</span>
-            {isChatGpt ? (
-              <>
-                <span className="text-fg-muted">
-                  {s.chatgptSignedInAs.replace(
-                    '{account}',
-                    c.accountLabel ?? c.maskedSuffix ?? s.chatgptAccountUnknown
-                  )}
-                </span>
-                <span className="text-fg-subtle">•</span>
-                <span className="rounded-full border border-stroke bg-surface px-2 py-0.5 text-[10px] text-fg-muted">
-                  {s.chatgptPlanBadge.replace('{plan}', planLabel)}
-                </span>
-              </>
+    <Card padded={false} className="space-y-3 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          {/* The glyph is the status: a triangle when the sign-in has lapsed, a
+              tick when the connector works, a cross when it is not configured. */}
+          <span className="mt-0.5 shrink-0">
+            {c.needsReauth ? (
+              <TriangleAlert size={ICON_MD} className="text-warning" />
+            ) : c.configured ? (
+              <CircleCheck size={ICON_MD} className="text-success" />
             ) : (
-              <span className="font-mono text-fg-muted">{c.maskedSuffix ?? '****'}</span>
+              <CircleX size={ICON_MD} className="text-danger" />
             )}
+          </span>
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="truncate text-sm font-semibold text-fg">{c.name}</h3>
+              <Badge>{t.providers[c.provider]}</Badge>
+              {isReadOnlyShared && <Badge>{s.sharedConnector}</Badge>}
+              {isDeprecated && <Badge variant="warning">{s.deprecatedBadge}</Badge>}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
+              <span className="inline-flex items-center gap-1">
+                {c.source === 'bun-secrets' && <ShieldCheck size={ICON_SM} />}
+                {c.source === 'config-file' && <FileCode size={ICON_SM} />}
+                {c.source === 'environment' && <Database size={ICON_SM} />}
+                {c.source.replace('-', ' ')}
+              </span>
+              <span aria-hidden="true">·</span>
+              {isChatGpt ? (
+                <>
+                  <span>
+                    {s.chatgptSignedInAs.replace(
+                      '{account}',
+                      c.accountLabel ?? c.maskedSuffix ?? s.chatgptAccountUnknown
+                    )}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <Badge>{s.chatgptPlanBadge.replace('{plan}', planLabel)}</Badge>
+                </>
+              ) : (
+                <span className="font-mono">{c.maskedSuffix ?? '****'}</span>
+              )}
+            </div>
           </div>
-          {isChatGpt && c.needsReauth ? (
-            <p className="text-[11px] leading-relaxed text-amber-200/80">
-              {s.chatgptReauthWarning}
-            </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          {isChatGpt && !c.needsReauth ? (
+            <Link
+              to="/settings/metrics"
+              className="inline-flex h-7 items-center gap-1.5 rounded-sm px-2 text-xs font-medium text-fg transition-colors hover:bg-fill-hover active:bg-fill-pressed"
+            >
+              <BarChart3 size={ICON_MD} />
+              {s.chatgptSeeMetrics}
+            </Link>
           ) : null}
-          {isChatGpt && !c.needsReauth && c.usage?.promoMessage ? (
-            <ChatGptPromoChip connectorId={c.id} message={c.usage.promoMessage} />
-          ) : null}
-          {chatGptOAuth.error ? (
-            <p className="text-[11px] leading-relaxed text-danger">{chatGptOAuth.error}</p>
-          ) : null}
-          {isDeprecated && (
-            <p className="text-[11px] leading-relaxed text-amber-200/80">
-              {s.deprecatedConnectorNote}
-            </p>
-          )}
-          {isReadOnlyShared && <p className="text-[10px] text-fg-subtle">{s.managedExternally}</p>}
+          <Button
+            variant="subtle"
+            size="icon"
+            onClick={() => onConfigure(c)}
+            title={s.configureModels}
+            aria-label={s.configureModels}
+          >
+            <Settings size={ICON_MD} />
+          </Button>
+          <Button
+            variant="subtle"
+            size="icon"
+            onClick={() => onDelete(c)}
+            title={isReadOnlyShared ? s.sharedDeleteBlocked : s.deleteConnector}
+            aria-label={s.deleteConnector}
+            className="text-danger enabled:hover:bg-danger-subtle"
+            disabled={isReadOnlyShared}
+          >
+            <Trash2 size={ICON_MD} />
+          </Button>
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        {isChatGpt && !c.needsReauth ? (
-          <Link
-            to="/settings/metrics"
-            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold text-fg-muted transition-all duration-200 hover:bg-fill-hover hover:text-fg"
-          >
-            <BarChart3 size={15} />
-            {s.chatgptSeeMetrics}
-          </Link>
-        ) : null}
-        {isChatGpt && c.needsReauth ? (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleReauthenticate}
-            disabled={chatGptOAuth.isBusy}
-          >
-            {chatGptOAuth.isBusy ? (
-              <>
-                <RefreshCw size={15} className="animate-spin" />
-                {s.chatgptReauthenticating}
-              </>
-            ) : (
-              <>
-                <RefreshCw size={15} />
-                {s.chatgptReauthenticate}
-              </>
-            )}
-          </Button>
-        ) : null}
-        <Button
-          variant="subtle"
-          size="sm"
-          onClick={() => onConfigure(c)}
-          title={s.configureModels}
-          className="p-2"
+      {isChatGpt && c.needsReauth ? (
+        <Callout
+          tone="warning"
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleReauthenticate}
+              loading={chatGptOAuth.isBusy}
+            >
+              {chatGptOAuth.isBusy ? (
+                s.chatgptReauthenticating
+              ) : (
+                <>
+                  <RefreshCw size={ICON_MD} />
+                  {s.chatgptReauthenticate}
+                </>
+              )}
+            </Button>
+          }
         >
-          <Settings size={18} />
-        </Button>
-        <Button
-          variant="subtle"
-          size="sm"
-          onClick={() => onDelete(c)}
-          title={isReadOnlyShared ? s.sharedDeleteBlocked : s.deleteConnector}
-          className="p-2 text-danger hover:text-danger hover:bg-danger-subtle disabled:opacity-40 disabled:hover:bg-transparent"
-          disabled={isReadOnlyShared}
-        >
-          <Trash2 size={18} />
-        </Button>
-      </div>
-    </div>
+          {s.chatgptReauthWarning}
+        </Callout>
+      ) : null}
+      {isChatGpt && !c.needsReauth && c.usage?.promoMessage ? (
+        <ChatGptPromoChip connectorId={c.id} message={c.usage.promoMessage} />
+      ) : null}
+      {chatGptOAuth.error ? <Callout tone="danger">{chatGptOAuth.error}</Callout> : null}
+      {isDeprecated && <Callout tone="warning">{s.deprecatedConnectorNote}</Callout>}
+      {isReadOnlyShared && <p className="text-xs text-fg-subtle">{s.managedExternally}</p>}
+    </Card>
   );
 }

@@ -17,8 +17,14 @@ import {
   type ExternalAgentTargetId,
   isExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
+import { ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
-import { Card } from '@/components/ui/Card';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { useExternalDisclosures } from '@/features/external-agents/useExternalDisclosures';
 import { useI18n } from '@/hooks/use-i18n';
@@ -40,23 +46,23 @@ export function ExternalAgentSettingsPage() {
   };
 
   return (
-    <Card padded={false} className="space-y-4 p-5">
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold text-fg">{labels.manageTitle}</h2>
-        <p className="text-xs leading-relaxed text-fg-muted">{labels.revokeHint}</p>
-      </div>
-
-      {/*
-        Loading is its own state rather than an empty list. "You have not
-        acknowledged any external agent yet" is a claim about this account, and
-        making it while the answer is still in flight would tell a user their
-        consents are gone every time the page opens.
-      */}
-      {disclosures.isLoading ? null : disclosures.records.length === 0 ? (
-        <p className="text-sm text-fg-muted">{labels.manageEmpty}</p>
-      ) : (
-        <ul className="divide-y divide-stroke">
-          {disclosures.records.map((record) => (
+    <SettingsPage title={t.settings.tabs.externalAgents}>
+      <SettingsSection title={labels.manageTitle} description={labels.revokeHint}>
+        {/*
+          Loading is its own state rather than an empty list. "You have not
+          acknowledged any external agent yet" is a claim about this account, and
+          making it while the answer is still in flight would tell a user their
+          consents are gone every time the page opens.
+        */}
+        {disclosures.isLoading ? (
+          <div role="status" className="px-4 py-3">
+            <Skeleton className="h-8 w-full" />
+            <span className="sr-only">{t.common.loading}</span>
+          </div>
+        ) : disclosures.records.length === 0 ? (
+          <EmptyState icon={<ShieldCheck size={24} />} title={labels.manageEmpty} />
+        ) : (
+          disclosures.records.map((record) => (
             <DisclosureRow
               key={record.targetId}
               targetId={record.targetId}
@@ -65,10 +71,10 @@ export function ExternalAgentSettingsPage() {
               busy={revoking === record.targetId}
               onRevoke={withdraw}
             />
-          ))}
-        </ul>
-      )}
-    </Card>
+          ))
+        )}
+      </SettingsSection>
+    </SettingsPage>
   );
 }
 
@@ -91,26 +97,24 @@ function DisclosureRow({ targetId, acknowledgedAt, locale, busy, onRevoke }: Dis
   const name = known ? t.externalAgents.target[targetId] : targetId;
 
   return (
-    <li className="flex items-center gap-3 py-3">
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-fg">{name}</p>
-        <p className="text-xs text-fg-muted">
-          {formatMessage(labels.acknowledgedAt, {
-            date: formatAcknowledgedAt(acknowledgedAt, locale),
-          })}
-        </p>
-      </div>
-      <button
+    <SettingsRow
+      label={name}
+      hint={formatMessage(labels.acknowledgedAt, {
+        date: formatAcknowledgedAt(acknowledgedAt, locale),
+      })}
+    >
+      <Button
         type="button"
+        variant="secondary"
+        size="sm"
         disabled={busy || !known}
         onClick={() => {
           if (known) onRevoke(targetId);
         }}
-        className="shrink-0 cursor-pointer rounded-xl border border-stroke px-3 py-1.5 text-xs text-fg-muted transition-colors hover:bg-fill-hover disabled:cursor-default disabled:opacity-50"
       >
         {busy ? labels.revoking : labels.revoke}
-      </button>
-    </li>
+      </Button>
+    </SettingsRow>
   );
 }
 

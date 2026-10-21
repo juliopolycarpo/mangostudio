@@ -18,21 +18,26 @@ import {
   RotateCcw,
   Trash2,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
-import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { workdirBasename } from '@/lib/paths';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
 import { CommitForm } from './CommitForm';
+import { GroupHeading } from './components/GroupHeading';
+import { IconButton } from './components/IconButton';
+import { PanelTabs } from './components/PanelTabs';
+import { RowList } from './components/RowList';
+import { DialogPathList, WorkspaceDialog } from './components/WorkspaceDialog';
 import type { DiffSelection } from './DiffViewer';
 import { readGitPanelPrefs, writeGitPanelPrefs } from './git-panel-prefs';
 import {
@@ -65,8 +70,8 @@ const STATUS_PRESENTATION: Readonly<Record<GitFileStatus, StatusPresentation>> =
   modified: { glyph: 'M', labelKey: 'modified', color: 'text-warning' },
   added: { glyph: 'A', labelKey: 'added', color: 'text-success' },
   deleted: { glyph: 'D', labelKey: 'deleted', color: 'text-danger' },
-  renamed: { glyph: 'R', labelKey: 'renamed', color: 'text-accent-fg' },
-  copied: { glyph: 'C', labelKey: 'copied', color: 'text-accent-fg' },
+  renamed: { glyph: 'R', labelKey: 'renamed', color: 'text-info' },
+  copied: { glyph: 'C', labelKey: 'copied', color: 'text-info' },
   untracked: { glyph: '?', labelKey: 'untracked', color: 'text-fg-muted' },
   conflicted: { glyph: '!', labelKey: 'conflicted', color: 'text-danger' },
   'type-changed': { glyph: 'T', labelKey: 'typeChanged', color: 'text-warning' },
@@ -99,37 +104,25 @@ export function GitPanel({ chatId }: GitPanelProps) {
 
   return (
     <section aria-label={labels.title} className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke px-3">
-        <div className="min-w-0 flex-1 text-fg-muted">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke px-4">
+        <div className="min-w-0 flex-1">
           <RepositoryName state={stateQuery.data} />
         </div>
-        <Button
-          type="button"
-          variant="subtle"
-          size="icon"
+        <IconButton
+          label={labels.refresh}
           onClick={() => void refresh()}
-          aria-label={labels.refresh}
-          title={labels.refresh}
           disabled={isFetching}
-          className="size-7 text-fg-muted disabled:cursor-wait focus-visible:outline-2 focus-visible:outline-focus"
+          busy={isFetching}
         >
           <RefreshCw size={ICON_SM} className={isFetching ? 'animate-spin' : undefined} />
-        </Button>
+        </IconButton>
         <Menu
           open={menuOpen}
           onOpenChange={setMenuOpen}
           trigger={(triggerProps) => (
-            <Button
-              type="button"
-              variant="subtle"
-              size="icon"
-              aria-label={labels.menu.open}
-              title={labels.menu.open}
-              className="size-7 text-fg-muted focus-visible:outline-2 focus-visible:outline-focus"
-              {...triggerProps}
-            >
+            <IconButton label={labels.menu.open} {...triggerProps}>
               <MoreHorizontal size={ICON_SM} />
-            </Button>
+            </IconButton>
           )}
         >
           <MenuItem
@@ -187,7 +180,7 @@ function RepositoryName({ state }: { readonly state: GitRepoState | undefined })
   if (!state || (state.state !== 'repo' && state.state !== 'not-a-repo')) return null;
   const path = state.state === 'repo' ? state.root : state.workdir;
   return (
-    <p className="truncate font-mono text-[11px] text-fg-muted" title={path}>
+    <p className="truncate font-mono text-xs text-fg-muted" title={path}>
       {basename(path)}
     </p>
   );
@@ -221,10 +214,9 @@ function GitPanelContent({
 
   if (error) {
     return (
-      <EmptyState
-        icon={<AlertTriangle size={20} />}
+      <Callout
+        tone="danger"
         title={labels.loadError}
-        tone="error"
         action={
           <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
             {t.common.retry}
@@ -234,27 +226,25 @@ function GitPanelContent({
     );
   }
   if (loading || !state) {
-    return (
-      <EmptyState icon={<RefreshCw size={20} className="animate-spin" />} title={labels.loading} />
-    );
+    return <EmptyState icon={<Spinner />} title={labels.loading} />;
   }
 
   switch (state.state) {
     case 'git-unavailable':
       return (
         <EmptyState
-          icon={<AlertTriangle size={20} />}
+          icon={<AlertTriangle size={ICON_LG} />}
           title={labels.unavailableTitle}
           hint={labels.unavailableHint}
           tone="warning"
         />
       );
     case 'no-workdir':
-      return <EmptyState icon={<FolderGit2 size={20} />} title={labels.noWorkdir} />;
+      return <EmptyState icon={<FolderGit2 size={ICON_LG} />} title={labels.noWorkdir} />;
     case 'not-a-repo':
       return (
         <EmptyState
-          icon={<FolderGit2 size={22} />}
+          icon={<FolderGit2 size={ICON_LG} />}
           title={labels.noRepositoryTitle}
           hint={labels.noRepositoryHint}
           action={
@@ -352,6 +342,11 @@ function RepositoryStatus({
   const hasUnstagedWork = changes.length > 0 || status.conflicted.length > 0;
   const anyPending =
     stageMutation.isPending || unstageMutation.isPending || discardMutation.isPending;
+  const discardText = discardRequest ? discardCopy(discardRequest, labels.discard) : null;
+  const viewTabs = (['changes', 'history'] as const).map((id) => ({
+    id,
+    label: labels.navigation[id],
+  }));
 
   return (
     <div className="space-y-4">
@@ -367,7 +362,7 @@ function RepositoryStatus({
         />
         {status.branch.upstream ? (
           <p
-            className="w-full truncate pl-6 font-mono text-[11px] text-fg-muted"
+            className="w-full truncate pl-8 font-mono text-micro text-fg-subtle"
             title={status.branch.upstream}
           >
             {status.branch.upstream}
@@ -375,25 +370,14 @@ function RepositoryStatus({
         ) : null}
       </section>
 
-      <div className="grid grid-cols-2 rounded-xl bg-surface p-1" role="tablist">
-        {(['changes', 'history'] as const).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={view === tab}
-            onClick={() => {
-              setView(tab);
-              setDiffSelection(null);
-            }}
-            className={`cursor-pointer rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-              view === tab ? 'bg-fill-selected text-fg shadow-sm' : 'text-fg-muted hover:text-fg'
-            }`}
-          >
-            {labels.navigation[tab]}
-          </button>
-        ))}
-      </div>
+      <PanelTabs
+        tabs={viewTabs}
+        active={view}
+        onSelect={(next) => {
+          setView(next);
+          setDiffSelection(null);
+        }}
+      />
 
       {view === 'history' ? (
         diffSelection ? (
@@ -431,7 +415,7 @@ function RepositoryStatus({
             />
           ) : status.clean ? (
             <EmptyState
-              icon={<Check size={22} />}
+              icon={<Check size={ICON_LG} />}
               title={labels.cleanTitle}
               hint={labels.cleanHint}
               tone="success"
@@ -439,9 +423,7 @@ function RepositoryStatus({
           ) : (
             <div className="space-y-4">
               {status.conflicted.length > 0 ? (
-                <div className="rounded-xl border border-danger bg-danger-subtle px-3 py-2.5 text-[11px] leading-4 text-danger">
-                  {labels.conflicts.hint}
-                </div>
+                <Callout tone="danger">{labels.conflicts.hint}</Callout>
               ) : null}
               <ChangeGroup
                 title={labels.groups.conflicted}
@@ -487,51 +469,29 @@ function RepositoryStatus({
 
       <BranchPrChip chatId={chatId} context={githubContext} />
 
-      {discardRequest ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="git-discard-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
-        >
-          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
-            <div className="space-y-2">
-              <h3 id="git-discard-title" className="text-lg font-bold text-fg">
-                {discardCopy(discardRequest, labels.discard).title}
-              </h3>
-              <p className="text-sm leading-5 text-fg-muted">
-                {discardCopy(discardRequest, labels.discard).hint}
-              </p>
-            </div>
-            <ul className="max-h-32 overflow-y-auto rounded-xl bg-control p-2 font-mono text-[11px]">
-              {discardRequest
-                .flatMap((selection) => selection.paths)
-                .map((path) => (
-                  <li key={path} className="truncate py-0.5" title={path}>
-                    {path}
-                  </li>
-                ))}
-            </ul>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setDiscardRequest(null)}
-              >
+      {discardRequest && discardText ? (
+        <WorkspaceDialog
+          titleId="git-discard-title"
+          title={discardText.title}
+          description={discardText.hint}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setDiscardRequest(null)}>
                 {labels.discard.cancel}
               </Button>
               <Button
                 type="button"
-                className="flex-1"
+                variant="danger"
                 loading={discardMutation.isPending}
                 onClick={() => void confirmDiscard()}
               >
-                {discardCopy(discardRequest, labels.discard).confirm}
+                {discardText.confirm}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <DialogPathList paths={discardRequest.flatMap((selection) => selection.paths)} />
+        </WorkspaceDialog>
       ) : null}
     </div>
   );
@@ -612,63 +572,57 @@ function ChangeGroup({
 
   return (
     <section>
-      <MicroLabel as="h3" className="mb-1.5 flex items-center gap-2 font-bold tracking-[0.12em]">
-        <span>{title}</span>
-        <span className="rounded-full bg-surface px-1.5 py-0.5 font-mono text-[9px] tracking-normal">
-          {changes.length}
-        </span>
-        <span className="ml-auto flex items-center gap-0.5">
-          {mixed && onDiscard ? (
-            <Menu
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
-              panelClassName="w-56"
-              trigger={(triggerProps) => (
-                <GroupButton
-                  label={t.git.actions.groupMenu.replace('{group}', title)}
-                  disabled={pending}
-                  {...triggerProps}
-                >
-                  <MoreHorizontal size={13} />
-                </GroupButton>
-              )}
-            >
-              {selections.map((selection) => (
-                <MenuItem
-                  key={selection.mode}
-                  tone="danger"
-                  onSelect={() => {
-                    setMenuOpen(false);
-                    onDiscard([selection]);
-                  }}
-                >
-                  {selection.mode === 'untracked'
-                    ? t.git.discard.deleteAllButton
-                    : t.git.discard.restoreAllButton}
-                </MenuItem>
-              ))}
-            </Menu>
-          ) : null}
-          {onDiscard ? (
-            <GroupButton
-              label={t.git.discard.discardAll.replace('{group}', title)}
-              tone="danger"
-              disabled={pending}
-              onClick={() => onDiscard(selections)}
-            >
-              <RotateCcw size={13} />
-            </GroupButton>
-          ) : null}
-          <GroupButton
-            label={allLabel}
-            disabled={pending}
-            onClick={() => onAction(changePaths(changes))}
+      <GroupHeading title={title} count={changes.length}>
+        {mixed && onDiscard ? (
+          <Menu
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            panelClassName="w-56"
+            trigger={(triggerProps) => (
+              <IconButton
+                label={t.git.actions.groupMenu.replace('{group}', title)}
+                disabled={pending}
+                {...triggerProps}
+              >
+                <MoreHorizontal size={ICON_SM} />
+              </IconButton>
+            )}
           >
-            {action === 'stage' ? <Plus size={13} /> : <Minus size={13} />}
-          </GroupButton>
-        </span>
-      </MicroLabel>
-      <ul className="overflow-hidden rounded-xl border border-stroke bg-control">
+            {selections.map((selection) => (
+              <MenuItem
+                key={selection.mode}
+                tone="danger"
+                onSelect={() => {
+                  setMenuOpen(false);
+                  onDiscard([selection]);
+                }}
+              >
+                {selection.mode === 'untracked'
+                  ? t.git.discard.deleteAllButton
+                  : t.git.discard.restoreAllButton}
+              </MenuItem>
+            ))}
+          </Menu>
+        ) : null}
+        {onDiscard ? (
+          <IconButton
+            label={t.git.discard.discardAll.replace('{group}', title)}
+            tone="danger"
+            disabled={pending}
+            onClick={() => onDiscard(selections)}
+          >
+            <RotateCcw size={ICON_SM} />
+          </IconButton>
+        ) : null}
+        <IconButton
+          label={allLabel}
+          disabled={pending}
+          onClick={() => onAction(changePaths(changes))}
+        >
+          {action === 'stage' ? <Plus size={ICON_SM} /> : <Minus size={ICON_SM} />}
+        </IconButton>
+      </GroupHeading>
+      <RowList>
         {changes.map((change) => (
           <FileChangeRow
             key={`${change.status}:${change.oldPath ?? ''}:${change.path}`}
@@ -684,39 +638,8 @@ function ChangeGroup({
             onDiff={() => onDiff(change.path)}
           />
         ))}
-      </ul>
+      </RowList>
     </section>
-  );
-}
-
-function GroupButton({
-  label,
-  tone = 'default',
-  disabled,
-  children,
-  ...props
-}: {
-  readonly label: string;
-  readonly tone?: 'default' | 'danger';
-  readonly disabled: boolean;
-  readonly children: ReactNode;
-  readonly onClick?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      className={`flex size-6 cursor-pointer items-center justify-center rounded tracking-normal transition-colors disabled:cursor-wait disabled:opacity-50 ${
-        tone === 'danger'
-          ? 'text-fg-muted hover:bg-danger-subtle hover:text-danger'
-          : 'text-fg-muted hover:bg-accent-hover hover:text-accent-fg'
-      }`}
-      {...props}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -748,22 +671,22 @@ function FileChangeRow({
     change.path
   );
   return (
-    <li className="group flex min-w-0 items-start gap-2 border-b border-stroke px-2.5 py-2 last:border-b-0">
+    <li className="flex min-h-8 min-w-0 items-center gap-2 px-3 py-0.5 transition-colors hover:bg-fill-hover">
       <span
-        className={`w-3 shrink-0 pt-px text-center font-mono text-[11px] font-bold ${presentation.color}`}
+        className={cn('w-4 shrink-0 text-center font-mono text-xs font-medium', presentation.color)}
         title={statusLabel}
         aria-hidden="true"
       >
         {presentation.glyph}
       </span>
       <span className="sr-only">{statusLabel}</span>
-      <FileCode2 size={13} className="mt-0.5 shrink-0 text-fg-muted" />
+      <FileCode2 size={ICON_SM} className="shrink-0 text-fg-muted" />
       <button
         type="button"
         onClick={onDiff}
         aria-label={t.git.actions.viewDiff.replace('{path}', change.path)}
         title={change.path}
-        className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[11px] leading-4 text-fg hover:text-accent-fg"
+        className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-xs text-fg"
       >
         {change.oldPath ? (
           <>
@@ -774,27 +697,13 @@ function FileChangeRow({
         {change.path}
       </button>
       {onDiscard ? (
-        <button
-          type="button"
-          aria-label={discardLabel}
-          title={discardLabel}
-          disabled={pending}
-          onClick={onDiscard}
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-fg-muted opacity-60 transition-colors hover:bg-danger-subtle hover:text-danger group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
-        >
-          {untracked ? <Trash2 size={12} /> : <RotateCcw size={12} />}
-        </button>
+        <IconButton label={discardLabel} tone="danger" disabled={pending} onClick={onDiscard}>
+          {untracked ? <Trash2 size={ICON_SM} /> : <RotateCcw size={ICON_SM} />}
+        </IconButton>
       ) : null}
-      <button
-        type="button"
-        aria-label={actionLabel}
-        title={actionLabel}
-        disabled={pending}
-        onClick={onAction}
-        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-fg-muted opacity-60 transition-colors hover:bg-fill-hover hover:text-accent-fg group-hover:opacity-100 disabled:cursor-wait disabled:opacity-30"
-      >
-        {action === 'stage' ? <Plus size={13} /> : <Minus size={13} />}
-      </button>
+      <IconButton label={actionLabel} disabled={pending} onClick={onAction}>
+        {action === 'stage' ? <Plus size={ICON_SM} /> : <Minus size={ICON_SM} />}
+      </IconButton>
     </li>
   );
 }

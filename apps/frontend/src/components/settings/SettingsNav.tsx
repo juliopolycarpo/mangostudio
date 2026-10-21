@@ -1,63 +1,37 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
+import { FIELD_CLASS } from '@/components/ui/Input';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { type SettingsNavGroup, settingsNavGroups } from './settings-nav';
 
 // Router `Link` concatenates `className` with the matching state's className,
 // so the three class strings must stay disjoint: an idle colour in the base
-// would still be on the active link, fighting `text-accent-fg` on stylesheet
-// order alone.
-const LINK_BASE =
-  'block rounded-lg px-3 py-2 text-sm transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus';
-/**
- * The hover fill is a translucent `on-surface` wash, not a surface token.
- *
- * A named elevation cannot work here: the panel is already
- * `surface-container-highest`, so `surface-container-high` — the tier the rest
- * of the app hovers with — is a step *down* in the dark theme (#262320 under
- * #322e29) and a barely-there step up in the light one. Either way the row
- * gained nothing on hover and only the label changed colour. `on-surface` is
- * near-white in dark and near-black in light, so an 8% wash of it always moves
- * away from whatever it sits on, in the direction that theme has room for.
- */
-const LINK_IDLE = 'font-medium text-fg-muted hover:bg-fill-hover hover:text-fg';
-const LINK_ACTIVE = 'font-semibold text-accent-fg bg-accent-subtle';
+// would still be on the active link, fighting `text-fg` on stylesheet order
+// alone.
+const LINK_BASE = 'relative flex h-8 items-center rounded-sm px-3 text-sm transition-colors';
+const LINK_IDLE = 'text-fg-muted hover:bg-fill-hover hover:text-fg';
+// The current page is a neutral fill plus the 3px accent bar on the leading
+// edge, as in the app sidebar: the bar carries the colour, the fill alone
+// would not survive a grayscale screen.
+const LINK_ACTIVE =
+  'bg-fill-selected font-medium text-fg before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-accent';
 
 /**
- * The list's own surface, so the column reads as one object against the page
- * instead of fifteen links loose on the background.
- *
- * `surface-container-highest` at 60% and not `.glass-panel`: the glass fill is
- * *lighter* than the page in both themes, which lands a near-white panel on a
- * near-white background and leaves the light theme with no panel at all. This
- * token moves away from the background in whichever direction the theme has
- * room for, and composites to the same weight as the `Card` surface the
- * settings pages themselves use.
+ * Below `lg` the list is a panel under the toggle; from `lg` it is bare, on the
+ * page's own canvas beside the content.
  *
  * The height cap is what makes `sticky` safe: a pinned column taller than the
  * scrollport can never show its last rows, because the page scrolls underneath
- * it. `7rem` is the header (~4.25rem) plus the `top-6` offset plus breathing
- * room at the bottom; erring high only means the panel scrolls itself slightly
- * sooner than it strictly must.
+ * it. `6rem` is the `top-6` offset plus the same again at the foot; erring high
+ * only means the list scrolls itself slightly sooner than it strictly must.
  */
-const PANEL_SURFACE = 'bg-fill-selected border border-stroke';
-const PANEL_BASE = `app-scrollbar mt-2 rounded-2xl p-3 ${PANEL_SURFACE}`;
-const PANEL_DESKTOP = 'lg:mt-0 lg:block lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto';
-
-/**
- * A hairline between groups, with the gap split evenly around it.
- *
- * Spacing alone carried the division while the rows had no hover fill: once a
- * row lights up on its own, a run of gaps reads as one list with uneven
- * leading rather than five sections. The rule at `outline-variant/15` is
- * quieter than the panel's own border, so the panel still reads as the outer
- * object and the rules as its internal seams — not as a table's gridlines.
- */
-const GROUP_BASE =
-  'space-y-1 border-t border-stroke pt-4 mt-4 first:border-t-0 first:pt-0 first:mt-0';
+const LIST_BASE =
+  'app-scrollbar max-lg:mt-2 max-lg:rounded-md max-lg:border max-lg:border-stroke max-lg:bg-surface max-lg:p-2';
+const LIST_DESKTOP = 'lg:block lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto';
 
 /**
  * Navigation for the settings surface: fifteen pages under five headings.
@@ -94,23 +68,19 @@ export function SettingsNav() {
         aria-expanded={open}
         aria-controls={listId}
         className={cn(
-          'flex w-full items-center justify-between gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-fg lg:hidden',
-          'transition-colors duration-200 hover:bg-fill-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus',
-          PANEL_SURFACE
+          FIELD_CLASS,
+          'flex cursor-pointer items-center justify-between gap-2 text-left font-medium lg:hidden'
         )}
       >
         <span className="truncate">
           {currentSettingsLabel(groups, pathname) ?? t.settings.title}
         </span>
-        <ChevronDown
-          size={16}
-          className={cn('shrink-0 transition-transform duration-200', open && 'rotate-180')}
-        />
+        <ChevronDown size={ICON_MD} className="shrink-0 text-fg-muted" />
       </button>
 
-      <div id={listId} className={cn(PANEL_BASE, PANEL_DESKTOP, !open && 'hidden')}>
+      <div id={listId} className={cn(LIST_BASE, LIST_DESKTOP, 'space-y-5', !open && 'hidden')}>
         {groups.map((group) => (
-          <div key={group.id} className={GROUP_BASE}>
+          <div key={group.id} className="space-y-0.5">
             <MicroLabel as="h2" className="px-3 pb-1">
               {group.label}
             </MicroLabel>

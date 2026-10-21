@@ -8,8 +8,13 @@ import type { McpServer, ReadMcpResourceResponse } from '@mangostudio/shared/mcp
 import { useQuery } from '@tanstack/react-query';
 import { Eye, FileText } from 'lucide-react';
 import { useState } from 'react';
+import { SettingsLoading } from '@/components/settings/SettingsStates';
+import { StatusNote } from '@/components/settings/StatusNote';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { readMcpResource } from '../api';
 import { mcpServerResourcesQueryOptions } from '../queries';
@@ -45,36 +50,36 @@ export function McpServerResources({ server }: McpServerResourcesProps) {
   };
 
   if (resourcesQuery.isLoading) {
-    return <p className="text-sm text-fg-muted py-2">{t.common.loading}</p>;
+    return <SettingsLoading count={2} />;
   }
   if (resourcesQuery.error) {
-    return <p className="text-sm text-danger py-2">{s.loadError}</p>;
+    return <Callout tone="danger">{s.loadError}</Callout>;
   }
   if (resourcesQuery.data === null) {
-    return <p className="text-sm text-fg-muted py-2">{s.notSupported}</p>;
+    return <EmptyState title={s.notSupported} className="min-h-0 py-4" />;
   }
 
   const resources = resourcesQuery.data?.resources ?? [];
   if (resources.length === 0) {
-    return <p className="text-sm text-fg-muted py-2">{s.empty}</p>;
+    return <EmptyState title={s.empty} className="min-h-0 py-4" />;
   }
 
   return (
-    <ul className="space-y-2 py-2">
+    <ul className="divide-y divide-stroke">
       {resources.map((resource) => (
-        <li key={resource.uri} className="rounded-xl bg-control px-3 py-2 space-y-2">
+        <li key={resource.uri} className="space-y-2 py-2">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 space-y-0.5">
-              <p className="flex items-center gap-1.5 text-sm font-medium text-fg break-all">
-                <FileText size={13} className="shrink-0 text-accent-fg" />
+              <p className="flex items-center gap-1.5 break-all text-sm font-medium text-fg">
+                <FileText size={ICON_SM} className="shrink-0 text-fg-muted" aria-hidden="true" />
                 {resource.name}
               </p>
-              <p className="text-xs text-fg-muted break-all">{resource.uri}</p>
+              <p className="break-all font-mono text-xs text-fg-muted">{resource.uri}</p>
               {resource.description && (
-                <p className="text-xs text-fg-muted leading-relaxed">{resource.description}</p>
+                <p className="text-xs text-fg-muted">{resource.description}</p>
               )}
               {resource.mimeType && (
-                <p className="text-[10px] font-mono text-fg-subtle">{resource.mimeType}</p>
+                <p className="font-mono text-micro text-fg-subtle">{resource.mimeType}</p>
               )}
             </div>
             <Button
@@ -84,20 +89,20 @@ export function McpServerResources({ server }: McpServerResourcesProps) {
               loading={preview?.uri === resource.uri && preview.loading}
               onClick={() => void handlePreview(resource.uri)}
             >
-              <Eye size={13} />
-              <span className="ml-1">{s.preview}</span>
+              <Eye size={ICON_SM} />
+              {s.preview}
             </Button>
           </div>
 
           {preview?.uri === resource.uri && !preview.loading && (
-            <div className="rounded-lg bg-surface px-3 py-2">
+            <div className="rounded-sm bg-canvas px-3 py-2">
               {preview.error ? (
-                <p className="text-xs text-danger">{preview.error}</p>
+                <StatusNote tone="danger">{preview.error}</StatusNote>
               ) : (
                 preview.response?.contents.map((content) => (
                   <div key={content.uri} className="space-y-1">
                     {content.text !== undefined ? (
-                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-xs text-fg-muted font-mono">
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-xs text-fg">
                         {content.text}
                       </pre>
                     ) : (

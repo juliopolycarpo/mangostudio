@@ -2,8 +2,11 @@ import type { Message } from '@mangostudio/shared/chat';
 import { FileText, Image, ImageOff } from 'lucide-react';
 import { useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
+import { Badge } from '@/components/ui/Badge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatClockTime } from '@/lib/i18n-format';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { MessageBubble } from './MessageBubble';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
@@ -26,12 +29,13 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
   return (
     <>
       {msg.referenceImage && (
-        <div className="mb-2 max-w-[200px] rounded-xl overflow-hidden border border-stroke shadow-sm">
+        <div className="mb-2 max-w-[200px] overflow-hidden rounded-md border border-stroke">
           {referenceImageFailed ? (
-            <div className="w-full aspect-square bg-surface flex flex-col items-center justify-center text-fg-subtle p-4 text-center">
-              <ImageOff size={24} className="mb-2" />
-              <span className="text-[10px]">{t.chat.feed.imageUnavailable}</span>
-            </div>
+            <EmptyState
+              icon={<ImageOff size={ICON_LG} />}
+              title={t.chat.feed.imageUnavailable}
+              className="aspect-square min-h-0 bg-surface"
+            />
           ) : (
             <ReservedAspectImage
               src={msg.referenceImage}
@@ -50,9 +54,9 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
                 href={attachment.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center gap-1.5 rounded-full border border-stroke bg-control px-2.5 py-1 text-[11px] text-fg-muted hover:text-fg transition-colors"
+                className="flex h-7 items-center gap-1.5 rounded-sm border border-stroke px-2 text-xs text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
               >
-                <FileText size={12} className="shrink-0 text-accent-fg" />
+                <FileText size={ICON_SM} className="shrink-0" />
                 <span className="max-w-[12rem] truncate">{attachment.originalName}</span>
               </a>
             ))}
@@ -66,13 +70,13 @@ export function UserMessageBubble({ msg, isImageTurn }: UserMessageBubbleProps) 
           />
         </MessageBubble>
         {isImageTurn && (
-          <span className="flex items-center gap-1 text-[10px] font-bold text-accent-fg px-1">
-            <Image size={11} />
+          <Badge>
+            <Image size={ICON_SM} />
             {t.chat.feed.createImageBadge}
-          </span>
+          </Badge>
         )}
       </div>
-      <span className="text-[10px] text-fg-muted px-2">
+      <span className="px-1 font-mono text-micro text-fg-subtle">
         {formatClockTime(msg.timestamp, locale)}
       </span>
     </>

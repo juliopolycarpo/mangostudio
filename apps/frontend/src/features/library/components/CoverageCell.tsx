@@ -3,20 +3,28 @@
  *
  * Never colour or glyph alone: every cell carries an `aria-label` naming the
  * resource, the target, and the state in words, and the text label appears
- * alongside the glyph once there is room for it. A user who cannot tell ⧉ from
+ * alongside the glyph once there is room for it. The glyph takes the state's
+ * colour; the word stays in `fg-muted`. A user who cannot tell ⧉ from
  * ⚠ — or cannot see either — still gets the whole answer.
  */
 
 import type { LibraryLocationStatus } from '@mangostudio/shared/library';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { CELL_GLYPHS, type CoverageCell as Cell, hashPrefix } from '../format';
 
-const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
-  present: 'text-accent-fg',
+/**
+ * The glyph's colour per state — shared with the legend so the key reads like the
+ * cells. Attention (copies that differ, or cannot be compared) is `warning`: the
+ * library is working, and the user may want to reconcile. Nothing here is an
+ * error, so nothing is `danger`.
+ */
+export const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
+  present: 'text-success',
   absent: 'text-fg-subtle',
   shadowed: 'text-info',
-  divergent: 'text-danger',
+  divergent: 'text-warning',
   'only-here': 'text-info',
   incomparable: 'text-warning',
 };
@@ -51,12 +59,10 @@ export function CoverageCell({ cell, resourceSlug, locations }: CoverageCellProp
       data-target={cell.targetId}
     >
       <span aria-hidden="true" className="inline-flex items-center justify-center gap-1.5">
-        <span className={`text-sm leading-none ${STATE_TONES[cell.state]}`}>
+        <span className={cn('text-sm leading-none', STATE_TONES[cell.state])}>
           {CELL_GLYPHS[cell.state]}
         </span>
-        <span className={`hidden text-[11px] xl:inline ${STATE_TONES[cell.state]}`}>
-          {stateLabel}
-        </span>
+        <span className="hidden text-xs text-fg-muted xl:inline">{stateLabel}</span>
       </span>
     </td>
   );

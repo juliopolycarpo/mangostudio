@@ -16,6 +16,7 @@ import type { InstallRecipePreview, RecipeInput } from '@mangostudio/shared/envi
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { chainStepLabel, runtimeNameList } from '../format';
@@ -39,7 +40,6 @@ interface InstallActionProps {
    */
   catalog: readonly InstallRecipePreview[];
   variant?: 'primary' | 'secondary' | 'subtle';
-  size?: 'sm' | 'md';
   icon?: ReactNode;
   /** Which machine to install on; omitted means the hub's own. */
   environmentId?: string;
@@ -59,7 +59,6 @@ export function InstallAction({
   label,
   catalog,
   variant = 'secondary',
-  size = 'sm',
   icon,
   environmentId,
   followUpSteps,
@@ -119,12 +118,12 @@ export function InstallAction({
 
   if (chain.kind === 'unresolved') {
     return (
-      <p className="text-sm text-fg-muted" data-testid="install-unresolved">
+      <Callout tone="warning" data-testid="install-unresolved">
         {formatMessage(s.requirementUnavailable, {
           target: runtimeName(recipe.runtimeId),
           requirements: runtimeNameList(resolve, chain.missing),
         })}
-      </p>
+      </Callout>
     );
   }
 
@@ -150,12 +149,7 @@ export function InstallAction({
   return (
     <div className="space-y-3">
       {flow.state.step !== 'refused' && !showConsole && (
-        <Button
-          variant={variant}
-          size={size}
-          loading={isBusy}
-          onClick={() => void flow.begin(steps)}
-        >
+        <Button variant={variant} size="sm" loading={isBusy} onClick={() => void flow.begin(steps)}>
           {icon}
           {prerequisites.length === 0
             ? label
@@ -170,7 +164,7 @@ export function InstallAction({
       )}
 
       {flow.state.step === 'error' && (
-        <p className="text-sm text-danger">{t.environments.install.startError}</p>
+        <Callout tone="danger">{t.environments.install.startError}</Callout>
       )}
 
       {flow.state.step === 'refused' && (
@@ -202,12 +196,12 @@ export function InstallAction({
       )}
 
       {flow.state.step === 'finished' && chainStopped(flow.state.chain) && currentStep && (
-        <p className="text-sm text-danger" data-testid="install-chain-stopped">
+        <Callout tone="danger" data-testid="install-chain-stopped">
           {formatMessage(s.chainStopped, {
             target: runtimeName(recipe.runtimeId),
             prerequisite: runtimeName(currentStep.recipe.runtimeId),
           })}
-        </p>
+        </Callout>
       )}
     </div>
   );

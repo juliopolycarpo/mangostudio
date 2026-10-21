@@ -1,7 +1,10 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import type { Connector } from '@mangostudio/shared/connectors';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+import { DialogFrame } from './DialogFrame';
 import { ModelToggleList } from './ModelToggleList';
 
 interface ConnectorModelsModalProps {
@@ -78,60 +81,55 @@ export function ConnectorModelsModal({
   const enabledModelIds = new Set(connector.enabledModels);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
-      <div className="bg-surface w-full max-w-lg rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke flex flex-col max-h-[90vh] sm:max-h-[80vh]">
-        <div className="space-y-2 mb-6">
-          <h3 className="text-xl font-bold text-fg">{s.modelsModalTitle}</h3>
-          <p className="text-sm text-fg-muted">
-            {s.modelsModalDescription}{' '}
-            <span className="text-accent-fg font-bold">{connector.name}</span>{' '}
-            {s.modelsModalDescriptionSuffix}
-          </p>
-        </div>
-
-        <div className="relative mb-4">
-          <input
-            type="text"
-            value={modelSearchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder={s.searchModelsPlaceholder}
-            className="w-full rounded-xl border border-stroke bg-control px-4 py-3 text-sm text-fg placeholder:text-fg-subtle focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
-          />
-        </div>
-
-        <div className="flex-1 overflow-y-auto pr-2 space-y-6 hide-scrollbar">
-          <ModelToggleList
-            title={s.textModelsLabel}
-            models={filteredTextModels}
-            enabledModelIds={enabledModelIds}
-            onToggleModel={onToggleModel}
-          />
-
-          <ModelToggleList
-            title={s.imageModelsLabel}
-            models={filteredImageModels}
-            enabledModelIds={enabledModelIds}
-            onToggleModel={onToggleModel}
-          />
-
-          {textModels.length === 0 && imageModels.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-stroke bg-control px-4 py-8 text-center text-sm text-fg-muted">
-              {s.noModelsDiscovered}
-            </div>
-          )}
-          {(textModels.length > 0 || imageModels.length > 0) &&
-            filteredTextModels.length === 0 &&
-            filteredImageModels.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-stroke bg-control px-4 py-8 text-center text-sm text-fg-muted">
-                {t.common.noResultsFor.replace('{query}', () => modelSearchQuery)}
-              </div>
-            )}
-        </div>
-
-        <Button variant="primary" onClick={onClose} className="mt-8 w-full py-4">
+    <DialogFrame
+      title={s.modelsModalTitle}
+      description={
+        <>
+          {s.modelsModalDescription} <span className="font-medium text-fg">{connector.name}</span>{' '}
+          {s.modelsModalDescriptionSuffix}
+        </>
+      }
+      toolbar={
+        <Input
+          type="text"
+          value={modelSearchQuery}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder={s.searchModelsPlaceholder}
+          aria-label={s.searchModelsPlaceholder}
+        />
+      }
+      onClose={onClose}
+      footer={
+        <Button variant="primary" onClick={onClose}>
           {s.doneButton}
         </Button>
-      </div>
-    </div>
+      }
+    >
+      <ModelToggleList
+        title={s.textModelsLabel}
+        models={filteredTextModels}
+        enabledModelIds={enabledModelIds}
+        onToggleModel={onToggleModel}
+      />
+
+      <ModelToggleList
+        title={s.imageModelsLabel}
+        models={filteredImageModels}
+        enabledModelIds={enabledModelIds}
+        onToggleModel={onToggleModel}
+      />
+
+      {textModels.length === 0 && imageModels.length === 0 && (
+        <EmptyState title={s.noModelsDiscovered} className="min-h-0 py-8" />
+      )}
+      {(textModels.length > 0 || imageModels.length > 0) &&
+        filteredTextModels.length === 0 &&
+        filteredImageModels.length === 0 && (
+          <EmptyState
+            title={t.common.noResultsFor.replace('{query}', () => modelSearchQuery)}
+            className="min-h-0 py-8"
+          />
+        )}
+    </DialogFrame>
   );
 }

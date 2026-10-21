@@ -13,6 +13,7 @@ import {
   FileText,
   FolderOpen,
   ImagePlus,
+  type LucideIcon,
   Replace,
   Search,
   Terminal,
@@ -21,6 +22,7 @@ import {
   UserRound,
   Wrench,
 } from 'lucide-react';
+import { ICON_SM } from '@/lib/icon-sizes';
 import type { TimelineTone } from './TimelineItem';
 
 /**
@@ -85,19 +87,43 @@ export function formatToolDuration(durationMs: number): string {
 export function StatusGlyph({ status, name }: { status: ToolExecutionStatus; name: string }) {
   switch (status) {
     case 'succeeded':
-      return <Check size={12} className="shrink-0" strokeWidth={2.5} />;
+      return <Check size={ICON_SM} className="shrink-0" />;
     case 'failed':
-      return <AlertCircle size={11} className="shrink-0" />;
+      return <AlertCircle size={ICON_SM} className="shrink-0" />;
     case 'timed_out':
-      return <TimerOff size={11} className="shrink-0" />;
+      return <TimerOff size={ICON_SM} className="shrink-0" />;
     case 'cancelled':
-      return <Ban size={11} className="shrink-0" />;
+      return <Ban size={ICON_SM} className="shrink-0" />;
     case 'awaiting_user':
-      return <UserRound size={11} className="shrink-0" />;
+      return <UserRound size={ICON_SM} className="shrink-0" />;
     default:
       return <ToolIcon toolName={name} className="animate-pulse shrink-0" />;
   }
 }
+
+/**
+ * The icon each built-in tool is drawn with while it is in flight. A `Map`
+ * rather than an object so a tool named `constructor` cannot resolve to
+ * something inherited.
+ */
+const TOOL_ICONS: ReadonlyMap<string, LucideIcon> = new Map([
+  ['list_directory', FolderOpen],
+  ['read_file', FileText],
+  ['write_file', FileEdit],
+  ['edit_file', FilePenLine],
+  ['replace_range', Replace],
+  ['apply_patch', FileDiff],
+  ['create_file', FilePlus],
+  ['delete_file', Trash2],
+  ['move_file', ArrowRightLeft],
+  ['generate_image', ImagePlus],
+  ['get_current_datetime', Clock],
+  ['bash', Terminal],
+  ['zsh', Terminal],
+  ['powershell', Terminal],
+  ['grep', Search],
+  ['glob', FileSearch],
+]);
 
 /**
  * Renders a per-tool icon based on the tool name.
@@ -109,41 +135,8 @@ export function StatusGlyph({ status, name }: { status: ToolExecutionStatus; nam
  * // Usage: <ToolIcon toolName="read_file" className="shrink-0" />
  */
 function ToolIcon({ toolName, className }: { toolName: string; className?: string }) {
-  const size = 11;
-  switch (toolName) {
-    case 'list_directory':
-      return <FolderOpen size={size} className={className} />;
-    case 'read_file':
-      return <FileText size={size} className={className} />;
-    case 'write_file':
-      return <FileEdit size={size} className={className} />;
-    case 'edit_file':
-      return <FilePenLine size={size} className={className} />;
-    case 'replace_range':
-      return <Replace size={size} className={className} />;
-    case 'apply_patch':
-      return <FileDiff size={size} className={className} />;
-    case 'create_file':
-      return <FilePlus size={size} className={className} />;
-    case 'delete_file':
-      return <Trash2 size={size} className={className} />;
-    case 'move_file':
-      return <ArrowRightLeft size={size} className={className} />;
-    case 'generate_image':
-      return <ImagePlus size={size} className={className} />;
-    case 'get_current_datetime':
-      return <Clock size={size} className={className} />;
-    case 'bash':
-    case 'zsh':
-    case 'powershell':
-      return <Terminal size={size} className={className} />;
-    case 'grep':
-      return <Search size={size} className={className} />;
-    case 'glob':
-      return <FileSearch size={size} className={className} />;
-    default:
-      return <Wrench size={size} className={className} />;
-  }
+  const Icon = TOOL_ICONS.get(toolName) ?? Wrench;
+  return <Icon size={ICON_SM} className={className} />;
 }
 
 /**

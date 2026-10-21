@@ -18,9 +18,13 @@ import type {
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
 import { externalAgentVendor } from '@mangostudio/shared/external-agents';
-import { AlertTriangle, ExternalLink } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { DialogBody, DialogFooter, DialogFrame } from './DialogFrame';
 
 export interface ExternalDisclosureDialogProps {
   /**
@@ -58,18 +62,18 @@ export function ExternalDisclosureDialog({
   const dialogRef = useFocusTrap(onCancel);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        aria-label={labels.title.replace('{vendor}', vendor)}
-        className="w-full max-w-lg space-y-4 rounded-2xl border border-stroke bg-surface p-5 text-sm text-fg shadow-2xl outline-none"
-      >
-        <h2 className="text-base font-semibold">{labels.title.replace('{vendor}', vendor)}</h2>
+    <DialogFrame
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      tabIndex={-1}
+      aria-label={labels.title.replace('{vendor}', vendor)}
+      className="max-w-lg text-sm text-fg outline-none"
+    >
+      <DialogBody>
+        <h2 className="text-title font-semibold">{labels.title.replace('{vendor}', vendor)}</h2>
 
-        <ul className="space-y-2 text-xs leading-relaxed text-fg-muted">
+        <ul className="space-y-2 text-sm text-fg-muted">
           <li>{labels.thirdParty.replace('{vendor}', vendor)}</li>
           <li>{labels.dataFlow.replace('{vendor}', vendor)}</li>
           <li>{labels.billing.replace('{vendor}', vendor)}</li>
@@ -84,13 +88,10 @@ export function ExternalDisclosureDialog({
           {targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
         </ul>
 
-        <p className="flex items-start gap-2 rounded-xl border border-warning bg-warning-subtle px-3 py-2 text-xs leading-relaxed text-warning">
-          <AlertTriangle size={14} className="mt-px shrink-0" />
-          {labels.autoExecution.replace('{vendor}', vendor)}
-        </p>
+        <Callout tone="warning">{labels.autoExecution.replace('{vendor}', vendor)}</Callout>
 
         {/*
-          The warning above says the level decides how much runs unattended.
+          The callout above says the level decides how much runs unattended.
           Naming the level the chat is actually on turns that from a general
           caution into something the user can check before agreeing.
         */}
@@ -107,47 +108,38 @@ export function ExternalDisclosureDialog({
           Linked, never summarized. Paraphrasing another company's terms would be
           MangoStudio making a claim about obligations that are not its to state.
         */}
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-fg-muted">
-          <ExternalLink size={12} className="shrink-0" />
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <a
             href={links.termsUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="underline underline-offset-2 hover:text-fg"
+            className="inline-flex items-center gap-1 text-accent-fg underline underline-offset-2"
           >
             {labels.terms.replace('{vendor}', vendor)}
+            <ExternalLink size={ICON_SM} className="shrink-0" aria-hidden="true" />
           </a>
           <a
             href={links.privacyUrl}
             target="_blank"
             rel="noreferrer noopener"
-            className="underline underline-offset-2 hover:text-fg"
+            className="inline-flex items-center gap-1 text-accent-fg underline underline-offset-2"
           >
             {labels.privacy.replace('{vendor}', vendor)}
+            <ExternalLink size={ICON_SM} className="shrink-0" aria-hidden="true" />
           </a>
         </p>
+      </DialogBody>
 
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className="cursor-pointer rounded-xl border border-stroke px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-fill-hover disabled:cursor-default disabled:opacity-50"
-          >
-            {reviewOnly ? labels.close : labels.cancel}
-          </button>
-          {reviewOnly ? null : (
-            <button
-              type="button"
-              onClick={onAccept}
-              disabled={busy}
-              className="cursor-pointer rounded-xl bg-accent px-4 py-2 text-sm font-medium text-on-accent transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
-            >
-              {busy ? labels.accepting : labels.accept}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+      <DialogFooter>
+        <Button type="button" variant="secondary" onClick={onCancel} disabled={busy}>
+          {reviewOnly ? labels.close : labels.cancel}
+        </Button>
+        {reviewOnly ? null : (
+          <Button type="button" onClick={onAccept} loading={busy}>
+            {busy ? labels.accepting : labels.accept}
+          </Button>
+        )}
+      </DialogFooter>
+    </DialogFrame>
   );
 }

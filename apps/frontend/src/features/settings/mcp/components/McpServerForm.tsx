@@ -6,13 +6,17 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer, McpTransport } from '@mangostudio/shared/mcp';
-import { AlertTriangle, Plus, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
+import { SettingsField } from '@/components/settings/SettingsField';
+import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
+import { DialogFrame } from '@/features/settings/connectors/components/DialogFrame';
 import { useI18n } from '@/hooks/use-i18n';
 import {
   createEmptyFormState,
@@ -21,6 +25,7 @@ import {
   type McpServerFormState,
   validateFormState,
 } from '../lib/server-form';
+import { EntryList } from './EntryList';
 import { KeyValueListField } from './KeyValueListField';
 
 interface McpServerFormProps {
@@ -78,265 +83,209 @@ export function McpServerForm({
     onSubmit(state);
   };
 
+  const environmentLoading = environments.isPending && !environments.data;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
-      <div className="bg-surface w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke">
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold text-fg">{server ? s.editServer : s.addServer}</h3>
-            <Button
-              type="button"
-              variant="subtle"
-              size="sm"
-              aria-label={s.cancelButton}
-              onClick={onClose}
-            >
-              <X size={16} />
-            </Button>
-          </div>
-
-          <Input
-            id="mcp-server-name"
-            label={s.nameLabel}
-            value={state.name}
-            onChange={(e) => patch({ name: e.target.value })}
-            placeholder={s.namePlaceholder}
-            error={errors.name}
-          />
-
-          <div className="space-y-1.5">
-            <Input
-              id="mcp-server-slug"
-              label={s.slugLabel}
-              value={state.slug}
-              onChange={(e) => patch({ slug: e.target.value })}
-              placeholder={s.slugPlaceholder}
-              error={errors.slug}
-            />
-            <p className="text-xs text-fg-muted">{s.slugHint}</p>
-          </div>
-
-          {/* ── Transport switch ── */}
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-fg-muted">{s.transportLabel}</span>
-            <div className="flex gap-2">
-              {TRANSPORTS.map((transport) => (
-                <button
-                  key={transport}
-                  type="button"
-                  onClick={() => patch({ transport })}
-                  className={`px-4 py-2 text-sm font-medium rounded-xl border transition-colors ${
-                    state.transport === transport
-                      ? 'bg-accent-subtle border-accent text-accent-fg'
-                      : 'bg-surface border-stroke text-fg-muted hover:text-fg'
-                  }`}
-                >
-                  {s.transports[transport]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Hosting environment ── */}
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor="mcp-server-environment" className="text-sm font-medium text-fg-muted">
-              {s.environmentLabel}
-            </label>
-            <Select
-              id="mcp-server-environment"
-              value={state.environmentId}
-              onChange={(environmentId) => patch({ environmentId })}
-              ariaLabel={s.environmentLabel}
-              disabled={environments.isPending && !environments.data}
-              options={[
-                ...(environments.isPending && !environments.data
-                  ? [{ value: state.environmentId, label: s.environmentsLoading }]
-                  : []),
-                // An environment that vanished (or is not readable) still has to
-                // render, or editing an unrelated field would silently rehome
-                // the server to whichever option happened to come first.
-                ...(environments.data?.some(
-                  (environment) => environment.id === state.environmentId
-                ) === false
-                  ? [{ value: state.environmentId, label: state.environmentId }]
-                  : []),
-                ...(environments.data ?? []).map((environment) => ({
-                  value: environment.id,
-                  label: environment.name,
-                  disabled: !environment.enabled,
-                })),
-              ]}
-            />
-            <p className="text-xs text-fg-muted">{s.environmentHint}</p>
-            {carriesSecrets ? (
-              <div className="flex items-start gap-2 rounded-xl border border-warning bg-warning-subtle p-3 text-xs text-fg-muted">
-                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" />
-                <span>
-                  <strong className="font-semibold text-fg">{s.remoteSecretNoticeTitle}</strong>{' '}
-                  {s.remoteSecretNotice.replace('{environment}', selectedEnvironmentName)}
-                </span>
-              </div>
-            ) : null}
-          </div>
-
-          {state.transport === 'stdio' ? (
-            <>
-              <div className="flex items-start gap-2 rounded-xl bg-danger-subtle border border-danger p-3 text-xs text-fg-muted">
-                <AlertTriangle size={14} className="text-danger shrink-0 mt-0.5" />
-                <span>{s.stdioTrustWarning}</span>
-              </div>
-
-              <Input
-                id="mcp-server-command"
-                label={s.commandLabel}
-                value={state.command}
-                onChange={(e) => patch({ command: e.target.value })}
-                placeholder={s.commandPlaceholder}
-                error={errors.command}
-              />
-
-              {/* ── Args list ── */}
-              <div className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium text-fg-muted">{s.argsLabel}</span>
-                <div className="space-y-2">
-                  {state.args.map((arg, index) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: rows have no stable identity while being typed
-                    <div key={index} className="flex items-center gap-2">
-                      <input
-                        value={arg}
-                        onChange={(e) =>
-                          patch({
-                            args: state.args.map((a, i) => (i === index ? e.target.value : a)),
-                          })
-                        }
-                        placeholder={s.argPlaceholder}
-                        aria-label={`${s.argsLabel} ${index + 1}`}
-                        className="flex-1 min-w-0 rounded-xl px-3 py-2 text-sm bg-surface text-fg border border-stroke placeholder:text-fg-subtle focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors"
-                      />
-                      <Button
-                        type="button"
-                        variant="subtle"
-                        size="sm"
-                        aria-label={s.removeEntry}
-                        onClick={() => patch({ args: state.args.filter((_, i) => i !== index) })}
-                      >
-                        <X size={14} />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-                <Button
-                  type="button"
-                  variant="subtle"
-                  size="sm"
-                  className="self-start"
-                  onClick={() => patch({ args: [...state.args, ''] })}
-                >
-                  <Plus size={14} />
-                  {s.addEntry}
-                </Button>
-              </div>
-
-              <KeyValueListField
-                label={s.envLabel}
-                hint={s.envHint}
-                entries={state.env}
-                onChange={(env) => patch({ env })}
-              />
-
-              {server && server.secretEnvNames.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {server.secretEnvNames.map((name) => (
-                    <span
-                      key={name}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-fill-selected px-3 py-1 text-xs text-fg-muted"
-                    >
-                      <span className="font-medium text-fg">{name}</span>
-                      <span aria-hidden>••••••</span>
-                      <span className="sr-only">{s.storedSecretEnvValue}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <KeyValueListField
-                label={s.secretEnvLabel}
-                hint={s.secretEnvHint}
-                entries={state.secretEnv}
-                onChange={(secretEnv) => patch({ secretEnv })}
-                secretValues
-              />
-            </>
-          ) : (
-            <>
-              <Input
-                id="mcp-server-url"
-                label={s.urlLabel}
-                value={state.url}
-                onChange={(e) => patch({ url: e.target.value })}
-                placeholder={s.urlPlaceholder}
-                error={errors.url}
-              />
-
-              {server && server.headerNames.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {server.headerNames.map((headerName) => (
-                    <span
-                      key={headerName}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-fill-selected px-3 py-1 text-xs text-fg-muted"
-                    >
-                      <span className="font-medium text-fg">{headerName}</span>
-                      <span aria-hidden>••••••</span>
-                      <span className="sr-only">{s.storedHeaderValue}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <KeyValueListField
-                label={s.headersLabel}
-                hint={s.headersHint}
-                entries={state.headers}
-                onChange={(headers) => patch({ headers })}
-                secretValues
-              />
-            </>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
-            <div className="space-y-1.5">
-              <Input
-                id="mcp-server-timeout"
-                type="number"
-                min={1}
-                label={s.timeoutLabel}
-                value={state.timeoutMs}
-                onChange={(e) => patch({ timeoutMs: e.target.value })}
-              />
-              <p className="text-xs text-fg-muted">{s.timeoutHint}</p>
-            </div>
-            <div className="pb-6">
-              <Toggle
-                id="mcp-server-enabled"
-                label={state.enabled ? s.enabledLabel : s.disabledLabel}
-                checked={state.enabled}
-                onChange={(e) => patch({ enabled: e.target.checked })}
-              />
-            </div>
-          </div>
-
-          {submitError && <p className="text-sm text-danger">{submitError}</p>}
-
-          <div className="flex gap-3 pt-2">
-            <Button type="button" variant="secondary" className="flex-1" onClick={onClose}>
+    <form onSubmit={handleSubmit}>
+      <DialogFrame
+        title={server ? s.editServer : s.addServer}
+        notice={submitError ? <Callout tone="danger">{submitError}</Callout> : undefined}
+        closeDisabled={isSaving}
+        onClose={onClose}
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={onClose}>
               {s.cancelButton}
             </Button>
-            <Button type="submit" variant="primary" className="flex-1" loading={isSaving}>
+            <Button type="submit" variant="primary" loading={isSaving}>
               {isSaving ? s.savingButton : s.saveButton}
             </Button>
-          </div>
-        </form>
-      </div>
+          </>
+        }
+      >
+        <Input
+          id="mcp-server-name"
+          label={s.nameLabel}
+          value={state.name}
+          onChange={(e) => patch({ name: e.target.value })}
+          placeholder={s.namePlaceholder}
+          error={errors.name}
+        />
+
+        <SettingsField label={s.slugLabel} htmlFor="mcp-server-slug" hint={s.slugHint}>
+          <Input
+            id="mcp-server-slug"
+            value={state.slug}
+            onChange={(e) => patch({ slug: e.target.value })}
+            placeholder={s.slugPlaceholder}
+            error={errors.slug}
+          />
+        </SettingsField>
+
+        <SettingsField label={s.transportLabel}>
+          <SettingsSegmented
+            ariaLabel={s.transportLabel}
+            value={state.transport}
+            options={TRANSPORTS.map((transport) => ({
+              value: transport,
+              label: s.transports[transport],
+            }))}
+            onChange={(transport) => patch({ transport })}
+          />
+        </SettingsField>
+
+        <SettingsField
+          label={s.environmentLabel}
+          htmlFor="mcp-server-environment"
+          hint={s.environmentHint}
+        >
+          <Select
+            id="mcp-server-environment"
+            value={state.environmentId}
+            onChange={(environmentId) => patch({ environmentId })}
+            ariaLabel={s.environmentLabel}
+            disabled={environmentLoading}
+            options={[
+              ...(environmentLoading
+                ? [{ value: state.environmentId, label: s.environmentsLoading }]
+                : []),
+              // An environment that vanished (or is not readable) still has to
+              // render, or editing an unrelated field would silently rehome
+              // the server to whichever option happened to come first.
+              ...(environments.data?.some(
+                (environment) => environment.id === state.environmentId
+              ) === false
+                ? [{ value: state.environmentId, label: state.environmentId }]
+                : []),
+              ...(environments.data ?? []).map((environment) => ({
+                value: environment.id,
+                label: environment.name,
+                disabled: !environment.enabled,
+              })),
+            ]}
+          />
+        </SettingsField>
+        {carriesSecrets ? (
+          <Callout tone="warning" title={s.remoteSecretNoticeTitle}>
+            {s.remoteSecretNotice.replace('{environment}', selectedEnvironmentName)}
+          </Callout>
+        ) : null}
+
+        {state.transport === 'stdio' ? (
+          <>
+            <Callout tone="warning">{s.stdioTrustWarning}</Callout>
+
+            <Input
+              id="mcp-server-command"
+              label={s.commandLabel}
+              value={state.command}
+              onChange={(e) => patch({ command: e.target.value })}
+              placeholder={s.commandPlaceholder}
+              error={errors.command}
+            />
+
+            <EntryList
+              label={s.argsLabel}
+              entries={state.args}
+              onAdd={() => patch({ args: [...state.args, ''] })}
+              onRemove={(index) => patch({ args: state.args.filter((_, i) => i !== index) })}
+              renderEntry={(arg, index) => (
+                <div className="min-w-0 flex-1">
+                  <Input
+                    value={arg}
+                    onChange={(e) =>
+                      patch({
+                        args: state.args.map((a, i) => (i === index ? e.target.value : a)),
+                      })
+                    }
+                    placeholder={s.argPlaceholder}
+                    aria-label={`${s.argsLabel} ${index + 1}`}
+                  />
+                </div>
+              )}
+            />
+
+            <KeyValueListField
+              label={s.envLabel}
+              hint={s.envHint}
+              entries={state.env}
+              onChange={(env) => patch({ env })}
+            />
+
+            {server && (
+              <StoredNames names={server.secretEnvNames} srLabel={s.storedSecretEnvValue} />
+            )}
+
+            <KeyValueListField
+              label={s.secretEnvLabel}
+              hint={s.secretEnvHint}
+              entries={state.secretEnv}
+              onChange={(secretEnv) => patch({ secretEnv })}
+              secretValues
+            />
+          </>
+        ) : (
+          <>
+            <Input
+              id="mcp-server-url"
+              label={s.urlLabel}
+              value={state.url}
+              onChange={(e) => patch({ url: e.target.value })}
+              placeholder={s.urlPlaceholder}
+              error={errors.url}
+            />
+
+            {server && <StoredNames names={server.headerNames} srLabel={s.storedHeaderValue} />}
+
+            <KeyValueListField
+              label={s.headersLabel}
+              hint={s.headersHint}
+              entries={state.headers}
+              onChange={(headers) => patch({ headers })}
+              secretValues
+            />
+          </>
+        )}
+
+        <SettingsField label={s.timeoutLabel} htmlFor="mcp-server-timeout" hint={s.timeoutHint}>
+          <Input
+            id="mcp-server-timeout"
+            type="number"
+            min={1}
+            value={state.timeoutMs}
+            onChange={(e) => patch({ timeoutMs: e.target.value })}
+          />
+        </SettingsField>
+
+        <Toggle
+          id="mcp-server-enabled"
+          label={state.enabled ? s.enabledLabel : s.disabledLabel}
+          checked={state.enabled}
+          onChange={(e) => patch({ enabled: e.target.checked })}
+        />
+      </DialogFrame>
+    </form>
+  );
+}
+
+interface StoredNamesProps {
+  readonly names: readonly string[];
+  /** Said to a screen reader after each name, in place of the masked dots. */
+  readonly srLabel: string;
+}
+
+/** The names of write-only values already saved: the value itself never comes back. */
+function StoredNames({ names, srLabel }: StoredNamesProps) {
+  if (names.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {names.map((name) => (
+        <Badge key={name}>
+          <span className="font-medium text-fg">{name}</span>
+          <span aria-hidden="true">••••••</span>
+          <span className="sr-only">{srLabel}</span>
+        </Badge>
+      ))}
     </div>
   );
 }

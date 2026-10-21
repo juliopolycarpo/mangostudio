@@ -40,7 +40,7 @@ export function SetupChecklist({ runtimes, agents, recipes, machine }: SetupChec
   return (
     <section className="space-y-3" data-testid="setup-checklist">
       <div className="space-y-1">
-        <h2 className="text-lg font-bold text-fg">{s.title}</h2>
+        <h2 className="text-base font-semibold text-fg">{s.title}</h2>
         <p className="text-sm text-fg-muted">{s.description}</p>
       </div>
 
@@ -54,7 +54,7 @@ export function SetupChecklist({ runtimes, agents, recipes, machine }: SetupChec
             data-setup-status={row.status}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-fg">{row.label}</p>
+              <p className="text-sm font-medium text-fg">{row.label}</p>
               <Badge variant={STATUS_VARIANT[row.status]}>{s.status[row.status]}</Badge>
             </div>
             <p className="text-xs text-fg-muted">{row.explanation}</p>

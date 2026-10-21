@@ -2,7 +2,9 @@ import { ClipboardCopy, CornerDownLeft, ExternalLink, Hash, MoreHorizontal } fro
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
+import { IconButton } from '@/features/workspace/components/IconButton';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import type { GithubReferenceTarget } from '../hooks/use-github-quick-actions';
 import { useGithubQuickActions } from '../hooks/use-github-quick-actions';
 
@@ -42,15 +44,15 @@ export function GithubRowMenu({ chatId, target, children }: GithubRowMenuProps) 
       onOpenChange={setOpen}
       panelClassName="w-60"
       trigger={(props) => (
-        <button
-          type="button"
+        <IconButton
+          label={t.common.openMenu}
+          // Out of the way until the row is hovered, focused or has its menu
+          // open; `-mt-1` centres the 28px button on the row's first line.
+          className="-mt-1 opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 focus-visible:opacity-100"
           {...props}
-          aria-label={t.common.openMenu}
-          title={t.common.openMenu}
-          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-lg text-fg-muted opacity-0 transition-opacity hover:bg-fill-hover hover:text-fg focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-focus group-hover:opacity-100"
         >
-          <MoreHorizontal size={13} />
-        </button>
+          <MoreHorizontal size={ICON_SM} />
+        </IconButton>
       )}
     >
       {children ? (
@@ -59,16 +61,16 @@ export function GithubRowMenu({ chatId, target, children }: GithubRowMenuProps) 
           <MenuSeparator />
         </>
       ) : null}
-      <MenuItem onSelect={run(actions.openInBrowser)} icon={<ExternalLink size={13} />}>
+      <MenuItem onSelect={run(actions.openInBrowser)} icon={<ExternalLink size={ICON_MD} />}>
         {t.github.actions.openInBrowser}
       </MenuItem>
-      <MenuItem onSelect={run(actions.copyUrl)} icon={<ClipboardCopy size={13} />}>
+      <MenuItem onSelect={run(actions.copyUrl)} icon={<ClipboardCopy size={ICON_MD} />}>
         {t.github.actions.copyUrl}
       </MenuItem>
-      <MenuItem onSelect={run(actions.copyReference)} icon={<Hash size={13} />}>
+      <MenuItem onSelect={run(actions.copyReference)} icon={<Hash size={ICON_MD} />}>
         {t.github.actions.copyReference}
       </MenuItem>
-      <MenuItem onSelect={run(actions.pasteReference)} icon={<CornerDownLeft size={13} />}>
+      <MenuItem onSelect={run(actions.pasteReference)} icon={<CornerDownLeft size={ICON_MD} />}>
         {t.github.actions.pasteReference}
       </MenuItem>
     </Menu>

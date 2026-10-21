@@ -3,6 +3,9 @@
  * API says the page may not do it — the sentence explaining why and the CLI
  * command to type instead. Refusing quietly would leave the user with a
  * greyed button and no way forward.
+ *
+ * The button that opens the confirmation is never `danger`: that variant is the
+ * dialog's own final "yes", and a destructive-looking trigger would say it twice.
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
@@ -19,7 +22,7 @@ interface MachineActionButtonProps {
   readonly label: string;
   readonly confirmTitle: string;
   readonly confirmDescription: string;
-  readonly variant?: 'primary' | 'secondary' | 'danger';
+  readonly variant?: 'primary' | 'secondary';
   readonly isPending: boolean;
   readonly onConfirm: () => void;
   readonly testId: string;

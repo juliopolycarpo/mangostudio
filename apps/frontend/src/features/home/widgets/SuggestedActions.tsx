@@ -7,6 +7,7 @@
  * prompt nobody read.
  */
 
+import { Button } from '@/components/ui/Button';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
@@ -56,14 +57,15 @@ function StarterList({
       {ids.map((id) => {
         const text = labels[id];
         return (
-          <button
+          <Button
             key={id}
             type="button"
+            variant="secondary"
             onClick={() => onSelect(text)}
-            className="rounded-xl border border-stroke bg-surface px-3.5 py-2 text-left text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
+            className="max-w-full"
           >
-            {text}
-          </button>
+            <span className="truncate">{text}</span>
+          </Button>
         );
       })}
     </div>

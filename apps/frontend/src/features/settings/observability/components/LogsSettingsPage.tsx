@@ -1,7 +1,12 @@
 import type { ProviderProbeOperation } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsSection } from '@/components/settings/SettingsSection';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { Callout } from '@/components/ui/Callout';
+import { Chip } from '@/components/ui/Chip';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/hooks/use-i18n';
 import { observabilityLogsQueryOptions } from '../queries';
 import { formatTimestamp } from '../utils';
@@ -16,79 +21,51 @@ export function LogsSettingsPage() {
     'model-list': labels.operations.modelList,
   };
 
-  if (isLoading) {
-    return (
-      <div className="space-y-4">
-        {/* Same independence as the error branch below: the discovery query is
-            this component's, not the probe log's, and gating it behind that
-            request only delays it. */}
-        <ExternalAgentDiscoveryLog />
-        <Card className="p-4 sm:p-6 text-sm text-fg-muted">{t.common.loading}</Card>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="space-y-4">
-        <Card className="p-4 sm:p-6 text-sm text-danger">{labels.failedToLoad}</Card>
-        {/* Independent of the provider probe log: an unreachable metrics
-            endpoint says nothing about how the agents were discovered. */}
-        <ExternalAgentDiscoveryLog />
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-4">
-      <ExternalAgentDiscoveryLog />
-      <Card className="space-y-4 p-4 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
-            <h2 className="text-lg font-semibold text-fg">{labels.title}</h2>
-            <p className="text-sm text-fg-muted">{labels.description}</p>
-          </div>
+    <SettingsPage
+      title={labels.title}
+      description={labels.description}
+      actions={
+        isLoading || error ? null : (
           <Button variant="secondary" size="sm" onClick={() => void refetch()} loading={isFetching}>
             {labels.refresh}
           </Button>
+        )
+      }
+    >
+      {/* The discovery card below is this page's own query, not the probe log's:
+          an unreachable metrics endpoint says nothing about how the agents were
+          discovered, and gating it behind that request only delays it. */}
+      {isLoading ? (
+        <div role="status" className="space-y-3">
+          <Skeleton className="h-20 w-full rounded-md" />
+          <span className="sr-only">{t.common.loading}</span>
         </div>
-      </Card>
-
-      {data?.entries.length ? (
-        data.entries.map((entry) => (
-          <Card key={entry.id} className="space-y-3 p-4 sm:p-6">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div className="space-y-1">
-                <p className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-                  {labels.eventKinds.probeTimeout}
-                </p>
-                <h3 className="text-base font-semibold text-fg">{t.providers[entry.provider]}</h3>
-                <p className="text-sm text-fg">{entry.message}</p>
+      ) : error ? (
+        <Callout tone="danger">{labels.failedToLoad}</Callout>
+      ) : data?.entries.length ? (
+        <SettingsSection>
+          {data.entries.map((entry) => (
+            <div key={entry.id} className="space-y-1 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h3 className="text-sm font-semibold text-fg">{t.providers[entry.provider]}</h3>
+                <Badge variant="warning">{labels.eventKinds.probeTimeout}</Badge>
+                <span className="ml-auto text-xs text-fg-muted">
+                  {formatTimestamp(entry.timestamp, locale)}
+                </span>
               </div>
-              <span className="text-xs text-fg-muted">
-                {formatTimestamp(entry.timestamp, locale)}
-              </span>
+              <p className="text-sm text-fg">{entry.message}</p>
+              <Chip label={labels.operationLabel}>{operationLabels[entry.operation]}</Chip>
             </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl bg-control px-4 py-3">
-                <p className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-                  {labels.providerLabel}
-                </p>
-                <p className="mt-1 text-sm text-fg">{t.providers[entry.provider]}</p>
-              </div>
-              <div className="rounded-xl bg-control px-4 py-3">
-                <p className="text-xs uppercase tracking-widest font-bold text-fg-muted">
-                  {labels.operationLabel}
-                </p>
-                <p className="mt-1 text-sm text-fg">{operationLabels[entry.operation]}</p>
-              </div>
-            </div>
-          </Card>
-        ))
+          ))}
+        </SettingsSection>
       ) : (
-        <Card className="p-4 sm:p-6 text-sm text-fg-muted">{labels.empty}</Card>
+        <SettingsSection>
+          <p className="px-4 py-3 text-sm text-fg-muted">{labels.empty}</p>
+        </SettingsSection>
       )}
-    </div>
+
+      <ExternalAgentDiscoveryLog />
+    </SettingsPage>
   );
 }

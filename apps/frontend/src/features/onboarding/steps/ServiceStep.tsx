@@ -8,8 +8,8 @@
  * remote page can offer.
  */
 
-import { Server } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
 import { CopyLine } from '@/features/environments/components/CopyLine';
 import {
@@ -34,16 +34,12 @@ export function ServiceStep() {
           <Spinner size="md" />
         </div>
       ) : (
-        <div
-          className="flex items-center gap-3 rounded-2xl border border-stroke bg-control px-4 py-3"
+        <Callout
+          tone={status.service.installed ? 'success' : 'neutral'}
+          title={status.service.installed ? s.installed : s.notInstalled}
           data-testid="onboarding-service-state"
           data-installed={status.service.installed}
-        >
-          <Server aria-hidden size={16} className="shrink-0 text-accent-fg" />
-          <span className="font-semibold text-fg text-sm">
-            {status.service.installed ? s.installed : s.notInstalled}
-          </span>
-        </div>
+        />
       )}
 
       {status && !status.service.installed && install?.available ? (
@@ -64,7 +60,7 @@ export function ServiceStep() {
           {/* The machine surface already has a sentence for every refusal
               code, and they are the accurate ones — a terminal owning the
               process is a different fact from a browser on another computer. */}
-          <p className="text-fg-muted text-sm">
+          <p className="text-sm text-fg-muted">
             {install.reason
               ? t.environments.machine.actions.reasons[install.reason]
               : t.environments.machine.actions.reasons.guard}

@@ -6,7 +6,11 @@
 
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { useQuery } from '@tanstack/react-query';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { SettingsLoading } from '@/components/settings/SettingsStates';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { ToggleSwitch } from '@/components/ui/Toggle';
 import {
   useToolSettings,
   useUpdateToolSetting,
@@ -31,41 +35,34 @@ export function McpServerTools({ server }: McpServerToolsProps) {
   const { mutate: updateToolSetting, isPending } = useUpdateToolSetting();
 
   if (toolsQuery.isLoading) {
-    return <p className="text-sm text-fg-muted py-2">{t.common.loading}</p>;
+    return <SettingsLoading count={2} />;
   }
 
   if (toolsQuery.error) {
-    return <p className="text-sm text-danger py-2">{s.toolsLoadError}</p>;
+    return <Callout tone="danger">{s.toolsLoadError}</Callout>;
   }
 
   const tools = toolsQuery.data?.tools ?? [];
   if (tools.length === 0) {
-    return <p className="text-sm text-fg-muted py-2">{s.noToolsDiscovered}</p>;
+    return <EmptyState title={s.noToolsDiscovered} className="min-h-0 py-4" />;
   }
 
   const enabledByName = new Map(descriptors.map((d) => [d.name, d.enabled]));
 
   return (
-    <ul className="space-y-2 py-2">
+    <ul className="divide-y divide-stroke">
       {tools.map((tool) => {
         const settingsName = buildToolSettingsName(server.slug, tool.name);
         const enabled = enabledByName.get(settingsName) ?? true;
         return (
-          <li
-            key={tool.name}
-            className="flex items-start justify-between gap-4 rounded-xl bg-control px-3 py-2"
-          >
-            <div className="min-w-0 space-y-0.5">
-              <p className="text-sm font-medium text-fg break-all">{tool.name}</p>
-              {tool.description && (
-                <p className="text-xs text-fg-muted leading-relaxed">{tool.description}</p>
-              )}
-            </div>
-            <label className="flex items-center gap-2 shrink-0">
-              <span className="text-xs text-fg-muted">
-                {enabled ? s.enabledLabel : s.disabledLabel}
-              </span>
-              <Checkbox
+          <li key={tool.name}>
+            <SettingsRow
+              as="label"
+              className="px-0 py-2"
+              label={<span className="break-all font-mono">{tool.name}</span>}
+              hint={tool.description}
+            >
+              <ToggleSwitch
                 checked={enabled}
                 disabled={isPending}
                 onChange={() =>
@@ -73,7 +70,7 @@ export function McpServerTools({ server }: McpServerToolsProps) {
                 }
                 aria-label={tool.name}
               />
-            </label>
+            </SettingsRow>
           </li>
         );
       })}

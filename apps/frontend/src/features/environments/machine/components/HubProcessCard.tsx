@@ -4,11 +4,12 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from '../../components/ToolCard';
 import { formatDuration } from '../../format';
 import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';
+import { MachineCard } from './MachineCard';
 
 interface HubProcessCardProps {
   readonly status: MachineStatus;
@@ -31,24 +32,18 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
   const { hub } = status;
 
   return (
-    <section className={`${TOOL_CARD_SURFACE} space-y-4 p-5`} data-testid="machine-hub-card">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <CardSectionLabel>{m.hub.title}</CardSectionLabel>
-          <p className="text-lg font-bold text-fg">
-            {hub.running ? m.hub.running : m.hub.notRunning}
-          </p>
-        </div>
-        {hub.health && (
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-bold ${HUB_HEALTH_TONE[hub.health].badge}`}
-            data-testid="machine-hub-health"
-          >
+    <MachineCard
+      title={m.hub.title}
+      headline={hub.running ? m.hub.running : m.hub.notRunning}
+      action={
+        hub.health ? (
+          <Badge variant={HUB_HEALTH_TONE[hub.health].badge} data-testid="machine-hub-health">
             {hubHealthLabel(t, hub.health)}
-          </span>
-        )}
-      </div>
-
+          </Badge>
+        ) : null
+      }
+      testId="machine-hub-card"
+    >
       {hub.running && (
         <div className="space-y-1.5">
           {hub.url && <Row label={m.hub.url} value={hub.url} />}
@@ -88,6 +83,6 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
           testId="machine-restart"
         />
       </div>
-    </section>
+    </MachineCard>
   );
 }

@@ -4,15 +4,21 @@
 
 import { API_KEY_MAX_PER_USER, type ApiKeySummary } from '@mangostudio/shared/api-keys';
 import type { ExternalApiSettings } from '@mangostudio/shared/app-settings';
-import { Plus, Trash2 } from 'lucide-react';
+import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingToggle } from '@/components/settings/SettingToggle';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { Callout } from '@/components/ui/Callout';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import {
   displayKeyName,
   formatApiKeyDate,
@@ -60,68 +66,80 @@ export function ExternalApiSettingsPage({
   };
 
   return (
-    <div className="space-y-4">
-      <Card className="space-y-3 p-4 sm:p-6">
-        <h2 className="text-lg font-bold text-fg">{s.title}</h2>
-        <p className="text-sm text-fg-muted">{s.description}</p>
-      </Card>
-
+    <SettingsPage title={s.title} description={s.description}>
       {/* The toggle is the kill switch for every key on the account, so it stays
           reachable even when the key list is still loading or failed to load. */}
-      <Card className="space-y-5 p-4 sm:p-6">
+      <SettingsSection
+        notice={!enabled ? <Callout tone="warning">{s.disabledNotice}</Callout> : undefined}
+      >
         <SettingToggle
           label={s.enableLabel}
           description={s.enableDescription}
           checked={enabled}
           onChange={setExternalApiEnabled}
         />
-        {!enabled && (
-          <p className="rounded-xl border border-warning bg-warning-subtle px-4 py-3 text-sm text-fg">
-            {s.disabledNotice}
-          </p>
-        )}
-      </Card>
+      </SettingsSection>
 
-      <Card className="space-y-4 p-4 sm:p-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
-            <h3 className="text-base font-bold text-fg">{s.keysTitle}</h3>
-            {atCap && <p className="text-xs text-fg-muted">{atCapMessage}</p>}
-          </div>
+      <SettingsSection
+        padded
+        title={s.keysTitle}
+        description={atCap ? atCapMessage : undefined}
+        action={
           <Button
+            variant="secondary"
             size="sm"
             disabled={atCap || isLoading || Boolean(error)}
             title={atCap ? atCapMessage : undefined}
             onClick={() => setCreateOpen(true)}
           >
-            <Plus size={14} />
+            <Plus size={ICON_MD} />
             {s.createKey}
           </Button>
-        </div>
-
+        }
+      >
         {isLoading ? (
-          <p className="py-8 text-center text-sm text-fg-muted">{t.common.loading}</p>
-        ) : error ? (
-          <div className="flex flex-col items-center gap-3 py-8">
-            <p className="text-sm text-danger">{s.loadError}</p>
-            <Button variant="subtle" size="sm" onClick={() => void refetch()}>
-              {t.common.retry}
-            </Button>
+          <div role="status" className="space-y-2">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+            <span className="sr-only">{t.common.loading}</span>
           </div>
+        ) : error ? (
+          <Callout
+            tone="danger"
+            action={
+              <Button variant="secondary" size="sm" onClick={() => void refetch()}>
+                {t.common.retry}
+              </Button>
+            }
+          >
+            {s.loadError}
+          </Callout>
         ) : keys.length === 0 ? (
-          <p className="py-8 text-center text-sm text-fg-muted">{s.empty}</p>
+          <EmptyState icon={<KeyRound size={24} />} title={s.empty} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
               <thead>
-                <tr className="border-b border-stroke text-xs uppercase tracking-wide text-fg-muted">
-                  <th className="px-2 py-2 font-semibold">{s.columns.name}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.scope}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.key}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.created}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.expires}</th>
-                  <th className="px-2 py-2 font-semibold">{s.columns.lastUsed}</th>
-                  <th className="px-2 py-2 font-semibold">
+                <tr className="border-b border-stroke text-xs text-fg-muted">
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    {s.columns.name}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    {s.columns.scope}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    {s.columns.key}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    {s.columns.created}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    {s.columns.expires}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
+                    {s.columns.lastUsed}
+                  </th>
+                  <th scope="col" className="px-2 py-2 font-medium">
                     <span className="sr-only">{s.columns.actions}</span>
                   </th>
                 </tr>
@@ -131,26 +149,25 @@ export function ExternalApiSettingsPage({
                   const expired = isKeyExpired(apiKey);
                   const inactive = !enabled || expired;
                   return (
-                    <tr
-                      key={apiKey.id}
-                      className={`border-b border-stroke ${inactive ? 'opacity-60' : ''}`}
-                    >
+                    <tr key={apiKey.id} className="border-b border-stroke last:border-b-0">
                       <td className="px-2 py-3 align-top">
                         <div className="space-y-1">
-                          <span className="font-medium text-fg">
+                          <span
+                            className={cn('font-medium', inactive ? 'text-fg-muted' : 'text-fg')}
+                          >
                             {displayKeyName(t, apiKey.name)}
                           </span>
                           {inactive && (
-                            <span className="block text-xs text-fg-muted">
-                              {!enabled ? s.inactive : s.expired}
+                            <span className="block">
+                              <Badge variant={!enabled ? 'neutral' : 'warning'}>
+                                {!enabled ? s.inactive : s.expired}
+                              </Badge>
                             </span>
                           )}
                         </div>
                       </td>
                       <td className="px-2 py-3 align-top">
-                        <span className="inline-flex rounded-full bg-surface px-2 py-0.5 text-xs font-medium text-fg-muted">
-                          {scopeLabel(t, apiKey.scope)}
-                        </span>
+                        <Badge>{scopeLabel(t, apiKey.scope)}</Badge>
                       </td>
                       <td className="px-2 py-3 align-top font-mono text-xs text-fg-muted">
                         {formatKeyHint(apiKey.start)}
@@ -164,14 +181,15 @@ export function ExternalApiSettingsPage({
                       <td className="px-2 py-3 align-top text-fg-muted">
                         {formatApiKeyDate(apiKey.lastUsedAt, locale, s.neverUsed)}
                       </td>
-                      <td className="px-2 py-3 align-top text-right">
+                      <td className="px-2 py-2 text-right align-top">
                         <Button
                           variant="subtle"
-                          size="sm"
+                          size="icon"
                           aria-label={`${s.revoke.confirmButton}: ${displayKeyName(t, apiKey.name)}`}
+                          className="text-danger enabled:hover:bg-danger-subtle"
                           onClick={() => setKeyToRevoke(apiKey)}
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={ICON_MD} />
                         </Button>
                       </td>
                     </tr>
@@ -181,7 +199,7 @@ export function ExternalApiSettingsPage({
             </table>
           </div>
         )}
-      </Card>
+      </SettingsSection>
 
       {createOpen && <CreateApiKeyDialog onClose={() => setCreateOpen(false)} />}
 
@@ -193,6 +211,6 @@ export function ExternalApiSettingsPage({
           onCancel={() => setKeyToRevoke(null)}
         />
       )}
-    </div>
+    </SettingsPage>
   );
 }

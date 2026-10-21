@@ -48,8 +48,8 @@ describe('GitSettingsPage', () => {
     );
 
     expect(screen.getByText('Uses your Git config signing key — GPG or SSH.')).toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox', { name: 'Sign commits' }));
-    await user.click(screen.getByRole('checkbox', { name: 'Add Signed-off-by trailer' }));
+    await user.click(screen.getByRole('switch', { name: 'Sign commits' }));
+    await user.click(screen.getByRole('switch', { name: 'Add Signed-off-by trailer' }));
 
     expect(setSignCommits).toHaveBeenCalledWith(true);
     expect(setSignOff).toHaveBeenCalledWith(false);

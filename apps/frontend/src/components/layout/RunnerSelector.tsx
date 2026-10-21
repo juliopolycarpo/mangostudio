@@ -25,6 +25,9 @@ import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agent
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Check, ChevronDown, CornerUpRight, History } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
@@ -35,6 +38,8 @@ import {
   externalUnavailableText,
 } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 export interface RunnerSelectorProps {
   runner: ChatRunnerConfiguration;
@@ -42,7 +47,7 @@ export interface RunnerSelectorProps {
   isAgentListLoading: boolean;
   externalAgents: readonly ExternalAgentDescriptor[];
   /**
-   * True while discovery is still answering. Load-bearing for the pill's dot: a
+   * True while discovery is still answering. Load-bearing for the trigger's dot: a
    * missing descriptor and a refused one are the same shape, so without this an
    * unanswered query reads as "this agent cannot run here".
    */
@@ -122,10 +127,10 @@ export function RunnerSelector({
     runner.kind === 'mangostudio'
       ? (selectableAgents.find((agent) => agent.id === runner.agentId)?.name ?? runner.agentId)
       : // A target this bundle predates still names itself: its raw id beats a
-        // blank pill, and the sidebar badge already degrades the same way.
+        // blank trigger, and the sidebar badge already degrades the same way.
         (t.externalAgents.target[runner.targetId] ?? runner.targetId);
 
-  // The pill's dot answers "can this runner take a turn right now": MangoStudio
+  // The trigger's dot answers "can this runner take a turn right now": MangoStudio
   // always can (accent), an external runner grades from signed-in through
   // auth-unknown to not-selectable-here.
   const activeDescriptor =
@@ -134,7 +139,7 @@ export function RunnerSelector({
       : undefined;
   // `disclosure-required` is checked on top of `externalAgentSelectable`, which
   // deliberately leaves such a descriptor selectable so the picker can route the
-  // user into the notice. The pill answers a different question — can this runner
+  // user into the notice. The trigger answers a different question — can this runner
   // take a turn right now — and the answer is no until the notice is accepted, so
   // a green dot reading "signed in" would promise a send that the turn-start gate
   // refuses. Same extra condition the composer applies.
@@ -163,30 +168,31 @@ export function RunnerSelector({
 
   return (
     <div ref={containerRef} className="relative">
-      <button
+      <Button
         type="button"
+        variant="subtle"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={labels.label}
-        className="flex h-9 max-w-full items-center gap-2 rounded-full border border-stroke bg-control px-3 text-sm font-medium text-fg transition-colors hover:border-accent disabled:opacity-50"
+        className="max-w-full px-2 aria-expanded:bg-fill-selected"
       >
         <StatusDot tone={availability.tone} />
         {availability.text ? <span className="sr-only">{availability.text}</span> : null}
         <span className="truncate">{activeLabel}</span>
-        <ChevronDown size={14} className="shrink-0 text-fg-muted" />
-      </button>
+        <ChevronDown size={ICON_MD} className="shrink-0 text-fg-muted" />
+      </Button>
 
       {open ? (
         <div
           role="listbox"
           aria-label={labels.label}
-          className="absolute left-0 z-50 mt-2 max-h-[70vh] w-80 overflow-auto rounded-2xl border border-stroke bg-surface p-2 shadow-2xl"
+          className="absolute left-0 z-50 mt-1 max-h-[70vh] w-80 overflow-auto rounded-md border border-stroke bg-surface-raised p-1 shadow-popover"
         >
           <GroupHeading>{labels.mangostudioGroup}</GroupHeading>
           {isAgentListLoading ? (
-            <p className="px-3 py-2 text-xs text-fg-muted">{labels.loading}</p>
+            <p className="px-2 py-2 text-xs text-fg-muted">{labels.loading}</p>
           ) : null}
           {selectableAgents.map((agent) => {
             const active = runner.kind === 'mangostudio' && runner.agentId === agent.id;
@@ -217,7 +223,7 @@ export function RunnerSelector({
 
           <GroupHeading>{labels.externalGroup}</GroupHeading>
           {externalAgents.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-fg-muted">{labels.noneDiscovered}</p>
+            <p className="px-2 py-2 text-xs text-fg-muted">{labels.noneDiscovered}</p>
           ) : null}
           {externalAgents.map((descriptor) => (
             <ExternalRow
@@ -252,9 +258,9 @@ export function RunnerSelector({
                 setOpen(false);
                 onBrowseSessions();
               }}
-              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-fg-muted transition-colors hover:bg-fill-hover"
+              className="flex min-h-8 w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg transition-colors hover:bg-fill-hover"
             >
-              <History size={13} className="shrink-0 text-accent-fg" />
+              <History size={ICON_MD} className="shrink-0 text-fg-muted" />
               <span className="min-w-0 flex-1 truncate">{t.externalAgents.sessions.entry}</span>
             </button>
           ) : null}
@@ -266,9 +272,9 @@ export function RunnerSelector({
 
 function GroupHeading({ children }: { children: string }) {
   return (
-    <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-fg-muted">
+    <MicroLabel as="p" className="px-2 pb-1 pt-2">
       {children}
-    </p>
+    </MicroLabel>
   );
 }
 
@@ -289,16 +295,19 @@ function RunnerRow({
       role="option"
       aria-selected={active}
       onClick={onSelect}
-      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-fg transition-colors hover:bg-fill-hover"
+      className={cn(
+        'flex min-h-8 w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg transition-colors',
+        active ? 'bg-fill-selected' : 'hover:bg-fill-hover'
+      )}
     >
       <span className="min-w-0 flex-1 truncate">{name}</span>
       {forkLabel ? (
-        <span className="flex shrink-0 items-center gap-1 text-[10px] text-fg-muted">
-          <CornerUpRight size={11} />
+        <span className="flex shrink-0 items-center gap-1 text-xs text-fg-muted">
+          <CornerUpRight size={ICON_SM} />
           {forkLabel}
         </span>
       ) : null}
-      {active ? <Check size={14} className="shrink-0 text-accent-fg" /> : null}
+      {active ? <Check size={ICON_MD} className="shrink-0 text-accent-fg" /> : null}
     </button>
   );
 }
@@ -379,7 +388,7 @@ function ExternalRow({
           : null;
 
   return (
-    <div className="rounded-xl px-1">
+    <div>
       <div className="flex w-full items-center gap-1">
         <button
           type="button"
@@ -387,27 +396,30 @@ function ExternalRow({
           aria-selected={active}
           disabled={!selectable}
           onClick={() => onSelect(forks)}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-fg transition-colors enabled:hover:bg-fill-hover disabled:cursor-not-allowed disabled:opacity-60"
+          className={cn(
+            'flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+            active ? 'bg-fill-selected' : 'enabled:hover:bg-fill-hover'
+          )}
         >
           <span className="min-w-0 flex-1 truncate">{labels.target[descriptor.targetId]}</span>
           {descriptor.authState === 'signed-in' ? (
-            <span className="flex shrink-0 items-center gap-1 text-[10px] text-success">
-              <Check size={11} />
+            <span className="flex shrink-0 items-center gap-1 font-mono text-micro text-success">
+              <Check size={ICON_SM} />
               {descriptor.account?.label ?? labels.selector.signedIn}
             </span>
           ) : null}
           {selectable && descriptor.authState === 'unknown' ? (
-            <span className="shrink-0 text-[10px] text-fg-muted">
+            <span className="shrink-0 font-mono text-micro text-fg-muted">
               {labels.selector.authUnknown}
             </span>
           ) : null}
           {selectable && forks ? (
-            <span className="flex shrink-0 items-center gap-1 text-[10px] text-fg-muted">
-              <CornerUpRight size={11} />
+            <span className="flex shrink-0 items-center gap-1 text-xs text-fg-muted">
+              <CornerUpRight size={ICON_SM} />
               {labels.selector.continueInNewChat}
             </span>
           ) : null}
-          {active ? <Check size={14} className="shrink-0 text-accent-fg" /> : null}
+          {active ? <Check size={ICON_MD} className="shrink-0 text-accent-fg" /> : null}
         </button>
         {descriptor.capabilities.accountUsage && selectable ? (
           <div className="shrink-0 pr-2">
@@ -417,21 +429,20 @@ function ExternalRow({
       </div>
 
       {explanation ? (
-        <p className="px-2 pb-2 text-[10px] leading-relaxed text-fg-muted">{explanation}</p>
+        <p className="px-2 pb-2 text-xs leading-relaxed text-fg-muted">{explanation}</p>
       ) : null}
 
       {/* The one refusal whose fix is an administrative change to a machine
           rather than a click. A one-line "this machine has not proven it keeps
           credentials separate" leaves the reader with nothing to do about it. */}
       {reason === 'isolation-unproven' ? (
-        <div className="mx-2 mb-2 space-y-1 rounded-xl border border-stroke bg-control px-2 py-2">
-          <p className="text-[10px] font-medium text-fg">{labels.isolation.title}</p>
-          <p className="text-[10px] leading-relaxed text-fg-muted">{labels.isolation.why}</p>
-          <p className="pt-1 text-[10px] font-medium text-fg">{labels.isolation.nextStep}</p>
-          <p className="text-[10px] leading-relaxed text-fg-muted">
+        <Callout tone="neutral" title={labels.isolation.title} className="mx-2 mb-2">
+          <p className="text-xs leading-relaxed">{labels.isolation.why}</p>
+          <p className="pt-1 text-xs font-medium text-fg">{labels.isolation.nextStep}</p>
+          <p className="text-xs leading-relaxed">
             {labels.isolation.next[isolationFixFor(transportKind)]}
           </p>
-        </div>
+        </Callout>
       ) : null}
 
       {/* The two remedies MangoStudio can act on. Both link into the surface

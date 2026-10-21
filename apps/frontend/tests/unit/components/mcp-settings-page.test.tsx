@@ -444,7 +444,7 @@ describe('McpSettingsPage', () => {
 
     expect(await screen.findByText('echo')).toBeInTheDocument();
 
-    const toggle = screen.getByRole('checkbox', { name: 'echo' });
+    const toggle = screen.getByRole('switch', { name: 'echo' });
     expect(toggle).not.toBeChecked();
     await user.click(toggle);
 

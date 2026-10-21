@@ -15,7 +15,10 @@
 
 import type { ExternalSteerPart } from '@mangostudio/shared/types';
 import { CornerDownRight } from 'lucide-react';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 export interface ExternalSteerPartBlockProps {
   part: ExternalSteerPart;
@@ -27,23 +30,21 @@ export function ExternalSteerPartBlock({ part }: ExternalSteerPartBlockProps) {
   const rejected = part.status === 'rejected';
 
   return (
-    <div
-      className={`max-w-2xl rounded-xl border px-3 py-2 text-sm ${
-        rejected
-          ? 'border-danger bg-danger-subtle text-fg-muted'
-          : 'border-accent bg-accent-subtle text-fg'
-      }`}
-    >
-      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-fg-muted">
-        <CornerDownRight size={12} className="shrink-0" />
-        <span>{labels.sentLabel}</span>
+    <div className="max-w-2xl space-y-2">
+      {/* The user's own words, so it wears the user's message: a `surface`
+          balloon with a hairline. Whether it landed is the callout's job. */}
+      <div className="rounded-lg border border-stroke bg-surface px-3 py-2 text-sm text-fg">
+        <MicroLabel as="div" className="mb-1 flex items-center gap-1.5">
+          <CornerDownRight size={ICON_SM} className="shrink-0" />
+          <span>{labels.sentLabel}</span>
+        </MicroLabel>
+        <p className="whitespace-pre-wrap break-words">{part.text}</p>
       </div>
-      <p className="whitespace-pre-wrap break-words">{part.text}</p>
       {rejected ? (
-        <p className="mt-1.5 text-xs text-danger">
-          {labels.rejectedLabel}
-          {part.reasonCode ? ` — ${labels.reason[part.reasonCode]}` : ''}
-        </p>
+        <Callout
+          tone="danger"
+          title={`${labels.rejectedLabel}${part.reasonCode ? ` — ${labels.reason[part.reasonCode]}` : ''}`}
+        />
       ) : null}
     </div>
   );

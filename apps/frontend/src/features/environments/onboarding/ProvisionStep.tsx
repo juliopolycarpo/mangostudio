@@ -15,6 +15,8 @@
 
 import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { InstallConsole } from '../components/InstallConsole';
@@ -92,26 +94,27 @@ export function ProvisionStep({
 
   return (
     <div className="space-y-4" data-testid="onboarding-provision-step">
-      <p className="text-fg-muted text-xs">
+      <p className="text-sm text-fg-muted">
         {paired ? labels.provisionPairedIntro : labels.provisionSshIntro}
       </p>
 
       {runId ? null : (
-        <button
-          type="button"
-          disabled={install.isPending || bootstrap.isPending}
+        // Primary while the run has not started, because it is the step's one
+        // action; the footer's Continue is grey until the run has succeeded.
+        <Button
+          variant="primary"
+          loading={install.isPending || bootstrap.isPending}
           onClick={() => void start()}
           data-testid="onboarding-provision-start"
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent-subtle px-2.5 font-semibold text-accent-fg text-xs transition-colors hover:bg-accent-hover disabled:opacity-45"
         >
           {paired ? labels.provisionStartPaired : labels.provisionStartSsh}
-        </button>
+        </Button>
       )}
 
       {error ? (
-        <p className="text-danger text-xs" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
 
       {runId ? (

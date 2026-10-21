@@ -1,8 +1,12 @@
 import type { McpMediaPart } from '@mangostudio/shared/types';
 import { Download, FileText, ImageOff, Plug } from 'lucide-react';
 import { useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ImageActionBar } from './ImageActionBar';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
 interface Props {
@@ -24,35 +28,36 @@ export function McpMediaPartBlock({ part }: Props) {
         href={part.url}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex max-w-md items-center gap-3 rounded-2xl border border-stroke bg-control px-4 py-3 transition-colors hover:bg-fill-hover"
+        className="inline-flex max-w-md items-center gap-3 rounded-md border border-stroke bg-control px-4 py-3 transition-colors hover:bg-control-hover"
       >
-        <FileText size={18} className="shrink-0 text-accent-fg" />
+        <FileText size={ICON_LG} className="shrink-0 text-fg-muted" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium text-fg">
             {part.uri ?? t.chat.feed.mcpResourceFile}
           </span>
-          <span className="block truncate text-[10px] text-fg-muted">
+          <span className="block truncate font-mono text-micro text-fg-subtle">
             {t.chat.feed.mcpMediaSource.replace('{source}', sourceLabel)} · {part.mimeType}
           </span>
         </span>
-        <Download size={14} className="shrink-0 text-fg-muted" />
+        <Download size={ICON_SM} className="shrink-0 text-fg-muted" />
       </a>
     );
   }
 
   if (loadError) {
     return (
-      <div className="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-stroke bg-surface p-6 text-fg-subtle">
-        <ImageOff size={32} />
-        <span className="text-xs">{t.chat.feed.imageUnavailable}</span>
-      </div>
+      <EmptyState
+        icon={<ImageOff size={ICON_LG} />}
+        title={t.chat.feed.imageUnavailable}
+        className="max-w-md rounded-md border border-stroke bg-surface"
+      />
     );
   }
 
   return (
-    <div className="max-w-md overflow-hidden rounded-2xl border border-stroke bg-control shadow-sm">
-      <div className="flex items-center gap-2.5 px-4 py-2.5">
-        <Plug size={14} className="shrink-0 text-accent-fg" />
+    <div className="max-w-md overflow-hidden rounded-md border border-stroke bg-surface">
+      <div className="flex h-8 items-center gap-2 px-3">
+        <Plug size={ICON_SM} className="shrink-0 text-fg-muted" />
         <span className="flex-1 truncate text-left text-xs text-fg-muted">
           {t.chat.feed.mcpMediaSource.replace('{source}', sourceLabel)}
         </span>
@@ -61,23 +66,23 @@ export function McpMediaPartBlock({ part }: Props) {
         <ReservedAspectImage
           src={part.url}
           alt={t.chat.feed.mcpImageAlt}
-          className="bg-surface"
+          className="bg-canvas"
           objectFit="contain"
           onLoadError={() => setLoadError(true)}
         />
-        <div className="absolute bottom-3 left-3 right-3 glass-panel rounded-xl p-2 flex justify-end items-center translate-y-12 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
-          <button
-            type="button"
+        <ImageActionBar className="justify-end">
+          <Button
+            variant="subtle"
+            size="icon"
             onClick={(e) => {
               e.stopPropagation();
               triggerImageDownload(part.url, t.common.downloadFilenamePrefix);
             }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center bg-fill-selected hover:bg-accent-hover text-fg transition-colors"
             title={t.chat.feed.download}
           >
-            <Download size={14} />
-          </button>
-        </div>
+            <Download size={ICON_MD} />
+          </Button>
+        </ImageActionBar>
       </div>
     </div>
   );

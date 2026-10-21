@@ -4,9 +4,11 @@ import {
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
 import { useEffect, useMemo, useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { cn } from '@/lib/utils';
 import { isFileChangeTool } from './file-change-preview';
 import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
@@ -111,13 +113,9 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
         summary={summary ? formatToolSummary(summary, t.tools.summary) : null}
         duration={duration === null ? null : formatToolDuration(duration)}
       >
-        <span className={`shrink-0 font-mono font-semibold ${toneTextClass(tone)}`}>{label}</span>
+        <span className={cn('shrink-0 font-mono font-medium', toneTextClass(tone))}>{label}</span>
         {firstHint && <span className="truncate font-mono text-fg-muted">{firstHint}</span>}
-        {moreCount > 0 && (
-          <span className="shrink-0 rounded-sm bg-surface px-1 py-px text-[10px] text-fg-muted">
-            {moreLabel}
-          </span>
-        )}
+        {moreCount > 0 && <Badge>{moreLabel}</Badge>}
       </TimelineRow>
 
       {/* A group opens onto a nested rail, not onto a card. */}

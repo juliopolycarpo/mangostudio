@@ -74,7 +74,7 @@ export function Layout({
         onWidthPreview={setPreviewWidth}
         onWidthChange={onChatSidebarWidthChange}
       />
-      <main className="flex-1 md:ml-[var(--chat-sidebar-width)] flex flex-col h-full relative w-full min-w-0">
+      <main className="relative flex h-full w-full min-w-0 flex-1 flex-col md:ml-(--chat-sidebar-width)">
         {children}
       </main>
     </div>

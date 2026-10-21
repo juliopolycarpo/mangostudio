@@ -8,8 +8,12 @@
 
 import type { LibraryLocationStatus, LibraryTargetDescriptor } from '@mangostudio/shared/library';
 import { Search } from 'lucide-react';
-import { useId } from 'react';
+import { useId, useMemo } from 'react';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { Input } from '@/components/ui/Input';
+import { Select, type SelectOption } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import type { LibraryFilters, LibraryShowFilter, LibrarySort } from '../format';
 
 interface MatrixFiltersProps {
@@ -18,9 +22,6 @@ interface MatrixFiltersProps {
   readonly locations: readonly LibraryLocationStatus[];
   readonly onChange: (update: Partial<LibraryFilters>) => void;
 }
-
-const SELECT_CLASS =
-  'rounded-lg border border-stroke bg-surface px-2 py-1.5 text-xs text-fg outline-none focus:border-focus';
 
 export function MatrixFilters({ filters, targets, locations, onChange }: MatrixFiltersProps) {
   const { t } = useI18n();
@@ -32,100 +33,106 @@ export function MatrixFilters({ filters, targets, locations, onChange }: MatrixF
   const sortId = useId();
   const groupId = useId();
 
+  const showOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: 'all', label: l.filters.showAll },
+      { value: 'divergent', label: l.filters.showDivergent },
+      { value: 'single-location', label: l.filters.showSingleLocation },
+      { value: 'shadowed', label: l.filters.showShadowed },
+    ],
+    [l.filters]
+  );
+  const targetOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: 'any', label: l.filters.anyTarget },
+      ...targets.map((target) => ({ value: target.id, label: l.targets[target.id] })),
+    ],
+    [l.filters.anyTarget, l.targets, targets]
+  );
+  const locationOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: 'any', label: l.filters.anyLocation },
+      ...locations.map((location) => ({ value: location.id, label: location.path ?? location.id })),
+    ],
+    [l.filters.anyLocation, locations]
+  );
+  const sortOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: 'name', label: l.filters.sortName },
+      { value: 'divergence', label: l.filters.sortDivergence },
+      { value: 'coverage', label: l.filters.sortCoverage },
+      { value: 'modified', label: l.filters.sortModified },
+    ],
+    [l.filters]
+  );
+
   return (
     <div className="flex flex-wrap items-center gap-2" data-testid="matrix-filters">
       <div className="relative min-w-0 flex-1 sm:max-w-xs">
         <Search
-          size={14}
-          className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 text-fg-subtle"
+          size={ICON_SM}
+          className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-3 text-fg-subtle"
         />
-        <input
+        <Input
           id={searchId}
           type="search"
           value={filters.search}
           onChange={(event) => onChange({ search: event.target.value })}
           placeholder={l.filters.search}
           aria-label={l.filters.search}
-          className="w-full rounded-lg border border-stroke bg-surface py-1.5 pr-2 pl-8 text-xs text-fg outline-none placeholder:text-fg-subtle focus:border-focus"
+          className="pl-8"
         />
       </div>
 
       <label className="sr-only" htmlFor={showId}>
         {l.filters.show}
       </label>
-      <select
+      <Select
         id={showId}
+        className="w-full sm:w-48"
         value={filters.show}
-        onChange={(event) => onChange({ show: event.target.value as LibraryShowFilter })}
-        className={SELECT_CLASS}
-      >
-        <option value="all">{l.filters.showAll}</option>
-        <option value="divergent">{l.filters.showDivergent}</option>
-        <option value="single-location">{l.filters.showSingleLocation}</option>
-        <option value="shadowed">{l.filters.showShadowed}</option>
-      </select>
+        options={showOptions}
+        onChange={(value) => onChange({ show: value as LibraryShowFilter })}
+      />
 
       <label className="sr-only" htmlFor={targetId}>
         {l.filters.target}
       </label>
-      <select
+      <Select
         id={targetId}
+        className="w-full sm:w-40"
         value={filters.targetId}
-        onChange={(event) =>
-          onChange({ targetId: event.target.value as LibraryFilters['targetId'] })
-        }
-        className={SELECT_CLASS}
-      >
-        <option value="any">{l.filters.anyTarget}</option>
-        {targets.map((target) => (
-          <option key={target.id} value={target.id}>
-            {l.targets[target.id]}
-          </option>
-        ))}
-      </select>
+        options={targetOptions}
+        onChange={(value) => onChange({ targetId: value as LibraryFilters['targetId'] })}
+      />
 
       <label className="sr-only" htmlFor={locationId}>
         {l.filters.location}
       </label>
-      <select
+      <Select
         id={locationId}
+        className="w-full sm:w-56"
         value={filters.locationId}
-        onChange={(event) => onChange({ locationId: event.target.value })}
-        className={SELECT_CLASS}
-      >
-        <option value="any">{l.filters.anyLocation}</option>
-        {locations.map((location) => (
-          <option key={location.id} value={location.id}>
-            {location.path ?? location.id}
-          </option>
-        ))}
-      </select>
+        options={locationOptions}
+        onChange={(value) => onChange({ locationId: value })}
+      />
 
       <label className="sr-only" htmlFor={sortId}>
         {l.filters.sort}
       </label>
-      <select
+      <Select
         id={sortId}
+        className="w-full sm:w-40"
         value={filters.sort}
-        onChange={(event) => onChange({ sort: event.target.value as LibrarySort })}
-        className={SELECT_CLASS}
-      >
-        <option value="name">{l.filters.sortName}</option>
-        <option value="divergence">{l.filters.sortDivergence}</option>
-        <option value="coverage">{l.filters.sortCoverage}</option>
-        <option value="modified">{l.filters.sortModified}</option>
-      </select>
+        options={sortOptions}
+        onChange={(value) => onChange({ sort: value as LibrarySort })}
+      />
 
-      <label
-        htmlFor={groupId}
-        className="flex cursor-pointer items-center gap-1.5 text-xs text-fg-muted"
-      >
-        <input
+      <label htmlFor={groupId} className="flex cursor-pointer items-center gap-2 text-fg text-sm">
+        <Checkbox
           id={groupId}
-          type="checkbox"
           checked={filters.groupByLocation}
           onChange={(event) => onChange({ groupByLocation: event.target.checked })}
-          className="size-3.5 accent-accent"
         />
         {l.filters.groupByLocation}
       </label>

@@ -8,18 +8,19 @@
  */
 
 import type { RuntimeHealth } from '@mangostudio/shared/environments';
+import { Card } from '@/components/ui/Card';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { healthLabel, healthRollup } from '../format';
 import { useAgentCliStatuses, useRuntimeStatuses } from '../hooks/use-runtime-status';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { OverviewSection } from './OverviewSection';
-import { CardSectionLabel, TOOL_CARD_SURFACE } from './ToolCard';
 
 /** Worst first: the reason to open this section is at the top of the list. */
 const HEALTH_ORDER: readonly RuntimeHealth[] = ['error', 'missing', 'warn', 'ok'];
 
 const COUNT_STYLES: Record<RuntimeHealth, string> = {
-  ok: 'text-accent-fg',
+  ok: 'text-success',
   warn: 'text-warning',
   missing: 'text-fg-muted',
   error: 'text-danger',
@@ -53,19 +54,21 @@ export function OverviewHealthRollup() {
       {total === 0 ? (
         <EnvironmentPageState variant="empty" size="section" title={e.health.empty} />
       ) : (
-        <div className={`${TOOL_CARD_SURFACE} p-4`}>
+        <Card>
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="health-rollup">
             {HEALTH_ORDER.map((health) => (
               <li key={health} className="space-y-0.5" data-health={health}>
-                <p className={`text-2xl font-bold ${COUNT_STYLES[health]}`}>{counts[health]}</p>
-                <CardSectionLabel>{healthLabel(t, health)}</CardSectionLabel>
+                <p className={`text-title font-semibold ${COUNT_STYLES[health]}`}>
+                  {counts[health]}
+                </p>
+                <MicroLabel as="p">{healthLabel(t, health)}</MicroLabel>
               </li>
             ))}
           </ul>
           {counts.ok === total && (
             <p className="mt-3 text-sm text-fg-muted">{e.overview.healthClear}</p>
           )}
-        </div>
+        </Card>
       )}
     </OverviewSection>
   );

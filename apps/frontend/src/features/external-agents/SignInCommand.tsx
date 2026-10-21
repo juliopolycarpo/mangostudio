@@ -1,6 +1,9 @@
 import { Check, Copy } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 interface SignInCommandProps {
   /** The vendor's own sign-in command. Shown as plain text, never interpreted. */
@@ -20,18 +23,19 @@ export function SignInCommand({ command, className }: SignInCommandProps) {
   const { t } = useI18n();
   const { copy, copied } = useClipboard();
   return (
-    <div className={`flex items-center gap-2 ${className ?? ''}`}>
-      <code className="min-w-0 flex-1 truncate rounded-lg bg-surface px-2 py-1 text-[10px] text-fg-muted">
+    <div className={cn('flex items-center gap-2', className)}>
+      <code className="min-w-0 flex-1 truncate rounded-md border border-stroke bg-canvas px-2 py-1 font-mono text-xs text-fg">
         {command}
       </code>
-      <button
-        type="button"
+      <Button
+        variant="subtle"
+        size="sm"
         onClick={() => copy(command)}
         aria-label={t.externalAgents.selector.copyLoginCommand}
-        className="shrink-0 rounded-lg p-1 text-fg-muted transition-colors hover:bg-fill-hover"
+        className="shrink-0"
       >
-        {copied ? <Check size={12} /> : <Copy size={12} />}
-      </button>
+        {copied ? <Check size={ICON_MD} /> : <Copy size={ICON_MD} />}
+      </Button>
     </div>
   );
 }

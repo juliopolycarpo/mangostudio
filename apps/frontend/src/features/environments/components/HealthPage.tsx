@@ -13,6 +13,8 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { describeFinding } from '../format';
 import { useEnvironmentHealth } from '../hooks/use-runtime-status';
 import { useToolIdentities } from '../identity/use-tool-identities';
@@ -22,6 +24,7 @@ import { EnvironmentPageState } from './EnvironmentPageState';
 import { EnvironmentScopeHeader } from './EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from './EnvironmentScopeNotice';
 import { FindingIcon } from './FindingList';
+import { TOOL_CARD_SURFACE } from './ToolCard';
 
 export function HealthPage() {
   const { t } = useI18n();
@@ -48,7 +51,7 @@ export function HealthPage() {
     <EnvironmentScopeHeader description={e.health.description} scope={scope} onRefresh={refetch}>
       {scope.hasChoice && !comparison && (
         <Button variant="subtle" size="sm" onClick={openComparison}>
-          <Columns2 size={14} />
+          <Columns2 size={ICON_MD} />
           {e.scope.compare}
         </Button>
       )}
@@ -114,17 +117,17 @@ export function HealthPage() {
           <p className="text-sm text-fg-muted">
             {formatMessage(e.health.findingCount, { count: String(entries.length) })}
           </p>
-          <ul className="space-y-2" data-testid="health-list">
+          <ul className={cn(TOOL_CARD_SURFACE, 'divide-y divide-stroke')} data-testid="health-list">
             {entries.map((entry) => (
               <li
                 key={entry.key}
-                className="flex items-start gap-3 rounded-2xl border border-stroke bg-surface p-4"
+                className="flex items-start gap-3 p-4"
                 data-testid="health-entry"
                 data-severity={entry.severity}
               >
-                <FindingIcon severity={entry.severity} size={18} />
+                <FindingIcon severity={entry.severity} size={ICON_MD} />
                 <div className="min-w-0 space-y-1">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
+                  <p className="text-sm font-medium text-fg">
                     {e.health.scope[entry.scope]} · {resolve(entry.scope, entry.subjectId).name}
                   </p>
                   <p className="text-sm text-fg-muted">

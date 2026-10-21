@@ -1,22 +1,25 @@
 import type { InputHTMLAttributes } from 'react';
 
-interface ToggleProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> {
-  label: string;
-}
+type ToggleSwitchProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>;
 
 /**
- * The preference switch: a 36×20 track with a 12px knob. Off is a `control`
- * track with the control line and a muted knob; on is the accent with the
- * knob in `on-accent`. The knob does not grow on hover and carries no shadow.
+ * The switch itself — a 36×20 track with a 12px knob — with no label of its
+ * own. Off is a `control` track with the control line and a muted knob; on is
+ * the accent with the knob in `on-accent`. The knob does not grow on hover and
+ * carries no shadow.
+ *
+ * Use it where a surrounding element already names the control (a settings row
+ * that is itself the `<label>`); everywhere else use `Toggle`, which brings its
+ * own label.
+ *
+ * Usage: <ToggleSwitch checked={on} onChange={…} aria-label={label} />
  */
-export function Toggle({ label, id, checked, defaultChecked, ...props }: ToggleProps) {
-  const inputId = id ?? label.toLowerCase().replace(/\s+/g, '-');
+export function ToggleSwitch({ checked, defaultChecked, ...props }: ToggleSwitchProps) {
   const isChecked = checked ?? defaultChecked ?? false;
 
   return (
-    <label htmlFor={inputId} className="group inline-flex cursor-pointer items-center gap-3">
+    <span className="group relative inline-flex shrink-0">
       <input
-        id={inputId}
         type="checkbox"
         role="switch"
         className="peer sr-only"
@@ -26,6 +29,7 @@ export function Toggle({ label, id, checked, defaultChecked, ...props }: ToggleP
         {...props}
       />
       <span
+        aria-hidden="true"
         className="
           relative inline-block h-5 w-9 shrink-0 rounded-full
           border border-stroke-strong bg-control
@@ -40,6 +44,21 @@ export function Toggle({ label, id, checked, defaultChecked, ...props }: ToggleP
           peer-checked:group-hover:after:bg-on-accent
         "
       />
+    </span>
+  );
+}
+
+interface ToggleProps extends ToggleSwitchProps {
+  label: string;
+}
+
+/** The preference switch with its label to the right. */
+export function Toggle({ label, id, ...props }: ToggleProps) {
+  const inputId = id ?? label.toLowerCase().replace(/\s+/g, '-');
+
+  return (
+    <label htmlFor={inputId} className="inline-flex cursor-pointer items-center gap-3">
+      <ToggleSwitch id={inputId} {...props} />
       <span className="select-none text-sm text-fg">{label}</span>
     </label>
   );

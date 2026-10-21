@@ -1,5 +1,6 @@
 import { Ellipsis } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { TimelineItem } from '../TimelineItem';
 import { TimelineRow } from '../TimelineRow';
 
@@ -18,7 +19,7 @@ export function TurnWorkingRow() {
       <TimelineRow
         expanded={false}
         disclosable={false}
-        glyph={<Ellipsis size={11} className="animate-pulse shrink-0" />}
+        glyph={<Ellipsis size={ICON_SM} className="animate-pulse shrink-0" />}
       >
         <span className="animate-pulse text-fg-muted">{t.chat.feed.statusWorking}</span>
       </TimelineRow>

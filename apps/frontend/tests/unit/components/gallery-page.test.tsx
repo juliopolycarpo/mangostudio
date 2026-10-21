@@ -134,9 +134,9 @@ describe('GalleryPage', () => {
     const downloadLink = screen.getByRole('link', { name: /download full image/i });
     expect(downloadLink).toHaveAttribute('download', 'mangostudio-art-img-42.png');
 
-    const closeButton = container.querySelector('button.absolute.top-6.right-6');
-    expect(closeButton).not.toBeNull();
-    await user.click(closeButton as HTMLButtonElement);
+    // By its accessible name rather than by where it is drawn: the corner it
+    // sits in is a styling decision, the label is the contract.
+    await user.click(screen.getByRole('button', { name: /close image/i }));
 
     await waitFor(() => {
       expect(screen.queryByRole('link', { name: /download full image/i })).not.toBeInTheDocument();

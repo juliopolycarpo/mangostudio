@@ -8,11 +8,16 @@ import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/cata
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { SettingsPage } from '@/components/settings/SettingsPage';
+import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { toolSettingsListQueryOptions } from '../../tools/queries';
 import {
@@ -24,8 +29,6 @@ import {
 import { agentSettingsKeys, agentSettingsListQueryOptions } from '../queries';
 import { AgentEditor, type EditableAgentProfile } from './AgentEditor';
 import { AgentList } from './AgentList';
-import { DeleteAgentDialog } from './DeleteAgentDialog';
-import { SettingsSectionHeader } from './SettingsSectionHeader';
 
 const NEW_AGENT_ID = 'user:new-agent' as const;
 
@@ -110,63 +113,62 @@ export function AgentSettingsPage() {
     },
   });
 
+  const page = { title: labels.title, description: labels.description };
+
   if (agentsQuery.isLoading || toolsQuery.isLoading) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-fg-muted">{t.common.loading}</p>
-      </div>
+      <SettingsPage {...page}>
+        <SettingsLoading shape="card" count={2} />
+      </SettingsPage>
     );
   }
 
   if (agentsQuery.error || toolsQuery.error) {
     return (
-      <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-danger">{labels.loadError}</p>
-        <Button
-          variant="subtle"
-          size="sm"
-          onClick={() => {
+      <SettingsPage {...page}>
+        <SettingsLoadError
+          message={labels.loadError}
+          onRetry={() => {
             void agentsQuery.refetch();
             void toolsQuery.refetch();
           }}
-        >
-          {labels.retry}
-        </Button>
-      </div>
+        />
+      </SettingsPage>
     );
   }
 
+  const createAction = (
+    <Button type="button" variant="secondary" size="sm" onClick={handleCreateAgent}>
+      <Plus size={ICON_SM} />
+      {labels.create}
+    </Button>
+  );
+
   if (agents.length === 0 && !newAgent) {
     return (
-      <div className="space-y-6">
-        <AgentSettingsHeader labels={labels} onCreate={handleCreateAgent} />
-
-        <Card className="p-8 sm:p-12 text-center space-y-4">
-          <div className="p-4 bg-surface rounded-full w-fit mx-auto text-fg-subtle">
-            <Bot size={32} />
-          </div>
-          <div className="space-y-1">
-            <p className="text-fg font-bold">{labels.emptyStateTitle}</p>
-            <p className="text-sm text-fg-muted">{labels.emptyStateDescription}</p>
-          </div>
-          <Button variant="primary" onClick={handleCreateAgent}>
-            <Plus size={16} />
-            {labels.create}
-          </Button>
+      <SettingsPage {...page} actions={createAction}>
+        <Card padded={false}>
+          <EmptyState
+            icon={<Bot size={24} />}
+            title={labels.emptyStateTitle}
+            hint={labels.emptyStateDescription}
+            action={
+              <Button variant="primary" onClick={handleCreateAgent}>
+                <Plus size={ICON_MD} />
+                {labels.create}
+              </Button>
+            }
+          />
         </Card>
-      </div>
+      </SettingsPage>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <AgentSettingsHeader labels={labels} onCreate={handleCreateAgent} />
-
+    <SettingsPage {...page} actions={createAction}>
       <AgentList
         agents={newAgent ? [newAgent, ...agents] : agents}
         selectedAgentId={selectedAgent?.id ?? null}
-        builtInLabel={labels.builtIn}
-        userLabel={labels.user}
         builtInAgentsTitle={labels.builtInAgents}
         userAgentsTitle={labels.userAgents}
         onSelect={(agentId) => {
@@ -182,48 +184,7 @@ export function AgentSettingsPage() {
           allAgents={agents}
           tools={toolsQuery.data?.tools ?? []}
           modelOptions={modelOptions}
-          labels={{
-            builtIn: labels.builtIn,
-            user: labels.user,
-            createTitle: labels.createTitle,
-            name: labels.name,
-            slug: labels.slug,
-            description: labels.agentDescription,
-            role: labels.role,
-            roles: labels.roles,
-            systemPrompt: labels.systemPrompt,
-            model: labels.model,
-            modelDefaultOption: labels.modelDefaultOption,
-            thinking: labels.thinking,
-            reasoningEffort: labels.reasoningEffort,
-            reasoningEffortDefaultOption: labels.reasoningEffortDefaultOption,
-            reasoningEfforts: labels.reasoningEfforts,
-            maxToolIterations: labels.maxToolIterations,
-            toolsEnabled: labels.toolsEnabled,
-            toolAllowlist: labels.toolAllowlist,
-            noTools: labels.noTools,
-            subagents: labels.subagents,
-            noSubagents: labels.noSubagents,
-            path: labels.path,
-            friendlyMode: labels.friendlyMode,
-            rawMode: labels.rawMode,
-            rawMarkdown: labels.rawMarkdown,
-            preview: labels.preview,
-            previewing: labels.previewing,
-            save: labels.save,
-            saving: labels.saving,
-            reset: labels.reset,
-            delete: labels.delete,
-            sectionIdentity: labels.sectionIdentity,
-            sectionBehavior: labels.sectionBehavior,
-            sectionReasoning: labels.sectionReasoning,
-            sectionTools: labels.sectionTools,
-            unsavedChanges: labels.unsavedChanges,
-            confirmResetTitle: labels.confirmResetTitle,
-            confirmResetDescription: labels.confirmResetDescription,
-            confirmReset: labels.confirmReset,
-            cancel: labels.cancel,
-          }}
+          labels={labels}
           isNew={selectedAgent.id === NEW_AGENT_ID}
           isSaving={saveMutation.isPending}
           isPreviewing={previewMutation.isPending}
@@ -240,47 +201,19 @@ export function AgentSettingsPage() {
         />
       )}
 
-      <DeleteAgentDialog
-        title={labels.deleteTitle}
-        description={labels.deleteDescription}
-        cancelLabel={labels.cancel}
-        confirmLabel={labels.deleteConfirm}
-        deletingLabel={labels.deleting}
-        isOpen={agentPendingDelete !== null}
-        isDeleting={deleteMutation.isPending}
-        onCancel={() => setAgentPendingDelete(null)}
-        onConfirm={() => {
-          if (agentPendingDelete) deleteMutation.mutate(agentPendingDelete.id);
-        }}
-      />
-    </div>
-  );
-}
-
-interface AgentHeaderLabels {
-  readonly title: string;
-  readonly description: string;
-  readonly create: string;
-}
-
-interface AgentSettingsHeaderProps {
-  readonly labels: AgentHeaderLabels;
-  readonly onCreate: () => void;
-}
-
-function AgentSettingsHeader({ labels, onCreate }: AgentSettingsHeaderProps) {
-  return (
-    <SettingsSectionHeader
-      title={labels.title}
-      description={labels.description}
-      icon={<Bot size={22} />}
-      action={
-        <Button type="button" variant="secondary" onClick={onCreate}>
-          <Plus size={16} />
-          {labels.create}
-        </Button>
-      }
-    />
+      {agentPendingDelete && (
+        <ConfirmDialog
+          title={labels.deleteTitle}
+          description={labels.deleteDescription}
+          entityName={agentPendingDelete.name}
+          confirmLabel={labels.deleteConfirm}
+          cancelLabel={labels.cancel}
+          isPending={deleteMutation.isPending}
+          onConfirm={() => deleteMutation.mutate(agentPendingDelete.id)}
+          onCancel={() => setAgentPendingDelete(null)}
+        />
+      )}
+    </SettingsPage>
   );
 }
 

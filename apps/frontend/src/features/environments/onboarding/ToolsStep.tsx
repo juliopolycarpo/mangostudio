@@ -10,6 +10,9 @@
 
 import type { Environment, RuntimeStatus } from '@mangostudio/shared/environments';
 import { useQuery } from '@tanstack/react-query';
+import { Callout } from '@/components/ui/Callout';
+import { Chip } from '@/components/ui/Chip';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { InstallTrustToggle } from '../components/InstallTrustToggle';
@@ -41,41 +44,43 @@ export function ToolsStep({ environment, onContinue }: ToolsStepProps) {
     .filter((entry) => entry.health !== 'missing')
     .map((entry: RuntimeStatus) => {
       const { installation } = effectiveInstallation(entry);
-      return installation ? `${entry.id} ${versionLabel(t, installation.version)}` : entry.id;
+      return { id: entry.id, version: installation ? versionLabel(t, installation.version) : null };
     });
 
   return (
     <div className="space-y-4" data-testid="onboarding-tools-step">
-      <p className="text-fg-muted text-xs">{labels.toolsIntro}</p>
+      <p className="text-sm text-fg-muted">{labels.toolsIntro}</p>
 
       {!connected ? (
-        <p className="rounded-xl border border-stroke bg-control px-3 py-2.5 text-fg-muted text-xs">
-          {labels.toolsDisconnected}
-        </p>
+        <Callout tone="info">{labels.toolsDisconnected}</Callout>
       ) : runtimes.isPending || agents.isPending ? (
-        <p className="text-fg-subtle text-xs">{labels.toolsProbing}</p>
+        <div className="flex items-center gap-2 text-sm text-fg-muted">
+          <Spinner size="sm" />
+          {labels.toolsProbing}
+        </div>
       ) : runtimes.isError || agents.isError ? (
-        <p className="text-danger text-xs" role="alert">
+        <Callout tone="danger" role="alert">
           {labels.toolsError}
-        </p>
+        </Callout>
       ) : found.length === 0 ? (
-        <p className="text-fg-muted text-xs">{labels.toolsNone}</p>
+        <p className="text-sm text-fg-muted">{labels.toolsNone}</p>
       ) : (
-        <ul className="flex list-none flex-wrap gap-1.5" aria-label={labels.toolsIntro}>
-          {found.map((name) => (
-            <li
-              key={name}
-              className="rounded-md border border-stroke bg-control px-2 py-1 font-mono text-[10px] text-fg-muted"
-            >
-              {name}
+        <ul className="flex list-none flex-wrap gap-2" aria-label={labels.toolsIntro}>
+          {found.map((tool) => (
+            <li key={`${tool.id}:${tool.version ?? ''}`}>
+              {tool.version === null ? (
+                <Chip>{tool.id}</Chip>
+              ) : (
+                <Chip label={tool.id}>{tool.version}</Chip>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      <div className="rounded-xl border border-stroke bg-control px-3 py-2.5">
+      <div className="space-y-2 rounded-md border border-stroke p-3">
         <InstallTrustToggle environment={environment} />
-        <p className="mt-1.5 text-fg-muted text-xs">
+        <p className="text-xs text-fg-muted">
           {formatMessage(labels.toolsInstallsNote, { name: environment.name })}
         </p>
       </div>

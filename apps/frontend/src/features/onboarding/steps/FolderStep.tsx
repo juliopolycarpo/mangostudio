@@ -16,6 +16,7 @@ import { Select } from '@/components/ui/Select';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { StepFrame } from '../StepFrame';
 
 interface FolderStepProps {
@@ -41,11 +42,8 @@ export function FolderStep({ state, onChange, isSaving }: FolderStepProps) {
       {/* Only worth a control when there is a choice to make; one machine is
           the overwhelmingly common case and a locked dropdown is noise. */}
       {options.length > 1 ? (
-        <div className="space-y-1.5">
-          <label
-            htmlFor="onboarding-environment"
-            className="font-semibold text-fg-muted text-xs uppercase tracking-wider"
-          >
+        <div className="space-y-1">
+          <label htmlFor="onboarding-environment" className="text-sm font-medium text-fg">
             {s.machineLabel}
           </label>
           <Select
@@ -65,25 +63,25 @@ export function FolderStep({ state, onChange, isSaving }: FolderStepProps) {
               }))
             }
           />
-          <p className="text-fg-muted text-xs">{s.machineHint}</p>
+          <p className="text-xs text-fg-muted">{s.machineHint}</p>
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-stroke bg-control p-4">
-        {state.workdir ? (
-          <div className="space-y-1">
-            <p className="text-[10px] text-fg-muted uppercase tracking-widest">{s.selected}</p>
-            <code
-              data-testid="onboarding-workdir"
-              className="block break-all font-mono text-fg text-xs"
-            >
-              {state.workdir}
-            </code>
-          </div>
-        ) : (
-          <p className="text-fg-muted text-sm">{s.empty}</p>
-        )}
-      </div>
+      {/* The path reads the way a command does everywhere else in setup: mono
+          on `canvas`, one step off the card it sits in. */}
+      {state.workdir ? (
+        <div className="space-y-1">
+          <p className="text-xs text-fg-muted">{s.selected}</p>
+          <code
+            data-testid="onboarding-workdir"
+            className="block break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg"
+          >
+            {state.workdir}
+          </code>
+        </div>
+      ) : (
+        <p className="text-sm text-fg-muted">{s.empty}</p>
+      )}
 
       <Button
         variant={state.workdir ? 'secondary' : 'primary'}
@@ -91,7 +89,7 @@ export function FolderStep({ state, onChange, isSaving }: FolderStepProps) {
         disabled={isSaving}
         onClick={() => setPickerOpen(true)}
       >
-        <FolderOpen aria-hidden size={15} />
+        <FolderOpen aria-hidden size={ICON_MD} />
         {state.workdir ? s.change : s.choose}
       </Button>
 

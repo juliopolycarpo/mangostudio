@@ -10,6 +10,7 @@ import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
 import { RailPanel } from './RailPanel';
 import { onRailPanelRequest } from './rail-panel-request';
@@ -137,7 +138,6 @@ export function WorkspaceRail({
     closeButtonRef?: Ref<HTMLButtonElement>
   ) => (
     <RailPanel
-      icon={activePanel.icon}
       title={activeTitle}
       closeMode={closeMode}
       closeButtonRef={closeButtonRef}
@@ -190,28 +190,26 @@ export function WorkspaceRail({
 
   return (
     <>
+      {/* A bare `<button>` rather than `Button`: closing the drawer returns focus
+          here, which needs the ref, and `Button` takes no `ref` prop. */}
       <button
         ref={mobileTriggerRef}
         type="button"
         onClick={() => setMobileOpen(true)}
         aria-label={t.workspace.sidePanelOpen}
         title={t.workspace.sidePanelOpen}
-        className="fixed bottom-24 right-3 z-30 flex size-11 items-center justify-center rounded-2xl border border-stroke bg-surface text-fg shadow-xl transition-all hover:border-accent hover:text-accent-fg motion-reduce:transition-none"
+        className="fixed bottom-24 right-3 z-30 flex size-10 cursor-pointer items-center justify-center rounded-sm border border-stroke bg-surface-raised text-fg shadow-popover transition-colors hover:bg-fill-hover"
       >
-        <PanelRightOpen size={19} />
+        <PanelRightOpen size={ICON_LG} />
       </button>
       {mobileOpen ? (
         <>
-          <div
-            aria-hidden="true"
-            onClick={closeMobile}
-            className="fixed inset-0 z-40 bg-black/60"
-          />
+          <div aria-hidden="true" onClick={closeMobile} className="fixed inset-0 z-40 bg-scrim" />
           <aside
             role="dialog"
             aria-modal="true"
             aria-label={t.workspace.sidePanelTitle}
-            className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,24rem)] border-l border-stroke bg-surface shadow-2xl"
+            className="fixed inset-y-0 right-0 z-50 flex w-[min(92vw,24rem)] border-l border-stroke bg-surface"
           >
             <PanelDock
               panels={availablePanels}
@@ -251,7 +249,7 @@ function PanelDock({
   return (
     <nav
       aria-label={navigationLabel}
-      className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-stroke bg-control py-2"
+      className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-stroke bg-sidebar py-2"
     >
       {panels.map((panel) => {
         const Icon = panel.icon;
@@ -267,16 +265,16 @@ function PanelDock({
             aria-label={switchLabel.replace('{panel}', title)}
             aria-pressed={active}
             title={title}
-            className={`relative size-10 focus-visible:outline-2 focus-visible:outline-focus ${
-              active
-                ? 'bg-accent-subtle text-accent-fg hover:bg-accent-hover hover:text-accent-fg'
-                : 'text-fg-muted'
+            className={`relative ${
+              active ? 'bg-fill-selected text-fg' : 'text-fg-muted enabled:hover:text-fg'
             }`}
           >
+            {/* The current panel's mark, on the dock's own edge like the sidebar's
+                current page: the fill alone would not survive a grayscale screen. */}
             {active ? (
-              <span className="absolute -left-1 h-5 w-0.5 rounded-r-full bg-accent" />
+              <span className="absolute inset-y-2 -left-2 w-[3px] rounded-full bg-accent" />
             ) : null}
-            <Icon size={18} />
+            <Icon size={ICON_MD} />
           </Button>
         );
       })}

@@ -1,6 +1,6 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, Loader2, Sparkles } from 'lucide-react';
+import { ArrowDown, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   type UIEvent,
@@ -11,8 +11,11 @@ import {
   useState,
   type WheelEvent,
 } from 'react';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
 import { useChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
@@ -34,11 +37,12 @@ const LOAD_OLDER_WITHIN_PX = 3 * ESTIMATED_ROW_HEIGHT_PX;
 function EmptyFeed() {
   const { t } = useI18n();
   return (
-    <div className="flex flex-col items-center justify-center h-full text-fg-subtle px-4">
-      <Sparkles size={48} className="mb-4 opacity-50" />
-      <p className="text-lg text-center">{t.chat.feed.emptyTitle}</p>
-      <p className="text-xs mt-2 text-fg-subtle text-center">{t.chat.feed.emptySubtitle}</p>
-    </div>
+    <EmptyState
+      icon={<Sparkles size={ICON_LG} />}
+      title={t.chat.feed.emptyTitle}
+      hint={t.chat.feed.emptySubtitle}
+      className="h-full"
+    />
   );
 }
 
@@ -207,8 +211,8 @@ export function ChatFeed({
           every message down when it appears and again when it goes. */}
       {older?.isLoading && (
         <div className="sticky top-0 z-10 flex h-0 justify-center pointer-events-none">
-          <output className="glass-elevated flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-fg-muted border border-stroke">
-            <Loader2 size={13} className="animate-spin" />
+          <output className="flex h-8 items-center gap-2 rounded-md border border-stroke bg-surface-raised px-3 text-xs font-medium text-fg-muted shadow-popover">
+            <Spinner size="sm" />
             {t.chat.feed.loadingOlder}
           </output>
         </div>
@@ -248,10 +252,10 @@ export function ChatFeed({
             {...fadeRise}
             type="button"
             onClick={scrollToBottom}
-            className="glass-elevated sticky bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-fg-muted border border-stroke cursor-pointer hover:border-stroke hover:text-fg transition-colors duration-200"
+            className="sticky bottom-4 left-1/2 z-10 flex h-8 -translate-x-1/2 cursor-pointer items-center gap-2 rounded-sm border border-stroke bg-control px-3 text-xs font-medium text-fg shadow-popover transition-colors hover:bg-control-hover active:bg-control-pressed"
             title={t.chat.scrollToBottom}
           >
-            <ArrowDown size={13} />
+            <ArrowDown size={ICON_SM} />
             {t.chat.scrollToBottom}
           </motion.button>
         )}

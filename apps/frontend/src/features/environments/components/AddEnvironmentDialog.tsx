@@ -17,6 +17,7 @@ import {
 } from '@mangostudio/shared/environments';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -35,6 +36,8 @@ import {
 import { isSshFormUsable, SSH_LEADING_DASH, sshFormToConfig, validateSshForm } from '../ssh-form';
 import { ContainerConfigFields } from './ContainerConfigFields';
 import { CopyLine } from './CopyLine';
+import { choiceClass } from './choice-class';
+import { DialogShell } from './DialogShell';
 import { WslDistributionPicker } from './WslDistributionPicker';
 
 /** Mirrors `EnvironmentIdSchema`; the server is still the authority. */
@@ -243,272 +246,252 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus.
-    <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-scrim p-4 fade-in duration-200"
-      data-testid="add-environment-dialog"
+    <DialogShell
+      testId="add-environment-dialog"
+      titleId={titleId}
+      title={labels.title}
+      description={labels.description}
       onKeyDown={(event) => {
         if (event.key !== 'Escape') return;
         event.stopPropagation();
         onClose();
       }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="max-h-full w-full max-w-md space-y-5 overflow-y-auto rounded-3xl border border-stroke bg-surface p-5 shadow-2xl sm:p-8"
-      >
-        <div className="space-y-1">
-          <h3 id={titleId} className="font-bold text-lg text-fg">
-            {labels.title}
-          </h3>
-          <p className="text-fg-muted text-xs">{labels.description}</p>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <p className="font-medium text-fg-muted text-sm">{labels.reachLabel}</p>
-            <div className="grid gap-2" role="tablist">
-              {choices.map((choice) => (
-                <ReachabilityOption
-                  key={choice.value}
-                  active={kind === choice.value}
-                  label={choice.label}
-                  onSelect={() => setKind(choice.value)}
-                />
-              ))}
-            </div>
-            {/* Last, and it leaves rather than selects: the guided flow asks
-                these same questions in an order that suits somebody who has a
-                bare machine and no environment yet. Sibling to the tablist, not
-                inside it: it is not a tab and does not select a choice. */}
-            {onStartOnboarding ? (
-              <button
-                type="button"
-                onClick={onStartOnboarding}
-                data-testid="add-environment-onboarding"
-                className="mt-2 block w-full rounded-xl border border-stroke border-dashed px-3 py-2 text-left font-semibold text-fg-muted text-sm transition-colors hover:bg-fill-hover"
-              >
-                {labels.reachNewMachine}
-                <span className="mt-0.5 block font-normal text-fg-subtle text-xs">
-                  {labels.newMachineHint}
-                </span>
-              </button>
-            ) : null}
-            <div className="rounded-xl border border-accent bg-accent-subtle px-3 py-2.5">
-              <p className="text-fg-muted text-xs">{hints[kind]}</p>
-            </div>
-          </div>
-
-          {kind === 'wsl' ? (
-            <div className="space-y-1">
-              <p className="font-medium text-fg-muted text-sm">{labels.wslDistroLabel}</p>
-              <WslDistributionPicker
-                distributions={distributions}
-                selected={selectedDistro}
-                onSelect={setDistro}
-              />
-            </div>
-          ) : null}
-
-          <Input
-            id="add-environment-name"
-            label={labels.nameLabel}
-            value={name}
-            autoFocus
-            maxLength={ENVIRONMENT_NAME_MAX_LENGTH}
-            // Only once something was typed: a blank untouched field is the
-            // starting state, not a mistake worth flagging.
-            error={name.length > 0 && trimmedName.length === 0 ? labels.nameRequired : undefined}
-            onChange={(event) => {
-              setNameEdited(true);
-              setName(event.target.value);
-            }}
-          />
-
-          <div className="space-y-1">
-            <Input
-              id="add-environment-id"
-              label={labels.idLabel}
-              value={effectiveId}
-              maxLength={ENVIRONMENT_ID_MAX_LENGTH}
-              error={idInvalid ? labels.idInvalid : undefined}
-              onChange={(event) => {
-                setIdEdited(true);
-                setId(event.target.value);
-              }}
-            />
-            {!idInvalid && <p className="text-fg-muted text-xs">{labels.idHint}</p>}
-          </div>
-
-          {kind === 'stdio' ? (
-            <>
-              <div className="space-y-1">
-                <Input
-                  id="add-environment-binary-path"
-                  label={`${labels.binaryPathLabel} · ${labels.optional}`}
-                  value={binaryPath}
-                  onChange={(event) => setBinaryPath(event.target.value)}
-                />
-                <p className="text-fg-muted text-xs">{labels.binaryPathHint}</p>
-              </div>
-
-              <div className="space-y-1">
-                <Input
-                  id="add-environment-cwd"
-                  label={`${labels.cwdLabel} · ${labels.optional}`}
-                  value={cwd}
-                  onChange={(event) => setCwd(event.target.value)}
-                />
-                <p className="text-fg-muted text-xs">{labels.cwdHint}</p>
-              </div>
-            </>
-          ) : null}
-
-          {kind === 'container' ? (
-            <ContainerConfigFields
-              idPrefix="add-environment-container"
-              form={container}
-              errors={containerErrors}
-              detection={containers.data}
-              onChange={(patch) => setContainer((current) => ({ ...current, ...patch }))}
-            />
-          ) : null}
-
-          {kind === 'websocket' ? (
-            <p className="rounded-xl border border-stroke bg-control px-3 py-2.5 text-fg-muted text-xs">
-              {labels.pairedNext}
-            </p>
-          ) : null}
-
-          {kind === 'http' ? (
-            <>
-              <Input
-                id="add-environment-base-url"
-                label={labels.directBaseUrlLabel}
-                value={baseUrl}
-                onChange={(event) => setBaseUrl(event.target.value)}
-              />
-              {shouldWarnPlaintextHttpRuntime(trimmedBaseUrl) ? (
-                <p className="rounded-xl border border-warning bg-warning-subtle px-3 py-2.5 text-fg-muted text-xs">
-                  {labels.directPlaintextWarning}
-                </p>
-              ) : null}
-              <Input
-                id="add-environment-token"
-                label={labels.directTokenLabel}
-                type="password"
-                autoComplete="off"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-              />
-            </>
-          ) : null}
-
-          {kind === 'ssh' ? (
-            <>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Input
-                  id="add-environment-ssh-host"
-                  label={labels.sshHostLabel}
-                  value={sshHost}
-                  error={
-                    sshHost.trim().length > 0 && SSH_LEADING_DASH.test(sshHost.trim())
-                      ? labels.sshDashInvalid
-                      : undefined
-                  }
-                  onChange={(event) => setSshHost(event.target.value)}
-                />
-                <Input
-                  id="add-environment-ssh-user"
-                  label={`${labels.sshUserLabel} · ${labels.optional}`}
-                  value={sshUser}
-                  error={
-                    sshUser.trim().length > 0 && SSH_LEADING_DASH.test(sshUser.trim())
-                      ? labels.sshDashInvalid
-                      : undefined
-                  }
-                  onChange={(event) => setSshUser(event.target.value)}
-                />
-                <Input
-                  id="add-environment-ssh-port"
-                  label={`${labels.sshPortLabel} · ${labels.optional}`}
-                  inputMode="numeric"
-                  placeholder="22"
-                  value={sshPort}
-                  error={
-                    sshPort.trim().length > 0 && sshFieldInvalid === 'port'
-                      ? labels.sshPortInvalid
-                      : undefined
-                  }
-                  onChange={(event) => setSshPort(event.target.value)}
-                />
-                <Input
-                  id="add-environment-ssh-identity"
-                  label={`${labels.sshIdentityFileLabel} · ${labels.optional}`}
-                  value={sshIdentityFile}
-                  error={
-                    sshIdentityFile.trim().length > 0 &&
-                    SSH_LEADING_DASH.test(sshIdentityFile.trim())
-                      ? labels.sshDashInvalid
-                      : undefined
-                  }
-                  onChange={(event) => setSshIdentityFile(event.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <Input
-                  id="add-environment-ssh-runtime-path"
-                  label={`${labels.sshRuntimePathLabel} · ${labels.optional}`}
-                  placeholder={DEFAULT_SSH_RUNTIME_PATH}
-                  value={sshRuntimePath}
-                  error={
-                    sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
-                      ? labels.sshDashInvalid
-                      : undefined
-                  }
-                  onChange={(event) => setSshRuntimePath(event.target.value)}
-                />
-                <p className="text-fg-muted text-xs">{labels.sshRuntimePathHint}</p>
-              </div>
-
-              {sshConfig.host ? (
-                <div className="space-y-2 rounded-xl border border-accent bg-accent-subtle px-3 py-2.5">
-                  <p className="text-fg-muted text-xs">{labels.sshPreflight}</p>
-                  <CopyLine
-                    label={labels.sshPreflightReach}
-                    value={sshPreflightCommands(sshConfig).reach}
-                  />
-                </div>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-
-        {error ? (
-          <p className="text-danger text-xs" role="alert">
-            {error}
-          </p>
-        ) : null}
-
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onClose} className="flex-1">
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
             {labels.cancel}
           </Button>
           <Button
             variant="primary"
-            className="flex-1"
             disabled={blocked}
             loading={create.isPending}
             onClick={() => void handleSubmit()}
           >
             {labels.submit}
           </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-fg">{labels.reachLabel}</p>
+          <div className="grid gap-2" role="tablist">
+            {choices.map((choice) => (
+              <ReachabilityOption
+                key={choice.value}
+                active={kind === choice.value}
+                label={choice.label}
+                onSelect={() => setKind(choice.value)}
+              />
+            ))}
+          </div>
+          {/* Last, and it leaves rather than selects: the guided flow asks
+              these same questions in an order that suits somebody who has a
+              bare machine and no environment yet. Sibling to the tablist, not
+              inside it: it is not a tab and does not select a choice. */}
+          {onStartOnboarding ? (
+            <button
+              type="button"
+              onClick={onStartOnboarding}
+              data-testid="add-environment-onboarding"
+              className="mt-2 block min-h-8 w-full rounded-sm border border-dashed border-stroke-strong px-3 py-1.5 text-left text-sm font-medium text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
+            >
+              {labels.reachNewMachine}
+              <span className="mt-0.5 block text-xs font-normal text-fg-subtle">
+                {labels.newMachineHint}
+              </span>
+            </button>
+          ) : null}
+          <Callout tone="neutral" className="mt-2">
+            {hints[kind]}
+          </Callout>
         </div>
+
+        {kind === 'wsl' ? (
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-fg">{labels.wslDistroLabel}</p>
+            <WslDistributionPicker
+              distributions={distributions}
+              selected={selectedDistro}
+              onSelect={setDistro}
+            />
+          </div>
+        ) : null}
+
+        <Input
+          id="add-environment-name"
+          label={labels.nameLabel}
+          value={name}
+          autoFocus
+          maxLength={ENVIRONMENT_NAME_MAX_LENGTH}
+          // Only once something was typed: a blank untouched field is the
+          // starting state, not a mistake worth flagging.
+          error={name.length > 0 && trimmedName.length === 0 ? labels.nameRequired : undefined}
+          onChange={(event) => {
+            setNameEdited(true);
+            setName(event.target.value);
+          }}
+        />
+
+        <div className="space-y-1">
+          <Input
+            id="add-environment-id"
+            label={labels.idLabel}
+            value={effectiveId}
+            maxLength={ENVIRONMENT_ID_MAX_LENGTH}
+            error={idInvalid ? labels.idInvalid : undefined}
+            onChange={(event) => {
+              setIdEdited(true);
+              setId(event.target.value);
+            }}
+          />
+          {!idInvalid && <p className="text-xs text-fg-muted">{labels.idHint}</p>}
+        </div>
+
+        {kind === 'stdio' ? (
+          <>
+            <div className="space-y-1">
+              <Input
+                id="add-environment-binary-path"
+                label={`${labels.binaryPathLabel} · ${labels.optional}`}
+                value={binaryPath}
+                onChange={(event) => setBinaryPath(event.target.value)}
+              />
+              <p className="text-xs text-fg-muted">{labels.binaryPathHint}</p>
+            </div>
+
+            <div className="space-y-1">
+              <Input
+                id="add-environment-cwd"
+                label={`${labels.cwdLabel} · ${labels.optional}`}
+                value={cwd}
+                onChange={(event) => setCwd(event.target.value)}
+              />
+              <p className="text-xs text-fg-muted">{labels.cwdHint}</p>
+            </div>
+          </>
+        ) : null}
+
+        {kind === 'container' ? (
+          <ContainerConfigFields
+            idPrefix="add-environment-container"
+            form={container}
+            errors={containerErrors}
+            detection={containers.data}
+            onChange={(patch) => setContainer((current) => ({ ...current, ...patch }))}
+          />
+        ) : null}
+
+        {kind === 'websocket' ? <Callout tone="info">{labels.pairedNext}</Callout> : null}
+
+        {kind === 'http' ? (
+          <>
+            <Input
+              id="add-environment-base-url"
+              label={labels.directBaseUrlLabel}
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+            />
+            {shouldWarnPlaintextHttpRuntime(trimmedBaseUrl) ? (
+              <Callout tone="warning">{labels.directPlaintextWarning}</Callout>
+            ) : null}
+            <Input
+              id="add-environment-token"
+              label={labels.directTokenLabel}
+              type="password"
+              autoComplete="off"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+            />
+          </>
+        ) : null}
+
+        {kind === 'ssh' ? (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                id="add-environment-ssh-host"
+                label={labels.sshHostLabel}
+                value={sshHost}
+                error={
+                  sshHost.trim().length > 0 && SSH_LEADING_DASH.test(sshHost.trim())
+                    ? labels.sshDashInvalid
+                    : undefined
+                }
+                onChange={(event) => setSshHost(event.target.value)}
+              />
+              <Input
+                id="add-environment-ssh-user"
+                label={`${labels.sshUserLabel} · ${labels.optional}`}
+                value={sshUser}
+                error={
+                  sshUser.trim().length > 0 && SSH_LEADING_DASH.test(sshUser.trim())
+                    ? labels.sshDashInvalid
+                    : undefined
+                }
+                onChange={(event) => setSshUser(event.target.value)}
+              />
+              <Input
+                id="add-environment-ssh-port"
+                label={`${labels.sshPortLabel} · ${labels.optional}`}
+                inputMode="numeric"
+                placeholder="22"
+                value={sshPort}
+                error={
+                  sshPort.trim().length > 0 && sshFieldInvalid === 'port'
+                    ? labels.sshPortInvalid
+                    : undefined
+                }
+                onChange={(event) => setSshPort(event.target.value)}
+              />
+              <Input
+                id="add-environment-ssh-identity"
+                label={`${labels.sshIdentityFileLabel} · ${labels.optional}`}
+                value={sshIdentityFile}
+                error={
+                  sshIdentityFile.trim().length > 0 && SSH_LEADING_DASH.test(sshIdentityFile.trim())
+                    ? labels.sshDashInvalid
+                    : undefined
+                }
+                onChange={(event) => setSshIdentityFile(event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Input
+                id="add-environment-ssh-runtime-path"
+                label={`${labels.sshRuntimePathLabel} · ${labels.optional}`}
+                placeholder={DEFAULT_SSH_RUNTIME_PATH}
+                value={sshRuntimePath}
+                error={
+                  sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
+                    ? labels.sshDashInvalid
+                    : undefined
+                }
+                onChange={(event) => setSshRuntimePath(event.target.value)}
+              />
+              <p className="text-xs text-fg-muted">{labels.sshRuntimePathHint}</p>
+            </div>
+
+            {sshConfig.host ? (
+              <div className="space-y-2">
+                <Callout tone="info">{labels.sshPreflight}</Callout>
+                <CopyLine
+                  label={labels.sshPreflightReach}
+                  value={sshPreflightCommands(sshConfig).reach}
+                />
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </div>
-    </div>
+
+      {error ? (
+        <Callout tone="danger" role="alert">
+          {error}
+        </Callout>
+      ) : null}
+    </DialogShell>
   );
 }
 
@@ -527,11 +510,7 @@ function ReachabilityOption({
       role="tab"
       aria-selected={active}
       onClick={onSelect}
-      className={`rounded-xl border px-3 py-2 text-left font-semibold text-sm transition-colors ${
-        active
-          ? 'border-accent bg-accent-subtle text-fg'
-          : 'border-stroke text-fg-muted hover:bg-fill-hover'
-      }`}
+      className={choiceClass(active)}
     >
       {label}
     </button>

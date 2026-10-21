@@ -1,8 +1,10 @@
 import type { ITheme } from '@xterm/xterm';
 
 /**
- * Terminal palette: the app's surface/on-surface tokens for the base colours,
- * plus a 16-colour ANSI set per app theme.
+ * Terminal palette: the app's `canvas`, `fg`, `accent-fg` and `fill-selected`
+ * tokens for the base colours, plus a 16-colour ANSI set per app theme. The
+ * terminal paints on `canvas`, so the pane reads as part of the page it sits in
+ * rather than as a darker hole cut into it.
  *
  * Values are literal, not read from `index.css`'s custom properties, on the
  * same reasoning as `tool-avatar-palette.ts`: a contrast test has to check the
@@ -47,10 +49,10 @@ export type TerminalAppTheme = 'dark' | 'light';
 
 export const TERMINAL_PALETTES: Readonly<Record<TerminalAppTheme, TerminalPalette>> = {
   dark: {
-    background: '#0d0c0a', // --color-surface-container-lowest (dark)
-    foreground: '#ece7df', // --color-on-surface (dark)
-    cursor: '#f5a623', // --color-primary (dark)
-    selectionBackground: '#262320', // --color-surface-container-high (dark)
+    background: '#151311', // --color-canvas (dark)
+    foreground: '#ece7df', // --color-fg (dark)
+    cursor: '#f5a623', // --color-accent-fg (dark)
+    selectionBackground: '#fff5e614', // --color-fill-selected (dark)
     ansi: {
       black: '#6a6358',
       red: '#f87171',
@@ -71,10 +73,10 @@ export const TERMINAL_PALETTES: Readonly<Record<TerminalAppTheme, TerminalPalett
     },
   },
   light: {
-    background: '#ffffff', // --color-surface-container-lowest (light)
-    foreground: '#1e1b16', // --color-on-surface (light)
-    cursor: '#8f5a00', // --color-primary (light)
-    selectionBackground: '#e7e2d9', // --color-surface-container-high (light)
+    background: '#f6f4f0', // --color-canvas (light)
+    foreground: '#1e1b16', // --color-fg (light)
+    cursor: '#8f5a00', // --color-accent-fg (light)
+    selectionBackground: '#2a1e0a12', // --color-fill-selected (light)
     ansi: {
       black: '#1e1b16',
       red: '#dc2626',

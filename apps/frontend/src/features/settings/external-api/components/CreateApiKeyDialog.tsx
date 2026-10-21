@@ -8,10 +8,14 @@ import {
 import { Check, Copy, KeyRound, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { DialogFrame } from '@/features/settings/connectors/components/DialogFrame';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { scopeHint, scopeLabel } from '../format';
 import { useCreateApiKey } from '../hooks/use-api-key-mutations';
@@ -19,9 +23,6 @@ import { useCreateApiKey } from '../hooks/use-api-key-mutations';
 interface CreateApiKeyDialogProps {
   readonly onClose: () => void;
 }
-
-const FIELD_CLASS =
-  'w-full rounded-xl border border-stroke bg-control px-4 py-2.5 text-sm text-fg outline-none transition-colors focus:border-focus focus:ring-1 focus:ring-focus';
 
 export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
   const { t } = useI18n();
@@ -87,121 +88,113 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim animate-in fade-in duration-200">
-      <div className="bg-surface w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl p-5 sm:p-8 shadow-2xl border border-stroke space-y-5">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h3 className="text-xl font-bold text-fg">{created ? reveal.title : labels.title}</h3>
-            {!created && <p className="text-sm text-fg-muted">{scopeHint(t, scope)}</p>}
-          </div>
-          <Button
-            variant="subtle"
-            size="sm"
-            aria-label={labels.cancelButton}
-            disabled={createMutation.isPending}
-            onClick={onClose}
-          >
-            <X size={16} />
+  const pending = createMutation.isPending;
+
+  if (created) {
+    return (
+      <DialogFrame
+        title={reveal.title}
+        onClose={onClose}
+        footer={<Button onClick={onClose}>{reveal.done}</Button>}
+      >
+        <Callout tone="warning" icon={<KeyRound size={ICON_MD} />}>
+          {reveal.notice}
+        </Callout>
+        <code
+          className="block break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg"
+          data-testid="api-key-plaintext"
+        >
+          {created.key}
+        </code>
+        <div>
+          <Button variant="secondary" size="sm" onClick={() => void copy(created.key)}>
+            {copied ? <Check size={ICON_MD} /> : <Copy size={ICON_MD} />}
+            {copied ? reveal.copied : reveal.copy}
           </Button>
         </div>
+        {copyFailed && <Callout tone="danger">{reveal.copyFailed}</Callout>}
+      </DialogFrame>
+    );
+  }
 
-        {created ? (
-          <div className="space-y-4">
-            <div className="flex items-start gap-3 rounded-2xl border border-warning bg-warning-subtle p-4">
-              <KeyRound size={18} className="mt-0.5 shrink-0 text-warning" />
-              <p className="text-sm text-fg">{reveal.notice}</p>
-            </div>
-            <code
-              className="block break-all rounded-2xl bg-control px-4 py-3 font-mono text-xs text-fg border border-stroke"
-              data-testid="api-key-plaintext"
-            >
-              {created.key}
-            </code>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" size="sm" onClick={() => void copy(created.key)}>
-                {copied ? <Check size={14} /> : <Copy size={14} />}
-                {copied ? reveal.copied : reveal.copy}
-              </Button>
-            </div>
-            {copyFailed && <p className="text-xs text-danger">{reveal.copyFailed}</p>}
-            <div className="flex justify-end pt-2">
-              <Button onClick={onClose}>{reveal.done}</Button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <label className="block space-y-2">
-              <span className="block text-sm font-semibold text-fg">{labels.nameLabel}</span>
-              <input
-                type="text"
-                value={name}
-                maxLength={API_KEY_NAME_MAX_LENGTH}
-                onChange={(event) => {
-                  setName(event.target.value);
-                  if (nameError) setNameError(null);
-                }}
-                placeholder={labels.namePlaceholder}
-                aria-label={labels.nameLabel}
-                aria-invalid={Boolean(nameError)}
-                className={FIELD_CLASS}
-              />
-              {nameError && <span className="block text-xs text-danger">{nameError}</span>}
-            </label>
+  return (
+    <DialogFrame
+      title={labels.title}
+      description={scopeHint(t, scope)}
+      onClose={onClose}
+      closeDisabled={pending}
+      headerAction={
+        <Button
+          variant="subtle"
+          size="icon"
+          aria-label={labels.cancelButton}
+          disabled={pending}
+          onClick={onClose}
+        >
+          <X size={ICON_MD} />
+        </Button>
+      }
+      notice={submitError ? <Callout tone="danger">{submitError}</Callout> : undefined}
+      footer={
+        <>
+          <Button variant="secondary" disabled={pending} onClick={onClose}>
+            {labels.cancelButton}
+          </Button>
+          <Button loading={pending} onClick={handleSubmit}>
+            {pending ? labels.creatingButton : labels.createButton}
+          </Button>
+        </>
+      }
+    >
+      <Input
+        id="api-key-name"
+        label={labels.nameLabel}
+        type="text"
+        value={name}
+        maxLength={API_KEY_NAME_MAX_LENGTH}
+        onChange={(event) => {
+          setName(event.target.value);
+          if (nameError) setNameError(null);
+        }}
+        placeholder={labels.namePlaceholder}
+        error={nameError ?? undefined}
+      />
 
-            <div className="space-y-2">
-              <span className="block text-sm font-semibold text-fg">{labels.scopeLabel}</span>
-              <Select
-                value={scope}
-                onChange={(value) => setScope(value as ApiKeyScope)}
-                ariaLabel={labels.scopeLabel}
-                options={API_KEY_SCOPES.map((value) => ({
-                  value,
-                  label: scopeLabel(t, value),
-                }))}
-              />
-            </div>
-
-            <label className="block space-y-2">
-              <span className="block text-sm font-semibold text-fg">{labels.expiresLabel}</span>
-              <span className="block text-xs text-fg-muted">
-                {formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
-              </span>
-              <input
-                type="number"
-                min={1}
-                max={API_KEY_EXPIRY_MAX_DAYS}
-                step={1}
-                value={expiresInDays}
-                onChange={(event) => {
-                  setExpiresInDays(event.target.value);
-                  if (expiresError) setExpiresError(null);
-                }}
-                aria-label={labels.expiresLabel}
-                aria-invalid={Boolean(expiresError)}
-                className={FIELD_CLASS}
-              />
-              {expiresError && <span className="block text-xs text-danger">{expiresError}</span>}
-            </label>
-
-            {submitError && <p className="text-sm text-danger">{submitError}</p>}
-
-            <div className="flex gap-3 pt-2">
-              <Button
-                variant="secondary"
-                className="flex-1"
-                disabled={createMutation.isPending}
-                onClick={onClose}
-              >
-                {labels.cancelButton}
-              </Button>
-              <Button className="flex-1" loading={createMutation.isPending} onClick={handleSubmit}>
-                {createMutation.isPending ? labels.creatingButton : labels.createButton}
-              </Button>
-            </div>
-          </div>
-        )}
+      <div className="space-y-1">
+        <label htmlFor="api-key-scope" className="block text-sm font-medium text-fg">
+          {labels.scopeLabel}
+        </label>
+        <Select
+          id="api-key-scope"
+          value={scope}
+          onChange={(value) => setScope(value as ApiKeyScope)}
+          ariaLabel={labels.scopeLabel}
+          options={API_KEY_SCOPES.map((value) => ({
+            value,
+            label: scopeLabel(t, value),
+          }))}
+        />
       </div>
-    </div>
+
+      <div className="space-y-1">
+        <Input
+          id="api-key-expires"
+          label={labels.expiresLabel}
+          type="number"
+          min={1}
+          max={API_KEY_EXPIRY_MAX_DAYS}
+          step={1}
+          value={expiresInDays}
+          onChange={(event) => {
+            setExpiresInDays(event.target.value);
+            if (expiresError) setExpiresError(null);
+          }}
+          error={expiresError ?? undefined}
+        />
+        <p className="text-xs text-fg-muted">
+          {formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
+        </p>
+      </div>
+    </DialogFrame>
   );
 }

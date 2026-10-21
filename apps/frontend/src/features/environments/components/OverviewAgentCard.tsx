@@ -12,6 +12,7 @@ import { Link } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import {
   describeFinding,
   findInstallRecipe,
@@ -74,12 +75,12 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
               input={{ kind: 'none' }}
               label={formatMessage(e.runtimes.install, { runtime: name })}
               variant="primary"
-              icon={<Download size={14} />}
+              icon={<Download size={ICON_MD} />}
             />
           )}
           <Link
             to="/environments/agents"
-            className="ml-auto rounded-lg px-2 py-1 text-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-accent-fg"
+            className="ml-auto text-sm font-medium text-accent-fg hover:underline"
           >
             {e.overview.agentDetails}
           </Link>
@@ -98,7 +99,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
           data-testid="overview-agent-finding"
           data-finding-code={finding.code}
         >
-          <FindingIcon severity={findingSeverity(finding)} size={14} />
+          <FindingIcon severity={findingSeverity(finding)} size={ICON_SM} />
           <p className="text-xs text-fg-muted">{describeFinding(t, finding, lookup)}</p>
         </div>
       )}

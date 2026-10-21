@@ -12,8 +12,13 @@ import type {
 } from '@mangostudio/shared/environments';
 import { Download, HardDriveDownload, RefreshCw, RotateCcw, Shield } from 'lucide-react';
 import { useState } from 'react';
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useInstallStream } from '../hooks/use-install-stream';
 import {
@@ -23,6 +28,7 @@ import {
   useStartRuntimeInstallMutation,
 } from '../queries';
 import { CopyLine } from './CopyLine';
+import { EntityPanel } from './EntityPanel';
 import { InstallConsole } from './InstallConsole';
 import { RuntimeConsentDialog } from './RuntimeConsentDialog';
 
@@ -80,7 +86,7 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
 
   if (view.isPending && !data) {
     return (
-      <p className="text-[11px] text-fg-subtle" data-testid="runtime-lifecycle-loading">
+      <p className="text-xs text-fg-subtle" data-testid="runtime-lifecycle-loading">
         {labels.loading}
       </p>
     );
@@ -88,9 +94,9 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
 
   if (view.isError && !data) {
     return (
-      <p className="text-[11px] text-danger" role="alert" data-testid="runtime-lifecycle-error">
+      <Callout tone="danger" role="alert" data-testid="runtime-lifecycle-error">
         {resolveApiErrorMessage(view.error, labels.loadFailed)}
-      </p>
+      </Callout>
     );
   }
 
@@ -109,21 +115,11 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
   }
 
   return (
-    <div
-      className="space-y-2 rounded-lg border border-stroke bg-control px-2.5 py-2"
-      data-testid="runtime-lifecycle-panel"
+    <EntityPanel
+      testId="runtime-lifecycle-panel"
+      title={labels.title}
+      meta={data.stale ? <Badge variant="warning">{labels.stale}</Badge> : null}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
-          {labels.title}
-        </p>
-        {data.stale ? (
-          <span className="rounded-md bg-warning-subtle px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
-            {labels.stale}
-          </span>
-        ) : null}
-      </div>
-
       <HealthSummary view={data} />
 
       <UnenforcedContainment view={data} />
@@ -131,7 +127,7 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
       <RuntimeOffer view={data} />
 
       {data.actions.length > 0 ? (
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {data.actions
             .filter(
               (action): action is 'install' | 'reinstall' | 'upgrade' | 'download' =>
@@ -141,9 +137,11 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
             .map((action) => {
               const Icon = ACTION_ICONS[action] ?? Download;
               return (
-                <button
+                <Button
                   key={action}
                   type="button"
+                  variant={action === 'download' ? 'subtle' : 'secondary'}
+                  size="sm"
                   disabled={busy}
                   onClick={() => {
                     setActionError(null);
@@ -156,27 +154,23 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
                   }}
                   // Staging is the quieter option on purpose: it is what you
                   // reach for after declining the install, not instead of it.
-                  className={
-                    action === 'download'
-                      ? 'inline-flex h-7 items-center gap-1.5 rounded-lg bg-surface px-2 text-[11px] font-semibold text-fg-muted transition-colors hover:bg-fill-hover disabled:opacity-45'
-                      : 'inline-flex h-7 items-center gap-1.5 rounded-lg bg-accent-subtle px-2 text-[11px] font-semibold text-accent-fg transition-colors hover:bg-accent-hover disabled:opacity-45'
-                  }
                 >
-                  <Icon size={12} />
+                  <Icon size={ICON_MD} />
                   {labels.actions[action]}
-                </button>
+                </Button>
               );
             })}
           {data.actions.includes('setup') ? (
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               disabled={busy}
               onClick={() => setConsentOpen(true)}
-              className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-accent-subtle px-2 text-[11px] font-semibold text-accent-fg transition-colors hover:bg-accent-hover disabled:opacity-45"
             >
-              <Shield size={12} />
+              <Shield size={ICON_MD} />
               {labels.actions.setup}
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : null}
@@ -206,9 +200,9 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
       <StagedRuntime view={data} />
 
       {actionError ? (
-        <p className="text-[11px] text-danger" role="alert">
+        <Callout tone="danger" role="alert">
           {actionError}
-        </p>
+        </Callout>
       ) : null}
 
       {runId ? (
@@ -224,7 +218,7 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
           }}
         />
       ) : null}
-    </div>
+    </EntityPanel>
   );
 }
 
@@ -233,7 +227,7 @@ function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
   const labels = t.environments.entities.runtime;
   const health = view.health;
   if (!health) {
-    return <p className="text-[11px] text-fg-muted">{labels.noHealth}</p>;
+    return <p className="text-xs text-fg-muted">{labels.noHealth}</p>;
   }
 
   const version = health.version ?? health.runtimeVersion;
@@ -249,7 +243,7 @@ function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
       : null,
   ].filter((bit): bit is string => Boolean(bit));
 
-  return <p className="font-mono text-[10px] text-fg-muted">{bits.join(' · ')}</p>;
+  return <p className="font-mono text-micro text-fg-muted">{bits.join(' · ')}</p>;
 }
 
 /**
@@ -263,13 +257,9 @@ function UnenforcedContainment({ view }: { view: RuntimeLifecycleView }) {
   if (view.enforcesPathPolicy !== false) return null;
 
   return (
-    <p
-      className="rounded-lg border border-warning bg-warning-subtle px-2 py-1.5 text-[11px] text-fg-muted"
-      role="status"
-      data-testid="runtime-unenforced-containment"
-    >
+    <Callout tone="warning" role="status" data-testid="runtime-unenforced-containment">
       {t.environments.entities.runtime.unenforcedContainment}
-    </p>
+    </Callout>
   );
 }
 
@@ -300,7 +290,7 @@ function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
   if (!offersPush) {
     if (!view.actions.includes('download')) return null;
     return (
-      <p className="text-[11px] text-fg-muted" data-testid="runtime-offer">
+      <p className="text-xs text-fg-muted" data-testid="runtime-offer">
         {formatMessage(labels.downloadOffer, {
           version: staged.version,
           platform: staged.platformId,
@@ -323,16 +313,16 @@ function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
   const running = view.health?.runtimeVersion ?? null;
   if (!view.stale && running === staged.version) {
     return (
-      <p className="text-[11px] text-fg-muted" data-testid="runtime-offer-matched">
+      <p className="text-xs text-fg-muted" data-testid="runtime-offer-matched">
         {formatMessage(labels.matched, { version: staged.version })}
       </p>
     );
   }
 
   return (
-    <p className="text-[11px] text-fg-muted" data-testid="runtime-offer">
+    <p className="text-xs text-fg-muted" data-testid="runtime-offer">
       {formatMessage(labels.offer, { version: staged.version, platform: staged.platformId })}{' '}
-      <span className="text-fg-muted">{labels.offerHint}</span>
+      {labels.offerHint}
     </p>
   );
 }
@@ -352,9 +342,7 @@ function StagedRuntime({ view }: { view: RuntimeLifecycleView }) {
 
   return (
     <div className="space-y-2" data-testid="runtime-staged">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
-        {labels.title}
-      </p>
+      <MicroLabel as="p">{labels.title}</MicroLabel>
       <CopyLine label={labels.path} value={staged.path} />
       <CopyLine label={labels.verify} value={staged.verify} />
     </div>
@@ -372,7 +360,7 @@ function ManualCommands({ view }: { view: RuntimeLifecycleView }) {
       {/* Which build these commands fetch. A machine that has never paired is
           exactly when this block is read, and that is also when the hub has to
           guess — so the guess says so instead of quietly handing out Linux. */}
-      <p className="text-[11px] text-fg-muted" data-testid="manual-platform">
+      <p className="text-xs text-fg-muted" data-testid="manual-platform">
         {formatMessage(commands.platformAssumed ? labels.platformAssumed : labels.platform, {
           platform: commands.platformId,
         })}

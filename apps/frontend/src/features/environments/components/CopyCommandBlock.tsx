@@ -8,13 +8,12 @@
 
 import type { InstallRecipePreview } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import { Check, Copy } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { useClipboard } from '@/hooks/use-clipboard';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { guardReasonLabel, runtimeNameList } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
+import { CopyLine } from './CopyLine';
 import { EnableInstallsButton } from './EnableInstallsButton';
 
 interface CopyCommandBlockProps {
@@ -33,7 +32,6 @@ interface CopyCommandBlockProps {
 export function CopyCommandBlock({ recipe, message, environmentId }: CopyCommandBlockProps) {
   const { t } = useI18n();
   const s = t.environments.install;
-  const { copy, copied, failed: copyFailed } = useClipboard();
   const { resolve } = useToolIdentities();
 
   // Each blocker keeps a key naming where it came from, so two guards that
@@ -70,36 +68,20 @@ export function CopyCommandBlock({ recipe, message, environmentId }: CopyCommand
     recipe.guard.reasons[0] === 'disabled';
 
   return (
-    <div
-      className="space-y-3 rounded-2xl border border-stroke bg-control p-4"
-      data-testid="copy-command-block"
-    >
-      <div className="space-y-1">
-        <p className="text-xs font-bold uppercase tracking-widest text-fg-muted">
-          {s.guardBlockedTitle}
-        </p>
-        {reasons.map((reason) => (
-          <p key={reason.key} className="text-sm text-fg-muted">
-            {reason.text}
-          </p>
-        ))}
-      </div>
+    <div className="space-y-3" data-testid="copy-command-block">
+      <Callout tone="warning" title={s.guardBlockedTitle}>
+        <div className="space-y-1">
+          {reasons.map((reason) => (
+            <p key={reason.key}>{reason.text}</p>
+          ))}
+        </div>
+      </Callout>
 
       {canEnableInstalls && <EnableInstallsButton />}
 
       <p className="text-sm text-fg-muted">{s.copyCommandHint}</p>
 
-      <div className="flex items-start gap-2">
-        <code className="min-w-0 flex-1 break-all rounded-xl bg-fill-selected px-3 py-2 font-mono text-xs text-fg">
-          {recipe.copyCommand}
-        </code>
-        <Button variant="secondary" size="sm" onClick={() => void copy(recipe.copyCommand)}>
-          {copied ? <Check size={14} /> : <Copy size={14} />}
-          {copied ? t.environments.actions.copied : t.environments.actions.copy}
-        </Button>
-      </div>
-
-      {copyFailed && <p className="text-xs text-danger">{t.environments.actions.copyFailed}</p>}
+      <CopyLine value={recipe.copyCommand} />
     </div>
   );
 }

@@ -166,9 +166,8 @@ describe('WorkspaceHub', () => {
   it('greets by name and renders before any card query has answered', async () => {
     const { scenario } = await renderHub();
     try {
-      // The accessible name joins across the accent span, so the trailing
-      // period lands after a space. The assertion is about being greeted by
-      // name, not about where accname puts the punctuation.
+      // The assertion is about being greeted by name, not about the greeting's
+      // punctuation.
       expect(
         screen.getByRole('heading', { name: /Good (morning|afternoon|evening), Julio/ })
       ).toBeInTheDocument();

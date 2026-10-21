@@ -14,13 +14,16 @@ import { DEFAULT_SSH_RUNTIME_PATH, sshPreflightCommands } from '@mangostudio/sha
 import { Terminal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useUpdateEnvironmentMutation } from '../queries';
 import { type SshFormFields, sshFormToConfig, validateSshForm } from '../ssh-form';
 import { CopyLine } from './CopyLine';
+import { CommandGroup, EntityPanel } from './EntityPanel';
 
 interface SshPanelProps {
   readonly environment: Environment;
@@ -74,25 +77,16 @@ export function SshPanel({ environment }: SshPanelProps) {
   };
 
   return (
-    <section
-      className="space-y-3 rounded-xl border border-stroke bg-control p-3"
-      data-testid="ssh-panel"
+    <EntityPanel
+      testId="ssh-panel"
+      icon={<Terminal size={ICON_MD} />}
+      title={labels.title}
+      description={labels.description}
     >
-      <div className="flex items-start gap-2">
-        <Terminal size={14} className="mt-0.5 shrink-0 text-accent-fg" />
-        <div className="min-w-0 space-y-0.5">
-          <p className="font-semibold text-fg text-xs">{labels.title}</p>
-          <p className="text-[11px] text-fg-muted">{labels.description}</p>
-        </div>
-      </div>
-
       {environment.status.sshFailureReason ? (
-        <p
-          className="rounded-lg border border-warning bg-warning-subtle px-2.5 py-2 text-[11px] text-fg-muted"
-          data-testid="ssh-failure-reason"
-        >
+        <Callout tone="warning" data-testid="ssh-failure-reason">
           {labels.reason[environment.status.sshFailureReason]}
-        </p>
+        </Callout>
       ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2">
@@ -137,20 +131,19 @@ export function SshPanel({ environment }: SshPanelProps) {
           error={invalid === 'remoteRuntimePath' ? labels.dashInvalid : undefined}
           onChange={(event) => set({ remoteRuntimePath: event.target.value })}
         />
-        <p className="text-[11px] text-fg-muted">
+        <p className="text-xs text-fg-muted">
           {formatMessage(labels.runtimePathHint, { path: DEFAULT_SSH_RUNTIME_PATH })}
         </p>
       </div>
 
       {error ? (
-        <p className="text-[11px] text-danger" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
 
       <Button
         variant="secondary"
-        className="h-8 px-2.5 text-xs"
         disabled={!changed || invalid !== null}
         loading={update.isPending}
         onClick={() => void save()}
@@ -159,7 +152,7 @@ export function SshPanel({ environment }: SshPanelProps) {
       </Button>
 
       {config.host ? <SshPreflight config={config} /> : null}
-    </section>
+    </EntityPanel>
   );
 }
 
@@ -169,11 +162,9 @@ function SshPreflight({ config }: { readonly config: SshEnvironmentConfig }) {
   const preflight = sshPreflightCommands(config);
 
   return (
-    <div className="space-y-2 rounded-lg border border-accent bg-accent-subtle p-2.5">
-      <p className="font-semibold text-[11px] text-fg">{labels.preflightTitle}</p>
-      <p className="text-[11px] text-fg-muted">{labels.preflightHint}</p>
+    <CommandGroup title={labels.preflightTitle} hint={labels.preflightHint}>
       <CopyLine label={labels.preflightReach} value={preflight.reach} />
       <CopyLine label={labels.preflightRuntime} value={preflight.runtime} />
-    </div>
+    </CommandGroup>
   );
 }

@@ -38,11 +38,11 @@ export function UnrecognisedEntries({ entries, locations }: UnrecognisedEntriesP
 
   return (
     <section
-      className="space-y-3 rounded-lg border border-stroke bg-surface p-4"
+      className="space-y-4 rounded-md border border-stroke bg-surface p-4"
       data-testid="library-unreadable-entries"
     >
       <div className="space-y-1">
-        <h2 className="text-fg text-sm font-medium">{l.heading}</h2>
+        <h2 className="font-semibold text-fg text-sm">{l.heading}</h2>
         <p className="text-fg-muted text-xs">{l.rule}</p>
       </div>
       <ul className="space-y-3">
@@ -50,14 +50,16 @@ export function UnrecognisedEntries({ entries, locations }: UnrecognisedEntriesP
           const path = locations.find((candidate) => candidate.id === locationId)?.path;
           return (
             <li key={locationId}>
-              <p className="text-fg-muted text-xs font-medium">{path ?? locationId}</p>
+              <p className="break-all font-medium font-mono text-fg-muted text-xs">
+                {path ?? locationId}
+              </p>
               <ul className="mt-1 space-y-1">
                 {locationEntries.map((entry) => (
                   <li
                     key={`${locationId}:${entry.name}`}
                     className="flex items-center justify-between gap-2 text-sm"
                   >
-                    <span className="truncate text-fg" title={entry.name}>
+                    <span className="truncate font-mono text-fg text-xs" title={entry.name}>
                       {entry.name}
                     </span>
                     <span className="shrink-0 text-fg-muted text-xs">{l.reason[entry.reason]}</span>

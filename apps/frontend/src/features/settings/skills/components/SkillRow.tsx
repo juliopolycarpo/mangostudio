@@ -1,0 +1,86 @@
+/**
+ * One discovered skill as a settings row: its name and where it came from, what
+ * it does, and the switch that turns it on.
+ */
+
+import type { SkillDescriptor } from '@mangostudio/shared/skills';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { StatusNote } from '@/components/settings/StatusNote';
+import { Badge } from '@/components/ui/Badge';
+import { ToggleSwitch } from '@/components/ui/Toggle';
+import { useI18n } from '@/hooks/use-i18n';
+import { useUpdateSkillSetting } from '../hooks/use-skill-settings';
+
+interface SkillRowProps {
+  descriptor: SkillDescriptor;
+}
+
+export function SkillRow({ descriptor }: SkillRowProps) {
+  const { t } = useI18n();
+  const s = t.settings.skills;
+  const { mutateAsync } = useUpdateSkillSetting();
+  const isMountedRef = useRef(true);
+  const [enabled, setEnabled] = useState(descriptor.enabled);
+
+  useEffect(() => {
+    setEnabled(descriptor.enabled);
+  }, [descriptor.enabled]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const handleToggle = useCallback(async () => {
+    const newEnabled = !enabled;
+    setEnabled(newEnabled);
+    try {
+      const nextDescriptor = await mutateAsync({ skillKey: descriptor.key, enabled: newEnabled });
+      if (!isMountedRef.current) return;
+      setEnabled(nextDescriptor.enabled);
+    } catch {
+      if (!isMountedRef.current) return;
+      setEnabled(descriptor.enabled);
+    }
+  }, [enabled, mutateAsync, descriptor.key, descriptor.enabled]);
+
+  return (
+    <SettingsRow
+      as="label"
+      label={
+        <span className="flex flex-wrap items-center gap-2">
+          <span>{descriptor.name}</span>
+          <Badge>{s.sourceLabels[descriptor.source]}</Badge>
+          {!descriptor.valid && <Badge variant="error">{s.invalidBadge}</Badge>}
+          {descriptor.shadowed && (
+            <Badge variant="warning" title={s.shadowedHint}>
+              {s.shadowedBadge}
+            </Badge>
+          )}
+        </span>
+      }
+      hint={
+        <span className="block space-y-1">
+          {descriptor.description && <span className="block">{descriptor.description}</span>}
+          {descriptor.error && (
+            <StatusNote as="span" tone="danger">
+              {descriptor.error}
+            </StatusNote>
+          )}
+          <span className="block break-all font-mono text-micro text-fg-subtle">
+            {descriptor.path}
+          </span>
+        </span>
+      }
+    >
+      <ToggleSwitch
+        checked={enabled}
+        onChange={() => void handleToggle()}
+        aria-label={descriptor.name}
+      />
+    </SettingsRow>
+  );
+}

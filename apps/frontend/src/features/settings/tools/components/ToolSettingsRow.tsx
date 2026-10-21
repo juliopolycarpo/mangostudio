@@ -1,11 +1,13 @@
 /**
- * A card displaying a single tool's settings.
+ * One tool as a settings row: its name and what it lets the agent do, the
+ * switch that turns it on, and the parameters it exposes underneath.
  */
 
+import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Card } from '@/components/ui/Card';
-import { Checkbox } from '@/components/ui/Checkbox';
+import { SettingsRow } from '@/components/settings/SettingsRow';
+import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
 import { useUpdateToolSetting } from '../hooks/use-tool-settings';
 import { ToolParameterField } from './ToolParameterField';
@@ -19,80 +21,38 @@ function areToolParametersEqual(
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-interface ToolSettingsCardProps {
+interface ToolSettingsRowProps {
   descriptor: ToolSettingsDescriptor;
 }
+
+/** The built-in file tools whose name and description the locale files carry. */
+const TOOL_TEXT_KEYS = {
+  read_file: 'readFile',
+  write_file: 'writeFile',
+  edit_file: 'editFile',
+  replace_range: 'replaceRange',
+  apply_patch: 'applyPatch',
+  create_file: 'createFile',
+  delete_file: 'deleteFile',
+  move_file: 'moveFile',
+  list_directory: 'listDirectory',
+  glob: 'glob',
+  grep: 'grep',
+} as const satisfies Record<string, keyof Messages['settings']['tools']['toolNames']>;
 
 function getTranslatedToolText(
   descriptor: ToolSettingsDescriptor,
   t: ReturnType<typeof useI18n>['t']
 ) {
   const s = t.settings.tools;
-  switch (descriptor.name) {
-    case 'read_file':
-      return {
-        title: s.toolNames.readFile,
-        description: s.toolDescriptions.readFile,
-      };
-    case 'write_file':
-      return {
-        title: s.toolNames.writeFile,
-        description: s.toolDescriptions.writeFile,
-      };
-    case 'edit_file':
-      return {
-        title: s.toolNames.editFile,
-        description: s.toolDescriptions.editFile,
-      };
-    case 'replace_range':
-      return {
-        title: s.toolNames.replaceRange,
-        description: s.toolDescriptions.replaceRange,
-      };
-    case 'apply_patch':
-      return {
-        title: s.toolNames.applyPatch,
-        description: s.toolDescriptions.applyPatch,
-      };
-    case 'create_file':
-      return {
-        title: s.toolNames.createFile,
-        description: s.toolDescriptions.createFile,
-      };
-    case 'delete_file':
-      return {
-        title: s.toolNames.deleteFile,
-        description: s.toolDescriptions.deleteFile,
-      };
-    case 'move_file':
-      return {
-        title: s.toolNames.moveFile,
-        description: s.toolDescriptions.moveFile,
-      };
-    case 'list_directory':
-      return {
-        title: s.toolNames.listDirectory,
-        description: s.toolDescriptions.listDirectory,
-      };
-    case 'glob':
-      return {
-        title: s.toolNames.glob,
-        description: s.toolDescriptions.glob,
-      };
-    case 'grep':
-      return {
-        title: s.toolNames.grep,
-        description: s.toolDescriptions.grep,
-      };
-    default:
-      return {
-        title: descriptor.title,
-        description: descriptor.description,
-      };
-  }
+  const key = Object.hasOwn(TOOL_TEXT_KEYS, descriptor.name)
+    ? TOOL_TEXT_KEYS[descriptor.name as keyof typeof TOOL_TEXT_KEYS]
+    : undefined;
+  if (!key) return { title: descriptor.title, description: descriptor.description };
+  return { title: s.toolNames[key], description: s.toolDescriptions[key] };
 }
 
-export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
+export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
   const { t } = useI18n();
   const s = t.settings.tools;
   const { mutateAsync, isPending } = useUpdateToolSetting();
@@ -231,28 +191,25 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
   );
 
   return (
-    <Card className="space-y-4 p-4 sm:p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1 min-w-0">
-          <h4 className="text-sm font-bold text-fg">{translated.title}</h4>
-          {translated.description && (
-            <p className="text-xs text-fg-muted leading-relaxed">{translated.description}</p>
-          )}
-        </div>
+    <div>
+      <SettingsRow
+        as={descriptor.canDisable ? 'label' : 'div'}
+        label={translated.title}
+        hint={translated.description}
+      >
         {descriptor.canDisable ? (
-          <label className="flex items-center gap-2 shrink-0">
-            <span className="text-xs text-fg-muted">{enabled ? s.enabled : s.disabled}</span>
-            <Checkbox checked={enabled} onChange={() => void handleToggle()} />
-          </label>
+          <ToggleSwitch
+            checked={enabled}
+            onChange={() => void handleToggle()}
+            aria-label={translated.title}
+          />
         ) : (
-          <span className="text-xs text-fg-subtle italic shrink-0 text-right">
-            {s.cannotDisable}
-          </span>
+          <span className="block text-right text-xs text-fg-muted">{s.cannotDisable}</span>
         )}
-      </div>
+      </SettingsRow>
 
       {hasParameters && (
-        <div className="space-y-3 pt-2 border-t border-stroke">
+        <div className="space-y-4 px-4 pb-4">
           {descriptor.parameterDescriptors.map((pd) => {
             const qualityDisabled =
               pd.name === 'defaultQuality' && params.letAiDecideQuality === true;
@@ -273,6 +230,6 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
           )}
         </div>
       )}
-    </Card>
+    </div>
   );
 }

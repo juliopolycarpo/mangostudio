@@ -19,11 +19,14 @@ import type { LibraryTargetId, ResourceKind } from '@mangostudio/shared/library'
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useMemo } from 'react';
+import { buttonClassName } from '@/components/ui/Button';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { libraryEnvironmentSearch, libraryResourcesQueryOptions } from '@/features/library/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatList, formatMessage } from '@/lib/i18n-format';
 import { type DivergentResource, summarizeLibraryDivergence } from '../lib/library-divergence';
+import { CARD_LINK_CLASS } from './card-link';
 
 interface LibraryDivergenceCardProps {
   environmentId: string | null;
@@ -87,7 +90,7 @@ export function LibraryDivergenceCard({
           <Link
             to={kind === 'skill' ? '/environments/library/skills' : '/environments/library'}
             search={search}
-            className="text-accent-fg transition-colors hover:text-accent-fg"
+            className={CARD_LINK_CLASS}
           >
             {labels.openLibrary}
           </Link>
@@ -143,16 +146,14 @@ function DivergenceBody({
         });
 
   return (
-    <div className="space-y-2.5">
-      <p className="flex flex-wrap items-center gap-1.5">
-        <span className="terminal-chip h-6 max-w-full text-fg">
+    <div className="space-y-3">
+      <p className="flex flex-wrap items-center gap-2">
+        <span className="terminal-chip max-w-full text-fg">
           <span className="truncate">{resource.slug}</span>
         </span>
-        {showKind ? (
-          <span className="micro-label text-fg-muted">{t.library.kinds[resource.kind]}</span>
-        ) : null}
+        {showKind ? <MicroLabel>{t.library.kinds[resource.kind]}</MicroLabel> : null}
       </p>
-      <p className="text-sm leading-relaxed text-fg-muted">{body}</p>
+      <p className="text-sm text-fg-muted">{body}</p>
       <div className="flex flex-wrap gap-2">
         {/* Both land on the resource page: propagation runs there, behind its
             own preview-and-confirm step. */}
@@ -160,7 +161,7 @@ function DivergenceBody({
           to="/environments/library/$resourceKey"
           params={{ resourceKey: resource.key }}
           search={search}
-          className="inline-flex items-center rounded-lg border border-accent bg-accent-subtle px-3 py-1.5 text-xs font-bold text-accent-fg transition-colors hover:bg-accent-hover"
+          className={buttonClassName('primary', 'sm')}
         >
           {labels.propagate}
         </Link>
@@ -168,7 +169,7 @@ function DivergenceBody({
           to="/environments/library/$resourceKey"
           params={{ resourceKey: resource.key }}
           search={{ ...search, compare: true }}
-          className="inline-flex items-center rounded-lg border border-stroke px-3 py-1.5 text-xs font-bold text-fg-muted transition-colors hover:border-stroke hover:text-fg"
+          className={buttonClassName('secondary', 'sm')}
         >
           {labels.viewDiff}
         </Link>

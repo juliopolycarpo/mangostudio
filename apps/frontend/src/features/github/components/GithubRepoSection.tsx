@@ -4,12 +4,15 @@ import type {
   GithubUnavailableState,
 } from '@mangostudio/shared/github';
 import { type UseQueryResult, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FolderOpen, GitPullRequest, Plus, RefreshCw } from 'lucide-react';
+import { CircleDot, FolderOpen, GitPullRequest, Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
+import { PanelTabs } from '@/features/workspace/components/PanelTabs';
 import { gitWriteScopes, invalidateGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
@@ -120,9 +123,14 @@ export function GithubRepoSection({
       }
     >
       {workdir ? (
-        <div className="space-y-2">
-          <TabBar
-            tab={tab}
+        <div className="space-y-3">
+          <PanelTabs
+            tabs={[
+              { id: 'prs', label: t.github.panel.prs },
+              { id: 'issues', label: t.github.panel.issues },
+            ]}
+            active={tab}
+            label={t.github.panel.repo}
             onSelect={(next) => {
               setTab(next);
               // Leaving the pull requests behind leaves the open one too:
@@ -167,39 +175,6 @@ export function GithubRepoSection({
   );
 }
 
-function TabBar({
-  tab,
-  onSelect,
-}: {
-  readonly tab: RepoTab;
-  readonly onSelect: (tab: RepoTab) => void;
-}) {
-  const { t } = useI18n();
-  const labels: Readonly<Record<RepoTab, string>> = {
-    prs: t.github.panel.prs,
-    issues: t.github.panel.issues,
-  };
-
-  return (
-    <div role="tablist" aria-label={t.github.panel.repo} className="flex gap-1">
-      {(['prs', 'issues'] as const).map((id) => (
-        <button
-          key={id}
-          type="button"
-          role="tab"
-          aria-selected={tab === id}
-          onClick={() => onSelect(id)}
-          className={`cursor-pointer rounded-lg px-2 py-1 text-[10px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
-            tab === id ? 'bg-accent-subtle text-accent-fg' : 'text-fg-muted hover:bg-fill-hover'
-          }`}
-        >
-          {labels[id]}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /** The filter row, generic over the two closed filter unions the lists take. */
 function FilterBar<T extends string>({
   filters,
@@ -215,17 +190,17 @@ function FilterBar<T extends string>({
   return (
     <div className="flex flex-wrap gap-1">
       {filters.map((filter) => (
-        <button
+        <Button
           key={filter}
           type="button"
+          variant="subtle"
+          size="sm"
           aria-pressed={filter === active}
           onClick={() => onSelect(filter)}
-          className={`cursor-pointer rounded-full px-2 py-0.5 text-[10px] transition-colors focus-visible:outline-2 focus-visible:outline-focus ${
-            filter === active ? 'bg-fill-selected text-fg' : 'text-fg-muted hover:text-fg'
-          }`}
+          className="text-fg-muted aria-pressed:bg-fill-selected aria-pressed:text-fg"
         >
           {labels[filter]}
-        </button>
+        </Button>
       ))}
     </div>
   );
@@ -334,9 +309,14 @@ function PrsPane({
         // cannot name) has no branch for `gh pr create` to push, and the
         // command fails with a generic server error rather than explaining
         // why — so this state is caught here instead.
-        <p className="text-[10px] leading-4 text-fg-muted">{t.github.createPr.noBranch}</p>
+        <p className="text-xs text-fg-muted">{t.github.createPr.noBranch}</p>
       )}
-      <ListGate query={query} errorLabel={t.github.errors.prs} emptyLabel={t.github.empty.prs}>
+      <ListGate
+        query={query}
+        errorLabel={t.github.errors.prs}
+        emptyLabel={t.github.empty.prs}
+        emptyIcon={<GitPullRequest size={ICON_LG} />}
+      >
         {(payload) =>
           payload.prs.map((pr) => (
             <GithubPrRow
@@ -382,6 +362,7 @@ function IssuesPane({
         query={query}
         errorLabel={t.github.errors.issues}
         emptyLabel={t.github.empty.issues}
+        emptyIcon={<CircleDot size={ICON_LG} />}
       >
         {(payload) =>
           payload.issues.map((issue) => (
@@ -414,38 +395,29 @@ function ListGate<TOk extends { state: 'ok' }>({
   query,
   errorLabel,
   emptyLabel,
+  emptyIcon,
   children,
 }: {
   readonly query: UseQueryResult<TOk | GithubUnavailableState, Error>;
   readonly errorLabel: string;
   readonly emptyLabel: string;
+  /** What the empty list is a list of, so an empty issue list does not wear a pull request. */
+  readonly emptyIcon: ReactNode;
   readonly children: (payload: TOk) => ReactNode[];
 }) {
   const { t } = useI18n();
 
   if (query.isPending) {
-    return (
-      <EmptyState
-        icon={<RefreshCw size={ICON_LG} className="animate-spin" />}
-        title={t.github.loading}
-        className="min-h-24 py-4"
-      />
-    );
+    return <EmptyState icon={<Spinner />} title={t.github.loading} className="min-h-24 py-4" />;
   }
   if (query.isError || !query.data) {
-    return <EmptyState title={errorLabel} tone="error" className="min-h-24 py-4" />;
+    return <Callout tone="danger" title={errorLabel} />;
   }
   if (query.data.state !== 'ok') return <GithubNotConnected state={query.data.state} />;
 
   const rows = children(query.data as TOk);
   if (rows.length === 0) {
-    return (
-      <EmptyState
-        icon={<GitPullRequest size={ICON_LG} />}
-        title={emptyLabel}
-        className="min-h-24 py-4"
-      />
-    );
+    return <EmptyState icon={emptyIcon} title={emptyLabel} className="min-h-24 py-4" />;
   }
 
   return <ul className="space-y-0.5">{rows}</ul>;

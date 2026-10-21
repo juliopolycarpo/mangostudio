@@ -13,8 +13,12 @@
 
 import type { WslDistribution } from '@mangostudio/shared/environments';
 import { Check } from 'lucide-react';
+import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
+import { choiceClass } from './choice-class';
 
 interface WslDistributionPickerProps {
   readonly distributions: readonly WslDistribution[];
@@ -31,11 +35,11 @@ export function WslDistributionPicker({
   const labels = t.environments.entities.add;
 
   if (distributions.length === 0) {
-    return <p className="text-fg-muted text-xs">{labels.wslEmpty}</p>;
+    return <p className="text-xs text-fg-muted">{labels.wslEmpty}</p>;
   }
 
   return (
-    <ul className="space-y-1.5" data-testid="wsl-distribution-list">
+    <ul className="space-y-2" data-testid="wsl-distribution-list">
       {distributions.map((distribution) => {
         const configured = Boolean(distribution.environmentId);
         const active = distribution.name === selected;
@@ -46,22 +50,18 @@ export function WslDistributionPicker({
               disabled={configured}
               aria-pressed={active}
               onClick={() => onSelect(distribution.name)}
-              className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
-                active ? 'border-accent bg-accent-subtle' : 'border-stroke hover:bg-fill-hover'
-              } ${configured ? 'cursor-not-allowed opacity-55' : ''}`}
+              className={cn(
+                'flex w-full items-center gap-2',
+                choiceClass(active),
+                configured && 'cursor-not-allowed opacity-50 hover:bg-transparent'
+              )}
             >
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
-                  <span className="truncate font-semibold text-fg text-sm">
-                    {distribution.name}
-                  </span>
-                  {distribution.default ? (
-                    <span className="shrink-0 rounded bg-accent-subtle px-1.5 py-0.5 font-medium text-[10px] text-accent-fg">
-                      {labels.wslDefault}
-                    </span>
-                  ) : null}
+                  <span className="truncate text-sm font-medium text-fg">{distribution.name}</span>
+                  {distribution.default ? <Badge>{labels.wslDefault}</Badge> : null}
                 </span>
-                <span className="mt-0.5 block truncate text-fg-muted text-xs">
+                <span className="mt-0.5 block truncate text-xs text-fg-muted">
                   {configured
                     ? formatMessage(labels.wslConfigured, {
                         id: distribution.environmentId ?? '',
@@ -69,7 +69,7 @@ export function WslDistributionPicker({
                     : `${distribution.state} · WSL ${distribution.wslVersion}`}
                 </span>
               </span>
-              {active ? <Check size={14} className="shrink-0 text-accent-fg" /> : null}
+              {active ? <Check size={ICON_MD} className="shrink-0 text-accent-fg" /> : null}
             </button>
           </li>
         );

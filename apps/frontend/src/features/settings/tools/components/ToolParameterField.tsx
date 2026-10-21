@@ -5,11 +5,18 @@
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
+import { SettingsField } from '@/components/settings/SettingsField';
+import { SettingsRow } from '@/components/settings/SettingsRow';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
+import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 
 interface ToolParameterFieldProps {
   descriptor: ToolParameterDescriptor;
@@ -67,12 +74,12 @@ function PathListField({
   value,
   onChange,
   disabled,
-  placeholder,
+  ariaLabel,
 }: {
   value: unknown;
   onChange: (value: unknown) => void;
   disabled: boolean;
-  placeholder?: string;
+  ariaLabel: string;
 }) {
   const { t } = useI18n();
   const s = t.settings.tools.pathList;
@@ -127,38 +134,35 @@ function PathListField({
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
-        <input
-          type="text"
-          value={newPath}
-          onChange={(e) => setNewPath(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              handleAdd();
-            }
-          }}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="flex-1 rounded-xl px-4 py-2.5 text-sm bg-control text-fg border border-stroke placeholder:text-fg-subtle focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        />
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={disabled || !newPath.trim()}
-          onClick={handleAdd}
-        >
+        <div className="min-w-0 flex-1">
+          <Input
+            type="text"
+            value={newPath}
+            onChange={(e) => setNewPath(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                handleAdd();
+              }
+            }}
+            disabled={disabled}
+            placeholder={s.pathPlaceholder}
+            aria-label={ariaLabel}
+          />
+        </div>
+        <Button variant="secondary" disabled={disabled || !newPath.trim()} onClick={handleAdd}>
           {s.add}
         </Button>
       </div>
 
       {items.length === 0 ? (
-        <p className="text-sm text-fg-subtle py-2">{s.noPaths}</p>
+        <p className="py-2 text-sm text-fg-subtle">{s.noPaths}</p>
       ) : (
-        <ul className="space-y-1.5">
+        <ul className="space-y-1">
           {items.map((item, index) => (
             <li
               key={item.path}
-              className="flex items-center gap-2 p-2 rounded-lg bg-control border border-stroke"
+              className="flex items-center gap-2 rounded-sm border border-stroke bg-control px-2 py-1"
             >
               <Checkbox
                 checked={item.enabled}
@@ -166,47 +170,54 @@ function PathListField({
                 disabled={disabled}
               />
               {editingIndex === index ? (
-                <input
-                  type="text"
-                  value={editingPath}
-                  onChange={(e) => setEditingPath(e.target.value)}
-                  onBlur={saveEdit}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      saveEdit();
-                    }
-                    if (e.key === 'Escape') {
-                      cancelEdit();
-                    }
-                  }}
-                  className="flex-1 rounded-lg px-3 py-1.5 text-sm bg-control text-fg border border-stroke focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus"
-                />
+                <div className="min-w-0 flex-1">
+                  <Input
+                    type="text"
+                    value={editingPath}
+                    onChange={(e) => setEditingPath(e.target.value)}
+                    onBlur={saveEdit}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        saveEdit();
+                      }
+                      if (e.key === 'Escape') {
+                        cancelEdit();
+                      }
+                    }}
+                    aria-label={s.edit}
+                  />
+                </div>
               ) : (
                 <>
                   <span
-                    className={`flex-1 text-sm ${item.enabled ? 'text-fg' : 'text-fg-subtle line-through'}`}
+                    className={cn(
+                      'min-w-0 flex-1 break-all font-mono text-xs',
+                      item.enabled ? 'text-fg' : 'text-fg-subtle line-through'
+                    )}
                   >
                     {item.path}
                   </span>
-                  <button
-                    type="button"
+                  <Button
+                    variant="subtle"
+                    size="icon"
+                    className="size-7"
                     onClick={() => startEdit(index)}
                     disabled={disabled}
-                    className="p-1.5 rounded-md text-fg-muted hover:bg-fill-hover disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label={s.edit}
                   >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
+                    <Pencil size={ICON_SM} />
+                  </Button>
+                  <Button
+                    variant="subtle"
+                    size="icon"
+                    className="size-7 text-danger"
                     onClick={() => handleDelete(index)}
                     disabled={disabled}
-                    className="p-1.5 rounded-md text-danger hover:bg-danger-subtle disabled:opacity-50 disabled:cursor-not-allowed"
                     aria-label={s.delete}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    <Trash2 size={ICON_SM} />
+                  </Button>
                 </>
               )}
             </li>
@@ -269,9 +280,6 @@ export function ToolParameterField({
     return descriptor.description;
   }, [descriptor.name, descriptor.description, t]);
 
-  const baseInputClass =
-    'w-full rounded-xl px-4 py-2.5 text-sm bg-control text-fg border border-stroke placeholder:text-fg-subtle focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
-
   const descriptorValue = value ?? descriptor.defaultValue ?? '';
 
   // Model selector: backed by the catalog, not static options
@@ -290,12 +298,7 @@ export function ToolParameterField({
       ),
     ];
     return (
-      <div className="space-y-1">
-        {label && (
-          <label htmlFor={`${fieldId}-model`} className="text-sm text-fg-muted">
-            {label}
-          </label>
-        )}
+      <SettingsField label={label} htmlFor={`${fieldId}-model`} hint={description}>
         <Select
           id={`${fieldId}-model`}
           value={toSafeString(descriptorValue)}
@@ -305,33 +308,30 @@ export function ToolParameterField({
           options={modelOptions}
           placeholder={fallbackLabel(modelOptions)}
         />
-      </div>
+      </SettingsField>
     );
   }
 
   switch (descriptor.type) {
     case 'boolean': {
+      // The autosave makes this an immediate setting, so it is a switch. The
+      // padding is the card's own: the row sits inside a tool's row.
       return (
-        <label className="flex items-center gap-3 cursor-pointer">
-          <Checkbox
+        <SettingsRow as="label" label={label} hint={description} className="p-0">
+          <ToggleSwitch
             checked={Boolean(descriptorValue)}
             onChange={(e) => onChange(e.target.checked)}
             disabled={disabled}
+            aria-label={label}
           />
-          {label}
-        </label>
+        </SettingsRow>
       );
     }
 
     case 'number': {
       return (
-        <div className="space-y-1">
-          {label && (
-            <label htmlFor={`${fieldId}-number`} className="text-sm text-fg-muted">
-              {label}
-            </label>
-          )}
-          <input
+        <SettingsField label={label} htmlFor={`${fieldId}-number`} hint={description}>
+          <Input
             id={`${fieldId}-number`}
             type="number"
             min={descriptor.min}
@@ -340,22 +340,15 @@ export function ToolParameterField({
             value={descriptorValue === '' ? '' : Number(descriptorValue)}
             onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
             disabled={disabled}
-            placeholder={description}
-            className={baseInputClass}
           />
-        </div>
+        </SettingsField>
       );
     }
 
     case 'select': {
       const options = descriptor.options ?? [];
       return (
-        <div className="space-y-1">
-          {label && (
-            <label htmlFor={`${fieldId}-select`} className="text-sm text-fg-muted">
-              {label}
-            </label>
-          )}
+        <SettingsField label={label} htmlFor={`${fieldId}-select`} hint={description}>
           <Select
             id={`${fieldId}-select`}
             value={toSafeString(descriptorValue)}
@@ -365,7 +358,7 @@ export function ToolParameterField({
             options={options}
             placeholder={fallbackLabel(options)}
           />
-        </div>
+        </SettingsField>
       );
     }
 
@@ -374,13 +367,8 @@ export function ToolParameterField({
         ? descriptorValue.join('\n')
         : toSafeString(descriptorValue);
       return (
-        <div className="space-y-1">
-          {label && (
-            <label htmlFor={`${fieldId}-list`} className="text-sm text-fg-muted">
-              {label}
-            </label>
-          )}
-          <textarea
+        <SettingsField label={label} htmlFor={`${fieldId}-list`} hint={description}>
+          <Textarea
             id={`${fieldId}-list`}
             value={listValue}
             onChange={(e) => {
@@ -391,46 +379,36 @@ export function ToolParameterField({
               onChange(lines);
             }}
             disabled={disabled}
-            placeholder={description}
             rows={4}
-            className={`${baseInputClass} resize-y`}
           />
-        </div>
+        </SettingsField>
       );
     }
 
     case 'path_list': {
       return (
-        <div className="space-y-1">
-          {label && <span className="text-sm text-fg-muted">{label}</span>}
+        <SettingsField label={label} hint={description}>
           <PathListField
             value={descriptorValue}
             onChange={onChange}
             disabled={disabled}
-            placeholder={description}
+            ariaLabel={label}
           />
-        </div>
+        </SettingsField>
       );
     }
 
     default: {
       return (
-        <div className="space-y-1">
-          {label && (
-            <label htmlFor={`${fieldId}-text`} className="text-sm text-fg-muted">
-              {label}
-            </label>
-          )}
-          <input
+        <SettingsField label={label} htmlFor={`${fieldId}-text`} hint={description}>
+          <Input
             id={`${fieldId}-text`}
             type="text"
             value={toSafeString(descriptorValue)}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
-            placeholder={description}
-            className={baseInputClass}
           />
-        </div>
+        </SettingsField>
       );
     }
   }

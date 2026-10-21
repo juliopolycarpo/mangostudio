@@ -11,6 +11,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -47,9 +48,9 @@ export function EnableInstallsButton() {
         {enable.button}
       </Button>
       {mutation.isError && (
-        <p className="text-xs text-danger" role="alert">
+        <Callout tone="danger" role="alert">
           {resolveApiErrorMessage(mutation.error, enable.failed)}
-        </p>
+        </Callout>
       )}
       {confirming && (
         <ConfirmDialog

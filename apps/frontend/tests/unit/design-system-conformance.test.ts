@@ -26,12 +26,14 @@ interface Rule {
   readonly pattern: RegExp;
   /** Comments describing a retired token are stale documentation, so some rules read them too. */
   readonly includeComments?: boolean;
+  /** Class strings live in TypeScript; a stylesheet may use the property the rule bans. */
+  readonly sourceOnly?: boolean;
 }
 
 /** A class token, with its variants, as Tailwind would scan it. */
 const VARIANTS = String.raw`(?:[\w\[\]=&>*\-.()]+:)*`;
-const COLOR_UTILS = String.raw`(?:bg|text|border(?:-[trblxy])?|ring|divide|outline|fill|stroke|from|via|to|shadow|decoration|accent|caret|placeholder)`;
-const SEMANTIC_COLORS = String.raw`(?:fg|fg-muted|fg-subtle|stroke|stroke-strong|canvas|sidebar|surface|surface-raised|control|control-hover|control-pressed|fill-hover|fill-pressed|fill-selected|accent|accent-hover|accent-pressed|accent-fg|accent-subtle|on-accent|focus|success|success-subtle|warning|warning-subtle|danger|danger-subtle|danger-solid|on-danger|info|info-subtle|scrim|agent-[a-z]+)`;
+const COLOR_UTILS = `(?:bg|text|border(?:-[trblxy])?|ring|divide|outline|fill|stroke|from|via|to|shadow|decoration|accent|caret|placeholder)`;
+const SEMANTIC_COLORS = `(?:fg|fg-muted|fg-subtle|stroke|stroke-strong|canvas|sidebar|surface|surface-raised|control|control-hover|control-pressed|fill-hover|fill-pressed|fill-selected|accent|accent-hover|accent-pressed|accent-fg|accent-subtle|on-accent|focus|success|success-subtle|warning|warning-subtle|danger|danger-subtle|danger-solid|on-danger|info|info-subtle|scrim|agent-[a-z]+)`;
 const edge = (body: string) =>
   new RegExp(String.raw`(?<![\w\-/])${VARIANTS}${body}(?![\w\-])`, 'g');
 
@@ -41,15 +43,15 @@ const RULES: readonly Rule[] = [
     includeComments: true,
     pattern: new RegExp(
       [
-        String.raw`surface-container`,
+        `surface-container`,
         String.raw`\bon-surface\b`,
         String.raw`\bon-primary\b`,
         String.raw`\bon-background\b`,
-        String.raw`outline-variant`,
-        String.raw`primary-container`,
-        String.raw`accent-muted`,
-        String.raw`surface-dim`,
-        String.raw`--color-(?:primary|error|tertiary|background|outline|on-|surface-c)`,
+        `outline-variant`,
+        `primary-container`,
+        `accent-muted`,
+        `surface-dim`,
+        `--color-(?:primary|error|tertiary|background|outline|on-(?:surface|primary|background|error)|surface-c)`,
         String.raw`\b${COLOR_UTILS}-(?:primary|error|tertiary|background|outline)(?![\w\-])`,
       ].join('|'),
       'g'
@@ -69,7 +71,7 @@ const RULES: readonly Rule[] = [
   {
     why: 'radii are xs/sm/md/lg (4/6/8/12) plus rounded-full for status — larger names compile to nothing',
     pattern: edge(
-      String.raw`rounded(?:-(?:[trbl]|tl|tr|bl|br|s|e|ss|se|es|ee))?(?:-(?:xl|2xl|3xl|4xl|none)|(?=["'\`\s}]))`
+      String.raw`rounded(?:-(?:[trbl]|tl|tr|bl|br|s|e|ss|se|es|ee))?(?:-(?:xl|2xl|3xl|4xl)|(?=["'\`\s}]))`
     ),
   },
   {
@@ -84,11 +86,12 @@ const RULES: readonly Rule[] = [
   },
   {
     why: 'weights are 400/500/600 — use font-medium or font-semibold',
-    pattern: edge(String.raw`font-(?:bold|extrabold|black|thin|extralight|light)`),
+    pattern: edge(`font-(?:bold|extrabold|black|thin|extralight|light)`),
   },
   {
     why: 'upper-case and letter-spacing belong to .micro-label only; badges and buttons are sentence case',
-    pattern: edge(String.raw`(?:uppercase|tracking-(?:wide|wider|widest))`),
+    sourceOnly: true,
+    pattern: edge(`(?:uppercase|tracking-(?:wide|wider|widest))`),
   },
   {
     why: 'tints are tokens (*-subtle, fill-*), not opacity modifiers — a second /NN in one rule also downlevels badly',
@@ -123,6 +126,12 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   'components/ui/ToolAvatar.tsx': {
     'type scale is text-micro/xs/sm/base/title/headline — other sizes compile to nothing':
       'monogram sizes inside 16–24px avatar tiles: a glyph drawn in the tile, not running text',
+    'upper-case and letter-spacing belong to .micro-label only; badges and buttons are sentence case':
+      'a monogram is a glyph in a tile; the contract fixes it at two characters and the tile upper-cases them',
+  },
+  'components/ui/ContextRing.tsx': {
+    'type scale is text-micro/xs/sm/base/title/headline — other sizes compile to nothing':
+      'the percentage drawn inside a 16–20px ring is a data glyph, not running text',
   },
 };
 
@@ -149,6 +158,7 @@ async function violations(): Promise<string[]> {
     const code = stripComments(raw, file);
     for (const rule of RULES) {
       if (ALLOWED[file]?.[rule.why]) continue;
+      if (rule.sourceOnly && file.endsWith('.css')) continue;
       const text = rule.includeComments ? raw : code;
       for (const match of text.matchAll(rule.pattern)) {
         const hit = match[0].trim();

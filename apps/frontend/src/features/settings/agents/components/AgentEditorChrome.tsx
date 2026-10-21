@@ -1,7 +1,9 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
-import { AlertCircle, RotateCcw, Save, Trash2 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { CircleAlert, RotateCcw, Save, Trash2 } from 'lucide-react';
+import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import type { AgentEditorLabels, AgentEditorMode, EditableAgentProfile } from './AgentEditor.types';
 
 interface AgentEditorHeaderProps {
@@ -11,8 +13,7 @@ interface AgentEditorHeaderProps {
   readonly mode: AgentEditorMode;
   readonly dirty: boolean;
   readonly isUserAgent: boolean;
-  readonly onFriendlyMode: () => void;
-  readonly onRawMode: () => void;
+  readonly onModeChange: (mode: AgentEditorMode) => void;
 }
 
 export function AgentEditorHeader({
@@ -22,57 +23,35 @@ export function AgentEditorHeader({
   mode,
   dirty,
   isUserAgent,
-  onFriendlyMode,
-  onRawMode,
+  onModeChange,
 }: AgentEditorHeaderProps) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between p-4 sm:p-6 border-b border-stroke">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <h2 className="text-xl font-bold text-fg">{title}</h2>
-          <span className="rounded-full bg-control px-2 py-0.5 text-xs text-fg-muted">
-            {draft.kind === 'builtin' ? labels.builtIn : labels.user}
-          </span>
+    <div className="flex flex-col gap-3 border-b border-stroke p-4 sm:flex-row sm:items-start sm:justify-between sm:p-6">
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-base font-semibold text-fg">{title}</h3>
+          <Badge>{draft.kind === 'builtin' ? labels.builtIn : labels.user}</Badge>
           {dirty && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-600 dark:text-amber-400">
-              <AlertCircle size={12} />
+            <Badge variant="warning">
+              <CircleAlert size={ICON_SM} aria-hidden="true" />
               {labels.unsavedChanges}
-            </span>
+            </Badge>
           )}
         </div>
-        <p className="mt-1 text-sm text-fg-muted truncate">{draft.id}</p>
+        <p className="truncate font-mono text-xs text-fg-muted">{draft.id}</p>
       </div>
       {isUserAgent && (
-        <div className="flex gap-1 p-1 rounded-xl bg-control border border-stroke shrink-0">
-          <ModeToggleButton active={mode === 'friendly'} onClick={onFriendlyMode}>
-            {labels.friendlyMode}
-          </ModeToggleButton>
-          <ModeToggleButton active={mode === 'raw'} onClick={onRawMode}>
-            {labels.rawMode}
-          </ModeToggleButton>
-        </div>
+        <SettingsSegmented
+          ariaLabel={`${labels.friendlyMode} / ${labels.rawMode}`}
+          value={mode}
+          options={[
+            { value: 'friendly', label: labels.friendlyMode },
+            { value: 'raw', label: labels.rawMode },
+          ]}
+          onChange={onModeChange}
+        />
       )}
     </div>
-  );
-}
-
-interface ModeToggleButtonProps {
-  readonly active: boolean;
-  readonly onClick: () => void;
-  readonly children: ReactNode;
-}
-
-function ModeToggleButton({ active, onClick, children }: ModeToggleButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-200 ${
-        active ? 'bg-surface text-fg shadow-sm' : 'text-fg-muted hover:text-fg'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -100,51 +79,29 @@ export function AgentEditorActionBar({
   onSave,
 }: AgentEditorActionBarProps) {
   return (
-    <div className="sticky bottom-0 z-10 flex flex-wrap justify-between gap-2 border-t border-stroke bg-surface p-4 sm:p-6 rounded-b-2xl">
+    <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-b-md border-t border-stroke bg-surface px-4 py-3 sm:px-6">
       <div>
         {isUserAgent && !isNew && (
-          <Button type="button" variant="subtle" onClick={() => onDelete(draft)}>
-            <Trash2 size={16} />
+          <Button
+            type="button"
+            variant="subtle"
+            className="text-danger"
+            onClick={() => onDelete(draft)}
+          >
+            <Trash2 size={ICON_MD} />
             {labels.delete}
           </Button>
         )}
       </div>
       <div className="flex gap-2">
-        <Button type="button" variant="subtle" onClick={onReset}>
-          <RotateCcw size={16} />
+        <Button type="button" variant="secondary" onClick={onReset}>
+          <RotateCcw size={ICON_MD} />
           {labels.reset}
         </Button>
         <Button type="button" loading={isSaving} disabled={!dirty && !isNew} onClick={onSave}>
-          <Save size={16} />
+          <Save size={ICON_MD} />
           {isSaving ? labels.saving : labels.save}
         </Button>
-      </div>
-    </div>
-  );
-}
-
-interface AgentResetDialogProps {
-  readonly labels: AgentEditorLabels;
-  readonly onCancel: () => void;
-  readonly onConfirm: () => void;
-}
-
-export function AgentResetDialog({ labels, onCancel, onConfirm }: AgentResetDialogProps) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-md rounded-2xl border border-stroke bg-canvas p-5 shadow-xl space-y-4">
-        <div className="space-y-1">
-          <h3 className="text-lg font-bold text-fg">{labels.confirmResetTitle}</h3>
-          <p className="text-sm text-fg-muted">{labels.confirmResetDescription}</p>
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="subtle" onClick={onCancel}>
-            {labels.cancel}
-          </Button>
-          <Button type="button" variant="primary" onClick={onConfirm}>
-            {labels.confirmReset}
-          </Button>
-        </div>
       </div>
     </div>
   );

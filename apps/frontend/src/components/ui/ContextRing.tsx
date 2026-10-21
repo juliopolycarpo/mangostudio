@@ -74,9 +74,10 @@ export function ContextRing({ ratio, severity }: ContextRingProps) {
         />
       </svg>
       {/* The number carries the value at low percentages, where the arc is a
-          dot; `on-surface` rather than the muted variant because 8px of muted
-          text on a tinted band is not a number anyone reads. */}
-      <span className="absolute text-[8px] font-bold tabular-nums text-fg">{pct}</span>
+          dot; `fg` rather than the muted variant because 8px of muted text is
+          not a number anyone reads. It is a glyph drawn inside the ring, not
+          running text, which is why it is below the type scale's floor. */}
+      <span className="absolute text-[8px] font-semibold tabular-nums text-fg">{pct}</span>
     </div>
   );
 }

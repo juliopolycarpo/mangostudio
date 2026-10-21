@@ -1,11 +1,17 @@
 import type { GenerateCommitMessageResponse, GitBranchInfo } from '@mangostudio/shared/git';
-import { History, Info, Sparkles, X } from 'lucide-react';
+import { History, X } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Input } from '@/components/ui/Input';
+import { Textarea } from '@/components/ui/Textarea';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { CommitActions, useCommitActions } from './CommitActions';
+import { IconButton } from './components/IconButton';
+import { WorkspaceDialog } from './components/WorkspaceDialog';
 import { useGenerateCommitMessage, useGitHeadMessage } from './hooks/use-git-state';
 
 const AMEND_CONFIRMED_KEY = 'mangostudio.git.amend-confirmed';
@@ -137,55 +143,44 @@ export function CommitForm({
   };
 
   return (
-    <section className="space-y-2">
+    <section className="space-y-3">
       {amend ? (
-        <div className="flex items-center gap-2 rounded-lg border border-warning bg-warning-subtle px-2.5 py-1.5 text-[11px] leading-4 text-warning">
-          <History size={13} className="shrink-0" />
-          <span className="min-w-0 flex-1">
-            <span className="font-semibold">{labels.amendLabel}</span>
-            <span className="block opacity-80">
-              {headMessage.isLoading ? t.git.headMessage.loading : labels.amendHint}
-            </span>
-          </span>
-          <button
-            type="button"
-            aria-label={labels.amendExit}
-            title={labels.amendExit}
-            onClick={() => setAmend(false)}
-            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded transition-colors hover:bg-warning-subtle"
-          >
-            <X size={12} />
-          </button>
-        </div>
+        <Callout
+          tone="warning"
+          icon={<History size={ICON_MD} />}
+          title={labels.amendLabel}
+          action={
+            <IconButton label={labels.amendExit} onClick={() => setAmend(false)}>
+              <X size={ICON_SM} />
+            </IconButton>
+          }
+        >
+          {headMessage.isLoading ? t.git.headMessage.loading : labels.amendHint}
+        </Callout>
       ) : null}
 
-      <label className="block space-y-1">
-        <span className="sr-only">{labels.titleLabel}</span>
-        <input
+      <div className="space-y-1">
+        <Input
           value={title}
           onChange={(event) => updateTitle(event.target.value)}
           onKeyDown={handleShortcut}
           maxLength={72}
           aria-label={labels.titleLabel}
           placeholder={labels.titlePlaceholder}
-          className="w-full rounded-lg border border-stroke bg-control px-3 py-2 text-xs text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
         />
-        <span className="block text-right font-mono text-[10px] text-fg-muted">
+        <p className="text-right font-mono text-micro text-fg-subtle">
           {labels.titleCount.replace('{count}', String(title.length))}
-        </span>
-      </label>
-      <label className="block">
-        <span className="sr-only">{labels.bodyLabel}</span>
-        <textarea
-          value={body}
-          onChange={(event) => updateBody(event.target.value)}
-          onKeyDown={handleShortcut}
-          aria-label={labels.bodyLabel}
-          placeholder={labels.bodyPlaceholder}
-          rows={2}
-          className="w-full resize-y rounded-lg border border-stroke bg-control px-3 py-2 text-xs text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-focus"
-        />
-      </label>
+        </p>
+      </div>
+      <Textarea
+        value={body}
+        onChange={(event) => updateBody(event.target.value)}
+        onKeyDown={handleShortcut}
+        aria-label={labels.bodyLabel}
+        placeholder={labels.bodyPlaceholder}
+        rows={2}
+        className="min-h-16"
+      />
 
       <CommitActions
         actions={actions}
@@ -199,40 +194,20 @@ export function CommitForm({
         onGenerate={() => void handleGenerate()}
       />
 
-      {diffWasTruncated ? (
-        <p className="flex items-start gap-1.5 text-[10px] leading-4 text-fg-muted">
-          <Info size={12} className="mt-0.5 shrink-0" />
-          {labels.truncatedNotice}
-        </p>
-      ) : null}
+      {diffWasTruncated ? <Callout tone="info">{labels.truncatedNotice}</Callout> : null}
 
       {confirmAmend ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="git-amend-confirm-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
-        >
-          <div className="w-full max-w-sm space-y-5 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
-            <div className="space-y-2 text-center">
-              <History className="mx-auto text-warning" size={30} />
-              <h3 id="git-amend-confirm-title" className="text-lg font-bold text-fg">
-                {amendLabels.title}
-              </h3>
-              <p className="text-sm leading-5 text-fg-muted">{amendLabels.description}</p>
-            </div>
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setConfirmAmend(false)}
-              >
+        <WorkspaceDialog
+          titleId="git-amend-confirm-title"
+          title={amendLabels.title}
+          description={amendLabels.description}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setConfirmAmend(false)}>
                 {amendLabels.cancel}
               </Button>
               <Button
                 type="button"
-                className="flex-1"
                 onClick={() => {
                   sessionStorage.setItem(AMEND_CONFIRMED_KEY, 'true');
                   setConfirmAmend(false);
@@ -241,38 +216,23 @@ export function CommitForm({
               >
                 {amendLabels.confirm}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
       ) : null}
 
       {pendingSuggestion ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="git-commit-message-overwrite-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
-        >
-          <div className="w-full max-w-sm space-y-5 rounded-3xl border border-stroke bg-surface p-6 shadow-2xl">
-            <div className="space-y-2 text-center">
-              <Sparkles className="mx-auto text-accent-fg" size={30} />
-              <h3 id="git-commit-message-overwrite-title" className="text-lg font-bold text-fg">
-                {overwriteLabels.title}
-              </h3>
-              <p className="text-sm leading-5 text-fg-muted">{overwriteLabels.description}</p>
-            </div>
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setPendingSuggestion(null)}
-              >
+        <WorkspaceDialog
+          titleId="git-commit-message-overwrite-title"
+          title={overwriteLabels.title}
+          description={overwriteLabels.description}
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setPendingSuggestion(null)}>
                 {overwriteLabels.cancel}
               </Button>
               <Button
                 type="button"
-                className="flex-1"
                 onClick={() => {
                   applySuggestion(pendingSuggestion);
                   setPendingSuggestion(null);
@@ -280,9 +240,9 @@ export function CommitForm({
               >
                 {overwriteLabels.confirm}
               </Button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        />
       ) : null}
     </section>
   );

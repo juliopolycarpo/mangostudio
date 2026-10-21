@@ -16,7 +16,9 @@ import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
+import { Textarea } from '@/components/ui/Textarea';
 import {
   chatKeys,
   messageKeys,
@@ -148,34 +150,30 @@ export function FirstChatStep({
   return (
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
       {state.workdir ? (
-        <p className="text-fg-muted text-xs" data-testid="onboarding-chat-summary">
+        <p className="text-xs text-fg-muted" data-testid="onboarding-chat-summary">
           {formatMessage(s.summary, { runner: runnerName, workdir: state.workdir })}
         </p>
       ) : (
-        <p className="text-fg-muted text-sm" data-testid="onboarding-chat-needs-folder">
+        <Callout tone="warning" data-testid="onboarding-chat-needs-folder">
           {s.needsFolder}
-        </p>
+        </Callout>
       )}
 
-      <div className="space-y-1.5">
-        <label
-          htmlFor="onboarding-prompt"
-          className="font-semibold text-fg-muted text-xs uppercase tracking-wider"
-        >
+      <div className="space-y-1">
+        <label htmlFor="onboarding-prompt" className="text-sm font-medium text-fg">
           {s.promptLabel}
         </label>
-        <textarea
+        <Textarea
           id="onboarding-prompt"
           data-testid="onboarding-prompt"
           rows={3}
           maxLength={GENERATION_PROMPT_MAX_LENGTH}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
-          className="w-full resize-y rounded-2xl border border-stroke bg-control px-3 py-2 text-fg text-sm outline-none focus:border-focus"
         />
       </div>
 
-      {state.chatId && !answered ? <p className="text-fg-muted text-xs">{s.resume}</p> : null}
+      {state.chatId && !answered ? <p className="text-xs text-fg-muted">{s.resume}</p> : null}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -204,22 +202,22 @@ export function FirstChatStep({
       </div>
 
       {answered ? (
-        <p className="font-semibold text-accent-fg text-sm" data-testid="onboarding-chat-answered">
+        <Callout tone="success" data-testid="onboarding-chat-answered">
           {s.answered}
-        </p>
+        </Callout>
       ) : null}
 
       {!answered && state.chatId && !isSending && alreadyAsked(prompt) ? (
-        <p className="flex items-center gap-2 text-fg-muted text-sm">
+        <p className="flex items-center gap-2 text-sm text-fg-muted">
           <Spinner size="sm" />
           {s.waiting}
         </p>
       ) : null}
 
       {hasFailed ? (
-        <p className="text-danger text-sm" data-testid="onboarding-chat-failed">
+        <Callout tone="danger" data-testid="onboarding-chat-failed">
           {s.failed}
-        </p>
+        </Callout>
       ) : null}
     </StepFrame>
   );

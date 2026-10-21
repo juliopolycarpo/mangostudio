@@ -1,8 +1,15 @@
 import type { GitCommitFile, GitCommitSummary } from '@mangostudio/shared/git';
-import { ArrowLeft, FileCode2, GitCommitHorizontal, LoaderCircle } from 'lucide-react';
+import { ArrowLeft, FileCode2, GitCommitHorizontal } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Card } from '@/components/ui/Card';
+import { Chip } from '@/components/ui/Chip';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
+import { RowList } from './components/RowList';
 import type { DiffSelection } from './DiffViewer';
 import { useGitCommit, useGitHistory } from './hooks/use-git-state';
 
@@ -33,32 +40,27 @@ export function RepositoryHistory({
   }
 
   if (history.isLoading) {
-    return (
-      <HistoryMessage
-        icon={<LoaderCircle size={18} className="animate-spin" />}
-        text={t.git.history.loading}
-      />
-    );
+    return <EmptyState icon={<Spinner />} title={t.git.history.loading} className="min-h-36" />;
   }
-  if (history.error) return <HistoryMessage text={t.git.history.loadError} tone="error" />;
-  if (commits.length === 0) return <HistoryMessage text={t.git.history.empty} />;
+  if (history.error) return <Callout tone="danger" title={t.git.history.loadError} />;
+  if (commits.length === 0) return <EmptyState title={t.git.history.empty} className="min-h-36" />;
 
   return (
     <div className="space-y-2">
-      <ol className="overflow-hidden rounded-xl border border-stroke bg-control">
+      <RowList as="ol">
         {commits.map((commit) => (
-          <li key={commit.hash} className="border-b border-stroke last:border-b-0">
+          <li key={commit.hash}>
             <button
               type="button"
               onClick={() => setSelectedHash(commit.hash)}
-              className="group w-full cursor-pointer px-3 py-2.5 text-left hover:bg-fill-hover"
+              className="w-full cursor-pointer px-3 py-2 text-left transition-colors hover:bg-fill-hover"
             >
               <div className="flex items-start gap-2">
-                <GitCommitHorizontal size={13} className="mt-0.5 shrink-0 text-accent-fg" />
+                <GitCommitHorizontal size={ICON_SM} className="mt-0.5 shrink-0 text-fg-muted" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-semibold text-fg">{commit.subject}</p>
-                  <div className="mt-1 flex items-center gap-2 text-[10px] text-fg-muted">
-                    <span className="font-mono text-accent-fg">{commit.shortHash}</span>
+                  <p className="truncate text-sm font-medium text-fg">{commit.subject}</p>
+                  <div className="mt-1 flex items-center gap-2 text-xs text-fg-muted">
+                    <span className="font-mono">{commit.shortHash}</span>
                     <span className="truncate">{commit.author}</span>
                     <time className="ml-auto shrink-0" dateTime={commit.authoredAt}>
                       {formatCommitDate(commit.authoredAt)}
@@ -70,7 +72,7 @@ export function RepositoryHistory({
             </button>
           </li>
         ))}
-      </ol>
+      </RowList>
       {history.hasNextPage ? (
         <Button
           type="button"
@@ -103,50 +105,34 @@ function CommitDetails({
   readonly onOpenDiff: (selection: DiffSelection) => void;
 }) {
   const { t } = useI18n();
-  if (loading)
-    return (
-      <HistoryMessage
-        icon={<LoaderCircle size={18} className="animate-spin" />}
-        text={t.git.history.loading}
-      />
-    );
-  if (!commit || !files) return <HistoryMessage text={t.git.history.loadError} tone="error" />;
+  if (loading) {
+    return <EmptyState icon={<Spinner />} title={t.git.history.loading} className="min-h-36" />;
+  }
+  if (!commit || !files) return <Callout tone="danger" title={t.git.history.loadError} />;
   return (
     <section aria-label={t.git.history.commitDetails} className="space-y-3">
-      <button
-        type="button"
-        onClick={onBack}
-        className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-accent-fg"
-      >
-        <ArrowLeft size={13} />
+      <Button type="button" variant="subtle" size="sm" onClick={onBack} className="-ml-2">
+        <ArrowLeft size={ICON_SM} />
         {t.git.history.back}
-      </button>
-      <div className="rounded-xl border border-stroke bg-surface p-3">
-        <p className="text-sm font-semibold leading-5 text-fg">{commit.subject}</p>
-        <p className="mt-1 text-[11px] text-fg-muted">
+      </Button>
+      <Card padded={false} className="p-3">
+        <p className="text-sm font-semibold text-fg">{commit.subject}</p>
+        <p className="mt-1 text-xs text-fg-muted">
           {commit.author} · {formatCommitDate(commit.authoredAt)}
         </p>
-        <p className="mt-2 font-mono text-[10px] text-accent-fg">{commit.hash}</p>
+        <p className="mt-2 break-all font-mono text-micro text-fg-subtle">{commit.hash}</p>
         <CommitStats commit={commit} />
         {commit.refs.length > 0 ? (
           <div className="mt-2 flex flex-wrap gap-1">
             {commit.refs.map((ref) => (
-              <span
-                key={ref}
-                className="rounded-full bg-accent-subtle px-1.5 py-0.5 font-mono text-[9px] text-accent-fg"
-              >
-                {ref}
-              </span>
+              <Chip key={ref}>{ref}</Chip>
             ))}
           </div>
         ) : null}
-      </div>
-      <ul className="overflow-hidden rounded-xl border border-stroke bg-control">
+      </Card>
+      <RowList>
         {files.map((file) => (
-          <li
-            key={`${file.oldPath ?? ''}:${file.path}`}
-            className="border-b border-stroke last:border-b-0"
-          >
+          <li key={`${file.oldPath ?? ''}:${file.path}`}>
             <button
               type="button"
               onClick={() =>
@@ -156,20 +142,20 @@ function CommitDetails({
                   title: t.git.diff.view.replace('{path}', file.path),
                 })
               }
-              className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left hover:bg-fill-hover"
+              className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-fill-hover"
             >
-              <FileCode2 size={13} className="shrink-0 text-fg-muted" />
-              <span className="min-w-0 flex-1 truncate font-mono text-[10px]">{file.path}</span>
-              <span className="shrink-0 font-mono text-[9px] text-success">
+              <FileCode2 size={ICON_SM} className="shrink-0 text-fg-muted" />
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">{file.path}</span>
+              <span className="shrink-0 font-mono text-micro text-success">
                 +{file.additions ?? '—'}
               </span>
-              <span className="shrink-0 font-mono text-[9px] text-danger">
+              <span className="shrink-0 font-mono text-micro text-danger">
                 -{file.deletions ?? '—'}
               </span>
             </button>
           </li>
         ))}
-      </ul>
+      </RowList>
     </section>
   );
 }
@@ -183,7 +169,7 @@ function CommitStats({
 }) {
   const { t } = useI18n();
   return (
-    <div className={`flex flex-wrap gap-x-2 font-mono text-[9px] ${compact ? 'mt-1' : 'mt-2'}`}>
+    <div className={`flex flex-wrap gap-x-2 font-mono text-micro ${compact ? 'mt-1' : 'mt-2'}`}>
       <span className="text-fg-muted">
         {t.git.history.filesChanged.replace('{count}', String(commit.changedFiles))}
       </span>
@@ -193,25 +179,6 @@ function CommitStats({
       <span className="text-danger">
         {t.git.history.deletions.replace('{count}', String(commit.deletions))}
       </span>
-    </div>
-  );
-}
-
-function HistoryMessage({
-  icon,
-  text,
-  tone = 'neutral',
-}: {
-  readonly icon?: React.ReactNode;
-  readonly text: string;
-  readonly tone?: 'neutral' | 'error';
-}) {
-  return (
-    <div
-      className={`flex min-h-36 flex-col items-center justify-center gap-2 text-center text-xs ${tone === 'error' ? 'text-danger' : 'text-fg-muted'}`}
-    >
-      {icon}
-      <p>{text}</p>
     </div>
   );
 }

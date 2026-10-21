@@ -241,11 +241,11 @@ Menus and dialogs enter with a fade and a few pixels of travel; nothing bounces.
 Lucide (`lucide-react`), stroked at 2px with round caps — the set the app already
 used. Sizes are constants in `@/lib/icon-sizes`:
 
-| Constant  | px | Use                                                             |
-| --------- | -- | --------------------------------------------------------------- |
-| `ICON_SM` | 14 | Inside chips, badges and compact rows.                          |
-| `ICON_MD` | 16 | Buttons, menu items, navigation rows.                           |
-| `ICON_LG` | 20 | The mobile navigation tiles, toast glyphs. Empty states use 24. |
+| Constant  | px | Use                                                      |
+| --------- | -- | -------------------------------------------------------- |
+| `ICON_SM` | 14 | Inside chips, badges and compact rows.                   |
+| `ICON_MD` | 16 | Buttons, menu items, navigation rows.                    |
+| `ICON_LG` | 20 | The mobile navigation tiles, toast glyphs, empty states. |
 
 Icons inherit the text colour of their row; at rest that is `fg-muted`. A native
 build swaps them for Segoe Fluent Icons or Adwaita symbolic icons at the same

@@ -26,11 +26,18 @@ import type {
   ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
 import { EXTERNAL_AGENT_TARGET_IDS } from '@mangostudio/shared/external-agents';
-import { Check, Loader2, RefreshCw } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
+import { Checkbox } from '@/components/ui/Checkbox';
+import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Spinner } from '@/components/ui/Spinner';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { listExternalNativeSessions } from '@/services/external-agent-service';
+import { ExternalDialog } from './ExternalDialog';
 
 export interface ExternalSessionPickerProps {
   readonly environmentId: string;
@@ -126,70 +133,47 @@ export function ExternalSessionPicker({
   }, [listableKey, load, reloadToken]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        aria-label={labels.title}
-        className="flex max-h-[80vh] w-full max-w-xl flex-col gap-3 rounded-2xl border border-stroke bg-surface p-5 text-sm text-fg shadow-2xl outline-none"
-      >
-        <div className="space-y-1">
-          <h2 className="text-base font-semibold">{labels.title}</h2>
-          <p className="text-xs leading-relaxed text-fg-muted">
-            {labels.subtitle.replace('{environment}', environmentName)}
-          </p>
-        </div>
+    <ExternalDialog
+      dialogRef={dialogRef}
+      label={labels.title}
+      title={labels.title}
+      description={labels.subtitle.replace('{environment}', environmentName)}
+      size="lg"
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          {t.externalAgents.disclosure.close}
+        </Button>
+      }
+    >
+      {workspacePath ? (
+        <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-fg">
+          <Checkbox
+            checked={thisWorkspaceOnly}
+            onChange={(event) => setThisWorkspaceOnly(event.target.checked)}
+          />
+          {labels.thisWorkspaceOnly}
+        </label>
+      ) : null}
 
-        {workspacePath ? (
-          <button
-            type="button"
-            aria-pressed={thisWorkspaceOnly}
-            onClick={() => setThisWorkspaceOnly((value) => !value)}
-            className="flex w-fit items-center gap-2 rounded-full border border-stroke px-3 py-1 text-xs text-fg-muted transition-colors hover:bg-fill-hover"
-          >
-            <span
-              className={`flex h-3.5 w-3.5 items-center justify-center rounded border ${
-                thisWorkspaceOnly ? 'border-accent bg-accent text-on-accent' : 'border-stroke'
-              }`}
-            >
-              {thisWorkspaceOnly ? <Check size={10} /> : null}
-            </span>
-            {labels.thisWorkspaceOnly}
-          </button>
-        ) : null}
-
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
-          {EXTERNAL_AGENT_TARGET_IDS.map((targetId) => {
-            const descriptor = agents.find((agent) => agent.targetId === targetId);
-            if (!descriptor) return null;
-            return (
-              <TargetGroup
-                key={targetId}
-                targetId={targetId}
-                canList={descriptor.capabilities.sessionListing}
-                state={states[targetId]}
-                adoptingId={adoptingId}
-                filtered={filter !== undefined}
-                onAdopt={onAdopt}
-                onLoadMore={(cursor) => void load(targetId, cursor)}
-              />
-            );
-          })}
-        </div>
-
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded-xl border border-stroke px-3 py-2 text-sm text-fg-muted transition-colors hover:bg-fill-hover"
-          >
-            {t.externalAgents.disclosure.close}
-          </button>
-        </div>
+      <div className="space-y-5">
+        {EXTERNAL_AGENT_TARGET_IDS.map((targetId) => {
+          const descriptor = agents.find((agent) => agent.targetId === targetId);
+          if (!descriptor) return null;
+          return (
+            <TargetGroup
+              key={targetId}
+              targetId={targetId}
+              canList={descriptor.capabilities.sessionListing}
+              state={states[targetId]}
+              adoptingId={adoptingId}
+              filtered={filter !== undefined}
+              onAdopt={onAdopt}
+              onLoadMore={(cursor) => void load(targetId, cursor)}
+            />
+          );
+        })}
       </div>
-    </div>
+    </ExternalDialog>
   );
 }
 
@@ -214,26 +198,22 @@ function TargetGroup({
   const labels = t.externalAgents.sessions;
 
   return (
-    <section className="space-y-1">
-      <h3 className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
-        {t.externalAgents.target[targetId]}
-      </h3>
+    <section className="space-y-2">
+      <MicroLabel as="h3">{t.externalAgents.target[targetId]}</MicroLabel>
 
       {!canList ? (
-        <p className="px-1 text-[11px] leading-relaxed text-fg-muted">
+        <p className="text-xs text-fg-muted">
           {targetId === 'claude' ? labels.unsupportedClaude : labels.unsupported}
         </p>
       ) : state === undefined || state.status === 'loading' ? (
-        <p className="flex items-center gap-2 px-1 text-[11px] text-fg-muted">
-          <Loader2 size={12} className="animate-spin" />
+        <div className="flex items-center gap-2 text-xs text-fg-muted">
+          <Spinner size="sm" />
           {labels.loading}
-        </p>
+        </div>
       ) : state.status === 'failed' ? (
-        <p className="px-1 text-[11px] text-danger">{labels.loadFailed}</p>
+        <Callout tone="danger">{labels.loadFailed}</Callout>
       ) : state.page.sessions.length === 0 ? (
-        <p className="px-1 text-[11px] text-fg-muted">
-          {filtered ? labels.emptyInWorkspace : labels.empty}
-        </p>
+        <p className="text-xs text-fg-muted">{filtered ? labels.emptyInWorkspace : labels.empty}</p>
       ) : (
         <>
           <ul className="space-y-1">
@@ -249,14 +229,14 @@ function TargetGroup({
             ))}
           </ul>
           {state.page.nextCursor ? (
-            <button
-              type="button"
+            <Button
+              variant="subtle"
+              size="sm"
               onClick={() => onLoadMore(state.page.nextCursor as string)}
-              className="flex items-center gap-1 px-1 py-1 text-[11px] text-fg-muted transition-colors hover:text-fg"
             >
-              <RefreshCw size={11} />
+              <RefreshCw size={ICON_SM} />
               {labels.loadMore}
-            </button>
+            </Button>
           ) : null}
         </>
       )}
@@ -296,19 +276,19 @@ function SessionRow({
       type="button"
       onClick={onAdopt}
       disabled={disabled}
-      className="flex w-full flex-col items-start gap-0.5 rounded-xl px-2 py-2 text-left transition-colors enabled:hover:bg-fill-hover disabled:opacity-60"
+      className="flex w-full flex-col items-start gap-0.5 rounded-sm px-3 py-2 text-left transition-colors enabled:hover:bg-fill-hover disabled:opacity-50"
     >
       {heading ? (
-        <span className="w-full truncate text-xs text-fg">{heading}</span>
+        <span className="w-full truncate text-sm text-fg">{heading}</span>
       ) : session.workspacePath ? null : (
-        <span className="w-full truncate text-xs text-fg-muted">{labels.noTitle}</span>
+        <span className="w-full truncate text-sm text-fg-muted">{labels.noTitle}</span>
       )}
-      <span className="flex w-full items-center gap-2 text-[10px] text-fg-muted">
+      <span className="flex w-full items-center gap-2 font-mono text-micro text-fg-subtle">
         {session.workspacePath ? (
           <span className="min-w-0 flex-1 truncate">{session.workspacePath}</span>
         ) : null}
         <span className="shrink-0">{relativeAge(session.updatedAtMs, labels)}</span>
-        {busy ? <Loader2 size={10} className="shrink-0 animate-spin" /> : null}
+        {busy ? <Loader2 size={ICON_SM} className="shrink-0 animate-spin" /> : null}
       </span>
     </button>
   );

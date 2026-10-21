@@ -238,7 +238,7 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
       )}
       {socket.status === 'reconnecting' && (
         <div className="absolute inset-x-0 top-0 z-10 flex justify-center p-2">
-          <span className="rounded bg-canvas px-2 py-1 text-xs text-fg-muted">
+          <span className="rounded-md border border-stroke bg-surface-raised px-3 py-1 text-xs text-fg-muted shadow-popover">
             {t.terminal.reconnecting}
           </span>
         </div>

@@ -1,5 +1,5 @@
 /**
- * Every folder the account works in, as a grid — the cross-workspace answer to
+ * Every folder the account works in, as a list — the cross-workspace answer to
  * the question the chat hub's `WorkspaceCard` answers for one session.
  *
  * The fork from that card is deliberate and is the whole reason this file
@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FolderGit2, GitBranch, MessageSquarePlus, Play } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { chatListQueryOptions } from '@/features/chat/queries';
@@ -23,12 +24,13 @@ import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state
 import { useI18n } from '@/hooks/use-i18n';
 import { branchLabel } from '@/lib/git-branch';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { groupChatsByWorkdir, type WorkspaceGroup } from '../lib/group-chats-by-workdir';
 import { HubSkeletonLines } from './HubSkeletonLines';
 
 const NO_CHATS: readonly Chat[] = [];
 
-interface WorkspacesGridProps {
+interface WorkspacesListProps {
   /** Folders the picker remembers, so one chosen but never used still shows. */
   readonly recentWorkdirs: readonly string[];
   readonly onSelectChat: (chatId: string) => void;
@@ -37,12 +39,12 @@ interface WorkspacesGridProps {
   readonly onNewChat: () => void;
 }
 
-export function WorkspacesGrid({
+export function WorkspacesList({
   recentWorkdirs,
   onSelectChat,
   onNewChatInWorkdir,
   onNewChat,
-}: WorkspacesGridProps) {
+}: WorkspacesListProps) {
   const { t } = useI18n();
   const labels = t.home.workspaces;
   // One shared empty array, not a fresh `?? []`: an unsettled query would
@@ -67,16 +69,16 @@ export function WorkspacesGrid({
   const summaries = useBatchedGitSummaries(gitChatIds);
 
   return (
-    <SectionCard label={labels.label} tone="accent">
+    <SectionCard label={labels.label} tone="neutral">
       {isPending && groups.length === 0 ? <HubSkeletonLines /> : null}
 
-      {!isPending && groups.length === 0 ? (
-        <EmptyWorkspaces onNewChat={onNewChat} />
-      ) : (
-        <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+      {!isPending && groups.length === 0 ? <EmptyWorkspaces onNewChat={onNewChat} /> : null}
+
+      {groups.length > 0 ? (
+        <ul className="divide-y divide-stroke">
           {groups.map((group) => (
-            <li key={group.key}>
-              <WorkspaceTile
+            <li key={group.key} className="py-3 first:pt-0 last:pb-0">
+              <WorkspaceRow
                 group={group}
                 summary={
                   group.representativeChatId ? summaries[group.representativeChatId] : undefined
@@ -87,7 +89,7 @@ export function WorkspacesGrid({
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
 
       {overflowCount > 0 ? (
         <p className="text-xs text-fg-muted">
@@ -100,24 +102,27 @@ export function WorkspacesGrid({
 
 /**
  * Persona one: a brand new account with no chat and no remembered folder. The
- * grid is the surface that has something to say to them, so it says it here
+ * list is the surface that has something to say to them, so it says it here
  * rather than collapsing to nothing and leaving a labelled empty box.
  */
 function EmptyWorkspaces({ onNewChat }: { onNewChat: () => void }) {
   const { t } = useI18n();
   const labels = t.home.workspaces;
   return (
-    <div className="space-y-2.5">
-      <p className="text-sm text-fg-muted">{labels.empty}</p>
-      <Button variant="secondary" size="sm" onClick={onNewChat} className="gap-1.5">
-        <MessageSquarePlus size={13} />
-        {t.chat.newChat}
-      </Button>
-    </div>
+    <EmptyState
+      icon={<FolderGit2 size={ICON_LG} />}
+      title={labels.empty}
+      action={
+        <Button variant="secondary" size="sm" onClick={onNewChat}>
+          <MessageSquarePlus size={ICON_SM} />
+          {t.chat.newChat}
+        </Button>
+      }
+    />
   );
 }
 
-interface WorkspaceTileProps {
+interface WorkspaceRowProps {
   readonly group: WorkspaceGroup;
   /** Absent while the batch is in flight; `null` when the server has no answer. */
   readonly summary: ReturnType<typeof useBatchedGitSummaries>[string] | undefined;
@@ -125,7 +130,7 @@ interface WorkspaceTileProps {
   readonly onNewChatInWorkdir: (workdir: string, environmentId: string) => void;
 }
 
-function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: WorkspaceTileProps) {
+function WorkspaceRow({ group, summary, onSelectChat, onNewChatInWorkdir }: WorkspaceRowProps) {
   const { t } = useI18n();
   const labels = t.home.workspaces;
   const badgeLabels = t.sidebar.runner;
@@ -133,76 +138,81 @@ function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: Wor
 
   return (
     <article
-      className="flex h-full min-w-0 flex-col gap-2 rounded-lg border border-stroke bg-surface p-3"
+      className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
       data-testid="workspace-tile"
       data-workdir={group.workdir}
     >
-      <p className="flex min-w-0 items-center gap-1.5">
-        <FolderGit2 size={13} aria-hidden="true" className="shrink-0 text-fg-muted" />
-        <span className="truncate font-mono text-sm text-fg" title={group.workdir}>
-          {group.name}
-        </span>
-      </p>
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="flex min-w-0 items-center gap-2">
+          <FolderGit2 size={ICON_MD} aria-hidden="true" className="shrink-0 text-fg-muted" />
+          <span className="truncate font-mono text-sm text-fg" title={group.workdir}>
+            {group.name}
+          </span>
+        </p>
 
-      {summary === undefined && group.representativeChatId ? <HubSkeletonLines /> : null}
+        {/* Indented to the folder name (icon + gap), so the facts about the
+            folder line up under it instead of under its icon. */}
+        <div className="space-y-1 pl-6">
+          {summary === undefined && group.representativeChatId ? <HubSkeletonLines /> : null}
 
-      {branch && summary ? (
-        <div className="space-y-1 font-mono text-[11px]">
-          <p className="flex min-w-0 items-center gap-1.5 text-fg-muted">
-            <GitBranch size={11} aria-hidden="true" className="shrink-0" />
-            <span className="truncate text-fg">{branch}</span>
-          </p>
-          <p className="text-fg-muted">
-            <span
-              className={summary.changedFileCount > 0 ? 'text-warning' : 'text-success'}
-              data-testid="workspace-tile-tree"
-            >
-              {summary.changedFileCount > 0
-                ? formatMessage(labels.dirty, { count: String(summary.changedFileCount) })
-                : labels.clean}
+          {branch && summary ? (
+            <div className="space-y-1 font-mono text-xs">
+              <p className="flex min-w-0 items-center gap-1.5 text-fg-muted">
+                <GitBranch size={ICON_SM} aria-hidden="true" className="shrink-0" />
+                <span className="truncate text-fg">{branch}</span>
+              </p>
+              <p className="text-fg-muted">
+                <span
+                  className={summary.changedFileCount > 0 ? 'text-warning' : 'text-success'}
+                  data-testid="workspace-tile-tree"
+                >
+                  {summary.changedFileCount > 0
+                    ? formatMessage(labels.dirty, { count: String(summary.changedFileCount) })
+                    : labels.clean}
+                </span>
+                {summary.ahead > 0 || summary.behind > 0 ? (
+                  <>
+                    {' · '}
+                    {formatMessage(t.sidebar.git.sync, {
+                      ahead: String(summary.ahead),
+                      behind: String(summary.behind),
+                    })}
+                  </>
+                ) : null}
+              </p>
+            </div>
+          ) : null}
+
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
+            <span>
+              {group.sessionCount === 0
+                ? labels.noSessions
+                : formatMessage(labels.sessions, { count: String(group.sessionCount) })}
             </span>
-            {summary.ahead > 0 || summary.behind > 0 ? (
-              <>
-                {' · '}
-                {formatMessage(t.sidebar.git.sync, {
-                  ahead: String(summary.ahead),
-                  behind: String(summary.behind),
-                })}
-              </>
-            ) : null}
+            {group.runners.map((runner) => {
+              const badge = runnerBadge(runner, badgeLabels);
+              return (
+                <span key={badge.label} className="flex items-center gap-1 font-mono">
+                  <StatusDot tone="neutral" className={badge.dotClassName} />
+                  {badge.label}
+                </span>
+              );
+            })}
           </p>
         </div>
-      ) : null}
+      </div>
 
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-fg-muted">
-        <span>
-          {group.sessionCount === 0
-            ? labels.noSessions
-            : formatMessage(labels.sessions, { count: String(group.sessionCount) })}
-        </span>
-        {group.runners.map((runner) => {
-          const badge = runnerBadge(runner, badgeLabels);
-          return (
-            <span key={badge.label} className="flex items-center gap-1 font-mono">
-              <StatusDot tone="neutral" className={badge.dotClassName} />
-              {badge.label}
-            </span>
-          );
-        })}
-      </p>
-
-      <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+      <div className="flex shrink-0 flex-wrap gap-2">
         {group.representativeChatId ? (
           <Button
             variant="secondary"
             size="sm"
             onClick={() => onSelectChat(group.representativeChatId as string)}
-            className="gap-1.5"
             aria-label={formatMessage(labels.continueSession, {
               title: group.representativeTitle ?? group.name,
             })}
           >
-            <Play size={12} />
+            <Play size={ICON_SM} />
             {labels.continueLatest}
           </Button>
         ) : null}
@@ -210,10 +220,9 @@ function WorkspaceTile({ group, summary, onSelectChat, onNewChatInWorkdir }: Wor
           variant="subtle"
           size="sm"
           onClick={() => onNewChatInWorkdir(group.workdir, group.environmentId)}
-          className="gap-1.5"
           aria-label={formatMessage(labels.newChatHereIn, { folder: group.name })}
         >
-          <MessageSquarePlus size={12} />
+          <MessageSquarePlus size={ICON_SM} />
           {labels.newChatHere}
         </Button>
       </div>

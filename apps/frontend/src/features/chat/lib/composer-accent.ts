@@ -2,9 +2,10 @@
  * Which identity colour the composer wears.
  *
  * The composer is the one surface that acts *as* the runner rather than as the
- * product, so its frame carries the runner's colour: the border, the status
- * line, the prompt mark, the caret and Send all read a single custom property
- * that this resolves from the chat's runner.
+ * product, so its frame carries the runner's colour: the focused border, the
+ * prompt mark, the caret and the runner's own chip all read a single custom
+ * property that this resolves from the chat's runner. Send does not: it is
+ * always the product accent, whoever is answering.
  *
  * A MangoStudio chat resolves to the mango token — the hue the composer has
  * always had — so the default is unchanged and only a chat handed to a vendor

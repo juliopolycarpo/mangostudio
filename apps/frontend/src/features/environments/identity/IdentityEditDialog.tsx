@@ -10,10 +10,12 @@
 import { normalizeMonogram, TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
 import { type KeyboardEvent, useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { ToolAvatar, type ToolImageDisplay } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { DialogShell } from '../components/DialogShell';
 import { deriveMonogram, type ResolvedToolIdentity } from './resolve';
 import { IMAGE_URL_PATTERN, ToolImageFields, type ToolImageMode } from './ToolImageFields';
 import { useSaveToolIdentity } from './use-tool-identities';
@@ -133,96 +135,84 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus.
-    <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-scrim p-4 fade-in duration-200"
-      data-testid="identity-edit-dialog"
+    <DialogShell
+      testId="identity-edit-dialog"
       onKeyDown={handleKeyDown}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="max-h-full w-full max-w-md space-y-5 overflow-y-auto rounded-3xl border border-stroke bg-surface p-5 shadow-2xl sm:p-8"
-      >
-        <div className="flex items-center gap-3">
-          <ToolAvatar
-            subjectKey={identity.subjectKey}
-            monogram={previewMonogram}
-            name={previewName}
-            image={previewImage}
-            size="lg"
-          />
-          <div className="min-w-0 space-y-0.5">
-            <h3 id={titleId} className="truncate font-bold text-lg text-fg">
-              {formatMessage(labels.dialogTitle, { name: identity.name })}
-            </h3>
-            <p className="text-fg-muted text-xs">{labels.preview}</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="space-y-1">
-            <Input
-              id="tool-identity-name"
-              label={labels.nameLabel}
-              value={name}
-              // The dialog exists to edit this field; opening it and landing
-              // outside the form is the keyboard user's version of a dead end.
-              autoFocus
-              maxLength={64}
-              placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
-              onChange={(event) => setName(event.target.value)}
-            />
-            <p className="text-fg-muted text-xs">{labels.nameHint}</p>
-          </div>
-
-          <div className="space-y-1">
-            <Input
-              id="tool-identity-monogram"
-              label={labels.monogramLabel}
-              value={monogram}
-              maxLength={2}
-              placeholder={deriveMonogram(previewName)}
-              error={monogramInvalid ? labels.monogramInvalid : undefined}
-              onChange={(event) => setMonogram(event.target.value)}
-            />
-            {!monogramInvalid && <p className="text-fg-muted text-xs">{labels.monogramHint}</p>}
-          </div>
-
-          <ToolImageFields
-            mode={imageMode}
-            onModeChange={setImageMode}
-            file={file}
-            onFileChange={setFile}
-            hasStoredUpload={hasStoredUpload}
-            fileTooLarge={fileTooLarge}
-            url={imageUrl}
-            onUrlChange={setImageUrl}
-            cache={cacheImage}
-            onCacheChange={setCacheImage}
-            urlInvalid={urlInvalid && trimmedUrl.length > 0}
-          />
-        </div>
-
-        {save.isError && <p className="text-danger text-xs">{labels.saveFailed}</p>}
-
-        <div className="flex gap-3">
-          <Button variant="secondary" onClick={onClose} className="flex-1">
+      titleId={titleId}
+      title={formatMessage(labels.dialogTitle, { name: identity.name })}
+      titleClassName="truncate"
+      description={labels.preview}
+      leading={
+        <ToolAvatar
+          subjectKey={identity.subjectKey}
+          monogram={previewMonogram}
+          name={previewName}
+          image={previewImage}
+          size="lg"
+        />
+      }
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
             {labels.cancel}
           </Button>
           <Button
             variant="primary"
-            className="flex-1"
             disabled={blocked}
             loading={save.isPending}
             onClick={handleSave}
           >
             {labels.save}
           </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <Input
+            id="tool-identity-name"
+            label={labels.nameLabel}
+            value={name}
+            // The dialog exists to edit this field; opening it and landing
+            // outside the form is the keyboard user's version of a dead end.
+            autoFocus
+            maxLength={64}
+            placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
+            onChange={(event) => setName(event.target.value)}
+          />
+          <p className="text-xs text-fg-muted">{labels.nameHint}</p>
         </div>
+
+        <div className="space-y-1">
+          <Input
+            id="tool-identity-monogram"
+            label={labels.monogramLabel}
+            value={monogram}
+            maxLength={2}
+            placeholder={deriveMonogram(previewName)}
+            error={monogramInvalid ? labels.monogramInvalid : undefined}
+            onChange={(event) => setMonogram(event.target.value)}
+          />
+          {!monogramInvalid && <p className="text-xs text-fg-muted">{labels.monogramHint}</p>}
+        </div>
+
+        <ToolImageFields
+          mode={imageMode}
+          onModeChange={setImageMode}
+          file={file}
+          onFileChange={setFile}
+          hasStoredUpload={hasStoredUpload}
+          fileTooLarge={fileTooLarge}
+          url={imageUrl}
+          onUrlChange={setImageUrl}
+          cache={cacheImage}
+          onCacheChange={setCacheImage}
+          urlInvalid={urlInvalid && trimmedUrl.length > 0}
+        />
       </div>
-    </div>
+
+      {save.isError && <Callout tone="danger">{labels.saveFailed}</Callout>}
+    </DialogShell>
   );
 }
 

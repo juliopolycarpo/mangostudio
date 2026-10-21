@@ -204,8 +204,8 @@ describe('ToolSettingsPage', () => {
       body: {},
     });
 
-    const checkbox = screen.getAllByRole('checkbox')[0];
-    await user.click(checkbox);
+    const toggle = screen.getAllByRole('switch')[0];
+    await user.click(toggle);
 
     await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
@@ -480,7 +480,7 @@ describe('ToolSettingsPage', () => {
     const qualitySelect = screen.getByRole('combobox');
     expect(qualitySelect).not.toBeDisabled();
 
-    // Check the "Let AI decide quality" checkbox
+    // Switch on "Let AI decide quality"
     const letAiCheckbox = screen.getByLabelText('Let AI decide quality');
     await user.click(letAiCheckbox);
 

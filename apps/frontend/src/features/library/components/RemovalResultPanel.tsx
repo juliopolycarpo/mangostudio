@@ -7,10 +7,14 @@
  */
 
 import type { PropagationUndo, RemovalApply } from '@mangostudio/shared/library';
-import { CircleCheck, CircleSlash, CircleX, TriangleAlert, Undo2 } from 'lucide-react';
+import { Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { InlineNote } from './InlineNote';
+import { ResultRow, ResultSection } from './ResultList';
 
 interface RemovalResultPanelProps {
   readonly result: RemovalApply | undefined;
@@ -47,102 +51,70 @@ export function RemovalResultPanel({
   return (
     <div className="space-y-4" data-testid="removal-result-panel" data-partial={result.partial}>
       {result.partial && (
-        <p
-          className="flex items-start gap-2 rounded-lg border border-danger bg-danger-subtle p-3 text-danger text-xs"
-          data-testid="partial-warning"
-        >
-          <TriangleAlert size={14} className="mt-0.5 shrink-0" />
-          {l.removal.resultPartial}
-        </p>
+        <Callout tone="danger" title={l.removal.resultPartial} data-testid="partial-warning" />
       )}
       {rolledBack && (
-        <p className="text-fg-muted text-xs" data-testid="rolled-back">
-          {l.removal.resultRolledBack}
-        </p>
+        <Callout tone="info" title={l.removal.resultRolledBack} data-testid="rolled-back" />
       )}
 
       {result.removed.length > 0 && (
-        <section className="space-y-1.5">
-          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-            {l.removal.resultRemovedHeading}
-          </h3>
-          <ul className="space-y-1">
-            {result.removed.map((removed) => (
-              <li
-                key={`${removed.resourceKey}:${removed.locationId}`}
-                className="flex items-start gap-2 text-xs"
-                data-testid="removed-row"
-              >
-                <CircleCheck size={12} className="mt-0.5 shrink-0 text-accent-fg" />
-                <span className="min-w-0">
-                  <span className="text-fg">{removed.resourceKey}</span>
-                  <span className="block break-all font-mono text-[11px] text-fg-muted">
-                    {removed.path}
-                  </span>
-                  {removed.lastCopy && (
-                    <span className="block text-[11px] text-danger" data-testid="last-copy-removed">
-                      {l.removal.resultLastCopy}
-                    </span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <ResultSection heading={l.removal.resultRemovedHeading}>
+          {result.removed.map((removed) => (
+            <ResultRow
+              key={`${removed.resourceKey}:${removed.locationId}`}
+              outcome="done"
+              title={removed.resourceKey}
+              testId="removed-row"
+            >
+              <span className="block break-all font-mono text-fg-muted text-micro">
+                {removed.path}
+              </span>
+              {removed.lastCopy && (
+                <InlineNote tone="danger" data-testid="last-copy-removed">
+                  {l.removal.resultLastCopy}
+                </InlineNote>
+              )}
+            </ResultRow>
+          ))}
+        </ResultSection>
       )}
 
       {result.failed.length > 0 && (
-        <section className="space-y-1.5">
-          <h3 className="font-semibold text-[10px] text-danger uppercase tracking-widest">
-            {l.result.failedHeading}
-          </h3>
-          <ul className="space-y-1">
-            {result.failed.map((failure) => (
-              <li
-                key={`${failure.resourceKey}:${failure.locationId}`}
-                className="flex items-start gap-2 text-xs"
-                data-testid="failed-row"
-              >
-                <CircleX size={12} className="mt-0.5 shrink-0 text-danger" />
-                <span className="min-w-0">
-                  <span className="text-fg">{failure.resourceKey}</span>
-                  <span className="block text-[11px] text-fg-muted">
-                    {l.removalFailureReason[failure.reason]}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <ResultSection heading={l.result.failedHeading}>
+          {result.failed.map((failure) => (
+            <ResultRow
+              key={`${failure.resourceKey}:${failure.locationId}`}
+              outcome="failed"
+              title={failure.resourceKey}
+              testId="failed-row"
+            >
+              <span className="block text-fg-muted text-xs">
+                {l.removalFailureReason[failure.reason]}
+              </span>
+            </ResultRow>
+          ))}
+        </ResultSection>
       )}
 
       {unresolved.length > 0 && (
-        <section className="space-y-1.5">
-          <h3 className="font-semibold text-[10px] text-fg-muted uppercase tracking-widest">
-            {l.removal.resultKeptHeading}
-          </h3>
-          <ul className="space-y-1">
-            {unresolved.map((kept) => (
-              <li
-                key={`${kept.resourceKey}:${kept.locationId}`}
-                className="flex items-start gap-2 text-xs"
-                data-testid="kept-row"
-              >
-                <CircleSlash size={12} className="mt-0.5 shrink-0 text-fg-muted" />
-                <span className="min-w-0">
-                  <span className="text-fg">{kept.resourceKey}</span>
-                  <span className="block text-[11px] text-fg-muted">
-                    {l.removalKeptReason[kept.reason]}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <ResultSection heading={l.removal.resultKeptHeading}>
+          {unresolved.map((kept) => (
+            <ResultRow
+              key={`${kept.resourceKey}:${kept.locationId}`}
+              outcome="kept"
+              title={kept.resourceKey}
+              testId="kept-row"
+            >
+              <span className="block text-fg-muted text-xs">
+                {l.removalKeptReason[kept.reason]}
+              </span>
+            </ResultRow>
+          ))}
+        </ResultSection>
       )}
 
       {result.removed.length === 0 && result.failed.length === 0 && (
-        <p className="text-fg-muted text-xs">{l.removal.resultNone}</p>
+        <p className="text-fg-muted text-sm">{l.removal.resultNone}</p>
       )}
 
       {/*
@@ -158,28 +130,28 @@ export function RemovalResultPanel({
         return (
           <div
             key={`${handle.environmentId}:${handle.backupId}`}
-            className="space-y-2 rounded-lg border border-stroke bg-surface p-3"
+            className="space-y-3 rounded-md border border-stroke bg-surface p-4"
             data-testid="removal-backup-handle"
             data-environment-id={handle.environmentId}
           >
-            <p className="break-all font-mono text-[11px] text-fg-muted">
+            <p className="break-all font-mono text-fg-muted text-micro">
               {environmentName(handle.environmentId)} ·{' '}
               {formatMessage(l.result.backupId, { id: handle.backupId })}
             </p>
             {handleUndoResult ? (
-              <div className="space-y-1" data-testid="removal-undo-result">
-                <p className="text-fg text-xs">
+              <div className="space-y-2" data-testid="removal-undo-result">
+                <p className="text-fg text-sm">
                   {formatMessage(l.result.undone, {
                     restored: String(handleUndoResult.restored.length),
                     removed: String(handleUndoResult.removed.length),
                   })}
                 </p>
                 {handleUndoResult.skipped.length > 0 && (
-                  <p className="text-[11px] text-info">
+                  <InlineNote tone="info">
                     {formatMessage(l.result.undoSkipped, {
                       count: String(handleUndoResult.skipped.length),
                     })}
-                  </p>
+                  </InlineNote>
                 )}
               </div>
             ) : (
@@ -190,12 +162,12 @@ export function RemovalResultPanel({
                 loading={handleIsUndoing}
                 data-testid="removal-undo-button"
               >
-                <Undo2 size={13} />
+                <Undo2 size={ICON_MD} />
                 {handleIsUndoing ? l.result.undoing : l.removal.restore}
               </Button>
             )}
             {handleUndoError !== null && handleUndoError !== undefined && (
-              <p className="text-danger text-[11px]">{l.result.undoError}</p>
+              <InlineNote tone="danger">{l.result.undoError}</InlineNote>
             )}
           </div>
         );

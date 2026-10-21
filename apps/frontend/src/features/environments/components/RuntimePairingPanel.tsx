@@ -10,8 +10,11 @@
 import type { RuntimePairingStatus } from '@mangostudio/shared/environments';
 import { KeyRound, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   useIssueRuntimePairingMutation,
@@ -20,6 +23,7 @@ import {
   useRuntimePairingQuery,
 } from '../queries';
 import { CopyLine } from './CopyLine';
+import { CommandGroup, EntityPanel } from './EntityPanel';
 
 interface RuntimePairingPanelProps {
   readonly environmentId: string;
@@ -58,26 +62,16 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
   };
 
   return (
-    <section
-      className="space-y-3 rounded-xl border border-stroke bg-control p-3"
-      data-testid="runtime-pairing-panel"
+    <EntityPanel
+      testId="runtime-pairing-panel"
+      icon={<KeyRound size={ICON_MD} />}
+      title={labels.title}
+      description={labels.description}
     >
-      <div className="flex items-start gap-2">
-        <KeyRound size={14} className="mt-0.5 shrink-0 text-accent-fg" />
-        <div className="min-w-0 space-y-0.5">
-          <p className="font-semibold text-fg text-xs">{labels.title}</p>
-          <p className="text-[11px] text-fg-muted">{labels.description}</p>
-        </div>
-      </div>
-
-      {status?.endpoint ? null : (
-        <p className="rounded-lg border border-warning bg-warning-subtle px-2.5 py-2 text-[11px] text-fg-muted">
-          {labels.endpointUnset}
-        </p>
-      )}
+      {status?.endpoint ? null : <Callout tone="warning">{labels.endpointUnset}</Callout>}
 
       {status?.token ? (
-        <p className="text-[11px] text-fg-muted">
+        <p className="text-xs text-fg-muted">
           {status.token.lastSeenAt
             ? formatMessage(labels.lastSeen, {
                 when: new Date(status.token.lastSeenAt).toLocaleString(),
@@ -85,7 +79,7 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
             : labels.neverSeen}
         </p>
       ) : (
-        <p className="text-[11px] text-fg-muted">{labels.noToken}</p>
+        <p className="text-xs text-fg-muted">{labels.noToken}</p>
       )}
 
       {issuedToken ? (
@@ -97,34 +91,30 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
       ) : null}
 
       {error ? (
-        <p className="text-[11px] text-danger" role="alert">
+        <Callout tone="danger" role="alert">
           {error}
-        </p>
+        </Callout>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => void runIssue()}
-          disabled={busy}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent-subtle px-2.5 font-semibold text-accent-fg text-xs transition-colors hover:bg-accent-hover disabled:opacity-45"
-        >
-          <RefreshCw size={13} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="secondary" size="sm" onClick={() => void runIssue()} disabled={busy}>
+          <RefreshCw size={ICON_MD} />
           {status?.token ? labels.rotate : labels.issue}
-        </button>
+        </Button>
         {status?.token ? (
-          <button
-            type="button"
+          <Button
+            variant="subtle"
+            size="sm"
             onClick={() => void runRevoke()}
             disabled={busy}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-danger text-xs hover:bg-danger-subtle hover:text-danger disabled:opacity-45"
+            className="text-danger enabled:hover:bg-danger-subtle"
           >
-            <Trash2 size={13} />
+            <Trash2 size={ICON_MD} />
             {labels.revoke}
-          </button>
+          </Button>
         ) : null}
       </div>
-    </section>
+    </EntityPanel>
   );
 }
 
@@ -162,17 +152,16 @@ function SetupSteps({
   const powershell = `$env:MANGOSTUDIO_RUNTIME_TOKEN='${token}'; mangostudio-runtime connect --hub ${target}`;
 
   return (
-    <div className="space-y-2 rounded-lg border border-accent bg-accent-subtle p-2.5">
-      <p className="font-semibold text-[11px] text-fg">{labels.tokenIssued}</p>
-      <p className="text-[11px] text-fg-muted">{labels.tokenOnce}</p>
+    <CommandGroup title={labels.tokenIssued}>
+      <Callout tone="warning">{labels.tokenOnce}</Callout>
       <CopyLine label={labels.stepConnect} value={posix} />
       <CopyLine label={labels.stepConnectPowerShell} value={powershell} />
       {serviceInstall ? (
         <>
           <CopyLine label={labels.stepService} value={serviceInstall} />
-          <p className="text-[11px] text-fg-muted">{labels.serviceHint}</p>
+          <p className="text-xs text-fg-muted">{labels.serviceHint}</p>
         </>
       ) : null}
-    </div>
+    </CommandGroup>
   );
 }

@@ -1,5 +1,6 @@
 import { Image } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_SM } from '@/lib/icon-sizes';
 
 /**
  * "Use the image tool for this turn." A hint to the model rather than a mode
@@ -25,7 +26,7 @@ export function ImageIntentToggle({
       title={t.chat.input.createImagesHint}
       className="terminal-chip composer-tool-chip"
     >
-      <Image size={12} className="shrink-0" />
+      <Image size={ICON_SM} className="shrink-0" />
       <span className="hidden sm:inline">{t.chat.input.createImages}</span>
     </button>
   );

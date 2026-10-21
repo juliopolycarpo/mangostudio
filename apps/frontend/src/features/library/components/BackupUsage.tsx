@@ -17,6 +17,7 @@ import { Link } from '@tanstack/react-router';
 import { ArrowRight } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { formatBytes } from '../format';
 import { backupUsageQueryOptions } from '../queries';
 
@@ -32,7 +33,7 @@ export function BackupUsage() {
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="backup-usage">
-      <p className="text-[11px] text-fg-muted">
+      <p className="text-fg-muted text-xs">
         {formatMessage(l.backups.usage, {
           count: String(usage.setCount),
           size: formatBytes(usage.sizeBytes),
@@ -44,11 +45,11 @@ export function BackupUsage() {
       </p>
       <Link
         to="/environments/library/backups"
-        className="inline-flex items-center gap-1 text-[11px] text-accent-fg hover:underline"
+        className="inline-flex items-center gap-1 text-accent-fg text-xs hover:underline"
         data-testid="manage-backups"
       >
         {l.backups.manage}
-        <ArrowRight size={11} />
+        <ArrowRight size={ICON_SM} aria-hidden="true" />
       </Link>
     </div>
   );

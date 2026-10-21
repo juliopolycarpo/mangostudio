@@ -1,6 +1,6 @@
 import { normalizeApiErrorBody } from '@mangostudio/shared/errors';
 import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
 
 /**
  * Neutral, non-localized message used when a failed request carries no server
@@ -10,6 +10,22 @@ import { twMerge } from 'tailwind-merge';
  * the two strings together.
  */
 export const DEFAULT_API_ERROR_FALLBACK = 'An unknown error occurred';
+
+/**
+ * `tailwind-merge` only knows Tailwind's own scales. The design system names its
+ * type sizes and elevations differently (`text-title`, `shadow-popover`), and an
+ * unknown name is read as a colour — so `cn('text-title', 'text-danger')` would
+ * drop the size, and `cn('text-sm', 'text-title')` would keep both and leave the
+ * stylesheet order to pick the winner.
+ */
+const twMerge = extendTailwindMerge({
+  extend: {
+    theme: {
+      text: ['micro', 'title', 'headline'],
+      shadow: ['popover', 'dialog'],
+    },
+  },
+});
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

@@ -102,11 +102,11 @@ export function EdgeResizeHandle({
         onBlur={endKeyboardResize}
         // `h-auto` beats the Tailwind preflight `hr { height: 0 }`, which would otherwise
         // override the `inset-y-0` stretch and leave a 0px-tall, unhittable handle.
-        className={`peer absolute inset-y-0 z-10 m-0 h-auto w-2 cursor-col-resize touch-none border-0 bg-transparent transition-colors hover:bg-accent-hover focus-visible:bg-accent-subtle focus-visible:outline-none ${positionClass}`}
+        className={`peer absolute inset-y-0 z-10 m-0 h-auto w-2 cursor-col-resize touch-none border-0 bg-transparent focus-visible:outline-none ${positionClass}`}
       />
       <span
         aria-hidden="true"
-        className={`pointer-events-none absolute top-1/2 z-10 h-12 w-1 -translate-y-1/2 rounded-full bg-stroke transition-colors peer-hover:bg-accent-hover peer-focus-visible:bg-accent ${positionClass}`}
+        className={`pointer-events-none absolute top-1/2 z-10 h-12 w-1 -translate-y-1/2 rounded-xs bg-stroke transition-colors peer-hover:bg-stroke-strong peer-focus-visible:bg-focus ${positionClass}`}
       />
     </>
   );

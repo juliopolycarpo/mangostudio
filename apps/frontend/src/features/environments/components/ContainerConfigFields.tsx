@@ -11,15 +11,19 @@ import type { ContainerDetection, ContainerEngine } from '@mangostudio/shared/en
 import { CONTAINER_MAX_MOUNTS } from '@mangostudio/shared/environments';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import {
   type ContainerFormError,
   type ContainerFormFields,
   type ContainerMountIssue,
   emptyContainerMount,
 } from '../container-form';
+import { choiceClass } from './choice-class';
 
 const ENGINES: readonly ContainerEngine[] = ['docker', 'podman'];
 
@@ -74,11 +78,11 @@ export function ContainerConfigFields({
           error={form.image.trim() && errorFor('image') ? labels.imageInvalid : undefined}
           onChange={(event) => onChange({ image: event.target.value })}
         />
-        <p className="text-[11px] text-fg-muted">{labels.imageHint}</p>
+        <p className="text-xs text-fg-muted">{labels.imageHint}</p>
       </div>
 
       <div className="space-y-1">
-        <p className="font-medium text-fg-muted text-xs">{labels.engineLabel}</p>
+        <p className="text-sm font-medium text-fg">{labels.engineLabel}</p>
         <div className="flex gap-2">
           {ENGINES.map((engine) => {
             const status = detection?.engines.find((entry) => entry.engine === engine);
@@ -89,14 +93,10 @@ export function ContainerConfigFields({
                 type="button"
                 aria-pressed={form.engine === engine}
                 onClick={() => onChange({ engine })}
-                className={`flex-1 rounded-xl border px-3 py-2 text-left text-xs transition-colors ${
-                  form.engine === engine
-                    ? 'border-accent bg-accent-subtle text-fg'
-                    : 'border-stroke text-fg-muted hover:bg-fill-hover'
-                }`}
+                className={cn('flex-1', choiceClass(form.engine === engine))}
               >
-                <span className="font-semibold">{labels.engine[engine]}</span>
-                <span className="mt-0.5 block text-[10px] text-fg-muted">
+                <span>{labels.engine[engine]}</span>
+                <span className="mt-0.5 block text-xs font-normal text-fg-muted">
                   {status?.available
                     ? (status.version ?? labels.engineReady)
                     : unavailable
@@ -109,16 +109,15 @@ export function ContainerConfigFields({
         </div>
       </div>
 
-      <label className="flex items-start gap-2 text-xs text-fg-muted">
-        <input
-          type="checkbox"
+      <label className="flex cursor-pointer items-start gap-2 text-sm">
+        <Checkbox
           className="mt-0.5"
           checked={!form.network}
           onChange={(event) => onChange({ network: !event.target.checked })}
         />
         <span>
           <span className="font-medium text-fg">{labels.networkOffLabel}</span>
-          <span className="mt-0.5 block text-[11px] text-fg-muted">{labels.networkOffHint}</span>
+          <span className="mt-0.5 block text-xs text-fg-muted">{labels.networkOffHint}</span>
         </span>
       </label>
 
@@ -142,22 +141,22 @@ export function ContainerConfigFields({
           onChange={(event) => onChange({ memoryMib: event.target.value })}
         />
       </div>
-      <p className="text-[11px] text-fg-muted">{labels.limitsHint}</p>
+      <p className="text-xs text-fg-muted">{labels.limitsHint}</p>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <p className="font-medium text-fg-muted text-xs">{labels.mountsLabel}</p>
+          <p className="text-sm font-medium text-fg">{labels.mountsLabel}</p>
           <Button
             variant="secondary"
-            className="h-7 gap-1 px-2 text-[11px]"
+            size="sm"
             disabled={form.mounts.length >= CONTAINER_MAX_MOUNTS}
             onClick={() => onChange({ mounts: [...form.mounts, emptyContainerMount()] })}
           >
-            <Plus size={12} />
+            <Plus size={ICON_MD} />
             {labels.mountAdd}
           </Button>
         </div>
-        <p className="text-[11px] text-fg-muted">{labels.mountsHint}</p>
+        <p className="text-xs text-fg-muted">{labels.mountsHint}</p>
 
         {form.mounts.map((mount, index) => (
           <div
@@ -165,7 +164,7 @@ export function ContainerConfigFields({
             // index is the only stable identity a row has here.
             // biome-ignore lint/suspicious/noArrayIndexKey: positional rows with no id of their own
             key={index}
-            className="grid items-end gap-2 rounded-xl border border-stroke p-2 sm:grid-cols-[1fr_1fr_auto]"
+            className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]"
           >
             <Input
               id={`${idPrefix}-mount-host-${index}`}
@@ -179,29 +178,30 @@ export function ContainerConfigFields({
               value={mount.containerPath}
               onChange={(event) => setMount(index, { containerPath: event.target.value })}
             />
-            <div className="flex items-center gap-2 pb-2">
-              <label className="flex items-center gap-1 text-[11px] text-fg-muted">
-                <input
-                  type="checkbox"
+            <div className="flex items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-fg">
+                <Checkbox
                   checked={mount.readonly}
                   onChange={(event) => setMount(index, { readonly: event.target.checked })}
                 />
                 {labels.mountReadonly}
               </label>
-              <button
+              <Button
                 type="button"
+                variant="subtle"
+                size="icon"
                 aria-label={labels.mountRemove}
-                className="rounded-lg p-1 text-fg-muted hover:bg-fill-hover"
+                className="text-fg-muted"
                 onClick={() => onChange({ mounts: form.mounts.filter((_row, at) => at !== index) })}
               >
-                <X size={14} />
-              </button>
+                <X size={ICON_MD} />
+              </Button>
             </div>
           </div>
         ))}
 
         {mountError ? (
-          <p className="text-[11px] text-danger" role="alert">
+          <p className="text-xs text-danger" role="alert">
             {mountError.refusal
               ? formatMessage(
                   labels.mountRefusal[mountError.refusal.code],

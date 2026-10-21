@@ -15,6 +15,7 @@
 
 import type { RuntimeHealth } from '@mangostudio/shared/environments';
 import { Link } from '@tanstack/react-router';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { healthLabel, healthRollup } from '@/features/environments/format';
 import {
@@ -22,13 +23,14 @@ import {
   useRuntimeStatuses,
 } from '@/features/environments/hooks/use-runtime-status';
 import { useI18n } from '@/hooks/use-i18n';
+import { CARD_LINK_CLASS } from './card-link';
 import { HubSkeletonLines } from './HubSkeletonLines';
 
 /** Worst first: the reason to open this card is at the top of the list. */
 const HEALTH_ORDER: readonly RuntimeHealth[] = ['error', 'missing', 'warn', 'ok'];
 
 const COUNT_STYLES: Record<RuntimeHealth, string> = {
-  ok: 'text-accent-fg',
+  ok: 'text-success',
   warn: 'text-warning',
   missing: 'text-fg-muted',
   error: 'text-danger',
@@ -52,10 +54,7 @@ export function ToolchainHealthCard() {
       label={labels.label}
       tone={cardTone(counts.error > 0, needsAttention > 0)}
       action={
-        <Link
-          to="/environments/health"
-          className="micro-label text-accent-fg transition-colors hover:text-accent-fg"
-        >
+        <Link to="/environments/health" className={CARD_LINK_CLASS}>
           {labels.open}
         </Link>
       }
@@ -69,8 +68,12 @@ export function ToolchainHealthCard() {
           <ul className="grid grid-cols-4 gap-2" data-testid="home-health-rollup">
             {HEALTH_ORDER.map((health) => (
               <li key={health} className="min-w-0 space-y-0.5" data-health={health}>
-                <p className={`text-xl font-bold ${COUNT_STYLES[health]}`}>{counts[health]}</p>
-                <p className="micro-label truncate text-fg-muted">{healthLabel(t, health)}</p>
+                <p className={`text-title font-semibold ${COUNT_STYLES[health]}`}>
+                  {counts[health]}
+                </p>
+                <MicroLabel as="p" className="truncate">
+                  {healthLabel(t, health)}
+                </MicroLabel>
               </li>
             ))}
           </ul>

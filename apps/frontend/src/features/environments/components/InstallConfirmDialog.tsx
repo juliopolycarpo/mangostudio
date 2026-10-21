@@ -15,11 +15,14 @@ import { renderShellCommand } from '@mangostudio/shared/environments';
 import { Download, FolderPen, Globe, TerminalSquare, X } from 'lucide-react';
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { chainStepLabel, formatBytes } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import type { InstallChainStep } from '../install-chain';
+import { DialogShell } from './DialogShell';
 
 interface InstallConfirmDialogProps {
   preparation: InstallPreparation;
@@ -74,62 +77,46 @@ export function InstallConfirmDialog({
       : s.confirmDescription;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-3 sm:p-6">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="install-confirm-title"
-        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-stroke bg-surface shadow-2xl"
-      >
-        <header className="flex items-start justify-between gap-4 border-b border-stroke px-5 py-4 sm:px-6">
-          <div className="min-w-0 space-y-1">
-            <h2 id="install-confirm-title" className="text-xl font-bold text-fg">
-              {title}
-            </h2>
-            <p className="text-sm text-fg-muted">{description}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-xl p-2 text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
-            aria-label={s.cancel}
-          >
-            <X size={18} />
-          </button>
-        </header>
-
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4 sm:px-6">
-          {recipes.map((recipe, index) => (
-            <div
-              key={recipe.id}
-              className={isChain ? 'space-y-5 rounded-2xl border border-stroke p-4' : 'space-y-5'}
-              data-testid="install-step"
-            >
-              {isChain && (
-                <p className="text-[10px] font-bold uppercase tracking-widest text-fg-muted">
-                  {chainStepLabel(
-                    t,
-                    index,
-                    recipes.length,
-                    resolve('runtime', recipe.runtimeId).name
-                  )}
-                </p>
-              )}
-              <RecipeDetails recipe={recipe} />
-            </div>
-          ))}
-        </div>
-
-        <footer className="flex justify-end gap-2 border-t border-stroke px-5 py-4 sm:px-6">
-          <Button variant="subtle" onClick={onCancel}>
+    <DialogShell
+      size="lg"
+      titleId="install-confirm-title"
+      title={title}
+      description={description}
+      headerAction={
+        <Button variant="subtle" size="icon" onClick={onCancel} aria-label={s.cancel}>
+          <X size={ICON_MD} />
+        </Button>
+      }
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             {s.cancel}
           </Button>
-          <Button onClick={onConfirm} loading={isStarting}>
+          <Button
+            variant={isUninstall ? 'danger' : 'primary'}
+            onClick={onConfirm}
+            loading={isStarting}
+          >
             {isUninstall ? s.runUninstall : s.run}
           </Button>
-        </footer>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {recipes.map((recipe, index) => (
+        <div
+          key={recipe.id}
+          className={isChain ? 'space-y-5 rounded-md border border-stroke p-4' : 'space-y-5'}
+          data-testid="install-step"
+        >
+          {isChain && (
+            <MicroLabel as="p">
+              {chainStepLabel(t, index, recipes.length, resolve('runtime', recipe.runtimeId).name)}
+            </MicroLabel>
+          )}
+          <RecipeDetails recipe={recipe} />
+        </div>
+      ))}
+    </DialogShell>
   );
 }
 
@@ -140,9 +127,9 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
   return (
     <>
       <section className="space-y-2">
-        <SectionLabel icon={<TerminalSquare size={14} />} label={s.commandLabel} />
+        <SectionLabel icon={<TerminalSquare size={ICON_SM} />} label={s.commandLabel} />
         <code
-          className="block break-all rounded-xl bg-fill-selected px-3 py-2 font-mono text-xs text-fg"
+          className="block break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg"
           data-testid="install-argv"
         >
           {/* Quoted the way the API quotes its copyable command: an
@@ -153,7 +140,7 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
 
       {recipe.writes.length > 0 && (
         <section className="space-y-2">
-          <SectionLabel icon={<FolderPen size={14} />} label={s.willWrite} />
+          <SectionLabel icon={<FolderPen size={ICON_SM} />} label={s.willWrite} />
           <ul className="space-y-1">
             {recipe.writes.map((target) => (
               <li key={target} className="break-all font-mono text-xs text-fg-muted">
@@ -166,14 +153,14 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
 
       {recipe.networkAccess && (
         <section className="flex items-center gap-2 text-sm text-fg-muted">
-          <Globe size={14} className="shrink-0 text-info" />
+          <Globe size={ICON_SM} className="shrink-0" />
           <span>{s.requiresNetwork}</span>
         </section>
       )}
 
       {recipe.download && (
         <section className="space-y-1.5">
-          <SectionLabel icon={<Download size={14} />} label={s.downloadLabel} />
+          <SectionLabel icon={<Download size={ICON_SM} />} label={s.downloadLabel} />
           <p className="break-all font-mono text-xs text-fg-muted">
             {formatMessage(s.downloadOrigin, { url: recipe.download.url })}
           </p>
@@ -190,7 +177,7 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
       {recipe.profileSetup && (
         <section className="space-y-2">
           <p className="text-sm text-fg-muted">{s.profileSetup}</p>
-          <code className="block whitespace-pre-wrap break-all rounded-xl bg-fill-selected px-3 py-2 font-mono text-xs text-fg">
+          <code className="block whitespace-pre-wrap break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg">
             {recipe.profileSetup.lines.join('\n')}
           </code>
           {recipe.profileSetup.present && (
@@ -208,9 +195,9 @@ function RecipeDetails({ recipe }: { recipe: InstallRecipePreview }) {
 
 function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
-    <div className="flex items-center gap-2 text-fg-muted">
+    <MicroLabel as="p" className="flex items-center gap-2">
       {icon}
-      <span className="text-[10px] font-bold uppercase tracking-widest">{label}</span>
-    </div>
+      {label}
+    </MicroLabel>
   );
 }

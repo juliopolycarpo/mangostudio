@@ -2,10 +2,16 @@ import type { AgentProfile, AgentRole } from '@mangostudio/shared/agents';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/shared/app-settings';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { Eye } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useId } from 'react';
+import { CheckboxRow } from '@/components/settings/CheckboxRow';
+import { SettingsField } from '@/components/settings/SettingsField';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Input } from '@/components/ui/Input';
+import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Select } from '@/components/ui/Select';
+import { Textarea } from '@/components/ui/Textarea';
+import { ICON_MD } from '@/lib/icon-sizes';
 import type {
   AgentEditorLabels,
   EditableAgentProfile,
@@ -41,10 +47,10 @@ export function AgentRawMarkdownSection({
   onPreview,
 }: AgentRawMarkdownSectionProps) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <AgentMarkdownEditor label={labels.rawMarkdown} markdown={rawMarkdown} onChange={onChange} />
       <Button type="button" variant="secondary" loading={isPreviewing} onClick={onPreview}>
-        <Eye size={16} />
+        <Eye size={ICON_MD} />
         {isPreviewing ? labels.previewing : labels.preview}
       </Button>
     </div>
@@ -72,6 +78,7 @@ export function AgentFriendlyEditor({
   isUserAgent,
   onDraftChange,
 }: AgentFriendlyEditorProps) {
+  const sourceId = useId();
   const eligibleSubagents = allAgents.filter(
     (candidate) =>
       candidate.id !== draft.id && (candidate.role === 'subagent' || candidate.role === 'both')
@@ -107,7 +114,15 @@ export function AgentFriendlyEditor({
         selectedSubagents={selectedSubagents}
         onDraftChange={onDraftChange}
       />
-      {isUserAgent && sourcePath && <AgentSourcePathField label={labels.path} value={sourcePath} />}
+      {isUserAgent && sourcePath && (
+        <Input
+          id={sourceId}
+          label={labels.path}
+          readOnly
+          value={sourcePath}
+          className="font-mono text-xs text-fg-muted"
+        />
+      )}
     </div>
   );
 }
@@ -120,35 +135,39 @@ interface AgentIdentitySectionProps {
 }
 
 function AgentIdentitySection({ draft, labels, isNew, onDraftChange }: AgentIdentitySectionProps) {
+  const id = useId();
   return (
     <AgentEditorSection title={labels.sectionIdentity}>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <TextField
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Input
+          id={`${id}-name`}
           label={labels.name}
           value={draft.name}
-          onChange={(name) => onDraftChange({ name })}
+          onChange={(event) => onDraftChange({ name: event.target.value })}
         />
         {isNew && (
-          <TextField
+          <Input
+            id={`${id}-slug`}
             label={labels.slug}
             value={draft.slug ?? ''}
-            onChange={(slug) => onDraftChange({ slug })}
+            onChange={(event) => onDraftChange({ slug: event.target.value })}
           />
         )}
-        <TextField
-          label={labels.description}
+        <Input
+          id={`${id}-description`}
+          label={labels.agentDescription}
           value={draft.description}
-          onChange={(description) => onDraftChange({ description })}
+          onChange={(event) => onDraftChange({ description: event.target.value })}
         />
-        <div className="space-y-2">
-          <span className="text-sm font-semibold text-fg">{labels.role}</span>
+        <SettingsField label={labels.role} htmlFor={`${id}-role`}>
           <Select
+            id={`${id}-role`}
             value={draft.role}
             onChange={(value) => onDraftChange({ role: value as AgentRole })}
             ariaLabel={labels.role}
             options={ROLE_OPTIONS.map((role) => ({ value: role, label: labels.roles[role] }))}
           />
-        </div>
+        </SettingsField>
       </div>
     </AgentEditorSection>
   );
@@ -167,26 +186,26 @@ function AgentBehaviorSection({
   modelOptions,
   onDraftChange,
 }: AgentBehaviorSectionProps) {
+  const id = useId();
   return (
     <AgentEditorSection title={labels.sectionBehavior}>
-      <label className="block space-y-2">
-        <span className="text-sm font-semibold text-fg">{labels.systemPrompt}</span>
-        <textarea
+      <SettingsField label={labels.systemPrompt} htmlFor={`${id}-prompt`}>
+        <Textarea
+          id={`${id}-prompt`}
           value={draft.systemPrompt}
           onChange={(event) => onDraftChange({ systemPrompt: event.target.value })}
           rows={6}
-          className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus resize-y"
         />
-      </label>
-      <div className="space-y-2">
-        <span className="text-sm font-semibold text-fg">{labels.model}</span>
+      </SettingsField>
+      <SettingsField label={labels.model} htmlFor={`${id}-model`}>
         <Select
+          id={`${id}-model`}
           value={draft.model ?? ''}
           onChange={(value) => onDraftChange({ model: value ? value : undefined })}
           ariaLabel={labels.model}
           options={[{ value: '', label: labels.modelDefaultOption }, ...modelOptions]}
         />
-      </div>
+      </SettingsField>
     </AgentEditorSection>
   );
 }
@@ -198,19 +217,18 @@ interface AgentReasoningSectionProps {
 }
 
 function AgentReasoningSection({ draft, labels, onDraftChange }: AgentReasoningSectionProps) {
+  const id = useId();
   return (
     <AgentEditorSection title={labels.sectionReasoning}>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <label className="flex items-center gap-2 rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg">
-          <Checkbox
-            checked={draft.thinkingEnabled ?? false}
-            onChange={(event) => onDraftChange({ thinkingEnabled: event.target.checked })}
-          />
-          {labels.thinking}
-        </label>
-        <div className="space-y-2">
-          <span className="text-sm font-semibold text-fg">{labels.reasoningEffort}</span>
+      <CheckboxOption
+        label={labels.thinking}
+        checked={draft.thinkingEnabled ?? false}
+        onChange={(thinkingEnabled) => onDraftChange({ thinkingEnabled })}
+      />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <SettingsField label={labels.reasoningEffort} htmlFor={`${id}-effort`}>
           <Select
+            id={`${id}-effort`}
             value={draft.reasoningEffort ?? ''}
             onChange={(value) =>
               onDraftChange({
@@ -228,11 +246,21 @@ function AgentReasoningSection({ draft, labels, onDraftChange }: AgentReasoningS
               })),
             ]}
           />
-        </div>
-        <NumberField
+        </SettingsField>
+        <Input
+          id={`${id}-iterations`}
+          type="number"
           label={labels.maxToolIterations}
+          min={MAX_TOOL_ITERATIONS_MIN}
+          max={MAX_TOOL_ITERATIONS_MAX}
           value={draft.maxToolIterations ?? ''}
-          onChange={(maxToolIterations) => onDraftChange({ maxToolIterations })}
+          onChange={(event) => {
+            const nextValue = Number(event.target.value);
+            onDraftChange({
+              maxToolIterations:
+                Number.isFinite(nextValue) && event.target.value ? nextValue : undefined,
+            });
+          }}
         />
       </div>
     </AgentEditorSection>
@@ -258,13 +286,11 @@ function AgentToolsSection({
 }: AgentToolsSectionProps) {
   return (
     <AgentEditorSection title={labels.sectionTools}>
-      <label className="flex items-center gap-2 rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg w-fit">
-        <Checkbox
-          checked={draft.toolsEnabled}
-          onChange={(event) => onDraftChange({ toolsEnabled: event.target.checked })}
-        />
-        {labels.toolsEnabled}
-      </label>
+      <CheckboxOption
+        label={labels.toolsEnabled}
+        checked={draft.toolsEnabled}
+        onChange={(toolsEnabled) => onDraftChange({ toolsEnabled })}
+      />
 
       <AgentToolPicker
         label={labels.toolAllowlist}
@@ -276,32 +302,44 @@ function AgentToolsSection({
       />
 
       <fieldset className="space-y-2" disabled={eligibleSubagents.length === 0}>
-        <legend className="text-sm font-semibold text-fg">{labels.subagents}</legend>
+        <legend className="text-sm font-medium text-fg">{labels.subagents}</legend>
         {eligibleSubagents.length === 0 ? (
           <p className="text-sm text-fg-muted">{labels.noSubagents}</p>
         ) : (
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             {eligibleSubagents.map((subagent) => (
-              <label
+              <CheckboxRow
                 key={subagent.id}
-                className="flex items-center gap-2 rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg"
-              >
-                <Checkbox
-                  checked={selectedSubagents.has(subagent.id)}
-                  onChange={(event) => {
-                    const subagentIds = event.target.checked
-                      ? [...draft.subagentIds, subagent.id]
-                      : draft.subagentIds.filter((id) => id !== subagent.id);
-                    onDraftChange({ subagentIds });
-                  }}
-                />
-                {subagent.name}
-              </label>
+                label={subagent.name}
+                checked={selectedSubagents.has(subagent.id)}
+                onChange={(checked) => {
+                  const subagentIds = checked
+                    ? [...draft.subagentIds, subagent.id]
+                    : draft.subagentIds.filter((id) => id !== subagent.id);
+                  onDraftChange({ subagentIds });
+                }}
+              />
             ))}
           </div>
         )}
       </fieldset>
     </AgentEditorSection>
+  );
+}
+
+interface CheckboxOptionProps {
+  readonly label: string;
+  readonly checked: boolean;
+  readonly onChange: (checked: boolean) => void;
+}
+
+/** A lone checkbox with its name to the right: an option of the form, submitted with Save. */
+function CheckboxOption({ label, checked, onChange }: CheckboxOptionProps) {
+  return (
+    <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-fg">
+      <Checkbox checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      {label}
+    </label>
   );
 }
 
@@ -313,72 +351,10 @@ interface AgentEditorSectionProps {
 function AgentEditorSection({ title, children }: AgentEditorSectionProps) {
   return (
     <section className="space-y-4">
-      <h3 className="text-xs uppercase tracking-widest font-bold text-fg-muted">{title}</h3>
+      <MicroLabel as="h4" className="block">
+        {title}
+      </MicroLabel>
       {children}
     </section>
-  );
-}
-
-interface AgentSourcePathFieldProps {
-  readonly label: string;
-  readonly value: string;
-}
-
-function AgentSourcePathField({ label, value }: AgentSourcePathFieldProps) {
-  return (
-    <label className="block space-y-2">
-      <span className="text-sm font-semibold text-fg">{label}</span>
-      <input
-        readOnly
-        value={value}
-        className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg-muted"
-      />
-    </label>
-  );
-}
-
-interface TextFieldProps {
-  readonly label: string;
-  readonly value: string;
-  readonly onChange: (value: string) => void;
-  readonly placeholder?: string;
-}
-
-function TextField({ label, value, onChange, placeholder }: TextFieldProps) {
-  return (
-    <label className="block space-y-2">
-      <span className="text-sm font-semibold text-fg">{label}</span>
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
-      />
-    </label>
-  );
-}
-
-interface NumberFieldProps {
-  readonly label: string;
-  readonly value: number | '';
-  readonly onChange: (value: number | undefined) => void;
-}
-
-function NumberField({ label, value, onChange }: NumberFieldProps) {
-  return (
-    <label className="block space-y-2">
-      <span className="text-sm font-semibold text-fg">{label}</span>
-      <input
-        type="number"
-        min={MAX_TOOL_ITERATIONS_MIN}
-        max={MAX_TOOL_ITERATIONS_MAX}
-        value={value}
-        onChange={(event) => {
-          const nextValue = Number(event.target.value);
-          onChange(Number.isFinite(nextValue) && event.target.value ? nextValue : undefined);
-        }}
-        className="w-full rounded-xl border border-stroke bg-control px-3 py-2 text-sm text-fg focus:border-focus focus:outline-none focus:ring-1 focus:ring-focus"
-      />
-    </label>
   );
 }

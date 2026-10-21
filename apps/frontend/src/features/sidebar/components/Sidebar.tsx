@@ -295,7 +295,7 @@ export function Sidebar({
         >
           {searching && visibleCount === 0 ? (
             <EmptyState
-              icon={<SearchX size={20} />}
+              icon={<SearchX size={ICON_LG} />}
               title={formatMessage(t.common.noResultsFor, { query: deferredQuery.trim() })}
               hint={t.sidebar.searchNoResultsHint}
             />
@@ -348,7 +348,7 @@ export function Sidebar({
                             onKeyDown={(e) => handleKeyDown(e, chat.id)}
                             onBlur={() => handleSaveEdit(chat.id)}
                             aria-label={t.chat.editTitle}
-                            className="h-6 min-w-0 flex-1 rounded-xs border border-focus bg-control px-1 text-sm text-fg outline-none"
+                            className={cn(FIELD_CLASS, 'h-7 min-w-0 flex-1 px-2')}
                           />
                         </div>
                       ) : (
@@ -396,7 +396,7 @@ export function Sidebar({
                             <button
                               type="button"
                               onClick={() => handleStartEdit(chat)}
-                              className="flex size-6 items-center justify-center rounded-xs transition-colors hover:bg-fill-hover hover:text-fg"
+                              className="flex size-7 items-center justify-center rounded-sm transition-colors hover:bg-fill-hover hover:text-fg"
                               title={t.chat.editTitle}
                             >
                               <Pencil size={ICON_SM} />
@@ -404,7 +404,7 @@ export function Sidebar({
                             <button
                               type="button"
                               onClick={() => handleDelete(chat.id)}
-                              className="flex size-6 items-center justify-center rounded-xs transition-colors hover:bg-danger-subtle hover:text-danger"
+                              className="flex size-7 items-center justify-center rounded-sm transition-colors hover:bg-danger-subtle hover:text-danger"
                               title={t.chat.deleteTitle}
                             >
                               <Trash2 size={ICON_SM} />
