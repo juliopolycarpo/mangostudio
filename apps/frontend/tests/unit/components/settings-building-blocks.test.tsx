@@ -259,6 +259,36 @@ describe('SettingsSliderRow', () => {
     expect(onChange).toHaveBeenLastCalledWith(80);
   });
 
+  it('keeps an emptied, partial or out-of-range number as a draft until blur clamps it', () => {
+    const onChange = jest.fn();
+    render(
+      <SettingsSliderRow
+        id="warning"
+        label="Warning threshold"
+        value={60}
+        min={50}
+        max={99}
+        onChange={onChange}
+        withNumberInput
+      />
+    );
+    const field = screen.getByRole('spinbutton', { name: 'Warning threshold' });
+
+    // Auto-save would persist each of these, so none of them is committed.
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.change(field, { target: { value: '7' } });
+    fireEvent.change(field, { target: { value: '999' } });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(field).toHaveValue(999);
+
+    fireEvent.blur(field);
+    expect(onChange).toHaveBeenLastCalledWith(99);
+
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
+    expect(onChange).toHaveBeenLastCalledWith(50);
+  });
+
   it('hands the track how far along the value sits, for the accent fill', () => {
     const { rerender } = render(
       <SettingsSliderRow

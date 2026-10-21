@@ -69,8 +69,8 @@ type DialogProps = DialogName & {
   readonly flush?: boolean;
   /**
    * Wraps the header, body and footer in a `<form>`, so the footer's submit
-   * button submits it. The handler is passed through untouched: it calls
-   * `preventDefault` itself.
+   * button submits it. The dialog calls `preventDefault` before the handler, so
+   * a submit (Enter in a field included) never navigates the document.
    */
   readonly onSubmit?: FormEventHandler<HTMLFormElement>;
   /** Escape and a click on the backdrop. Not called while `closeDisabled`. */
@@ -247,7 +247,13 @@ export function Dialog({
         )}
       >
         {onSubmit ? (
-          <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSubmit(event);
+            }}
+            className="flex min-h-0 flex-1 flex-col"
+          >
             {sections}
           </form>
         ) : (

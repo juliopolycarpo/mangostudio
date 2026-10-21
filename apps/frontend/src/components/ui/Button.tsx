@@ -82,6 +82,10 @@ export function buttonClassName(variant: ButtonVariant = 'primary', size: Button
  * `subtle-danger`, whose text also turns `danger` on hover, keyboard focus and press
  * (decision 22).
  *
+ * It is `type="button"` unless the caller says otherwise: a `Dialog` with
+ * `onSubmit` wraps its footer in a `<form>`, and a Cancel that forgot its type
+ * would submit it. A submit action passes `type="submit"`.
+ *
  * // Usage: <Button variant="secondary" size="sm">{t.common.cancel}</Button>
  */
 export function Button({
@@ -95,6 +99,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
+      type="button"
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cn(buttonClassName(variant, size), className)}

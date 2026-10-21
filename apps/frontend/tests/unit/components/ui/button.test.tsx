@@ -97,3 +97,19 @@ describe('Button disabled look', () => {
     expect(button).toHaveAttribute('aria-busy', 'true');
   });
 });
+
+describe('Button type', () => {
+  // A Dialog with onSubmit wraps its footer in a form: a Cancel without a type
+  // would submit it.
+  it('is a plain button unless the caller asks to submit', () => {
+    render(
+      <>
+        <Button>Cancel</Button>
+        <Button type="submit">Save</Button>
+      </>
+    );
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveAttribute('type', 'button');
+    expect(screen.getByRole('button', { name: 'Save' })).toHaveAttribute('type', 'submit');
+  });
+});

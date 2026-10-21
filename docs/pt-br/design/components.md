@@ -578,7 +578,9 @@ alinhadas à direita na largura natural, a discreta primeiro e a primária por �
   própria pessoa.
 - **`flush`** entrega o corpo a um layout com seus próprios painéis e regiões de scroll: sem
   padding, sem scroll, e um hairline abaixo do header.
-- **`onSubmit`** envolve o diálogo num `<form>`, para que o botão de submit do footer o envie.
+- **`onSubmit`** envolve o diálogo num `<form>`, para que o botão de submit do footer o envie. O
+  diálogo chama `preventDefault` antes, então Enter num campo nunca navega a página. `Button` é
+  `type="button"` por padrão; a ação de envio passa `type="submit"`.
 - **`closeDisabled`** faz Escape e o backdrop não fazerem nada, como faz um Cancel desabilitado,
   enquanto uma escrita está em andamento.
 - **Acessibilidade.** `role="dialog"`, `aria-modal`, nomeado pelo título e descrito pela
@@ -673,8 +675,9 @@ salvam conforme mudam, então o controle de liga/desliga delas é um switch, nã
 `SettingsSliderRow` é uma linha `stacked` cujo controle é um slider de intervalo: uma pílula
 `.range-field` com preenchimento `accent` sobre a parte percorrida, em volta de um thumb
 `.range-input`. `readout` é o valor em palavras na linha do nome, tabular para que os dígitos não
-tremam. `withNumberInput` adiciona um campo numérico `w-32` para entrada exata, que faz clamp no
-blur. Um intervalo com centenas de passos é um campo numérico simples numa linha `inline`, porque
+tremam. `withNumberInput` adiciona um campo numérico `w-32` para entrada exata. As settings salvam
+sozinhas, então uma tecla só grava um valor dentro do intervalo; um campo vazio, parcial ou fora do
+intervalo fica como rascunho até o blur, que faz clamp e grava. Um intervalo com centenas de passos é um campo numérico simples numa linha `inline`, porque
 ninguém consegue ajustá-lo arrastando.
 
 ### `SettingsField`

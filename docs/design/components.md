@@ -569,7 +569,9 @@ actions right-aligned at natural width, the quiet one first and the primary last
   one line.
 - **`flush`** hands the body to a layout with its own panes and scroll regions: no
   padding, no scroll, and a hairline under the header.
-- **`onSubmit`** wraps the dialog in a `<form>`, so the footer's submit button submits it.
+- **`onSubmit`** wraps the dialog in a `<form>`, so the footer's submit button submits it. The
+  dialog calls `preventDefault` first, so Enter in a field never navigates the page. `Button`
+  defaults to `type="button"`; the submit action passes `type="submit"`.
 - **`closeDisabled`** makes Escape and the backdrop do nothing, as a disabled Cancel does,
   while a write is in flight.
 - **Accessibility.** `role="dialog"`, `aria-modal`, named by the title and described by
@@ -665,7 +667,9 @@ save as they change, so their on/off control is a switch, not a checkbox.
 `SettingsSliderRow` is a `stacked` row whose control is a range slider: a `.range-field`
 pill with an `accent` fill over the travelled part, around a `.range-input` thumb. `readout`
 is the value in words on the name's line, tabular so the digits do not jitter.
-`withNumberInput` adds a `w-32` number field for exact entry, which clamps on blur. A range
+`withNumberInput` adds a `w-32` number field for exact entry. Settings auto-save, so a keystroke
+commits only a value inside the range; an emptied, partial or out-of-range entry stays a draft
+until blur clamps and commits it. A range
 with hundreds of steps is a plain number field in an `inline` row instead, because nobody
 can set it by dragging.
 

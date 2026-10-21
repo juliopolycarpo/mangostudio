@@ -114,6 +114,18 @@ describe('Dialog', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('textbox', { name: 'Name' }).closest('form')).not.toBeNull();
   });
+  it('owns preventDefault, so a handler that forgets it cannot navigate the document', async () => {
+    let defaultPrevented: boolean | undefined;
+    const onSubmit = jest.fn((event: FormEvent) => {
+      defaultPrevented = event.defaultPrevented;
+    });
+    renderDialog({ onSubmit, footer: <button type="submit">Save</button> });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(defaultPrevented).toBe(true);
+  });
 });
 
 describe('Dialog keyboard contract', () => {

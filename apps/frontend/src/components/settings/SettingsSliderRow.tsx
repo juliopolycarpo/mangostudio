@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { type CSSProperties, type ReactNode, useState } from 'react';
 import { Input } from '@/components/ui/Input';
 import { SettingsRow } from './SettingsRow';
 
@@ -18,7 +18,11 @@ interface SettingsSliderRowProps {
   readonly step?: number;
   readonly onChange: (value: number) => void;
   readonly disabled?: boolean;
-  /** Adds a number field beside the track for exact entry. Committed again on blur, which clamps what was typed. */
+  /**
+   * Adds a number field beside the track for exact entry. A keystroke commits
+   * only a value inside the range; anything else (empty, `5` on the way to `75`)
+   * stays a draft in the field until blur, which clamps it and commits.
+   */
   readonly withNumberInput?: boolean;
 }
 
@@ -89,20 +93,59 @@ export function SettingsSliderRow({
           />
         </div>
         {withNumberInput ? (
-          <Input
-            type="number"
+          <NumberField
+            label={label}
+            value={value}
             min={min}
             max={max}
             step={step}
-            value={value}
-            onChange={(event) => onChange(Number(event.target.value))}
-            onBlur={(event) => onChange(clamp(event.target.valueAsNumber, min, max))}
+            onChange={onChange}
             disabled={disabled}
-            aria-label={label}
-            className="w-32 text-center"
           />
         ) : null}
       </div>
     </SettingsRow>
+  );
+}
+
+interface NumberFieldProps {
+  readonly label: string;
+  readonly value: number;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
+  readonly onChange: (value: number) => void;
+  readonly disabled?: boolean;
+}
+
+/**
+ * The exact-entry twin of the track. Settings auto-save, so committing every
+ * keystroke would persist `0` for an emptied field or `5` while typing `75`; the
+ * text being typed lives in `draft` until it parses into the range or the field
+ * loses focus.
+ */
+function NumberField({ label, value, min, max, step, onChange, disabled }: NumberFieldProps) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <Input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft ?? value}
+      onChange={(event) => {
+        setDraft(event.target.value);
+        const typed = event.target.valueAsNumber;
+        if (!Number.isNaN(typed) && typed >= min && typed <= max) onChange(typed);
+      }}
+      onBlur={(event) => {
+        setDraft(null);
+        const next = clamp(event.target.valueAsNumber, min, max);
+        if (next !== value) onChange(next);
+      }}
+      disabled={disabled}
+      aria-label={label}
+      className="w-32 text-center"
+    />
   );
 }
