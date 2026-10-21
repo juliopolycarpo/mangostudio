@@ -126,7 +126,7 @@ async function startServer(): Promise<EncodingServer> {
   // frontend answers, and the fallback receives Elysia's accumulated headers.
   const app = new Elysia()
     .use(cors({ origin: () => true }))
-    .error(NotFound, ({ request: req, set }) => frontendNotFound(req, set));
+    .onError(NotFound, ({ request: req, set }) => frontendNotFound(req, set));
   app.get('/api/probe', () => ({ ok: true, padding: 'x'.repeat(2000) }));
   app.use(createUploadedFileRoutes(uploadsDir));
   registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');

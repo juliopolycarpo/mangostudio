@@ -262,7 +262,7 @@ function registerEmbeddedSpa(
     if (asset) return serveEmbeddedAsset(asset, request, set);
     return isSpaRoute(pathname) ? serveEmbeddedAsset(shell, request, set) : undefined;
   });
-  app.error(NotFound, ({ request, set }) => frontendNotFound(request, set));
+  app.onError(NotFound, ({ request, set }) => frontendNotFound(request, set));
 }
 
 /**
@@ -464,7 +464,7 @@ function registerSpa(app: App, frontendDir: string): void {
   };
   app.get('/', ({ request }) => serveIndex(request));
 
-  app.error(NotFound, ({ request }) => frontendNotFound(request));
+  app.onError(NotFound, ({ request }) => frontendNotFound(request));
 
   setFrontendFallback((request) => {
     if (request.method !== 'GET') return undefined;
@@ -505,5 +505,5 @@ function registerApiOnly(app: App): void {
     if (isApiOwnedPath(pathname)) return undefined;
     return new Response('Frontend not found. API is running.', { status: 404 });
   });
-  app.error(NotFound, ({ request }) => frontendNotFound(request));
+  app.onError(NotFound, ({ request }) => frontendNotFound(request));
 }
