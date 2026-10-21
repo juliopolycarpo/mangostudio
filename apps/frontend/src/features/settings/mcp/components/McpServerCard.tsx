@@ -1,16 +1,19 @@
 /**
- * Card for one MCP server: identity, transport chip, hosting environment,
- * last-known status badge, explicit test-connection action with inline result,
- * and expandable tools.
+ * Card for one MCP server: identity with its last-known status, transport and
+ * hosting environment as quiet metadata, the row actions (test, enable, edit,
+ * rename, delete) on the right, and expandable tools and resources. One line
+ * under the command says why the server is not working: the last test's answer,
+ * or until there is one the cause the server last reported.
  */
 
 import type { McpServer, McpServerStatus, TestMcpServerResponse } from '@mangostudio/shared/mcp';
-import { ChevronDown, ChevronRight, Pencil, Server, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pencil, RefreshCw, Server, Trash2 } from 'lucide-react';
 import { type ComponentProps, useState } from 'react';
 import { StatusNote } from '@/components/settings/StatusNote';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { Toggle } from '@/components/ui/Toggle';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { ToolIdentityMenu } from '@/features/environments/identity/ToolIdentityMenu';
@@ -29,14 +32,22 @@ interface McpServerCardProps {
   onDelete: (server: McpServer) => void;
 }
 
-const STATUS_VARIANT: Record<
-  McpServerStatus,
-  NonNullable<ComponentProps<typeof Badge>['variant']>
-> = {
-  connected: 'success',
-  connecting: 'neutral',
-  error: 'error',
-  disconnected: 'neutral',
+interface StatusPresentation {
+  readonly variant: NonNullable<ComponentProps<typeof Badge>['variant']>;
+  readonly tone: StatusDotTone;
+}
+
+/**
+ * Only the status badge wears a dot, so it never reads as the transport or
+ * environment badge beside it. `connecting` is `info` rather than `neutral` for
+ * the same reason, and it gets no pulse: the status is the last known state, not
+ * work in flight.
+ */
+const STATUS_PRESENTATION: Record<McpServerStatus, StatusPresentation> = {
+  connected: { variant: 'success', tone: 'success' },
+  connecting: { variant: 'info', tone: 'neutral' },
+  error: { variant: 'error', tone: 'error' },
+  disconnected: { variant: 'neutral', tone: 'neutral' },
 };
 
 export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) {
@@ -85,12 +96,23 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
           }
         : { ok: false, message: testResult.error ?? s.testFailed }
       : null;
+  // A fresh test answer replaces the stored cause, so the card never shows two
+  // lines. The stored cause is state rather than something the user just
+  // asked for, which is why it is not announced.
+  const note =
+    testOutcome ??
+    (server.status === 'error' && server.statusError
+      ? { ok: false, message: server.statusError }
+      : null);
+
+  const status = STATUS_PRESENTATION[server.status];
+  const expanded = toolsOpen || resourcesOpen;
 
   return (
     <Card className="space-y-3">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="space-y-1">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ToolAvatar
               subjectKey={identity.subjectKey}
               monogram={identity.monogram}
@@ -99,89 +121,100 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               size="sm"
             />
             <h3 className="text-sm font-semibold text-fg">{identity.name}</h3>
+            <Badge
+              variant={status.variant}
+              title={server.status === 'error' ? server.statusError : undefined}
+            >
+              <StatusDot tone={status.tone} />
+              {s.status[server.status]}
+            </Badge>
             <Badge>{s.transports[server.transport]}</Badge>
             <Badge title={`${s.environmentLabel}: ${environmentName}`}>
               <Server size={ICON_SM} aria-hidden="true" />
               {environmentName}
             </Badge>
-            <Badge
-              variant={STATUS_VARIANT[server.status]}
-              title={server.status === 'error' ? server.statusError : undefined}
-            >
-              {s.status[server.status]}
-            </Badge>
           </div>
-          <p className="break-all font-mono text-xs text-fg-muted">
+
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:flex-nowrap">
+            {/* First in the cluster: "Testing…" is wider than "Test", and growing
+                leftwards moves nothing else. */}
+            <Button
+              variant="subtle"
+              size="sm"
+              loading={testMutation.isPending}
+              onClick={handleTest}
+            >
+              {!testMutation.isPending && <RefreshCw size={ICON_SM} />}
+              {testMutation.isPending ? s.testingButton : s.testButton}
+            </Button>
+            <Toggle
+              id={`mcp-server-enabled-${server.id}`}
+              label={server.enabled ? s.enabledLabel : s.disabledLabel}
+              checked={server.enabled}
+              disabled={updateMutation.isPending}
+              onChange={(e) => handleToggleEnabled(e.target.checked)}
+            />
+            <Button
+              variant="subtle"
+              size="icon-sm"
+              aria-label={s.editButton}
+              onClick={() => onEdit(server)}
+            >
+              <Pencil size={ICON_MD} />
+            </Button>
+            <ToolIdentityMenu identity={identity} defaultName={server.name} size="icon-sm" />
+            <Button
+              variant="subtle-danger"
+              size="icon-sm"
+              aria-label={s.deleteServer}
+              onClick={() => onDelete(server)}
+            >
+              <Trash2 size={ICON_MD} />
+            </Button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+          <p className="min-w-0 flex-1 basis-48 break-all font-mono text-xs text-fg-muted">
             {server.transport === 'stdio'
               ? [server.command, ...server.args].filter(Boolean).join(' ')
               : server.url}
           </p>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2">
-          <Toggle
-            id={`mcp-server-enabled-${server.id}`}
-            label={server.enabled ? s.enabledLabel : s.disabledLabel}
-            checked={server.enabled}
-            disabled={updateMutation.isPending}
-            onChange={(e) => handleToggleEnabled(e.target.checked)}
-          />
-          <Button
-            variant="subtle"
-            size="icon"
-            className="size-7"
-            aria-label={s.editButton}
-            onClick={() => onEdit(server)}
-          >
-            <Pencil size={ICON_MD} />
-          </Button>
-          <ToolIdentityMenu identity={identity} defaultName={server.name} />
-          <Button
-            variant="subtle"
-            size="icon"
-            className="size-7 text-danger"
-            aria-label={s.deleteServer}
-            onClick={() => onDelete(server)}
-          >
-            <Trash2 size={ICON_MD} />
-          </Button>
+          <div className="flex shrink-0 gap-1">
+            <Button
+              variant="subtle"
+              size="sm"
+              aria-expanded={toolsOpen}
+              onClick={() => setToolsOpen((open) => !open)}
+            >
+              {toolsOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
+              {toolsOpen ? s.hideTools : s.showTools}
+            </Button>
+            <Button
+              variant="subtle"
+              size="sm"
+              aria-expanded={resourcesOpen}
+              onClick={() => setResourcesOpen((open) => !open)}
+            >
+              {resourcesOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
+              {resourcesOpen ? s.resources.hide : s.resources.show}
+            </Button>
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="secondary" size="sm" loading={testMutation.isPending} onClick={handleTest}>
-          {testMutation.isPending ? s.testingButton : s.testButton}
-        </Button>
-        {testOutcome && (
-          <StatusNote tone={testOutcome.ok ? 'success' : 'danger'} role="status">
-            {testOutcome.message}
-          </StatusNote>
-        )}
-      </div>
+      {note && (
+        <StatusNote tone={note.ok ? 'success' : 'danger'} role={testOutcome ? 'status' : undefined}>
+          {note.message}
+        </StatusNote>
+      )}
 
-      <div className="flex flex-wrap gap-1 border-t border-stroke pt-3">
-        <Button
-          variant="subtle"
-          size="sm"
-          aria-expanded={toolsOpen}
-          onClick={() => setToolsOpen((open) => !open)}
-        >
-          {toolsOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
-          {toolsOpen ? s.hideTools : s.showTools}
-        </Button>
-        <Button
-          variant="subtle"
-          size="sm"
-          aria-expanded={resourcesOpen}
-          onClick={() => setResourcesOpen((open) => !open)}
-        >
-          {resourcesOpen ? <ChevronDown size={ICON_SM} /> : <ChevronRight size={ICON_SM} />}
-          {resourcesOpen ? s.resources.hide : s.resources.show}
-        </Button>
-      </div>
-
-      {toolsOpen && <McpServerTools server={server} />}
-      {resourcesOpen && <McpServerResources server={server} />}
+      {expanded && (
+        <div className="space-y-3 border-t border-stroke pt-3">
+          {toolsOpen && <McpServerTools server={server} />}
+          {resourcesOpen && <McpServerResources server={server} />}
+        </div>
+      )}
     </Card>
   );
 }

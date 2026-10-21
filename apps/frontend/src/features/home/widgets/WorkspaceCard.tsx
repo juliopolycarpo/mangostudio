@@ -13,6 +13,7 @@ import { SectionCard } from '@/components/ui/SectionCard';
 import type { StatusDotTone } from '@/components/ui/StatusDot';
 import { useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
@@ -78,6 +79,7 @@ function cardTone(state: GitRepoState | undefined): StatusDotTone {
 
 function RepoLines({ status }: { status: Extract<GitRepoState, { state: 'repo' }>['status'] }) {
   const { t } = useI18n();
+  const plural = usePlural();
   const labels = t.home.workspace;
   const { branch } = status;
   const changed =
@@ -99,9 +101,7 @@ function RepoLines({ status }: { status: Extract<GitRepoState, { state: 'repo' }
         <span className={status.clean ? 'text-success' : 'text-warning'}>
           {status.clean
             ? labels.cleanTree
-            : formatMessage(labels.dirtyTree, {
-                count: String(changed),
-              })}
+            : plural({ one: labels.dirtyTreeOne, other: labels.dirtyTreeOther }, changed)}
         </span>
         {' · '}
         {syncLine(branch, labels, t.sidebar.git.sync)}

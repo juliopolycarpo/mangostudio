@@ -154,7 +154,7 @@ export function McpSettingsPage() {
 
       {serverToDelete && (
         <ConfirmDialog
-          title={s.deleteServer}
+          title={s.deleteTitle}
           description={s.deleteConfirm}
           entityName={serverToDelete.name}
           confirmLabel={s.deleteServer}

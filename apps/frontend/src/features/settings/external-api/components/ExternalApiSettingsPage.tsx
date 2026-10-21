@@ -17,12 +17,13 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_MD } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import {
   displayKeyName,
   formatApiKeyDate,
   formatKeyHint,
+  hasKeyHint,
   isKeyActive,
   isKeyExpired,
   scopeLabel,
@@ -51,6 +52,10 @@ export function ExternalApiSettingsPage({
   const [keyToRevoke, setKeyToRevoke] = useState<ApiKeySummary | null>(null);
 
   const activeCount = keys.filter((key) => isKeyActive(key)).length;
+  // Keys created before the hint carried random characters all store the bare
+  // prefix. A column of identical dashes says nothing, so it appears only once
+  // some key has a hint that tells it apart.
+  const showKeyColumn = keys.some((key) => hasKeyHint(key.start));
   const atCap = activeCount >= API_KEY_MAX_PER_USER;
   const atCapMessage = formatMessage(s.createDisabledAtCap, {
     max: String(API_KEY_MAX_PER_USER),
@@ -115,7 +120,7 @@ export function ExternalApiSettingsPage({
             {s.loadError}
           </Callout>
         ) : keys.length === 0 ? (
-          <EmptyState icon={<KeyRound size={24} />} title={s.empty} />
+          <EmptyState icon={<KeyRound size={ICON_LG} />} title={s.empty} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
@@ -127,9 +132,11 @@ export function ExternalApiSettingsPage({
                   <th scope="col" className="px-2 py-2 font-medium">
                     {s.columns.scope}
                   </th>
-                  <th scope="col" className="px-2 py-2 font-medium">
-                    {s.columns.key}
-                  </th>
+                  {showKeyColumn && (
+                    <th scope="col" className="px-2 py-2 font-medium">
+                      {s.columns.key}
+                    </th>
+                  )}
                   <th scope="col" className="px-2 py-2 font-medium">
                     {s.columns.created}
                   </th>
@@ -150,7 +157,7 @@ export function ExternalApiSettingsPage({
                   const inactive = !enabled || expired;
                   return (
                     <tr key={apiKey.id} className="border-b border-stroke last:border-b-0">
-                      <td className="px-2 py-3 align-top">
+                      <td className="px-2 py-3 align-baseline">
                         <div className="space-y-1">
                           <span
                             className={cn('font-medium', inactive ? 'text-fg-muted' : 'text-fg')}
@@ -166,19 +173,21 @@ export function ExternalApiSettingsPage({
                           )}
                         </div>
                       </td>
-                      <td className="px-2 py-3 align-top">
+                      <td className="px-2 py-3 align-baseline">
                         <Badge>{scopeLabel(t, apiKey.scope)}</Badge>
                       </td>
-                      <td className="px-2 py-3 align-top font-mono text-xs text-fg-muted">
-                        {formatKeyHint(apiKey.start)}
-                      </td>
-                      <td className="px-2 py-3 align-top text-fg-muted">
+                      {showKeyColumn && (
+                        <td className="whitespace-nowrap px-2 py-3 align-baseline font-mono text-xs text-fg-muted">
+                          {formatKeyHint(apiKey.start)}
+                        </td>
+                      )}
+                      <td className="px-2 py-3 align-baseline text-fg-muted">
                         {formatApiKeyDate(apiKey.createdAt, locale, '—')}
                       </td>
-                      <td className="px-2 py-3 align-top text-fg-muted">
+                      <td className="px-2 py-3 align-baseline text-fg-muted">
                         {formatApiKeyDate(apiKey.expiresAt, locale, s.neverExpires)}
                       </td>
-                      <td className="px-2 py-3 align-top text-fg-muted">
+                      <td className="px-2 py-3 align-baseline text-fg-muted">
                         {formatApiKeyDate(apiKey.lastUsedAt, locale, s.neverUsed)}
                       </td>
                       <td className="px-2 py-2 text-right align-top">

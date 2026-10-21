@@ -54,6 +54,17 @@ describe('Header auth navigation', () => {
     expect(screen.getByTestId('logout-button')).toBeInTheDocument();
   });
 
+  it('names the sign-out button in full and prints no clipped copy of it', () => {
+    renderHeader();
+    const button = screen.getByTestId('logout-button');
+    expect(button).toHaveAccessibleName('Sign out');
+    expect(button).toHaveAttribute('title', 'Sign out');
+    // The label is one node (shown from `sm`), with the glyph for narrower
+    // screens beside it, never a second, sliced copy of the translated string.
+    expect(button.textContent).toBe('Sign out');
+    expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  });
+
   it('navigates to /login only once Better Auth clears the session', async () => {
     const user = userEvent.setup();
     mockSignOut.mockResolvedValue(undefined);

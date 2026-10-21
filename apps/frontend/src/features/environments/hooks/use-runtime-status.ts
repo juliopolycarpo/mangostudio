@@ -152,7 +152,7 @@ export function useProbeAgentCli(environmentId?: string) {
 
 export type HealthScope = 'runtime' | 'version-manager' | 'agent';
 
-interface HealthEntry {
+export interface HealthEntry {
   readonly key: string;
   readonly scope: HealthScope;
   /** Runtime id, version manager id, or agent target id. */
@@ -196,7 +196,22 @@ export function useEnvironmentHealth(environmentId?: string, enabled = true) {
       });
     };
 
-    for (const runtime of runtimes.data ?? []) collect('runtime', runtime.id, runtime.findings);
+    // A version manager is probed twice — as a binary, then for what it manages —
+    // and a missing one raises the same finding both times. The manager's own entry
+    // names it more exactly, so the runtime's copy of the same finding is dropped
+    // rather than listing one absent tool as two problems.
+    const managerFindings = new Set(
+      (versionManagers.data ?? []).flatMap((manager) =>
+        manager.findings.map((finding) => `${manager.id}:${finding.code}`)
+      )
+    );
+    for (const runtime of runtimes.data ?? []) {
+      collect(
+        'runtime',
+        runtime.id,
+        runtime.findings.filter((finding) => !managerFindings.has(`${runtime.id}:${finding.code}`))
+      );
+    }
     for (const manager of versionManagers.data ?? []) {
       collect('version-manager', manager.id, manager.findings);
     }

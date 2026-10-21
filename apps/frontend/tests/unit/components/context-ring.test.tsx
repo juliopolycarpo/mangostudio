@@ -30,16 +30,38 @@ describe('ContextRing', () => {
     expect(circle?.getAttribute('class')).toContain('stroke-warning');
   });
 
-  it('uses stroke-accent-fg for other severities', () => {
-    const { container } = render(<ContextRing ratio={0.3} severity="info" />);
-    const circle = container.querySelector('svg circle:last-child');
-    expect(circle?.getAttribute('class')).toContain('stroke-accent-fg');
-  });
+  // Mango is for the primary action, the current item and focus; a chat at 30%
+  // of its window is none of them, and a mango arc sat a shade from `warning`.
+  it.each(['normal', 'info'] as const)(
+    'draws %s in the text colour, not the accent',
+    (severity) => {
+      const { container } = render(<ContextRing ratio={0.3} severity={severity} />);
+      const arc = container.querySelector('svg circle:last-child')?.getAttribute('class');
+      expect(arc).toBe('stroke-fg');
+    }
+  );
 
-  it('uses stroke-accent-fg for danger severity', () => {
+  it('uses stroke-danger for danger severity', () => {
     const { container } = render(<ContextRing ratio={0.3} severity="danger" />);
     const circle = container.querySelector('svg circle:last-child');
     expect(circle?.getAttribute('class')).toContain('stroke-danger');
+  });
+
+  // The composer prints the figure beside the ring at a readable size, so it
+  // asks the ring for the bare glyph.
+  it('can draw the ring without a figure, as a smaller glyph', () => {
+    const { container } = render(<ContextRing ratio={0.62} severity="normal" showValue={false} />);
+
+    expect(container.textContent).not.toContain('62');
+    expect(container.querySelector('span')).toBeNull();
+    expect(container.querySelector('svg')?.getAttribute('width')).toBe('16');
+  });
+
+  it('draws the figure inside a 20px ring by default', () => {
+    const { container } = render(<ContextRing ratio={0.62} severity="normal" />);
+
+    expect(container.textContent).toContain('62');
+    expect(container.querySelector('svg')?.getAttribute('width')).toBe('20');
   });
 
   /**

@@ -83,6 +83,9 @@ Open these first:
 - `apps/shared/src/streaming/events.ts`
 - `apps/shared/src/streaming/schemas.ts`
 - `apps/frontend/src/features/chat/ChatPage.tsx`
+- `apps/frontend/src/features/chat/lib/chat-column.ts` (the one column and gutter the transcript,
+  the dock notices and the composer share; `ChatDockNotice` in `ChatPageNotices.tsx` is the row
+  every block above the composer sits in)
 - `apps/frontend/src/features/chat/components/InputBar.tsx` (the composer, including the `/`
   palette's caret and keyboard)
 - `apps/frontend/src/features/chat/lib/slash-commands.ts` (what opens the palette, how it ranks,

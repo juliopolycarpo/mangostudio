@@ -8,7 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { Chat } from '@mangostudio/shared/chat';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { Sidebar } from '../../../src/features/sidebar/components/Sidebar';
 import { flushAsyncRender, render } from '../../support/harness/render';
 
@@ -88,6 +88,45 @@ describe('sidebar grouping', () => {
   });
 });
 
+describe('sidebar chat row leading slot', () => {
+  const RING_INFO = {
+    estimatedInputTokens: 62_000,
+    contextLimit: 100_000,
+    estimatedUsageRatio: 0.62,
+    mode: 'stateful',
+    severity: 'normal',
+  } as const;
+
+  /** The slot is the `aria-hidden` box that precedes the title inside the select button. */
+  function slotFor(title: string): HTMLElement {
+    const slot = screen.getByText(title).previousElementSibling;
+    if (!(slot instanceof HTMLElement)) throw new Error('leading slot not found');
+    return slot;
+  }
+
+  it('gives the context ring and the plain chat icon the same 20px box, so titles share one x', () => {
+    renderSidebar({ contextCache: new Map([['c1', RING_INFO]]) });
+
+    const withRing = slotFor('Plugin LSP TypeScript');
+    const withIcon = slotFor('sse-soak load test');
+    expect(withRing.querySelector('svg')).not.toHaveClass('lucide-message-square');
+    expect(withIcon.querySelector('svg')).toHaveClass('lucide-message-square');
+    for (const slot of [withRing, withIcon]) {
+      expect(slot).toHaveClass('size-5', 'shrink-0', 'justify-center');
+    }
+  });
+
+  it('keeps the same slot in the inline rename editor', () => {
+    renderSidebar({ contextCache: new Map([['c1', RING_INFO]]) });
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li');
+    if (!row) throw new Error('row not found');
+    fireEvent.click(within(row).getByTitle('Edit title'));
+
+    const editor = screen.getByDisplayValue<HTMLInputElement>('Plugin LSP TypeScript');
+    expect(editor.previousElementSibling).toHaveClass('size-5', 'justify-center');
+  });
+});
+
 describe('sidebar git badges', () => {
   const GIT_SUMMARIES = {
     c1: {
@@ -114,22 +153,45 @@ describe('sidebar git badges', () => {
     return row;
   }
 
-  it('shows branch, dirty dot, and sync drift from the batched summary', () => {
-    renderSidebar({ gitSummaries: GIT_SUMMARIES });
-    const row = rowFor('Plugin LSP TypeScript');
-    expect(within(row).getByText('feat/lsp-store')).toBeInTheDocument();
-    expect(within(row).getByTitle('3 uncommitted change(s)')).toBeInTheDocument();
-    expect(within(row).getByText('↑2 ↓1')).toBeInTheDocument();
-    // The arrows read as bare glyphs, so the drift is spelled out alongside them.
-    expect(within(row).getByText('2 ahead, 1 behind')).toBeInTheDocument();
+  function badgeFor(title: string, width?: number): HTMLElement {
+    renderSidebar({ gitSummaries: GIT_SUMMARIES, ...(width ? { width } : {}) });
+    return within(rowFor(title)).getByTestId('git-summary-badge');
+  }
+
+  it('is a glyph at the default width, with every fact in words for the tooltip and assistive tech', () => {
+    const badge = badgeFor('Plugin LSP TypeScript');
+    const description = 'feat/lsp-store · 3 uncommitted changes · 2 ahead, 1 behind';
+    expect(badge).toHaveAttribute('title', description);
+    // Read once, in full…
+    expect(within(badge).getByText(description)).toHaveClass('sr-only');
+    // …and not drawn: a label squeezed to "c…" says nothing and costs the title room.
+    expect(within(badge).queryByText('feat/lsp-store')).toBeNull();
+    expect(within(badge).queryByText('↑2 ↓1')).toBeNull();
   });
 
-  it('falls back to the short detached hash and hides clean/synced indicators', () => {
-    renderSidebar({ gitSummaries: GIT_SUMMARIES });
-    const row = rowFor('sse-soak load test');
-    expect(within(row).getByText('abc1234')).toBeInTheDocument();
-    expect(within(row).queryByTitle(/uncommitted/)).toBeNull();
-    expect(within(row).queryByText(/↑/)).toBeNull();
+  it('marks a dirty tree with its own glyph in the warning hue, not a dot beside the runner dot', () => {
+    const dirty = badgeFor('Plugin LSP TypeScript');
+    expect(dirty.querySelector('svg')).toHaveClass('text-warning');
+    expect(dirty.querySelector('svg')).toHaveClass('lucide-git-branch-plus');
+    expect(dirty.querySelector('[data-tone]')).toBeNull();
+    expect(within(rowFor('Plugin LSP TypeScript')).getAllByText('codex')).toHaveLength(1);
+  });
+
+  it('adds the branch and the drift once the sidebar is wide enough to read them', () => {
+    const badge = badgeFor('Plugin LSP TypeScript', 320);
+    expect(within(badge).getByText('feat/lsp-store')).toBeInTheDocument();
+    expect(within(badge).getByText('↑2 ↓1')).toBeInTheDocument();
+    // What is drawn is hidden from assistive tech: the sr-only sentence says it all.
+    expect(within(badge).getByText('feat/lsp-store')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('falls back to the short detached hash and draws a clean, synced tree as a plain glyph', () => {
+    const badge = badgeFor('sse-soak load test', 320);
+    expect(within(badge).getAllByText('abc1234').length).toBeGreaterThan(0);
+    expect(badge).toHaveAttribute('title', 'abc1234');
+    expect(badge.querySelector('svg')).not.toHaveClass('text-warning');
+    expect(badge.querySelector('svg')).toHaveClass('lucide-git-branch');
+    expect(within(badge).queryByText(/↑/)).toBeNull();
   });
 
   it('renders no badge for a chat the server has no answer for', () => {
@@ -241,14 +303,6 @@ describe('sidebar behaviors that must survive the overhaul', () => {
     expect(props.onUpdateChatTitle).toHaveBeenCalledWith('c1', 'Renamed');
   });
 
-  it('deletes from the row action', () => {
-    const { props } = renderSidebar();
-    const row = screen.getByText('Ancient refactor').closest('li');
-    if (!row) throw new Error('row not found');
-    fireEvent.click(within(row as HTMLElement).getByTitle('Delete chat'));
-    expect(props.onDeleteChat).toHaveBeenCalledWith('c3');
-  });
-
   it('does not let Enter/Space on the edit or delete buttons activate the row', () => {
     const { props } = renderSidebar();
     const row = screen.getByText('Plugin LSP TypeScript').closest('li');
@@ -271,6 +325,57 @@ describe('sidebar behaviors that must survive the overhaul', () => {
   it('exposes chat titles through the title attribute when truncated', () => {
     renderSidebar();
     expect(screen.getByText('Ancient refactor')).toHaveAttribute('title', 'Ancient refactor');
+  });
+});
+
+describe('deleting a chat', () => {
+  function openDeleteFor(title: string): HTMLElement {
+    const row = screen.getByText(title).closest('li');
+    if (!row) throw new Error('row not found');
+    fireEvent.click(within(row).getByTitle('Delete chat'));
+    return screen.getByRole('dialog', { name: 'Delete this chat?' });
+  }
+
+  it('asks first, naming the chat, and deletes nothing until it is confirmed', () => {
+    const { props } = renderSidebar();
+    const dialog = openDeleteFor('Ancient refactor');
+    expect(within(dialog).getByText(/Ancient refactor/)).toBeInTheDocument();
+    expect(props.onDeleteChat).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(props.onDeleteChat).not.toHaveBeenCalled();
+  });
+
+  it('puts the dialog outside the sliding panel, whose transform would capture it', () => {
+    const { container } = renderSidebar();
+    const dialog = openDeleteFor('Ancient refactor');
+    expect(container.querySelector('aside')).not.toContainElement(dialog);
+  });
+
+  it('deletes on confirm and reports success once the request has settled', async () => {
+    const onDeleteChat = jest.fn().mockResolvedValue(undefined);
+    renderSidebar({ onDeleteChat });
+    const dialog = openDeleteFor('Ancient refactor');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete chat' }));
+
+    await waitFor(() => expect(onDeleteChat).toHaveBeenCalledWith('c3'));
+    expect(await screen.findByText('Chat deleted')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('does not claim success when the request fails', async () => {
+    const onDeleteChat = jest.fn().mockRejectedValue(new Error('network'));
+    renderSidebar({ onDeleteChat });
+    const dialog = openDeleteFor('Ancient refactor');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete chat' }));
+
+    expect(await screen.findByText('Could not delete the chat. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText('Chat deleted')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
 
@@ -303,6 +408,22 @@ describe('sidebar shell', () => {
     expect(studioButtons[0]?.className).toContain('bg-fill-selected');
   });
 
+  // The selected chat is only "current" on a chat page. On any other page
+  // (the Terminal has no nav entry, so nothing else is current there) it must
+  // not keep the fill and accent bar, or the sidebar names a destination the
+  // user is not on.
+  it('marks the selected chat row current on a chat page only', () => {
+    const { unmount } = renderSidebar({ currentPage: 'chat' });
+    const row = () => screen.getByText('Plugin LSP TypeScript').closest('li');
+    expect(row()?.classList.contains('bg-fill-selected')).toBe(true);
+    unmount();
+
+    renderSidebar({ currentPage: 'terminal' });
+    expect(row()?.classList.contains('bg-fill-selected')).toBe(false);
+    // Nor does any nav entry claim to be the current page.
+    expect(document.querySelector('[aria-current="page"]')).toBeNull();
+  });
+
   it('calls onNavigate with "studio" when Studio is clicked', () => {
     const { props } = renderSidebar();
     fireEvent.click(screen.getAllByRole('button', { name: /studio/i })[0] as HTMLElement);
@@ -330,6 +451,38 @@ describe('sidebar shell', () => {
     expect(container.querySelector('aside')?.className).toContain('hidden');
   });
 
+  // The stored width is a desktop preference. Applied inline at every width it
+  // made the phone's slide-over 256px, which left a chat title one letter.
+  it('takes the stored width from md up and most of the screen below it', () => {
+    const { container } = renderSidebar({ width: 300 });
+    const aside = container.querySelector('aside');
+    expect(aside?.style.width).toBe('');
+    expect(aside?.style.getPropertyValue('--chat-sidebar-width')).toBe('300px');
+    expect(aside).toHaveClass('w-[85vw]', 'max-w-sm', 'md:w-(--chat-sidebar-width)');
+  });
+
+  it('lets the git badge and the runner name give way to the title on a touch screen', () => {
+    renderSidebar({
+      gitSummaries: {
+        c1: { branch: 'main', ahead: 0, behind: 0, changedFileCount: 0, workdir: '/w' },
+      },
+    });
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li') as HTMLElement;
+    expect(within(row).getByTestId('git-summary-badge').parentElement).toHaveClass(
+      'pointer-coarse:hidden'
+    );
+    // The name stays for assistive tech and for the search that matches it.
+    expect(within(row).getByText('codex')).toHaveClass('pointer-coarse:sr-only');
+  });
+
+  it('caps a mobile shortcut label to its cell so a long one ends in an ellipsis', () => {
+    renderSidebar();
+    const tile = within(screen.getByTestId('mobile-shortcuts')).getByRole('button', {
+      name: /environments/i,
+    });
+    expect(within(tile).getByText(/environments/i)).toHaveClass('max-w-full', 'truncate');
+  });
+
   it('resizes from the keyboard and persists the clamped width', () => {
     const onWidthChange = jest.fn();
     const { container } = renderSidebar({ width: 256, onWidthChange });
@@ -342,7 +495,9 @@ describe('sidebar shell', () => {
     fireEvent.keyDown(handle, { key: 'ArrowRight' });
     fireEvent.keyUp(handle, { key: 'ArrowRight' });
     expect(onWidthChange).toHaveBeenCalledWith(272);
-    expect(container.querySelector('aside')).toHaveStyle({ width: '272px' });
+    expect(container.querySelector('aside')?.style.getPropertyValue('--chat-sidebar-width')).toBe(
+      '272px'
+    );
   });
 
   // The rail handle sits on the opposite edge, so a shared component that mixed
@@ -360,6 +515,8 @@ describe('sidebar shell', () => {
     fireEvent.pointerMove(handle, { pointerId: 1, clientX: 296 });
 
     expect(onWidthPreview).toHaveBeenLastCalledWith(296);
-    expect(container.querySelector('aside')).toHaveStyle({ width: '296px' });
+    expect(container.querySelector('aside')?.style.getPropertyValue('--chat-sidebar-width')).toBe(
+      '296px'
+    );
   });
 });

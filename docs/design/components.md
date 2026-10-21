@@ -20,23 +20,29 @@ A 32px flat button with four roles and four sizes.
 | `subtle`    | none; hover `fill-hover`         | Toolbars, the header, row actions, icon buttons.                  |
 | `danger`    | `danger-solid`, text `on-danger` | The final confirmation of something destructive, inside a dialog. |
 
-| `size` | Height | Use                                                            |
-| ------ | ------ | -------------------------------------------------------------- |
-| `sm`   | 28px   | Dense bars and rows; text at 12px.                             |
-| `md`   | 32px   | Default; text at 14px.                                         |
-| `lg`   | 40px   | The main action of login, onboarding and empty screens.        |
-| `icon` | 32×32  | An icon-only button. It must carry an `aria-label` or `title`. |
+| `size` | Height | Use                                                                                                  |
+| ------ | ------ | ---------------------------------------------------------------------------------------------------- |
+| `sm`   | 28px   | Dense bars and rows; text at 12px.                                                                   |
+| `md`   | 32px   | Default; text at 14px.                                                                               |
+| `lg`   | 40px   | The main action of login, onboarding and empty screens; onboarding's Back and Skip share its height. |
+| `icon` | 32×32  | An icon-only button. It must carry an `aria-label` or `title`.                                       |
 
 Weight 500, `rounded-sm`, transitions colour only. Hover and press shift the fill;
-there is no shadow, no scale on press and no glow. A disabled button is neutral
-grey in every variant; `loading` shows a spinner, keeps the variant's colour and
-sets `aria-busy`.
+there is no shadow, no scale on press and no glow. A disabled `primary`,
+`secondary` or `danger` button is a neutral grey tile (`fill-selected` + `fg-subtle`);
+a disabled `subtle` or `subtle-danger` button has no tile and only turns its text
+`fg-subtle`, so the inactive control never looks like the hovered or selected one.
+`loading` shows a spinner, keeps the variant's colour and sets `aria-busy`.
 
 ### `SplitButton`
 
 A primary action with a menu of variants attached ("Commit" / "Commit and push").
-Both halves are `Button size="sm"`; the divider is a 1px `accent-pressed` line. Use
-it only when the alternatives are variations of the same action.
+Both halves are `Button size="sm"`; the divider is a 1px `accent-pressed` line. While
+the primary half is unavailable it is the neutral grey of any disabled button, so
+the chevron drops to `secondary` and the divider to its `stroke` border — the menu
+must not be the only mango in the region. A primary half that is only loading keeps
+its accent, and so does the chevron. Use it only when the alternatives are
+variations of the same action.
 
 ## Input
 
@@ -66,7 +72,19 @@ check mark in `accent-fg`.
 fills `accent` with an `on-accent` tick. `Toggle` is the preference switch (36×20
 track, 12px knob): off is `control` with a `stroke-strong` border and a muted knob;
 on is `accent` with an `on-accent` knob. Use a switch for a setting with an
-immediate effect and a checkbox for an option in a form or a list.
+immediate effect and a checkbox for an option in a form or a list. On a touch
+screen the 16px box does not grow (the 44px floor skips it); `Checkbox` and
+`Radio` widen the hit area to 40px with a pseudo-element on the input itself, so
+a tap beside the box still toggles it, with or without a wrapping `<label>`.
+
+### `SettingsSegmented`
+
+A row of two to four mutually exclusive segments (`components/settings/`): the 32px
+`rounded-sm` face of a secondary button, `control` fill and `fg-muted` text at rest. The
+selected segment is a neutral `fill-selected` with a `stroke-strong` border, `fg` text and
+a 2px `accent` bar along its bottom edge, the mark of the current underline tab — never
+the accent fill of a primary button, which would put a second primary next to Save
+(decision 16). A longer list belongs in a `Select`.
 
 ## Status
 
@@ -75,7 +93,9 @@ immediate effect and a checkbox for an option in a form or a list.
 A 20px pill, 12px/500, sentence case: `neutral`, `accent`, `success`, `warning`,
 `error`, with the matching `*-subtle` fill and status-coloured text. Pills are
 reserved for status — nothing clickable is round. It carries a word or an icon, so
-colour is never the only signal.
+colour is never the only signal. A badge that states a live state (an MCP server's
+last-known connection) may lead with a `StatusDot`, so it cannot be mistaken for the
+neutral metadata badges beside it (transport, environment).
 
 ### `StatusDot`
 
@@ -122,7 +142,9 @@ coloured disc behind the icon.
 
 Underline tabs for sibling subpages: 36px, `fg-muted` at rest, `fg` at 500 when
 current, with a 2px `accent` underline sitting on the divider. Hover is `fill-hover`.
-No tinted background and no folder corners.
+No tinted background and no folder corners. The strip is one row that scrolls
+sideways when the tabs do not fit (it never wraps, which would strand the
+underline on a row with no divider), and it scrolls the current tab into view.
 
 ### `NavItem` and the sidebar
 
@@ -180,7 +202,17 @@ while focused, the prompt mark `›`, the caret and the runner's own chip. Send 
 **always** the product `accent`: one primary action, one colour, whoever is
 answering. A status line on top carries mono `key: value` chips separated by `·`,
 closed by a `stroke` line; the tool row below uses ghost buttons in the same
-dialect.
+dialect. A toggle chip is `aria-pressed`: on, it takes `fill-selected` (the open
+menu's wash) and tints its leading icon with `--composer-accent`, so on and open
+never look alike; `create images`, which has no value chip beside it, also shows a
+check from `sm` up.
+
+The context ring is a 16px glyph with the figure beside it (`62%`, mono, 12px,
+`fg-muted`) in the strip, and the 20px ring with the figure inside it in a sidebar
+row, where a title is truncating next to it. The arc is `fg` while usage is normal
+or informational and turns `warning` and `danger` as the tracker escalates; mango
+is not used, because a healthy 62% is not the primary action, the current item or
+focus.
 
 ### Timeline and tool blocks
 
@@ -195,4 +227,6 @@ Tool blocks are `surface` cards with a 32px mono header and their output in mono
 Headings are Inter 600; inline code is mono on `fill-selected` with `rounded-xs`;
 code blocks are `surface` with a `stroke` border (Shiki keeps its own theme
 background); links are `accent-fg`; a blockquote's rule is `stroke-strong`, not an
-accent.
+accent. A table sits in a `.markdown-table-scroll` wrapper that scrolls sideways
+when its columns need more than the bubble, and inline code in a cell never
+breaks at a hyphen.

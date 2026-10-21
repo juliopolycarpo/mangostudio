@@ -22,6 +22,7 @@ import {
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ContextRing } from '@/components/ui/ContextRing';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { FIELD_CLASS } from '@/components/ui/Input';
@@ -34,6 +35,7 @@ import { useToast } from '@/components/ui/Toast';
 import type { ContextInfo } from '@/features/generation/types';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { newChatShortcutHint } from '@/lib/keyboard';
@@ -45,6 +47,13 @@ import { runnerBadge } from '../lib/runner-badge';
 import { GitSummaryBadge } from './GitSummaryBadge';
 import { NavItem } from './NavItem';
 
+/**
+ * Below this the sidebar is a glyph per git badge; from here up it has room for
+ * the branch name beside it. 264px (the default) and the 240px minimum are the
+ * narrow case on purpose: a branch squeezed to "c…" is worse than none.
+ */
+const GIT_DETAIL_MIN_WIDTH = 320;
+
 interface Props {
   currentPage: AppPage;
   onNavigate: (page: AppPage) => void;
@@ -52,7 +61,11 @@ interface Props {
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onUpdateChatTitle: (chatId: string, title: string) => void;
-  onDeleteChat: (chatId: string) => void;
+  /**
+   * Settles when the chat is gone and rejects when it could not be deleted, so
+   * the row can tell the person which of the two happened.
+   */
+  onDeleteChat: (chatId: string) => Promise<void>;
   onNewChat: () => void;
   contextCache?: Map<string, ContextInfo>;
   /**
@@ -97,11 +110,14 @@ export function Sidebar({
   const [editTitle, setEditTitle] = useState('');
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
+  const [pendingDelete, setPendingDelete] = useState<Chat | null>(null);
+  const [isDeleting, setDeleting] = useState(false);
   const [liveWidth, setLiveWidth] = useState(width);
   const widthRef = useRef(width);
   const editInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { t, locale } = useI18n();
+  const plural = usePlural();
 
   useEffect(() => {
     setLiveWidth(width);
@@ -131,9 +147,20 @@ export function Sidebar({
     setEditingChatId(null);
   };
 
-  const handleDelete = (chatId: string) => {
-    onDeleteChat(chatId);
-    toast(t.chat.deleted, 'success');
+  // The toast follows the request, not the click: deletion is a round trip that
+  // can fail, and "Chat deleted" over a chat that is still there is a lie.
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await onDeleteChat(pendingDelete.id);
+      toast(t.chat.deleted, 'success');
+    } catch {
+      toast(t.chat.deleteFailed, 'error');
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, chatId: string) => {
@@ -172,9 +199,10 @@ export function Sidebar({
   const navBadges: Partial<Record<AppPage, string>> =
     environmentAlertCount > 0
       ? {
-          environments: formatMessage(t.home.machines.navAlerts, {
-            count: String(environmentAlertCount),
-          }),
+          environments: plural(
+            { one: t.home.machines.navAlertsOne, other: t.home.machines.navAlertsOther },
+            environmentAlertCount
+          ),
         }
       : {};
 
@@ -216,11 +244,12 @@ export function Sidebar({
           aria-hidden="true"
         />
       )}
-      {/* The width preference is a desktop one, so `max-w` keeps the mobile
-          slide-over inside narrow viewports. */}
+      {/* The width preference is a desktop one. The slide-over is most of the
+          screen instead (`85vw`, capped at `max-w-sm`), so a phone's chat titles
+          get the room the 256px preference would have taken from them. */}
       <aside
-        style={{ width: liveWidth }}
-        className={`bg-sidebar flex-col h-full max-w-[85vw] md:max-w-none border-r border-stroke fixed left-0 top-0 z-50 transition-transform duration-(--duration-slow) ease-standard
+        style={{ ['--chat-sidebar-width' as string]: `${liveWidth}px` }}
+        className={`bg-sidebar flex-col h-full w-[85vw] max-w-sm md:w-(--chat-sidebar-width) md:max-w-none border-r border-stroke fixed left-0 top-0 z-50 transition-transform duration-(--duration-slow) ease-standard
           ${isMobileOpen ? 'flex translate-x-0' : 'hidden -translate-x-full'} md:flex md:translate-x-0
         `}
       >
@@ -317,8 +346,16 @@ export function Sidebar({
                   // name stays the chat title: a button flattens its descendants
                   // into that name, and the ring contributes both an SVG <title>
                   // and its percentage.
+                  //
+                  // One 20px slot for both occupants (the 20px ring, the 16px
+                  // icon), centred in it: sized to its content the column would
+                  // step 4px between a chat with a ring and one without, and
+                  // every title below would start at a different x.
                   const leadingIcon = (
-                    <span aria-hidden="true" className="flex shrink-0 items-center">
+                    <span
+                      aria-hidden="true"
+                      className="flex size-5 shrink-0 items-center justify-center"
+                    >
                       {ctx ? (
                         <ContextRing ratio={ctx.estimatedUsageRatio} severity={ctx.severity} />
                       ) : (
@@ -380,8 +417,10 @@ export function Sidebar({
                            * The badge yields the slot to the row actions on hover
                            * and on focus — but only where hovering is possible.
                            * On a coarse pointer there is no hover to reveal
-                           * anything, so both stay up: the row is a full-width
-                           * sheet there and has the space.
+                           * anything, so the actions stay up, and each is a 44px
+                           * touch target: that is most of the row. What gives way
+                           * is the git badge, and the runner's name down to the
+                           * dot (still read aloud, and still what search matches).
                            *
                            * Bounded to a share of the row, and allowed to shrink
                            * inside it, so a long branch gives way to the title
@@ -389,9 +428,16 @@ export function Sidebar({
                            * truncates first, the runner chip never does.
                            */}
                           <span className="flex min-w-0 max-w-[40%] shrink items-center gap-1.5 overflow-hidden pr-2 font-mono text-micro text-fg-subtle group-hover:hidden group-focus-within:hidden">
-                            {gitSummary ? <GitSummaryBadge summary={gitSummary} /> : null}
+                            {gitSummary ? (
+                              <span className="flex min-w-0 pointer-coarse:hidden">
+                                <GitSummaryBadge
+                                  summary={gitSummary}
+                                  expanded={liveWidth >= GIT_DETAIL_MIN_WIDTH}
+                                />
+                              </span>
+                            ) : null}
                             <StatusDot tone="neutral" className={badge.dotClassName} />
-                            <span className="shrink-0">{badge.label}</span>
+                            <span className="shrink-0 pointer-coarse:sr-only">{badge.label}</span>
                           </span>
                           {/*
                            * `group-focus-within` is what makes these reachable:
@@ -409,7 +455,7 @@ export function Sidebar({
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDelete(chat.id)}
+                              onClick={() => setPendingDelete(chat)}
                               className="flex size-7 items-center justify-center rounded-sm transition-colors hover:bg-danger-subtle hover:text-danger"
                               title={t.chat.deleteTitle}
                             >
@@ -453,6 +499,22 @@ export function Sidebar({
           </div>
         ) : null}
       </aside>
+
+      {/* Outside the `aside`: its slide transform makes it the containing block
+          for anything `fixed` inside it, and the dialog would be laid out as a
+          sliver of the sidebar instead of over the window. */}
+      {pendingDelete ? (
+        <ConfirmDialog
+          title={t.chat.deleteConfirmTitle}
+          description={t.chat.deleteConfirmDescription}
+          entityName={pendingDelete.title}
+          confirmLabel={t.chat.deleteTitle}
+          cancelLabel={t.chat.deleteCancel}
+          isPending={isDeleting}
+          onConfirm={() => void handleConfirmDelete()}
+          onCancel={() => setPendingDelete(null)}
+        />
+      ) : null}
     </>
   );
 }

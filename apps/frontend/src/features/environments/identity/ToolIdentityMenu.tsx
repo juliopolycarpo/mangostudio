@@ -6,7 +6,7 @@
  * the same two actions attached to the same subject.
  */
 
-import { MoreVertical, Pencil, RotateCcw } from 'lucide-react';
+import { MoreVertical, RotateCcw, Tag } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Menu, MenuItem } from '@/components/ui/Menu';
@@ -22,9 +22,11 @@ interface ToolIdentityMenuProps {
   readonly identity: ResolvedToolIdentity;
   /** What the name falls back to, so the dialog can show it as the placeholder. */
   readonly defaultName: string;
+  /** `icon-sm` where the buttons beside it are 28px, as in an MCP server's row of actions. */
+  readonly size?: 'icon' | 'icon-sm';
 }
 
-export function ToolIdentityMenu({ identity, defaultName }: ToolIdentityMenuProps) {
+export function ToolIdentityMenu({ identity, defaultName, size = 'icon' }: ToolIdentityMenuProps) {
   const { t } = useI18n();
   const labels = t.environments.identity;
   const reset = useResetToolIdentity();
@@ -42,18 +44,18 @@ export function ToolIdentityMenu({ identity, defaultName }: ToolIdentityMenuProp
           <Button
             type="button"
             variant="subtle"
-            size="icon"
+            size={size}
             {...triggerProps}
             aria-label={formatMessage(labels.menu, { name: identity.name })}
             data-testid="tool-identity-menu"
-            className="text-fg-muted"
           >
             <MoreVertical size={ICON_MD} />
           </Button>
         )}
       >
         <MenuItem
-          icon={<Pencil size={ICON_MD} />}
+          // Not a pencil: on an MCP server card the row's edit button already is one.
+          icon={<Tag size={ICON_MD} />}
           onSelect={() => {
             setMenuOpen(false);
             setEditing(true);

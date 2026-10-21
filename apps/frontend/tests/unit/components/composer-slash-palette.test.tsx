@@ -90,6 +90,22 @@ describe('composer slash palette', () => {
     expect(screen.getByRole('option', { name: /autopilot/ })).toBeInTheDocument();
   });
 
+  // It rises over the whole frame, status line included, at the frame's own
+  // width. Hung from the input row it covered the chips it was meant to sit
+  // above, and a fixed 320px matched nothing on a phone.
+  it('rises from the composer frame at the width of the frame', async () => {
+    const { user } = renderComposer();
+    await user.type(screen.getByRole('textbox'), '/');
+
+    const list = await screen.findByRole('listbox');
+    expect(list.parentElement).toBe(screen.getByTestId('composer'));
+    const classes = list.className.split(/\s+/);
+    expect(classes).toContain('inset-x-0');
+    expect(classes).toContain('w-auto');
+    expect(classes).not.toContain('w-80');
+    expect(classes).not.toContain('left-0');
+  });
+
   it('narrows to what the user has typed', async () => {
     const { user } = renderComposer();
     await user.type(screen.getByRole('textbox'), '/auto');

@@ -27,19 +27,21 @@
 
 import type { PropagationBackupSet, PropagationUndo } from '@mangostudio/shared/library';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, Pin, Server, Timer, Trash2, Undo2 } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { Archive, ArrowLeft, Pin, Server, Timer, Trash2, Undo2 } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { formatBytes } from '@/features/environments/format';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { purgeBackup, undoPropagation } from '../api';
-import { formatBytes } from '../format';
 import { backupUsageQueryOptions, libraryKeys } from '../queries';
+import { BackupSummary, formatBackupUsage } from './BackupSummary';
 import { InlineNote } from './InlineNote';
 import { LibraryPageState } from './LibraryPageState';
 
@@ -120,19 +122,19 @@ export function BackupList() {
   return (
     <div className="space-y-4" data-testid="backup-list">
       <div className="space-y-1">
+        {/* Backups span every kind, so they are no tab of the strip above; this
+            is the way back to where the sets came from. */}
+        <Link
+          to="/environments/library/skills"
+          className="inline-flex items-center gap-1.5 text-fg-muted text-xs hover:text-fg"
+          data-testid="backups-back"
+        >
+          <ArrowLeft size={ICON_SM} aria-hidden="true" />
+          {l.backups.back}
+        </Link>
         <h2 className="font-semibold text-base text-fg">{l.backups.title}</h2>
         <p className="text-fg-muted text-sm">{l.backups.description}</p>
-        <p className="text-fg-muted text-xs">
-          {formatMessage(l.backups.usage, {
-            count: String(usage.setCount),
-            size: formatBytes(usage.sizeBytes),
-          })}{' '}
-          {formatMessage(l.backups.retention, {
-            count: String(usage.retentionCount),
-            size: formatBytes(usage.retentionBytes),
-          })}{' '}
-          {l.backups.retentionPerMachine}
-        </p>
+        <BackupSummary usage={usage} perMachine />
       </div>
 
       {usage.unreachableEnvironmentIds.length > 0 && (
@@ -178,12 +180,17 @@ export function BackupList() {
           <h3 className="flex items-center gap-2 font-semibold text-fg text-sm">
             <Server size={ICON_MD} aria-hidden="true" className="shrink-0 text-fg-muted" />
             {nameOf(environmentId)}
-            <span className="font-normal text-fg-muted text-xs">
-              {formatMessage(l.backups.usage, {
-                count: String(sets.length),
-                size: formatBytes(sets.reduce((total, set) => total + set.sizeBytes, 0)),
-              })}
-            </span>
+            {/* One machine's figures are the page's figures, already stated under the
+                description; a second copy of them beside the name only repeats it. */}
+            {machines.length > 1 && (
+              <span className="font-normal text-fg-muted text-xs">
+                {formatBackupUsage(
+                  l.backups,
+                  sets.length,
+                  sets.reduce((total, set) => total + set.sizeBytes, 0)
+                )}
+              </span>
+            )}
           </h3>
           <ul className="space-y-2">
             {sets.map((set) => {

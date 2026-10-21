@@ -166,6 +166,19 @@ describe('MarkdownContent', () => {
     expect(container.querySelectorAll('td')).toHaveLength(2);
   });
 
+  // The wrapper is what scrolls: `display: block` on the table would shrink-wrap
+  // a narrow one and drop its table semantics from some screen readers.
+  it('seats a table in a scroll box and keeps it a table', () => {
+    const table = '| File | Tokens |\n|---|---|\n| a.css | `border-stroke`, `bg-surface-raised` |';
+    const { container } = render(<MarkdownContentRenderer content={table} />);
+
+    const scroller = container.querySelector('.markdown-content > .markdown-table-scroll');
+    expect(scroller).toBeInTheDocument();
+    expect(scroller?.querySelector(':scope > table')).toBeInTheDocument();
+    expect(scroller?.querySelector('td code')).toHaveTextContent('border-stroke');
+    expect(container.querySelectorAll('table')).toHaveLength(1);
+  });
+
   it('renders code blocks', () => {
     const code = '```\nconst x = 1;\n```';
     const { container } = render(<MarkdownContentRenderer content={code} />);

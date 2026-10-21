@@ -1,5 +1,4 @@
 import type { MessagePart } from '@mangostudio/shared/types';
-import { ChevronDown, ChevronRight } from 'lucide-react';
 import { type ComponentProps, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { Badge } from '@/components/ui/Badge';
@@ -7,7 +6,7 @@ import { Chip } from '@/components/ui/Chip';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_MD } from '@/lib/icon-sizes';
+import { DisclosureChevron } from '../DisclosureChevron';
 
 type SubagentTracePartValue = Extract<MessagePart, { type: 'subagent_trace' }>;
 type FeedLabels = ReturnType<typeof useI18n>['t']['chat']['feed'];
@@ -50,9 +49,6 @@ export function SubagentTracePart({ part }: SubagentTracePartProps) {
         onClick={() => setExpanded((value) => !value)}
         className="flex w-full cursor-pointer items-start gap-3 p-4 text-left transition-colors hover:bg-fill-hover"
       >
-        <span className="mt-0.5 text-fg-muted">
-          {expanded ? <ChevronDown size={ICON_MD} /> : <ChevronRight size={ICON_MD} />}
-        </span>
         <span className="min-w-0 flex-1 space-y-1">
           <span className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-fg">{part.agentName}</span>
@@ -62,6 +58,8 @@ export function SubagentTracePart({ part }: SubagentTracePartProps) {
           </span>
           <span className="block truncate text-fg-muted">{part.lastMessage ?? part.summary}</span>
         </span>
+        {/* Level with the first line (the badges are 20px), not the card's middle. */}
+        <DisclosureChevron expanded={expanded} className="mt-1" />
       </button>
 
       {expanded && (

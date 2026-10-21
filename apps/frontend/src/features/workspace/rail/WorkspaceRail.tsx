@@ -10,7 +10,7 @@ import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
+import { ICON_MD } from '@/lib/icon-sizes';
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
 import { RailPanel } from './RailPanel';
 import { onRailPanelRequest } from './rail-panel-request';
@@ -190,18 +190,23 @@ export function WorkspaceRail({
 
   return (
     <>
-      {/* A bare `<button>` rather than `Button`: closing the drawer returns focus
-          here, which needs the ref, and `Button` takes no `ref` prop. */}
-      <button
+      {/* Floats over the transcript's lower corner, never over the composer: it
+          is anchored to the top of the chat's bottom dock, whose height
+          `ChatPage` publishes as `--chat-dock-height` on the row this sits in
+          (the row is `relative`). The fallback is a composer-sized guess for a
+          page that publishes nothing. */}
+      <Button
         ref={mobileTriggerRef}
         type="button"
+        variant="secondary"
+        size="icon"
         onClick={() => setMobileOpen(true)}
         aria-label={t.workspace.sidePanelOpen}
         title={t.workspace.sidePanelOpen}
-        className="fixed bottom-24 right-3 z-30 flex size-10 cursor-pointer items-center justify-center rounded-sm border border-stroke bg-surface-raised text-fg shadow-popover transition-colors hover:bg-fill-hover"
+        className="absolute right-3 bottom-[calc(var(--chat-dock-height,8rem)+0.75rem)] z-30 bg-surface-raised shadow-popover"
       >
-        <PanelRightOpen size={ICON_LG} />
-      </button>
+        <PanelRightOpen size={ICON_MD} />
+      </Button>
       {mobileOpen ? (
         <>
           <div aria-hidden="true" onClick={closeMobile} className="fixed inset-0 z-40 bg-scrim" />

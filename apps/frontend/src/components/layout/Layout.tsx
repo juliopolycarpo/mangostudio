@@ -14,7 +14,7 @@ interface LayoutProps {
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onUpdateChatTitle: (chatId: string, title: string) => void;
-  onDeleteChat: (chatId: string) => void;
+  onDeleteChat: (chatId: string) => Promise<void>;
   onNewChat: () => void;
   contextCache?: Map<string, ContextInfo>;
   gitSummaries?: Record<string, GitSummary | null>;

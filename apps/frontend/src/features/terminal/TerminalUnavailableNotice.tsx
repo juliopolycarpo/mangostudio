@@ -1,20 +1,31 @@
-import { EmptyState } from '@/components/ui/EmptyState';
+import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
+import type { TerminalAvailabilityState } from './use-terminal-availability';
 
-export interface TerminalUnavailableNoticeProps {
-  /** Localized refusal from `useTerminalAvailability`. */
-  readonly message: string;
+export interface TerminalUnavailableNoticeProps
+  extends Pick<TerminalAvailabilityState, 'message' | 'tone'> {
   readonly className?: string;
 }
 
 /**
- * Why no terminal can be opened here, worded and laid out the same on the rail
- * panel and the `/terminal` page.
+ * Why no terminal can be opened here, worded and drawn the same on the rail
+ * panel and the `/terminal` page. A `Callout` rather than an empty state: it is
+ * an inline notice about why the controls beside it are inert, not a statement
+ * that a list is empty.
  *
  * @example
- * <TerminalUnavailableNotice message={message} className="h-full" />
+ * const { message, tone } = useTerminalAvailability(environmentId);
+ * <TerminalUnavailableNotice message={message} tone={tone} />
  */
-export function TerminalUnavailableNotice({ message, className }: TerminalUnavailableNoticeProps) {
+export function TerminalUnavailableNotice({
+  message,
+  tone,
+  className,
+}: TerminalUnavailableNoticeProps) {
   const { t } = useI18n();
-  return <EmptyState title={t.terminal.unavailableTitle} hint={message} className={className} />;
+  return (
+    <Callout tone={tone} title={t.terminal.unavailableTitle} className={className}>
+      {message}
+    </Callout>
+  );
 }

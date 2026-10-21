@@ -85,10 +85,13 @@ export function DiffViewer({
           className="min-h-32"
         />
       ) : (
-        <div className="app-scrollbar max-h-[34rem] overflow-auto bg-canvas font-mono text-xs">
+        <div className="@container app-scrollbar max-h-[34rem] overflow-auto bg-canvas font-mono text-xs">
           {hunks.map((hunk) => (
             <div key={`${hunk.oldStart}:${hunk.newStart}:${hunk.header}`}>
-              <div className="sticky top-0 z-10 border-y border-stroke bg-surface px-2 py-1 text-fg-muted">
+              <div
+                title={hunk.header}
+                className="sticky top-0 z-10 truncate border-y border-stroke bg-surface px-2 py-1 text-fg-muted"
+              >
                 {hunk.header}
               </div>
               {hunk.lines.map((line) => (
@@ -132,12 +135,27 @@ const DiffLineRow = memo(function DiffLineRow({
   const marker = line.type === 'addition' ? '+' : line.type === 'deletion' ? '-' : ' ';
   const markerTone =
     line.type === 'addition' ? 'text-success' : line.type === 'deletion' ? 'text-danger' : '';
+  // In a narrow rail two 40px gutters leave the code about 24 characters, so
+  // the viewer keeps one: the new number, or the old one on a line that has no
+  // new number (a deletion). Both stay in the markup; the container query only
+  // decides which of the two is drawn, so the wide layout is untouched.
+  const hasNewLine = line.newLine !== undefined;
   return (
     <div className={cn('flex min-w-max', tone)}>
-      <span className="w-10 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle">
+      <span
+        className={cn(
+          'w-10 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle',
+          hasNewLine && '@max-sm:hidden'
+        )}
+      >
         {line.oldLine ?? ''}
       </span>
-      <span className="w-10 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle">
+      <span
+        className={cn(
+          'w-10 shrink-0 select-none border-r border-stroke px-1 text-right text-fg-subtle',
+          !hasNewLine && '@max-sm:hidden'
+        )}
+      >
         {line.newLine ?? ''}
       </span>
       <span className={cn('w-5 shrink-0 select-none text-center font-medium', markerTone)}>

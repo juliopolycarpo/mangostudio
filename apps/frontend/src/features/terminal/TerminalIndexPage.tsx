@@ -2,10 +2,12 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Suspense, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useToast } from '@/components/ui/Toast';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import type { EnvironmentScopeSearch } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
+import { cn } from '@/lib/utils';
 import { LazyTerminalView } from './LazyTerminalView';
 import { openFailureMessage } from './open-failure-message';
 import { useOpenTerminalMutation, useTerminalSessionsQuery } from './services/terminal-service';
@@ -26,9 +28,17 @@ export function TerminalIndexPage() {
   const environmentId = search.environmentId ?? LOCAL_ENVIRONMENT_ID;
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const { unavailable, message: unavailableHint } = useTerminalAvailability(environmentId);
+  const {
+    unavailable,
+    message: unavailableHint,
+    tone: unavailableTone,
+  } = useTerminalAvailability(environmentId);
   const sessionsQuery = useTerminalSessionsQuery(environmentId, null);
   const sessions = sessionsQuery.data ?? [];
+  // With nothing open, a refusal leaves nothing to list and nothing to press, so
+  // the notice stands alone. With sessions open (the per-user cap is made of
+  // them) the list stays reachable and only "New terminal" is refused.
+  const showSessions = !(unavailable && sessions.length === 0);
   const openMutation = useOpenTerminalMutation();
 
   function changeEnvironment(nextEnvironmentId: string): void {
@@ -62,46 +72,60 @@ export function TerminalIndexPage() {
         />
       </div>
 
-      {unavailable ? <TerminalUnavailableNotice message={unavailableHint} /> : null}
+      {unavailable ? (
+        <TerminalUnavailableNotice message={unavailableHint} tone={unavailableTone} />
+      ) : null}
 
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold text-fg">{t.terminal.page.sessions}</h2>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={openNewSession}
-          disabled={unavailable}
-          title={unavailable ? unavailableHint : undefined}
-          loading={openMutation.isPending}
-        >
-          {t.terminal.newSession}
-        </Button>
-      </div>
-
-      {sessionsQuery.isSuccess && sessions.length === 0 ? (
-        <p className="text-sm text-fg-muted">{t.terminal.page.noSessions}</p>
-      ) : (
-        <ul className="divide-y divide-stroke rounded-md border border-stroke">
-          {sessions.map((session) => (
-            <li
-              key={session.id}
-              className="flex items-center justify-between gap-3 px-4 py-2 text-sm"
+      {showSessions ? (
+        <>
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-fg">{t.terminal.page.sessions}</h2>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={openNewSession}
+              disabled={unavailable}
+              title={unavailable ? unavailableHint : undefined}
+              loading={openMutation.isPending}
             >
-              <span className="truncate text-fg">{session.title}</span>
-              <Button
-                type="button"
-                variant="subtle"
-                size="sm"
-                onClick={() => setActiveId(session.id)}
-                aria-pressed={session.id === activeId}
-              >
-                {t.terminal.page.openHere}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
+              {t.terminal.newSession}
+            </Button>
+          </div>
+
+          {sessionsQuery.isSuccess && sessions.length === 0 ? (
+            <p className="text-sm text-fg-muted">{t.terminal.page.noSessions}</p>
+          ) : (
+            <ul className="divide-y divide-stroke overflow-hidden rounded-md border border-stroke">
+              {sessions.map((session) => {
+                const open = session.id === activeId;
+                return (
+                  <li
+                    key={session.id}
+                    className={cn(
+                      'relative flex items-center justify-between gap-3 px-4 py-2 text-sm',
+                      open && cn('bg-fill-selected', SELECTION_BAR)
+                    )}
+                  >
+                    <span className={cn('truncate text-fg', open && 'font-medium')}>
+                      {session.title}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => setActiveId(session.id)}
+                      aria-pressed={open}
+                    >
+                      {t.terminal.page.openHere}
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      ) : null}
 
       {activeId ? (
         <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-stroke">

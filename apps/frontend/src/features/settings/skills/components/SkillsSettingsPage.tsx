@@ -9,6 +9,7 @@ import { SettingsLoadError, SettingsLoading } from '@/components/settings/Settin
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { useSkillSettings } from '../hooks/use-skill-settings';
 import { SkillRow } from './SkillRow';
 import { SkillSourceToggles } from './SkillSourceToggles';
@@ -30,10 +31,10 @@ export function SkillsSettingsPage() {
 
           {skills.length === 0 ? (
             <Card padded={false}>
-              <EmptyState icon={<Sparkles size={24} />} title={s.noSkills} />
+              <EmptyState icon={<Sparkles size={ICON_LG} />} title={s.noSkills} />
             </Card>
           ) : (
-            <SettingsSection>
+            <SettingsSection title={s.installedTitle}>
               {skills.map((skill) => (
                 <SkillRow key={skill.key} descriptor={skill} />
               ))}

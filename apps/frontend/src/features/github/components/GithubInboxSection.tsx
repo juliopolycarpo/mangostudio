@@ -1,14 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
 import { Inbox } from 'lucide-react';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
-import { useApp } from '@/lib/app-context';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
-import { useForceRefresh } from '../hooks/use-force-refresh';
-import { githubInboxQueryOptions } from '../queries';
+import type { GithubInbox } from '../hooks/use-github-inbox';
 import { GithubNotConnected } from './GithubNotConnected';
 import { GithubPrBadge } from './GithubPrBadge';
 import { GithubRowMenu } from './GithubRowMenu';
@@ -18,6 +15,8 @@ import { GithubRefreshButton, GithubStaleness } from './GithubStaleness';
 
 interface GithubInboxSectionProps {
   readonly chatId: string;
+  /** The panel's read of the queue; the panel owns it to tell a signed-out `gh` from an empty queue. */
+  readonly inbox: GithubInbox;
   readonly collapsed: boolean;
   readonly onToggle: () => void;
 }
@@ -33,21 +32,16 @@ const GITHUB_INBOX_TESTID = 'github-inbox-section';
  * a review request does not stop mattering because you switched projects.
  *
  * @example
- * <GithubInboxSection chatId={chatId} collapsed={false} onToggle={toggleInbox} />
+ * <GithubInboxSection chatId={chatId} inbox={inbox} collapsed={false} onToggle={toggleInbox} />
  */
-export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxSectionProps) {
+export function GithubInboxSection({
+  chatId,
+  inbox,
+  collapsed,
+  onToggle,
+}: GithubInboxSectionProps) {
   const { t } = useI18n();
-  // The source chat's own record first, and the shell's current environment
-  // only as a fallback — same resolution `useIssueToNewChat` uses, since a
-  // chat pinned to WSL/SSH/a container has `gh` credentials that live on that
-  // machine, not on the hub's. Resolved once here and threaded to `InboxBody`
-  // too, so the staleness stamp above and the rows below always read the same
-  // cache entry.
-  const { chats, currentEnvironmentId } = useApp();
-  const environmentId =
-    chats.find((chat) => chat.id === chatId)?.environmentId ?? currentEnvironmentId ?? undefined;
-  const forceRefresh = useForceRefresh();
-  const query = useQuery(githubInboxQueryOptions(environmentId, forceRefresh.read));
+  const { query, refresh } = inbox;
   const data = query.data;
 
   return (
@@ -62,14 +56,11 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
             cachedAt={data?.state === 'ok' ? data.cachedAt : null}
             refreshing={query.isFetching}
           />
-          <GithubRefreshButton
-            onRefresh={() => void forceRefresh.trigger(query.refetch)}
-            refreshing={query.isFetching}
-          />
+          <GithubRefreshButton onRefresh={refresh} refreshing={query.isFetching} />
         </>
       }
     >
-      <InboxBody chatId={chatId} environmentId={environmentId} forceRefresh={forceRefresh.read} />
+      <InboxBody chatId={chatId} query={query} />
     </GithubSection>
   );
 }
@@ -80,15 +71,12 @@ export function GithubInboxSection({ chatId, collapsed, onToggle }: GithubInboxS
  */
 function InboxBody({
   chatId,
-  environmentId,
-  forceRefresh,
+  query,
 }: {
   readonly chatId: string;
-  readonly environmentId: string | undefined;
-  readonly forceRefresh: () => boolean;
+  readonly query: GithubInbox['query'];
 }) {
   const { t } = useI18n();
-  const query = useQuery(githubInboxQueryOptions(environmentId, forceRefresh));
 
   if (query.isPending) {
     return <EmptyState icon={<Spinner />} title={t.github.loading} className="min-h-24 py-4" />;

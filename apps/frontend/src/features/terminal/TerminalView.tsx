@@ -221,8 +221,13 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
     fitAndResize(term, fitAddon, socketRef.current);
   }, [config.fontSize]);
 
+  // The wrapper paints `canvas` (xterm's own theme background) and carries the
+  // inset, so the output never sits flush against a border and the strip FitAddon
+  // leaves under the last row is the same colour as the rows. `containerRef`
+  // stays bare: FitAddon measures the box it is given, and padding on it would
+  // be counted into the grid.
   return (
-    <div className="relative h-full min-h-0 w-full">
+    <div className="relative h-full min-h-0 w-full bg-canvas p-2">
       <div ref={containerRef} className="h-full min-h-0 w-full" data-testid="terminal-view" />
       {socket.status === 'replaced' && (
         // `z-10`: xterm stacks its own layers (the link-layer canvas is z-index

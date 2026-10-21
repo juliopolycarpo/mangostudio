@@ -21,6 +21,7 @@ import { useChatAutoFollow } from '../hooks/use-chat-auto-follow';
 import { useChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
 import type { OlderMessages } from '../hooks/use-chat-page-state';
 import { useTranscriptReadAhead } from '../hooks/use-transcript-read-ahead';
+import { CHAT_COLUMN_CLASS, CHAT_GUTTER_X_CLASS } from '../lib/chat-column';
 import type { ReaderPosition } from '../transcript-read-ahead';
 import { ChatMessageRow } from './ChatMessageRow';
 
@@ -203,7 +204,9 @@ export function ChatFeed({
       onScroll={handleFeedScroll}
       onWheel={handleFeedWheel}
       onTouchMove={requestOlderNearTop}
-      className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 md:py-8 hide-scrollbar max-w-5xl mx-auto w-full"
+      // Full width, so a wheel or a touch in the margins beside the column still
+      // scrolls the feed; the column itself is the one the composer sits in.
+      className={`hide-scrollbar min-h-0 flex-1 overflow-y-auto py-4 sm:py-6 md:py-8 ${CHAT_GUTTER_X_CLASS}`}
     >
       {messages.length === 0 && <EmptyFeed />}
 
@@ -221,9 +224,9 @@ export function ChatFeed({
       {messages.length > 0 && (
         <div
           ref={contentRef}
+          className={CHAT_COLUMN_CLASS}
           style={{
             height: `${totalSize}px`,
-            width: '100%',
             position: 'relative',
           }}
         >

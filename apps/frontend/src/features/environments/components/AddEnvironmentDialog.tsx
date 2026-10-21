@@ -15,13 +15,15 @@ import {
   shouldWarnPlaintextHttpRuntime,
   sshPreflightCommands,
 } from '@mangostudio/shared/environments';
-import { useEffect, useState } from 'react';
+import { Check, ChevronRight } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import {
   type ContainerFormFields,
   containerFormToConfig,
@@ -81,6 +83,8 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
   const { t } = useI18n();
   const labels = t.environments.entities.add;
   const create = useCreateEnvironmentMutation();
+  const reachGroupName = useId();
+  const newMachineHintId = useId();
 
   const [kind, setKind] = useState<ReachabilityChoice>('stdio');
   const [name, setName] = useState('');
@@ -267,38 +271,46 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
       }
     >
       <div className="space-y-4">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-fg">{labels.reachLabel}</p>
-          <div className="grid gap-2" role="tablist">
-            {choices.map((choice) => (
-              <ReachabilityOption
-                key={choice.value}
-                active={kind === choice.value}
-                label={choice.label}
-                onSelect={() => setKind(choice.value)}
-              />
-            ))}
-          </div>
+        <div className="space-y-2">
+          {/* Real radios: one choice out of several, arrow keys between them,
+              announced as a group under its question. */}
+          <fieldset className="min-w-0 space-y-2">
+            <legend className="text-sm font-medium text-fg">{labels.reachLabel}</legend>
+            <div className="grid gap-2">
+              {choices.map((choice) => (
+                <ReachabilityOption
+                  key={choice.value}
+                  groupName={reachGroupName}
+                  value={choice.value}
+                  active={kind === choice.value}
+                  label={choice.label}
+                  onSelect={() => setKind(choice.value)}
+                />
+              ))}
+            </div>
+          </fieldset>
+          {/* Straight under the tiles: it explains the answer just picked. */}
+          <Callout tone="neutral">{hints[kind]}</Callout>
           {/* Last, and it leaves rather than selects: the guided flow asks
               these same questions in an order that suits somebody who has a
-              bare machine and no environment yet. Sibling to the tablist, not
-              inside it: it is not a tab and does not select a choice. */}
+              bare machine and no environment yet. Not one of the radios. */}
           {onStartOnboarding ? (
-            <button
-              type="button"
-              onClick={onStartOnboarding}
-              data-testid="add-environment-onboarding"
-              className="mt-2 block min-h-8 w-full rounded-sm border border-dashed border-stroke-strong px-3 py-1.5 text-left text-sm font-medium text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
-            >
-              {labels.reachNewMachine}
-              <span className="mt-0.5 block text-xs font-normal text-fg-subtle">
+            <div className="flex flex-col items-start gap-1">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={onStartOnboarding}
+                aria-describedby={newMachineHintId}
+                data-testid="add-environment-onboarding"
+              >
+                {labels.reachNewMachine}
+                <ChevronRight size={ICON_SM} aria-hidden="true" />
+              </Button>
+              <p id={newMachineHintId} className="text-xs text-fg-subtle">
                 {labels.newMachineHint}
-              </span>
-            </button>
+              </p>
+            </div>
           ) : null}
-          <Callout tone="neutral" className="mt-2">
-            {hints[kind]}
-          </Callout>
         </div>
 
         {kind === 'wsl' ? (
@@ -490,23 +502,39 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
 }
 
 function ReachabilityOption({
+  groupName,
+  value,
   active,
   label,
   onSelect,
 }: {
+  readonly groupName: string;
+  readonly value: ReachabilityChoice;
   readonly active: boolean;
   readonly label: string;
   readonly onSelect: () => void;
 }) {
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onSelect}
-      className={choiceClass(active)}
+    <label
+      className={cn(
+        'flex cursor-pointer items-center gap-2',
+        choiceClass(active),
+        // The radio is visually hidden, so the tile carries its focus mark.
+        'has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus'
+      )}
     >
-      {label}
-    </button>
+      <input
+        type="radio"
+        name={groupName}
+        value={value}
+        checked={active}
+        className="sr-only"
+        onChange={onSelect}
+      />
+      <span className="min-w-0 flex-1">{label}</span>
+      {active ? (
+        <Check size={ICON_MD} aria-hidden="true" className="shrink-0 text-accent-fg" />
+      ) : null}
+    </label>
   );
 }

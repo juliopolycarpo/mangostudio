@@ -8,6 +8,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { MANGO_IDENTITY } from '@/lib/agent-identity';
 import { formatClockTime } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
+import { TURN_ACTION_REVEAL } from '../lib/turn-action-reveal';
 import { deriveTurnIdentity } from '../lib/turn-identity';
 import type { TurnStatus } from '../lib/turn-status';
 import { CopyMessageButton } from './CopyMessageButton';
@@ -135,7 +136,12 @@ export function TurnSeparator({
         />
       )}
       {turnIsSettledEnoughForActions && (
-        <span className="shrink-0 font-mono text-micro text-fg-subtle opacity-0 transition-opacity duration-(--duration-base) group-hover:opacity-100">
+        <span
+          className={cn(
+            'shrink-0 font-mono text-micro text-fg-subtle transition-opacity duration-(--duration-base)',
+            TURN_ACTION_REVEAL
+          )}
+        >
           {formatClockTime(msg.timestamp, locale)}
         </span>
       )}

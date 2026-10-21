@@ -1,7 +1,6 @@
-import { ChevronDown } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+import { DisclosureChevron } from './DisclosureChevron';
 
 interface TimelineRowProps {
   expanded: boolean;
@@ -86,13 +85,17 @@ export function TimelineRow({
       className={cn(ROW_CLASS, 'cursor-pointer hover:bg-fill-hover')}
     >
       {content}
-      <ChevronDown
-        size={ICON_SM}
-        aria-hidden="true"
+      <DisclosureChevron
+        expanded={expanded}
         className={cn(
-          'shrink-0 text-fg-subtle transition-[opacity,transform] duration-(--duration-base)',
+          'transition-[opacity,transform]',
           !hasMeta && 'ml-auto',
-          expanded ? 'rotate-180 opacity-100' : 'opacity-0 group-hover/row:opacity-100'
+          // A closed row keeps its chevron out of sight until the pointer or the
+          // keyboard is on it — but a touch screen has neither, and a row that
+          // gives no sign it opens is a row nobody opens. `hover:` is wrapped in
+          // `@media (hover: hover)`, so touch needs its own term.
+          !expanded &&
+            'opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 pointer-coarse:opacity-100'
         )}
       />
     </button>

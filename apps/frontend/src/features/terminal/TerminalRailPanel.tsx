@@ -43,7 +43,11 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   const [activeId, setActiveId] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<string | null>(null);
 
-  const { unavailable, message: unavailableHint } = useTerminalAvailability(environmentId);
+  const {
+    unavailable,
+    message: unavailableHint,
+    tone: unavailableTone,
+  } = useTerminalAvailability(environmentId);
   const sessionsQuery = useTerminalSessionsQuery(
     environmentId ?? '',
     chatId,
@@ -105,8 +109,14 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
     return queryClient.invalidateQueries({ queryKey: terminalKeys.all });
   }
 
+  // The rail body is edge-to-edge, so the notice brings its own gutter and sits
+  // at the top where the eye lands, instead of floating mid-panel.
   if (!environmentId || (unavailable && sessions.length === 0)) {
-    return <TerminalUnavailableNotice message={unavailableHint} className="h-full" />;
+    return (
+      <div className="p-4">
+        <TerminalUnavailableNotice message={unavailableHint} tone={unavailableTone} />
+      </div>
+    );
   }
 
   if (sessionsQuery.isSuccess && sessions.length === 0) {

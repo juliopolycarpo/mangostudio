@@ -76,9 +76,10 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
       <RunnerOption
         title={t.library.targets.mangostudio}
         description={s.modelDescription}
-        icon={<Sparkles aria-hidden size={ICON_MD} className="text-fg-muted" />}
+        icon={<Sparkles aria-hidden size={ICON_MD} />}
         selected={sameRunner(state.runner, MANGOSTUDIO_RUNNER)}
-        disabled={isSaving || (!catalog.isPending && !hasModel)}
+        busy={isSaving}
+        unavailable={!catalog.isPending && !hasModel}
         testId="onboarding-runner-mangostudio"
         onSelect={() => choose(MANGOSTUDIO_RUNNER)}
       />
@@ -148,9 +149,10 @@ function AgentOption({
       <RunnerOption
         title={t.library.targets[agent.targetId]}
         description={agent.authState === 'signed-out' ? s.signedOut : s.signedIn}
-        icon={<Bot aria-hidden size={ICON_MD} className="text-fg-muted" />}
+        icon={<Bot aria-hidden size={ICON_MD} />}
         selected={selected}
-        disabled={busy || !selectable}
+        busy={busy}
+        unavailable={!selectable}
         testId={`onboarding-runner-${agent.targetId}`}
         onSelect={onSelect}
       />
@@ -163,12 +165,24 @@ function AgentOption({
   );
 }
 
+/**
+ * One runner on offer.
+ *
+ * Two reasons it cannot be clicked, told apart because they look different: a
+ * write is in flight (`busy`, over in a moment, so nothing about the row
+ * changes), or the runner cannot be used at all (`unavailable`). The second is
+ * drawn in the quieter text tokens rather than faded by opacity. Its
+ * description is the reason ("Not signed in") and the one thing a person needs
+ * to read here, so it has to stay legible; the row looks inactive because of
+ * its colours and its cursor, not because everything in it is half-transparent.
+ */
 function RunnerOption({
   title,
   description,
   icon,
   selected,
-  disabled = false,
+  busy = false,
+  unavailable = false,
   testId,
   onSelect,
 }: {
@@ -176,7 +190,8 @@ function RunnerOption({
   readonly description: string;
   readonly icon: React.ReactNode;
   readonly selected: boolean;
-  readonly disabled?: boolean;
+  readonly busy?: boolean;
+  readonly unavailable?: boolean;
   readonly testId: string;
   readonly onSelect: () => void;
 }) {
@@ -185,22 +200,31 @@ function RunnerOption({
   return (
     <button
       type="button"
-      disabled={disabled}
+      disabled={busy || unavailable}
       data-testid={testId}
       aria-pressed={selected}
       onClick={onSelect}
       className={cn(
-        'relative flex w-full items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+        'relative flex w-full items-center gap-3 rounded-sm border border-stroke px-3 py-2 text-left transition-colors',
         // The chosen runner is the list's current item, marked as in the sidebar.
         selected
           ? cn('bg-fill-selected', SELECTION_BAR)
-          : 'bg-control enabled:hover:bg-control-hover'
+          : cn('bg-control', !unavailable && 'enabled:hover:bg-control-hover'),
+        unavailable && 'cursor-not-allowed'
       )}
     >
-      <span className="shrink-0">{icon}</span>
+      <span className={cn('shrink-0', unavailable ? 'text-fg-subtle' : 'text-fg-muted')}>
+        {icon}
+      </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-fg">{title}</span>
-        <span className="block truncate text-xs text-fg-muted">{description}</span>
+        <span
+          className={cn('block text-sm font-medium', unavailable ? 'text-fg-muted' : 'text-fg')}
+        >
+          {title}
+        </span>
+        <span className={cn('block text-xs', unavailable ? 'text-fg-subtle' : 'text-fg-muted')}>
+          {description}
+        </span>
       </span>
       {selected ? (
         <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-fg">

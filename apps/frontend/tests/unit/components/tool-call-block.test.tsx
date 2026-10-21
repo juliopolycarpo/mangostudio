@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from 'bun:test';
+import { en } from '@mangostudio/shared/i18n';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { ToolCallBlock } from '@/features/chat/components/ToolCallBlock';
@@ -186,6 +187,141 @@ describe('ToolCallBlock', () => {
     fireEvent.click(screen.getByTitle('Copy result'));
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith('logs');
+    });
+  });
+
+  describe('a shell run', () => {
+    const FAILED = JSON.stringify({
+      shell: 'bash',
+      command: 'bun run build',
+      exitCode: 2,
+      signal: null,
+      stdout: '',
+      stderr: 'src/app.ts:3:1 - error TS2304: Cannot find name "foo".\nFound 1 error.\n',
+      truncated: false,
+    });
+
+    it('reads a failure as its own lines, not as an escaped JSON string', () => {
+      render(
+        <ToolCallBlock
+          name="bash"
+          args={{ command: 'bun run build' }}
+          status="failed"
+          result={FAILED}
+          execution={snapshot({ status: 'failed', durationMs: 5200 })}
+        />
+      );
+
+      // Real line breaks and real quotes: nothing of the wire format shows.
+      const body = screen.getByText(/Cannot find name/);
+      expect(body.textContent).toBe(
+        'src/app.ts:3:1 - error TS2304: Cannot find name "foo".\nFound 1 error.\n'
+      );
+      expect(body.textContent).not.toContain('\\n');
+      expect(body.textContent).not.toContain('\\"');
+      // The row already says `exit 2`, so the body does not repeat it.
+      expect(screen.queryByText(/exitCode/)).toBeNull();
+      expect(screen.getByRole('button', { name: /exit 2/ })).toBeInTheDocument();
+    });
+
+    it('draws each stream that printed something as its own section and skips the empty one', () => {
+      render(<ToolCallBlock name="bash" args={{ command: 'x' }} status="failed" result={FAILED} />);
+      expect(screen.getByText('stderr')).toBeInTheDocument();
+      expect(screen.queryByText('stdout')).toBeNull();
+      expect(screen.queryByText('error')).toBeNull();
+      // The failure's text keeps the primary colour; the label carries the tone.
+      expect(screen.getByText(/Cannot find name/).className).toContain('text-fg');
+      expect(screen.getByText(/Cannot find name/).className).not.toContain('text-danger');
+      expect(screen.getByText('stderr').className).toContain('text-danger');
+    });
+
+    it('leads with the stream the reader came for and tints only the failing one', () => {
+      const result = JSON.stringify({ exitCode: 1, stdout: 'compiling\n', stderr: 'boom\n' });
+      const { rerender } = render(
+        <ToolCallBlock name="bash" args={{}} status="failed" result={result} />
+      );
+      const labels = () =>
+        screen.getAllByText(/^(stdout|stderr)$/).map((label) => label.textContent);
+
+      expect(labels()).toEqual(['stderr', 'stdout']);
+      expect(screen.getByText('stdout').className).not.toContain('text-danger');
+
+      // A failed call opens itself, and stays open when the same row settles.
+      rerender(<ToolCallBlock name="bash" args={{}} status="succeeded" result={result} />);
+      expect(labels()).toEqual(['stdout', 'stderr']);
+      expect(screen.getByText('stderr').className).not.toContain('text-danger');
+    });
+
+    it('copies the text of the section it sits in', async () => {
+      const writeText = jest.fn().mockResolvedValue(undefined);
+      stubClipboard(writeText);
+      render(
+        <ToolCallBlock
+          name="bash"
+          args={{}}
+          status="succeeded"
+          result={JSON.stringify({ exitCode: 0, stdout: 'hello\n', stderr: 'warn\n' })}
+        />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /Bash/ }));
+
+      fireEvent.click(screen.getByTitle('Copy stderr'));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith('warn\n'));
+      fireEvent.click(screen.getByTitle('Copy stdout'));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith('hello\n'));
+    });
+
+    it('says when the runtime cut the output', () => {
+      render(
+        <ToolCallBlock
+          name="bash"
+          args={{}}
+          status="failed"
+          result={JSON.stringify({ exitCode: 1, stdout: '', stderr: 'x', truncated: true })}
+        />
+      );
+      expect(screen.getByText(en.tools.outputTruncated)).toBeInTheDocument();
+    });
+
+    it('keeps the payload when the run printed nothing, so the exit code is not lost', () => {
+      render(
+        <ToolCallBlock
+          name="bash"
+          args={{}}
+          status="succeeded"
+          result={JSON.stringify({ exitCode: 0, stdout: '', stderr: '' })}
+        />
+      );
+      fireEvent.click(screen.getByRole('button', { name: /Bash/ }));
+      expect(screen.getByText('result')).toBeInTheDocument();
+      expect(screen.getByText(/"exitCode": 0/)).toBeInTheDocument();
+    });
+
+    it('still unwraps the error a timed-out run leaves behind', () => {
+      render(
+        <ToolCallBlock
+          name="bash"
+          args={{}}
+          status="timed_out"
+          result='{"error":"Command timed out after 30 seconds."}'
+        />
+      );
+      expect(screen.getByText('error')).toBeInTheDocument();
+      expect(screen.getByText('Command timed out after 30 seconds.')).toBeInTheDocument();
+    });
+
+    it('leaves another tool with a stdout field to the generic body', () => {
+      render(
+        <ToolCallBlock
+          name="mcp__x__run"
+          args={{}}
+          status="succeeded"
+          result={JSON.stringify({ stdout: 'a\nb' })}
+        />
+      );
+      fireEvent.click(screen.getByRole('button'));
+      expect(screen.queryByText('stdout')).toBeNull();
+      expect(screen.getByText(/"stdout": "a\\nb"/)).toBeInTheDocument();
     });
   });
 

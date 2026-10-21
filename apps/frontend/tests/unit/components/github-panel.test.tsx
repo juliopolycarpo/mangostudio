@@ -302,6 +302,96 @@ describe('GithubPanel', () => {
     });
   }
 
+  // `gh` missing or signed out is true of the whole machine, so the panel says
+  // it once. The two repository-scoped states stay on the repository section.
+  const MACHINE_LEVEL = [
+    ['gh-not-installed', 'GitHub CLI is not installed where this chat runs.'],
+    ['not-authenticated', 'GitHub CLI is not signed in where this chat runs.'],
+  ] as const;
+
+  for (const [state, sentence] of MACHINE_LEVEL) {
+    it(`says ${state} once for the whole panel instead of once per section`, async () => {
+      const { scenario } = await renderPanel({ inbox: { state }, prs: { state } });
+      try {
+        // `findByText` and `getByText` both throw on a second match, so this is
+        // the assertion that the sentence is drawn exactly once.
+        expect(await screen.findByText(sentence)).toBeVisible();
+        expect(screen.getByRole('button', { name: 'Refresh' })).toBeVisible();
+        // Neither half is drawn: no headers to collapse, no tabs, no filters, no
+        // create button sitting live above a refusal.
+        expect(screen.queryByTestId('github-inbox-section')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('github-repo-section')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Create pull request' })).toBeNull();
+      } finally {
+        scenario.restore();
+      }
+    });
+  }
+
+  it('brings both sections back once the refresh finds gh signed in', async () => {
+    const user = userEvent.setup();
+    const { scenario } = await renderPanel({ inbox: { state: 'not-authenticated' } });
+    try {
+      expect(
+        await screen.findByText('GitHub CLI is not signed in where this chat runs.')
+      ).toBeVisible();
+      scenario.respondWithJson('GET', '/api/github/inbox?refresh=true', {
+        body: { state: 'ok', cachedAt: 2_000, items: [INBOX_ITEM] },
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+      expect(await screen.findByText('Tighten the runtime probe cache')).toBeVisible();
+      expect(screen.getByTestId('github-repo-section')).toBeVisible();
+      expect(
+        screen.queryByText('GitHub CLI is not signed in where this chat runs.')
+      ).not.toBeInTheDocument();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it('keeps the review queue when only the repository has no remote', async () => {
+    const { scenario } = await renderPanel({
+      inbox: { state: 'ok', cachedAt: Date.now(), items: [INBOX_ITEM] },
+      prs: { state: 'no-remote' },
+    });
+    try {
+      // A repository-scoped state is not a reason to blank the queue: it must
+      // not be hoisted to the panel.
+      expect(await screen.findByText('This repository has no remote.')).toBeVisible();
+      expect(screen.getByText('Tighten the runtime probe cache')).toBeVisible();
+      expect(screen.getByTestId('github-inbox-section')).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it('hides the filters and the create button above a repository that cannot be read', async () => {
+    const { scenario } = await renderPanel({ prs: { state: 'no-remote' } });
+    try {
+      expect(await screen.findByText('This repository has no remote.')).toBeVisible();
+      const repo = within(screen.getByTestId('github-repo-section'));
+      expect(repo.queryByRole('button', { name: 'Create pull request' })).toBeNull();
+      expect(repo.queryByRole('button', { name: 'Open' })).toBeNull();
+      // The tabs stay: switching to issues is still a way to look elsewhere.
+      expect(repo.getByRole('tab', { name: 'Issues' })).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it('shows the filters and the create button once the repository answers', async () => {
+    const { scenario } = await renderPanel();
+    try {
+      const repo = within(screen.getByTestId('github-repo-section'));
+      expect(await repo.findByRole('button', { name: 'Create pull request' })).toBeVisible();
+      expect(repo.getByRole('button', { name: 'Open' })).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
+
   it('degrades each section on its own when a read fails', async () => {
     const { scenario } = await renderPanel({ inbox: undefined, prs: { state: 'no-remote' } });
     try {

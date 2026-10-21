@@ -107,11 +107,11 @@ describe('ChatGptResetCreditAction', () => {
     );
 
     fireEvent.click(screen.getByText('Use a rate-limit reset'));
-    expect(screen.queryByText(/restored 2 window/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/restored 2 windows/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Use reset'));
     await waitFor(() => expect(onRedeemed).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByText('Use a rate-limit reset'));
-    expect(screen.getByText(/restored 2 window\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText(/restored 2 windows\./)).toBeInTheDocument();
   });
 });

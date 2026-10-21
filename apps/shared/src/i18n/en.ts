@@ -34,6 +34,10 @@ export const messages: Messages = {
     newChatWorkdirFailed: 'Could not start the chat in that folder. Try again.',
     editTitle: 'Edit title',
     deleteTitle: 'Delete chat',
+    deleteConfirmTitle: 'Delete this chat?',
+    deleteConfirmDescription: 'This permanently deletes the chat and all its messages.',
+    deleteCancel: 'Cancel',
+    deleteFailed: 'Could not delete the chat. Try again.',
     sectionLabel: 'Chats',
     streaming: 'Generating…',
     input: {
@@ -54,6 +58,7 @@ export const messages: Messages = {
       mcpNeedsChat: 'Open a chat before attaching resources.',
       mcpAttachFailed: 'Could not attach the resource. Try again.',
       mcpInsertFailed: 'Could not insert the prompt. Try again.',
+      mcpLoadFailed: 'Could not load MCP prompts and resources.',
       slashMenuLabel: 'Slash commands',
       slashMenuEmpty: 'No command matches.',
       slashMenuLoading: 'Looking for commands…',
@@ -324,12 +329,22 @@ export const messages: Messages = {
         'This turn also ran MCP tools. Any files they changed are not checkpointed and will not be reverted.',
       uncheckpointedBoth:
         'This turn also ran shell commands and MCP tools. Any changes made by shell commands or MCP tools are not checkpointed and will not be reverted.',
-      reverted: 'Reverted {count} file(s).',
-      revertedWithShell:
-        'Reverted {count} file(s). Any changes made by shell commands were not reverted.',
-      revertedWithMcp: 'Reverted {count} file(s). Any changes made by MCP tools were not reverted.',
-      revertedWithBoth:
-        'Reverted {count} file(s). Any changes made by shell commands or MCP tools were not reverted.',
+      // One/Other pairs: the revert result is restated per combination of
+      // uncovered sources (see `uncheckpointed-copy.ts`), and each sentence
+      // agrees with its count.
+      revertedOne: 'Reverted {count} file.',
+      revertedOther: 'Reverted {count} files.',
+      revertedWithShellOne:
+        'Reverted {count} file. Any changes made by shell commands were not reverted.',
+      revertedWithShellOther:
+        'Reverted {count} files. Any changes made by shell commands were not reverted.',
+      revertedWithMcpOne: 'Reverted {count} file. Any changes made by MCP tools were not reverted.',
+      revertedWithMcpOther:
+        'Reverted {count} files. Any changes made by MCP tools were not reverted.',
+      revertedWithBothOne:
+        'Reverted {count} file. Any changes made by shell commands or MCP tools were not reverted.',
+      revertedWithBothOther:
+        'Reverted {count} files. Any changes made by shell commands or MCP tools were not reverted.',
       conflict: 'Could not revert: one or more files changed on disk since this message completed.',
       outsideWorkdir:
         'Could not revert: this message touched files outside the working directory, and tools are restricted to it.',
@@ -361,14 +376,18 @@ export const messages: Messages = {
     workspaces: {
       label: 'Workspaces',
       clean: 'clean tree',
-      dirty: '{count} changed',
-      sessions: '{count} chat(s)',
+      // `*One` / `*Other` pairs: the component picks by count (`usePlural`).
+      dirtyOne: '{count} changed',
+      dirtyOther: '{count} changed',
+      sessionsOne: '{count} chat',
+      sessionsOther: '{count} chats',
       noSessions: 'No chat here yet',
       continueLatest: 'Continue',
       continueSession: 'Continue {title}',
       newChatHere: 'New chat here',
       newChatHereIn: 'New chat in {folder}',
-      more: 'And {count} more folder(s).',
+      moreOne: 'And {count} more folder.',
+      moreOther: 'And {count} more folders.',
       empty: 'No folders yet',
       emptyHint: 'Start a chat and point it at a project to see it here.',
     },
@@ -377,7 +396,8 @@ export const messages: Messages = {
       // Not "Open environments": the fault card beside this one already uses
       // that, and two links with one name on one screen is a coin toss.
       open: 'Manage machines',
-      navAlerts: '{count} alert(s)',
+      navAlertsOne: '{count} alert',
+      navAlertsOther: '{count} alerts',
     },
     toolchain: {
       label: 'Toolchain',
@@ -396,7 +416,8 @@ export const messages: Messages = {
     workspace: {
       label: 'Workspace',
       cleanTree: 'clean tree',
-      dirtyTree: '{count} file(s) changed',
+      dirtyTreeOne: '{count} file changed',
+      dirtyTreeOther: '{count} files changed',
       synced: 'synced with origin',
       noUpstream: 'no upstream',
       detached: 'detached HEAD at {hash}',
@@ -411,16 +432,26 @@ export const messages: Messages = {
       manage: 'Manage agents',
       quotaRefresh: 'Refresh quota',
       sessionsThisWeek: '{count} this week',
+      /** The short words an agent row's badge shows; the full reason stays in the title. */
+      ready: 'Ready',
+      notInstalled: 'Not installed',
+      signedOut: 'Signed out',
+      needsApproval: 'Needs approval',
+      unavailable: 'Unavailable',
+      unconfirmed: 'Unconfirmed',
     },
     skills: {
       label: 'Skills',
-      labelDivergent: 'Skills — {count} divergence(s)',
+      labelDivergentOne: 'Skills — {count} divergence',
+      labelDivergentOther: 'Skills — {count} divergences',
       divergenceBody: 'Different version in {outliers} than in {agreeing}.',
       divergenceBodyNoMajority: '{targets} read different versions of this skill.',
-      more: '{count} more skill(s) diverge.',
+      moreOne: '{count} more skill diverges.',
+      moreOther: '{count} more skills diverge.',
       propagate: 'Propagate',
       viewDiff: 'View diff',
-      singleTarget: '{count} skill(s) live in a single agent.',
+      singleTargetOne: '{count} skill lives in a single agent.',
+      singleTargetOther: '{count} skills live in a single agent.',
       openLibrary: 'Open in the library',
     },
     /**
@@ -432,20 +463,26 @@ export const messages: Messages = {
      */
     library: {
       label: 'Library',
-      labelDivergent: 'Library — {count} divergence(s)',
+      labelDivergentOne: 'Library — {count} divergence',
+      labelDivergentOther: 'Library — {count} divergences',
       divergenceBody: 'Different version in {outliers} than in {agreeing}.',
       divergenceBodyNoMajority: '{targets} read different versions of this resource.',
-      more: '{count} more resource(s) diverge.',
+      moreOne: '{count} more resource diverges.',
+      moreOther: '{count} more resources diverge.',
       propagate: 'Propagate',
       viewDiff: 'View diff',
-      singleTarget: '{count} resource(s) live in a single agent.',
+      singleTargetOne: '{count} resource lives in a single agent.',
+      singleTargetOther: '{count} resources live in a single agent.',
       openLibrary: 'Open in the library',
     },
     uncommitted: {
       label: 'Uncommitted work',
-      changed: '{count} changed',
-      unpushed: '{count} unpushed',
-      more: 'And {count} more chat(s).',
+      changedOne: '{count} changed',
+      changedOther: '{count} changed',
+      unpushedOne: '{count} unpushed',
+      unpushedOther: '{count} unpushed',
+      moreOne: 'And {count} more chat.',
+      moreOther: 'And {count} more chats.',
       open: 'Open {title}',
     },
     environments: {
@@ -469,7 +506,8 @@ export const messages: Messages = {
       label: 'Activity',
       empty: 'Nothing here yet.',
       sinceLastVisit: 'Since your last visit',
-      newCount: '{count} new',
+      newCountOne: '{count} new',
+      newCountOther: '{count} new',
       today: 'Today',
       yesterday: 'Yesterday',
       chatCreated: 'Started {title}',
@@ -512,7 +550,7 @@ export const messages: Messages = {
     empty: 'Your creations will appear here.',
     download: 'Download full image',
     downloadImage: 'Download image',
-    view: 'View',
+    viewImage: 'View image: {prompt}',
     lightboxLabel: 'Image preview',
     close: 'Close image',
   },
@@ -681,7 +719,7 @@ export const messages: Messages = {
       saveError: 'Failed to save agent',
       deleteError: 'Failed to delete agent',
       previewError: 'Failed to preview agent',
-      deleteTitle: 'Delete agent',
+      deleteTitle: 'Delete this agent?',
       deleteDescription: 'This Markdown-backed agent will be removed from disk.',
       deleteConfirm: 'Delete agent',
       sectionIdentity: 'Identity',
@@ -739,7 +777,8 @@ export const messages: Messages = {
       addButton: 'Add connector',
       emptyTitle: 'No connectors found',
       emptyDescription: 'Add your first API key to start generating.',
-      deleteConfirm: 'Are you sure you want to delete this connector?',
+      deleteTitle: 'Delete this connector?',
+      deleteConfirm: 'This removes the connector and its stored credentials.',
       addModalTitle: 'Add connector',
       addModalDescription: 'Choose the provider, configure the API key and storage.',
       chatgptAddModalDescription:
@@ -832,9 +871,11 @@ export const messages: Messages = {
       chatgptRedeemConfirmTitle: 'Use a rate-limit reset?',
       chatgptRedeemConfirmBody:
         'This spends one of your {count} reset credits to restore exhausted rate-limit windows. It cannot be undone.',
-      chatgptRedeemConfirmRestores: 'Your last reset restored {count} window(s).',
+      chatgptRedeemConfirmRestoresOne: 'Your last reset restored {count} window.',
+      chatgptRedeemConfirmRestoresOther: 'Your last reset restored {count} windows.',
       chatgptRedeemConfirmAction: 'Use reset',
-      chatgptRedeemSuccess: 'Rate limit reset — {count} window(s) restored.',
+      chatgptRedeemSuccessOne: 'Rate limit reset — {count} window restored.',
+      chatgptRedeemSuccessOther: 'Rate limit reset — {count} windows restored.',
       chatgptRedeemNothingToReset:
         'Nothing to reset — no rate-limit window is exhausted right now.',
       chatgptRedeemNoCredit: 'No reset credits are available on this account.',
@@ -1085,6 +1126,7 @@ export const messages: Messages = {
         binaryNotice: 'Binary content ({mime}) — attach it from the chat composer to use it.',
       },
       deleteServer: 'Delete server',
+      deleteTitle: 'Delete this server?',
       deleteConfirm: 'This removes the server and its stored auth headers.',
       import: {
         button: 'Import',
@@ -1234,8 +1276,8 @@ export const messages: Messages = {
         done: 'Done',
       },
       revoke: {
-        title: 'Revoke API key',
-        confirm: 'Revoke this key? Requests that present it will stop working immediately.',
+        title: 'Revoke this API key?',
+        confirm: 'Requests that present it stop working immediately.',
         confirmButton: 'Revoke',
         cancelButton: 'Cancel',
       },
@@ -1244,6 +1286,7 @@ export const messages: Messages = {
       title: 'Skills',
       description: 'Enable installed Agent Skills and choose which library locations to scan.',
       sourcesTitle: 'Skill sources',
+      installedTitle: 'Installed skills',
       sourcesDescription:
         'Skills in ~/.mango/skills are always available. Toggle other detected locations or force a fresh disk scan.',
       sourceLabels: {
@@ -1455,7 +1498,8 @@ export const messages: Messages = {
       cursor: 'cursor',
     },
     git: {
-      dirty: '{count} uncommitted change(s)',
+      dirtyOne: '{count} uncommitted change',
+      dirtyOther: '{count} uncommitted changes',
       // Spells out the ↑/↓ glyphs for anyone who cannot see them.
       sync: '{ahead} ahead, {behind} behind',
     },
@@ -1592,9 +1636,14 @@ export const messages: Messages = {
       loadMore: 'Load older commits',
       loadingMore: 'Loading…',
       back: 'Back to history',
-      filesChanged: '{count} files changed',
-      additions: '{count} additions',
-      deletions: '{count} deletions',
+      // English splits one from many; `count` arrives already grouped for the
+      // locale. The two labels name the signed numbers for assistive tech, which
+      // would otherwise hear only "+10,826 −10,006".
+      filesChangedOne: '{count} file changed',
+      filesChangedOther: '{count} files changed',
+      additionsLabel: 'Additions: {count}',
+      deletionsLabel: 'Deletions: {count}',
+      binary: 'Binary',
       commitDetails: 'Commit details',
     },
     diff: {
@@ -1678,6 +1727,7 @@ export const messages: Messages = {
       menu: 'More commit actions',
       commit: 'Commit changes',
       stageAllAndCommit: 'Stage all and commit',
+      nothingStagedHint: 'Nothing is staged. Stage files, or choose "{action}" in the menu.',
       commitAndPush: 'Commit and push',
       commitAndSync: 'Commit and sync',
       stageFailed: 'The changes could not be staged. No commit was created.',
@@ -2076,6 +2126,17 @@ export const messages: Messages = {
       'only-here': 'Only here',
       incomparable: 'Cannot compare',
     },
+    // What a matrix cell prints beside its glyph. The column is a fraction of the
+    // table, so the sentence-length `cellState` would not fit; that one stays on
+    // the legend, the tooltip and the accessible name.
+    cellStateShort: {
+      present: 'Present',
+      absent: 'Absent',
+      shadowed: 'Shadowed',
+      divergent: 'Differs',
+      'only-here': 'Only here',
+      incomparable: 'Cannot compare',
+    },
     cellHint: {
       present: 'This agent reads one copy of this resource.',
       absent: 'This agent reads no copy — which is often correct.',
@@ -2149,8 +2210,6 @@ export const messages: Messages = {
       propagate: 'Propagate',
       loadError: 'The library could not be loaded.',
       retry: 'Try again',
-      rescan: 'Re-read from disk',
-      rescanning: 'Re-reading…',
       locationGroup: 'In {location}',
       locationGroupOther: 'In other locations',
     },
@@ -2183,7 +2242,9 @@ export const messages: Messages = {
       back: 'Back to the matrix',
       contentHeading: 'Content',
       coverageHeading: 'Coverage',
-      copies: '×{count}',
+      // `*One` / `*Other` pair: the component picks by count (`usePlural`).
+      copiesOne: '{count} copy',
+      copiesOther: '{count} copies',
       modified: 'modified {when}',
       compare: 'Compare {left} ↔ {right}',
       compareHide: 'Close comparison',
@@ -2235,6 +2296,7 @@ export const messages: Messages = {
     conflict: {
       description:
         'These resources have more than one readable version. There is no canonical copy, so the choice is yours.',
+      none: 'No conflicts: every selected resource has one readable version, so there is nothing to choose.',
       resolved: 'Resolved',
       unresolved: '{count} resources still need a decision.',
       adopt: 'Use this version',
@@ -2430,8 +2492,11 @@ export const messages: Messages = {
       purgeCancel: 'Keep it',
       purgeError: 'This backup could not be deleted.',
       usage: '{count} backups using {size}.',
+      // Singular form: there is no plural machinery, so the one-set case is a key.
+      usageOne: '1 backup using {size}.',
       retention: 'We keep the last {count} or {size}, whichever comes first.',
       manage: 'Manage backups',
+      back: 'Back to the matrix',
       title: 'Backups',
       description:
         'Every copy the app is holding from a propagation or a removal, with the way back from each.',
@@ -3468,7 +3533,7 @@ export const messages: Messages = {
       emptyHint: 'MangoStudio can install an agent CLI for you on this machine.',
     },
     health: {
-      description: 'Everything that is wrong, in one list, worst first.',
+      description: 'Everything that is wrong or worth knowing, with what needs action first.',
       empty: 'Nothing needs attention.',
       emptyHint: 'Every runtime, version manager, and agent CLI is healthy.',
       scope: {
@@ -3476,10 +3541,13 @@ export const messages: Messages = {
         'version-manager': 'Version manager',
         agent: 'Agent',
       },
-      findingCount: '{count} items need attention',
+      // The list is split by whether anything has to be done: a failing
+      // finding blocks something, a warning does not.
+      needsAction: 'Needs action',
+      canWait: 'Can wait',
     },
     install: {
-      confirmTitle: 'Run install',
+      confirmTitle: 'Run this install?',
       confirmDescription: 'This runs a command on this machine. Review it before continuing.',
       confirmUninstallTitle: 'Remove {target}?',
       confirmUninstallDescription:
@@ -3587,7 +3655,9 @@ export const messages: Messages = {
       continueInNewChat: 'Continue in a new chat',
       copyLoginCommand: 'Copy login command',
       ownership: '{vendor} controls its own tools and permissions.',
-      unavailableHere: 'This agent cannot run here right now — pick another.',
+      unavailableHere: 'This agent cannot run here right now.',
+      /** The next step under `unavailableHere`, and under a reason with nothing to click. */
+      unavailableTryElsewhere: 'Pick another runner in the header, or try again in a moment.',
       forkFailed: 'The new chat could not be created.',
     },
     /** Why a send could not open, when the answer is not about the agent itself. */
@@ -3984,8 +4054,12 @@ export const messages: Messages = {
     argsLabel: 'args',
     errorLabel: 'error',
     resultLabel: 'result',
+    stdoutLabel: 'stdout',
+    stderrLabel: 'stderr',
     copyResult: 'Copy result',
+    copyStream: 'Copy {stream}',
     resultCopied: 'Result copied',
+    outputTruncated: 'The command printed more than fits here; the output was cut.',
     status: {
       queued: 'Queued',
       running: 'Running',
@@ -4059,6 +4133,11 @@ export const messages: Messages = {
     textGenerationFailed: 'Failed to get a response. Please try again.',
     imageGenerationFailed: 'Failed to generate image. Please try again.',
     imageGenerationInterrupted: 'The turn was interrupted before this image was generated.',
+    notFound: {
+      title: 'Page not found',
+      hint: 'The link may be wrong, or the page may have moved.',
+      home: 'Back to MangoStudio',
+    },
     bootstrap: {
       title: 'MangoStudio could not finish loading',
       lead: 'One of the requests every page depends on was refused.',
@@ -4079,6 +4158,7 @@ export const messages: Messages = {
     unavailable: 'Models unavailable',
     noModelsAvailable: 'No models available',
     preview: 'Preview',
+    providerLocked: 'This chat started with {provider}. Start a new chat to use another provider.',
   },
 
   api: {
@@ -4093,7 +4173,7 @@ export const messages: Messages = {
     title: 'Welcome to MangoStudio',
     subtitle:
       'A few short steps and an agent will be answering inside your own project. Skip anything you already have.',
-    progress: 'Step {step} of {total}',
+    progress: 'Step {step} of {total} · {name}',
     stepList: 'Setup steps',
     back: 'Back',
     continue: 'Continue',
@@ -4175,6 +4255,8 @@ export const messages: Messages = {
       hint: 'Optional. Without it, MangoStudio runs only while the terminal that started it stays open.',
       installed: 'Installed',
       notInstalled: 'Not installed',
+      /** Title when the supervisor could not be asked and has no coded reason; the raw line sits beneath. */
+      unreadable: 'Could not check the service',
       install: 'Install the service',
       installing: 'Installing…',
       commandTitle: 'Run this on the computer hosting MangoStudio:',

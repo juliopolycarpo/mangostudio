@@ -48,7 +48,10 @@ export function NavItem({
       )}
     >
       <Icon size={horizontal ? ICON_MD : ICON_LG} className="shrink-0" />
-      <span className="truncate" title={horizontal ? undefined : label}>
+      {/* `max-w-full`: in the tile's column the label is as wide as its text
+          however narrow the cell is, so "Environments" ran past its neighbours
+          instead of ending in an ellipsis. */}
+      <span className="max-w-full truncate" title={horizontal ? undefined : label}>
         {label}
       </span>
       {horizontal && badgeLabel ? (

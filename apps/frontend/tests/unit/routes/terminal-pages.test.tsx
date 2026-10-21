@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { render, screen, waitFor, within } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
@@ -159,6 +159,81 @@ describe('/terminal route', () => {
           'The Local runtime shares the hub’s account with other users, so terminals stay off there.'
         )
       ).toBeVisible()
+    );
+  });
+
+  it('shows only the notice when the environment refuses and nothing is open', async () => {
+    fetchScenario.respondWithJson('GET', '/api/environments', {
+      body: [{ id: 'local', name: 'Local', enabled: true, status: { state: 'connected' } }],
+    });
+    fetchScenario.respondWithJson('GET', '/api/terminals/availability?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        available: false,
+        reason: 'disabled',
+        shells: [],
+        openSessions: 0,
+        maxSessions: 0,
+      },
+    });
+    fetchScenario.respondWithJson('GET', '/api/terminals?environmentId=local', {
+      body: { sessions: [] },
+    });
+
+    render(<TerminalIndexPage />);
+
+    expect(await screen.findByText('Terminal is unavailable')).toBeVisible();
+    expect(screen.getByText('Terminals are turned off on this hub.')).toBeVisible();
+    // Nothing to list and nothing to press: the controls the refusal makes inert
+    // are not drawn beside it.
+    await waitFor(() => expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.queryByRole('heading', { name: 'Sessions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'New terminal' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('No terminals are open for this environment.')
+    ).not.toBeInTheDocument();
+  });
+
+  it('marks the row whose terminal is open', async () => {
+    const user = userEvent.setup();
+    mockLocalEnvironment();
+    fetchScenario.respondWithJson('GET', '/api/terminals?environmentId=local', {
+      body: {
+        sessions: ['term-1', 'term-2'].map((id, index) => ({
+          id,
+          environmentId: 'local',
+          chatId: null,
+          title: `Terminal ${index + 1}`,
+          shell: 'bash',
+          cwd: null,
+          cols: 80,
+          rows: 24,
+          status: 'running',
+          attached: false,
+          createdAt: 1,
+          lastActivityAt: 1,
+        })),
+      },
+    });
+
+    render(<TerminalIndexPage />);
+    const rows = await screen.findAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).not.toHaveClass('bg-fill-selected');
+
+    await user.click(within(rows[1]).getByRole('button', { name: 'Open here' }));
+
+    // The selected fill (with the accent bar) is the sighted cue; aria-pressed
+    // is the assistive one, and the two must agree.
+    expect(rows[1]).toHaveClass('bg-fill-selected');
+    expect(within(rows[1]).getByRole('button', { name: 'Open here' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    expect(rows[0]).not.toHaveClass('bg-fill-selected');
+    expect(within(rows[0]).getByRole('button', { name: 'Open here' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
     );
   });
 

@@ -96,6 +96,55 @@ describe('McpSettingsPage', () => {
     expect(screen.getByText('Error')).toBeInTheDocument();
   });
 
+  it('gives only the status badge a dot, and tells connecting apart from disconnected', async () => {
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: {
+        servers: [
+          { ...STDIO_SERVER, id: 'srv-connecting', name: 'Booting', status: 'connecting' },
+          { ...HTTP_SERVER, id: 'srv-off', name: 'Idle', status: 'disconnected' },
+        ],
+      },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Booting');
+    const connecting = screen.getByText('Connecting');
+    const disconnected = screen.getByText('Disconnected');
+
+    expect(connecting.querySelector('[data-tone]')).not.toBeNull();
+    expect(disconnected.querySelector('[data-tone]')).not.toBeNull();
+    // Same grey as metadata would be indistinguishable; `connecting` is `info`.
+    expect(connecting).toHaveClass('bg-info-subtle');
+    expect(disconnected).not.toHaveClass('bg-info-subtle');
+    // Transport and environment stay plain metadata badges.
+    expect(screen.getByText('stdio').querySelector('[data-tone]')).toBeNull();
+    expect(screen.getByText('HTTP').querySelector('[data-tone]')).toBeNull();
+  });
+
+  it('keeps Test with the row actions and the tool disclosure beside the command', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [STDIO_SERVER] },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Everything');
+    const testButton = screen.getByRole('button', { name: /^test$/i });
+    expect(testButton.parentElement).toBe(
+      screen.getByRole('button', { name: /^edit$/i }).parentElement
+    );
+
+    const showTools = screen.getByRole('button', { name: /show tools/i });
+    expect(showTools).toHaveAttribute('aria-expanded', 'false');
+    await user.click(showTools);
+    expect(screen.getByRole('button', { name: /hide tools/i })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+  });
+
   it('opens the add form, validates required fields with i18n messages, and shows the stdio trust warning', async () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/mcp/servers', { body: { servers: [] } });
@@ -197,6 +246,37 @@ describe('McpSettingsPage', () => {
     await user.click(screen.getByRole('button', { name: /^test$/i }));
 
     expect(await screen.findByText(/2 tools available/i)).toBeInTheDocument();
+  });
+
+  it('writes the cause of an error status on the card instead of only in a tooltip', async () => {
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [HTTP_SERVER] },
+    });
+
+    render(<McpSettingsPage />);
+
+    expect(await screen.findByText('connect ECONNREFUSED')).toBeInTheDocument();
+    // Stored state rather than an answer the user just asked for: not announced.
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('replaces the stored cause with the answer of a new test, never showing both', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [HTTP_SERVER] },
+    });
+    fetchScenario.respondWithJson('POST', '/api/mcp/servers/srv-http/test', {
+      body: { ok: false, status: 'error', error: 'Handshake timed out' },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('connect ECONNREFUSED');
+    await user.click(screen.getByRole('button', { name: /^test$/i }));
+
+    expect(await screen.findByText('Handshake timed out')).toBeInTheDocument();
+    expect(screen.queryByText('connect ECONNREFUSED')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Handshake timed out');
   });
 
   it('deletes a server after confirmation', async () => {

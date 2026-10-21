@@ -54,7 +54,9 @@ Never colour the words of a notice; the glyph and the fill carry the tone.
 Show state as a `Badge` (a word in a pill), a `StatusDot` beside a word, or a glyph in
 the status colour **with** a word. Colour alone is never the signal. Prefer `neutral`
 for "no state" over leaving it out — a row that sometimes has a badge and sometimes
-none reads as broken.
+none reads as broken. A thing that is simply absent and optional (an agent CLI that
+is not installed) is `neutral`, a thing the person can fix (signed out) is `warning`,
+and `error` is for a fault: a healthy account's landing page shows no red.
 
 ## Dialogs and destructive actions
 
@@ -67,6 +69,13 @@ none reads as broken.
 ## Empty, loading and error
 
 - **Empty**: `EmptyState` with an icon, what is missing, and how to get some.
+- **Unavailable**: a feature that cannot work here (the GitHub CLI is signed out,
+  terminals are switched off) is not an empty list. It is a `Callout` — `warning`
+  when the person can fix it, `info` when it is a standing fact — left-aligned
+  where the content would be, said once for the region it covers. The controls it
+  makes inert (filters, a create button, a "Sessions" header with nothing under it)
+  are not drawn beside it; a list that is still reachable (open terminals at the
+  cap) stays.
 - **Loading**: `Skeleton` blocks for lists and cards; `Spinner` for a single action.
   Never both on one region.
 - **Error**: a `Callout tone="danger"` with the cause and a retry `Button`. A toast
@@ -81,6 +90,9 @@ none reads as broken.
 - The ellipsis is the single character `…` ("Saving…", "Search chats…").
 - One word per concept. A session with a runner is a **chat**; a list heading may say
   "Recent chats". The product is **MangoStudio**, one word.
+- A count is never "chat(s)". A counted message is a pair of dictionary keys, `xOne` and
+  `xOther`, picked with `usePlural` ("1 chat", "3 chats"), so each language agrees its
+  nouns and adjectives its own way ("1 arquivo alterado", "3 arquivos alterados").
 - Errors say what failed and what to do: "Could not start the chat with this runner.
   Try again."
 - No emoji in the interface. All text comes from `@mangostudio/shared/i18n`, with the

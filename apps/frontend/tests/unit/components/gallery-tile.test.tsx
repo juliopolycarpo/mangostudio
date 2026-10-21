@@ -1,8 +1,12 @@
 /**
- * The tile's two actions sit under an overlay that is transparent until the
- * pointer arrives, which is the part worth pinning: both are tabbable, so a
- * reveal keyed to hover alone leaves a keyboard user with a focus ring on
- * something they cannot see.
+ * The image is the control that opens it, and the caption bar over its foot
+ * carries the prompt and a download link. What is worth pinning is the part that
+ * breaks without anyone noticing in a unit lane:
+ *
+ * - the bar fades in on hover *and* focus, because its link is tabbable;
+ * - the bar never takes pointer events itself, or it would swallow taps on the
+ *   foot of the image while invisible and clicks on its own text while shown;
+ * - nothing clips the focus ring, which sits outside the control it belongs to.
  *
  * Asserted on the class list rather than through `getComputedStyle`: the unit
  * lane renders without the Tailwind stylesheet, so computed opacity is `1` here
@@ -25,36 +29,80 @@ const TEST_ITEM: GalleryItem = {
   createdAt: 1,
 };
 
-/** The overlay holding the prompt and the actions — the element that fades in. */
-function overlayOf(container: HTMLElement): HTMLElement {
-  const overlay = container.querySelector<HTMLElement>('.opacity-0');
-  if (!overlay) {
-    throw new Error('The tile no longer has a hidden overlay to reveal.');
+/** The caption bar holding the prompt and the download link — the element that fades in. */
+function captionOf(container: HTMLElement): HTMLElement {
+  const caption = container.querySelector<HTMLElement>('.opacity-0');
+  if (!caption) {
+    throw new Error('The tile no longer has a hidden caption bar to reveal.');
   }
-  return overlay;
+  return caption;
 }
 
 describe('GalleryTile', () => {
-  it('reveals its actions on focus, not on hover alone', () => {
-    const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
+  it('opens the image when the image itself is pressed', async () => {
+    const onView = jest.fn();
+    render(<GalleryTile item={TEST_ITEM} onView={onView} />);
 
-    expect(overlayOf(container)).toHaveClass('group-focus-within:opacity-100');
+    await userEvent.setup().click(screen.getByRole('button', { name: /view image/i }));
+
+    expect(onView).toHaveBeenCalledWith(TEST_ITEM);
   });
 
-  it('still reveals them on hover', () => {
-    const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
+  it('names the control by what it opens and says that it opens a dialog', () => {
+    render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
 
-    expect(overlayOf(container)).toHaveClass('group-hover:opacity-100');
+    const button = screen.getByRole('button', {
+      name: 'View image: Aurora over a quiet mountain lake',
+    });
+    expect(button).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(button).toContainElement(screen.getByAltText(TEST_ITEM.prompt));
   });
 
-  // The reveal is keyed off the wrapper, so the controls have to be inside it
-  // for `focus-within` to fire at all.
-  it('keeps both controls inside the element the reveal is keyed to', () => {
+  it('reveals its caption on focus, not on hover alone', () => {
     const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
-    const overlay = overlayOf(container);
 
-    expect(overlay).toContainElement(screen.getByRole('button', { name: /view/i }));
-    expect(overlay).toContainElement(screen.getByRole('link', { name: /download image/i }));
+    expect(captionOf(container)).toHaveClass('group-focus-within:opacity-100');
+  });
+
+  it('still reveals it on hover', () => {
+    const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
+
+    expect(captionOf(container)).toHaveClass('group-hover:opacity-100');
+  });
+
+  // Nested interactive elements are invalid, and the reveal is keyed off the
+  // wrapper, so the link has to sit in the bar and the bar beside the button.
+  it('keeps the download link in the caption, outside the button', () => {
+    const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
+    const caption = captionOf(container);
+    const link = screen.getByRole('link', { name: /download image/i });
+
+    expect(caption).toContainElement(link);
+    expect(screen.getByRole('button', { name: /view image/i })).not.toContainElement(link);
+  });
+
+  it('lets a press on the bar through to the image, and gives events only to the shown link', () => {
+    const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
+
+    // The bar never takes events, so a tap on the invisible foot of the tile
+    // opens the image and so does a click on the caption's own text.
+    expect(captionOf(container)).toHaveClass('pointer-events-none');
+    // The link takes them only while the bar is shown, never while it is faded out.
+    const link = screen.getByRole('link', { name: /download image/i });
+    expect(link).toHaveClass('pointer-events-none');
+    expect(link).toHaveClass('group-hover:pointer-events-auto');
+    expect(link).toHaveClass('group-focus-within:pointer-events-auto');
+  });
+
+  // The global ring is drawn 2px outside the control. A wrapper that clips would
+  // cut it off, so the clipping and the rounding belong to the button.
+  it('clips the image on the button, not on the wrapper that carries the focus ring', () => {
+    const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
+
+    const button = screen.getByRole('button', { name: /view image/i });
+    expect(button).toHaveClass('overflow-hidden', 'rounded-md');
+    expect(container.firstElementChild).not.toHaveClass('overflow-hidden');
+    expect(container.firstElementChild).toHaveClass('group', 'relative');
   });
 
   // Icon-only, so without a label the link announces as its URL or as nothing.
@@ -67,12 +115,15 @@ describe('GalleryTile', () => {
     );
   });
 
-  it('opens the image through the callback it is given', async () => {
+  it('is just the image when compact, with the prompt and download left to the lightbox', async () => {
     const onView = jest.fn();
-    render(<GalleryTile item={TEST_ITEM} onView={onView} />);
+    const { container } = render(<GalleryTile item={TEST_ITEM} onView={onView} compact />);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /view/i }));
+    expect(container.querySelector('.opacity-0')).toBeNull();
+    expect(screen.queryByRole('link', { name: /download image/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(TEST_ITEM.prompt)).not.toBeInTheDocument();
 
+    await userEvent.setup().click(screen.getByRole('button', { name: /view image/i }));
     expect(onView).toHaveBeenCalledWith(TEST_ITEM);
   });
 });

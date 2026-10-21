@@ -7,24 +7,13 @@
  * rounded that up to "available" would be the most-read lie on the page.
  */
 
-import type { RuntimeHealth } from '@mangostudio/shared/environments';
 import { Card } from '@/components/ui/Card';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
-import { healthLabel, healthRollup } from '../format';
+import { HEALTH_ORDER, healthCountClass, healthLabel, healthRollup } from '../format';
 import { useAgentCliStatuses, useRuntimeStatuses } from '../hooks/use-runtime-status';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { OverviewSection } from './OverviewSection';
-
-/** Worst first: the reason to open this section is at the top of the list. */
-const HEALTH_ORDER: readonly RuntimeHealth[] = ['error', 'missing', 'warn', 'ok'];
-
-const COUNT_STYLES: Record<RuntimeHealth, string> = {
-  ok: 'text-success',
-  warn: 'text-warning',
-  missing: 'text-fg-muted',
-  error: 'text-danger',
-};
 
 export function OverviewHealthRollup() {
   const { t } = useI18n();
@@ -58,7 +47,9 @@ export function OverviewHealthRollup() {
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="health-rollup">
             {HEALTH_ORDER.map((health) => (
               <li key={health} className="space-y-0.5" data-health={health}>
-                <p className={`text-title font-semibold ${COUNT_STYLES[health]}`}>
+                <p
+                  className={`text-title font-semibold ${healthCountClass(health, counts[health])}`}
+                >
                   {counts[health]}
                 </p>
                 <MicroLabel as="p">{healthLabel(t, health)}</MicroLabel>

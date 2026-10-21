@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { Children, type ReactNode } from 'react';
 import { Card } from '@/components/ui/Card';
 import { cn } from '@/lib/utils';
 
@@ -40,6 +40,12 @@ interface SettingsSectionProps {
    * children are free-form content in a padded body (a preview, a grid of tiles, a list).
    */
   readonly padded?: boolean;
+  /**
+   * `true`: every child is a unit of several rows (a rule file) and gets a card of its
+   * own, stacked at `space-y-3`, so where one ends and the next begins is a card edge
+   * and not one more hairline. Ignored with `padded`.
+   */
+  readonly cards?: boolean;
   readonly className?: string;
   readonly children: ReactNode;
 }
@@ -61,6 +67,7 @@ export function SettingsSection({
   action,
   notice,
   padded = false,
+  cards = false,
   className,
   children,
 }: SettingsSectionProps) {
@@ -70,9 +77,23 @@ export function SettingsSection({
         <SettingsSectionHeader title={title} description={description} action={action} />
       ) : null}
       {notice}
-      <Card padded={false} className={padded ? 'space-y-4 p-4' : 'divide-y divide-stroke'}>
-        {children}
-      </Card>
+      {cards && !padded ? (
+        <div className="space-y-3">
+          {/* `map` keys what it returns, and hands `null` for the `false` of
+              `{list.length === 0 && …}`, which must not become an empty card. */}
+          {Children.map(children, (child) =>
+            child === null ? null : (
+              <Card padded={false} className="divide-y divide-stroke">
+                {child}
+              </Card>
+            )
+          )}
+        </div>
+      ) : (
+        <Card padded={false} className={padded ? 'space-y-4 p-4' : 'divide-y divide-stroke'}>
+          {children}
+        </Card>
+      )}
     </section>
   );
 }

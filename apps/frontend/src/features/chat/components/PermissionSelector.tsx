@@ -151,6 +151,16 @@ export function PermissionSelector({
     return pair ? [{ id: preset.id, pair }] : [];
   });
   const hasPresets = presets.length > 0;
+  // The chip names the setting in the words of the list it opens. A preset the
+  // popover offers is named as it is there (`Balanced`); the level's own name
+  // (`Default`) appears in no list the person picked from, and reads as a pick
+  // that did not take. Gated on the preset being offered: `selectedPreset`
+  // matches by candidate, so a vendor that does not offer it would otherwise
+  // show a name with no row to match it, the same mismatch the other way round.
+  const modeName =
+    selectedPreset !== undefined && presets.some((preset) => preset.id === selectedPreset)
+      ? labels.preset[selectedPreset].label
+      : labels.levelName[level];
 
   return (
     <div ref={containerRef} className="relative flex items-center">
@@ -169,9 +179,7 @@ export function PermissionSelector({
           <Lock size={ICON_SM} className="composer-chip-icon shrink-0" />
         )}
         <span className="composer-chip-key text-fg-muted">{`${labels.modeKey}:`}</span>
-        <span className={cn('composer-chip-value', unattended && 'text-warning')}>
-          {labels.levelName[level]}
-        </span>
+        <span className={cn('composer-chip-value', unattended && 'text-warning')}>{modeName}</span>
         <ChevronDown size={ICON_SM} className="shrink-0" />
       </button>
 

@@ -188,6 +188,25 @@ export function worstFinding(findings: readonly RuntimeFinding[]): RuntimeFindin
 
 export type HealthRollup = Readonly<Record<RuntimeHealth, number>>;
 
+/** Worst first: the reason to open a rollup is at the top of its list. */
+export const HEALTH_ORDER: readonly RuntimeHealth[] = ['error', 'missing', 'warn', 'ok'];
+
+const HEALTH_COUNT_STYLES: Record<RuntimeHealth, string> = {
+  ok: 'text-success',
+  warn: 'text-warning',
+  missing: 'text-fg-muted',
+  error: 'text-danger',
+};
+
+/**
+ * The text colour of one rollup count. A state wears its status colour only
+ * while something is in it: a red "0 probe failed" next to a healthy machine
+ * reads as an alert about nothing, so an empty bucket stays quiet.
+ */
+export function healthCountClass(health: RuntimeHealth, count: number): string {
+  return count > 0 ? HEALTH_COUNT_STYLES[health] : 'text-fg-muted';
+}
+
 const EMPTY_ROLLUP: HealthRollup = { ok: 0, warn: 0, missing: 0, error: 0 };
 
 /**
@@ -394,12 +413,18 @@ export function runtimeUninstallRecipe(
   return removesInstallation(recipe, installation) ? recipe : undefined;
 }
 
-/** Human-readable byte count for the installer download disclosure. */
+/**
+ * Human-readable byte count, shared by the installer download disclosure and the
+ * library's sizes and backup budget. One decimal at most, and none when it would
+ * be a zero: a 512 MiB limit reads "512 MiB", not "512.0 MiB". The KiB figure is
+ * rounded before it is compared with the MiB boundary, so 1048575 B is "1 MiB"
+ * rather than "1024 KiB".
+ */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  const kib = bytes / 1024;
-  if (kib < 1024) return `${kib.toFixed(1)} KiB`;
-  return `${(kib / 1024).toFixed(1)} MiB`;
+  const kib = Number((bytes / 1024).toFixed(1));
+  if (kib < 1024) return `${kib} KiB`;
+  return `${Number((bytes / 1024 ** 2).toFixed(1))} MiB`;
 }
 
 /** Elapsed install time, rounded to something a human reads at a glance. */

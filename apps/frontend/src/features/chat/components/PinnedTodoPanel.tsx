@@ -1,10 +1,12 @@
 import { getActiveTodo, summarizeTodos } from '@mangostudio/shared/todos';
-import { ChevronDown, ChevronUp, ListTodo } from 'lucide-react';
+import { ListTodo } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+import { ChatDockNotice } from './ChatPageNotices';
+import { DisclosureChevron } from './DisclosureChevron';
 import { TodoItemRow } from './TodoItemRow';
 
 interface PinnedTodoPanelProps {
@@ -29,7 +31,7 @@ export function PinnedTodoPanel({ chatId }: PinnedTodoPanelProps) {
   const active = getActiveTodo(todos);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 sm:px-6">
+    <ChatDockNotice>
       <div className="overflow-hidden rounded-md border border-stroke bg-surface text-sm text-fg">
         <button
           type="button"
@@ -50,11 +52,7 @@ export function PinnedTodoPanel({ chatId }: PinnedTodoPanelProps) {
               {labels.panelCurrent.replace('{task}', active.content)}
             </span>
           )}
-          {expanded ? (
-            <ChevronUp size={ICON_MD} className="ml-auto shrink-0 text-fg-muted" />
-          ) : (
-            <ChevronDown size={ICON_MD} className="ml-auto shrink-0 text-fg-muted" />
-          )}
+          <DisclosureChevron expanded={expanded} className="ml-auto" />
         </button>
         {expanded && (
           <ul className="space-y-1.5 px-4 pb-3">
@@ -65,6 +63,6 @@ export function PinnedTodoPanel({ chatId }: PinnedTodoPanelProps) {
           </ul>
         )}
       </div>
-    </div>
+    </ChatDockNotice>
   );
 }

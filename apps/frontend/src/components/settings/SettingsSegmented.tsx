@@ -24,13 +24,19 @@ interface SettingsSegmentedProps<T extends string> {
 
 const SEGMENT =
   'inline-flex h-8 cursor-pointer items-center justify-center rounded-sm border px-3 text-sm font-medium transition-colors';
-const SEGMENT_ON = 'border-transparent bg-accent text-on-accent hover:bg-accent-hover';
-const SEGMENT_OFF = 'border-stroke bg-control text-fg hover:bg-control-hover';
+/** The selected segment: a neutral fill and a firmer border, with the accent as a 2px bar on its bottom edge, as under the current tab. */
+const SEGMENT_ON =
+  'relative border-stroke-strong bg-fill-selected text-fg after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full after:bg-accent';
+const SEGMENT_OFF = 'border-stroke bg-control text-fg-muted hover:bg-control-hover hover:text-fg';
 
 /**
- * A short, mutually exclusive choice drawn as a row of segments: the selected
- * one carries the accent, the rest are secondary buttons. For two to four
- * options; a longer list belongs in a `Select`.
+ * A short, mutually exclusive choice drawn as a row of segments. The selected
+ * one is a neutral fill with a firmer border and a 2px accent bar under it, so
+ * the accent still marks the current item but never reads as a second primary
+ * button next to Save; the rest are quiet, `control` segments. The bar, not a
+ * check, carries the colour: it does not change the segment's width when the
+ * choice moves, and the fill alone would not survive a grayscale screen. For
+ * two to four options; a longer list belongs in a `Select`.
  *
  * // Usage: <SettingsSegmented ariaLabel={s.label} value={theme} options={options} onChange={setTheme} />
  */

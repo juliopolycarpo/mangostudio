@@ -157,6 +157,20 @@ describe('WorkspaceRail', () => {
 
     await user.click(screen.getByRole('button', { name: 'Close agent side panel' }));
     expect(screen.queryByRole('dialog', { name: 'Agent side panel' })).not.toBeInTheDocument();
+    // Closing hands focus back to the trigger that opened the drawer.
+    expect(screen.getByRole('button', { name: 'Open agent side panel' })).toHaveFocus();
+  });
+
+  it('anchors the mobile trigger to the chat dock instead of a fixed offset', () => {
+    setDesktopMediaQuery(false);
+    renderRail();
+
+    // `ChatPage` publishes the height of the notices and composer under the
+    // transcript; a fixed `bottom-24` landed inside the composer, whatever its
+    // height. The fallback only serves a page that publishes nothing.
+    const trigger = screen.getByRole('button', { name: 'Open agent side panel' });
+    expect(trigger.className).toContain('bottom-[calc(var(--chat-dock-height,8rem)+0.75rem)]');
+    expect(trigger.className).not.toContain('fixed');
   });
 
   /**

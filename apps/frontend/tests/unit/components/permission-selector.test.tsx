@@ -278,3 +278,49 @@ describe('permission presets', () => {
     expect(screen.getByText('What it can do')).toBeInTheDocument();
   });
 });
+
+/**
+ * The chip says the setting in the words of the list it opens. `Default` is the
+ * level's name on an axis that only the fine-tune matrix shows; read next to a
+ * checked `Balanced`, it looks like the pick did not take.
+ */
+describe('permission chip', () => {
+  const chipFor = (props: Partial<React.ComponentProps<typeof PermissionSelector>>) => {
+    render(
+      <PermissionSelector
+        configurations={FULL_MATRIX}
+        level="default"
+        routing="user"
+        targetId="claude"
+        onChange={jest.fn()}
+        {...props}
+      />
+    );
+    return screen.getByRole('button', { name: /permissions/i });
+  };
+
+  it('names the preset the popover offers and checks', () => {
+    const chip = chipFor({});
+    expect(chip).toHaveTextContent('Balanced');
+    expect(chip).not.toHaveTextContent('Default');
+
+    fireEvent.click(chip);
+    expect(screen.getByRole('button', { name: /Balanced/, pressed: true })).toBeInTheDocument();
+  });
+
+  it('follows the preset to another pair', () => {
+    expect(chipFor({ level: 'read-only' })).toHaveTextContent('Careful');
+  });
+
+  it('keeps the level name when the vendor does not offer the preset the pair matches', () => {
+    // `default x user` matches Balanced, but this vendor only supports the
+    // auto-review pair, so the popover has no Balanced row to match the chip.
+    const chip = chipFor({
+      configurations: [
+        { level: 'default', routing: 'auto-review', supported: true, unattended: true },
+      ],
+    });
+    expect(chip).toHaveTextContent('Default');
+    expect(chip).not.toHaveTextContent('Balanced');
+  });
+});

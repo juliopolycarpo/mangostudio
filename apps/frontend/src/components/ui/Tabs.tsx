@@ -10,10 +10,19 @@ import { cn } from '@/lib/utils';
  * leave `text-fg-muted` on the current tab, fighting `text-fg` on stylesheet order
  * alone. The 2px accent rule is the only mark of the current tab; it sits on the
  * strip's divider.
+ *
+ * `list` is the row the tabs sit in. A strip that does not fit scrolls sideways
+ * instead of wrapping: a wrapped strip strands the current tab's rule on a row
+ * with no divider under it. Scrolling clips what is drawn below the tabs, so the
+ * list reaches one pixel over the divider (`-mb-px`) and pads one pixel back
+ * (`pb-px`) to keep that rule on the divider without cutting it. `base` pulls the
+ * focus ring inwards (`-outline-offset-2`) for the same reason: an outline offset
+ * outwards would be clipped by the list.
  */
 export const TAB_CLASSES = {
   strip: 'flex gap-1 border-b border-stroke',
-  base: 'relative inline-flex h-9 shrink-0 cursor-pointer items-center rounded-t-sm px-3 text-sm whitespace-nowrap transition-colors',
+  list: 'app-scrollbar -mb-px flex min-w-0 gap-1 overflow-x-auto pb-px',
+  base: 'relative inline-flex h-9 shrink-0 cursor-pointer items-center rounded-t-sm px-3 text-sm whitespace-nowrap transition-colors -outline-offset-2',
   idle: 'text-fg-muted hover:bg-fill-hover hover:text-fg',
   active:
     'font-medium text-fg after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-accent',
@@ -101,15 +110,7 @@ export function Tabs<T extends string>({
 
   return (
     <div className={cn(TAB_CLASSES.strip, 'items-center', className)}>
-      {/* The list scrolls, and scrolling clips what is drawn below the tabs, so it
-          reaches one pixel over the divider (`-mb-px`) and pads one pixel back
-          (`pb-px`) to keep the current tab's rule on the divider without clipping it. */}
-      <div
-        role="tablist"
-        aria-label={label}
-        onKeyDown={handleKeyDown}
-        className="-mb-px flex min-w-0 gap-1 overflow-x-auto pb-px"
-      >
+      <div role="tablist" aria-label={label} onKeyDown={handleKeyDown} className={TAB_CLASSES.list}>
         {tabs.map((tab) => {
           const selected = tab.id === active;
           const chrome = cn(TAB_CLASSES.base, selected ? TAB_CLASSES.active : TAB_CLASSES.idle);
@@ -129,12 +130,7 @@ export function Tabs<T extends string>({
               onClick={() => onSelect(tab.id)}
               onDoubleClick={tab.onDoubleClick}
               data-testid={hasChrome ? undefined : tab.testId}
-              className={
-                hasChrome
-                  ? 'max-w-32 truncate'
-                  : // The tab is the whole button, so a ring offset outwards would be clipped by the scrolling list.
-                    cn(chrome, '-outline-offset-2')
-              }
+              className={hasChrome ? 'max-w-32 truncate' : chrome}
             >
               {tab.label}
             </button>

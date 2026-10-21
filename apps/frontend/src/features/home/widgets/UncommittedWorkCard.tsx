@@ -15,6 +15,7 @@ import { SectionCard } from '@/components/ui/SectionCard';
 import { chatListQueryOptions } from '@/features/chat/queries';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { uncommittedWork } from '../lib/uncommitted-work';
@@ -29,6 +30,7 @@ interface UncommittedWorkCardProps {
 
 export function UncommittedWorkCard({ currentChatId, onSelectChat }: UncommittedWorkCardProps) {
   const { t } = useI18n();
+  const plural = usePlural();
   const labels = t.home.uncommitted;
   // One shared empty array, not a fresh `?? []`: an unsettled query would
   // otherwise hand every render a new identity and defeat the memo below.
@@ -72,11 +74,16 @@ export function UncommittedWorkCard({ currentChatId, onSelectChat }: Uncommitted
               <span className="shrink-0 space-x-2 font-mono text-micro text-warning">
                 {row.changedFileCount > 0 ? (
                   <span>
-                    {formatMessage(labels.changed, { count: String(row.changedFileCount) })}
+                    {plural(
+                      { one: labels.changedOne, other: labels.changedOther },
+                      row.changedFileCount
+                    )}
                   </span>
                 ) : null}
                 {row.ahead > 0 ? (
-                  <span>{formatMessage(labels.unpushed, { count: String(row.ahead) })}</span>
+                  <span>
+                    {plural({ one: labels.unpushedOne, other: labels.unpushedOther }, row.ahead)}
+                  </span>
                 ) : null}
               </span>
             </button>
@@ -85,7 +92,7 @@ export function UncommittedWorkCard({ currentChatId, onSelectChat }: Uncommitted
       </ul>
       {work.overflowCount > 0 ? (
         <p className="text-xs text-fg-muted">
-          {formatMessage(labels.more, { count: String(work.overflowCount) })}
+          {plural({ one: labels.moreOne, other: labels.moreOther }, work.overflowCount)}
         </p>
       ) : null}
     </SectionCard>

@@ -132,3 +132,79 @@ The bundler downlevels `color-mix()` and re-emits only the first mixed declarati
 each rule, which had already shipped two bugs that no gate noticed. Every tint the design
 needs is now a token, so the stylesheets author no `color-mix()` at all.
 `tests/unit/stylesheet-downlevel.test.ts` keeps it that way.
+
+## 14. Disabled quiet buttons keep no fill
+
+**Status:** accepted · **Supersedes:** 10, for `subtle` and `subtle-danger`.
+
+Decision 10 turned every disabled button into the neutral `fill-selected` tile. For a
+`subtle` button that is the wrong picture: `fill-selected` is also the selected and
+the hovered fill, so a disabled icon button in a row of flat ones (the Repository
+row's up arrow, beside its enabled siblings) became the most prominent control in the
+row, and looked current. Native toolbar and flat buttons draw "disabled" as grey text
+with no tile, because they never had one to begin with.
+
+**Consequence:** `primary`, `secondary` and `danger` still turn into the grey tile; a
+disabled `subtle` or `subtle-danger` button keeps no fill and only turns its text
+`fg-subtle`, overriding a call site's own `text-danger`. A button that is loading is
+still untouched (`aria-busy`). A split button follows the same rule through its
+halves: while the primary half is the grey tile, the chevron is `secondary`.
+
+## 15. Touch targets are 44px, except where a control draws its own box
+
+**Status:** accepted.
+
+On a coarse pointer, buttons, selects, textareas and text inputs get a 44px
+`min-height` and `min-width`; the 32px rhythm in the foundations is the fine-pointer
+contract. The rule is unlayered on purpose, so a utility on a menu row cannot undo an
+accessibility floor, and for the same reason it has to name what it must not touch.
+It first applied to every `input`, which drew the 16px checkbox and radio as empty
+44px squares, the slider as a 44px bar, and the copy button over the first lines of
+a code block.
+
+**Consequence:** checkbox, radio and switch inputs, range inputs, the code block's
+copy button and links inside markdown prose are exempt. `Checkbox` and `Radio` keep
+their 16px drawing and widen the hit area to 40px with a pseudo-element on the input;
+a row that wraps one in a `<label>` is its own 44px target (`pointer-coarse:min-h-11`).
+The sliders keep their 6px track; a taller one is a restyle of the track, not a
+`min-height`. `tests/unit/stylesheet-cascade.test.ts` pins the exemptions.
+
+## 16. A selected segment is neutral, with the accent as a bar
+
+**Status:** accepted.
+
+`SettingsSegmented` drew the selected segment as an accent-filled button
+(`bg-accent text-on-accent`), which is exactly the primary `Button`. On the Prompts
+page that put four mango buttons on screen at once, two per rule file, and in the Add
+server dialog the `stdio` segment and Save were the same orange, so the real primary
+no longer stood out. Decision 8 already says the accent appears only on the primary
+button, the current item, checked controls and focus; a selected segment is the
+*current item*, not a call to action.
+
+**Consequence:** the selected segment is `fill-selected` with a `stroke-strong` border
+and `fg`, and the accent is a 2px bar on its bottom edge, the same mark as the
+underline tab (decision 9). The unselected segments are `control` with `fg-muted`
+text. A bar rather than a check, because a check changes the segment's width when the
+choice moves and the bar does not; the fill alone would not survive a grayscale screen,
+which is why `selection-bar.ts` pairs it with the accent. All eight call sites change
+with the one component.
+
+## 17. A disabled menu row whose name is information steps down a colour, it does not fade
+
+**Status:** accepted · **Narrows:** the State bullet in `foundations.md`, for menu rows.
+
+The State section drops "other disabled controls" to 50% opacity, and the model menu
+and the runner menu followed it: a model tied to another provider, a runner this
+machine cannot use, faded as a whole row. Sampled, the names fell to about 3.4:1 in
+light and 4.2:1 in dark, under the 4.5:1 floor that principle 4 and decision 6 set for
+text. That is fine for a control that is merely off (WCAG exempts it), but not here:
+these names are the content. They say which providers and agents exist, and the row
+is the only place that says why they are out of reach.
+
+**Consequence:** a disabled menu row keeps its icon and its `cursor-not-allowed`, and
+its name goes from `fg` to `fg-muted`, the way `PermissionSelector`'s refused pair
+already reads. Nothing is faded. The reason is written down once per menu, not once
+per row: a `text-xs fg-muted` line at the head of the model list names the provider
+the chat is tied to, and the runner menu keeps the explanation line under each row.
+Every other disabled control (field, select, checkbox, switch, composer chip) keeps
+the 50% rule: a control that is off carries no information of its own.

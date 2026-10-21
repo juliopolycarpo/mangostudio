@@ -13,8 +13,7 @@ import type { PropagationPreview, PropagationPreviewEntry } from '@mangostudio/s
 import { Badge } from '@/components/ui/Badge';
 import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
-import { formatBytes } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
 import { resolutionFor, type WizardDraft } from '../propagation';
 import { ChoiceRow } from './ChoiceRow';
 import { ContentGroupList } from './ContentGroupList';
@@ -39,7 +38,7 @@ export function ConflictStep({ preview, draft, unresolved, onResolve }: Conflict
   if (divergent.length === 0) {
     return (
       <p className="text-fg-muted text-sm" data-testid="conflict-none">
-        {l.conflict.description}
+        {l.conflict.none}
       </p>
     );
   }
@@ -79,7 +78,7 @@ function ConflictEntry({
   readonly resolved: boolean;
   readonly onResolve: ConflictStepProps['onResolve'];
 }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const l = t.library;
   const choice = resolutionFor(draft, entry.resourceKey);
 
@@ -101,15 +100,6 @@ function ConflictEntry({
           selectedHash={choice.resolution === 'adopt-group' ? choice.winnerContentHash : undefined}
           onSelect={(contentHash) =>
             onResolve(entry.resourceKey, 'adopt-group', { winnerContentHash: contentHash })
-          }
-          renderMeta={(group) =>
-            [
-              formatMessage(l.detail.copies, { count: String(group.instanceCount) }),
-              formatMessage(l.detail.modified, {
-                when: formatRelativeTime(group.newestModifiedAtMs, locale),
-              }),
-              formatBytes(group.sizeBytes),
-            ].join(' · ')
           }
         />
 

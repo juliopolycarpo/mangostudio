@@ -165,7 +165,7 @@ function RecentStrip({
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {items.map((item) => (
-        <GalleryTile key={item.id} item={item} onView={onView} />
+        <GalleryTile key={item.id} item={item} onView={onView} compact />
       ))}
     </div>
   );

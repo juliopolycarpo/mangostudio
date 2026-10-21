@@ -127,6 +127,22 @@ describe('SettingsSegmented', () => {
     expect(onChange).toHaveBeenCalledWith('large');
   });
 
+  it('marks the selected segment with a neutral fill, never the primary button look', () => {
+    render(
+      <SettingsSegmented
+        ariaLabel="Font size"
+        value="small"
+        options={options}
+        onChange={jest.fn()}
+      />
+    );
+
+    const selected = screen.getByRole('button', { name: 'Small' });
+    expect(selected).toHaveClass('bg-fill-selected');
+    expect(selected).not.toHaveClass('bg-accent');
+    expect(screen.getByRole('button', { name: 'Large' })).not.toHaveClass('bg-fill-selected');
+  });
+
   it('is a native radio group in radio mode', () => {
     const onChange = jest.fn();
     render(

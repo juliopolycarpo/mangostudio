@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/Badge';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { HubSkeletonLines } from '@/features/home/widgets/HubSkeletonLines';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
+import { usePlural } from '@/hooks/use-plural';
 import { ActivityFeed } from './ActivityFeed';
 import { countNewSince } from './lib/group-activity';
 import { useActivityBookmark } from './use-activity-bookmark';
@@ -44,6 +44,7 @@ export interface ActivityCardProps {
 
 export function ActivityCard({ limit, compact = false, className }: ActivityCardProps) {
   const { t } = useI18n();
+  const plural = usePlural();
   const labels = t.home.activity;
   const { events, isLoading, isError } = useActivity({ limit });
   const lastSeenAt = useActivityBookmark();
@@ -71,7 +72,7 @@ export function ActivityCard({ limit, compact = false, className }: ActivityCard
       action={
         newCount > 0 ? (
           <Badge variant="accent">
-            {formatMessage(labels.newCount, { count: String(newCount) })}
+            {plural({ one: labels.newCountOne, other: labels.newCountOther }, newCount)}
           </Badge>
         ) : undefined
       }

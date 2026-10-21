@@ -83,7 +83,13 @@ export function SlashCommandMenu({
       // of them would blur the textarea, which the composer answers by
       // dismissing the palette out from under the pointer mid-click.
       onMouseDown={(event) => event.preventDefault()}
-      className={empty ? 'p-3' : 'app-scrollbar max-h-72 overflow-y-auto p-1'}
+      // The width of the composer it rises from, not a fixed 320px: a
+      // description fits on one line there, and on a phone the panel meets both
+      // edges of the frame instead of floating off them.
+      className={cn(
+        'inset-x-0 w-auto',
+        empty ? 'p-3' : 'app-scrollbar max-h-72 overflow-y-auto p-1'
+      )}
     >
       {empty && (
         <p className="text-xs text-fg-muted">

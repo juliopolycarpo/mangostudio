@@ -94,8 +94,10 @@ describe('InputBar — chat-only composer', () => {
   });
 
   // The first prompt settles who runs the chat; from then on the chip is a
-  // fact, and switching lives in the header as "continue in a new chat".
-  it('locks the agent chip once the chat has turns and says why', () => {
+  // fact, and switching lives in the header as "continue in a new chat". A fact
+  // is not a control: no combobox, no chevron promising a menu that cannot open,
+  // and no disabled-looking half-opacity chip that fails its own contrast.
+  it('turns the agent chip into a plain statement once the chat has turns, and says why', () => {
     renderInputBar({
       selectedAgentId: 'default',
       agents,
@@ -103,9 +105,27 @@ describe('InputBar — chat-only composer', () => {
       hasTurns: true,
     });
 
-    const chip = screen.getByRole('combobox', { name: 'Select agent' });
-    expect(chip).toBeDisabled();
-    expect(chip.getAttribute('title')).toContain('Locked after the first turn');
+    expect(screen.queryByRole('combobox', { name: 'Select agent' })).toBeNull();
+
+    const chip = screen.getByTitle(/Locked after the first turn/);
+    expect(chip).toHaveTextContent('agent:');
+    expect(chip).toHaveTextContent('Default');
+    expect(chip.querySelector('svg')).toBeNull();
+    expect(chip.className).not.toContain('opacity-50');
+    // The sentence is also text, because a tooltip on a plain element is not
+    // announced and does not exist on touch.
+    expect(chip.querySelector('.sr-only')).toHaveTextContent(/Locked after the first turn/);
+  });
+
+  it('names the locked agent from the whole listing, not only the selectable ones', () => {
+    renderInputBar({
+      selectedAgentId: 'explore',
+      agents: [{ ...agents[0], id: 'explore', name: 'Reviewer', role: 'subagent' }],
+      onSelectedAgentIdChange: jest.fn(),
+      hasTurns: true,
+    });
+
+    expect(screen.getByTitle(/Locked after the first turn/)).toHaveTextContent('Reviewer');
   });
 
   // The env and dir chips moved to the header — the composer's status line

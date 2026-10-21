@@ -5,7 +5,7 @@ import type {
 } from '@mangostudio/shared/prompt-rules';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Toggle } from '@/components/ui/Toggle';
+import { Toggle, ToggleSwitch } from '@/components/ui/Toggle';
 import { SettingsRow } from './SettingsRow';
 import { SettingsSegmented } from './SettingsSegmented';
 
@@ -29,10 +29,18 @@ interface RuleFileRowsProps {
   };
 }
 
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
 /**
  * One rule file as three settings rows — the file and whether it is on, how it
- * is injected, how often — for the card of a `SettingsSection`. A built-in file
- * shows its path; a custom one lets you edit it and remove it.
+ * is injected, how often. Each file is the whole content of one card (a
+ * `SettingsSection` with `cards`), so the path row reads as the file's heading
+ * and the other two as its settings. A built-in file shows its path, and the
+ * path is the name of its switch, so the row is the label and the switch
+ * carries no word of its own; a custom one lets you edit its path, name its
+ * switch and remove it.
  */
 export function RuleFileRows({
   setting,
@@ -50,23 +58,24 @@ export function RuleFileRows({
     { value: 'every-turn', label: labels.frequencyEveryTurn },
   ];
 
-  const enabledToggle = (
-    <Toggle
-      id={`rule-enabled-${setting.id}`}
-      label={labels.enabledLabel}
-      checked={setting.enabled}
-      onChange={(e) => onUpdate({ enabled: e.target.checked })}
-    />
-  );
+  // The label is a free string, so only a label that says more than the path's
+  // own file name earns a hint; "AGENTS.md" under "~/.mango/AGENTS.md" repeats it.
+  const pathHint =
+    setting.label && setting.label !== basename(setting.path) ? setting.label : undefined;
 
   return (
     <>
       {isFixed ? (
         <SettingsRow
+          as="label"
           label={<span className="font-mono">{setting.path}</span>}
-          hint={setting.label || undefined}
+          hint={pathHint}
         >
-          {enabledToggle}
+          <ToggleSwitch
+            checked={setting.enabled}
+            onChange={(e) => onUpdate({ enabled: e.target.checked })}
+            aria-label={labels.enabledLabel}
+          />
         </SettingsRow>
       ) : (
         <div className="flex flex-wrap items-end gap-x-4 gap-y-3 px-4 py-3">
@@ -80,7 +89,12 @@ export function RuleFileRows({
             />
           </div>
           <div className="flex h-8 items-center gap-3">
-            {enabledToggle}
+            <Toggle
+              id={`rule-enabled-${setting.id}`}
+              label={labels.enabledLabel}
+              checked={setting.enabled}
+              onChange={(e) => onUpdate({ enabled: e.target.checked })}
+            />
             {onRemove ? (
               <Button variant="subtle" size="sm" onClick={onRemove} aria-label={labels.removeRule}>
                 {labels.removeRule}

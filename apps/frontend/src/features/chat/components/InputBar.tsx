@@ -24,6 +24,7 @@ import { filesFromClipboard, useComposerAttachments } from '../hooks/use-compose
 import { useComposerDraft } from '../hooks/use-composer-draft';
 import { usePromptHistory } from '../hooks/use-prompt-history';
 import { useSlashCommands } from '../hooks/use-slash-commands';
+import { CHAT_COLUMN_CLASS } from '../lib/chat-column';
 import { COMPOSER_ACCENT_PROPERTY, composerAccent } from '../lib/composer-accent';
 import { onComposerFocusRequest } from '../lib/composer-draft-store';
 import {
@@ -35,6 +36,7 @@ import {
 } from '../lib/slash-commands';
 import { CapabilityInspector } from './CapabilityInspector';
 import { ComposerChipRow, type ComposerChipRowProps } from './ComposerChipRow';
+import { ExternalRunnerBlockedCallout } from './ExternalRunnerBlockedCallout';
 import { ImageIntentToggle } from './ImageIntentToggle';
 import { McpComposerMenu } from './McpComposerMenu';
 import { SlashCommandMenu } from './SlashCommandMenu';
@@ -408,23 +410,8 @@ export function InputBar({
 
   return (
     <footer className="shrink-0 p-3 sm:p-4 md:p-6">
-      <div className="mx-auto w-full max-w-4xl">
-        {externalRunnerBlocked && (
-          // Named, not just disabled: "install it", "sign in", "wake that
-          // machine" and "wait for discovery" are four different things to do,
-          // and a composer that goes quiet without saying which leaves the user
-          // clicking Send at nothing.
-          <Callout
-            tone="warning"
-            role="status"
-            className="mb-2"
-            title={
-              externalUnavailableReason
-                ? `${t.externalAgents.unavailable[externalUnavailableReason]} — ${t.externalAgents.selector.unavailableHere}`
-                : t.externalAgents.selector.unavailableHere
-            }
-          />
-        )}
+      <div className={CHAT_COLUMN_CLASS}>
+        {externalRunnerBlocked && <ExternalRunnerBlockedCallout descriptor={externalDescriptor} />}
 
         {steerError && <Callout tone="danger" role="status" className="mb-2" title={steerError} />}
 
@@ -500,17 +487,7 @@ export function InputBar({
               box grows under it, the way a shell prompt does. The padding
               moved onto this row so the two share a text box and stay on the
               same baseline. */}
-          <div className="relative flex items-start gap-2 px-3 py-3">
-            {slashOpen && (
-              <SlashCommandMenu
-                entries={slashMatches}
-                activeIndex={slashActiveIndex}
-                listId={slashListId}
-                pending={slashPending}
-                onSelect={completeSlashCommand}
-                onHighlight={setSlashIndex}
-              />
-            )}
+          <div className="flex items-start gap-2 px-3 py-3">
             <span
               aria-hidden="true"
               className={`composer-prompt-mark ${inputDisabled ? 'opacity-50' : ''}`}
@@ -578,6 +555,21 @@ export function InputBar({
               placeholder={placeholder}
             />
           </div>
+
+          {/* A child of the frame, not of the input row: it rises over the whole
+              composer (status line included) and takes its width, instead of
+              hanging from the row and covering the chips it is meant to sit
+              above. `.composer-shell` is the positioned ancestor. */}
+          {slashOpen && (
+            <SlashCommandMenu
+              entries={slashMatches}
+              activeIndex={slashActiveIndex}
+              listId={slashListId}
+              pending={slashPending}
+              onSelect={completeSlashCommand}
+              onHighlight={setSlashIndex}
+            />
+          )}
 
           <div className="flex items-end justify-between gap-2 px-2 pb-2">
             <div className="flex min-w-0 flex-wrap items-center gap-1">

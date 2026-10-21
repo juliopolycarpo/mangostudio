@@ -397,7 +397,10 @@ function ExternalRow({
           disabled={!selectable}
           onClick={() => onSelect(forks)}
           className={cn(
-            'flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+            // A runner this machine cannot use is not faded: its name says which
+            // agents exist, and the line under it says why it is out of reach.
+            // The name steps down a text colour instead.
+            'flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-fg transition-colors disabled:cursor-not-allowed disabled:text-fg-muted',
             active ? 'bg-fill-selected' : 'enabled:hover:bg-fill-hover'
           )}
         >

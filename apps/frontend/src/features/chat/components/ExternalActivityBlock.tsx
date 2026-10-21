@@ -14,11 +14,10 @@
  */
 
 import type { ExternalActivityKind } from '@mangostudio/shared/external-agents';
+import type { ToolExecutionStatus } from '@mangostudio/shared/tool-executions';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import type { ExternalActivityPart } from '@mangostudio/shared/types';
 import {
-  Ban,
-  Check,
   FileDiff,
   Globe,
   ImagePlus,
@@ -37,9 +36,9 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { TIMELINE_PANEL_CLASS } from './TimelineDisclosure';
-import { TimelineItem, type TimelineTone } from './TimelineItem';
+import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
-import { toneTextClass } from './ToolCallVisuals';
+import { StatusGlyph, toneTextClass, toolStatusTone } from './ToolCallVisuals';
 
 /**
  * The icon comes from the neutral kind, never from the vendor's tool name.
@@ -74,24 +73,43 @@ function ActivityIcon({ kind, className }: { kind: ExternalActivityKind; classNa
   }
 }
 
-/** Same tone vocabulary a MangoStudio tool row uses, off the vendor's status. */
-function statusTone(part: ExternalActivityPart): TimelineTone {
-  if (part.isError || part.status === 'failed') return 'error';
-  if (part.status === 'cancelled') return 'muted';
-  if (part.status === 'completed') return 'success';
-  return 'active';
+/**
+ * How this activity ended, in the words a MangoStudio tool row uses.
+ *
+ * One predicate for everything the row says about the outcome (the rail node,
+ * the name's colour, the glyph, the word and the screen-reader sentence), with
+ * `isError` winning: a vendor can report a call `completed` that still failed,
+ * and a row whose glyph said so while its sentence said "Done" would argue with
+ * itself. Mapping onto `ToolExecutionStatus` is what lets this row borrow the
+ * native rows' tone and glyph tables instead of keeping a second pair.
+ */
+function executionStatusOf(part: ExternalActivityPart): ToolExecutionStatus {
+  if (part.isError || part.status === 'failed') return 'failed';
+  if (part.status === 'cancelled') return 'cancelled';
+  if (part.status === 'completed') return 'succeeded';
+  return 'running';
 }
 
-function StatusGlyph({ part }: { part: ExternalActivityPart }) {
-  if (part.isError || part.status === 'failed' || part.status === 'cancelled')
-    return <Ban size={ICON_SM} className="shrink-0" />;
-  if (part.status === 'completed')
-    return <Check size={ICON_SM} className="shrink-0" strokeWidth={2.5} />;
-  return <ActivityIcon kind={part.kind} className="animate-pulse shrink-0" />;
+/**
+ * The glyph a settled row draws is the tool rail's own verdict mark, so a
+ * failed and a cancelled call differ by shape and not only by colour. A call
+ * still running keeps the neutral kind icon: the shared glyph would pick one
+ * from the vendor's tool name, which this file never does.
+ */
+function ActivityGlyph({
+  part,
+  status,
+}: {
+  part: ExternalActivityPart;
+  status: ToolExecutionStatus;
+}) {
+  if (status === 'running')
+    return <ActivityIcon kind={part.kind} className="animate-pulse shrink-0" />;
+  return <StatusGlyph status={status} name={part.name} />;
 }
 
 function statusLabel(
-  part: ExternalActivityPart,
+  status: ToolExecutionStatus,
   labels: {
     statusRunning: string;
     statusCompleted: string;
@@ -99,9 +117,9 @@ function statusLabel(
     statusCancelled: string;
   }
 ): string {
-  if (part.status === 'running') return labels.statusRunning;
-  if (part.status === 'completed') return labels.statusCompleted;
-  if (part.status === 'cancelled') return labels.statusCancelled;
+  if (status === 'running') return labels.statusRunning;
+  if (status === 'succeeded') return labels.statusCompleted;
+  if (status === 'cancelled') return labels.statusCancelled;
   return labels.statusFailed;
 }
 
@@ -126,7 +144,12 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
   // monogram are what they see — so that is the path that has to look finished.
   const identity = resolve('agent', part.targetId);
   const hasDetail = Boolean(part.detail);
-  const tone = statusTone(part);
+  const status = executionStatusOf(part);
+  const tone = toolStatusTone(status);
+  // A settled call that did not go to plan says so in words, as a MangoStudio
+  // row does: the rail node and the glyph carry the tone, but a red and a grey
+  // that differ only by hue are not a signal.
+  const outcomeWord = status === 'failed' || status === 'cancelled' ? t.tools.status[status] : null;
 
   return (
     <TimelineItem tone={tone}>
@@ -134,7 +157,7 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
         expanded={hasDetail && expanded}
         onToggle={() => setExpanded((value) => !value)}
         disclosable={hasDetail}
-        glyph={<StatusGlyph part={part} />}
+        glyph={<ActivityGlyph part={part} status={status} />}
       >
         {/* Attribution stays on the row itself: an external turn interleaves
             several vendors' work in one transcript, and the turn header names
@@ -152,6 +175,9 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
           {part.name}
         </span>
         {part.title ? <span className="truncate font-mono text-fg-muted">{part.title}</span> : null}
+        {outcomeWord ? (
+          <span className={`shrink-0 ${toneTextClass(tone)}`}>{outcomeWord}</span>
+        ) : null}
         {part.truncated ? (
           <span className="shrink-0 text-fg-subtle" title={labels.truncatedHint}>
             <span aria-hidden>…</span>
@@ -171,7 +197,7 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
       {/* Attribution and outcome for a reader who cannot see the avatar or the
           tone that carry them visually. */}
       <span className="sr-only">
-        {`${formatMessage(labels.attribution, { agent: identity.name })} ${statusLabel(part, labels)}`}
+        {`${formatMessage(labels.attribution, { agent: identity.name })} ${statusLabel(status, labels)}`}
       </span>
     </TimelineItem>
   );

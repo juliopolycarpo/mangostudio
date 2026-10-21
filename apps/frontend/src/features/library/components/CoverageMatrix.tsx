@@ -24,11 +24,16 @@ import { useToolIdentities } from '@/features/environments/identity/use-tool-ide
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
-import { CELL_GLYPHS, type CoverageCellState, coverageCells, type LocationGroup } from '../format';
+import { type CoverageCellState, coverageCells, type LocationGroup } from '../format';
 import { libraryEnvironmentSearch } from '../queries';
-import { CoverageCell, STATE_TONES } from './CoverageCell';
+import { CoverageCell, CoverageGlyph } from './CoverageCell';
 
 const ROW_HEIGHT_PX = 40;
+
+/** The selection checkbox (`w-9`) and the resource column (`w-48`), in rem. */
+const LEADING_COLUMNS_REM = 14.25;
+/** Room for the widest header — the avatar and "Claude Code" — plus the cell padding, in rem. */
+const AGENT_COLUMN_MIN_REM = 7;
 const OVERSCAN_ROWS = 8;
 
 /**
@@ -116,7 +121,25 @@ export function CoverageMatrix({
       className="app-scrollbar max-h-[60vh] overflow-auto rounded-md border border-stroke bg-surface"
       data-testid="coverage-matrix"
     >
-      <table className="w-full border-collapse text-sm">
+      {/*
+        Fixed layout: every agent column is the same width on every tab, so the
+        same header sits in the same place and a glyph in a column stays in it.
+        Auto layout sized each column to its widest cell, and the grid moved
+        whenever a state word did. The agent columns carry no width of their own,
+        which splits whatever the two leading columns leave for any number of
+        targets; below the minimum the container scrolls sideways instead.
+      */}
+      <table
+        className="w-full table-fixed border-collapse text-sm"
+        style={{ minWidth: `${LEADING_COLUMNS_REM + targets.length * AGENT_COLUMN_MIN_REM}rem` }}
+      >
+        <colgroup>
+          <col className="w-9" />
+          <col className="w-48" />
+          {targets.map((target) => (
+            <col key={target.id} />
+          ))}
+        </colgroup>
         <thead className="sticky top-0 z-10 bg-surface">
           <tr className="border-stroke border-b">
             <th scope="col" className="w-9 px-2 py-2">
@@ -137,9 +160,9 @@ export function CoverageMatrix({
                   key={target.id}
                   scope="col"
                   data-target-id={target.id}
-                  className="px-2 py-2 text-center font-medium text-fg-muted text-xs"
+                  className="px-2 py-2 text-left font-medium text-fg-muted text-xs"
                 >
-                  <span className="flex items-center justify-center gap-1.5">
+                  <span className="flex items-center gap-1.5">
                     <ToolAvatar
                       subjectKey={identity.subjectKey}
                       monogram={identity.monogram}
@@ -277,8 +300,8 @@ export function MatrixLegend() {
     >
       {LEGEND_ORDER.map((state) => (
         <div key={state} className="flex items-center gap-1.5">
-          <dt aria-hidden="true" className={STATE_TONES[state]}>
-            {CELL_GLYPHS[state]}
+          <dt aria-hidden="true">
+            <CoverageGlyph state={state} />
           </dt>
           <dd>{l.cellState[state]}</dd>
         </div>

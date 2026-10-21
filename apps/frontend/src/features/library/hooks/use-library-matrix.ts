@@ -15,9 +15,8 @@ import type {
   LibraryUnreadableEntry,
   ResourceKind,
 } from '@mangostudio/shared/library';
-import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
+import { useQueries } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { rescanLibrary } from '../api';
 import {
   DEFAULT_LIBRARY_FILTERS,
   filterResources,
@@ -28,7 +27,6 @@ import {
   sortResources,
 } from '../format';
 import {
-  libraryKeys,
   libraryLocationsQueryOptions,
   libraryResourcesQueryOptions,
   libraryTargetsQueryOptions,
@@ -53,12 +51,9 @@ export interface LibraryMatrixState {
   readonly isPending: boolean;
   readonly error: unknown;
   readonly refetch: () => void;
-  readonly rescan: () => void;
-  readonly isRescanning: boolean;
 }
 
 export function useLibraryMatrix(kind: ResourceKind, environmentId?: string): LibraryMatrixState {
-  const queryClient = useQueryClient();
   const [filters, setFiltersState] = useState<LibraryFilters>(DEFAULT_LIBRARY_FILTERS);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -94,11 +89,6 @@ export function useLibraryMatrix(kind: ResourceKind, environmentId?: string): Li
         : [{ locationId: null, resources: visible }],
     [visible, filters.groupByLocation]
   );
-
-  const rescan = useMutation({
-    mutationFn: () => rescanLibrary(true, environmentId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
-  });
 
   const setFilters = useCallback((update: Partial<LibraryFilters>) => {
     setFiltersState((current) => ({ ...current, ...update }));
@@ -149,7 +139,5 @@ export function useLibraryMatrix(kind: ResourceKind, environmentId?: string): Li
     isPending: resourcesQuery.isPending || targetsQuery.isPending,
     error: resourcesQuery.error ?? targetsQuery.error,
     refetch,
-    rescan: useCallback(() => rescan.mutate(), [rescan]),
-    isRescanning: rescan.isPending,
   };
 }

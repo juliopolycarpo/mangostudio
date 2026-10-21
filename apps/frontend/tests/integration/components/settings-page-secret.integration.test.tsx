@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest, spyOn } from 'bun:te
 import userEvent from '@testing-library/user-event';
 import { ConnectorsSettings } from '../../../src/features/settings/connectors';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { render, screen, waitFor, within } from '../../support/harness/render';
 import {
   createFetchScenario,
   type FetchScenarioMock,
@@ -110,6 +110,45 @@ describe('ConnectorsSettings', () => {
     expect(screen.getByText('OS secret store')).toBeInTheDocument();
 
     expect(fetchScenario.fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks whether to delete, naming the consequence, before it deletes anything', async () => {
+    const props = createDefaultProps();
+    const user = userEvent.setup();
+
+    fetchScenario.respondWithJson('GET', '/api/settings/connectors', {
+      body: {
+        connectors: [
+          {
+            id: 'conn-1',
+            name: 'My Key',
+            provider: 'gemini',
+            configured: true,
+            source: 'bun-secrets',
+            maskedSuffix: '****...1234',
+            updatedAt: 1700000000000,
+            lastValidatedAt: 1700000000000,
+            lastValidationError: null,
+            enabledModels: [],
+            userId: 'user-1',
+          },
+        ],
+      },
+    });
+
+    render(<ConnectorsSettings {...props} />);
+
+    await screen.findByText('My Key');
+    await user.click(screen.getByRole('button', { name: 'Delete connector' }));
+
+    // The title is the question and the button is the verb: they never read alike.
+    const dialog = screen.getByRole('dialog', { name: 'Delete this connector?' });
+    expect(dialog).toHaveTextContent('This removes the connector and its stored credentials.');
+    expect(dialog).toHaveTextContent('My Key');
+    expect(within(dialog).getByRole('button', { name: 'Delete connector' })).toBeInTheDocument();
+    expect(
+      findFetchCall(fetchScenario.fetchMock, 'DELETE', '/api/settings/connectors/conn-1')
+    ).toBe(undefined);
   });
 
   it('adds a connector when form is submitted', async () => {

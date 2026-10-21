@@ -178,8 +178,8 @@ export function CommitForm({
         onKeyDown={handleShortcut}
         aria-label={labels.bodyLabel}
         placeholder={labels.bodyPlaceholder}
-        rows={2}
-        className="min-h-16"
+        rows={3}
+        className="min-h-20 max-h-40"
       />
 
       <CommitActions

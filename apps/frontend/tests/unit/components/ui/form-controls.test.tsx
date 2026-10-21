@@ -9,6 +9,7 @@
 
 import { describe, expect, it, jest } from 'bun:test';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { Radio } from '@/components/ui/Radio';
 import { Select, type SelectOption } from '@/components/ui/Select';
 import { fireEvent, render, screen } from '../../../support/harness/render';
 
@@ -234,5 +235,24 @@ describe('Checkbox', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Restrict tools' }));
 
     expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+// The 44px touch floor in `index.css` skips these inputs, because it drew the
+// 16px box as an empty 44px square. They widen the hit area themselves, on the
+// input, so a tap beside the box still lands on it — a pseudo-element on the
+// wrapper would not, with no `<label>` around it.
+describe('touch hit area', () => {
+  it.each([
+    ['Checkbox', <Checkbox key="c" aria-label="Pick" />, 'checkbox'],
+    ['Radio', <Radio key="r" aria-label="Pick" />, 'radio'],
+  ] as const)('%s widens its own input on a coarse pointer', (_name, control, role) => {
+    render(control);
+
+    const input = screen.getByRole(role, { name: 'Pick' });
+    expect(input.className).toContain('size-4');
+    expect(input.className).toContain('relative');
+    expect(input.className).toContain('pointer-coarse:after:absolute');
+    expect(input.className).toContain('pointer-coarse:after:-inset-3');
   });
 });

@@ -3,8 +3,9 @@ import type { UncheckpointedWriteSource } from '@mangostudio/shared/file-checkpo
 import { useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
-import { ApiError } from '@/lib/utils';
+import { ApiError, cn } from '@/lib/utils';
 import { useRevertChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
+import { TURN_ACTION_REVEAL } from '../lib/turn-action-reveal';
 import { revertedMessage } from '../lib/uncheckpointed-copy';
 import { RevertFileChangesDialog } from './RevertFileChangesDialog';
 
@@ -41,7 +42,7 @@ export function RevertFileChangesButton({
   messageId,
   uncheckpointedSources,
 }: RevertFileChangesButtonProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { toast } = useToast();
   const labels = t.chat.fileCheckpoints;
   const revert = useRevertChatFileCheckpoints(chatId);
@@ -54,7 +55,12 @@ export function RevertFileChangesButton({
         // The server's own answer, not the preview: the turn may have run an
         // uncheckpointed tool after the list was last fetched.
         toast(
-          revertedMessage(data?.revertedFiles ?? 0, data?.uncheckpointedSources ?? [], labels),
+          revertedMessage(
+            data?.revertedFiles ?? 0,
+            data?.uncheckpointedSources ?? [],
+            labels,
+            locale
+          ),
           'success'
         );
       },
@@ -74,7 +80,10 @@ export function RevertFileChangesButton({
         onClick={() => setIsConfirming(true)}
         disabled={revert.isPending}
         // Revealed with the turn's other actions, like the copy button beside it.
-        className="-my-0.5 flex h-6 shrink-0 cursor-pointer items-center rounded-sm px-2 text-xs text-fg-muted opacity-0 transition-colors enabled:hover:bg-fill-hover enabled:hover:text-fg focus-visible:opacity-100 disabled:cursor-not-allowed group-hover:opacity-100"
+        className={cn(
+          '-my-0.5 flex h-6 shrink-0 cursor-pointer items-center rounded-sm px-2 text-xs text-fg-muted transition-colors enabled:hover:bg-fill-hover enabled:hover:text-fg disabled:cursor-not-allowed',
+          TURN_ACTION_REVEAL
+        )}
       >
         {revert.isPending ? labels.reverting : labels.revert}
       </button>

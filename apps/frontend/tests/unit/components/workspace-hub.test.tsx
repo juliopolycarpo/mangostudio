@@ -217,7 +217,7 @@ describe('WorkspaceHub', () => {
     );
     try {
       expect(await screen.findByText('feat/lsp-plugin')).toBeInTheDocument();
-      expect(screen.getByText('2 file(s) changed')).toBeInTheDocument();
+      expect(screen.getByText('2 files changed')).toBeInTheDocument();
       expect(screen.getByText('mango')).toBeInTheDocument();
       // A dirty tree changes what the starters offer.
       expect(
@@ -281,7 +281,7 @@ describe('WorkspaceHub', () => {
     };
     const { scenario } = await renderHub({}, { skills: [onlyInClaude] });
     try {
-      expect(await screen.findByText('1 skill(s) live in a single agent.')).toBeInTheDocument();
+      expect(await screen.findByText('1 skill lives in a single agent.')).toBeInTheDocument();
       // No propagate CTA: absent is frequently the state its author wanted.
       expect(screen.queryByRole('link', { name: 'Propagate' })).toBeNull();
       expect(screen.getByRole('link', { name: 'Open in the library' })).toBeInTheDocument();

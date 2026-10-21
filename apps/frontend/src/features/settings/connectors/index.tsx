@@ -136,7 +136,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
 
       {connectorToDelete && (
         <ConfirmDialog
-          title={s.deleteConnector}
+          title={s.deleteTitle}
           description={s.deleteConfirm}
           entityName={connectorToDelete.name}
           confirmLabel={s.deleteConnector}

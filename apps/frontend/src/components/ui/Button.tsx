@@ -12,13 +12,23 @@ interface ButtonProps extends ComponentProps<'button'> {
 }
 
 /**
- * A disabled button is a neutral grey in every variant — the way WinUI and
- * libadwaita draw one — rather than the variant's colour faded by opacity. A
- * button that is only loading keeps its colour: `aria-busy` is what tells the
- * two apart, and the spinner is the signal.
+ * A disabled button is a neutral grey rather than the variant's colour faded by
+ * opacity — the way WinUI and libadwaita draw one. A button that is only loading
+ * keeps its colour: `aria-busy` is what tells the two apart, and the spinner is
+ * the signal.
+ *
+ * Two looks, because the variants split in two. The filled ones (`primary`,
+ * `secondary`, `danger`) turn into a grey tile. The quiet ones (`subtle`,
+ * `subtle-danger`) have no tile to turn grey: giving them `fill-selected` drew
+ * the inactive button as the hovered or selected one, the most prominent thing in
+ * its row, so they only lose their text colour. Decision 14 records the split.
+ *
+ * Each string spells out its selector in full because Tailwind finds classes by
+ * scanning for them; building one from a shared prefix would compile to nothing.
  */
-const DISABLED_NEUTRAL =
+const DISABLED_TILE =
   '[&:disabled:not([aria-busy=true])]:border-transparent [&:disabled:not([aria-busy=true])]:bg-fill-selected [&:disabled:not([aria-busy=true])]:text-fg-subtle';
+const DISABLED_TEXT = '[&:disabled:not([aria-busy=true])]:text-fg-subtle';
 
 /**
  * Hover and press are written with `not-disabled:` rather than `enabled:` so the
@@ -26,18 +36,16 @@ const DISABLED_NEUTRAL =
  * `:enabled` never matches.
  */
 const variantStyles: Record<ButtonVariant, string> = {
-  primary:
-    'bg-accent text-on-accent not-disabled:hover:bg-accent-hover not-disabled:active:bg-accent-pressed',
-  secondary:
-    'border border-stroke bg-control text-fg not-disabled:hover:bg-control-hover not-disabled:active:bg-control-pressed',
-  subtle: 'text-fg not-disabled:hover:bg-fill-hover not-disabled:active:bg-fill-pressed',
+  primary: `bg-accent text-on-accent not-disabled:hover:bg-accent-hover not-disabled:active:bg-accent-pressed ${DISABLED_TILE}`,
+  secondary: `border border-stroke bg-control text-fg not-disabled:hover:bg-control-hover not-disabled:active:bg-control-pressed ${DISABLED_TILE}`,
+  subtle: `text-fg not-disabled:hover:bg-fill-hover not-disabled:active:bg-fill-pressed ${DISABLED_TEXT}`,
   // A destructive action that is not the final confirmation — "Remove" on a row,
-  // "Revoke" in a list. Quiet until hovered.
-  'subtle-danger':
-    'text-danger not-disabled:hover:bg-danger-subtle not-disabled:active:bg-danger-subtle',
+  // "Revoke" in a list. Quiet until hovered. A call site that sets its own
+  // `text-danger` is still greyed when disabled: the selector above outranks it.
+  'subtle-danger': `text-danger not-disabled:hover:bg-danger-subtle not-disabled:active:bg-danger-subtle ${DISABLED_TEXT}`,
   // Confirming something that deletes a user's files should not look like
   // confirming anything else.
-  danger: 'bg-danger-solid text-on-danger not-disabled:hover:brightness-110',
+  danger: `bg-danger-solid text-on-danger not-disabled:hover:brightness-110 ${DISABLED_TILE}`,
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
@@ -58,7 +66,6 @@ export function buttonClassName(variant: ButtonVariant = 'primary', size: Button
   return cn(
     'inline-flex items-center justify-center gap-2 rounded-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed aria-busy:cursor-progress',
     variantStyles[variant],
-    DISABLED_NEUTRAL,
     sizeStyles[size]
   );
 }

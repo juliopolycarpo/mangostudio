@@ -1,4 +1,4 @@
-import type { ApiKeyScope, ApiKeySummary } from '@mangostudio/shared/api-keys';
+import { API_KEY_PREFIX, type ApiKeyScope, type ApiKeySummary } from '@mangostudio/shared/api-keys';
 import type { Locale, Messages } from '@mangostudio/shared/i18n';
 
 const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
@@ -14,10 +14,17 @@ function dateFormatter(locale: Locale): Intl.DateTimeFormat {
   return formatter;
 }
 
-/** Renders Better Auth's stored key hint as a truncated prefix. */
+/**
+ * Whether Better Auth's stored `start` tells keys apart. It stores the bare
+ * prefix by default, which every key shares, so it identifies nothing.
+ */
+export function hasKeyHint(start: string | null): start is string {
+  return Boolean(start) && start !== API_KEY_PREFIX;
+}
+
+/** Renders the stored key hint as a truncated prefix, or a dash when it identifies nothing. */
 export function formatKeyHint(start: string | null): string {
-  if (!start) return '—';
-  return `${start}…`;
+  return hasKeyHint(start) ? `${start}…` : '—';
 }
 
 export function formatApiKeyDate(value: string | null, locale: Locale, emptyLabel: string): string {

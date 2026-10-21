@@ -171,13 +171,15 @@ export function GeneralSettings({
 
       <SettingsSection title={workspace.settingsLabel} description={workspace.settingsDescription}>
         <SettingsRow label={workspace.defaultLabel} layout="stacked">
+          {/* Below `sm` the path takes the first line and its two buttons the
+              second, as one group: the clear button never wraps off on its own. */}
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setWorkdirPickerOpen(true)}
               className={cn(
                 FIELD_CLASS,
-                'flex min-w-0 flex-1 basis-48 cursor-pointer items-center gap-2 text-left'
+                'flex min-w-0 flex-1 basis-full cursor-pointer items-center gap-2 text-left sm:basis-48'
               )}
               title={workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
             >
@@ -186,21 +188,23 @@ export function GeneralSettings({
                 {workspaceSettings.defaultWorkdir || workspace.defaultEmpty}
               </span>
             </button>
-            <Button type="button" variant="secondary" onClick={() => setWorkdirPickerOpen(true)}>
-              {workspace.changeDefault}
-            </Button>
-            {workspaceSettings.defaultWorkdir ? (
-              <Button
-                type="button"
-                variant="subtle"
-                size="icon"
-                onClick={() => setDefaultWorkdir('')}
-                aria-label={workspace.clearDefault}
-                title={workspace.clearDefault}
-              >
-                <X size={ICON_MD} />
+            <div className="flex shrink-0 items-center gap-2">
+              <Button type="button" variant="secondary" onClick={() => setWorkdirPickerOpen(true)}>
+                {workspace.changeDefault}
               </Button>
-            ) : null}
+              {workspaceSettings.defaultWorkdir ? (
+                <Button
+                  type="button"
+                  variant="subtle"
+                  size="icon"
+                  onClick={() => setDefaultWorkdir('')}
+                  aria-label={workspace.clearDefault}
+                  title={workspace.clearDefault}
+                >
+                  <X size={ICON_MD} />
+                </Button>
+              ) : null}
+            </div>
           </div>
         </SettingsRow>
         <SettingToggle

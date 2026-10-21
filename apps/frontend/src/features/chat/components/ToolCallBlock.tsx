@@ -29,6 +29,7 @@ import {
 } from './ToolCallVisuals';
 import {
   formatToolSummary,
+  getShellStreams,
   parseToolResult,
   summarizeParsedToolResult,
 } from './tool-result-summary';
@@ -66,7 +67,6 @@ export function ToolCallBlock({
 
   const [expanded, setExpanded] = useState(isError || autoExpandPreview);
   const [showRaw, setShowRaw] = useState(false);
-  const { copy, copied } = useClipboard();
 
   const preview = useMemo(
     () => (previewable && expanded ? buildFileChangePreview(name, args, result) : null),
@@ -86,6 +86,12 @@ export function ToolCallBlock({
       ? null
       : t.tools.status[status];
   const tone = toolStatusTone(status);
+  const resultLabels: Record<ResultKind, string> = {
+    error: t.tools.errorLabel,
+    result: t.tools.resultLabel,
+    stderr: t.tools.stderrLabel,
+    stdout: t.tools.stdoutLabel,
+  };
   const isActive = isActiveToolExecutionStatus(status);
   const duration = execution?.durationMs;
   // Parsed once and shared: the outcome on the row and the raw body below it
@@ -98,8 +104,8 @@ export function ToolCallBlock({
   // Only the disclosed body reads this, and re-serializing an unopened result
   // on every stream frame is work nobody can see.
   const displayedResult = useMemo(
-    () => (expanded ? formatToolResult(parsedResult, isError) : null),
-    [expanded, parsedResult, isError]
+    () => (expanded ? formatToolResult(name, parsedResult, isError) : null),
+    [expanded, name, parsedResult, isError]
   );
 
   useEffect(() => {
@@ -118,11 +124,6 @@ export function ToolCallBlock({
     }
     if (diffPreviewMode === 'collapse_older') setExpanded(isError || isLatestFileChange);
   }, [previewable, diffPreviewMode, isError, isLatestFileChange]);
-
-  const handleCopyResult = async () => {
-    if (!displayedResult) return;
-    await copy(displayedResult);
-  };
 
   return (
     <TimelineItem tone={tone}>
@@ -160,35 +161,40 @@ export function ToolCallBlock({
               </pre>
             </ToolOutputSection>
           )}
-          {(preview === null || showRaw) && displayedResult !== null && (
-            <ToolOutputSection
-              label={isError ? t.tools.errorLabel : t.tools.resultLabel}
-              danger={isError}
-              action={
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  onClick={() => void handleCopyResult()}
-                  title={copied ? t.tools.resultCopied : t.tools.copyResult}
-                  className="size-7 px-0 text-fg-muted"
-                >
-                  {copied ? (
-                    <Check size={ICON_SM} className="text-success" />
-                  ) : (
-                    <Copy size={ICON_SM} />
-                  )}
-                </Button>
-              }
-            >
-              <pre
-                className={cn(
-                  'whitespace-pre-wrap font-mono leading-relaxed',
-                  isError ? 'text-danger' : 'text-fg-muted'
-                )}
+          {(preview === null || showRaw) &&
+            displayedResult?.sections.map((section) => (
+              <ToolOutputSection
+                key={section.kind}
+                label={resultLabels[section.kind]}
+                danger={section.danger}
+                action={
+                  <CopyOutputButton
+                    text={section.text}
+                    label={
+                      section.kind === 'stdout' || section.kind === 'stderr'
+                        ? formatMessage(t.tools.copyStream, { stream: resultLabels[section.kind] })
+                        : t.tools.copyResult
+                    }
+                  />
+                }
               >
-                {displayedResult}
-              </pre>
-            </ToolOutputSection>
+                {/* A failure's text is what the reader came for, so it keeps the
+                    primary colour; the label above and the row's glyph carry the
+                    tone. */}
+                <pre
+                  className={cn(
+                    'whitespace-pre-wrap break-words font-mono leading-relaxed',
+                    section.danger ? 'text-fg' : 'text-fg-muted'
+                  )}
+                >
+                  {section.text}
+                </pre>
+              </ToolOutputSection>
+            ))}
+          {(preview === null || showRaw) && displayedResult?.truncated && (
+            <p className="border-t border-stroke px-3 py-2 text-fg-subtle">
+              {t.tools.outputTruncated}
+            </p>
           )}
         </div>
       </TimelineDisclosure>
@@ -221,17 +227,84 @@ function ToolOutputSection({ label, danger = false, action, children }: ToolOutp
   );
 }
 
-function formatToolResult(parsedResult: unknown, isError: boolean): string | null {
+type ResultKind = 'error' | 'result' | 'stderr' | 'stdout';
+
+interface ResultSection {
+  readonly kind: ResultKind;
+  readonly text: string;
+  /** The section is the failure itself: its label is read in the error colour. */
+  readonly danger: boolean;
+}
+
+interface FormattedToolResult {
+  readonly sections: readonly ResultSection[];
+  /** The runtime cut a shell run's output at its size limit. */
+  readonly truncated: boolean;
+}
+
+/**
+ * What the disclosed body shows for a finished call, as the sections it is
+ * drawn in.
+ *
+ * A shell run is its two streams, one section each and real line breaks, with
+ * the quiet one dropped: a compiler's complaint is the point of a failed `bash`
+ * row, and `JSON.stringify` turned it into one wrapped paragraph of `\n` and
+ * `\"`. Everything else is a single section, as before.
+ */
+function formatToolResult(
+  name: string,
+  parsedResult: unknown,
+  isError: boolean
+): FormattedToolResult | null {
   if (parsedResult === null) return null;
+
+  const streams = getShellStreams(name, parsedResult);
+  if (streams) {
+    // What the reader came for first: stderr when the call failed, stdout when
+    // it did not. `exitCode` is not repeated here; the row already says it.
+    const ordered: ResultSection[] = [
+      { kind: 'stdout', text: streams.stdout, danger: false },
+      { kind: 'stderr', text: streams.stderr, danger: isError },
+    ];
+    if (isError) ordered.reverse();
+    const sections = ordered.filter((section) => section.text.length > 0);
+    // A run that printed nothing has no stream to show, so its payload is the
+    // only thing left to say what happened.
+    if (sections.length > 0) return { sections, truncated: streams.truncated };
+  }
+
+  const kind = isError ? 'error' : 'result';
   if (
     isError &&
     typeof parsedResult === 'object' &&
     'error' in parsedResult &&
     typeof parsedResult.error === 'string'
   ) {
-    return parsedResult.error;
+    return { sections: [{ kind, text: parsedResult.error, danger: true }], truncated: false };
   }
-  return typeof parsedResult === 'string'
-    ? parsedResult
-    : (JSON.stringify(parsedResult, null, 2) ?? null);
+  const text =
+    typeof parsedResult === 'string' ? parsedResult : JSON.stringify(parsedResult, null, 2);
+  return { sections: [{ kind, text, danger: isError }], truncated: false };
+}
+
+/**
+ * Copies one section's text, which is the text the section shows.
+ *
+ * Its own component because each section has its own "copied" tick: a shell run
+ * has two, and ticking one must not tick the other.
+ */
+function CopyOutputButton({ text, label }: { text: string; label: string }) {
+  const { t } = useI18n();
+  const { copy, copied } = useClipboard();
+  return (
+    <Button
+      variant="subtle"
+      size="sm"
+      onClick={() => void copy(text)}
+      title={copied ? t.tools.resultCopied : label}
+      className="size-7 px-0 text-fg-muted"
+    >
+      {copied ? <Check size={ICON_SM} className="text-success" /> : <Copy size={ICON_SM} />}
+    </Button>
+  );
 }

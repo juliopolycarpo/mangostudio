@@ -131,7 +131,7 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
   'components/ui/ContextRing.tsx': {
     'type scale is text-micro/xs/sm/base/title/headline — other sizes compile to nothing':
-      'the percentage drawn inside a 16–20px ring is a data glyph, not running text',
+      'the percentage drawn inside the 20px ring of a sidebar row is a data glyph, not running text; the composer prints its figure beside the ring at 12px',
   },
 };
 

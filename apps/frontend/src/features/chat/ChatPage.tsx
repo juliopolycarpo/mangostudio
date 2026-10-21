@@ -19,6 +19,7 @@ import { DeprecatedModelNotice } from './components/DeprecatedModelNotice';
 import { InputBar } from './components/InputBar';
 import { InterruptedTurnNotice } from './components/InterruptedTurnNotice';
 import { PinnedTodoPanel } from './components/PinnedTodoPanel';
+import { useChatDockHeight } from './hooks/use-chat-dock-height';
 import { useChatHasTurns } from './hooks/use-chat-has-turns';
 import { useChatContextControls, useChatPageMessages } from './hooks/use-chat-page-state';
 import { requestComposerFocus, setComposerDraft } from './lib/composer-draft-store';
@@ -198,10 +199,14 @@ export function ChatPage({
   const turnsHeldForModel = awaitingModel || autoContextActionDeferred;
   const turnsHeld = isContextActionPending || turnsHeldForModel;
   const railShowsTodos = workspaceSettings.sidePanel.visiblePanelIds.includes('todos');
+  // The rail's mobile trigger floats over the transcript, so it anchors to the
+  // top of everything under the transcript instead of a fixed offset the
+  // composer's height would outgrow.
+  const { hostRef, dockRef } = useChatDockHeight();
 
   return (
     <>
-      <div className="flex h-full min-h-0">
+      <div ref={hostRef} className="relative flex h-full min-h-0">
         <div className="flex min-w-0 flex-1 flex-col">
           <ChatPageContent
             chatId={chatId}
@@ -227,67 +232,75 @@ export function ChatPage({
                 : onSubmit
             }
           />
-          {fallbackNotice && <ChatFallbackNotice notice={fallbackNotice} />}
-          {modelUnavailable?.reason === 'provider-deprecated' ? (
-            <DeprecatedModelNotice
-              details={modelUnavailable}
-              isForking={isForkingRunner}
-              runnerAvailable={migrationRunnerAvailable}
-              onContinueWithRunner={(targetId) => onContinueWithExternalRunner?.(targetId)}
-              onDismiss={() => onDismissModelUnavailable?.()}
+          <div ref={dockRef} className="flex shrink-0 flex-col">
+            {/* Only the notices scroll when they outgrow the dock. Two stacked
+                callouts are taller than a phone, and a dock that grows with them
+                pushes the composer off the screen; capped, the notices scroll in
+                place and the composer stays where it is. */}
+            <div className="app-scrollbar max-h-[60dvh] overflow-y-auto">
+              {fallbackNotice && <ChatFallbackNotice notice={fallbackNotice} />}
+              {modelUnavailable?.reason === 'provider-deprecated' ? (
+                <DeprecatedModelNotice
+                  details={modelUnavailable}
+                  isForking={isForkingRunner}
+                  runnerAvailable={migrationRunnerAvailable}
+                  onContinueWithRunner={(targetId) => onContinueWithExternalRunner?.(targetId)}
+                  onDismiss={() => onDismissModelUnavailable?.()}
+                />
+              ) : null}
+              {contextControls.requiresDecision && (
+                <ChatContextDecisionNotice
+                  warningMessage={contextControls.warningMessage}
+                  isPending={isContextActionPending}
+                  isModelResolving={isModelResolving}
+                  onCompact={() => void contextControls.handleCompactClick()}
+                  onStartSummarizedChat={() => void contextControls.handleSummarizedChatClick()}
+                  onContinue={contextControls.handleContinue}
+                />
+              )}
+              {interruptedTurn && (
+                <InterruptedTurnNotice
+                  key={interruptedTurn.messageId}
+                  messageId={interruptedTurn.messageId}
+                  checkpoint={interruptedTurn.checkpoint}
+                  disabled={disabled || isGenerating || turnsHeldForModel}
+                  onResume={onResumeInterruptedTurn}
+                  onDismiss={onDismissInterruptedTurn}
+                />
+              )}
+            </div>
+            {/*
+              The rail surfaces todos instead — but only when the user kept that
+              panel visible, so the pinned panel stays the fallback rather than
+              todos vanishing entirely.
+            */}
+            {!railShowsTodos ? <PinnedTodoPanel chatId={chatId} /> : null}
+            <InputBar
+              onSubmit={onSubmit}
+              chatId={chatId}
+              disabled={disabled}
+              submitDisabled={contextControls.requiresDecision || turnsHeld}
+              isGenerating={isGenerating}
+              onStop={onStop}
+              thinkingEnabled={thinkingEnabled}
+              reasoningEffort={reasoningEffort}
+              onThinkingToggle={onThinkingToggle}
+              onReasoningEffortChange={onReasoningEffortChange}
+              reasoningVisible={reasoningVisible}
+              contextInfo={contextInfo}
+              threadUsage={threadUsage}
+              imageToolIntent={imageToolIntent}
+              onImageToolIntentChange={onImageToolIntentChange}
+              activeModel={activeModel}
+              selectedAgentId={selectedAgentId}
+              agents={agents}
+              isAgentListLoading={isAgentListLoading}
+              onSelectedAgentIdChange={onSelectedAgentIdChange}
+              hasTurns={hasTurns}
+              workdir={workdir}
+              {...composer}
             />
-          ) : null}
-          {contextControls.requiresDecision && (
-            <ChatContextDecisionNotice
-              warningMessage={contextControls.warningMessage}
-              isPending={isContextActionPending}
-              isModelResolving={isModelResolving}
-              onCompact={() => void contextControls.handleCompactClick()}
-              onStartSummarizedChat={() => void contextControls.handleSummarizedChatClick()}
-              onContinue={contextControls.handleContinue}
-            />
-          )}
-          {interruptedTurn && (
-            <InterruptedTurnNotice
-              key={interruptedTurn.messageId}
-              messageId={interruptedTurn.messageId}
-              checkpoint={interruptedTurn.checkpoint}
-              disabled={disabled || isGenerating || turnsHeldForModel}
-              onResume={onResumeInterruptedTurn}
-              onDismiss={onDismissInterruptedTurn}
-            />
-          )}
-          {/*
-            The rail surfaces todos instead — but only when the user kept that
-            panel visible, so the pinned panel stays the fallback rather than
-            todos vanishing entirely.
-          */}
-          {!railShowsTodos ? <PinnedTodoPanel chatId={chatId} /> : null}
-          <InputBar
-            onSubmit={onSubmit}
-            chatId={chatId}
-            disabled={disabled}
-            submitDisabled={contextControls.requiresDecision || turnsHeld}
-            isGenerating={isGenerating}
-            onStop={onStop}
-            thinkingEnabled={thinkingEnabled}
-            reasoningEffort={reasoningEffort}
-            onThinkingToggle={onThinkingToggle}
-            onReasoningEffortChange={onReasoningEffortChange}
-            reasoningVisible={reasoningVisible}
-            contextInfo={contextInfo}
-            threadUsage={threadUsage}
-            imageToolIntent={imageToolIntent}
-            onImageToolIntentChange={onImageToolIntentChange}
-            activeModel={activeModel}
-            selectedAgentId={selectedAgentId}
-            agents={agents}
-            isAgentListLoading={isAgentListLoading}
-            onSelectedAgentIdChange={onSelectedAgentIdChange}
-            hasTurns={hasTurns}
-            workdir={workdir}
-            {...composer}
-          />
+          </div>
         </div>
         {chatId ? (
           <WorkspaceRail

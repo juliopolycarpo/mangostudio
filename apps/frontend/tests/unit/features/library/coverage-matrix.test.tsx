@@ -105,6 +105,45 @@ describe('CoverageMatrix', () => {
     );
   });
 
+  // The word printed beside the glyph is short enough for a column that is a
+  // fraction of the table; the sentence stays on the cell's name and tooltip.
+  it('prints a short word beside the glyph and keeps the sentence in the name', async () => {
+    await renderMatrix([
+      resource({
+        key: 'skill:divergent',
+        ref: { kind: 'skill', slug: 'divergent' },
+        instances: [
+          instance({ locationId: 'agents-skills', contentHash: 'a3f9c1' }),
+          instance({ locationId: 'claude-skills', contentHash: 'a3f9c1' }),
+          instance({ locationId: 'cursor-skills', contentHash: '7c21e8' }),
+        ],
+        coverage: fullCoverage({
+          mangostudio: { state: 'present', effectiveLocationId: 'agents-skills' },
+          claude: { state: 'present', effectiveLocationId: 'claude-skills' },
+          cursor: { state: 'present', effectiveLocationId: 'cursor-skills' },
+        }),
+        divergence: 'divergent',
+      }),
+    ]);
+
+    const cell = cellFor('skill:divergent', 'cursor');
+    expect(cell).toHaveTextContent(en.library.cellStateShort.divergent);
+    expect(cell).not.toHaveTextContent(en.library.cellState.divergent);
+    expect(cell.getAttribute('aria-label')).toContain(en.library.cellState.divergent);
+  });
+
+  it('lays the columns out as a fixed grid, one equal share per agent', async () => {
+    await renderMatrix([resource()]);
+
+    const table = screen.getByTestId('coverage-matrix').querySelector('table');
+    expect(table).toHaveClass('table-fixed');
+    const columns = [...(table?.querySelectorAll('col') ?? [])];
+    expect(columns).toHaveLength(TARGETS.length + 2);
+    // Only the two leading columns are sized. The agents split what is left, so
+    // the same header lands in the same place on every tab and for any count.
+    expect(columns.slice(2).map((column) => column.className)).toEqual(TARGETS.map(() => ''));
+  });
+
   it('never calls an absence "missing"', async () => {
     await renderMatrix([resource()]);
 

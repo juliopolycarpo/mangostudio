@@ -87,6 +87,16 @@ describe('runner selector groups', () => {
 });
 
 describe('external availability states', () => {
+  // The name says which agents exist; the line under it says why this one is out
+  // of reach. Fading the row to 50% would put the name under the text floor.
+  it('does not fade the name of a runner that cannot run here', () => {
+    renderSelector({ externalAgents: [descriptor({ installed: false })] });
+
+    expect(codexOption()).toBeDisabled();
+    expect(codexOption().className).not.toContain('opacity');
+    expect(codexOption().className).toContain('disabled:text-fg-muted');
+  });
+
   it('explains undetermined discovery and still selects the installed target without a version', () => {
     const { props } = renderSelector({
       externalAgents: [descriptor({ discoveryState: 'undetermined' })],

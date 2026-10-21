@@ -17,7 +17,8 @@ import type {
 } from '@mangostudio/shared/library';
 import { userEvent } from '@testing-library/user-event';
 import { BackupList } from '../../../../src/features/library/components/BackupList';
-import { render, screen, waitFor, within } from '../../../support/harness/render';
+import { screen, waitFor, within } from '../../../support/harness/render';
+import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
 const REMOVAL_ID = '2026-07-28T10-00-00.000Z-abc123';
@@ -93,7 +94,7 @@ async function renderList(
     )
     .install();
 
-  render(<BackupList />);
+  await renderWithRouter(<BackupList />);
   if (sets.length > 0) await screen.findAllByTestId('backup-row');
   else await screen.findByTestId('backup-list-empty');
 }
@@ -107,6 +108,44 @@ function rowFor(backupId: string): HTMLElement {
 }
 
 describe('BackupList', () => {
+  // The library strip has no tab for backups, so the page carries its own way
+  // back rather than leaving a dead end under the tabs.
+  it('links back to the matrix', async () => {
+    await renderList();
+
+    const back = screen.getByTestId('backups-back');
+    expect(back).toHaveTextContent(en.library.backups.back);
+    expect(back).toHaveAttribute('href', '/environments/library/skills');
+  });
+
+  // No plural machinery in the dictionaries, so the singular is its own key.
+  it('words one set in the singular and states the figures once', async () => {
+    await renderList();
+
+    expect(
+      screen.getByText(en.library.backups.usageOne.replace('{size}', '4 KiB'), { exact: false })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/1 backups/)).not.toBeInTheDocument();
+    // A single machine's figures are the page's figures: no second copy beside its name.
+    const heading = within(screen.getByTestId('backup-machine')).getByRole('heading', {
+      level: 3,
+    });
+    expect(heading).not.toHaveTextContent('4 KiB');
+  });
+
+  it("states each machine's figures beside its name once there are several", async () => {
+    await renderList([
+      set(),
+      set({ backupId: PROPAGATION_ID, environmentId: 'wsl-ubuntu', operation: 'propagation' }),
+    ]);
+
+    for (const machine of screen.getAllByTestId('backup-machine')) {
+      expect(within(machine).getByRole('heading', { level: 3 })).toHaveTextContent(
+        en.library.backups.usageOne.replace('{size}', '4 KiB')
+      );
+    }
+  });
+
   it('lists every retained set, not only the pinned ones', async () => {
     await renderList([
       set(),

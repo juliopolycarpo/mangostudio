@@ -36,6 +36,7 @@ import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
 import { CommitForm } from './CommitForm';
 import { DialogPathList } from './components/DialogBlocks';
+import { FilePathLabel } from './components/FilePathLabel';
 import { GroupHeading } from './components/GroupHeading';
 import { IconButton } from './components/IconButton';
 import { RowList } from './components/RowList';
@@ -673,7 +674,7 @@ function FileChangeRow({
     change.path
   );
   return (
-    <li className="flex min-h-8 min-w-0 items-center gap-2 px-3 py-0.5 transition-colors hover:bg-fill-hover">
+    <li className="group flex min-h-8 min-w-0 items-center gap-2 px-3 py-0.5 transition-colors hover:bg-fill-hover">
       <span
         className={cn('w-4 shrink-0 text-center font-mono text-xs font-medium', presentation.color)}
         title={statusLabel}
@@ -687,25 +688,29 @@ function FileChangeRow({
         type="button"
         onClick={onDiff}
         aria-label={t.git.actions.viewDiff.replace('{path}', change.path)}
-        title={change.path}
-        className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-xs text-fg"
+        className="flex min-w-0 flex-1 cursor-pointer text-left"
       >
-        {change.oldPath ? (
-          <>
-            <span className="text-fg-muted line-through">{change.oldPath}</span>
-            <span className="px-1 text-fg-muted">→</span>
-          </>
-        ) : null}
-        {change.path}
+        <FilePathLabel path={change.path} oldPath={change.oldPath} className="flex-1" />
       </button>
-      {onDiscard ? (
-        <IconButton label={discardLabel} tone="danger" disabled={pending} onClick={onDiscard}>
-          {untracked ? <Trash2 size={ICON_SM} /> : <RotateCcw size={ICON_SM} />}
+      {/*
+        The row actions take no room until they are wanted, so the file name —
+        what this list is scanned for — keeps the width instead of ending in an
+        ellipsis after a dozen characters, and the destructive discard is not
+        parked a gap away from stage on every row. Shown on hover and, because
+        the diff button is tabbable, on focus-within: that is what keeps them
+        reachable from the keyboard. A coarse pointer has no hover, so they
+        stay up there (the same swap the sidebar's chat rows make).
+      */}
+      <div className="hidden shrink-0 items-center gap-0.5 group-hover:flex group-focus-within:flex pointer-coarse:flex">
+        {onDiscard ? (
+          <IconButton label={discardLabel} tone="danger" disabled={pending} onClick={onDiscard}>
+            {untracked ? <Trash2 size={ICON_SM} /> : <RotateCcw size={ICON_SM} />}
+          </IconButton>
+        ) : null}
+        <IconButton label={actionLabel} disabled={pending} onClick={onAction}>
+          {action === 'stage' ? <Plus size={ICON_SM} /> : <Minus size={ICON_SM} />}
         </IconButton>
-      ) : null}
-      <IconButton label={actionLabel} disabled={pending} onClick={onAction}>
-        {action === 'stage' ? <Plus size={ICON_SM} /> : <Minus size={ICON_SM} />}
-      </IconButton>
+      </div>
     </li>
   );
 }

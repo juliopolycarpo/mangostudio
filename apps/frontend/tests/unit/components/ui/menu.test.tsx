@@ -127,16 +127,22 @@ function SplitButtonHarness({
   onPrimary = jest.fn(),
   onSecondary = jest.fn(),
   disabled = false,
+  menuDisabled = false,
+  loading = false,
 }: {
   readonly onPrimary?: () => void;
   readonly onSecondary?: () => void;
   readonly disabled?: boolean;
+  readonly menuDisabled?: boolean;
+  readonly loading?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <SplitButton
       onClick={onPrimary}
       disabled={disabled}
+      menuDisabled={menuDisabled}
+      loading={loading}
       menuLabel="More commit actions"
       open={open}
       onOpenChange={setOpen}
@@ -179,5 +185,37 @@ describe('SplitButton', () => {
     // The menu holds actions with their own preconditions, so a blocked primary
     // action must not seal them off.
     expect(screen.getByRole('button', { name: 'More commit actions' })).toBeEnabled();
+  });
+
+  // One control, one colour: a blocked primary half is the neutral grey of any
+  // disabled button, so the chevron beside it must not stay the only mango in
+  // the region.
+  it('draws both halves in the accent while the primary action is available', () => {
+    render(<SplitButtonHarness />);
+
+    const chevron = screen.getByRole('button', { name: 'More commit actions' });
+    expect(chevron.className).toContain('bg-accent');
+    expect(chevron.className).toContain('border-accent-pressed');
+  });
+
+  it('drops the chevron to the secondary look while the primary half is blocked', () => {
+    render(<SplitButtonHarness disabled />);
+
+    const chevron = screen.getByRole('button', { name: 'More commit actions' });
+    expect(chevron.className).not.toContain('bg-accent');
+    expect(chevron.className).toContain('bg-control');
+    // The secondary variant brings its own stroke; an accent edge would repaint it.
+    expect(chevron.className).not.toContain('border-accent-pressed');
+  });
+
+  it('keeps the accent across the divider while the primary half is loading', () => {
+    render(<SplitButtonHarness disabled loading menuDisabled />);
+
+    const chevron = screen.getByRole('button', { name: 'More commit actions' });
+    expect(chevron).toBeDisabled();
+    // `aria-busy` is what exempts a disabled button from turning grey.
+    expect(chevron).toHaveAttribute('aria-busy', 'true');
+    expect(chevron.className).toContain('bg-accent');
+    expect(chevron.className).toContain('border-accent-pressed');
   });
 });

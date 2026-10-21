@@ -25,5 +25,11 @@ export function activePageForPath(pathname: string): AppPage {
   if (pathname.includes('/settings')) return 'settings';
   if (pathname.includes('/gallery')) return 'gallery';
   if (pathname.includes('/home')) return 'home';
+  // The index page and the pop-out (`/terminal/$sessionId`) both render inside
+  // the shell. Without this they fell through to `chat` and drew the chat's
+  // chrome (new-chat button, environment chip, workspace breadcrumb, current
+  // chat row) over a page that is not a chat. No other route holds this segment,
+  // so it cannot change how any earlier check resolves.
+  if (pathname.includes('/terminal')) return 'terminal';
   return 'chat';
 }

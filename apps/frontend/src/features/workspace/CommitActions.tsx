@@ -156,69 +156,80 @@ export function CommitActions({
   const busy = actions.pending || generating;
   // Amending replaces HEAD, so it commits even with nothing staged.
   const canCommit = hasTitle && (hasStagedChanges || amend);
+  // A filled form and a dead primary button, with nothing in the panel saying
+  // why: say it, and name the menu entry that is the way forward. Without a
+  // title the empty field already explains the button.
+  const showStageHint = hasTitle && !hasStagedChanges && !amend && hasUnstagedWork;
   const select = (action: CommitAction) => {
     setMenuOpen(false);
     void actions.run(action);
   };
 
   return (
-    <div className="flex items-stretch gap-2">
-      <Button
-        type="button"
-        variant="secondary"
-        size="icon"
-        aria-label={commitLabels.generate}
-        title={generating ? commitLabels.generating : commitLabels.generate}
-        disabled={!canGenerate || busy}
-        onClick={onGenerate}
-        className="size-7 shrink-0 text-fg-muted"
-      >
-        <Sparkles size={ICON_SM} className={generating ? 'animate-pulse' : undefined} />
-      </Button>
-      <SplitButton
-        className="flex-1"
-        onClick={() => void actions.run('commit')}
-        loading={actions.pending}
-        disabled={busy || !canCommit}
-        menuDisabled={busy}
-        menuLabel={labels.menu}
-        open={menuOpen}
-        onOpenChange={setMenuOpen}
-        menu={
-          <>
-            <MenuItem disabled={!canCommit} onSelect={() => select('commit')}>
-              {labels.commit}
-            </MenuItem>
-            <MenuItem
-              disabled={!hasTitle || !hasUnstagedWork}
-              onSelect={() => select('stage-all-and-commit')}
-            >
-              {labels.stageAllAndCommit}
-            </MenuItem>
-            <MenuItem
-              disabled={!canCommit || branch.name === null}
-              onSelect={() => select('commit-and-push')}
-            >
-              {labels.commitAndPush}
-            </MenuItem>
-            <MenuItem
-              disabled={!canCommit || !branch.upstream}
-              onSelect={() => select('commit-and-sync')}
-            >
-              {labels.commitAndSync}
-            </MenuItem>
-            <MenuSeparator />
-            <MenuItem icon={<History size={ICON_MD} />} onSelect={() => select('amend')}>
-              {commitLabels.amendLabel}
-            </MenuItem>
-          </>
-        }
-      >
-        <Check size={ICON_SM} className="shrink-0" />
-        <span className="truncate">
-          {actions.pending ? commitLabels.submitting : commitLabels.submit}
-        </span>
-      </SplitButton>
+    <div className="space-y-1.5">
+      <div className="flex items-stretch gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon-sm"
+          aria-label={commitLabels.generate}
+          title={generating ? commitLabels.generating : commitLabels.generate}
+          disabled={!canGenerate || busy}
+          onClick={onGenerate}
+          className="shrink-0 text-fg-muted"
+        >
+          <Sparkles size={ICON_SM} className={generating ? 'animate-pulse' : undefined} />
+        </Button>
+        <SplitButton
+          className="flex-1"
+          onClick={() => void actions.run('commit')}
+          loading={actions.pending}
+          disabled={busy || !canCommit}
+          menuDisabled={busy}
+          menuLabel={labels.menu}
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          menu={
+            <>
+              <MenuItem disabled={!canCommit} onSelect={() => select('commit')}>
+                {labels.commit}
+              </MenuItem>
+              <MenuItem
+                disabled={!hasTitle || !hasUnstagedWork}
+                onSelect={() => select('stage-all-and-commit')}
+              >
+                {labels.stageAllAndCommit}
+              </MenuItem>
+              <MenuItem
+                disabled={!canCommit || branch.name === null}
+                onSelect={() => select('commit-and-push')}
+              >
+                {labels.commitAndPush}
+              </MenuItem>
+              <MenuItem
+                disabled={!canCommit || !branch.upstream}
+                onSelect={() => select('commit-and-sync')}
+              >
+                {labels.commitAndSync}
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem icon={<History size={ICON_MD} />} onSelect={() => select('amend')}>
+                {commitLabels.amendLabel}
+              </MenuItem>
+            </>
+          }
+        >
+          <Check size={ICON_SM} className="shrink-0" />
+          <span className="truncate">
+            {actions.pending ? commitLabels.submitting : commitLabels.submit}
+          </span>
+        </SplitButton>
+      </div>
+      {showStageHint ? (
+        <p className="text-xs text-fg-muted">
+          {labels.nothingStagedHint.replace('{action}', labels.stageAllAndCommit)}
+        </p>
+      ) : null}
     </div>
   );
 }

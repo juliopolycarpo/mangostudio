@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+import { useGithubInbox } from '../hooks/use-github-inbox';
 import {
   type GithubPanelPrefs,
   readGithubPanelPrefs,
   writeGithubPanelPrefs,
 } from '../lib/github-panel-prefs';
+import { machineUnavailableState } from '../lib/github-unavailable';
 import { GithubInboxSection } from './GithubInboxSection';
+import { GithubNotConnected } from './GithubNotConnected';
 import { GithubRepoSection } from './GithubRepoSection';
+import { GithubRefreshButton } from './GithubStaleness';
 
 interface GithubPanelProps {
   readonly chatId: string;
@@ -29,6 +33,12 @@ const GITHUB_PANEL_TESTID = 'github-panel';
  * top half has nothing to do with a checkout, and gating the panel on one would
  * hide a full review queue from anybody whose chat has no folder yet.
  *
+ * When `gh` itself is missing or signed out, both halves would say the same
+ * thing and every control under them would be inert, so the panel says it once
+ * and draws neither. Only those two states are hoisted, and only off the inbox:
+ * `no-remote` and `not-a-github-remote` belong to the repository, and the inbox
+ * can be perfectly healthy while they are true.
+ *
  * The panel never polls. Every list here is a live `gh` subprocess on whatever
  * machine the chat runs on, and a side panel left open in a background tab has
  * no business spawning one a minute forever. Each section carries a refresh and
@@ -41,6 +51,8 @@ export function GithubPanel({ chatId, workdir }: GithubPanelProps) {
   const { t } = useI18n();
   const [prefs, setPrefs] = useState<GithubPanelPrefs>(readGithubPanelPrefs);
   const gitState = useGitState(chatId);
+  const inbox = useGithubInbox(chatId);
+  const machineState = machineUnavailableState(inbox.query.data);
 
   const updatePrefs = (next: GithubPanelPrefs) => {
     setPrefs(next);
@@ -50,35 +62,49 @@ export function GithubPanel({ chatId, workdir }: GithubPanelProps) {
   const branch = gitState.data?.state === 'repo' ? gitState.data.status.branch : null;
 
   return (
-    // A `section` rather than a labelled `div`: the two sections inside are
-    // each headed, so the panel is a real landmark a screen-reader user
-    // navigates to, and `aria-label` is only supported on a role that takes it.
+    // A `section` rather than a labelled `div`: the sections inside are each
+    // headed, so the panel is a real landmark a screen-reader user navigates
+    // to, and `aria-label` is only supported on a role that takes it.
     <section
       data-testid={GITHUB_PANEL_TESTID}
       aria-label={t.github.title}
       className="app-scrollbar h-full min-h-0 divide-y divide-stroke overflow-y-auto"
     >
-      <GithubInboxSection
-        chatId={chatId}
-        collapsed={prefs.inboxCollapsed}
-        onToggle={() => updatePrefs({ ...prefs, inboxCollapsed: !prefs.inboxCollapsed })}
-      />
-      <GithubRepoSection
-        chatId={chatId}
-        workdir={workdir}
-        // No upstream, or an upstream that is behind local commits, is what
-        // makes the combined push-then-create action mandatory rather than a
-        // convenience: `gh pr create --head` skips pushing entirely, so a
-        // branch ahead of its already-published upstream would otherwise open
-        // a pull request missing the commits the user meant to submit, and a
-        // branch with none at all makes `gh` prompt for where to push —
-        // prompts are disabled, so that prompt is a hang.
-        needsPush={Boolean(branch?.name) && (!branch?.upstream || (branch?.ahead ?? 0) > 0)}
-        branchName={branch?.name ?? null}
-        branchLoading={gitState.isLoading}
-        prefs={prefs}
-        onPrefsChange={updatePrefs}
-      />
+      {machineState ? (
+        <div className="p-4">
+          <GithubNotConnected
+            state={machineState}
+            action={
+              <GithubRefreshButton onRefresh={inbox.refresh} refreshing={inbox.query.isFetching} />
+            }
+          />
+        </div>
+      ) : (
+        <>
+          <GithubInboxSection
+            chatId={chatId}
+            inbox={inbox}
+            collapsed={prefs.inboxCollapsed}
+            onToggle={() => updatePrefs({ ...prefs, inboxCollapsed: !prefs.inboxCollapsed })}
+          />
+          <GithubRepoSection
+            chatId={chatId}
+            workdir={workdir}
+            // No upstream, or an upstream that is behind local commits, is what
+            // makes the combined push-then-create action mandatory rather than a
+            // convenience: `gh pr create --head` skips pushing entirely, so a
+            // branch ahead of its already-published upstream would otherwise open
+            // a pull request missing the commits the user meant to submit, and a
+            // branch with none at all makes `gh` prompt for where to push —
+            // prompts are disabled, so that prompt is a hang.
+            needsPush={Boolean(branch?.name) && (!branch?.upstream || (branch?.ahead ?? 0) > 0)}
+            branchName={branch?.name ?? null}
+            branchLoading={gitState.isLoading}
+            prefs={prefs}
+            onPrefsChange={updatePrefs}
+          />
+        </>
+      )}
     </section>
   );
 }

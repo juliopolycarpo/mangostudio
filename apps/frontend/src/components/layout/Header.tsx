@@ -1,4 +1,4 @@
-import { Menu, Plus, Search, Settings } from 'lucide-react';
+import { LogOut, Menu, Plus, Search, Settings } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/Button';
 import { KbdHint } from '@/components/ui/KbdHint';
@@ -52,6 +52,7 @@ export function Header({
   const { data: session } = authClient.useSession();
   const { t } = useI18n();
   const { signOut, isSigningOut } = useSignOut();
+  const signOutLabel = isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton;
 
   return (
     <header className="sticky top-0 z-40 flex h-12 w-full shrink-0 items-center justify-between border-b border-stroke bg-canvas px-2 sm:px-4">
@@ -121,20 +122,26 @@ export function Header({
             <span className="hidden max-w-32 truncate text-sm text-fg-muted md:inline">
               {session.user.name}
             </span>
+            {/* One button for every width, so there is one `logout-button`: the
+                label from `sm` up, the glyph below it. The phone header used to
+                print the first four letters of the translated string, which
+                says "Sign" in English and breaks in any language that does not
+                put its first word first. The glyph steps aside while signing
+                out, because `Button` already shows its spinner there. */}
             <Button
               variant="subtle"
               size="sm"
               onClick={() => void signOut()}
               loading={isSigningOut}
+              aria-label={signOutLabel}
+              title={signOutLabel}
               data-testid="logout-button"
-              className="shrink-0"
+              className="shrink-0 max-sm:size-8 max-sm:p-0"
             >
-              <span className="hidden sm:inline">
-                {isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton}
-              </span>
-              <span className="sm:hidden">
-                {isSigningOut ? t.auth.logoutLoading : t.auth.logoutButton.slice(0, 4)}
-              </span>
+              {isSigningOut ? null : (
+                <LogOut size={ICON_MD} className="sm:hidden" aria-hidden="true" />
+              )}
+              <span className="hidden sm:inline">{signOutLabel}</span>
             </Button>
           </div>
         )}

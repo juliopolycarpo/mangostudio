@@ -16,8 +16,14 @@ interface RadioProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>
   readonly className?: string;
 }
 
+/**
+ * `after:` widens the hit area on a touch screen without moving anything: the
+ * 44px floor in `index.css` skips this input so its drawn box stays 16px, and a
+ * pseudo-element of the input is part of the input, so a tap on it checks the
+ * box with or without a wrapping `<label>`. 12px each way makes a 40px target.
+ */
 const BOX =
-  'peer size-4 shrink-0 cursor-pointer appearance-none rounded-full border border-stroke-strong bg-control transition-colors checked:border-accent checked:bg-accent enabled:hover:bg-control-hover enabled:checked:hover:bg-accent-hover disabled:cursor-not-allowed';
+  "peer relative size-4 shrink-0 cursor-pointer appearance-none rounded-full border border-stroke-strong bg-control transition-colors checked:border-accent checked:bg-accent enabled:hover:bg-control-hover enabled:checked:hover:bg-accent-hover disabled:cursor-not-allowed pointer-coarse:after:absolute pointer-coarse:after:-inset-3 pointer-coarse:after:content-['']";
 
 export function Radio({ className, ...props }: RadioProps) {
   return (

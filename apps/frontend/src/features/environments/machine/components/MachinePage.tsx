@@ -9,15 +9,13 @@
  */
 
 import type { MachineActionResponse, MachineServiceAction } from '@mangostudio/shared/machine';
-import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
-import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { ICON_SM } from '@/lib/icon-sizes';
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
+import { EnvironmentScopeHeader } from '../../components/EnvironmentScopeHeader';
 import type { MachineActionResult } from '../api';
 import { refusalMessage } from '../format';
 import {
@@ -68,18 +66,11 @@ export function MachinePage() {
     service.mutate(action, { onSuccess: settle, onError: fail });
 
   const header = (
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <p className="text-sm text-fg-muted">{m.description}</p>
-      <Button
-        variant="subtle"
-        size="sm"
-        onClick={() => void status.refetch()}
-        loading={status.isFetching && Boolean(status.data)}
-      >
-        <RefreshCw size={ICON_SM} />
-        {m.refresh}
-      </Button>
-    </div>
+    <EnvironmentScopeHeader
+      description={m.description}
+      onRefresh={() => void status.refetch()}
+      refreshing={status.isFetching && Boolean(status.data)}
+    />
   );
 
   if (status.isPending && !status.data) {

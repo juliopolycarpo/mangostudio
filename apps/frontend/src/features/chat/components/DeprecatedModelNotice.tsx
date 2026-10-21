@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+import { ChatDockNotice } from './ChatPageNotices';
 
 interface DeprecatedModelNoticeProps {
   readonly details: ModelUnavailableDetails;
@@ -41,40 +42,38 @@ export function DeprecatedModelNotice({
   const targetId = details.targetId;
 
   return (
-    <div className="px-6 pt-4">
-      <div className="mx-auto max-w-4xl">
-        <Callout
-          tone="warning"
-          role="status"
-          aria-live="polite"
-          className="p-4"
-          title={labels.title.replace('{provider}', details.provider ?? '')}
-        >
-          <div className="space-y-1">
-            <p className="text-xs">{labels.body.replace('{model}', details.modelId ?? '')}</p>
-            {targetId && !runnerAvailable ? (
-              <p className="text-xs">{labels.runnerUnavailable.replace('{target}', targetId)}</p>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-center gap-2 pt-3">
-            <Button variant="secondary" size="sm" onClick={onDismiss}>
-              {labels.dismiss}
+    <ChatDockNotice>
+      <Callout
+        tone="warning"
+        role="status"
+        aria-live="polite"
+        className="p-4"
+        title={labels.title.replace('{provider}', details.provider ?? '')}
+      >
+        <div className="space-y-1">
+          <p className="text-xs">{labels.body.replace('{model}', details.modelId ?? '')}</p>
+          {targetId && !runnerAvailable ? (
+            <p className="text-xs">{labels.runnerUnavailable.replace('{target}', targetId)}</p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 pt-3">
+          <Button variant="secondary" size="sm" onClick={onDismiss}>
+            {labels.dismiss}
+          </Button>
+          {targetId && runnerAvailable ? (
+            <Button
+              variant="primary"
+              size="sm"
+              loading={isForking}
+              disabled={isForking}
+              onClick={() => onContinueWithRunner(targetId)}
+            >
+              {labels.continueInNewChat.replace('{target}', targetId)}
+              <ArrowRight size={ICON_SM} />
             </Button>
-            {targetId && runnerAvailable ? (
-              <Button
-                variant="primary"
-                size="sm"
-                loading={isForking}
-                disabled={isForking}
-                onClick={() => onContinueWithRunner(targetId)}
-              >
-                {labels.continueInNewChat.replace('{target}', targetId)}
-                <ArrowRight size={ICON_SM} />
-              </Button>
-            ) : null}
-          </div>
-        </Callout>
-      </div>
-    </div>
+          ) : null}
+        </div>
+      </Callout>
+    </ChatDockNotice>
   );
 }

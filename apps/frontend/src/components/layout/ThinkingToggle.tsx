@@ -40,8 +40,9 @@ export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: Th
         type="button"
         onClick={() => onToggle(!enabled)}
         aria-pressed={enabled}
-        // The on state is styled off `aria-pressed` in `index.css`, so it
-        // follows the composer's runner accent rather than the product accent.
+        // The on state is styled off `aria-pressed` in `index.css`: a
+        // `fill-selected` wash and the icon in the composer's runner colour.
+        // The effort chip that appears beside it is the third cue.
         className="composer-chip"
       >
         <Brain size={ICON_SM} className="shrink-0" />

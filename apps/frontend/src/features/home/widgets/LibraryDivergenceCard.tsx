@@ -20,10 +20,12 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useMemo } from 'react';
 import { buttonClassName } from '@/components/ui/Button';
+import { Chip } from '@/components/ui/Chip';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { libraryEnvironmentSearch, libraryResourcesQueryOptions } from '@/features/library/queries';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
 import { formatList, formatMessage } from '@/lib/i18n-format';
 import { type DivergentResource, summarizeLibraryDivergence } from '../lib/library-divergence';
 import { CARD_LINK_CLASS } from './card-link';
@@ -41,6 +43,7 @@ export function LibraryDivergenceCard({
   className,
 }: LibraryDivergenceCardProps) {
   const { t, locale } = useI18n();
+  const plural = usePlural();
   const labels = cardLabels(t, kind);
   const scope = environmentId ?? undefined;
   // A failed or still-loading scan renders nothing at all. This card is the
@@ -60,7 +63,10 @@ export function LibraryDivergenceCard({
     <SectionCard
       label={
         summary.divergentCount > 0
-          ? formatMessage(labels.labelDivergent, { count: String(summary.divergentCount) })
+          ? plural(
+              { one: labels.labelDivergentOne, other: labels.labelDivergentOther },
+              summary.divergentCount
+            )
           : labels.label
       }
       tone={summary.divergentCount > 0 ? 'warning' : 'neutral'}
@@ -80,13 +86,16 @@ export function LibraryDivergenceCard({
 
       {summary.divergentCount > 1 ? (
         <p className="text-xs text-fg-muted">
-          {formatMessage(labels.more, { count: String(summary.divergentCount - 1) })}
+          {plural({ one: labels.moreOne, other: labels.moreOther }, summary.divergentCount - 1)}
         </p>
       ) : null}
 
       {summary.singleTargetCount > 0 ? (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-stroke pt-3 text-xs text-fg-muted">
-          {formatMessage(labels.singleTarget, { count: String(summary.singleTargetCount) })}
+          {plural(
+            { one: labels.singleTargetOne, other: labels.singleTargetOther },
+            summary.singleTargetCount
+          )}
           <Link
             to={kind === 'skill' ? '/environments/library/skills' : '/environments/library'}
             search={search}
@@ -148,9 +157,7 @@ function DivergenceBody({
   return (
     <div className="space-y-3">
       <p className="flex flex-wrap items-center gap-2">
-        <span className="terminal-chip max-w-full text-fg">
-          <span className="truncate">{resource.slug}</span>
-        </span>
+        <Chip className="max-w-full">{resource.slug}</Chip>
         {showKind ? <MicroLabel>{t.library.kinds[resource.kind]}</MicroLabel> : null}
       </p>
       <p className="text-sm text-fg-muted">{body}</p>

@@ -75,9 +75,9 @@ Rules that hold across all of them:
 
 | Token            | Utility             | Dark        | Light       | Use                                                                          |
 | ---------------- | ------------------- | ----------- | ----------- | ---------------------------------------------------------------------------- |
-| `success`        | `bg-success`        | `#4ade80`   | `#15803d`   | Text and icon for success. Always with an icon or a word.                    |
+| `success`        | `bg-success`        | `#4ade80`   | `#166534`   | Text and icon for success. Always with an icon or a word.                    |
 | `success-subtle` | `bg-success-subtle` | `#4ade801f` | `#15803d1a` | Fill of a success badge or callout.                                          |
-| `warning`        | `bg-warning`        | `#ffd166`   | `#b45309`   | Text and icon for attention. Always with an icon or a word.                  |
+| `warning`        | `bg-warning`        | `#ffd166`   | `#92400e`   | Text and icon for attention. Always with an icon or a word.                  |
 | `warning-subtle` | `bg-warning-subtle` | `#ffd1661f` | `#b453091a` | Fill of a warning badge or callout.                                          |
 | `danger`         | `bg-danger`         | `#f87171`   | `#c42b1c`   | Text and icon for errors, and the status dot. Always with an icon or a word. |
 | `danger-subtle`  | `bg-danger-subtle`  | `#f871711f` | `#c42b1c14` | Fill of an error badge or callout; hover of a destructive menu item.         |
@@ -85,6 +85,11 @@ Rules that hold across all of them:
 | `on-danger`      | `text-on-danger`    | `#ffffff`   | `#ffffff`   | Text on `danger-solid` (5.7:1).                                              |
 | `info`           | `bg-info`           | `#7cb8ff`   | `#1f63c4`   | Text and icon for neutral information and notes.                             |
 | `info-subtle`    | `bg-info-subtle`    | `#7cb8ff1f` | `#1f63c414` | Fill of an info badge or callout.                                            |
+
+Light `success` and `warning` are darker than a plain white page needs, because
+text in them is also read on its own tint over `canvas`, `sidebar` and `surface` (a
+badge, a diff line, a callout). `#166534` and `#92400e` keep 5:1 or better there;
+the brighter `#15803d` / `#b45309` fell to about 4:1 on the tint.
 
 ### Overlay and identity
 
@@ -172,6 +177,13 @@ nearest utility; settings pages and the chat use the width their layout defines)
 
 32px is WinUI's own control height and is within two pixels of libadwaita's.
 
+These are the **fine-pointer** sizes. Under `@media (pointer: coarse)` buttons,
+links (outside markdown prose), selects, textareas and text inputs grow to a 44px
+hit size (`min-height` and `min-width`), so a touch screen reads taller than the
+table. A checkbox, radio and switch keep their drawn size and widen only the hit
+area (`Checkbox` and `Radio` extend it with a pseudo-element), and a range input
+keeps its 6px track. [`decisions.md`](./decisions.md) #15 has the reasoning.
+
 ## Radius
 
 Four radii by role, plus the pill. The theme empties Tailwind's own scale, so a
@@ -217,11 +229,21 @@ class bundles all of it for menus and listboxes.
   `transition-all`.
 - **Pressed** goes one step darker (`accent-pressed`, `control-pressed`,
   `fill-pressed`).
-- **Disabled** buttons turn neutral grey (`fill-selected` + `fg-subtle`) in every
-  variant; other disabled controls drop to 50% opacity. A button that is merely
-  *loading* keeps its colour and shows the spinner (`aria-busy` tells the two apart).
+- **Disabled** buttons turn neutral grey (`fill-selected` + `fg-subtle`) in the
+  filled variants (`primary`, `secondary`, `danger`); the quiet ones (`subtle`,
+  `subtle-danger`) have no fill to begin with and only turn their text `fg-subtle`,
+  because a tile would read as the hovered or selected row. Other disabled controls
+  drop to 50% opacity — except a disabled menu row whose name is information (a
+  locked model, an unavailable runner): its name steps to `fg-muted` instead of
+  fading, and the reason sits beside it ([decision 17](./decisions.md)). A button
+  that is merely *loading* keeps its colour and shows the spinner (`aria-busy` tells
+  the two apart).
 - **Selected** is a neutral fill, plus the 3px accent bar where a list has a
   current item.
+- **On** (a toggle chip with `aria-pressed="true"`) wears `fill-selected`, the same
+  wash as an open menu, so it adds a second cue the open state lacks: the chip's
+  leading icon takes the composer's runner colour. A chip whose state nothing else
+  shows (`create images`) also carries a check beside its label.
 
 ## Motion
 
@@ -257,5 +279,14 @@ metrics.
   closed by a `stroke` border. Below `md` it becomes a slide-over with a `scrim`.
 - The header is `h-12` in every breakpoint. It carries the runner and workspace
   context on the left, the command palette and account actions on the right.
-- Reading surfaces (chat, settings) centre their content in a single column.
-  Settings and library pages use a two-column layout (nav + content) from `lg`.
+- Reading surfaces (chat, settings) centre their content in a single column. The
+  chat's is `max-w-4xl` (896px) inside a `px-3 sm:px-4 md:px-6` gutter, and the
+  transcript, the notices above the composer and the composer all sit in it, so
+  their edges line up at every width.
+  Settings pages use a two-column layout (nav + content) from `lg`. The library is
+  a section of the Environments umbrella, not a page of its own: it sits under
+  that umbrella's heading and tab strip with a second `TabNav` of its own (kinds,
+  settings, locations) and no side nav, so a wide matrix keeps the full width.
+  The row above the second strip is the same `EnvironmentScopeHeader` every
+  Environments tab opens with: the description, the machine picker and one
+  Re-check.

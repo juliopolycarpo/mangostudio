@@ -175,6 +175,11 @@ export function GithubRepoSection({
   );
 }
 
+/** True once a list has answered that the repository cannot be read, so its controls have nothing to act on. */
+function isUnavailable(data: { readonly state: string } | undefined): boolean {
+  return data !== undefined && data.state !== 'ok';
+}
+
 /** The filter row, generic over the two closed filter unions the lists take. */
 function FilterBar<T extends string>({
   filters,
@@ -280,36 +285,43 @@ function PrsPane({
 
   return (
     <div className="space-y-2">
-      <FilterBar
-        filters={PR_FILTERS}
-        active={prefs.prFilter}
-        labels={t.github.prFilter}
-        onSelect={(prFilter) => onPrefsChange({ ...prefs, prFilter })}
-      />
-      {creating ? (
-        <CreatePrForm
-          chatId={chatId}
-          needsPush={needsPush}
-          defaultTitle={branchName ?? ''}
-          onDone={() => setCreating(false)}
-        />
-      ) : branchName ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() => setCreating(true)}
-          className="w-full"
-        >
-          <Plus size={ICON_SM} />
-          {t.github.actions.createPr}
-        </Button>
-      ) : (
-        // A detached HEAD (or a checkout `readCurrentBranch()` otherwise
-        // cannot name) has no branch for `gh pr create` to push, and the
-        // command fails with a generic server error rather than explaining
-        // why — so this state is caught here instead.
-        <p className="text-xs text-fg-muted">{t.github.createPr.noBranch}</p>
+      {/* Nothing here can work while the list says the repository is
+          unavailable (no `gh`, no remote), so the filters and the create button
+          stay out of the way rather than sitting live above a refusal. */}
+      {isUnavailable(query.data) ? null : (
+        <>
+          <FilterBar
+            filters={PR_FILTERS}
+            active={prefs.prFilter}
+            labels={t.github.prFilter}
+            onSelect={(prFilter) => onPrefsChange({ ...prefs, prFilter })}
+          />
+          {creating ? (
+            <CreatePrForm
+              chatId={chatId}
+              needsPush={needsPush}
+              defaultTitle={branchName ?? ''}
+              onDone={() => setCreating(false)}
+            />
+          ) : branchName ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setCreating(true)}
+              className="w-full"
+            >
+              <Plus size={ICON_SM} />
+              {t.github.actions.createPr}
+            </Button>
+          ) : (
+            // A detached HEAD (or a checkout `readCurrentBranch()` otherwise
+            // cannot name) has no branch for `gh pr create` to push, and the
+            // command fails with a generic server error rather than explaining
+            // why — so this state is caught here instead.
+            <p className="text-xs text-fg-muted">{t.github.createPr.noBranch}</p>
+          )}
+        </>
       )}
       <ListGate
         query={query}
@@ -352,12 +364,14 @@ function IssuesPane({
 
   return (
     <div className="space-y-2">
-      <FilterBar
-        filters={ISSUE_FILTERS}
-        active={prefs.issueFilter}
-        labels={t.github.issueFilter}
-        onSelect={(issueFilter) => onPrefsChange({ ...prefs, issueFilter })}
-      />
+      {isUnavailable(query.data) ? null : (
+        <FilterBar
+          filters={ISSUE_FILTERS}
+          active={prefs.issueFilter}
+          labels={t.github.issueFilter}
+          onSelect={(issueFilter) => onPrefsChange({ ...prefs, issueFilter })}
+        />
+      )}
       <ListGate
         query={query}
         errorLabel={t.github.errors.issues}

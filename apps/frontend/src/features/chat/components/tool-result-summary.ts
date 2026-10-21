@@ -28,6 +28,9 @@ const FILE_TARGET_TOOLS = new Set([
   'move_file',
 ]);
 
+/** The tools whose result is a shell run: `{ stdout, stderr, exitCode, … }`. */
+const SHELL_TOOLS = new Set(['bash', 'zsh', 'powershell']);
+
 function count(unit: ToolSummaryUnit, value: number): ToolResultSummary | null {
   return Number.isFinite(value) && value >= 0
     ? { kind: 'count', unit, count: Math.round(value) }
@@ -141,17 +144,47 @@ export function summarizeParsedToolResult(
       if (typeof startLine !== 'number' || typeof endLine !== 'number') return null;
       return count('line', Math.max(0, endLine - startLine + 1));
     }
-    case 'bash':
-    case 'zsh':
-    case 'powershell': {
-      const exitCode = payload?.exitCode;
-      if (typeof exitCode === 'number' && exitCode !== 0) return { kind: 'exit', code: exitCode };
-      const lines = lineCount(payload?.stdout);
-      return lines === null ? null : count('line', lines);
-    }
     default:
-      return null;
+      return SHELL_TOOLS.has(name) ? summarizeShellResult(payload) : null;
   }
+}
+
+/** A non-zero exit is the answer; otherwise the length of what was printed. */
+function summarizeShellResult(payload: Record<string, unknown> | null): ToolResultSummary | null {
+  const exitCode = payload?.exitCode;
+  if (typeof exitCode === 'number' && exitCode !== 0) return { kind: 'exit', code: exitCode };
+  const lines = lineCount(payload?.stdout);
+  return lines === null ? null : count('line', lines);
+}
+
+/** What a shell run printed, split the way the process wrote it. */
+interface ShellStreams {
+  readonly stdout: string;
+  readonly stderr: string;
+  /** The runtime stopped capturing at its size limit: the streams are not the whole output. */
+  readonly truncated: boolean;
+}
+
+/**
+ * The streams of a finished shell run, or null when the payload is not one.
+ *
+ * Null covers every shape this build does not recognise, including the
+ * `{ error }` a run that timed out or was aborted leaves behind: a caller
+ * falls back to showing the payload as it is rather than inventing streams.
+ *
+ * Usage: getShellStreams('bash', { stdout: 'ok\n', stderr: '', exitCode: 0 })
+ */
+export function getShellStreams(name: string, parsed: unknown): ShellStreams | null {
+  if (!SHELL_TOOLS.has(name)) return null;
+  const payload = asRecord(parsed);
+  if (payload === null) return null;
+  const { stdout, stderr, truncated } = payload;
+  if (typeof stdout !== 'string' && typeof stderr !== 'string') return null;
+  return {
+    stdout: typeof stdout === 'string' ? stdout : '',
+    stderr: typeof stderr === 'string' ? stderr : '',
+    truncated: truncated === true,
+  };
 }
 
 /**

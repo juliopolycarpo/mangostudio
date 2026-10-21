@@ -97,6 +97,15 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
     if (next) setStep(next);
   };
 
+  // One primary per region. While a step still has an action of its own to
+  // take (choose the folder, send the first prompt), that action is the
+  // primary and Continue steps down to `secondary`: it is enabled either way,
+  // because setup is skippable at every step, but it is not what the step is
+  // asking for. Every other step has no action of its own, so Continue is it.
+  const stepOwnsPrimary =
+    (step === 'folder' && !state.workdir) ||
+    (step === 'chat' && !!state.workdir && statuses.chat !== 'satisfied');
+
   const complete = async (destination?: string) => {
     await progress.update((current) => ({ ...current, completedAt: Date.now() }));
     onDone(destination);
@@ -150,13 +159,14 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
         </header>
 
         <div className="grid gap-6 sm:grid-cols-[13rem_1fr]">
-          {/* `min-w-0` on both tracks: a grid item defaults to `min-width:
-              auto`, so the horizontally scrolling step list below would widen
-              its own column past the viewport and take the panel with it. */}
-          <nav aria-label={s.stepList} className="min-w-0">
-            <ol className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
+          {/* From `sm` up only. A phone has no room for six steps in a row, and
+              a strip that scrolls sideways hides the current one at its edge;
+              the card says which step this is, by number and by name, and Back,
+              Skip and Continue move through them. */}
+          <nav aria-label={s.stepList} className="hidden sm:block">
+            <ol className="flex flex-col gap-1">
               {ONBOARDING_STEP_IDS.map((candidate, position) => (
-                <li key={candidate} className="shrink-0 sm:shrink">
+                <li key={candidate}>
                   <button
                     type="button"
                     aria-current={candidate === step ? 'step' : undefined}
@@ -181,6 +191,9 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             </ol>
           </nav>
 
+          {/* `min-w-0`: a grid item defaults to `min-width: auto`, so a long path
+              or command inside a step would widen the column past the viewport
+              instead of wrapping. */}
           <Card className="min-w-0 space-y-6">
             {/* No step chosen means resume is still waiting on a fact. The
                 wizard says so here rather than in place of the whole page: a
@@ -196,6 +209,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                 {formatMessage(s.progress, {
                   step: String(index + 1),
                   total: String(ONBOARDING_STEP_IDS.length),
+                  name: s.steps[step],
                 })}
               </p>
             )}
@@ -233,19 +247,26 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
 
             {step === null ? null : (
               <div className="flex flex-wrap items-center justify-end gap-2 border-t border-stroke pt-4">
-                <Button
-                  variant="secondary"
-                  disabled={index === 0}
-                  data-testid="onboarding-back"
-                  onClick={() => {
-                    const previous = ONBOARDING_STEP_IDS[index - 1];
-                    if (previous) setStep(previous);
-                  }}
-                >
-                  {s.back}
-                </Button>
+                {/* One row, one height: Back and Skip share Continue's `lg`, or
+                    the secondary's border sits visibly inside the primary's box.
+                    Nothing precedes the first step, so there is nothing to go
+                    back to: no disabled placeholder. */}
+                {index > 0 ? (
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    data-testid="onboarding-back"
+                    onClick={() => {
+                      const previous = ONBOARDING_STEP_IDS[index - 1];
+                      if (previous) setStep(previous);
+                    }}
+                  >
+                    {s.back}
+                  </Button>
+                ) : null}
                 <Button
                   variant="subtle"
+                  size="lg"
                   data-testid="onboarding-skip-step"
                   disabled={isWriting}
                   onClick={() => void skipCurrent()}
@@ -253,6 +274,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
                   {s.skipStep}
                 </Button>
                 <Button
+                  variant={stepOwnsPrimary ? 'secondary' : 'primary'}
                   size="lg"
                   data-testid="onboarding-continue"
                   loading={isWriting}

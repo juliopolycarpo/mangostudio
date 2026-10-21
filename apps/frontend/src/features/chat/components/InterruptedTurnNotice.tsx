@@ -3,7 +3,7 @@ import type {
   TurnCheckpointPart,
   TurnInterruptionReasonCode,
 } from '@mangostudio/shared/turn-recovery';
-import { CheckCircle2, RotateCcw, ShieldAlert } from 'lucide-react';
+import { RotateCcw, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -12,6 +12,8 @@ import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+import { ChatDockNotice } from './ChatPageNotices';
+import { StatusGlyph } from './ToolCallVisuals';
 
 interface InterruptedTurnNoticeProps {
   readonly messageId: string;
@@ -66,8 +68,8 @@ export function InterruptedTurnNotice({
   };
 
   return (
-    <div className="px-4 pt-3 sm:px-6" role="status" aria-live="polite">
-      <Callout tone="warning" className="mx-auto max-w-4xl p-4">
+    <ChatDockNotice role="status" aria-live="polite">
+      <Callout tone="warning" className="p-4">
         <div className="space-y-4">
           <div className="min-w-0 space-y-1">
             <h2 className="text-sm font-semibold text-fg">{t.chat.recovery.title}</h2>
@@ -86,12 +88,20 @@ export function InterruptedTurnNotice({
               <div className="flex flex-wrap gap-2">
                 {checkpoint.completedCalls.map((call) => (
                   <span key={call.callId} className="terminal-chip">
-                    <CheckCircle2
-                      size={ICON_SM}
-                      className={call.isError ? 'text-danger' : 'text-success'}
-                    />
+                    {/* The same verdict marks the tool rail draws for these calls:
+                        a check for one that finished, an alert for one that failed. */}
+                    <span
+                      className={
+                        call.isError ? 'inline-flex text-danger' : 'inline-flex text-success'
+                      }
+                    >
+                      <StatusGlyph
+                        status={call.isError ? 'failed' : 'succeeded'}
+                        name={call.name}
+                      />
+                    </span>
                     <span>{call.name}</span>
-                    {call.isError && <span className="text-danger">{t.chat.recovery.failed}</span>}
+                    {call.isError && <span>{t.chat.recovery.failed}</span>}
                   </span>
                 ))}
               </div>
@@ -110,7 +120,7 @@ export function InterruptedTurnNotice({
                 {checkpoint.incompleteCalls.map((call) => (
                   <label
                     key={call.callId}
-                    className="flex min-h-8 cursor-pointer items-center gap-3 rounded-sm border border-stroke bg-surface px-3 py-1.5 text-sm"
+                    className="flex min-h-8 cursor-pointer items-center gap-3 rounded-sm border border-stroke bg-surface px-3 py-1.5 text-sm pointer-coarse:min-h-11"
                   >
                     <Checkbox
                       checked={selectedRetries.has(call.callId)}
@@ -157,7 +167,7 @@ export function InterruptedTurnNotice({
           </div>
         </div>
       </Callout>
-    </div>
+    </ChatDockNotice>
   );
 }
 

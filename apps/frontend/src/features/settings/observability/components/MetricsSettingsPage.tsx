@@ -24,6 +24,11 @@ const CHATGPT_REFETCH_MS = 60_000;
 /** A block of a provider's card. The blocks are divided by a hairline, not boxed. */
 const BLOCK = 'space-y-3 border-t border-stroke pt-4 first:border-t-0 first:pt-0';
 
+/**
+ * Hits, misses and hit rate are right-aligned at a fixed width so the digits
+ * line up down the column, and the last one ends on the card's edge, where the
+ * probe-timeout counts below it end too. The cache name takes the rest.
+ */
 function CacheMetricsTable(props: {
   cacheLabel: string;
   cacheLabels: Record<ProviderCacheName, string>;
@@ -37,16 +42,16 @@ function CacheMetricsTable(props: {
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-fg-muted">
-            <th scope="col" className="whitespace-nowrap py-2 pr-4 font-medium">
+            <th scope="col" className="whitespace-nowrap py-2 font-medium">
               {props.cacheLabel}
             </th>
-            <th scope="col" className="whitespace-nowrap py-2 pr-4 font-medium">
+            <th scope="col" className="w-16 whitespace-nowrap py-2 pl-4 text-right font-medium">
               {props.hitsLabel}
             </th>
-            <th scope="col" className="whitespace-nowrap py-2 pr-4 font-medium">
+            <th scope="col" className="w-16 whitespace-nowrap py-2 pl-4 text-right font-medium">
               {props.missesLabel}
             </th>
-            <th scope="col" className="whitespace-nowrap py-2 font-medium">
+            <th scope="col" className="w-20 whitespace-nowrap py-2 pl-4 text-right font-medium">
               {props.hitRateLabel}
             </th>
           </tr>
@@ -54,12 +59,16 @@ function CacheMetricsTable(props: {
         <tbody>
           {props.entries.map((entry) => (
             <tr key={entry.cacheName} className="border-t border-stroke">
-              <td className="whitespace-nowrap py-2 pr-4 text-fg">
+              <td className="whitespace-nowrap py-2 text-fg">
                 {props.cacheLabels[entry.cacheName]}
               </td>
-              <td className="whitespace-nowrap py-2 pr-4 text-fg tabular-nums">{entry.hits}</td>
-              <td className="whitespace-nowrap py-2 pr-4 text-fg tabular-nums">{entry.misses}</td>
-              <td className="whitespace-nowrap py-2 text-fg tabular-nums">
+              <td className="whitespace-nowrap py-2 pl-4 text-right text-fg tabular-nums">
+                {entry.hits}
+              </td>
+              <td className="whitespace-nowrap py-2 pl-4 text-right text-fg tabular-nums">
+                {entry.misses}
+              </td>
+              <td className="whitespace-nowrap py-2 pl-4 text-right text-fg tabular-nums">
                 {formatPercent(entry.hitRate)}
               </td>
             </tr>

@@ -2,6 +2,7 @@ import { apiKey } from '@better-auth/api-key';
 import {
   API_KEY_HEADER,
   API_KEY_NAME_MAX_LENGTH,
+  API_KEY_PREFIX,
   type ApiKeyScope,
 } from '@mangostudio/shared/api-keys';
 import { betterAuth } from 'better-auth';
@@ -52,7 +53,7 @@ function createAuthInstance() {
     plugins: [
       apiKey({
         apiKeyHeaders: API_KEY_HEADER,
-        defaultPrefix: 'mango_',
+        defaultPrefix: API_KEY_PREFIX,
         maximumNameLength: API_KEY_NAME_MAX_LENGTH,
         // The scope (read-only | full) is carried in key metadata.
         enableMetadata: true,

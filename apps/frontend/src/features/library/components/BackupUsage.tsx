@@ -16,10 +16,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowRight } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
-import { formatBytes } from '../format';
 import { backupUsageQueryOptions } from '../queries';
+import { BackupSummary } from './BackupSummary';
 
 export function BackupUsage() {
   const { t } = useI18n();
@@ -33,16 +32,7 @@ export function BackupUsage() {
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="backup-usage">
-      <p className="text-fg-muted text-xs">
-        {formatMessage(l.backups.usage, {
-          count: String(usage.setCount),
-          size: formatBytes(usage.sizeBytes),
-        })}{' '}
-        {formatMessage(l.backups.retention, {
-          count: String(usage.retentionCount),
-          size: formatBytes(usage.retentionBytes),
-        })}
-      </p>
+      <BackupSummary usage={usage} />
       <Link
         to="/environments/library/backups"
         className="inline-flex items-center gap-1 text-accent-fg text-xs hover:underline"

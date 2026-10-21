@@ -1,5 +1,5 @@
 import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared/types';
-import { Bookmark, ChevronDown, Download, Image, ImageOff, Sparkles } from 'lucide-react';
+import { Bookmark, Download, Image, ImageOff, Sparkles } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -11,7 +11,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
-import { cn } from '@/lib/utils';
+import { DisclosureChevron } from './DisclosureChevron';
 import { ImageActionBar } from './ImageActionBar';
 import { ReservedAspectImage } from './ReservedAspectImage';
 
@@ -41,6 +41,7 @@ export function GeneratedImagePart({ part }: Props) {
       <div className="max-w-md overflow-hidden rounded-md border border-stroke bg-surface">
         <button
           type="button"
+          aria-expanded={!collapsed}
           onClick={() => setCollapsed((v) => !v)}
           className="flex h-8 w-full cursor-pointer items-center gap-2 px-3 transition-colors hover:bg-fill-hover"
         >
@@ -48,13 +49,7 @@ export function GeneratedImagePart({ part }: Props) {
           <span className="flex-1 truncate text-left text-xs text-fg-muted">
             {promptSnippet || t.chat.feed.generatedImageAlt}
           </span>
-          <ChevronDown
-            size={ICON_SM}
-            className={cn(
-              'shrink-0 text-fg-subtle transition-transform duration-(--duration-base)',
-              !collapsed && 'rotate-180'
-            )}
-          />
+          <DisclosureChevron expanded={!collapsed} />
         </button>
 
         <AnimatePresence initial={false}>

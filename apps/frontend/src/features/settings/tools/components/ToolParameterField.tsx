@@ -200,8 +200,7 @@ function PathListField({
                   </span>
                   <Button
                     variant="subtle"
-                    size="icon"
-                    className="size-7"
+                    size="icon-sm"
                     onClick={() => startEdit(index)}
                     disabled={disabled}
                     aria-label={s.edit}
@@ -209,9 +208,8 @@ function PathListField({
                     <Pencil size={ICON_SM} />
                   </Button>
                   <Button
-                    variant="subtle"
-                    size="icon"
-                    className="size-7 text-danger"
+                    variant="subtle-danger"
+                    size="icon-sm"
                     onClick={() => handleDelete(index)}
                     disabled={disabled}
                     aria-label={s.delete}
@@ -298,7 +296,13 @@ export function ToolParameterField({
       ),
     ];
     return (
-      <SettingsField label={label} htmlFor={`${fieldId}-model`} hint={description}>
+      <SettingsRow
+        label={label}
+        hint={description}
+        htmlFor={`${fieldId}-model`}
+        layout="field"
+        className="p-0"
+      >
         <Select
           id={`${fieldId}-model`}
           value={toSafeString(descriptorValue)}
@@ -308,7 +312,7 @@ export function ToolParameterField({
           options={modelOptions}
           placeholder={fallbackLabel(modelOptions)}
         />
-      </SettingsField>
+      </SettingsRow>
     );
   }
 
@@ -330,7 +334,13 @@ export function ToolParameterField({
 
     case 'number': {
       return (
-        <SettingsField label={label} htmlFor={`${fieldId}-number`} hint={description}>
+        <SettingsRow
+          label={label}
+          hint={description}
+          htmlFor={`${fieldId}-number`}
+          layout="field"
+          className="p-0"
+        >
           <Input
             id={`${fieldId}-number`}
             type="number"
@@ -341,14 +351,20 @@ export function ToolParameterField({
             onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
             disabled={disabled}
           />
-        </SettingsField>
+        </SettingsRow>
       );
     }
 
     case 'select': {
       const options = descriptor.options ?? [];
       return (
-        <SettingsField label={label} htmlFor={`${fieldId}-select`} hint={description}>
+        <SettingsRow
+          label={label}
+          hint={description}
+          htmlFor={`${fieldId}-select`}
+          layout="field"
+          className="p-0"
+        >
           <Select
             id={`${fieldId}-select`}
             value={toSafeString(descriptorValue)}
@@ -358,7 +374,7 @@ export function ToolParameterField({
             options={options}
             placeholder={fallbackLabel(options)}
           />
-        </SettingsField>
+        </SettingsRow>
       );
     }
 
@@ -400,7 +416,13 @@ export function ToolParameterField({
 
     default: {
       return (
-        <SettingsField label={label} htmlFor={`${fieldId}-text`} hint={description}>
+        <SettingsRow
+          label={label}
+          hint={description}
+          htmlFor={`${fieldId}-text`}
+          layout="field"
+          className="p-0"
+        >
           <Input
             id={`${fieldId}-text`}
             type="text"
@@ -408,7 +430,7 @@ export function ToolParameterField({
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
           />
-        </SettingsField>
+        </SettingsRow>
       );
     }
   }

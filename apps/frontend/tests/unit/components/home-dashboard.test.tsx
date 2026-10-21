@@ -217,9 +217,13 @@ describe('HomePage', () => {
       expect(tiles[0]).toHaveTextContent('mango');
       expect(tiles[0]).toHaveTextContent('feat/lsp-plugin');
       expect(tiles[0]).toHaveTextContent('3 changed');
-      expect(tiles[0]).toHaveTextContent('2 chat(s)');
+      expect(tiles[0]).toHaveTextContent('2 chats');
       expect(tiles[1]).toHaveTextContent('lsp-store');
       expect(tiles[1]).toHaveTextContent('clean tree');
+      // One chat is "1 chat", not "1 chat(s)" and not "1 chats".
+      expect(tiles[1]).toHaveTextContent('1 chat');
+      expect(tiles[1]).not.toHaveTextContent('1 chats');
+      expect(tiles[1]).not.toHaveTextContent('(s)');
     } finally {
       scenario.restore();
     }
@@ -377,6 +381,9 @@ describe('HomePage', () => {
       expect(rollup.querySelector('[data-health="ok"]')).toHaveTextContent('1');
       expect(rollup.querySelector('[data-health="missing"]')).toHaveTextContent('1');
       expect(rollup.querySelector('[data-health="error"]')).toHaveTextContent('0');
+      // An empty bucket stays muted; only a populated one wears its status colour.
+      expect(rollup.querySelector('[data-health="error"] p')).toHaveClass('text-fg-muted');
+      expect(rollup.querySelector('[data-health="ok"] p')).toHaveClass('text-success');
     } finally {
       scenario.restore();
     }

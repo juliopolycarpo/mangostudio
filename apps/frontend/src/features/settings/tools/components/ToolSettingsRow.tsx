@@ -194,7 +194,7 @@ export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
     <div>
       <SettingsRow
         as={descriptor.canDisable ? 'label' : 'div'}
-        label={translated.title}
+        label={<span className="font-semibold">{translated.title}</span>}
         hint={translated.description}
       >
         {descriptor.canDisable ? (
@@ -209,7 +209,9 @@ export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
       </SettingsRow>
 
       {hasParameters && (
-        <div className="space-y-4 px-4 pb-4">
+        // The rail says these belong to the tool above, which a parameter's
+        // label cannot: it is the same 14px/500 as the tool's own name.
+        <div className="mx-4 mb-4 space-y-4 border-l border-stroke pl-4">
           {descriptor.parameterDescriptors.map((pd) => {
             const qualityDisabled =
               pd.name === 'defaultQuality' && params.letAiDecideQuality === true;

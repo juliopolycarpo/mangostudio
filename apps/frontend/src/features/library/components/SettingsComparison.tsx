@@ -21,7 +21,6 @@ import type {
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Ban, EyeOff } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
-import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
@@ -40,19 +39,8 @@ export function SettingsComparison() {
   const scope = useEnvironmentScope();
   const query = useQuery(settingsComparisonQueryOptions(scope.environmentId));
 
-  // No description: the library section layout already renders the subtitle
-  // directly above the tab strip this page sits under.
-  const header = <EnvironmentScopeHeader scope={scope} onRefresh={() => void query.refetch()} />;
-
-  const framed = (body: React.ReactNode) => (
-    <div className="space-y-4">
-      {header}
-      {body}
-    </div>
-  );
-
   if (scope.environment && !scope.permitsLibrary) {
-    return framed(
+    return (
       <EnvironmentScopeNotice
         environment={scope.environment}
         reason="not-permitted"
@@ -64,7 +52,7 @@ export function SettingsComparison() {
   // A settings table describing the wrong machine is not a cosmetic problem:
   // it is what someone reads before deciding to change a setting.
   if (scope.environment && !scope.isConnected) {
-    return framed(
+    return (
       <EnvironmentScopeNotice
         environment={scope.environment}
         reason="disconnected"
@@ -73,19 +61,18 @@ export function SettingsComparison() {
     );
   }
 
-  if (query.isPending) return framed(<LibraryPageState variant="loading" />);
+  if (query.isPending) return <LibraryPageState variant="loading" />;
   if (query.error) {
-    return framed(<LibraryPageState variant="error" onRetry={() => void query.refetch()} />);
+    return <LibraryPageState variant="error" onRetry={() => void query.refetch()} />;
   }
 
   const comparisons = query.data ?? [];
   if (comparisons.length === 0) {
-    return framed(<LibraryPageState variant="empty" title={l.settings.empty} />);
+    return <LibraryPageState variant="empty" title={l.settings.empty} />;
   }
 
   return (
     <div className="space-y-4" data-testid="settings-comparison">
-      {header}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <p className="text-fg-muted text-sm">{l.settings.description}</p>
         <Badge>{l.settings.comparability}</Badge>

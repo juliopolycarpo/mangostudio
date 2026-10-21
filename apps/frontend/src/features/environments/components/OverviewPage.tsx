@@ -19,6 +19,7 @@ import { OverviewMachineSection } from '../machine/components/OverviewMachineSec
 import { machineStatusQueryOptions } from '../machine/queries';
 import { EnvironmentEntitiesOverview } from './EnvironmentEntitiesOverview';
 import { EnvironmentPageState } from './EnvironmentPageState';
+import { EnvironmentScopeHeader } from './EnvironmentScopeHeader';
 import { OverviewAgentCard } from './OverviewAgentCard';
 import { OverviewHealthRollup } from './OverviewHealthRollup';
 import { OverviewLibrarySnapshot } from './OverviewLibrarySnapshot';
@@ -35,7 +36,7 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-8">
-      <p className="text-sm text-fg-muted">{t.environments.overview.description}</p>
+      <EnvironmentScopeHeader description={t.environments.overview.description} />
 
       <SetupChecklist
         runtimes={runtimes.data ?? []}

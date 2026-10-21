@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
@@ -98,6 +99,15 @@ export function ModelSelector({
     return key;
   };
 
+  // Said once for the whole list rather than under every locked group: the
+  // reason is the same sentence for all of them, and it names the one provider
+  // the chat is tied to. Only when a row is actually locked — a catalog with
+  // nothing else in it has no padlock to explain.
+  const lockReason =
+    lockedProvider != null && activeModels.some((model) => model.provider !== lockedProvider)
+      ? formatMessage(t.models.providerLocked, { provider: getProviderLabel(lockedProvider) })
+      : null;
+
   return (
     <div className="relative flex items-center" ref={containerRef}>
       <button
@@ -130,6 +140,7 @@ export function ModelSelector({
             className="dropdown-panel absolute bottom-full left-0 mb-2 w-80"
           >
             <div className="hide-scrollbar max-h-[60vh] space-y-1 overflow-y-auto p-1">
+              {lockReason ? <p className="px-2 pt-1 text-xs text-fg-muted">{lockReason}</p> : null}
               {Object.keys(groups).length === 0 ? (
                 <div className="px-2 py-2 text-sm text-fg-muted">{t.models.noModelsAvailable}</div>
               ) : (
@@ -152,8 +163,11 @@ export function ModelSelector({
                           disabled={isLocked}
                           className={cn(
                             'flex min-h-8 w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left transition-colors',
+                            // A locked row is not faded: its name says which models
+                            // exist, and the line at the top says why they are out
+                            // of reach. The name steps down a text colour instead.
                             isLocked
-                              ? 'cursor-not-allowed opacity-50'
+                              ? 'cursor-not-allowed'
                               : 'hover:bg-fill-hover active:bg-fill-pressed',
                             isSelected && 'bg-fill-selected'
                           )}
@@ -165,7 +179,8 @@ export function ModelSelector({
                             <div className="min-w-0">
                               <div
                                 className={cn(
-                                  'truncate text-sm text-fg',
+                                  'truncate text-sm',
+                                  isLocked ? 'text-fg-muted' : 'text-fg',
                                   isSelected && 'font-medium'
                                 )}
                               >

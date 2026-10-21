@@ -22,6 +22,7 @@ import { chatListQueryOptions } from '@/features/chat/queries';
 import { runnerBadge } from '@/features/sidebar/lib/runner-badge';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
 import { branchLabel } from '@/lib/git-branch';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
@@ -46,6 +47,7 @@ export function WorkspacesList({
   onNewChat,
 }: WorkspacesListProps) {
   const { t } = useI18n();
+  const plural = usePlural();
   const labels = t.home.workspaces;
   // One shared empty array, not a fresh `?? []`: an unsettled query would
   // otherwise hand every render a new identity and defeat the memo below.
@@ -93,7 +95,7 @@ export function WorkspacesList({
 
       {overflowCount > 0 ? (
         <p className="text-xs text-fg-muted">
-          {formatMessage(labels.more, { count: String(overflowCount) })}
+          {plural({ one: labels.moreOne, other: labels.moreOther }, overflowCount)}
         </p>
       ) : null}
     </SectionCard>
@@ -133,6 +135,7 @@ interface WorkspaceRowProps {
 
 function WorkspaceRow({ group, summary, onSelectChat, onNewChatInWorkdir }: WorkspaceRowProps) {
   const { t } = useI18n();
+  const plural = usePlural();
   const labels = t.home.workspaces;
   const badgeLabels = t.sidebar.runner;
   const branch = summary ? branchLabel(summary.branch, summary.detachedAt) : null;
@@ -168,7 +171,10 @@ function WorkspaceRow({ group, summary, onSelectChat, onNewChatInWorkdir }: Work
                   data-testid="workspace-tile-tree"
                 >
                   {summary.changedFileCount > 0
-                    ? formatMessage(labels.dirty, { count: String(summary.changedFileCount) })
+                    ? plural(
+                        { one: labels.dirtyOne, other: labels.dirtyOther },
+                        summary.changedFileCount
+                      )
                     : labels.clean}
                 </span>
                 {summary.ahead > 0 || summary.behind > 0 ? (
@@ -188,7 +194,10 @@ function WorkspaceRow({ group, summary, onSelectChat, onNewChatInWorkdir }: Work
             <span>
               {group.sessionCount === 0
                 ? labels.noSessions
-                : formatMessage(labels.sessions, { count: String(group.sessionCount) })}
+                : plural(
+                    { one: labels.sessionsOne, other: labels.sessionsOther },
+                    group.sessionCount
+                  )}
             </span>
             {group.runners.map((runner) => {
               const badge = runnerBadge(runner, badgeLabels);

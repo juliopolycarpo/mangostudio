@@ -186,7 +186,7 @@ function AuthenticatedLayout() {
         currentChatId={app.currentChatId}
         onSelectChat={app.handleSelectChat}
         onUpdateChatTitle={(chatId, title) => void app.handleUpdateChatTitle(chatId, title)}
-        onDeleteChat={(chatId) => void app.handleDeleteChat(chatId)}
+        onDeleteChat={app.handleDeleteChat}
         onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
         gitSummaries={gitSummaries}

@@ -149,6 +149,11 @@ describe('Observability settings pages', () => {
     expect(screen.getByText('Cache hit rate')).toBeInTheDocument();
     expect(screen.getByText('SDK client')).toBeInTheDocument();
     expect(screen.getByText('80%')).toBeInTheDocument();
+    // Digits are compared down a column, so the numeric ones share a right edge.
+    expect(screen.getByRole('cell', { name: '80%' })).toHaveClass('text-right', 'tabular-nums');
+    for (const name of ['Hits', 'Misses', 'Hit rate']) {
+      expect(screen.getByRole('columnheader', { name })).toHaveClass('text-right');
+    }
   });
 
   it('renders the usage row when a provider has recorded turns', async () => {

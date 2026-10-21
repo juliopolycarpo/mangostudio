@@ -14,11 +14,12 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
+import { Button, buttonClassName } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import { formatPlan } from '../lib/format-plan';
 import { isReadOnlySharedConnector } from '../lib/shared-connector';
@@ -29,6 +30,19 @@ interface ConnectorCardProps {
   onConfigure: (connector: Connector) => void;
   onDelete: (connector: Connector) => void;
   onReauthenticated: (connector: Connector) => void | Promise<void>;
+}
+
+/**
+ * The `·` between meta items. Below `sm` the item after it can start a line of
+ * its own, and a dot left at the end of the line above would point at nothing,
+ * so there `collapsible` drops it and the line break does the separating.
+ */
+function MetaDot({ collapsible = false }: { collapsible?: boolean }) {
+  return (
+    <span aria-hidden="true" className={collapsible ? 'hidden sm:inline' : undefined}>
+      ·
+    </span>
+  );
 }
 
 export function ConnectorCard({
@@ -72,8 +86,10 @@ export function ConnectorCard({
 
   return (
     <Card padded={false} className="space-y-3 p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0 space-y-1">
+      {/* One row at every width: the actions belong to this connector, so they
+          stay on its right edge instead of dropping onto a row of their own. */}
+      <div className="flex items-start justify-between gap-2 sm:gap-4">
+        <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="truncate text-sm font-semibold text-fg">{c.name}</h3>
             <Badge>{t.providers[c.provider]}</Badge>
@@ -87,39 +103,45 @@ export function ConnectorCard({
               <status.Icon size={ICON_SM} className={status.tone} />
               {status.label}
             </span>
-            <span aria-hidden="true">·</span>
+            <MetaDot />
             <span className="inline-flex items-center gap-1">
               {c.source === 'bun-secrets' && <ShieldCheck size={ICON_SM} />}
               {c.source === 'config-file' && <FileCode size={ICON_SM} />}
               {c.source === 'environment' && <Database size={ICON_SM} />}
               {sourceLabel}
             </span>
-            <span aria-hidden="true">·</span>
+            <MetaDot collapsible />
+            {/* Its own wrap unit below `sm`: status and source stay on one line and
+                the credential identity takes the next, so the line never breaks
+                mid-item. */}
             {isChatGpt ? (
-              <>
+              <span className="inline-flex basis-full flex-wrap items-center gap-x-2 gap-y-1 sm:basis-auto">
                 <span>
                   {s.chatgptSignedInAs.replace(
                     '{account}',
                     c.accountLabel ?? c.maskedSuffix ?? s.chatgptAccountUnknown
                   )}
                 </span>
-                <span aria-hidden="true">·</span>
+                <MetaDot collapsible />
                 <Badge>{s.chatgptPlanBadge.replace('{plan}', planLabel)}</Badge>
-              </>
+              </span>
             ) : (
-              <span className="font-mono">{c.maskedSuffix ?? '****'}</span>
+              <span className="basis-full font-mono sm:basis-auto">{c.maskedSuffix ?? '****'}</span>
             )}
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
           {isChatGpt && !c.needsReauth ? (
+            // Icon-only below `sm`: with its label this link and two buttons would
+            // leave the name and badges about a third of the card.
             <Link
               to="/settings/metrics"
-              className="inline-flex h-7 items-center gap-1.5 rounded-sm px-2 text-xs font-medium text-fg transition-colors hover:bg-fill-hover active:bg-fill-pressed"
+              aria-label={s.chatgptSeeMetrics}
+              className={cn(buttonClassName('subtle', 'icon'), 'sm:w-auto sm:px-3')}
             >
               <BarChart3 size={ICON_MD} />
-              {s.chatgptSeeMetrics}
+              <span className="hidden sm:inline">{s.chatgptSeeMetrics}</span>
             </Link>
           ) : null}
           <Button
@@ -132,12 +154,11 @@ export function ConnectorCard({
             <Settings size={ICON_MD} />
           </Button>
           <Button
-            variant="subtle"
+            variant="subtle-danger"
             size="icon"
             onClick={() => onDelete(c)}
             title={isReadOnlyShared ? s.sharedDeleteBlocked : s.deleteConnector}
             aria-label={s.deleteConnector}
-            className="text-danger enabled:hover:bg-danger-subtle"
             disabled={isReadOnlyShared}
           >
             <Trash2 size={ICON_MD} />

@@ -8,7 +8,10 @@
  */
 
 import type { LibraryLocationId, PropagationSourceGroup } from '@mangostudio/shared/library';
+import { formatBytes } from '@/features/environments/format';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
+import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { hashPrefix } from '../format';
 import { ChoiceRow } from './ChoiceRow';
 
@@ -16,7 +19,6 @@ interface ContentGroupListProps {
   readonly groups: readonly PropagationSourceGroup[];
   readonly selectedHash?: string;
   readonly onSelect?: (contentHash: string) => void;
-  readonly renderMeta: (group: PropagationSourceGroup) => string;
   readonly locationLabel?: (locationId: LibraryLocationId) => string;
 }
 
@@ -24,11 +26,22 @@ export function ContentGroupList({
   groups,
   selectedHash,
   onSelect,
-  renderMeta,
   locationLabel,
 }: ContentGroupListProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const plural = usePlural();
   const l = t.library;
+
+  // How many copies hold this version, how recently, and how big — the three
+  // facts that tell two versions apart before their text is opened.
+  const metaOf = (group: PropagationSourceGroup) =>
+    [
+      plural({ one: l.detail.copiesOne, other: l.detail.copiesOther }, group.instanceCount),
+      formatMessage(l.detail.modified, {
+        when: formatRelativeTime(group.newestModifiedAtMs, locale),
+      }),
+      formatBytes(group.sizeBytes),
+    ].join(' · ');
 
   return (
     <ul className={onSelect ? 'space-y-1' : 'space-y-2'} data-testid="content-group-list">
@@ -42,7 +55,7 @@ export function ContentGroupList({
               <span className="font-medium font-mono text-fg text-xs">
                 {hashPrefix(group.contentHash)}…
               </span>
-              <span className="text-fg-muted text-xs">{renderMeta(group)}</span>
+              <span className="text-fg-muted text-xs">{metaOf(group)}</span>
             </span>
             <span className="mt-0.5 block break-all font-mono text-fg-muted text-micro">
               {locations}

@@ -192,6 +192,29 @@ function newestModifiedAtMs(resource: LibraryResource): number {
   );
 }
 
+/**
+ * The library tab a kind of resource is listed under — the page its back link
+ * returns to. Settings and hooks share one tab: the settings page shows both.
+ *
+ * Exhaustive on purpose: a `default` here sends a kind nobody wired up to the
+ * skills tab, which looks like a working link and is not one.
+ */
+export function libraryKindPath(kind: ResourceKind) {
+  switch (kind) {
+    case 'skill':
+      return '/environments/library/skills' as const;
+    case 'subagent':
+      return '/environments/library/subagents' as const;
+    case 'command':
+      return '/environments/library/commands' as const;
+    case 'instruction':
+      return '/environments/library/instructions' as const;
+    case 'setting':
+    case 'hook':
+      return '/environments/library/settings' as const;
+  }
+}
+
 export function validInstances(resource: LibraryResource): ValidLibraryInstance[] {
   return resource.instances.filter((instance): instance is ValidLibraryInstance => instance.valid);
 }
@@ -336,12 +359,4 @@ export function groupResourcesByLocation(resources: readonly LibraryResource[]):
     else groups.set(locationId, [resource]);
   }
   return [...groups].map(([locationId, grouped]) => ({ locationId, resources: grouped }));
-}
-
-/** Human-readable byte count for content group sizes. */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kib = bytes / 1024;
-  if (kib < 1024) return `${kib.toFixed(1)} KiB`;
-  return `${(kib / 1024).toFixed(1)} MiB`;
 }

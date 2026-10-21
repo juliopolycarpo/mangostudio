@@ -48,11 +48,10 @@ export function ChatGptPromoChip({
       action={
         <Button
           variant="subtle"
-          size="sm"
+          size="icon-sm"
           onClick={dismiss}
           title={t.settings.connectors.chatgptPromoDismiss}
           aria-label={t.settings.connectors.chatgptPromoDismiss}
-          className="size-7 px-0"
         >
           <X size={ICON_MD} />
         </Button>

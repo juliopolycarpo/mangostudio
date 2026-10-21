@@ -6,8 +6,12 @@
  */
 
 import type { ChatAttachment } from '@mangostudio/shared/chat';
-import type { McpPromptDescriptor, McpServer } from '@mangostudio/shared/mcp';
-import { useQuery } from '@tanstack/react-query';
+import type {
+  McpPromptDescriptor,
+  McpResourceDescriptor,
+  McpServer,
+} from '@mangostudio/shared/mcp';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import { FileText, Plug, SquareSlash } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
@@ -16,6 +20,7 @@ import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { FIELD_CLASS } from '@/components/ui/Input';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { Skeleton } from '@/components/ui/Skeleton';
 import { getMcpPrompt, readMcpResource } from '@/features/settings/mcp/api';
 import {
   mcpServerListQueryOptions,
@@ -56,9 +61,6 @@ export function McpComposerMenu({
   const [argumentForm, setArgumentForm] = useState<ArgumentFormState | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const serversQuery = useQuery({ ...mcpServerListQueryOptions(), enabled: open });
-  const servers = (serversQuery.data?.servers ?? []).filter((server) => server.enabled);
 
   const insertResolvedPrompt = async (
     serverId: string,
@@ -124,21 +126,14 @@ export function McpComposerMenu({
 
       {open && (
         <ComposerPopover className="max-h-96 space-y-3 overflow-y-auto p-3">
-          {serversQuery.isLoading && <p className="text-xs text-fg-muted">{t.common.loading}</p>}
-          {!serversQuery.isLoading && servers.length === 0 && (
-            <p className="text-xs text-fg-muted">{labels.mcpMenuEmpty}</p>
-          )}
+          <MicroLabel as="p">{labels.mcpMenuButton}</MicroLabel>
           {errorText && <Callout tone="danger" role="alert" title={errorText} />}
-          {servers.map((server) => (
-            <McpServerMenuSection
-              key={server.id}
-              server={server}
-              chatId={chatId}
-              busy={busy}
-              onPromptClick={handlePromptClick}
-              onResourceClick={(serverId, uri) => void handleResourceClick(serverId, uri)}
-            />
-          ))}
+          <McpMenuCatalog
+            chatId={chatId}
+            busy={busy}
+            onPromptClick={handlePromptClick}
+            onResourceClick={(serverId, uri) => void handleResourceClick(serverId, uri)}
+          />
         </ComposerPopover>
       )}
 
@@ -156,8 +151,135 @@ export function McpComposerMenu({
   );
 }
 
+/** What one enabled server offers the menu, with how far the asking has got. */
+interface McpServerCatalog {
+  readonly server: McpServer;
+  readonly prompts: readonly McpPromptDescriptor[];
+  readonly resources: readonly McpResourceDescriptor[];
+  /** Either listing is still on its way. */
+  readonly loading: boolean;
+  /** Either listing failed for a reason other than "this server doesn't do that". */
+  readonly failed: boolean;
+}
+
+interface McpMenuCatalogProps {
+  chatId: string | null;
+  busy: boolean;
+  onPromptClick: (serverId: string, prompt: McpPromptDescriptor) => void;
+  onResourceClick: (serverId: string, uri: string) => void;
+}
+
+/**
+ * The popover's body: every enabled server's prompts and resources, or the
+ * reason there is nothing to show.
+ *
+ * The listings are asked for here rather than inside each server's section
+ * because the panel has to know what its sections add up to. A tools-only
+ * server (both capabilities unsupported — the most common kind) contributes
+ * nothing, and when every server is like that the sections together drew an
+ * empty bordered box with no word in it. Only mounted while the popover is
+ * open, so nothing is fetched for a menu nobody opened.
+ */
+function McpMenuCatalog({ chatId, busy, onPromptClick, onResourceClick }: McpMenuCatalogProps) {
+  const { t } = useI18n();
+  const labels = t.chat.input;
+  const serversQuery = useQuery(mcpServerListQueryOptions());
+  const servers = (serversQuery.data?.servers ?? []).filter((server) => server.enabled);
+  const promptQueries = useQueries({
+    queries: servers.map((server) => mcpServerPromptsQueryOptions(server.id)),
+  });
+  const resourceQueries = useQueries({
+    queries: servers.map((server) => mcpServerResourcesQueryOptions(server.id)),
+  });
+
+  // A refetch that fails keeps the list it had, so only a menu with nothing to
+  // show can be a failed one — and the list failing is not "no prompts".
+  if (!serversQuery.data) {
+    return serversQuery.isError ? (
+      <McpLoadFailed
+        retrying={serversQuery.isFetching}
+        onRetry={() => void serversQuery.refetch()}
+      />
+    ) : (
+      <McpMenuLoading />
+    );
+  }
+
+  const catalogs: McpServerCatalog[] = servers.map((server, index) => {
+    const prompts = promptQueries[index];
+    const resources = resourceQueries[index];
+    return {
+      server,
+      prompts: prompts?.data?.prompts ?? [],
+      resources: resources?.data?.resources ?? [],
+      loading: Boolean(prompts?.isPending || resources?.isPending),
+      failed: Boolean(prompts?.isError || resources?.isError),
+    };
+  });
+  const loading = catalogs.some((catalog) => catalog.loading);
+  const failed = catalogs.some((catalog) => catalog.failed);
+  const hasContent = catalogs.some(
+    (catalog) => catalog.prompts.length > 0 || catalog.resources.length > 0
+  );
+  const failedQueries = [...promptQueries, ...resourceQueries].filter((query) => query.isError);
+  const retry = () => {
+    for (const query of failedQueries) void query.refetch();
+  };
+
+  return (
+    <>
+      {catalogs.map((catalog) => (
+        <McpServerMenuSection
+          key={catalog.server.id}
+          catalog={catalog}
+          chatId={chatId}
+          busy={busy}
+          onPromptClick={onPromptClick}
+          onResourceClick={onResourceClick}
+        />
+      ))}
+      {/* A listing that failed is not an empty one: "exposes no prompts" would
+          be false for exactly the servers the user is trying to reach. */}
+      {failed && (
+        <McpLoadFailed retrying={failedQueries.some((query) => query.isFetching)} onRetry={retry} />
+      )}
+      {!loading && !failed && !hasContent && (
+        <p className="text-xs text-fg-muted">{labels.mcpMenuEmpty}</p>
+      )}
+    </>
+  );
+}
+
+/** Rows' worth of grey while a listing is on its way, announced once as a status. */
+function McpMenuLoading() {
+  const { t } = useI18n();
+  return (
+    <div role="status" className="space-y-1">
+      <span className="sr-only">{t.common.loading}</span>
+      <Skeleton className="h-8 w-full" />
+      <Skeleton className="h-8 w-full" />
+    </div>
+  );
+}
+
+function McpLoadFailed({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
+  const { t } = useI18n();
+  return (
+    <Callout
+      tone="danger"
+      role="alert"
+      title={t.chat.input.mcpLoadFailed}
+      action={
+        <Button size="sm" variant="secondary" loading={retrying} onClick={onRetry}>
+          {t.common.retry}
+        </Button>
+      }
+    />
+  );
+}
+
 interface McpServerMenuSectionProps {
-  server: McpServer;
+  catalog: McpServerCatalog;
   chatId: string | null;
   busy: boolean;
   onPromptClick: (serverId: string, prompt: McpPromptDescriptor) => void;
@@ -165,7 +287,7 @@ interface McpServerMenuSectionProps {
 }
 
 function McpServerMenuSection({
-  server,
+  catalog,
   chatId,
   busy,
   onPromptClick,
@@ -173,20 +295,23 @@ function McpServerMenuSection({
 }: McpServerMenuSectionProps) {
   const { t } = useI18n();
   const labels = t.chat.input;
-  const promptsQuery = useQuery(mcpServerPromptsQueryOptions(server.id));
-  const resourcesQuery = useQuery(mcpServerResourcesQueryOptions(server.id));
+  const { server, prompts, resources } = catalog;
 
-  const prompts = promptsQuery.data?.prompts ?? [];
-  const resources = resourcesQuery.data?.resources ?? [];
-  if (promptsQuery.isLoading || resourcesQuery.isLoading) {
-    return <p className="text-xs text-fg-muted">{t.common.loading}</p>;
+  if (catalog.loading) {
+    return (
+      <div className="space-y-2">
+        <McpServerName>{server.name}</McpServerName>
+        <McpMenuLoading />
+      </div>
+    );
   }
   // A tools-only server (both capabilities unsupported) has nothing to offer.
+  // The menu says so once, for all of them, rather than each leaving a gap.
   if (prompts.length === 0 && resources.length === 0) return null;
 
   return (
     <div className="space-y-2">
-      <MicroLabel as="p">{server.name}</MicroLabel>
+      <McpServerName>{server.name}</McpServerName>
 
       {prompts.length > 0 && (
         <div className="space-y-1">
@@ -222,6 +347,16 @@ function McpServerMenuSection({
       )}
     </div>
   );
+}
+
+/**
+ * A server's name over its entries. Not a second `MicroLabel`: the popover's own
+ * title is one, and two upper-case mono lines in a row read as one heading
+ * wrapped. A server is content, so it is drawn heavier than the `Prompts` and
+ * `Resources` labels beneath it and in the text colour.
+ */
+function McpServerName({ children }: { children: ReactNode }) {
+  return <p className="truncate text-sm font-semibold text-fg">{children}</p>;
 }
 
 /** One insertable prompt or attachable resource: a glyph, a name and a one-line detail. */

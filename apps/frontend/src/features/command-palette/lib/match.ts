@@ -6,7 +6,10 @@
  * to argue with. What matters here is that the order is *explainable* — an
  * exact title beats a prefix, a prefix beats a word start, a word start beats a
  * substring, and a scattered subsequence comes last — and that it never
- * reshuffles the section headings underneath the reader.
+ * reshuffles the section headings underneath the reader. "Scattered" is
+ * bounded: the letters of a query typed into a few hundred titles will always
+ * occur in order somewhere, so a subsequence only counts as a match when it is
+ * tight enough to be an abbreviation rather than a coincidence.
  */
 
 import { COMMAND_SECTIONS, type CommandItem, type CommandSection } from './command-item';
@@ -31,6 +34,17 @@ const MAX_PENALTY = 999;
  * score, so the two ranges cannot overlap however the tiers are tuned.
  */
 const KEYWORD_DEMOTION = TIER.exact + 1;
+
+/**
+ * What separates an abbreviation (`cmdp` for `command palette`) from a
+ * coincidence (`sett` across "Postgres connection pooling notes"): the query
+ * needs three letters at least, and its letters must fit inside a run no longer
+ * than this many times their count. Three keeps `cmdp` (a nine-character run
+ * against a limit of twelve) and drops the title that merely contains the
+ * letters somewhere.
+ */
+const SUBSEQUENCE_MIN_LENGTH = 3;
+const SUBSEQUENCE_SPAN_FACTOR = 3;
 
 const WORD_BOUNDARY = /[\s/\-_.:·—]/;
 
@@ -101,12 +115,25 @@ function subsequenceSpan(haystack: string, needle: string): number | null {
   return shortest;
 }
 
+interface MatchOptions {
+  /**
+   * Whether the scattered-subsequence tier may match. On by default, for a label
+   * a person abbreviates; off for text that was never meant to be read as a
+   * word, where it only finds coincidences.
+   */
+  readonly allowSubsequence?: boolean;
+}
+
 /**
  * How well `text` answers `query`, or null when it does not at all. An empty
  * query matches everything at the same score, which is what leaves the caller's
  * own order (recency, for sessions) intact.
  */
-export function matchScore(text: string, query: string): number | null {
+export function matchScore(
+  text: string,
+  query: string,
+  { allowSubsequence = true }: MatchOptions = {}
+): number | null {
   const needle = normalize(query.trim());
   if (needle.length === 0) return 0;
   const haystack = normalize(text);
@@ -123,8 +150,9 @@ export function matchScore(text: string, query: string): number | null {
   const substringIndex = haystack.indexOf(needle);
   if (substringIndex >= 0) return TIER.substring - clampPenalty(substringIndex);
 
+  if (!allowSubsequence || needle.length < SUBSEQUENCE_MIN_LENGTH) return null;
   const span = subsequenceSpan(haystack, needle);
-  if (span === null) return null;
+  if (span === null || span > needle.length * SUBSEQUENCE_SPAN_FACTOR) return null;
   return TIER.subsequence - clampPenalty(span - needle.length);
 }
 
@@ -133,7 +161,10 @@ export function matchScore(text: string, query: string): number | null {
  * hint it renders, and whatever the provider made searchable without rendering.
  *
  * The second haystack is newline-joined so no query can match across the seam
- * between two of its parts; a search box cannot produce a newline.
+ * between two of its parts; a search box cannot produce a newline. It is also
+ * read literally, never as a subsequence: a path and a list of keywords are not
+ * words anyone abbreviates, and a scattered match there would reach across the
+ * very seam the newline exists to keep shut.
  */
 export function scoreCommand(item: CommandItem, query: string): number | null {
   const direct = matchScore(item.label, query);
@@ -141,7 +172,7 @@ export function scoreCommand(item: CommandItem, query: string): number | null {
 
   const secondary = [item.hint, item.keywords].filter(Boolean).join('\n');
   if (secondary.length === 0) return null;
-  const indirect = matchScore(secondary, query);
+  const indirect = matchScore(secondary, query, { allowSubsequence: false });
   return indirect === null ? null : indirect - KEYWORD_DEMOTION;
 }
 

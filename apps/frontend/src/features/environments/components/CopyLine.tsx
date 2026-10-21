@@ -27,11 +27,14 @@ export function CopyLine({ label, value }: CopyLineProps) {
   return (
     <div className="space-y-1">
       {label ? <p className="text-xs text-fg-muted">{label}</p> : null}
-      <div className="flex items-start gap-2">
-        <code className="min-w-0 flex-1 break-all rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg">
+      {/* Stacked below `sm`: beside the button a short command is left a
+          sliver, and wrapping it there splits a word. `break-words` wraps at
+          a space first and only breaks inside a token that cannot fit. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+        <code className="min-w-0 flex-1 break-words rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg">
           {value}
         </code>
-        <Button variant="secondary" onClick={() => void copy(value)}>
+        <Button variant="secondary" className="w-full sm:w-auto" onClick={() => void copy(value)}>
           {copied ? <Check size={ICON_SM} /> : <Copy size={ICON_SM} />}
           {copied ? t.environments.actions.copied : t.environments.actions.copy}
         </Button>

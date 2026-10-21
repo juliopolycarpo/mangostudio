@@ -32,6 +32,10 @@ export const messages = {
     newChatWorkdirFailed: 'Não foi possível iniciar o chat nessa pasta. Tente novamente.',
     editTitle: 'Editar título',
     deleteTitle: 'Excluir chat',
+    deleteConfirmTitle: 'Excluir este chat?',
+    deleteConfirmDescription: 'Isto exclui o chat e todas as suas mensagens, sem volta.',
+    deleteCancel: 'Cancelar',
+    deleteFailed: 'Não foi possível excluir o chat. Tente novamente.',
     sectionLabel: 'Chats',
     streaming: 'Gerando…',
     input: {
@@ -52,6 +56,7 @@ export const messages = {
       mcpNeedsChat: 'Abra um chat antes de anexar recursos.',
       mcpAttachFailed: 'Não foi possível anexar o recurso. Tente novamente.',
       mcpInsertFailed: 'Não foi possível inserir o prompt. Tente novamente.',
+      mcpLoadFailed: 'Não foi possível carregar os prompts e recursos MCP.',
       slashMenuLabel: 'Comandos de barra',
       slashMenuEmpty: 'Nenhum comando corresponde.',
       slashMenuLoading: 'Procurando comandos…',
@@ -321,13 +326,23 @@ export const messages = {
         'Este turno também executou ferramentas MCP. Quaisquer arquivos que elas tenham alterado não têm checkpoint e não serão revertidos.',
       uncheckpointedBoth:
         'Este turno também executou comandos de shell e ferramentas MCP. Quaisquer alterações feitas por comandos de shell ou ferramentas MCP não têm checkpoint e não serão revertidas.',
-      reverted: '{count} arquivo(s) revertido(s).',
-      revertedWithShell:
-        '{count} arquivo(s) revertido(s). Quaisquer alterações feitas por comandos de shell não foram revertidas.',
-      revertedWithMcp:
-        '{count} arquivo(s) revertido(s). Quaisquer alterações feitas por ferramentas MCP não foram revertidas.',
-      revertedWithBoth:
-        '{count} arquivo(s) revertido(s). Quaisquer alterações feitas por comandos de shell ou ferramentas MCP não foram revertidas.',
+      // Pares Um/Outro: o resultado da reversão é reescrito por combinação de
+      // fontes sem cobertura (ver `uncheckpointed-copy.ts`), e cada frase
+      // concorda com a contagem.
+      revertedOne: '{count} arquivo revertido.',
+      revertedOther: '{count} arquivos revertidos.',
+      revertedWithShellOne:
+        '{count} arquivo revertido. Quaisquer alterações feitas por comandos de shell não foram revertidas.',
+      revertedWithShellOther:
+        '{count} arquivos revertidos. Quaisquer alterações feitas por comandos de shell não foram revertidas.',
+      revertedWithMcpOne:
+        '{count} arquivo revertido. Quaisquer alterações feitas por ferramentas MCP não foram revertidas.',
+      revertedWithMcpOther:
+        '{count} arquivos revertidos. Quaisquer alterações feitas por ferramentas MCP não foram revertidas.',
+      revertedWithBothOne:
+        '{count} arquivo revertido. Quaisquer alterações feitas por comandos de shell ou ferramentas MCP não foram revertidas.',
+      revertedWithBothOther:
+        '{count} arquivos revertidos. Quaisquer alterações feitas por comandos de shell ou ferramentas MCP não foram revertidas.',
       conflict:
         'Não foi possível reverter: um ou mais arquivos mudaram no disco desde que esta mensagem foi concluída.',
       outsideWorkdir:
@@ -364,14 +379,18 @@ export const messages = {
     workspaces: {
       label: 'Workspaces',
       clean: 'árvore limpa',
-      dirty: '{count} alterado(s)',
-      sessions: '{count} chat(s)',
+      // Pares `*One` / `*Other`: o componente escolhe pela contagem (`usePlural`).
+      dirtyOne: '{count} alterado',
+      dirtyOther: '{count} alterados',
+      sessionsOne: '{count} chat',
+      sessionsOther: '{count} chats',
       noSessions: 'Nenhum chat aqui ainda',
       continueLatest: 'Continuar',
       continueSession: 'Continuar {title}',
       newChatHere: 'Novo chat aqui',
       newChatHereIn: 'Novo chat em {folder}',
-      more: 'E mais {count} pasta(s).',
+      moreOne: 'E mais {count} pasta.',
+      moreOther: 'E mais {count} pastas.',
       empty: 'Nenhuma pasta ainda',
       emptyHint: 'Inicie um chat e aponte-o para um projeto para vê-lo aqui.',
     },
@@ -379,7 +398,8 @@ export const messages = {
       label: 'Máquinas',
       // Não "Abrir ambientes": o card de falhas ao lado já usa esse rótulo.
       open: 'Gerenciar máquinas',
-      navAlerts: '{count} aviso(s)',
+      navAlertsOne: '{count} aviso',
+      navAlertsOther: '{count} avisos',
     },
     toolchain: {
       label: 'Toolchain',
@@ -398,7 +418,8 @@ export const messages = {
     workspace: {
       label: 'Workspace',
       cleanTree: 'árvore limpa',
-      dirtyTree: '{count} arquivo(s) alterado(s)',
+      dirtyTreeOne: '{count} arquivo alterado',
+      dirtyTreeOther: '{count} arquivos alterados',
       synced: 'sincronizado com origin',
       noUpstream: 'sem upstream',
       detached: 'HEAD desanexado em {hash}',
@@ -413,38 +434,54 @@ export const messages = {
       manage: 'Gerenciar agentes',
       quotaRefresh: 'Atualizar cota',
       sessionsThisWeek: '{count} nesta semana',
+      // As palavras curtas do selo de cada agente; o motivo completo fica no title.
+      ready: 'Pronto',
+      notInstalled: 'Não instalado',
+      signedOut: 'Sem sessão iniciada',
+      needsApproval: 'Requer aprovação',
+      unavailable: 'Indisponível',
+      unconfirmed: 'Não confirmado',
     },
     skills: {
       label: 'Skills',
-      labelDivergent: 'Skills — {count} divergência(s)',
+      labelDivergentOne: 'Skills — {count} divergência',
+      labelDivergentOther: 'Skills — {count} divergências',
       // Quem lê uma versão que os outros não confirmam, e com quem discorda.
       divergenceBody: 'Versão diferente em {outliers} do que em {agreeing}.',
       divergenceBodyNoMajority: '{targets} leem versões diferentes desta skill.',
-      more: 'Mais {count} skill(s) divergente(s).',
+      moreOne: 'Mais {count} skill divergente.',
+      moreOther: 'Mais {count} skills divergentes.',
       propagate: 'Propagar',
       viewDiff: 'Ver diff',
       // Deliberadamente neutro: viver em um só agente costuma ser intencional.
-      singleTarget: '{count} skill(s) vivem em apenas um agente.',
+      singleTargetOne: '{count} skill vive em apenas um agente.',
+      singleTargetOther: '{count} skills vivem em apenas um agente.',
       openLibrary: 'Abrir na biblioteca',
     },
     // O mesmo card varrendo todos os tipos: frases próprias, não um substantivo
     // interpolado na cópia de skills — concordância não sobrevive a um slot.
     library: {
       label: 'Biblioteca',
-      labelDivergent: 'Biblioteca — {count} divergência(s)',
+      labelDivergentOne: 'Biblioteca — {count} divergência',
+      labelDivergentOther: 'Biblioteca — {count} divergências',
       divergenceBody: 'Versão diferente em {outliers} do que em {agreeing}.',
       divergenceBodyNoMajority: '{targets} leem versões diferentes deste recurso.',
-      more: 'Mais {count} recurso(s) divergente(s).',
+      moreOne: 'Mais {count} recurso divergente.',
+      moreOther: 'Mais {count} recursos divergentes.',
       propagate: 'Propagar',
       viewDiff: 'Ver diff',
-      singleTarget: '{count} recurso(s) vivem em apenas um agente.',
+      singleTargetOne: '{count} recurso vive em apenas um agente.',
+      singleTargetOther: '{count} recursos vivem em apenas um agente.',
       openLibrary: 'Abrir na biblioteca',
     },
     uncommitted: {
       label: 'Trabalho não commitado',
-      changed: '{count} alterado(s)',
-      unpushed: '{count} não enviado(s)',
-      more: 'E mais {count} chat(s).',
+      changedOne: '{count} alterado',
+      changedOther: '{count} alterados',
+      unpushedOne: '{count} não enviado',
+      unpushedOther: '{count} não enviados',
+      moreOne: 'E mais {count} chat.',
+      moreOther: 'E mais {count} chats.',
       open: 'Abrir {title}',
     },
     environments: {
@@ -468,7 +505,8 @@ export const messages = {
       label: 'Atividade',
       empty: 'Nada por aqui ainda.',
       sinceLastVisit: 'Desde sua última visita',
-      newCount: '{count} novo(s)',
+      newCountOne: '{count} novo',
+      newCountOther: '{count} novos',
       today: 'Hoje',
       yesterday: 'Ontem',
       chatCreated: 'Iniciou {title}',
@@ -511,7 +549,7 @@ export const messages = {
     empty: 'Suas criações aparecerão aqui.',
     download: 'Baixar imagem completa',
     downloadImage: 'Baixar imagem',
-    view: 'Ver',
+    viewImage: 'Ver imagem: {prompt}',
     lightboxLabel: 'Visualização da imagem',
     close: 'Fechar imagem',
   },
@@ -684,7 +722,7 @@ export const messages = {
       saveError: 'Falha ao salvar agente',
       deleteError: 'Falha ao excluir agente',
       previewError: 'Falha ao pré-visualizar agente',
-      deleteTitle: 'Excluir agente',
+      deleteTitle: 'Excluir este agente?',
       deleteDescription: 'Este agente em Markdown será removido do disco.',
       deleteConfirm: 'Excluir agente',
       sectionIdentity: 'Identidade',
@@ -742,7 +780,8 @@ export const messages = {
       addButton: 'Adicionar conector',
       emptyTitle: 'Nenhum conector encontrado',
       emptyDescription: 'Adicione sua primeira chave de API para começar a gerar.',
-      deleteConfirm: 'Tem certeza que deseja excluir este conector?',
+      deleteTitle: 'Excluir este conector?',
+      deleteConfirm: 'Isso remove o conector e suas credenciais armazenadas.',
       addModalTitle: 'Adicionar conector',
       addModalDescription: 'Escolha o provider, configure a chave de API e o armazenamento.',
       chatgptAddModalDescription:
@@ -836,9 +875,11 @@ export const messages = {
       chatgptRedeemConfirmTitle: 'Usar um reset de limite?',
       chatgptRedeemConfirmBody:
         'Isso gasta um dos seus {count} créditos de reset para restaurar janelas de limite esgotadas. Não pode ser desfeito.',
-      chatgptRedeemConfirmRestores: 'Seu último reset restaurou {count} janela(s).',
+      chatgptRedeemConfirmRestoresOne: 'Seu último reset restaurou {count} janela.',
+      chatgptRedeemConfirmRestoresOther: 'Seu último reset restaurou {count} janelas.',
       chatgptRedeemConfirmAction: 'Usar reset',
-      chatgptRedeemSuccess: 'Limite resetado — {count} janela(s) restaurada(s).',
+      chatgptRedeemSuccessOne: 'Limite resetado — {count} janela restaurada.',
+      chatgptRedeemSuccessOther: 'Limite resetado — {count} janelas restauradas.',
       chatgptRedeemNothingToReset:
         'Nada para resetar — nenhuma janela de limite está esgotada no momento.',
       chatgptRedeemNoCredit: 'Não há créditos de reset disponíveis nesta conta.',
@@ -1094,6 +1135,7 @@ export const messages = {
         binaryNotice: 'Conteúdo binário ({mime}) — anexe pelo compositor do chat para usá-lo.',
       },
       deleteServer: 'Excluir servidor',
+      deleteTitle: 'Excluir este servidor?',
       deleteConfirm: 'Isso remove o servidor e seus cabeçalhos de autenticação armazenados.',
       import: {
         button: 'Importar',
@@ -1246,9 +1288,8 @@ export const messages = {
         done: 'Concluir',
       },
       revoke: {
-        title: 'Revogar chave de API',
-        confirm:
-          'Revogar esta chave? Requisições que a apresentarem deixam de funcionar imediatamente.',
+        title: 'Revogar esta chave de API?',
+        confirm: 'Requisições que a apresentarem deixam de funcionar imediatamente.',
         confirmButton: 'Revogar',
         cancelButton: 'Cancelar',
       },
@@ -1258,6 +1299,7 @@ export const messages = {
       description:
         'Ative Agent Skills instaladas e escolha quais locais da biblioteca devem ser lidos.',
       sourcesTitle: 'Fontes de skills',
+      installedTitle: 'Skills instaladas',
       sourcesDescription:
         'Skills em ~/.mango/skills estão sempre disponíveis. Alterne outros locais detectados ou force uma nova leitura do disco.',
       sourceLabels: {
@@ -1471,7 +1513,8 @@ export const messages = {
       cursor: 'cursor',
     },
     git: {
-      dirty: '{count} alteração(ões) não commitada(s)',
+      dirtyOne: '{count} alteração não commitada',
+      dirtyOther: '{count} alterações não commitadas',
       // Descreve as setas ↑/↓ do resumo para quem não as enxerga.
       sync: '{ahead} à frente, {behind} atrás',
     },
@@ -1610,9 +1653,11 @@ export const messages = {
       loadMore: 'Carregar commits anteriores',
       loadingMore: 'Carregando…',
       back: 'Voltar ao histórico',
-      filesChanged: '{count} arquivos alterados',
-      additions: '{count} adições',
-      deletions: '{count} exclusões',
+      filesChangedOne: '{count} arquivo alterado',
+      filesChangedOther: '{count} arquivos alterados',
+      additionsLabel: 'Adições: {count}',
+      deletionsLabel: 'Exclusões: {count}',
+      binary: 'Binário',
       commitDetails: 'Detalhes do commit',
     },
     diff: {
@@ -1697,6 +1742,7 @@ export const messages = {
       menu: 'Mais ações de commit',
       commit: 'Criar commit',
       stageAllAndCommit: 'Preparar tudo e commitar',
+      nothingStagedHint: 'Nada foi preparado. Prepare arquivos ou escolha "{action}" no menu.',
       commitAndPush: 'Commit e push',
       commitAndSync: 'Commit e sync',
       stageFailed: 'Não foi possível preparar as alterações. Nenhum commit foi criado.',
@@ -2097,6 +2143,14 @@ export const messages = {
       'only-here': 'Só aqui',
       incomparable: 'Não dá para comparar',
     },
+    cellStateShort: {
+      present: 'Presente',
+      absent: 'Ausente',
+      shadowed: 'Duplicado',
+      divergent: 'Difere',
+      'only-here': 'Só aqui',
+      incomparable: 'Não comparável',
+    },
     cellHint: {
       present: 'Este agente lê uma cópia deste recurso.',
       absent: 'Este agente não lê nenhuma cópia — o que muitas vezes é o correto.',
@@ -2168,8 +2222,6 @@ export const messages = {
       propagate: 'Propagar',
       loadError: 'Não foi possível carregar a biblioteca.',
       retry: 'Tentar novamente',
-      rescan: 'Reler do disco',
-      rescanning: 'Relendo…',
       locationGroup: 'Em {location}',
       locationGroupOther: 'Em outros locais',
     },
@@ -2202,7 +2254,9 @@ export const messages = {
       back: 'Voltar à matriz',
       contentHeading: 'Conteúdo',
       coverageHeading: 'Cobertura',
-      copies: '×{count}',
+      // Par `*One` / `*Other`: o componente escolhe pela contagem (`usePlural`).
+      copiesOne: '{count} cópia',
+      copiesOther: '{count} cópias',
       modified: 'modificado {when}',
       compare: 'Comparar {left} ↔ {right}',
       compareHide: 'Fechar comparação',
@@ -2255,6 +2309,7 @@ export const messages = {
     conflict: {
       description:
         'Estes recursos têm mais de uma versão legível. Não existe cópia canônica, então a escolha é sua.',
+      none: 'Nenhum conflito: cada recurso selecionado tem uma única versão legível, então não há o que escolher.',
       resolved: 'Resolvido',
       unresolved: '{count} recursos ainda precisam de uma decisão.',
       adopt: 'Usar esta versão',
@@ -2440,8 +2495,10 @@ export const messages = {
       purgeCancel: 'Manter',
       purgeError: 'Não foi possível excluir este backup.',
       usage: '{count} backups ocupando {size}.',
+      usageOne: '1 backup ocupando {size}.',
       retention: 'Guardamos os últimos {count} ou {size}, o que vier primeiro.',
       manage: 'Gerenciar backups',
+      back: 'Voltar à matriz',
       title: 'Backups',
       description:
         'Todas as cópias que o app está guardando de uma propagação ou de uma remoção, com a volta de cada uma.',
@@ -3471,7 +3528,7 @@ export const messages = {
       emptyHint: 'O MangoStudio pode instalar uma CLI de agente para você nesta máquina.',
     },
     health: {
-      description: 'Tudo que está errado, em uma lista só, do mais grave ao menos grave.',
+      description: 'Tudo que está errado ou vale saber, com o que precisa de ação primeiro.',
       empty: 'Nada precisa de atenção.',
       emptyHint: 'Todos os runtimes, gerenciadores de versão e CLIs de agente estão saudáveis.',
       scope: {
@@ -3479,10 +3536,11 @@ export const messages = {
         'version-manager': 'Gerenciador de versões',
         agent: 'Agente',
       },
-      findingCount: '{count} itens precisam de atenção',
+      needsAction: 'Precisa de ação',
+      canWait: 'Pode esperar',
     },
     install: {
-      confirmTitle: 'Executar instalação',
+      confirmTitle: 'Executar esta instalação?',
       confirmDescription: 'Isto roda um comando nesta máquina. Confira antes de continuar.',
       confirmUninstallTitle: 'Remover {target}?',
       confirmUninstallDescription: 'Isto remove {paths} desta máquina. Confira antes de continuar.',
@@ -3589,7 +3647,9 @@ export const messages = {
       continueInNewChat: 'Continuar em um novo chat',
       copyLoginCommand: 'Copiar comando de login',
       ownership: '{vendor} controla as próprias ferramentas e permissões.',
-      unavailableHere: 'Este agente não pode rodar aqui agora — escolha outro.',
+      unavailableHere: 'Este agente não pode rodar aqui agora.',
+      /** O próximo passo sob `unavailableHere`, e sob um motivo sem nada para clicar. */
+      unavailableTryElsewhere: 'Escolha outro runner no cabeçalho ou tente novamente em instantes.',
       forkFailed: 'Não foi possível criar o novo chat.',
     },
     /** Por que um envio não conseguiu abrir, quando a resposta não é sobre o agente em si. */
@@ -3971,8 +4031,12 @@ export const messages = {
     argsLabel: 'argumentos',
     errorLabel: 'erro',
     resultLabel: 'resultado',
+    stdoutLabel: 'stdout',
+    stderrLabel: 'stderr',
     copyResult: 'Copiar resultado',
+    copyStream: 'Copiar {stream}',
     resultCopied: 'Resultado copiado',
+    outputTruncated: 'O comando imprimiu mais do que cabe aqui; a saída foi cortada.',
     status: {
       queued: 'Na fila',
       running: 'Executando',
@@ -4046,6 +4110,11 @@ export const messages = {
     textGenerationFailed: 'Falha ao obter uma resposta. Tente novamente.',
     imageGenerationFailed: 'Falha ao gerar imagem. Tente novamente.',
     imageGenerationInterrupted: 'O turno foi interrompido antes desta imagem ser gerada.',
+    notFound: {
+      title: 'Página não encontrada',
+      hint: 'O link pode estar errado, ou a página pode ter mudado de lugar.',
+      home: 'Voltar ao MangoStudio',
+    },
     bootstrap: {
       title: 'O MangoStudio não conseguiu terminar de carregar',
       lead: 'Uma das requisições de que toda página depende foi recusada.',
@@ -4066,6 +4135,8 @@ export const messages = {
     unavailable: 'Modelos indisponíveis',
     noModelsAvailable: 'Nenhum modelo disponível',
     preview: 'Pré-visualização',
+    providerLocked:
+      'Este chat começou com {provider}. Inicie um novo chat para usar outro provedor.',
   },
 
   api: {
@@ -4080,7 +4151,7 @@ export const messages = {
     title: 'Boas-vindas ao MangoStudio',
     subtitle:
       'Alguns passos curtos e um agente vai responder dentro do seu próprio projeto. Pule o que você já tem.',
-    progress: 'Passo {step} de {total}',
+    progress: 'Passo {step} de {total} · {name}',
     stepList: 'Passos da configuração',
     back: 'Voltar',
     continue: 'Continuar',
@@ -4161,6 +4232,8 @@ export const messages = {
       hint: 'Opcional. Sem isso, o MangoStudio roda só enquanto o terminal que o iniciou continuar aberto.',
       installed: 'Instalado',
       notInstalled: 'Não instalado',
+      // Título quando o supervisor não pôde ser consultado e não há motivo codificado; a linha bruta fica abaixo.
+      unreadable: 'Não foi possível verificar o serviço',
       install: 'Instalar o serviço',
       installing: 'Instalando…',
       commandTitle: 'Rode isto no computador que hospeda o MangoStudio:',

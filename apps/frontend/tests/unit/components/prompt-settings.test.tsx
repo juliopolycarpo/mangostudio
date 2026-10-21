@@ -3,7 +3,7 @@ import type {
   PromptSettings as PromptSettingsData,
   RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
@@ -48,6 +48,35 @@ describe('PromptSettings', () => {
 
     expect(screen.getByText('~/.mango/AGENTS.md')).toBeInTheDocument();
     expect(screen.getByText('~/.claude/CLAUDE.md')).toBeInTheDocument();
+  });
+
+  it('draws each rule file as a card of its own, holding only its three rows', () => {
+    renderPromptSettings();
+
+    for (const path of ['~/.mango/AGENTS.md', '~/.claude/CLAUDE.md']) {
+      const card = screen.getByText(path).closest('.divide-y');
+      expect(card).not.toBeNull();
+      if (!card) continue;
+      expect(within(card as HTMLElement).getAllByRole('radiogroup')).toHaveLength(2);
+    }
+  });
+
+  it('does not repeat the file name under a path that already ends in it', () => {
+    renderPromptSettings();
+
+    // The built-in labels are "AGENTS.md" / "CLAUDE.md", the basenames of their paths.
+    expect(screen.queryByText('AGENTS.md')).not.toBeInTheDocument();
+    expect(screen.queryByText('CLAUDE.md')).not.toBeInTheDocument();
+  });
+
+  it('keeps a hint that says more than the file name', () => {
+    renderPromptSettings({
+      promptSettings: createPromptSettings({
+        agentsMd: { ...DEFAULT_PROMPT_SETTINGS.agentsMd, label: 'Project guidance' },
+      }),
+    });
+
+    expect(screen.getByText('Project guidance')).toBeInTheDocument();
   });
 
   it('calls onTextSystemPromptChange when text prompt changes', () => {
@@ -148,6 +177,41 @@ describe('PromptSettings', () => {
     fireEvent.click(screen.getByText('Remove'));
 
     expect(props.onRemoveCustomRule).toHaveBeenCalledWith('custom-1');
+  });
+
+  it('names a built-in file switch by its row, with no "Enabled" word beside it', () => {
+    renderPromptSettings();
+
+    // The path is the row's name; a static word beside an off switch read as its state.
+    expect(screen.getAllByRole('switch', { name: 'Enabled' })).toHaveLength(2);
+    expect(screen.queryByText('Enabled')).not.toBeInTheDocument();
+  });
+
+  it('turns a built-in file on from anywhere on its row', () => {
+    const props = renderPromptSettings();
+
+    fireEvent.click(screen.getByText('~/.mango/AGENTS.md'));
+
+    expect(props.onUpdateRuleFile).toHaveBeenCalledWith('agentsMd', { enabled: true });
+  });
+
+  it('keeps the "Enabled" word on a custom rule, whose path is a field and not a name', () => {
+    renderPromptSettings({
+      promptSettings: createPromptSettings({
+        customRules: [
+          {
+            id: 'custom-1',
+            label: '',
+            path: '~/my-project/rules.md',
+            enabled: true,
+            injectionRole: 'system',
+            sendFrequency: 'first-turn',
+          },
+        ],
+      }),
+    });
+
+    expect(screen.getByText('Enabled')).toBeInTheDocument();
   });
 
   it('calls onUpdateRuleFile when a rule enabled toggle is clicked', () => {

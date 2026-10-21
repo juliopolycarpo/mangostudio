@@ -3,7 +3,8 @@
  *
  * Never colour or glyph alone: every cell carries an `aria-label` naming the
  * resource, the target, and the state in words, and the text label appears
- * alongside the glyph once there is room for it. The glyph takes the state's
+ * alongside the glyph once there is room for it, as a short word — the full
+ * sentence is the tooltip and the accessible name. The glyph takes the state's
  * colour; the word stays in `fg-muted`. A user who cannot tell ⧉ from
  * ⚠ — or cannot see either — still gets the whole answer.
  */
@@ -15,12 +16,11 @@ import { cn } from '@/lib/utils';
 import { CELL_GLYPHS, type CoverageCell as Cell, hashPrefix } from '../format';
 
 /**
- * The glyph's colour per state — shared with the legend so the key reads like the
- * cells. Attention (copies that differ, or cannot be compared) is `warning`: the
- * library is working, and the user may want to reconcile. Nothing here is an
- * error, so nothing is `danger`.
+ * The glyph's colour per state. Attention (copies that differ, or cannot be
+ * compared) is `warning`: the library is working, and the user may want to
+ * reconcile. Nothing here is an error, so nothing is `danger`.
  */
-export const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
+const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
   present: 'text-success',
   absent: 'text-fg-subtle',
   shadowed: 'text-info',
@@ -28,6 +28,30 @@ export const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
   'only-here': 'text-info',
   incomparable: 'text-warning',
 };
+
+/**
+ * The one drawing of a coverage state: its glyph, in the state's colour.
+ *
+ * The matrix cells, the legend that explains them and the detail page's
+ * per-agent rows all use it, so a state looks the same wherever it is met. It is
+ * decoration (`aria-hidden`): the caller prints the state's word beside it.
+ */
+export function CoverageGlyph({
+  state,
+  className,
+}: {
+  readonly state: Cell['state'];
+  readonly className?: string;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn('shrink-0 text-sm leading-none', STATE_TONES[state], className)}
+    >
+      {CELL_GLYPHS[state]}
+    </span>
+  );
+}
 
 interface CoverageCellProps {
   readonly cell: Cell;
@@ -50,7 +74,7 @@ export function CoverageCell({ cell, resourceSlug, locations }: CoverageCellProp
     // resource, target, and state. The glyph and the short text are decoration
     // on top of it, never the only way to read the answer.
     <td
-      className="px-2 py-1.5 text-center align-middle"
+      className="px-2 py-1.5 text-left align-middle"
       aria-label={label}
       // The tooltip carries the facts needed to act without leaving the matrix.
       title={cellTitle(cell, locations, l, locale)}
@@ -58,11 +82,11 @@ export function CoverageCell({ cell, resourceSlug, locations }: CoverageCellProp
       data-state={cell.state}
       data-target={cell.targetId}
     >
-      <span aria-hidden="true" className="inline-flex items-center justify-center gap-1.5">
-        <span className={cn('text-sm leading-none', STATE_TONES[cell.state])}>
-          {CELL_GLYPHS[cell.state]}
+      <span aria-hidden="true" className="flex items-center gap-1.5">
+        <CoverageGlyph state={cell.state} />
+        <span className="hidden min-w-0 truncate text-xs text-fg-muted xl:inline">
+          {l.cellStateShort[cell.state]}
         </span>
-        <span className="hidden text-xs text-fg-muted xl:inline">{stateLabel}</span>
       </span>
     </td>
   );

@@ -97,6 +97,14 @@ describe('SkillsSettingsPage', () => {
 
     expect(screen.getAllByText('pdf-tools')).toHaveLength(2);
     expect(screen.getByText('Shadowed')).toBeInTheDocument();
+    // The reason is on the row, not only in a tooltip a touch screen never shows.
+    expect(
+      screen.getByText(
+        'A higher-priority source provides a skill with the same name, so this copy is inactive.'
+      )
+    ).toBeInTheDocument();
+    // The list is a titled section of its own, not a headless second card.
+    expect(screen.getByRole('heading', { name: 'Installed skills' })).toBeInTheDocument();
     expect(screen.getByText('Invalid')).toBeInTheDocument();
     expect(screen.getByText('SKILL.md not found in the skill directory.')).toBeInTheDocument();
   });

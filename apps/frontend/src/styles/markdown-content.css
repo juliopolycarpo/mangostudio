@@ -132,18 +132,33 @@
   text-decoration: underline;
 }
 
+/* A table is wider than a phone's bubble as soon as it has a column of tokens.
+ * The renderer seats it in this box, which scrolls sideways instead of squeezing
+ * the columns until each cell is a tower of broken lines. The vertical margin
+ * lives here rather than on the table, and the selector is deliberately a lone
+ * class so `.markdown-content > :first-child` still resets it at the top. */
+.markdown-table-scroll {
+  overflow-x: auto;
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
 .markdown-content table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 0.75em;
-  margin-bottom: 0.75em;
   font-size: 0.9em;
 }
 .markdown-content th,
 .markdown-content td {
+  /* Below this a column is not worth reading; the box scrolls instead. */
+  min-width: 6rem;
   border: 1px solid var(--color-stroke);
   padding: 0.5em 0.75em;
   text-align: left;
+}
+/* A token is the thing to scan for in a table, so it never splits at a hyphen. */
+.markdown-content th code,
+.markdown-content td code {
+  white-space: nowrap;
 }
 .markdown-content th {
   background: var(--color-fill-selected);
@@ -221,8 +236,10 @@
 /* A list or a quote opens a line *under* its last line rather than trailing it,
  * so the caret hops down to whatever holds that line. Code blocks and tables
  * have no line to trail at all: inside `<pre>` the caret would land in the
- * highlighted source, next to the copy button. */
-.markdown-content--streaming > :is(ul, ol, blockquote, pre, table):last-child::after {
+ * highlighted source, next to the copy button, and after a table's scroll box it
+ * would hang on a line of its own. */
+.markdown-content--streaming
+> :is(ul, ol, blockquote, pre, .markdown-table-scroll):last-child::after {
   content: none;
 }
 

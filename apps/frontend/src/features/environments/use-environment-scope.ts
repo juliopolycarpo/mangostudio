@@ -54,7 +54,7 @@ export function validateEnvironmentSearch(raw: Record<string, unknown>): Environ
  * the URL entirely — reached from outside through `environmentScopeRoute`, so
  * both ways of scoping the umbrella produce the same address.
  */
-function environmentScopeSearch(environmentId: string): EnvironmentScopeSearch {
+export function environmentScopeSearch(environmentId: string): EnvironmentScopeSearch {
   return environmentId === LOCAL_ENVIRONMENT_ID ? {} : { environmentId };
 }
 

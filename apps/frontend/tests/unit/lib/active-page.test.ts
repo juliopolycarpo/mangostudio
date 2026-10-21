@@ -16,6 +16,16 @@ describe('activePageForPath', () => {
     expect(activePageForPath('/settings')).toBe('settings');
     expect(activePageForPath('/studio')).toBe('studio');
     expect(activePageForPath('/environments')).toBe('environments');
+    expect(activePageForPath('/terminal')).toBe('terminal');
+  });
+
+  it('does not treat the terminal page as a chat', () => {
+    // The shell gates the chat's header chrome and the sidebar's current-chat
+    // row on `chat`; a terminal path resolving there drew both over a page that
+    // owns its own environment selector. The pop-out is a child of the same
+    // layout, so it has to resolve the same way as the index.
+    expect(activePageForPath('/terminal/abc')).toBe('terminal');
+    expect(activePageForPath('/terminal/7f3c9e2a-1b4d-4a8e-9c5f-0d2e6b8a1f34')).toBe('terminal');
   });
 
   it('falls back to chat, which owns the index route', () => {

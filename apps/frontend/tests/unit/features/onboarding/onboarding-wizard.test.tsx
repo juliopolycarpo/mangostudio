@@ -10,8 +10,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { DEFAULT_APP_SETTINGS, onboardingFor } from '@mangostudio/shared/app-settings';
+import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { en } from '@mangostudio/shared/i18n';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -289,6 +290,38 @@ describe('OnboardingWizard', () => {
     expect(screen.queryByText(en.onboarding.agents.noneFound)).not.toBeInTheDocument();
   });
 
+  it('keeps the reason a runner is unusable readable instead of fading the whole row', async () => {
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        agents: [
+          {
+            targetId: 'codex',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'determined',
+            authState: 'signed-out',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_790_000_000_000, attempts: 1 },
+          },
+        ],
+      },
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-agents')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-agents'));
+
+    const row = await screen.findByTestId('onboarding-runner-codex');
+    expect(row).toBeDisabled();
+    // No opacity anywhere: the status line is the one thing worth reading here.
+    expect(row.className).not.toContain('opacity');
+    const reason = within(row).getByText(en.onboarding.agents.signedOut);
+    expect(reason).toHaveClass('text-fg-subtle');
+    expect(reason).not.toHaveClass('truncate');
+  });
+
   it('refuses a second skip while the first write is still open', async () => {
     // Every write is built on the cached record, and nothing is cached until
     // the server answers: a second click during the first PUT would send the
@@ -367,6 +400,89 @@ describe('OnboardingWizard', () => {
 
     await waitFor(() => expect(screen.getByTestId('onboarding-skip-all')).toBeDisabled());
     expect(screen.getByTestId('onboarding-skip-step')).toBeDisabled();
+  });
+
+  it('has nothing to go back to on the first step, and a Back control on every other', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
+    expect(screen.queryByTestId('onboarding-back')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('onboarding-skip-step'));
+
+    await waitFor(() => expect(screen.getByTestId('onboarding-back')).toBeEnabled());
+  });
+
+  it('draws the whole footer row at one height, so no border sits inside another button', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-skip-step'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-back')).toBeEnabled());
+
+    for (const id of ['onboarding-back', 'onboarding-skip-step', 'onboarding-continue']) {
+      expect(screen.getByTestId(id)).toHaveClass('h-10');
+    }
+  });
+
+  it('names the step in the progress line, which is all a phone gets of the step list', async () => {
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-skip-step')).toBeInTheDocument());
+    expect(
+      screen.getByText(`Step 1 of 6 · ${en.onboarding.steps.welcome}`, { exact: false })
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('onboarding-skip-step'));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(`Step 2 of 6 · ${en.onboarding.steps.folder}`, { exact: false })
+      ).toBeInTheDocument()
+    );
+    // The list itself is for `sm` and up: it is in the document, behind a class.
+    expect(screen.getByRole('navigation', { name: en.onboarding.stepList })).toHaveClass('hidden');
+  });
+
+  it('keeps one primary in the folder step: the step\u2019s own until a folder is chosen', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true }),
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-folder')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-folder'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-choose-folder')).toBeInTheDocument());
+
+    expect(screen.getByTestId('onboarding-choose-folder')).toHaveClass('bg-accent');
+    expect(screen.getByTestId('onboarding-continue')).not.toHaveClass('bg-accent');
+    // Stepping down changes the look and nothing else: setup stays skippable.
+    expect(screen.getByTestId('onboarding-continue')).toBeEnabled();
+  });
+
+  it('hands the primary to Continue once the folder is chosen', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true, workdir: '/home/dev/project' }),
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-folder')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-folder'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-choose-folder')).toBeInTheDocument());
+
+    expect(screen.getByTestId('onboarding-choose-folder')).not.toHaveClass('bg-accent');
+    expect(screen.getByTestId('onboarding-continue')).toHaveClass('bg-accent');
+  });
+
+  it('puts Send ahead of Open MangoStudio on the first-chat step until the prompt is answered', async () => {
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: settingsWith({ welcomeAcknowledged: true, workdir: '/home/dev/project' }),
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-chat')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-chat'));
+    await waitFor(() => expect(screen.getByTestId('onboarding-send-prompt')).toBeInTheDocument());
+
+    expect(screen.getByTestId('onboarding-send-prompt')).toHaveClass('bg-accent');
+    expect(screen.getByTestId('onboarding-continue')).not.toHaveClass('bg-accent');
   });
 
   it('advances past a skipped step and remembers the skip', async () => {

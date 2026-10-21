@@ -1,11 +1,11 @@
 /**
  * A context ring with its figures a hover away.
  *
- * Both composers read the same way through this: the strip carries one ring,
- * and the numbers behind it — token counts, the window, whichever scopes the
- * runner reports — open on hover or on keyboard focus. Spelling them out inline
- * cost a whole wrapped line of the status strip to say something you read once
- * a session.
+ * Both composers read the same way through this: the strip carries one ring and
+ * its percentage, and the numbers behind them — token counts, the window,
+ * whichever scopes the runner reports — open on hover or on keyboard focus.
+ * Spelling them out inline cost a whole wrapped line of the status strip to say
+ * something you read once a session.
  */
 
 import type { ContextSeverity } from '@mangostudio/shared/chat';
@@ -43,6 +43,7 @@ export function ContextUsageChip({
   testId,
 }: ContextUsageChipProps) {
   const hasRing = typeof ratio === 'number' && Number.isFinite(ratio);
+  const percent = hasRing ? Math.round(ratio * 100) : null;
 
   // The whole breakdown, for anyone who will never hover it.
   const accessibleName = [
@@ -60,14 +61,20 @@ export function ContextUsageChip({
         type="button"
         aria-label={accessibleName}
         data-testid={testId ? `${testId}-indicator` : undefined}
-        data-percent={hasRing ? String(Math.round(ratio * 100)) : undefined}
+        data-percent={percent === null ? undefined : String(percent)}
         data-severity={severity}
-        className="composer-chip cursor-default px-1"
+        className="composer-chip cursor-default"
       >
         {hasRing ? (
-          <ContextRing ratio={ratio} severity={severity} />
+          <>
+            {/* The figure is running text beside the ring, not a digit squeezed
+                inside it: the strip has room for 12px, and the number is the
+                reason anyone looks at this chip. */}
+            <ContextRing ratio={ratio} severity={severity} showValue={false} />
+            <span aria-hidden="true" className="tabular-nums">{`${percent}%`}</span>
+          </>
         ) : (
-          <span aria-hidden="true" className="tabular-nums text-micro">
+          <span aria-hidden="true" className="tabular-nums">
             {fallback}
           </span>
         )}

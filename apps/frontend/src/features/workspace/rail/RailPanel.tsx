@@ -1,5 +1,6 @@
 import { ChevronRight, X } from 'lucide-react';
 import type { ReactNode, Ref } from 'react';
+import { Button } from '@/components/ui/Button';
 import { ICON_MD } from '@/lib/icon-sizes';
 
 interface RailPanelProps {
@@ -28,18 +29,18 @@ export function RailPanel({
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold text-fg" title={title}>
           {title}
         </h2>
-        {/* A bare `<button>` rather than `Button`: the mobile drawer moves focus
-            here on open, which needs the ref, and `Button` takes no `ref` prop. */}
-        <button
+        <Button
           ref={closeButtonRef}
           type="button"
+          variant="subtle"
+          size="icon-sm"
           onClick={onClose}
           aria-label={closeLabel}
           title={closeLabel}
-          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-sm text-fg-muted transition-colors hover:bg-fill-hover hover:text-fg"
+          className="shrink-0 text-fg-muted hover:text-fg"
         >
           <CloseIcon size={ICON_MD} />
-        </button>
+        </Button>
       </header>
       <div className="min-h-0 flex-1">{children}</div>
     </div>

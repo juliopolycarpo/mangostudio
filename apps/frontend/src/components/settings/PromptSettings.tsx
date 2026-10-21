@@ -85,7 +85,7 @@ export function PromptSettings({
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title={s.ruleFilesLabel}>
+      <SettingsSection title={s.ruleFilesLabel} cards>
         <RuleFileRows
           setting={promptSettings.agentsMd}
           isFixed
@@ -103,6 +103,7 @@ export function PromptSettings({
       <SettingsSection
         title={s.customRulesLabel}
         description={s.customRulesDescription}
+        cards
         action={
           <Button variant="secondary" size="sm" onClick={onAddCustomRule}>
             <Plus size={ICON_SM} />

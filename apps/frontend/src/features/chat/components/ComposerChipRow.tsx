@@ -60,9 +60,10 @@ export interface ComposerChipRowProps {
   isAgentListLoading: boolean;
   onSelectedAgentIdChange?: (agentId: string) => void;
   /**
-   * True once the chat has turns, which locks the agent chip: the first prompt
-   * settles who runs this chat, and switching from here on means continuing in
-   * a new chat — an offer the header's runner selector makes, not this strip.
+   * True once the chat has turns, which turns the agent chip from a choice into
+   * a statement: the first prompt settles who runs this chat, and switching from
+   * here on means continuing in a new chat — an offer the header's runner
+   * selector makes, not this strip.
    */
   hasTurns: boolean;
   /**
@@ -129,6 +130,44 @@ interface Chip {
 }
 
 /**
+ * A `key: value` chip that states a fact instead of offering a choice.
+ *
+ * What the agent chip becomes once a chat has turns. The disabled select it used
+ * to be dropped the whole chip to half opacity — the key to 2.4:1 against its
+ * surface — and kept a chevron promising a menu that could not open, for a fact
+ * (who is answering) that is information rather than a dead control. Without the
+ * chevron, with the key and value at full strength, it reads the way the context
+ * ring and the usage chips beside it do. No glyph of its own: the lock beside
+ * `mode:` means a permission level, and a second one here would mean something
+ * else on the same line.
+ *
+ * `title` is the hover explanation; the same sentence follows the chip as
+ * screen-reader text because a tooltip on a plain element is not announced and
+ * is not there at all on touch.
+ */
+function LockedChip({
+  label,
+  value,
+  reason,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly reason: string;
+}) {
+  return (
+    // The wrapper mirrors `ChipSelect`'s, so the `·` the strip draws after its
+    // children sits beside this chip exactly where it sits beside a select.
+    <span className="relative flex items-center">
+      <span className="composer-chip max-w-[13rem] cursor-default" title={reason}>
+        <span className="composer-chip-key text-fg-muted">{`${label}:`}</span>
+        <span className="composer-chip-value">{value}</span>
+        <span className="sr-only">{reason}</span>
+      </span>
+    </span>
+  );
+}
+
+/**
  * The narrow-screen stand-in: the two facts that decide what a turn will do.
  * Deliberately not every chip abbreviated — a summary nobody can read is worse
  * than a shorter one that is true.
@@ -153,22 +192,30 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
     const selectable = (props.agents ?? []).filter(
       (agent) => agent.role === 'primary' || agent.role === 'both'
     );
+    // The chip renders before the listing lands, and the id it was given is not
+    // a name anyone would recognise.
+    const placeholder = props.isAgentListLoading ? labels.agentsLoading : props.selectedAgentId;
     chips.push({
       key: 'agent',
-      node: (
+      node: props.hasTurns ? (
+        <LockedChip
+          label={labels.agentLabel}
+          // Looked up in the whole listing, not just the selectable agents: this
+          // is who *did* answer, and a chat can outlive the agent's role.
+          value={
+            props.agents?.find((agent) => agent.id === props.selectedAgentId)?.name ?? placeholder
+          }
+          reason={labels.agentLocked}
+        />
+      ) : (
         <ChipSelect
           value={props.selectedAgentId}
           options={selectable.map((agent) => ({ value: agent.id, label: agent.name }))}
           onChange={(agentId) => props.onSelectedAgentIdChange?.(agentId)}
           label={labels.agentLabel}
           ariaLabel={labels.selectAgent}
-          disabled={
-            props.disabled || props.hasTurns || props.isAgentListLoading || selectable.length === 0
-          }
-          {...(props.hasTurns ? { title: labels.agentLocked } : {})}
-          // The chip renders before the listing lands, and the id it was given
-          // is not a name anyone would recognise.
-          placeholder={props.isAgentListLoading ? labels.agentsLoading : props.selectedAgentId}
+          disabled={props.disabled || props.isAgentListLoading || selectable.length === 0}
+          placeholder={placeholder}
         />
       ),
     });

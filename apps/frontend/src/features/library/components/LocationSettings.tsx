@@ -13,7 +13,6 @@ import { Lock } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { Toggle } from '@/components/ui/Toggle';
-import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
@@ -27,53 +26,33 @@ export function LocationSettings() {
   const l = t.library;
   const scope = useEnvironmentScope();
   const settings = useLocationSettings(scope.environmentId);
-  const header = <EnvironmentScopeHeader scope={scope} onRefresh={settings.refetch} />;
 
   if (scope.environment && !scope.permitsLibrary) {
     return (
-      <div className="space-y-4">
-        {header}
-        <EnvironmentScopeNotice
-          environment={scope.environment}
-          reason="not-permitted"
-          surface="library"
-        />
-      </div>
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="not-permitted"
+        surface="library"
+      />
     );
   }
 
   // Before the loading check: while detecting, the settings have arrived but
   // their enablement is a placeholder, so no row may render it as real.
   if (settings.defaultsPending) {
-    return (
-      <div className="space-y-4">
-        {header}
-        <LibraryPageState variant="loading" title={l.locationSettings.detecting} />
-      </div>
-    );
+    return <LibraryPageState variant="loading" title={l.locationSettings.detecting} />;
   }
 
   if (settings.isPending && settings.groups.length === 0) {
-    return (
-      <div className="space-y-4">
-        {header}
-        <LibraryPageState variant="loading" />
-      </div>
-    );
+    return <LibraryPageState variant="loading" />;
   }
 
   if (settings.error && settings.groups.length === 0) {
-    return (
-      <div className="space-y-4">
-        {header}
-        <LibraryPageState variant="error" onRetry={settings.refetch} />
-      </div>
-    );
+    return <LibraryPageState variant="error" onRetry={settings.refetch} />;
   }
 
   return (
     <div className="space-y-4" data-testid="location-settings">
-      {header}
       <p className="text-fg-muted text-sm">{l.locationSettings.description}</p>
 
       {settings.groups.map((group) => (

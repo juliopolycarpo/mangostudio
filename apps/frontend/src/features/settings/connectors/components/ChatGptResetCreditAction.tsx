@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+import { usePlural } from '@/hooks/use-plural';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { useChatGptResetRedeem } from '../hooks/use-chatgpt-reset-redeem';
 
@@ -20,13 +21,15 @@ interface ChatGptResetCreditActionProps {
  * a confirmation dialog because redeeming spends an irreversible perk.
  */
 export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptResetCreditActionProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const plural = usePlural();
   const { toast } = useToast();
   const s = t.settings.connectors;
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const { redeem, isRedeeming, lastWindowsReset } = useChatGptResetRedeem({
     connectorId: connector.id,
     messages: s,
+    locale,
     toast,
     onSettled: onRedeemed,
   });
@@ -42,7 +45,10 @@ export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptReset
   const confirmBody = [
     s.chatgptRedeemConfirmBody.replace('{count}', String(availableCount)),
     lastWindowsReset !== null && lastWindowsReset > 0
-      ? s.chatgptRedeemConfirmRestores.replace('{count}', String(lastWindowsReset))
+      ? plural(
+          { one: s.chatgptRedeemConfirmRestoresOne, other: s.chatgptRedeemConfirmRestoresOther },
+          lastWindowsReset
+        )
       : null,
   ]
     .filter(Boolean)

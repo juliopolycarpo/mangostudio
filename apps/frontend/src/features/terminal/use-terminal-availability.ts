@@ -15,13 +15,15 @@
 
 import { useI18n } from '@/hooks/use-i18n';
 import { useTerminalAvailabilityQuery } from './services/terminal-service';
-import { unavailableMessage } from './unavailable-message';
+import { unavailableMessage, unavailableTone } from './unavailable-message';
 
 export interface TerminalAvailabilityState {
   /** The environment refused another session, and the query has actually answered. */
   readonly unavailable: boolean;
   /** Localized refusal, safe to render whenever `unavailable` is true. */
   readonly message: string;
+  /** How the refusal is drawn: `info` for standing policy, `warning` for anything actionable. */
+  readonly tone: 'info' | 'warning';
 }
 
 /**
@@ -33,8 +35,11 @@ export function useTerminalAvailability(environmentId: string | null): TerminalA
   const { t } = useI18n();
   const query = useTerminalAvailabilityQuery(environmentId ?? '', environmentId !== null);
 
+  const reason = query.data?.reason ?? 'unavailable';
+
   return {
     unavailable: query.isSuccess && !query.data.available,
-    message: unavailableMessage(t, query.data?.reason ?? 'unavailable'),
+    message: unavailableMessage(t, reason),
+    tone: unavailableTone(reason),
   };
 }
