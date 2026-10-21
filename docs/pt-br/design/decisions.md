@@ -274,8 +274,9 @@ sob o botão de copiar, e um controle flutuante ou sobreposto precisa continuar 
 acima do corpo do diálogo; `control-pressed` assume o antigo valor de repouso, um degrau mais
 escuro. Um preenchimento mais claro cobra seu preço das linhas e do texto desenhados sobre
 ele, então o `stroke-strong` escuro sobe para `#857f73` (3:1 sobre `control` e seu hover) e o
-`fg-subtle` escuro para `#9c958a` (os placeholders continuam acima de 4.5:1 sobre `control`).
-Os dois só ficam mais claros sobre uma superfície escura, então nada mais perde contraste.
+`fg-subtle` escuro para `#a29b91` (os placeholders continuam acima de 4.5:1 sobre `control` e
+`control-hover`), com o `fg-muted` escuro em `#b0a99e` para seguir um degrau nítido acima. Os
+três só ficam mais claros sobre uma superfície escura, então nada mais perde contraste.
 
 ## 20. A lavagem de warning do tema claro é âmbar
 

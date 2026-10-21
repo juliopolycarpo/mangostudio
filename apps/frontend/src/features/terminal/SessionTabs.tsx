@@ -114,6 +114,7 @@ export function SessionTabs({
               size="icon"
               onClick={() => startEditing(session)}
               aria-label={t.terminal.rename}
+              title={t.terminal.rename}
               className={TAB_ACTION_ON_DEMAND}
             >
               <Pencil size={ICON_SM} />
@@ -124,6 +125,7 @@ export function SessionTabs({
               size="icon"
               onClick={() => onPopOut(session.id)}
               aria-label={t.terminal.popOut}
+              title={t.terminal.popOut}
               className={TAB_ACTION_ON_DEMAND}
             >
               <ExternalLink size={ICON_SM} />
@@ -134,6 +136,7 @@ export function SessionTabs({
               size="icon"
               onClick={() => onRequestClose(session.id)}
               aria-label={t.terminal.closeSession}
+              title={t.terminal.closeSession}
               className="size-6"
             >
               <X size={ICON_SM} />

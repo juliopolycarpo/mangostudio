@@ -64,7 +64,7 @@ export function LibraryPageState({ variant, title, hint, onRetry }: LibraryPageS
         hint={hint}
         action={
           onRetry ? (
-            <Button variant="subtle" size="sm" onClick={onRetry}>
+            <Button variant="secondary" size="sm" onClick={onRetry}>
               {l.matrix.clearFilters}
             </Button>
           ) : undefined

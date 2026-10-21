@@ -19,7 +19,7 @@ would cost more than it saves.
   (`NSAccentColorName`).
 - **Map by role, never by the nearest hex.** A token's row below names the resource that
   plays the same role.
-- **Keep the contrast floors.** `fg-muted` holds 5.4:1 and `fg-subtle` 4.6:1 on every
+- **Keep the contrast floors.** `fg-muted` holds 5.9:1 and `fg-subtle` 4.5:1 on every
   surface; status text holds 4.5:1 on its own tint. Where a platform's secondary or
   tertiary text colour is fainter than that in the light theme, use the next stronger
   resource or the token's own value, as the text rows below do.

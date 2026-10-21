@@ -271,6 +271,7 @@ function AgentReasoningSection({ draft, labels, onDraftChange }: AgentReasoningS
                 Number.isFinite(nextValue) && event.target.value ? nextValue : undefined,
             });
           }}
+          className="w-32 text-center"
         />
       </div>
     </AgentEditorSection>

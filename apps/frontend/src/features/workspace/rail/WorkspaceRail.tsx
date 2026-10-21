@@ -9,6 +9,7 @@ import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { createPortal } from 'react-dom';
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
+import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
@@ -290,15 +291,15 @@ function PanelDock({
             aria-label={switchLabel.replace('{panel}', title)}
             aria-pressed={active}
             title={title}
+            // The current panel's mark is the shared selection bar, moved out to the
+            // dock's own edge (`before:-left-2`) like the sidebar's current page: the
+            // fill alone would not survive a grayscale screen.
             className={`relative ${
-              active ? 'bg-fill-selected text-fg' : 'text-fg-muted enabled:hover:text-fg'
+              active
+                ? `bg-fill-selected text-fg ${SELECTION_BAR} before:-left-2`
+                : 'text-fg-muted enabled:hover:text-fg'
             }`}
           >
-            {/* The current panel's mark, on the dock's own edge like the sidebar's
-                current page: the fill alone would not survive a grayscale screen. */}
-            {active ? (
-              <span className="absolute inset-y-2 -left-2 w-[3px] rounded-full bg-accent" />
-            ) : null}
             <Icon size={ICON_MD} />
           </Button>
         );

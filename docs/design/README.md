@@ -3,7 +3,7 @@
 MangoStudio is a working tool: people spend hours in it talking to agents, reading
 diffs and running commands. The interface is **flat, calm and predictable** (solid
 surfaces, one accent colour, hairlines) so the same screens can be redrawn in
-WinUI 3 or GTK 4 / libadwaita and still read as one product.
+WinUI 3, GTK 4 / libadwaita or AppKit and still read as one product.
 
 ## The pages, in reading order
 
@@ -19,7 +19,7 @@ WinUI 3 or GTK 4 / libadwaita and still read as one product.
 5. [`decisions.md`](./decisions.md): why the system is shaped this way, one numbered
    decision at a time. A decision is changed by a new entry, not by editing an old one.
 6. [`native-ports.md`](./native-ports.md): how each token and component maps to
-   WinUI 3 and libadwaita.
+   WinUI 3, libadwaita and AppKit (macOS).
 7. [`migration.md`](./migration.md): the old to new vocabulary, how the conformance
    test works, and how to add an exception.
 

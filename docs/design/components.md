@@ -168,8 +168,9 @@ track to 50%.
 
 - `ToggleSwitch` is the bare switch, for a row that is itself the `<label>`
   (`SettingToggle`, a rule file's path row).
-- `Toggle` adds its own 14px label to the right. It derives the input's id from the label
-  unless you pass `id`; pass one when two toggles on a page share a label.
+- `Toggle` adds its own 14px label to the right. It generates the input's id, so two
+  toggles that share a label stay distinct; pass `id` only when something else must
+  reference the input.
 - Use a switch for a setting that takes effect at once, and a checkbox for an option in a
   form or a list.
 - **Accessibility.** The input is a visually hidden checkbox with `role="switch"`; the
@@ -706,8 +707,8 @@ must not follow the app's tokens) are page parts, not primitives.
 that have no shell: sign-in, sign-up and onboarding. The `Logo` at 48px (`size-12`) over
 "MangoStudio" at 14px/500 in `fg-muted`, 8px apart. It is a wordmark, not a heading (each
 page's own title is its `h1`), and the mark inside it has an empty `alt`, because the word
-beside it already names the product. Not Found and the bootstrap error keep the logo inside
-their card instead.
+beside it already names the product. Not Found keeps the logo inside its card instead; the
+bootstrap error has no logo and leads with a `danger` `CircleX`.
 
 ## The chat's own components
 
@@ -806,8 +807,8 @@ bubble, and inline code in a cell never breaks at a hyphen. A labelled code bloc
 2.5rem header row above its first line: the language label sits at its left (1rem in) and
 the copy button at its right (0.5rem in), both in a 28px box at a 0.5rem top inset so they
 share one vertical centre. The label is always shown and never fades, because it never
-covers code. The copy button (`.copy-code-btn`) appears when the pointer is over the block,
-and stays visible on a screen that cannot hover. An unlabelled snippet keeps the plain `1em` padding. The label is positioned
+covers code. The copy button (`.copy-code-btn`) appears when the pointer is over the block
+or when it has keyboard focus, and stays visible on a screen that cannot hover. An unlabelled snippet keeps the plain `1em` padding. The label is positioned
 against the block, so it scrolls away with the code when a wide block is scrolled sideways.
 The table wrapper draws a thin always-visible scrollbar with a track, so a table cut off at
 its third column reads as scrollable.

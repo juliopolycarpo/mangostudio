@@ -6,9 +6,9 @@
  * both edges at every width. Two numbers define it and both are written once,
  * here: how wide the column is, and how far the page keeps it from the window.
  *
- * The gutter is the composer footer's own ladder (`p-3 sm:p-4 md:p-6`, read on
- * its sides), which is why the footer does not import it: it needs the same
- * steps on all four sides.
+ * The gutter is the composer footer's own ladder (`px-3 pb-3 sm:px-4 sm:pb-4
+ * md:px-6 md:pb-6`, read on its sides), which is why the footer does not import
+ * it: it needs the same steps underneath as well.
  */
 
 /** Centres a block in the chat column: 896px, as wide as the composer. */

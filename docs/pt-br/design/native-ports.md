@@ -19,7 +19,7 @@ plataforma custaria mais do que economizaria.
   `AccentColor` do app (`NSAccentColorName`).
 - **Associe pelo papel, nunca pelo hexadecimal mais próximo.** A linha de cada token
   abaixo nomeia o recurso que cumpre o mesmo papel.
-- **Mantenha os pisos de contraste.** `fg-muted` mantém 5.4:1 e `fg-subtle` 4.6:1 em toda
+- **Mantenha os pisos de contraste.** `fg-muted` mantém 5.9:1 e `fg-subtle` 4.5:1 em toda
   superfície; texto de status mantém 4.5:1 sobre a própria tinta. Onde a cor de texto
   secundária ou terciária de uma plataforma for mais fraca que isso no tema claro, use o
   próximo recurso mais forte ou o valor do próprio token, como fazem as linhas de texto

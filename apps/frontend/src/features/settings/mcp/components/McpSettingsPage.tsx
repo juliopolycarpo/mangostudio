@@ -106,10 +106,13 @@ export function McpSettingsPage() {
               <FileDown size={ICON_SM} />
               {s.import.button}
             </Button>
-            <Button size="sm" onClick={() => setFormMode({ kind: 'add' })}>
-              <Plus size={ICON_SM} />
-              {s.addServer}
-            </Button>
+            {/* The empty state carries its own Add, so the header's is not drawn beside it. */}
+            {servers.length > 0 && (
+              <Button variant="secondary" size="sm" onClick={() => setFormMode({ kind: 'add' })}>
+                <Plus size={ICON_SM} />
+                {s.addServer}
+              </Button>
+            )}
           </div>
         )
       }
@@ -120,7 +123,16 @@ export function McpSettingsPage() {
         <SettingsLoadError message={s.loadError} onRetry={() => void refetch()} />
       ) : servers.length === 0 ? (
         <Card padded={false}>
-          <EmptyState icon={<Server size={ICON_LG} />} title={s.empty} />
+          <EmptyState
+            icon={<Server size={ICON_LG} />}
+            title={s.empty}
+            action={
+              <Button variant="secondary" size="sm" onClick={() => setFormMode({ kind: 'add' })}>
+                <Plus size={ICON_SM} />
+                {s.addServer}
+              </Button>
+            }
+          />
         </Card>
       ) : (
         <div className="space-y-3">

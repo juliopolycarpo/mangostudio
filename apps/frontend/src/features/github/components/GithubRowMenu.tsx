@@ -48,7 +48,7 @@ export function GithubRowMenu({ chatId, target, children }: GithubRowMenuProps) 
           label={t.common.openMenu}
           // Out of the way until the row is hovered, focused or has its menu
           // open; `-mt-1` centres the 28px button on the row's first line.
-          className="-mt-1 opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 focus-visible:opacity-100"
+          className="-mt-1 opacity-0 group-hover:opacity-100 aria-expanded:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
           {...props}
         >
           <MoreHorizontal size={ICON_SM} />

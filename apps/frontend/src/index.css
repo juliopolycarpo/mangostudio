@@ -27,9 +27,9 @@
  * tree-shake, while a bare `@theme` drops any token no utility references. The
  * two disagree for any token reached through `var()` in an inline style, which
  * Tailwind does not scan: `--color-agent-*` is read that way by the composer
- * accent, the home agents card, the sidebar runner badge and the turn
- * separator, so a bare `@theme` would emit them for the light theme only and a
- * `var()` reading them would resolve to nothing in the dark default. */
+ * accent and the turn separator, so a bare `@theme` would emit them for the
+ * light theme only and a `var()` reading them would resolve to nothing in the
+ * dark default. */
 @theme static {
   /* Tailwind's own palette (`bg-amber-500`, `text-blue-400`) is emptied: a hue
    * that is not a token does not follow the theme, and the contrast guarantees
@@ -62,8 +62,8 @@
 
   /* Text: all three clear 4.5:1 on every surface above. */
   --color-fg: #ece7df;
-  --color-fg-muted: #a8a196;
-  --color-fg-subtle: #9c958a;
+  --color-fg-muted: #b0a99e;
+  --color-fg-subtle: #a29b91;
 
   /* Mango. `accent` fills; `accent-fg` is the same hue as text or an icon. */
   --color-accent: #f5a623;
@@ -103,7 +103,7 @@
   --color-agent-claude: #e0836a;
   --color-agent-codex: #5cc8e8;
   --color-agent-cursor: #a78bfa;
-  --color-agent-generic: #8b8579;
+  --color-agent-generic: #9a958a;
 
   /* One interface family and one mono. The stacks fall through to what the
    * platform ships (Segoe UI Variable, Adwaita Sans), which is the point of a
@@ -274,11 +274,13 @@
   --color-fill-media-hover: #ffffff29;
   --color-fill-media-pressed: #ffffff3d;
 
-  --color-agent-mango: #a86400;
-  --color-agent-claude: #b9553a;
-  --color-agent-codex: #1f7a99;
-  --color-agent-cursor: #6d4fd8;
-  --color-agent-generic: #736d63;
+  /* Darker than a dot needs: the composer's prompt mark and the turn separator
+   * read these as text, on `surface` and on `fill-selected` over `canvas`. */
+  --color-agent-mango: #955900;
+  --color-agent-claude: #a64c34;
+  --color-agent-codex: #1c6f8b;
+  --color-agent-cursor: #6b4dd8;
+  --color-agent-generic: #6b665d;
 
   --elevation-popover: 0 4px 16px rgba(30, 20, 5, 0.1);
   --elevation-dialog: 0 16px 40px rgba(30, 20, 5, 0.14);
@@ -583,8 +585,9 @@ body {
     background: var(--color-fill-pressed);
   }
 
-  /* `focus-within` rather than `focus`: a `<label>` wrapping a `<select>` is the
-   * element that is drawn, while the select is the one that is focused. */
+  /* `:has(:focus-visible)` rather than the chip's own `:focus-visible`: a
+   * `<label>` wrapping a `<select>` is the element that is drawn, while the
+   * select is the one that is focused. */
   .composer-chip:has(:focus-visible) {
     outline: 2px solid var(--color-focus);
     outline-offset: 2px;
@@ -865,7 +868,9 @@ body {
     color var(--duration-quick) var(--ease-standard);
 }
 
-pre:hover .copy-code-btn {
+pre:hover .copy-code-btn,
+pre:focus-within .copy-code-btn,
+.copy-code-btn:focus-visible {
   opacity: 1;
 }
 
@@ -897,7 +902,6 @@ pre:hover .copy-code-btn {
 :root {
   --chat-font-size: 0.875rem; /* 14px — matches 'default' */
   --chat-message-gap: 3rem; /* matches 'default' density */
-  --chat-padding: 1.25rem;
   --timeline-row-gap: 0.125rem;
   --timeline-block-gap: 0.5rem;
 }
@@ -919,7 +923,6 @@ pre:hover .copy-code-btn {
  * density ship with half its values missing. */
 [data-chat-density="compact"] {
   --chat-message-gap: 1.5rem;
-  --chat-padding: 0.75rem;
   /* `0px`, not `0`: this feeds a `calc()` that adds it to a length, and a
    * unitless zero there is invalid — the dot would drop to its static
    * position and every node would sit half a row below its own row. */
@@ -928,13 +931,11 @@ pre:hover .copy-code-btn {
 }
 [data-chat-density="default"] {
   --chat-message-gap: 3rem;
-  --chat-padding: 1.25rem;
   --timeline-row-gap: 0.125rem;
   --timeline-block-gap: 0.5rem;
 }
 [data-chat-density="comfortable"] {
   --chat-message-gap: 4rem;
-  --chat-padding: 1.5rem;
   --timeline-row-gap: 0.3125rem;
   --timeline-block-gap: 0.75rem;
 }

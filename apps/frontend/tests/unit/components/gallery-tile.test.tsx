@@ -109,6 +109,17 @@ describe('GalleryTile', () => {
     expect(link).toHaveClass('group-focus-within:pointer-events-auto');
   });
 
+  // Touch has no hover, so the bar is shown at rest there; its link must be
+  // tappable too, or a tap on the visible icon falls through to the image.
+  it('shows the bar at rest on touch with a tappable link', () => {
+    const { container } = render(<GalleryTile item={TEST_ITEM} onView={jest.fn()} />);
+
+    expect(captionOf(container)).toHaveClass('pointer-coarse:opacity-100');
+    expect(screen.getByRole('link', { name: /download image/i })).toHaveClass(
+      'pointer-coarse:pointer-events-auto'
+    );
+  });
+
   // The global ring is drawn 2px outside the control. A wrapper that clips would
   // cut it off, so the clipping and the rounding belong to the button.
   it('clips the image on the button, not on the wrapper that carries the focus ring', () => {

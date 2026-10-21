@@ -40,7 +40,7 @@ export function ReservedAspectImage({
         src={src}
         alt={alt}
         className={cn(
-          'absolute inset-0 size-full transition-opacity duration-300',
+          'absolute inset-0 size-full transition-opacity duration-(--duration-slow)',
           fitClassName,
           isLoaded ? 'opacity-100' : 'opacity-0',
           imageClassName

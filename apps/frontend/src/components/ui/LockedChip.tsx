@@ -25,7 +25,7 @@ interface LockedChipProps {
  *
  * What a `ChipSelect` becomes once its answer is settled — the agent chip and
  * the environment chip, after a chat's first turn. The disabled select it
- * replaces dropped the whole chip to half opacity (the key to 2.4:1 against its
+ * replaces dropped the whole chip to half opacity (the key to 2.3:1 against its
  * surface, the value to 3.3:1) and kept a chevron promising a menu that could
  * not open, for a fact (who is answering, where it runs) that is information
  * rather than a dead control. Without the chevron, with the key and value at

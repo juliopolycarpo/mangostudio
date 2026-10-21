@@ -1,6 +1,8 @@
+import { motion } from 'motion/react';
 import { type FormEventHandler, type ReactNode, useCallback, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
+import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 
 /**
@@ -97,7 +99,7 @@ type DialogProps = DialogName & {
  *
  * It mounts on `document.body`, not where it is written. `fixed inset-0` is
  * relative to the nearest ancestor that has a transform, filter or `contain`
- * (a page-transition wrapper, an `animate-in` panel), and a scrim inside one
+ * (a page-transition wrapper, a panel mid-entrance), and a scrim inside one
  * stopped short of the viewport edge, leaving a bright stripe under the dimmed
  * page. Mounted at the root, every dialog covers the same viewport.
  *
@@ -129,6 +131,7 @@ export function Dialog({
 }: DialogProps) {
   const titleId = useId();
   const descriptionId = useId();
+  const { overlay, dialogPanel } = useMotionPresets();
   // Read through refs so the escape handler keeps one identity: the trap
   // re-registers its listener whenever it changes, and a dialog that re-renders
   // while a write is in flight would otherwise churn it on every keystroke.
@@ -209,10 +212,9 @@ export function Dialog({
   );
 
   return createPortal(
-    // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop only dismisses; Escape, handled by the focus trap, is its keyboard equivalent.
-    // biome-ignore lint/a11y/useKeyWithClickEvents: same — the key is Escape, on the document.
-    <div
-      className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-scrim p-4 fade-in duration-200"
+    <motion.div
+      {...overlay}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4"
       data-testid={testId}
       onMouseDown={(event) => {
         pressBeganInPanel.current = event.target !== event.currentTarget;
@@ -227,7 +229,8 @@ export function Dialog({
         requestClose();
       }}
     >
-      <div
+      <motion.div
+        {...dialogPanel}
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
@@ -250,8 +253,8 @@ export function Dialog({
         ) : (
           sections
         )}
-      </div>
-    </div>,
+      </motion.div>
+    </motion.div>,
     document.body
   );
 }

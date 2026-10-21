@@ -1,5 +1,6 @@
 import { ChevronDown } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { Button } from './Button';
 import { Menu } from './Menu';
@@ -82,7 +83,7 @@ export function SplitButton({
             )}
             {...triggerProps}
           >
-            <ChevronDown size={14} />
+            <ChevronDown size={ICON_SM} />
           </Button>
         )}
       >

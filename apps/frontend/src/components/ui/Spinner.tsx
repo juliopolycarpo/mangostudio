@@ -1,3 +1,5 @@
+import { cn } from '@/lib/utils';
+
 interface SpinnerProps {
   size?: 'sm' | 'md' | 'lg';
   className?: string;
@@ -27,12 +29,16 @@ const sizes = {
  *
  * // Usage: <Spinner size="lg" label={t.common.loading} />
  */
-export function Spinner({ size = 'md', className = '', label }: SpinnerProps) {
+export function Spinner({ size = 'md', className, label }: SpinnerProps) {
   return (
     <div
       role={label ? 'status' : undefined}
       aria-hidden={label ? undefined : true}
-      className={`${sizes[size]} rounded-full border-2 border-stroke-strong border-t-accent animate-spin ${className}`}
+      className={cn(
+        sizes[size],
+        'rounded-full border-2 border-stroke-strong border-t-accent animate-spin',
+        className
+      )}
     >
       {label ? <span className="sr-only">{label}</span> : null}
     </div>

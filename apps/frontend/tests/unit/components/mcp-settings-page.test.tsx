@@ -62,12 +62,26 @@ describe('McpSettingsPage', () => {
     fetchScenario.restore();
   });
 
-  it('shows the empty state when no servers exist', async () => {
+  it('shows the empty state with its own Add, and no header twin, when no servers exist', async () => {
     fetchScenario.respondWithJson('GET', '/api/mcp/servers', { body: { servers: [] } });
 
     render(<McpSettingsPage />);
 
     expect(await screen.findByText(/no mcp servers yet/i)).toBeInTheDocument();
+    const addButtons = screen.getAllByRole('button', { name: /add server/i });
+    expect(addButtons).toHaveLength(1);
+    expect(addButtons[0]).toHaveClass('bg-control');
+  });
+
+  it('draws the header Add as a secondary button once servers exist', async () => {
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [STDIO_SERVER] },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Everything');
+    expect(screen.getByRole('button', { name: /add server/i })).toHaveClass('bg-control');
   });
 
   it('shows error state with retry button', async () => {

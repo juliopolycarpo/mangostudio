@@ -78,10 +78,11 @@ export function GalleryTile({ item, onView, compact = false }: GalleryTileProps)
       {/*
         `group-focus-within` and not `group-hover` alone: the download link is
         tabbable, so revealing it on hover only hands a keyboard user a focus
-        ring on something invisible.
+        ring on something invisible. On touch, which has no hover, the bar and
+        its link are shown, and tappable, at rest.
       */}
       {compact ? null : (
-        <div className="pointer-events-none absolute inset-x-px bottom-px flex items-start gap-3 rounded-b-sm bg-scrim-media p-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+        <div className="pointer-events-none absolute inset-x-px bottom-px flex items-start gap-3 rounded-b-sm bg-scrim-media p-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">
           <p className="line-clamp-3 min-w-0 flex-1 text-sm text-on-scrim-media">{item.prompt}</p>
           {/* Icon-only, so the label is the only name a screen reader can read out. */}
           <a
@@ -93,7 +94,7 @@ export function GalleryTile({ item, onView, compact = false }: GalleryTileProps)
             className={cn(
               buttonClassName('subtle', 'icon-sm'),
               MEDIA_CONTROL_CLASS,
-              'pointer-events-none shrink-0 group-hover:pointer-events-auto group-focus-within:pointer-events-auto'
+              'pointer-events-none shrink-0 group-hover:pointer-events-auto group-focus-within:pointer-events-auto pointer-coarse:pointer-events-auto'
             )}
           >
             <Download size={ICON_MD} />

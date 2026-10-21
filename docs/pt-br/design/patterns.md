@@ -220,11 +220,10 @@ palavra, ou um glifo na cor de status **com** uma palavra. A cor sozinha nunca �
 ## Vazio, carregamento e erro
 
 - **Vazio**: `EmptyState` com um ícone `ICON_LG`, o que está faltando e como conseguir. Numa
-  página de settings, ele fica num `Card padded={false}`. Ofereça a saída uma vez só: ou como
-  a própria `action` do estado vazio (um botão `secondary` `sm` com um `Plus` em `ICON_SM`),
-  caso em que o botão do cabeçalho que faz a mesma coisa não é desenhado enquanto ele aparece
-  (Connectors, Custom rules, Agents), ou só pelo botão do cabeçalho, sem ação no estado vazio
-  (MCP servers). Onde não há nada a fazer (Logs, Metrics), não há ação. Um fato permanente que
+  página de settings, ele fica num `Card padded={false}`. Ofereça a saída uma vez só, como a
+  própria `action` do estado vazio (um botão `secondary` `sm` com um `Plus` em `ICON_SM`); o
+  botão do cabeçalho que faz a mesma coisa não é desenhado enquanto ele aparece (Connectors,
+  Custom rules, Agents, MCP servers). Onde não há nada a fazer (Logs, Metrics), não há ação. Um fato permanente que
   não é uma lista vazia (um repositório só com a worktree principal) é uma linha de texto em
   `fg-muted`, não um título de `EmptyState`.
 - **Indisponível**: uma feature que não pode funcionar aqui (a CLI do GitHub está sem login,

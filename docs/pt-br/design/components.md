@@ -167,9 +167,9 @@ borda `stroke-strong` e um knob `fg-muted` que vira `fg` no hover; ligado é `ac
 
 - `ToggleSwitch` é o switch puro, para uma linha que é ela própria o `<label>`
   (`SettingToggle`, a linha de caminho de um arquivo de regras).
-- `Toggle` adiciona seu próprio label de 14px à direita. Ele deriva o id do input a partir do
-  label, a menos que você passe `id`; passe um quando dois toggles na mesma página tiverem o
-  mesmo label.
+- `Toggle` adiciona seu próprio label de 14px à direita. Ele gera o id do input, então dois
+  toggles com o mesmo label continuam distintos; passe `id` só quando outra coisa precisar
+  referenciar o input.
 - Use um switch para uma configuração que vale na hora, e um checkbox para uma opção num
   formulário ou numa lista.
 - **Acessibilidade.** O input é um checkbox visualmente escondido com `role="switch"`; o
@@ -714,7 +714,8 @@ que não podem seguir os tokens do app) são partes de página, não primitivos.
 têm shell: sign-in, sign-up e onboarding. O `Logo` em 48px (`size-12`) sobre "MangoStudio" a
 14px/500 em `fg-muted`, com 8px entre os dois. É um wordmark, não um título (o título próprio de
 cada página é o seu `h1`), e a marca dentro dele tem `alt` vazio, porque a palavra ao lado já
-nomeia o produto. Not Found e o erro de bootstrap mantêm o logo dentro do card deles.
+nomeia o produto. Not Found mantém o logo dentro do card dele; o erro de bootstrap não tem logo
+e abre com um `CircleX` `danger`.
 
 ## Os Componentes Próprios Do Chat
 
@@ -814,7 +815,7 @@ tem uma linha de header de 2.5rem acima da primeira linha: o rótulo da linguage
 (1rem para dentro) e o botão de copiar à direita (0.5rem para dentro), os dois numa caixa de 28px
 com recuo superior de 0.5rem, para que compartilhem um centro vertical. O rótulo aparece sempre
 e nunca esmaece, porque nunca cobre código. O botão de copiar (`.copy-code-btn`) aparece quando
-o ponteiro está sobre o bloco, e fica visível numa tela que não faz hover. Um trecho sem rótulo
+o ponteiro está sobre o bloco ou quando ele tem o foco do teclado, e fica visível numa tela que não faz hover. Um trecho sem rótulo
 mantém o padding simples de `1em`. O rótulo é posicionado em relação ao bloco, então ele rola
 junto com o código quando um bloco largo rola para o lado. O wrapper da tabela desenha uma
 scrollbar fina sempre visível, com trilho, para que uma tabela cortada na terceira coluna se leia

@@ -116,7 +116,11 @@ describe('ProviderSettingsMenu', () => {
 
     render(<ProviderSettingsMenu />);
 
-    await screen.findByText(/no ai providers available/i);
+    const title = await screen.findByText(/no ai providers available/i);
+    // A settings-page empty state sits in a card and leads with an icon.
+    const card = title.closest('.bg-surface');
+    expect(card).not.toBeNull();
+    expect(card?.querySelector('svg')).not.toBeNull();
   });
 
   it('renders provider cards from API response', async () => {

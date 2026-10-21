@@ -51,7 +51,7 @@ different value in either theme.
 | `control`         | `bg-control`         | `#2f2c27`   | `#ffffff`   | Fill of text fields, Select triggers, secondary buttons, unselected segments, checkbox and radio boxes, the switch and slider tracks, keycaps, the code block's copy button. One step above `surface-raised`, so a field in a dialog is still a field ([decision 19](./decisions.md)). |
 | `control-hover`   | `bg-control-hover`   | `#37342e`   | `#f7f5f1`   | The same controls under the pointer.                                                                                                                                                                                                                                                   |
 | `control-pressed` | `bg-control-pressed` | `#2a2723`   | `#f0ede7`   | Secondary button while pressed. One step darker than `control` in both themes.                                                                                                                                                                                                         |
-| `fill-hover`      | `bg-fill-hover`      | `#fff5e60f` | `#2a1e0a0d` | Hover for anything with no fill of its own: subtle buttons, menu items, sidebar rows, list rows, idle tabs, chips.                                                                                                                                                                     |
+| `fill-hover`      | `bg-fill-hover`      | `#fff5e60f` | `#2a1e0a0d` | Hover for anything with no fill of its own: subtle buttons, menu items, sidebar rows, list rows, idle tabs, chips. Also the static stripe on a markdown table's even rows, a step below its `fill-selected` header.                                                                    |
 | `fill-pressed`    | `bg-fill-pressed`    | `#fff5e608` | `#2a1e0a08` | Pressed state of the `fill-hover` family. A thinner wash than `fill-hover` in both themes.                                                                                                                                                                                             |
 | `fill-selected`   | `bg-fill-selected`   | `#fff5e614` | `#2a1e0a12` | The current item in navigation and lists, an open or pressed chip, inline code, the disabled filled button, skeletons, the neutral `Badge` and `Callout`. Neutral on purpose: the `accent` bar carries the colour.                                                                     |
 
@@ -64,11 +64,11 @@ different value in either theme.
 
 ### Text
 
-| Token       | Utility          | Dark      | Light     | Use                                                                                                                                                                           |
-| ----------- | ---------------- | --------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fg`        | `text-fg`        | `#ece7df` | `#1e1b16` | Primary text and active icons.                                                                                                                                                |
-| `fg-muted`  | `text-fg-muted`  | `#a8a196` | `#5a554c` | Secondary text, descriptions, the key half of a chip, resting icons, the resting `subtle-danger` button. At least 5.4:1 on every surface and on `control`.                    |
-| `fg-subtle` | `text-fg-subtle` | `#9c958a` | `#6b655b` | Placeholders, timestamps, metadata, hints, `.micro-label`. At least 4.6:1 on every surface and on `control`. It is the floor for text: never fade text with opacity below it. |
+| Token       | Utility          | Dark      | Light     | Use                                                                                                                                                                                                                                                                   |
+| ----------- | ---------------- | --------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fg`        | `text-fg`        | `#ece7df` | `#1e1b16` | Primary text and active icons.                                                                                                                                                                                                                                        |
+| `fg-muted`  | `text-fg-muted`  | `#b0a99e` | `#5a554c` | Secondary text, descriptions, the key half of a chip, resting icons, the resting `subtle-danger` button. At least 5.9:1 on every surface and on `control`, 5.3:1 on `control-hover`; a clear step above `fg-subtle`.                                                  |
+| `fg-subtle` | `text-fg-subtle` | `#a29b91` | `#6b655b` | Placeholders, timestamps, metadata, hints, `.micro-label`. At least 4.5:1 on every surface, on `control` and `control-hover`, and on every `*-subtle` and `fill-*` wash over `canvas` and `surface`. It is the floor for text: never fade text with opacity below it. |
 
 ### Accent (mango)
 
@@ -120,18 +120,21 @@ reads yellow beside the pink danger wash and is lighter, so `fg-subtle` (4.9:1) 
 | `on-scrim-media`     | `text-on-scrim-media`   | `#ffffff`   | `#ffffff`   | Text, icons and the focus ring on `scrim-media`. White in both themes.                                                                                                                                                                                              |
 | `fill-media-hover`   | `bg-fill-media-hover`   | `#ffffff29` | `#ffffff29` | Hover fill of a control laid on `scrim-media` (the lightbox's Close, a tile's download): `on-scrim-media` at 16%. Unthemed, like the veil. Applied through `MEDIA_CONTROL_CLASS` in `features/gallery/components/media-control.ts` ([decision 23](./decisions.md)). |
 | `fill-media-pressed` | `bg-fill-media-pressed` | `#ffffff3d` | `#ffffff3d` | Pressed fill of a control on `scrim-media`: `on-scrim-media` at 24%.                                                                                                                                                                                                |
-| `agent-mango`        | `bg-agent-mango`        | `#f5a623`   | `#a86400`   | MangoStudio's own runner: the dot, the composer border, the prompt mark. The light value is darkened to `#a86400` because the composer draws it as text on `surface` (4.7:1).                                                                                       |
-| `agent-claude`       | `bg-agent-claude`       | `#e0836a`   | `#b9553a`   | Claude Code runner identity.                                                                                                                                                                                                                                        |
-| `agent-codex`        | `bg-agent-codex`        | `#5cc8e8`   | `#1f7a99`   | Codex runner identity.                                                                                                                                                                                                                                              |
-| `agent-cursor`       | `bg-agent-cursor`       | `#a78bfa`   | `#6d4fd8`   | Cursor runner identity.                                                                                                                                                                                                                                             |
-| `agent-generic`      | `bg-agent-generic`      | `#8b8579`   | `#736d63`   | A runner with no identity of its own.                                                                                                                                                                                                                               |
+| `agent-mango`        | `bg-agent-mango`        | `#f5a623`   | `#955900`   | MangoStudio's own runner: the dot, the composer border, the prompt mark. The light value is darkened to `#955900` because it is also read as text (see below).                                                                                                      |
+| `agent-claude`       | `bg-agent-claude`       | `#e0836a`   | `#a64c34`   | Claude Code runner identity.                                                                                                                                                                                                                                        |
+| `agent-codex`        | `bg-agent-codex`        | `#5cc8e8`   | `#1c6f8b`   | Codex runner identity.                                                                                                                                                                                                                                              |
+| `agent-cursor`       | `bg-agent-cursor`       | `#a78bfa`   | `#6b4dd8`   | Cursor runner identity.                                                                                                                                                                                                                                             |
+| `agent-generic`      | `bg-agent-generic`      | `#9a958a`   | `#6b665d`   | A runner with no identity of its own.                                                                                                                                                                                                                               |
 
 `lib/agent-identity.ts` maps each runner to its token in two forms: a `bg-agent-*`
 class for its dot (`dotClass`) and a `var(--color-agent-*)` reference (`colorVar`).
 The `var()` form is read in inline styles (the composer accent through
 `features/chat/lib/composer-accent.ts`, the turn separator), which Tailwind does not
 scan. That is why the theme is `@theme static`: a plain `@theme` would drop those
-tokens from the dark default.
+tokens from the dark default. Both read the colour as text (the prompt mark on
+`surface`, the separator's monogram on `fill-selected` over the chat), so every
+`agent-*` value clears 4.5:1 on `surface` and on `fill-selected` over `canvas` and
+`surface` in both themes; the light ones are darker than a dot alone would need.
 
 ### Which surface, which fill
 

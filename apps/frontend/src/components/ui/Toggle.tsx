@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes } from 'react';
+import { type InputHTMLAttributes, useId } from 'react';
 
 type ToggleSwitchProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>;
 
@@ -54,7 +54,8 @@ interface ToggleProps extends ToggleSwitchProps {
 
 /** The preference switch with its label to the right. */
 export function Toggle({ label, id, ...props }: ToggleProps) {
-  const inputId = id ?? label.toLowerCase().replace(/\s+/g, '-');
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
 
   return (
     <label htmlFor={inputId} className="inline-flex cursor-pointer items-center gap-3">

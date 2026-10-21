@@ -3,7 +3,7 @@
 O MangoStudio é uma ferramenta de trabalho: as pessoas passam horas nele conversando com
 agentes, lendo diffs e rodando comandos. A interface é **flat, calma e previsível**
 (superfícies sólidas, uma cor de destaque, linhas finas) para que as mesmas telas possam ser
-redesenhadas em WinUI 3 ou GTK 4 / libadwaita e ainda pareçam um só produto.
+redesenhadas em WinUI 3, GTK 4 / libadwaita ou AppKit e ainda pareçam um só produto.
 
 Esta pasta espelha [`docs/design/`](../../design/README.md). Em caso de divergência, vale a
 versão em inglês: é ela que os testes leem.
@@ -23,7 +23,7 @@ versão em inglês: é ela que os testes leem.
    decisão numerada por vez. Uma decisão muda com uma entrada nova, nunca editando uma
    antiga.
 6. [`native-ports.md`](./native-ports.md): como cada token e componente se traduz para
-   WinUI 3 e libadwaita.
+   WinUI 3, libadwaita e AppKit (macOS).
 7. [`migration.md`](./migration.md): o vocabulário antigo e o novo, como o teste
    de conformidade funciona e como adicionar uma exceção.
 

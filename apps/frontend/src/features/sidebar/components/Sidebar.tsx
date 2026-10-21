@@ -51,7 +51,7 @@ import { NavItem } from './NavItem';
 /**
  * Below this a chat row's metadata is two glyphs — the git badge's branch icon
  * and the runner's dot; from here up it has room for the words beside them, the
- * branch name and the runner's name. 264px (the default) and the 240px minimum
+ * branch name and the runner's name. 256px (the default) and the 240px minimum
  * are the narrow case on purpose: a branch squeezed to "c…" is worse than none,
  * and every character the metadata keeps is one the chat title loses. The words
  * stay in the document at every width, so search and screen readers read them.

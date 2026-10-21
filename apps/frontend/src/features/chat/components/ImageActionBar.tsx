@@ -8,7 +8,7 @@ interface ImageActionBarProps {
 
 /**
  * The bar of actions that surfaces over an image while it is hovered or holds
- * focus. A floating surface, so it is solid `surface-raised` with a hairline and
+ * focus, and stays at rest on touch, which cannot hover. A floating surface, so it is solid `surface-raised` with a hairline and
  * the popover shadow — never a frosted panel over the picture.
  *
  * The caller owns the positioning context: wrap the image and this bar in a
@@ -20,7 +20,7 @@ export function ImageActionBar({ children, className }: ImageActionBarProps) {
   return (
     <div
       className={cn(
-        'absolute inset-x-3 bottom-3 flex items-center justify-between gap-2 rounded-md border border-stroke bg-surface-raised p-1 opacity-0 shadow-popover transition-opacity group-focus-within:opacity-100 group-hover:opacity-100',
+        'absolute inset-x-3 bottom-3 flex items-center justify-between gap-2 rounded-md border border-stroke bg-surface-raised p-1 opacity-0 shadow-popover transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100',
         className
       )}
     >

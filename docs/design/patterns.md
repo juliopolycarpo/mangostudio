@@ -213,12 +213,11 @@ the status colour **with** a word. Colour alone is never the signal.
 ## Empty, loading and error
 
 - **Empty**: `EmptyState` with an `ICON_LG` icon, what is missing, and how to get some.
-  On a settings page it sits in a `Card padded={false}`. Offer the way out once: either
-  as the empty state's own `action` (a `secondary` `sm` button with a `Plus` at
-  `ICON_SM`), in which case the header button that does the same thing is not drawn while
-  it shows (Connectors, Custom rules, Agents), or by the header button alone with no
-  action in the empty state (MCP servers). Where there is nothing to do (Logs, Metrics)
-  there is no action. A standing fact that is not an empty list (a repository with only
+  On a settings page it sits in a `Card padded={false}`. Offer the way out once, as the
+  empty state's own `action` (a `secondary` `sm` button with a `Plus` at `ICON_SM`); the
+  header button that does the same thing is not drawn while it shows (Connectors, Custom
+  rules, Agents, MCP servers). Where there is nothing to do (Logs, Metrics) there is no
+  action. A standing fact that is not an empty list (a repository with only
   its main worktree) is one line of `fg-muted` text, not an `EmptyState` title.
 - **Unavailable**: a feature that cannot work here (the GitHub CLI is signed out,
   terminals are switched off) is not an empty list. It is a `Callout`, `warning` when the

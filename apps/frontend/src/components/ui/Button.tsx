@@ -78,7 +78,9 @@ export function buttonClassName(variant: ButtonVariant = 'primary', size: Button
 /**
  * The one button. Heights are the platform's own rhythm (28/32/40px), weight is
  * 500, and nothing about it floats: no shadow, no scale on press, no glow in
- * the variant's colour. Hover and press change only the fill.
+ * the variant's colour. Hover and press change only the fill, except on
+ * `subtle-danger`, whose text also turns `danger` on hover, keyboard focus and press
+ * (decision 22).
  *
  * // Usage: <Button variant="secondary" size="sm">{t.common.cancel}</Button>
  */

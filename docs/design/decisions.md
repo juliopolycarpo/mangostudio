@@ -269,8 +269,9 @@ code blocks and under the copy button, and a floating or overlaid control must s
 **Consequence:** dark `control` is `#2f2c27` and `control-hover` `#37342e`, one step above the
 dialog body; `control-pressed` takes the old resting value, one step darker. A lighter fill
 costs the lines and text drawn on it, so dark `stroke-strong` rises to `#857f73` (3:1 on
-`control` and its hover) and dark `fg-subtle` to `#9c958a` (placeholders stay above 4.5:1 on
-`control`). Both only get lighter on a dark surface, so nothing else loses contrast.
+`control` and its hover) and dark `fg-subtle` to `#a29b91` (placeholders stay above 4.5:1 on
+`control` and `control-hover`), with dark `fg-muted` at `#b0a99e` so it stays a clear step
+above. All three only get lighter on a dark surface, so nothing else loses contrast.
 
 ## 20. The light warning wash is amber
 

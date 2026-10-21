@@ -259,6 +259,7 @@ export function McpServerForm({
           min={1}
           value={state.timeoutMs}
           onChange={(e) => patch({ timeoutMs: e.target.value })}
+          className="w-32 text-center"
         />
       </SettingsField>
 

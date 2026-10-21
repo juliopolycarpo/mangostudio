@@ -18,7 +18,7 @@ interface TodoRailPanelProps {
  * The bar is the context ring's gauge, not an accent: mango marks the primary
  * action, the current item and focus, and the in-progress task's own glyph in
  * the list already is the current item. The fill is `fg-muted` on the `stroke`
- * hairline (4.9:1 dark, 5.6:1 light), and `success` once every task is done.
+ * hairline (5.5:1 in both themes), and `success` once every task is done.
  */
 export function TodoRailPanel({ todos }: TodoRailPanelProps) {
   const { t } = useI18n();

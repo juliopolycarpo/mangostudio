@@ -164,7 +164,7 @@ export function Select({
                       onMouseEnter={() => setActiveIndex(index)}
                       className={cn(
                         'flex min-h-8 w-full items-start justify-between gap-2 rounded-sm px-2 py-1.5 text-left text-sm transition-colors',
-                        'disabled:cursor-not-allowed disabled:opacity-40',
+                        'disabled:cursor-not-allowed disabled:opacity-50',
                         index === activeIndex && !option.disabled && 'bg-fill-hover',
                         isSelected && 'bg-fill-selected'
                       )}

@@ -11,10 +11,7 @@ interface SettingsSectionHeaderProps {
 
 /**
  * The heading of a group of settings: a 16px/600 title, an optional description
- * in `fg-muted`, and an action on the right. Used by `SettingsSection`; on its
- * own it heads a list of cards that are not one card (servers, keys).
- *
- * // Usage: <SettingsSectionHeader title={s.keysTitle} action={<Button size="sm">…</Button>} />
+ * in `fg-muted`, and an action on the right. `SettingsSection`'s header.
  */
 function SettingsSectionHeader({ title, description, action }: SettingsSectionHeaderProps) {
   return (
