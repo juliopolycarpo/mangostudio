@@ -286,7 +286,12 @@ export function Sidebar({
         </div>
 
         <div className="mb-2 flex items-center gap-2 px-3">
-          <Button variant="primary" onClick={onNewChat} className="flex-1 justify-between">
+          <Button
+            variant="primary"
+            onClick={onNewChat}
+            className="flex-1 justify-between"
+            data-testid="sidebar-new-chat"
+          >
             <span className="flex items-center gap-2">
               <Plus size={ICON_MD} />
               <span>{t.chat.newChat}</span>

@@ -23,11 +23,12 @@ test('typing in the terminal panel runs a real command', async ({ page }) => {
   await dismissWorkdirPicker(page);
 
   // The rail only exists on the chat surface; open a chat when the landing
-  // did not already do so. Scoped to `main` because the sidebar carries a
-  // second button with the same label.
+  // did not already do so. From `md` up the sidebar carries "New chat" and the
+  // header's copy is hidden. By test id, because an untitled chat's row in the
+  // sidebar list is a button with the same name.
   const railButton = page.getByRole('button', { name: 'Show Terminal panel' });
   if (!(await railButton.isVisible())) {
-    await page.getByRole('main').getByRole('button', { name: 'New chat' }).click();
+    await page.getByTestId('sidebar-new-chat').click();
     await dismissWorkdirPicker(page);
   }
   await expect(railButton).toBeVisible({ timeout: 15_000 });
