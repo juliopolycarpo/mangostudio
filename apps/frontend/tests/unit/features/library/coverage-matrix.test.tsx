@@ -16,23 +16,23 @@ import { fullCoverage, instance, location, resource, TARGETS } from './fixtures'
 
 /**
  * happy-dom reports every element as zero-sized, and the row virtualizer measures
- * the scroll container with `offsetHeight`. Without a height it computes an
+ * the scroll container with `clientHeight`. Without a height it computes an
  * empty window and renders no rows, so the box is stubbed for this file only.
  */
 const VIEWPORT_HEIGHT_PX = 600;
-let offsetHeightDescriptor: PropertyDescriptor | undefined;
+let clientHeightDescriptor: PropertyDescriptor | undefined;
 
 beforeAll(() => {
-  offsetHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+  clientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
     configurable: true,
     get: () => VIEWPORT_HEIGHT_PX,
   });
 });
 
 afterAll(() => {
-  if (offsetHeightDescriptor) {
-    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeightDescriptor);
+  if (clientHeightDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', clientHeightDescriptor);
   }
 });
 

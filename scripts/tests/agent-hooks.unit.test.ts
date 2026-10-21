@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative, resolve } from 'node:path';
@@ -20,6 +20,7 @@ import {
   shouldSkipFile,
 } from '../../.codex/hooks/auto-fix.mjs';
 import { fixtureChildEnvironment } from './support/child-supervision';
+import { FormatterClock, HangingFormatter } from './support/fake-formatter-deadline';
 import {
   GRANDCHILD_ENV,
   grandchildMarker,
@@ -55,7 +56,7 @@ async function readMarker(marker: string, who: string) {
   const text = await readFile(marker, 'utf8').catch(() => {
     throw new Error(`${who} never started | expected: a marker at ${marker} | received: none`);
   });
-  return JSON.parse(text) as { args: string[]; cwd: string; pid: number };
+  return JSON.parse(text) as { args: string[]; cwd: string; pid: number; startedAt: number };
 }
 
 /**
@@ -112,14 +113,41 @@ describe('agent auto-fix hooks', () => {
     if (fakeRustfmtBin) await rm(fakeRustfmtBin, { recursive: true, force: true });
   });
 
-  /** The environment of a hook whose rustfmt hangs and starts a grandchild. */
-  const hangingFormatterEnv = (marker: string) => ({
-    // The hook must stop rustfmt itself; inherited --no-orphans would mask a leak.
-    ...fixtureChildEnvironment(),
-    PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
-    [MARKER_ENV]: marker,
-    [HANG_ENV]: '1',
-    [GRANDCHILD_ENV]: '0',
+  /**
+   * Put the named formatter first on one PATH entry, including Windows hosts
+   * whose inherited environment spells the key `Path`.
+   * @example
+   * formatterEnvironment(marker, '1'); // hanging formatter and grandchild
+   */
+  const formatterEnvironment = (
+    marker: string,
+    hang = '0',
+    ambient: NodeJS.ProcessEnv = process.env
+  ): NodeJS.ProcessEnv => {
+    const environment = fixtureChildEnvironment(ambient);
+    const path =
+      ambient.PATH ??
+      Object.entries(ambient).find(([key]) => key.toLowerCase() === 'path')?.[1] ??
+      '';
+    for (const key of Object.keys(environment)) {
+      if (key.toLowerCase() === 'path') delete environment[key];
+    }
+    return {
+      ...environment,
+      PATH: `${fakeRustfmtBin}${delimiter}${path}`,
+      [MARKER_ENV]: marker,
+      [HANG_ENV]: hang,
+      [GRANDCHILD_ENV]: '0',
+    };
+  };
+
+  it('gives the fake formatter one PATH when Windows inherits Path', () => {
+    const environment = formatterEnvironment('marker', '0', { Path: 'inherited-path' });
+    expect(environment.Path).toBeUndefined();
+    expect(environment.PATH).toBe(`${fakeRustfmtBin}${delimiter}inherited-path`);
+    expect(Object.keys(environment).filter((key) => key.toLowerCase() === 'path')).toEqual([
+      'PATH',
+    ]);
   });
 
   it('extracts touched files from Claude and Codex hook payloads', () => {
@@ -164,26 +192,70 @@ describe('agent auto-fix hooks', () => {
     expect(await readFile(filePath, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
   });
 
+  it('starts the five-second formatter deadline after cold hook startup', async () => {
+    const dir = join(repoRoot, '.mango', `formatter-clock-${process.pid}`);
+    tempDirs.push(dir);
+    await mkdir(dir, { recursive: true });
+    const filePath = join(dir, 'sample.rs');
+    await writeFile(filePath, 'fn main() {}\n');
+    const clock = new FormatterClock();
+    const formatter = new HangingFormatter(clock);
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(formatter.spawn as typeof Bun.spawn);
+    const spawnSync = spyOn(Bun, 'spawnSync').mockImplementation(
+      formatter.taskkill as typeof Bun.spawnSync
+    );
+    const signal = spyOn(process, 'kill').mockImplementation(formatter.signal);
+    const schedule = spyOn(globalThis, 'setTimeout').mockImplementation(
+      clock.schedule as typeof setTimeout
+    );
+    const cancel = spyOn(globalThis, 'clearTimeout').mockImplementation(
+      clock.cancel as typeof clearTimeout
+    );
+    const running = runAutoFixHook(JSON.stringify({ path: filePath }));
+    try {
+      await formatter.started;
+      expect(formatter.startedAt).toBe(6_000);
+      clock.advance(4_999);
+      expect(
+        formatter.killedAt,
+        'formatter must remain alive until its own five-second deadline'
+      ).toEqual([]);
+      clock.advance(1);
+      expect(formatter.killedAt).toEqual([11_000]);
+      expect(formatter.treeStops).toEqual([process.platform === 'win32' ? 'taskkill' : 'group']);
+      await running;
+    } finally {
+      formatter.release();
+      try {
+        await running;
+      } finally {
+        cancel.mockRestore();
+        schedule.mockRestore();
+        signal.mockRestore();
+        spawnSync.mockRestore();
+        spawn.mockRestore();
+      }
+    }
+  });
+
   it('bounds a formatter that never exits, grandchildren included', async () => {
     const dir = await makeTempDir();
     const marker = join(dir, 'started.json');
     const filePath = join(repoRoot, '.mango', `formatter-timeout-${process.pid}.rs`);
     tempDirs.push(filePath);
     await writeFile(filePath, 'fn main() {}\n');
-    // The formatter deadline includes startup, before the fake can write its marker.
-    const startedAt = performance.now();
     const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
-      env: hangingFormatterEnv(marker),
+      env: formatterEnvironment(marker, '1'),
       stdin: 'pipe',
       stdout: 'ignore',
       stderr: 'pipe',
-      timeout: 8000,
+      // Allow hook startup and Windows tree termination around the 5-second formatter deadline.
+      timeout: 15_000,
     });
     proc.stdin.write(JSON.stringify({ path: filePath }));
     proc.stdin.end();
 
     const exitCode = await proc.exited;
-    const elapsedMs = performance.now() - startedAt;
     const fakes = [
       [marker, 'fake rustfmt'],
       [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
@@ -192,26 +264,36 @@ describe('agent auto-fix hooks', () => {
     try {
       expect(exitCode).toBe(0);
       expect(proc.signalCode).toBeNull();
-      expect(elapsedMs).toBeGreaterThanOrEqual(4500);
-      expect(elapsedMs).toBeLessThan(7000);
       for (const [fakeMarker, who] of fakes) {
         const started = await readMarker(fakeMarker, who);
         expect(started.args).toEqual([filePath]);
         expect(started.cwd).toBe(repoRoot);
         if (await stillBeating(fakeMarker)) leaked.push(started.pid);
+        const lastBeat = JSON.parse(await readFile(heartbeatPath(fakeMarker), 'utf8')) as {
+          at: number;
+        };
+        // Measure the formatter's live interval, excluding cold hook startup. A longer
+        // formatter deadline still fails this bound; both descendants must also stop.
+        expect(
+          lastBeat.at - started.startedAt,
+          `${who}: expected less than 7000ms alive`
+        ).toBeLessThan(7000);
       }
       expect(leaked).toEqual([]);
       expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
     } finally {
-      for (const pid of leaked) {
+      // An earlier assertion must not bypass discovery of either descendant.
+      for (const [fakeMarker, who] of fakes) {
+        const started = await readMarker(fakeMarker, who).catch(() => null);
+        if (!started || !(await stillBeating(fakeMarker))) continue;
         try {
-          process.kill(pid, 'SIGKILL');
+          process.kill(started.pid, 'SIGKILL');
         } catch {
           // Stopped between the heartbeat check and here.
         }
       }
     }
-  }, 10000);
+  }, 20_000);
 
   // Windows has no group signal to forward; Bun's job object ends the hook's children there.
   it.skipIf(process.platform === 'win32')(
@@ -224,7 +306,7 @@ describe('agent auto-fix hooks', () => {
       await writeFile(filePath, 'fn main() {}\n');
       // An agent cancels a hook by signalling the group it started the hook in.
       const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
-        env: hangingFormatterEnv(marker),
+        env: formatterEnvironment(marker, '1'),
         detached: true,
         stdin: 'pipe',
         stdout: 'ignore',
@@ -297,12 +379,7 @@ describe('agent auto-fix hooks', () => {
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, 'sample.rs'), 'fn main() {}\n');
       const proc = Bun.spawn([process.execPath, entrypoint], {
-        env: {
-          ...process.env,
-          PATH: `${fakeRustfmtBin}${delimiter}${process.env.PATH}`,
-          [MARKER_ENV]: marker,
-          [HANG_ENV]: '0',
-        },
+        env: formatterEnvironment(marker),
         stdin: 'pipe',
         stdout: 'ignore',
         stderr: 'ignore',

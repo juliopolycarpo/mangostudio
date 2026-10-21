@@ -10,11 +10,6 @@ is over, and nothing here floats any more.
 Install it with `bun upgrade`, or `curl -fsSL https://bun.sh/install | bash` from
 cold.
 
-`bun-types` is pinned to `1.4.3` through the root override while the `@types/bun`
-wrapper remains at its latest published version, `1.4.2`. Remove that override
-when the wrapper publishes `1.4.3` and the workspace dependency ranges can move
-with it.
-
 ### Two fields name the same toolchain, for two different consumers
 
 | File                            | Value       | Read by                                                    |

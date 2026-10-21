@@ -9,7 +9,7 @@ import type {
   GitWorktreeListResponse,
 } from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RailPanel } from '../../../src/features/workspace/rail/RailPanel';
 import { AppContext } from '../../../src/lib/app-context';
@@ -742,9 +742,12 @@ describe('GitPanel', () => {
     expect(screen.getByText('Loading diff…')).toBeVisible();
     expect(screen.queryByRole('region', { name: 'View diff for src/panel.tsx' })).toBeNull();
 
-    expect(
-      await screen.findByRole('region', { name: 'View diff for src/panel.tsx' })
-    ).toBeVisible();
+    // Await the chunk itself: a cold import can exceed findByRole's deadline.
+    await act(async () => {
+      await import('../../../src/features/workspace/DiffViewer');
+    });
+
+    expect(screen.getByRole('region', { name: 'View diff for src/panel.tsx' })).toBeVisible();
   });
 
   it('opens a line-numbered worktree diff from a changed file', async () => {
@@ -768,8 +771,10 @@ describe('GitPanel', () => {
     render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
 
-    // `findByRole`: the viewer is behind a lazy import that resolves after the click.
-    const diff = await screen.findByRole('region', { name: 'View diff for src/panel.tsx' });
+    await act(async () => {
+      await import('../../../src/features/workspace/DiffViewer');
+    });
+    const diff = screen.getByRole('region', { name: 'View diff for src/panel.tsx' });
     expect(diff).toBeVisible();
     expect(diff).toHaveTextContent('old title');
     expect(diff).toHaveTextContent('new title');
@@ -796,7 +801,9 @@ describe('GitPanel', () => {
 
     render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
-    await screen.findByRole('region', { name: 'View diff for src/panel.tsx' });
+    await act(async () => {
+      await import('../../../src/features/workspace/DiffViewer');
+    });
 
     // The whole header is the tooltip: it truncates to one line like the code rows.
     const header = screen.getByText('@@ -4,2 +4,2 @@ export function Panel() {');
@@ -847,7 +854,10 @@ describe('GitPanel', () => {
     expect(screen.getByText('1234567')).toHaveAttribute('title', '1234567890abcdef');
     expect(screen.queryByText('1234567890abcdef')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /src\/git\.ts/ }));
-    const diff = await screen.findByRole('region', { name: 'View diff for src/git.ts' });
+    await act(async () => {
+      await import('../../../src/features/workspace/DiffViewer');
+    });
+    const diff = screen.getByRole('region', { name: 'View diff for src/git.ts' });
     expect(diff).toBeVisible();
     // The diff names the commit with the same seven characters the list did.
     expect(within(diff).getByText('1234567')).toHaveAttribute('title', '1234567890abcdef');

@@ -28,6 +28,16 @@ if (!marker) {
 }
 const hang = process.env[HANG_ENV] === '1';
 
+writeFileSync(
+  marker,
+  JSON.stringify({
+    args: process.argv.slice(2),
+    cwd: process.cwd(),
+    pid: process.pid,
+    startedAt: performance.timeOrigin + performance.now(),
+  })
+);
+
 if (hang && process.env[GRANDCHILD_ENV] !== '1') {
   Bun.spawn([process.execPath, ...process.argv.slice(2)], {
     env: { ...process.env, [MARKER_ENV]: grandchildMarker(marker), [GRANDCHILD_ENV]: '1' },
@@ -36,12 +46,15 @@ if (hang && process.env[GRANDCHILD_ENV] !== '1') {
     stderr: 'ignore',
   });
 }
-writeFileSync(
-  marker,
-  JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), pid: process.pid })
-);
 
 if (hang) {
   let beat = 0;
-  setInterval(() => writeFileSync(heartbeatPath(marker), String(++beat)), HEARTBEAT_MS);
+  setInterval(
+    () =>
+      writeFileSync(
+        heartbeatPath(marker),
+        JSON.stringify({ beat: ++beat, at: performance.timeOrigin + performance.now() })
+      ),
+    HEARTBEAT_MS
+  );
 }
