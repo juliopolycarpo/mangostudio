@@ -10,6 +10,14 @@ import { GalleryLightbox } from './components/GalleryLightbox';
 import { GalleryTile } from './components/GalleryTile';
 import { useGalleryQuery } from './queries';
 
+/**
+ * Two columns from the phone up, the density of Studio's recent strip, which
+ * draws the same `GalleryTile`: one 358px tile per row made a dozen images a
+ * dozen screens. The skeleton and the loaded grid share it so nothing jumps
+ * when the first page lands.
+ */
+const GALLERY_GRID = 'grid grid-cols-2 gap-3 pb-12 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4';
+
 export function GalleryPage() {
   const [selectedImage, setSelectedImage] = useState<GalleryItem | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
@@ -41,7 +49,7 @@ export function GalleryPage() {
       <h1 className="shrink-0 text-title font-semibold text-fg">{t.gallery.title}</h1>
 
       {status === 'pending' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
+        <div className={GALLERY_GRID}>
           {Array.from({ length: 8 }, (_, index) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
             <Skeleton key={index} className="aspect-square rounded-md" />
@@ -54,7 +62,7 @@ export function GalleryPage() {
           className="flex-1 py-20"
         />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-12">
+        <div className={GALLERY_GRID}>
           {items.map((item) => (
             <GalleryTile key={item.id} item={item} onView={setSelectedImage} />
           ))}

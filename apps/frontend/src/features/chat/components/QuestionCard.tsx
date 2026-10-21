@@ -21,8 +21,6 @@ interface QuestionCardProps {
   onSubmit?: (prompt: string) => void;
 }
 
-const OPTION_LETTERS = ['a', 'b', 'c', 'd'];
-
 /**
  * Interactive card for an ask_user_question tool call: option buttons plus a
  * free-text "own answer" per question, submitted as one user message. Renders
@@ -108,8 +106,9 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
             )}
             {/* The options are one answer to the question above them, so they are
                 a group named by it (and described by the "select one or more"
-                line when that applies): a single-select and a multi-select no
-                longer sound the same. */}
+                line when that applies), and each option's face is a circle or a
+                square: a single-select and a multi-select no longer sound or
+                look the same. */}
             <fieldset
               aria-labelledby={`${idBase}-q${questionIndex}`}
               aria-describedby={
@@ -117,12 +116,12 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
               }
               className="min-w-0 space-y-2"
             >
-              {question.options.map((option, optionIndex) => (
+              {question.options.map((option) => (
                 <ChoiceButton
                   key={option.label}
+                  kind={question.allowMultiple ? 'several' : 'one'}
                   selected={draft?.selectedLabels.includes(option.label) ?? false}
                   disabled={!interactive}
-                  marker={`${OPTION_LETTERS[optionIndex] ?? ''})`}
                   onClick={() =>
                     toggleOption(questionIndex, option.label, question.allowMultiple ?? false)
                   }

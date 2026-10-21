@@ -27,6 +27,7 @@ function items(): CommandItem[] {
       section: 'sessions',
       label: 'Plugin LSP TypeScript',
       hint: 'mango-lsp-store',
+      hintIsPath: true,
       meta: 'an hour ago',
       badge: { label: 'codex', dotClassName: 'bg-agent-codex' },
       run: runs.session,
@@ -43,6 +44,7 @@ function items(): CommandItem[] {
       id: 'environment:local',
       section: 'environments',
       label: 'Local',
+      hint: 'Hub-launched',
       run: runs.environment,
     },
   ];
@@ -273,6 +275,14 @@ describe('command palette filtering', () => {
 
     fireEvent.change(input(), { target: { value: 'chat' } });
     expect(activeOptionLabel()).toContain('New chat');
+  });
+
+  it('sets a folder hint in mono and a hint meant for reading in sans', () => {
+    renderPalette();
+    const session = screen.getByRole('option', { name: /Plugin LSP TypeScript/ });
+    expect(within(session).getByText('mango-lsp-store')).toHaveClass('font-mono');
+    const environment = screen.getByRole('option', { name: /Local/ });
+    expect(within(environment).getByText('Hub-launched')).not.toHaveClass('font-mono');
   });
 
   it('offers the no-results state rather than an empty panel', () => {

@@ -207,8 +207,8 @@ describe('BackupList', () => {
     );
   });
 
-  // "Created 21 minutes ago Contents skill:release Size 911 B Origin Apply" ran
-  // together as one sentence: only a gap divided the pairs, and "Origin Apply"
+  // "Created 21 minutes ago Contents skill:release Size 911 B Origin Propagation" ran
+  // together as one sentence: only a gap divided the pairs, and "Origin Propagation"
   // read as a phrase. A key and a value are two elements.
   it('states each fact as a key and a value, not as one run of words', async () => {
     await renderList([set()]);

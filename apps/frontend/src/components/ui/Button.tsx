@@ -40,12 +40,14 @@ const variantStyles: Record<ButtonVariant, string> = {
   secondary: `border border-stroke bg-control text-fg not-disabled:hover:bg-control-hover not-disabled:active:bg-control-pressed ${DISABLED_TILE}`,
   subtle: `text-fg not-disabled:hover:bg-fill-hover not-disabled:active:bg-fill-pressed ${DISABLED_TEXT}`,
   // A destructive action that is not the final confirmation — "Remove" on a
-  // row, "Revoke" in a list. `danger` text at rest, so the verb reads as
-  // destructive before anyone reaches for it, and a `danger-subtle` fill once
-  // the pointer, the keyboard or a press arrives. Focus is `focus-visible`, not
-  // `focus`: a mouse click leaves a button focused, and the row would stay
-  // tinted after it. A disabled one is greyed: the selector above outranks it.
-  'subtle-danger': `text-danger not-disabled:hover:bg-danger-subtle not-disabled:focus-visible:bg-danger-subtle not-disabled:active:bg-danger-subtle ${DISABLED_TEXT}`,
+  // row, "Revoke" in a list. `fg-muted` at rest, because these repeat: a list
+  // of rows each ending in a red trash can is a column of red that outshouts
+  // the content it sits beside. The verb turns `danger` text on a
+  // `danger-subtle` fill once the pointer, the keyboard or a press reaches it,
+  // which is when it is about to happen. Focus is `focus-visible`, not `focus`:
+  // a mouse click leaves a button focused, and the row would stay tinted after
+  // it. A disabled one is greyed: the selector above outranks it.
+  'subtle-danger': `text-fg-muted not-disabled:hover:bg-danger-subtle not-disabled:hover:text-danger not-disabled:focus-visible:bg-danger-subtle not-disabled:focus-visible:text-danger not-disabled:active:bg-danger-subtle not-disabled:active:text-danger ${DISABLED_TEXT}`,
   // Confirming something that deletes a user's files should not look like
   // confirming anything else.
   danger: `bg-danger-solid text-on-danger not-disabled:hover:brightness-110 ${DISABLED_TILE}`,

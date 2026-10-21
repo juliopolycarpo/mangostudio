@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Input } from '@/components/ui/Input';
 import { SettingsRow } from './SettingsRow';
 
@@ -32,8 +32,18 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * How far along the track `value` sits, 0–1, for the accent fill `.range-field`
+ * paints over the travelled part. An empty range reads as the start.
+ */
+function progress(value: number, min: number, max: number): number {
+  if (max <= min) return 0;
+  return (clamp(value, min, max) - min) / (max - min);
+}
+
+/**
  * A `SettingsRow` whose control is a range slider, optionally paired with a
- * number field. The track is the `.range-input` class from the stylesheet.
+ * number field. The track is `.range-field` around a `.range-input` (see the
+ * stylesheet): the wrapper draws the pill and the accent over its travelled part.
  *
  * // Usage: <SettingsSliderRow id="timeout" label={s.timeoutLabel} readout="30s" value={30} min={5} max={60} onChange={setTimeout} />
  *
@@ -62,17 +72,22 @@ export function SettingsSliderRow({
       aside={readout ? <span className="tabular-nums text-fg-muted">{readout}</span> : undefined}
     >
       <div className="flex items-center gap-4">
-        <input
-          id={id}
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(event) => onChange(Number(event.target.value))}
-          disabled={disabled}
-          className="range-input min-w-0 flex-1"
-        />
+        <div
+          className="range-field min-w-0 flex-1"
+          style={{ '--range-progress': progress(value, min, max) } as CSSProperties}
+        >
+          <input
+            id={id}
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={(event) => onChange(Number(event.target.value))}
+            disabled={disabled}
+            className="range-input"
+          />
+        </div>
         {withNumberInput ? (
           <Input
             type="number"

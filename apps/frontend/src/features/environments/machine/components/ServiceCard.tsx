@@ -57,7 +57,15 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
   return (
     <MachineCard
       title={m.service.title}
-      headline={service.installed ? m.service.installed : m.service.notInstalled}
+      // A supervisor that could not be asked has not said whether the unit is
+      // there, so the headline does not guess; the notice below says why.
+      headline={
+        service.error
+          ? m.service.unknown
+          : service.installed
+            ? m.service.installed
+            : m.service.notInstalled
+      }
       description={`${supervisorLabel(t, service.platform)} · ${service.unitName}`}
       action={
         <Badge variant={isOn ? 'success' : 'neutral'} data-testid="machine-service-state">
@@ -125,7 +133,9 @@ export function ServiceCard({ status, isPending, onInstall, onUninstall }: Servi
                 <Flag on={service.linger} yes={m.service.lingerOn} no={m.service.lingerOff} />
               </MachineFact>
             )}
-            {service.execPath && <MachineFact label={m.service.runs} value={service.execPath} />}
+            {service.execPath && (
+              <MachineFact label={m.service.runs} value={service.execPath} mono />
+            )}
           </MachineFacts>
         )
       )}

@@ -20,10 +20,14 @@ interface PickOneRowProps {
   readonly onCanvas?: boolean;
   /**
    * A choice that is listed but cannot be taken (a distribution another
-   * environment already owns). It stays readable, loses its hover and cannot be
+   * environment already owns, an agent CLI that is signed out). Its name is
+   * information, so nothing fades (decision 17): the glyph keeps its strength,
+   * the name steps from `fg` to `fg-muted`, the hover goes and it cannot be
    * focused, and the cursor says so.
    */
   readonly disabled?: boolean;
+  /** Set on the radio itself, the element that is checked and disabled. */
+  readonly testId?: string;
 }
 
 /**
@@ -51,6 +55,7 @@ export function PickOneRow({
   description,
   onCanvas = false,
   disabled = false,
+  testId,
 }: PickOneRowProps) {
   return (
     <label
@@ -63,7 +68,7 @@ export function PickOneRow({
           : onCanvas
             ? cn('bg-surface', !disabled && 'hover:bg-fill-hover')
             : cn('bg-control', !disabled && 'hover:bg-control-hover'),
-        disabled && 'cursor-not-allowed opacity-50'
+        disabled && 'cursor-not-allowed'
       )}
     >
       <input
@@ -72,17 +77,30 @@ export function PickOneRow({
         checked={checked}
         disabled={disabled}
         onChange={onSelect}
+        data-testid={testId}
         className="sr-only"
       />
       <span className="shrink-0 text-fg-muted" aria-hidden="true">
         {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cn('block truncate text-sm text-fg', checked ? 'font-medium' : null)}>
+        <span
+          className={cn(
+            'block truncate text-sm',
+            disabled ? 'text-fg-muted' : 'text-fg',
+            checked ? 'font-medium' : null
+          )}
+        >
           {title}
         </span>
         {description ? (
-          <span className="block truncate text-xs text-fg-muted">{description}</span>
+          // The line truncates in a narrow tile; the tooltip keeps the whole text reachable.
+          <span
+            className="block truncate text-xs text-fg-muted"
+            title={typeof description === 'string' ? description : undefined}
+          >
+            {description}
+          </span>
         ) : null}
       </span>
     </label>

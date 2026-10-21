@@ -8,7 +8,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { MANGO_IDENTITY } from '@/lib/agent-identity';
 import { formatClockTime } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
-import { deriveTurnIdentity } from '../lib/turn-identity';
+import { agentRunnerName, deriveTurnIdentity } from '../lib/turn-identity';
 import type { TurnStatus } from '../lib/turn-status';
 import { CopyMessageButton } from './CopyMessageButton';
 import { RevertFileChangesButton } from './RevertFileChangesButton';
@@ -95,7 +95,12 @@ export function TurnSeparator({
   // free — and the same resolver feeds both the name and the avatar, so they
   // cannot disagree.
   const agent = identity.kind === 'agent' ? resolve('agent', identity.targetId) : null;
-  const name = agent?.name ?? (identity.kind === 'model' ? identity.name : '');
+  const name =
+    identity.kind === 'agent'
+      ? agent
+        ? agentRunnerName(agent, identity.targetId, t.externalAgents.target)
+        : ''
+      : identity.name;
   // `msg.isGenerating` is only *this session* receiving tokens — a vendor turn
   // reopened mid-flight reads false on reload even though `deriveTurnStatus`
   // still reports `working` from the turn record. The derived phase is what
@@ -125,7 +130,7 @@ export function TurnSeparator({
           <ToolAvatar
             subjectKey={toolSubjectKey('agent', identity.targetId)}
             monogram={agent.monogram}
-            name={agent.name}
+            name={name}
             image={agent.image}
             size="xs"
             className="shrink-0"

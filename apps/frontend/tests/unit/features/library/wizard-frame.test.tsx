@@ -2,8 +2,8 @@
  * The frame both library wizards share, and the selectable row their steps use.
  *
  * What matters here is behaviour a screen reader and a keyboard user depend on:
- * the dialog is named by its title, the current step is announced, the close
- * button closes, and a row is one hit target whether it holds a checkbox or a
+ * the dialog is named by its title, the current step is announced, Escape
+ * closes it, and a row is one hit target whether it holds a checkbox or a
  * radio.
  */
 
@@ -20,7 +20,6 @@ function frame(onClose = () => undefined) {
       title="Propagate gh"
       steps={['Resolve', 'Choose', 'Review']}
       stepIndex={1}
-      closeLabel="Close"
       onClose={onClose}
       notes={<span data-testid="note">Pick one</span>}
       actions={<button type="button">Continue</button>}
@@ -42,14 +41,17 @@ describe('WizardFrame', () => {
     expect(steps[1]).toHaveTextContent('Choose');
   });
 
-  it('keeps the notes and the actions in the footer and closes from the header', async () => {
+  it('keeps the notes and the actions in the footer, and closes on Escape', async () => {
     const onClose = jest.fn();
     frame(onClose);
 
     const footer = screen.getByRole('button', { name: 'Continue' }).closest('footer');
     expect(footer).toContainElement(screen.getByTestId('note'));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    // The footer's Cancel is the way out, so the title line carries no second
+    // close control; the keyboard still has Escape.
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    await userEvent.keyboard('{Escape}');
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

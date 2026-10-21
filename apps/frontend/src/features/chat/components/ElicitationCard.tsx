@@ -12,7 +12,7 @@ import type {
 } from '@mangostudio/shared/mcp';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { FIELD_CLASS } from '@/components/ui/Input';
@@ -177,21 +177,42 @@ function FieldEditor({
   onChange: (value: FieldValue) => void;
 }) {
   const label = field.title ?? field.name;
+  const idBase = useId();
+  const labelId = `${idBase}-label`;
+  const descriptionId = field.description ? `${idBase}-description` : undefined;
+  const hintId = field.kind === 'multi_enum' ? `${idBase}-hint` : undefined;
+  // What the field is described by: its own explanation, then the "select one or
+  // more" line when it takes several — the same wiring `QuestionCard` gives a question.
+  const describedBy = [descriptionId, hintId].filter(Boolean).join(' ') || undefined;
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <p className="font-medium text-fg">{label}</p>
+        <p id={labelId} className="font-medium text-fg">
+          {label}
+        </p>
         {field.required && <span className="text-xs text-fg-muted">{requiredHint}</span>}
       </div>
-      {field.description && <p className="text-xs text-fg-muted">{field.description}</p>}
+      {field.description && (
+        <p id={descriptionId} className="text-xs text-fg-muted">
+          {field.description}
+        </p>
+      )}
 
       {field.kind === 'enum' || field.kind === 'multi_enum' ? (
         <>
           {field.kind === 'multi_enum' && (
-            <p className="text-xs text-fg-muted">{multiSelectHint}</p>
+            <p id={hintId} className="text-xs text-fg-muted">
+              {multiSelectHint}
+            </p>
           )}
-          <div className="space-y-2">
+          {/* One answer to the field above, so a group named by it, as a question's
+              options are. */}
+          <fieldset
+            aria-labelledby={labelId}
+            aria-describedby={describedBy}
+            className="min-w-0 space-y-2"
+          >
             {(field.options ?? []).map((option) => {
               const selected =
                 field.kind === 'multi_enum'
@@ -200,9 +221,9 @@ function FieldEditor({
               return (
                 <ChoiceButton
                   key={option.value}
+                  kind={field.kind === 'multi_enum' ? 'several' : 'one'}
                   selected={selected}
                   disabled={!interactive}
-                  marker="○"
                   onClick={() => {
                     if (field.kind === 'multi_enum') {
                       const current = Array.isArray(value) ? value : [];
@@ -220,13 +241,18 @@ function FieldEditor({
                 </ChoiceButton>
               );
             })}
-          </div>
+          </fieldset>
         </>
       ) : field.kind === 'boolean' ? (
-        <div className="flex gap-2">
+        <fieldset
+          aria-labelledby={labelId}
+          aria-describedby={describedBy}
+          className="flex min-w-0 gap-2"
+        >
           {[true, false].map((option) => (
             <ChoiceButton
               key={String(option)}
+              kind="one"
               selected={value === option}
               disabled={!interactive}
               onClick={() => onChange(option)}
@@ -235,9 +261,11 @@ function FieldEditor({
               {option ? booleanTrue : booleanFalse}
             </ChoiceButton>
           ))}
-        </div>
+        </fieldset>
       ) : (
         <input
+          aria-labelledby={labelId}
+          aria-describedby={describedBy}
           type={
             field.kind === 'number' || field.kind === 'integer'
               ? 'number'

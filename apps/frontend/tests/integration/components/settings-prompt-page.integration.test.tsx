@@ -67,8 +67,15 @@ describe('Settings Prompts Page — Integration', () => {
     expect(props.onAddCustomRule).toHaveBeenCalledTimes(1);
   });
 
-  it('shows injection role and frequency radio groups on fixed rules', () => {
-    const props = createDefaultProps();
+  it('shows injection role and frequency radio groups on fixed rules that are on', () => {
+    const props = {
+      ...createDefaultProps(),
+      promptSettings: {
+        ...DEFAULT_PROMPT_SETTINGS,
+        agentsMd: { ...DEFAULT_PROMPT_SETTINGS.agentsMd, enabled: true },
+        claudeMd: { ...DEFAULT_PROMPT_SETTINGS.claudeMd, enabled: true },
+      },
+    };
     render(<PromptSettings {...props} />);
 
     const radiogroups = screen.getAllByRole('radiogroup');

@@ -54,10 +54,8 @@ describe('ExternalAgentSettingsPage', () => {
 
     // The claim is about this account. Making it while the query is still in
     // flight would tell every user their consents were gone on every page load.
-    expect(screen.queryByText(/have not acknowledged any external agent/i)).toBeNull();
-    expect(
-      await screen.findByText(/have not acknowledged any external agent/i)
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/No external agents acknowledged yet/i)).toBeNull();
+    expect(await screen.findByText(/No external agents acknowledged yet/i)).toBeInTheDocument();
   });
 
   it('withdraws the acknowledgement for the vendor whose row was clicked', async () => {

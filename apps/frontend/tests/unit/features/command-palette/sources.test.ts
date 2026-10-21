@@ -48,10 +48,11 @@ const CHATS: Chat[] = [
   } as Chat['runner']),
 ];
 
-function buildSessions(onSelect = jest.fn()) {
+function buildSessions(onSelect = jest.fn(), chats: Chat[] = CHATS) {
   return sessionCommands({
-    chats: CHATS,
+    chats,
     badgeLabels: en.sidebar.runner,
+    untitledLabel: en.chat.untitled,
     locale: 'en',
     nowMs: NOW,
     onSelect,
@@ -71,7 +72,22 @@ describe('sessionCommands', () => {
     const oldest = buildSessions().at(-1);
     expect(oldest?.badge?.label).toBe('claude');
     expect(oldest?.hint).toBe('mango-lsp-store');
+    // The folder is a path, the one hint set in mono.
+    expect(oldest?.hintIsPath).toBe(true);
     expect(oldest?.meta).toBe('2 days ago');
+  });
+
+  // The stored marker for a chat nobody has named is English, Title Case and
+  // timestamped; a row shows the reader's word for an untitled chat instead.
+  it('names an untitled chat in the reader’s words, and keeps a real title', () => {
+    const untitled = chatFixture('c-untitled', 'New Chat [2026-10-21 14:24]', NOW, {
+      kind: 'external',
+      targetId: 'codex',
+    });
+    const labels = buildSessions(jest.fn(), [untitled, ...CHATS]).map((item) => item.label);
+    expect(labels[0]).toBe(en.chat.untitled);
+    expect(labels).toContain('Plugin LSP TypeScript');
+    expect(labels.join('\n')).not.toContain('[2026-10-21');
   });
 
   it('runs the selection callback with the chat id', () => {
@@ -105,7 +121,7 @@ describe('navigateCommands', () => {
   const items = navigateCommands({ t: en, navigate: jest.fn() });
 
   it('covers the top-level surfaces, every environments tab and every settings tab', () => {
-    const paths = items.map((item) => item.hint);
+    const paths = items.map((item) => item.id.replace(/^navigate:/, ''));
     expect(paths).toContain('/');
     expect(paths).toContain('/home');
     expect(paths).toContain('/gallery');
@@ -122,9 +138,17 @@ describe('navigateCommands', () => {
     expect(items.map((item) => item.label)).toContain('Environments · Health');
   });
 
+  it('prints no raw route beside the label, but still finds a row by its path', () => {
+    expect(items.every((item) => item.hint === undefined)).toBe(true);
+    const mcp = items.find((item) => item.id === 'navigate:/settings/mcp');
+    expect(mcp && scoreCommand(mcp, '/settings/mcp')).not.toBeNull();
+  });
+
   it('navigates to the row it was built from', () => {
     const navigate = jest.fn();
-    const gallery = navigateCommands({ t: en, navigate }).find((item) => item.hint === '/gallery');
+    const gallery = navigateCommands({ t: en, navigate }).find(
+      (item) => item.id === 'navigate:/gallery'
+    );
     gallery?.run();
     expect(navigate).toHaveBeenCalledWith('/gallery');
   });
@@ -217,6 +241,12 @@ describe('actionCommands', () => {
       { kind: 'external', targetId: 'codex' },
       'env-wsl'
     );
+  });
+
+  it('does not print the product name beside every agent profile, but finds them by it', () => {
+    const explore = build().find((item) => item.id === 'action:new-chat-agent:explore');
+    expect(explore?.hint).toBeUndefined();
+    expect(explore && scoreCommand(explore, 'MangoStudio')).not.toBeNull();
   });
 
   /** Agent profiles are the hub's own, so pinning one to a machine would be a lie. */

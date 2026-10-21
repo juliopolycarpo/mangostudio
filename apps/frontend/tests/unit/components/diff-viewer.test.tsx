@@ -28,7 +28,7 @@ function renderViewer() {
   hooks.diff = {
     path: PATH,
     binary: false,
-    diff: '@@ -1,3 +1,3 @@\n context line\n-old line\n+new line\n',
+    diff: '@@ -1,2 +1,2 @@\n context line\n-old line\n+new line\n',
   };
   return render(
     <DiffViewer
@@ -68,5 +68,18 @@ describe('DiffViewer', () => {
     // what this can pin is that the raw theme colour is not applied there.
     expect(styleOf('new line')).not.toContain('#d73a49');
     expect(styleOf('old line')).not.toContain('#d73a49');
+  });
+
+  it('draws exactly the lines the hunk header counts, with no row for the final newline', async () => {
+    const { container } = renderViewer();
+    await flushAsyncRender();
+
+    // `git diff` ends in a newline; the empty string after it once became a
+    // context row numbered one past the hunk.
+    expect(Array.from(container.querySelectorAll('code'), (code) => code.textContent)).toEqual([
+      'context line',
+      'old line',
+      'new line',
+    ]);
   });
 });

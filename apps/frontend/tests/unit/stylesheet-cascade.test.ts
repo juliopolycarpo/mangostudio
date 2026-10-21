@@ -162,4 +162,23 @@ describe('the coarse-pointer touch floor', () => {
     expect(links.length).toBeGreaterThan(0);
     for (const { selector } of links) expect(selector).toContain('.markdown-content a');
   });
+
+  /**
+   * A timeline node hangs half a row below its item's padding. The floor makes a
+   * disclosable step 44px tall on touch, so the row height the node is hung
+   * from has to follow it there, or every dot sits ~10px above its label.
+   */
+  it('raises the timeline row height to the floor it sets', async () => {
+    const css = withoutComments(await Bun.file(STYLESHEETS[0]).text());
+    const floorHeight = css.match(
+      /@media \(pointer: coarse\)\s*\{[^@]*?button[^{]*\{[^}]*min-height:\s*(\d+)px/
+    )?.[1];
+    const rowHeight = css.match(
+      /@media \(pointer: coarse\)\s*\{\s*\.chat-timeline\s*\{[^}]*--timeline-row-height:\s*([\d.]+)rem/
+    )?.[1];
+
+    expect(floorHeight).toBeDefined();
+    expect(rowHeight).toBeDefined();
+    expect(Number(rowHeight) * 16).toBe(Number(floorHeight));
+  });
 });

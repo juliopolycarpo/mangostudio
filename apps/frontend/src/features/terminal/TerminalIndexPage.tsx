@@ -1,6 +1,6 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { TerminalSquare, X } from 'lucide-react';
+import { Plus, TerminalSquare, X } from 'lucide-react';
 import { Suspense, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -41,6 +41,7 @@ export function TerminalIndexPage() {
     unavailable,
     message: unavailableHint,
     tone: unavailableTone,
+    reason: unavailableReason,
   } = useTerminalAvailability(environmentId);
   const sessionsQuery = useTerminalSessionsQuery(environmentId, null);
   const sessions = sessionsQuery.data ?? [];
@@ -48,6 +49,11 @@ export function TerminalIndexPage() {
   // the notice stands alone. With sessions open (the per-user cap is made of
   // them) the list stays reachable and only "New terminal" is refused.
   const showSessions = !(unavailable && sessions.length === 0);
+  // Terminals switched off on the hub are off on every machine, so choosing
+  // another one cannot help: the chip would be an inert control beside the
+  // notice. Every other refusal belongs to this environment, and another one
+  // may well open a terminal.
+  const showEnvironment = !(unavailable && unavailableReason === 'disabled');
   const noSessions = sessionsQuery.isSuccess && sessions.length === 0;
   const openMutation = useOpenTerminalMutation();
   const closeMutation = useCloseTerminalMutation();
@@ -88,7 +94,7 @@ export function TerminalIndexPage() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
+    <div className="flex h-full min-h-0 flex-col gap-6 overflow-y-auto p-4 sm:gap-8 sm:p-6">
       {/* One heading for one section: the page is its list, so a second
           "Sessions" under the title only said the same thing again. The button
           that adds to the list sits beside the machine it adds on. With nothing
@@ -96,11 +102,16 @@ export function TerminalIndexPage() {
           is not drawn: two "New terminal" buttons for one request. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-title font-semibold text-fg">{t.terminal.page.title}</h1>
-        <div className="flex items-center gap-2">
-          <EnvironmentSelector
-            environmentId={environmentId}
-            onEnvironmentChange={changeEnvironment}
-          />
+        {/* One height for the row's controls: the chip is the composer's 24px
+            dialect, and beside a 28px `sm` button the two tops did not line up,
+            so here it takes the button's height. */}
+        <div className="flex items-center gap-2 [&_.composer-chip]:h-7">
+          {showEnvironment ? (
+            <EnvironmentSelector
+              environmentId={environmentId}
+              onEnvironmentChange={changeEnvironment}
+            />
+          ) : null}
           {showSessions && !noSessions ? (
             <Button
               type="button"
@@ -118,7 +129,11 @@ export function TerminalIndexPage() {
       </div>
 
       {unavailable ? (
-        <TerminalUnavailableNotice message={unavailableHint} tone={unavailableTone} />
+        <TerminalUnavailableNotice
+          message={unavailableHint}
+          tone={unavailableTone}
+          reason={unavailableReason}
+        />
       ) : null}
 
       {showSessions ? (
@@ -128,7 +143,14 @@ export function TerminalIndexPage() {
             title={t.terminal.page.noSessions}
             hint={t.terminal.emptyHint}
             action={
-              <Button type="button" onClick={openNewSession} loading={openMutation.isPending}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={openNewSession}
+                loading={openMutation.isPending}
+              >
+                <Plus size={ICON_SM} />
                 {t.terminal.newSession}
               </Button>
             }

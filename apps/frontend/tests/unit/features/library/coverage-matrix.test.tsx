@@ -2,8 +2,8 @@
  * CoverageMatrix: one column per target, and a cell nobody has to decode.
  *
  * The accessible name is asserted alongside the glyph because colour or symbol
- * alone is not an answer — a user who cannot tell ⧉ from ⚠ still has to be able
- * to read the state.
+ * alone is not an answer — a user who cannot tell Shadowed from Differs by its
+ * icon still has to be able to read the state.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -142,6 +142,22 @@ describe('CoverageMatrix', () => {
     // Only the two leading columns are sized. The agents split what is left, so
     // the same header lands in the same place on every tab and for any count.
     expect(columns.slice(2).map((column) => column.className)).toEqual(TARGETS.map(() => ''));
+  });
+
+  // A slug is an identifier: `changelog-writer` broken at its hyphen reads as
+  // two words. It stays on one line, and one too long for the column keeps its
+  // whole name in the tooltip.
+  it('keeps a resource name on one line, with the whole name in its tooltip', async () => {
+    await renderMatrix([resource({ ref: { kind: 'skill', slug: 'changelog-writer' } })]);
+
+    const name = screen.getByRole('link', { name: /changelog-writer/ });
+    // The slug truncates inside a flex link, so the text centres in a row grown
+    // to the 44px touch floor instead of sitting on its top line.
+    const slug = within(name).getByText('changelog-writer');
+    expect(slug).toHaveClass('truncate');
+    expect(slug).not.toHaveClass('break-words');
+    expect(name).toHaveClass('items-center');
+    expect(name).toHaveAttribute('title', 'changelog-writer');
   });
 
   it('never calls an absence "missing"', async () => {

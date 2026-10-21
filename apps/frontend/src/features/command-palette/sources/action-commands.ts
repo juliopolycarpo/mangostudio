@@ -144,7 +144,10 @@ export function actionCommands({
       id: `action:new-chat-agent:${agent.id}`,
       section: 'actions',
       label: formatMessage(labels.newChatWith, { runner: agent.name }),
-      hint: t.library.targets.mangostudio,
+      // Not shown: every agent profile is MangoStudio's own, so the product's
+      // name on each of these rows told the reader nothing. Still searchable,
+      // so typing it lists them.
+      keywords: t.library.targets.mangostudio,
       icon: Plus,
       run: () => onNewChatWithRunner({ kind: 'mangostudio', agentId: agent.id }),
     });

@@ -9,19 +9,21 @@ import { formatTokensCompact } from '@/lib/format-tokens';
 
 interface ExternalTurnFooterProps {
   part: ExternalTurnPart;
-  isStreaming: boolean;
 }
 
 /**
- * What the vendor spent and why the turn stopped.
+ * What the vendor spent, and what went wrong if anything did.
  *
  * Usage renders only the fields the vendor reported, and no total is computed
  * from them: an adapter reports what its vendor reports, and a sum MangoStudio
  * invented would read as the vendor's own number. Cost is out of scope entirely.
  *
- * // Usage: <ExternalTurnFooter part={externalTurn} isStreaming={isStreaming} />
+ * Why the turn ended is not said here: it is the turn's closing line
+ * (`AssistantMessageBlock`), the same row that closes every other turn.
+ *
+ * // Usage: <ExternalTurnFooter part={externalTurn} />
  */
-export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProps) {
+export function ExternalTurnFooter({ part }: ExternalTurnFooterProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.turn;
   const usage = part.usage;
@@ -38,12 +40,7 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
       ).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
     : [];
 
-  const terminalNotice =
-    part.status === 'terminal' && part.terminalReason && part.terminalReason !== 'completed'
-      ? labels.terminal[part.terminalReason]
-      : null;
-
-  if (fields.length === 0 && !terminalNotice && !part.error && !part.conversationReset) return null;
+  if (fields.length === 0 && !part.error && !part.conversationReset) return null;
 
   // An error the hub can present is shown the way the selector shows the same state: its words,
   // the sign-in command to copy, or the install and update link. Two sources name it: the reason
@@ -85,9 +82,6 @@ export function ExternalTurnFooter({ part, isStreaming }: ExternalTurnFooterProp
           <span className="font-mono">{part.error.code}</span>
           {` — ${part.error.message}`}
         </Callout>
-      ) : null}
-      {terminalNotice && !isStreaming ? (
-        <p className="text-xs text-fg-muted">{terminalNotice}</p>
       ) : null}
     </div>
   );

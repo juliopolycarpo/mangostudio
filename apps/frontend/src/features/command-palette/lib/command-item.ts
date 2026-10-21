@@ -36,10 +36,15 @@ export interface CommandItem {
   readonly section: CommandSection;
   readonly label: string;
   /**
-   * Dim secondary text beside the label — a folder, a route, a hostname.
+   * Dim secondary text beside the label — a folder, an account, a transport.
    * Searchable: whatever a row shows, a user can type.
    */
   readonly hint?: string;
+  /**
+   * True when the hint is a path (a chat's folder), which is set in mono. Every
+   * other hint is a word for a person to read, and prose is never mono.
+   */
+  readonly hintIsPath?: boolean;
   /** Right-aligned dim text — a relative time, a connection state. */
   readonly meta?: string;
   /**

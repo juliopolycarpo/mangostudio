@@ -13,6 +13,7 @@
  * on this, never the session list.
  */
 
+import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTerminalAvailabilityQuery } from './services/terminal-service';
 import { unavailableMessage, unavailableTone } from './unavailable-message';
@@ -20,6 +21,11 @@ import { unavailableMessage, unavailableTone } from './unavailable-message';
 export interface TerminalAvailabilityState {
   /** The environment refused another session, and the query has actually answered. */
   readonly unavailable: boolean;
+  /**
+   * Why the environment refused, for a caller that offers a way out of one
+   * reason in particular (the rail links to `/terminal` at the per-user cap).
+   */
+  readonly reason: TerminalRefusalReason;
   /** Localized refusal, safe to render whenever `unavailable` is true. */
   readonly message: string;
   /** How the refusal is drawn: `info` for standing policy, `warning` for anything actionable. */
@@ -39,6 +45,7 @@ export function useTerminalAvailability(environmentId: string | null): TerminalA
 
   return {
     unavailable: query.isSuccess && !query.data.available,
+    reason,
     message: unavailableMessage(t, reason),
     tone: unavailableTone(reason),
   };

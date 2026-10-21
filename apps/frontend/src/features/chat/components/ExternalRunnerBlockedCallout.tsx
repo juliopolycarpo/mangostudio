@@ -2,7 +2,9 @@ import type {
   ExternalAgentDescriptor,
   ExternalAgentUnavailableReason,
 } from '@mangostudio/shared/external-agents';
+import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { promptExternalDisclosure } from '@/features/external-agents/disclosure-prompt';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
@@ -41,9 +43,18 @@ function reasonFor(
  * the vendor's sign-in command to copy, or the link to where the install and
  * update recipes live. Neither runs anything; both are for the user to act on.
  *
- * A reason with no control to offer (a machine another person administers, a
- * notice that has to be read first) says only what is wrong. The one thing left
- * to suggest, when the agent may simply not be reachable yet, is another runner.
+ * A notice that has to be read first is the one block this screen can clear
+ * itself: "Read the notice" opens the same third-party notice the send path
+ * raises (`ExternalDisclosureGate`, already mounted by the layout), which records
+ * the acknowledgement and refreshes the descriptors, so the composer unlocks the
+ * moment it is accepted. Every action here is a `secondary` small button — the
+ * notice's one control, the way the MCP error's "Retry" is — so the action slot
+ * reads the same whatever the reason, and never as a hyperlink floating at the
+ * band's edge.
+ *
+ * A reason with no control to offer (a machine another person administers) says
+ * only what is wrong. The one thing left to suggest, when the agent may simply
+ * not be reachable yet, is another runner.
  *
  * // Usage: <ExternalRunnerBlockedCallout descriptor={externalDescriptor} />
  */
@@ -57,6 +68,10 @@ export function ExternalRunnerBlockedCallout({ descriptor }: ExternalRunnerBlock
       ? (descriptor?.loginCommand ?? (remedy?.kind === 'sign-in' ? remedy.command : undefined))
       : undefined;
   const hasRemedyLink = remedy?.kind === 'install' || remedy?.kind === 'update';
+  const disclosure =
+    reason === 'disclosure-required' && descriptor
+      ? { targetId: descriptor.targetId, environmentId: descriptor.environmentId }
+      : null;
   // `disclosure-required` is its own instruction: the title already says to read
   // the notice, and suggesting another runner would point away from the fix.
   const suggestsAnotherRunner = !loginCommand && !hasRemedyLink && reason !== 'disclosure-required';
@@ -81,7 +96,20 @@ export function ExternalRunnerBlockedCallout({ descriptor }: ExternalRunnerBlock
           ? externalUnavailableText(reason, t, descriptor?.requiredVersion)
           : t.externalAgents.selector.unavailableHere
       }
-      action={hasRemedyLink && remedy ? <ExternalRemedyLink remedy={remedy} /> : undefined}
+      action={
+        disclosure ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => void promptExternalDisclosure(disclosure)}
+          >
+            {t.externalAgents.remedy['accept-disclosure']}
+          </Button>
+        ) : hasRemedyLink && remedy ? (
+          <ExternalRemedyLink remedy={remedy} variant="secondary" />
+        ) : undefined
+      }
     >
       {body}
     </Callout>

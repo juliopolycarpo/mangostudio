@@ -1,5 +1,5 @@
 import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared/types';
-import { Download, Image, ImageOff, Sparkles } from 'lucide-react';
+import { Download, Image, ImageOff, Timer } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
+import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { DisclosureChevron } from './DisclosureChevron';
@@ -28,8 +29,10 @@ export function GeneratedImagePart({ part }: Props) {
   const promptSnippet =
     part.prompt && part.prompt.length > 80 ? `${part.prompt.slice(0, 80)}…` : part.prompt;
 
+  // How long the picture took to make — not thinking, and not the turn's own
+  // time, which the turn's closing line states under it.
   const generationTimeLabel = part.generationTime
-    ? t.chat.feed.thoughtFor.replace('{time}', part.generationTime)
+    ? formatMessage(t.chat.feed.generatedIn, { time: part.generationTime })
     : null;
 
   const modelLabel = part.modelName ?? null;
@@ -38,7 +41,9 @@ export function GeneratedImagePart({ part }: Props) {
   // its frame is a reserved square (the part carries no dimensions, and the
   // only provider renders 1:1), so at 41rem a square would be 656px tall. The
   // cards that hold text end where the prose bubble does; this one holds a
-  // picture and is sized by it.
+  // picture and is sized by it. The frame is the card's own surface rather than
+  // a canvas well: a picture that is not square letterboxes into the card, not
+  // into a darker hole that read as still loading.
   if (part.status === 'completed' && part.imageUrl && !loadError) {
     const imageUrl = part.imageUrl;
 
@@ -65,8 +70,8 @@ export function GeneratedImagePart({ part }: Props) {
                 <div className="flex flex-wrap items-center gap-2 px-3 pb-2">
                   {modelLabel && <Chip>{modelLabel}</Chip>}
                   {generationTimeLabel && (
-                    <span className="flex items-center gap-1 font-mono text-micro text-fg-subtle">
-                      <Sparkles size={ICON_SM} />
+                    <span className="flex items-center gap-1.5 font-mono text-micro text-fg-subtle">
+                      <Timer size={ICON_SM} aria-hidden="true" className="shrink-0" />
                       {generationTimeLabel}
                     </span>
                   )}
@@ -77,7 +82,6 @@ export function GeneratedImagePart({ part }: Props) {
                 <ReservedAspectImage
                   src={imageUrl}
                   alt={t.chat.feed.generatedImageAlt}
-                  className="bg-canvas"
                   objectFit="contain"
                   onLoadError={() => setLoadError(true)}
                 />

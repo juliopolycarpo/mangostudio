@@ -16,7 +16,6 @@ import {
 import { Badge } from '@/components/ui/Badge';
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
-import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
@@ -24,7 +23,7 @@ import { formatPlan } from '../lib/format-plan';
 import { isReadOnlySharedConnector } from '../lib/shared-connector';
 import { ChatGptPromoChip } from './ChatGptPromoChip';
 
-interface ConnectorCardProps {
+interface ConnectorRowProps {
   connector: Connector;
   onConfigure: (connector: Connector) => void;
   onDelete: (connector: Connector) => void;
@@ -44,12 +43,18 @@ function MetaDot({ collapsible = false }: { collapsible?: boolean }) {
   );
 }
 
-export function ConnectorCard({
+/**
+ * One connector as a row of the page's connector card: the same `px-4 py-3`
+ * inset as a `SettingsRow`, with the `stroke` between rows drawn by the
+ * `SettingsSection` that holds them. Notes about this connector (sign in again,
+ * deprecated) stay inside its row, under the line they qualify.
+ */
+export function ConnectorRow({
   connector: c,
   onConfigure,
   onDelete,
   onReauthenticated,
-}: ConnectorCardProps) {
+}: ConnectorRowProps) {
   const { t } = useI18n();
   const s = t.settings.connectors;
   const isReadOnlyShared = isReadOnlySharedConnector(c);
@@ -84,7 +89,7 @@ export function ConnectorCard({
   }[c.source];
 
   return (
-    <Card padded={false} className="space-y-3 p-4">
+    <div className="space-y-3 px-4 py-3">
       {/* Side by side from `sm`. Below it the actions take a row under the
           metadata, so "Models" keeps its word instead of shrinking to a bare
           glyph beside a trash can, and the name and badges keep the full width. */}
@@ -194,6 +199,6 @@ export function ConnectorCard({
       {chatGptOAuth.error ? <Callout tone="danger">{chatGptOAuth.error}</Callout> : null}
       {isDeprecated && <Callout tone="warning">{s.deprecatedConnectorNote}</Callout>}
       {isReadOnlyShared && <p className="text-xs text-fg-subtle">{s.managedExternally}</p>}
-    </Card>
+    </div>
   );
 }

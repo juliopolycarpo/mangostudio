@@ -91,7 +91,7 @@ describe('/terminal route', () => {
 
     render(<TerminalIndexPage />);
 
-    expect(await screen.findByText('No terminals are open for this environment.')).toBeVisible();
+    expect(await screen.findByText('No terminals are open for this environment')).toBeVisible();
   });
 
   // The same empty state the chat's rail panel draws: what is missing, how to
@@ -101,9 +101,7 @@ describe('/terminal route', () => {
 
     render(<TerminalIndexPage />);
 
-    expect(
-      await screen.findByText('Open one to run commands where this environment runs.')
-    ).toBeVisible();
+    expect(await screen.findByText('Open one to run commands in this environment.')).toBeVisible();
     expect(screen.getAllByRole('button', { name: 'New terminal' })).toHaveLength(1);
     expect(screen.queryByRole('heading', { name: 'Sessions' })).toBeNull();
   });
@@ -125,7 +123,7 @@ describe('/terminal route', () => {
     });
 
     render(<TerminalIndexPage />);
-    await screen.findByText('No terminals are open for this environment.');
+    await screen.findByText('No terminals are open for this environment');
     await user.click(screen.getByRole('button', { name: 'New terminal' }));
 
     expect(
@@ -143,7 +141,7 @@ describe('/terminal route', () => {
     fetchScenario.failWithNetworkError('POST', '/api/terminals');
 
     render(<TerminalIndexPage />);
-    await screen.findByText('No terminals are open for this environment.');
+    await screen.findByText('No terminals are open for this environment');
     await user.click(screen.getByRole('button', { name: 'New terminal' }));
 
     expect(await screen.findByText('Could not open a terminal. Try again.')).toBeVisible();
@@ -174,6 +172,8 @@ describe('/terminal route', () => {
         )
       ).toBeVisible()
     );
+    // A refusal that belongs to this environment keeps the chip: another one may work.
+    expect(screen.getByText('Local')).toBeInTheDocument();
   });
 
   it('shows only the notice when the environment refuses and nothing is open', async () => {
@@ -204,8 +204,10 @@ describe('/terminal route', () => {
     expect(screen.queryByRole('heading', { name: 'Sessions' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New terminal' })).not.toBeInTheDocument();
     expect(
-      screen.queryByText('No terminals are open for this environment.')
+      screen.queryByText('No terminals are open for this environment')
     ).not.toBeInTheDocument();
+    // Switched off on the hub is off everywhere, so the environment chip is not drawn either.
+    expect(screen.queryByText('Local')).not.toBeInTheDocument();
   });
 
   it('marks the row whose terminal is open', async () => {

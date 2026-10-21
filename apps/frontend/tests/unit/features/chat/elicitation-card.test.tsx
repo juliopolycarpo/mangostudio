@@ -7,7 +7,7 @@
 
 import { describe, expect, it, jest, mock } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared/types';
-import { fireEvent, render, screen, waitFor } from '../../../support/harness/render';
+import { fireEvent, render, screen, waitFor, within } from '../../../support/harness/render';
 
 const respondMock = jest.fn();
 
@@ -41,6 +41,47 @@ function makePart(overrides: Partial<ElicitationPart> = {}): ElicitationPart {
 }
 
 describe('ElicitationCard', () => {
+  // The same idiom a question card uses: options grouped under the field's own
+  // words, a round face for a pick-one field and a square one for pick-several,
+  // and a free-text field named by its label.
+  it('names each field and draws its options by how many it takes', () => {
+    render(
+      <ElicitationCard
+        part={makePart({
+          fields: [
+            {
+              name: 'tier',
+              title: 'Tier',
+              required: true,
+              kind: 'enum',
+              options: [
+                { value: 'free', label: 'Free' },
+                { value: 'pro', label: 'Pro' },
+              ],
+            },
+            {
+              name: 'regions',
+              title: 'Regions',
+              required: false,
+              kind: 'multi_enum',
+              options: [{ value: 'eu', label: 'EU' }],
+            },
+            { name: 'email', title: 'Email', required: false, kind: 'string' },
+          ],
+        })}
+      />
+    );
+
+    const tier = screen.getByRole('group', { name: 'Tier' });
+    const free = within(tier).getByRole('button', { name: 'Free' });
+    expect(free.querySelector('[data-choice-kind]')).toHaveAttribute('data-choice-kind', 'one');
+    const regions = screen.getByRole('group', { name: 'Regions' });
+    expect(
+      within(regions).getByRole('button', { name: 'EU' }).querySelector('[data-choice-kind]')
+    ).toHaveAttribute('data-choice-kind', 'several');
+    expect(screen.getByRole('textbox', { name: 'Email' })).toBeInTheDocument();
+  });
+
   it('disables a mounted card when the part prop turns terminal', () => {
     const { rerender } = render(<ElicitationCard part={makePart()} />);
     expect(screen.getByRole('button', { name: 'Submit' })).toBeTruthy();

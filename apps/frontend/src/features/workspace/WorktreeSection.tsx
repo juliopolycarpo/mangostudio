@@ -24,6 +24,7 @@ import {
   useGitWorktrees,
   useRemoveWorktree,
 } from './hooks/use-git-state';
+import { shortHash } from './short-hash';
 import { WorktreeAddForm } from './WorktreeAddForm';
 
 type WorktreeLabels = Messages['git']['worktrees'];
@@ -224,7 +225,8 @@ function WorktreeRow({
           {workdirLabel(worktree.path) ?? worktree.path}
         </p>
         <p className="truncate font-mono text-xs text-fg-muted">
-          {worktree.branch ?? labels.detached.replace('{commit}', worktree.head?.slice(0, 8) ?? '')}
+          {worktree.branch ??
+            labels.detached.replace('{commit}', worktree.head ? shortHash(worktree.head) : '')}
         </p>
         <WorktreeBadges worktree={worktree} isCurrent={isCurrent} labels={labels} />
       </div>

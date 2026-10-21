@@ -84,6 +84,37 @@ describe('RemovalWizard after a stale rejection', () => {
   });
 });
 
+describe('RemovalWizard footer on a later step', () => {
+  // The title line has no close button, so every step before the result keeps
+  // Cancel in the footer; Back joins it rather than replacing it.
+  it('keeps Cancel beside Back', async () => {
+    // Its own scenario: a restored one forgets its answers.
+    const own = createFetchScenario()
+      .respondWithJson('GET', '/api/environments', { body: [] })
+      .respondWithJson('POST', '/api/library/removal/preview', { body: preview })
+      .install();
+    const onClose = jest.fn();
+    const user = userEvent.setup();
+
+    await renderWithRouter(
+      <RemovalWizard
+        resourceKeys={['skill:gh']}
+        locationIds={['claude-skills']}
+        onClose={onClose}
+      />
+    );
+
+    await user.click(await screen.findByTestId('removal-row'));
+    await user.click(screen.getByTestId('continue-button'));
+
+    expect(screen.getByRole('button', { name: en.library.wizard.back })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: en.library.wizard.cancel }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    own.restore();
+  });
+});
+
 describe('RemovalWizard footer and title', () => {
   // Every other dialog closes with Cancel then its primary; the first step had no
   // Back to offer and only the header X to leave by.

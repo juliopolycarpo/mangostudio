@@ -48,6 +48,60 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     jest.clearAllMocks();
   });
 
+  // The turn reports a tool-loop stop twice — an event with the numbers, an
+  // error with the sentence. Drawn separately, a red-glyph divider sat directly
+  // above a danger card saying the same thing.
+  it('tells a tool-loop stop once, in the error card, with the event detail', async () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'system_event',
+        event: 'tool_loop_exhausted',
+        detail: 'Reached 25 iterations with 2 pending tool calls',
+      },
+      { type: 'error', text: 'The model exceeded the maximum number of tool interactions.' },
+    ];
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[makeMessage({ parts })]} />);
+    await flushAsyncRender();
+
+    expect(container.querySelectorAll('.chat-timeline-item--divider')).toHaveLength(0);
+    const card = container.querySelector('.chat-timeline-item--card');
+    expect(card).toHaveTextContent('The model exceeded the maximum number of tool interactions.');
+    // The hub's English note is said in the reader's words; the original stays
+    // on the sentence's tooltip for quoting.
+    expect(card).toHaveTextContent('Stopped after 25 rounds of tool calls.');
+    expect(card).not.toHaveTextContent('Reached 25 iterations');
+    expect(
+      screen.getByText('The model exceeded the maximum number of tool interactions.')
+    ).toHaveAttribute('title', 'Reached 25 iterations with 2 pending tool calls');
+  });
+
+  it('keeps an unrecognised tool-loop note off the card face', async () => {
+    const parts: MessagePart[] = [
+      {
+        type: 'system_event',
+        event: 'tool_loop_exhausted',
+        detail: 'stopped after 1000 tool calls',
+      },
+      { type: 'error', text: 'The model exceeded the maximum number of tool interactions.' },
+    ];
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[makeMessage({ parts })]} />);
+    await flushAsyncRender();
+
+    const card = container.querySelector('.chat-timeline-item--card');
+    expect(card).not.toHaveTextContent('stopped after 1000 tool calls');
+  });
+
+  it('still marks a tool-loop stop that has no error card after it', async () => {
+    const parts: MessagePart[] = [
+      { type: 'system_event', event: 'tool_loop_exhausted', detail: 'Reached 25 iterations' },
+    ];
+    const { container } = render(<ChatFeed chatId="chat-1" messages={[makeMessage({ parts })]} />);
+    await flushAsyncRender();
+
+    expect(container.querySelectorAll('.chat-timeline-item--divider')).toHaveLength(1);
+    expect(screen.getByText(/Reached 25 iterations/)).toBeInTheDocument();
+  });
+
   it('renders a single thinking block for a legacy single-thinking part', async () => {
     const parts: MessagePart[] = [
       { type: 'thinking', text: 'single thought' },
@@ -403,7 +457,7 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
       'src',
       '/images/generated-123.png'
     );
-    expect(screen.getByText(/Thought for/)).toBeInTheDocument();
+    expect(screen.getByText('Responded in 1.2s')).toBeInTheDocument();
     expect(screen.getByText('1K')).toBeInTheDocument();
   });
 

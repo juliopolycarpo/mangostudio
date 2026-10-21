@@ -49,16 +49,18 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
     >
       {hub.running && (
         <MachineFacts>
-          {hub.url && <MachineFact label={m.hub.url} value={hub.url} />}
-          {hub.pid !== undefined && <MachineFact label={m.hub.pid} value={String(hub.pid)} />}
+          {hub.url && <MachineFact label={m.hub.url} value={hub.url} mono />}
+          {hub.pid !== undefined && <MachineFact label={m.hub.pid} value={String(hub.pid)} mono />}
           {hub.launch && (
             <MachineFact
               label={m.hub.launchLabel}
-              value={
-                hub.serviceUnit
-                  ? `${launchModeLabel(t, hub.launch)} · ${hub.serviceUnit}`
-                  : launchModeLabel(t, hub.launch)
-              }
+              // How it was started is a phrase; the unit it runs as is a name.
+              value={[
+                { text: launchModeLabel(t, hub.launch) },
+                ...(hub.serviceUnit
+                  ? [{ text: ' · ' }, { text: hub.serviceUnit, code: true }]
+                  : []),
+              ]}
             />
           )}
           {hub.uptimeMs !== undefined && (
@@ -68,9 +70,14 @@ export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCa
             <MachineFact
               label={m.hub.version}
               value={hub.buildSha ? `${hub.version} (${hub.buildSha.slice(0, 7)})` : hub.version}
+              mono
             />
           )}
-          <MachineFact label={m.hub.logFile} value={hub.logFile || m.hub.noLogFile} />
+          <MachineFact
+            label={m.hub.logFile}
+            value={hub.logFile || m.hub.noLogFile}
+            mono={Boolean(hub.logFile)}
+          />
         </MachineFacts>
       )}
     </MachineCard>

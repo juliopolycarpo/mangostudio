@@ -21,10 +21,10 @@ import {
   resumeOnboarding,
 } from '@mangostudio/shared/onboarding';
 import { useState } from 'react';
+import { BrandLockup } from '@/components/layout/BrandLockup';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
-import { Logo } from '@/components/ui/Logo';
 import { Spinner } from '@/components/ui/Spinner';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
@@ -180,8 +180,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
           {/* A wordmark, not a heading: the step's own title is the screen's
               one headline (and its `h1`), and a larger-looking "Welcome to…"
               above it said the same words twice on the first step. */}
-          <Logo className="mx-auto size-12" />
-          <p className="text-sm font-medium text-fg-muted">{t.common.appName}</p>
+          <BrandLockup />
         </header>
 
         <div className="grid gap-6 sm:grid-cols-[13rem_1fr]">
@@ -234,7 +233,7 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
               // From `sm` up the step list beside the card already marks the current
               // step; the line is for the phone, which has no list. Hidden rather
               // than removed, so the card's `space-y` leaves no gap above the title.
-              <p className="font-mono text-micro text-fg-subtle sm:hidden">
+              <p className="text-xs text-fg-muted sm:hidden">
                 {formatMessage(s.progress, {
                   step: String(index + 1),
                   total: String(ONBOARDING_STEP_IDS.length),

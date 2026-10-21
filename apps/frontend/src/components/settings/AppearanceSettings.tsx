@@ -79,8 +79,8 @@ const DIFF_PREVIEW_MODE_I18N_KEYS = {
 const DIFF_PREVIEW_MODES = ['expanded', 'collapsed', 'collapse_older'] as const;
 
 /**
- * Appearance settings page: app theme, code theme, font size, chat density,
- * file change previews.
+ * Appearance settings page: app theme, font size and chat density in one
+ * card, then code theme and file change previews.
  */
 export function AppearanceSettings() {
   const { t } = useI18n();
@@ -103,17 +103,52 @@ export function AppearanceSettings() {
 
   return (
     <SettingsPage title={s.title}>
-      <SettingsSection title={s.appTheme.label} description={s.appTheme.description} padded>
-        <SettingsSegmented<AppTheme>
-          ariaLabel={s.appTheme.label}
-          value={config.appTheme}
-          options={[
-            { value: 'dark', label: s.appTheme.dark },
-            { value: 'light', label: s.appTheme.light },
-            { value: 'system', label: s.appTheme.system },
-          ]}
-          onChange={(appTheme) => setConfig({ appTheme })}
-        />
+      {/* The page's plain choices share one card, one row each, as General's
+          first card does; Code theme and File changes keep their own headed
+          sections because each carries more than a single control. */}
+      <SettingsSection>
+        <SettingsRow label={s.appTheme.label} hint={s.appTheme.description} layout="stacked">
+          <SettingsSegmented<AppTheme>
+            ariaLabel={s.appTheme.label}
+            value={config.appTheme}
+            options={[
+              { value: 'dark', label: s.appTheme.dark },
+              { value: 'light', label: s.appTheme.light },
+              { value: 'system', label: s.appTheme.system },
+            ]}
+            onChange={(appTheme) => setConfig({ appTheme })}
+          />
+        </SettingsRow>
+        <SettingsRow label={s.fontSize.label} hint={s.fontSize.description} layout="stacked">
+          <SettingsSegmented<FontSize>
+            ariaLabel={s.fontSize.label}
+            value={config.fontSize}
+            options={[
+              { value: 'small', label: s.fontSize.small },
+              { value: 'default', label: s.fontSize.default },
+              { value: 'large', label: s.fontSize.large },
+            ]}
+            onChange={(fontSize) => setConfig({ fontSize })}
+          />
+          <p
+            className="mt-3 leading-relaxed text-fg-muted"
+            style={{ fontSize: 'var(--chat-font-size)' }}
+          >
+            {s.fontSize.preview}
+          </p>
+        </SettingsRow>
+        <SettingsRow label={s.chatDensity.label} hint={s.chatDensity.description} layout="stacked">
+          <SettingsSegmented<ChatDensity>
+            ariaLabel={s.chatDensity.label}
+            value={config.chatDensity}
+            options={[
+              { value: 'compact', label: s.chatDensity.compact },
+              { value: 'default', label: s.chatDensity.default },
+              { value: 'comfortable', label: s.chatDensity.comfortable },
+            ]}
+            onChange={(chatDensity) => setConfig({ chatDensity })}
+          />
+        </SettingsRow>
       </SettingsSection>
 
       <SettingsSection title={s.codeTheme.label} description={s.codeTheme.description} padded>
@@ -173,25 +208,6 @@ export function AppearanceSettings() {
         )}
       </SettingsSection>
 
-      <SettingsSection title={s.fontSize.label} description={s.fontSize.description} padded>
-        <SettingsSegmented<FontSize>
-          ariaLabel={s.fontSize.label}
-          value={config.fontSize}
-          options={[
-            { value: 'small', label: s.fontSize.small },
-            { value: 'default', label: s.fontSize.default },
-            { value: 'large', label: s.fontSize.large },
-          ]}
-          onChange={(fontSize) => setConfig({ fontSize })}
-        />
-        <p
-          className="border-t border-stroke pt-4 leading-relaxed text-fg-muted"
-          style={{ fontSize: 'var(--chat-font-size)' }}
-        >
-          {s.fontSize.preview}
-        </p>
-      </SettingsSection>
-
       <SettingsSection title={s.fileChanges.label} description={s.fileChanges.description}>
         <SettingToggle
           label={s.fileChanges.enabled}
@@ -211,19 +227,6 @@ export function AppearanceSettings() {
             />
           </SettingsRow>
         ) : null}
-      </SettingsSection>
-
-      <SettingsSection title={s.chatDensity.label} description={s.chatDensity.description} padded>
-        <SettingsSegmented<ChatDensity>
-          ariaLabel={s.chatDensity.label}
-          value={config.chatDensity}
-          options={[
-            { value: 'compact', label: s.chatDensity.compact },
-            { value: 'default', label: s.chatDensity.default },
-            { value: 'comfortable', label: s.chatDensity.comfortable },
-          ]}
-          onChange={(chatDensity) => setConfig({ chatDensity })}
-        />
       </SettingsSection>
     </SettingsPage>
   );

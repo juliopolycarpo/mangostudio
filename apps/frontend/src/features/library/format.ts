@@ -2,7 +2,7 @@
  * Pure presentation logic for the library surface.
  *
  * Deliberately free of React so the rules that carry the most meaning — which
- * glyph a cell earns, what counts as divergent, what is merely shadowed — can
+ * state a cell earns, what counts as divergent, what is merely shadowed — can
  * be asserted directly instead of through a rendered tree.
  *
  * The vocabulary here never says "missing". A resource Cursor does not have is
@@ -38,16 +38,6 @@ export type CoverageCellState =
   | 'divergent'
   | 'only-here'
   | 'incomparable';
-
-/** Characters carrying each state. Never the only signal — every cell is also labelled. */
-export const CELL_GLYPHS: Readonly<Record<CoverageCellState, string>> = {
-  present: '✓',
-  absent: '—',
-  shadowed: '⧉',
-  divergent: '⚠',
-  'only-here': '★',
-  incomparable: '?',
-};
 
 export interface CoverageCell {
   readonly targetId: LibraryTargetId;
@@ -175,6 +165,30 @@ export function presentTargetCount(resource: LibraryResource): number {
 
 export function coverageCells(resource: LibraryResource): CoverageCell[] {
   return resource.coverage.map((coverage) => coverageCell(resource, coverage));
+}
+
+/**
+ * How a shadowed copy compares with the copy its target actually reads.
+ * `unknown` when either copy has no readable hash, or when the hashes come from
+ * different runtime versions and "identical" would be a guess.
+ */
+export type ShadowedCopyComparison = 'identical' | 'differs' | 'unknown';
+
+/**
+ * Compares one shadowed location's copy with the effective one (the cell's own
+ * hash), for the badge the detail page prints beside that location.
+ *
+ * // Usage: shadowedCopyComparison(resource, cell, 'claude-skills') // 'differs'
+ */
+export function shadowedCopyComparison(
+  resource: LibraryResource,
+  cell: CoverageCell,
+  shadowedLocationId: LibraryLocationId
+): ShadowedCopyComparison {
+  if (resource.divergence === 'incomparable') return 'unknown';
+  const shadowedHash = instanceAt(resource, shadowedLocationId)?.contentHash;
+  if (cell.contentHash === undefined || shadowedHash === undefined) return 'unknown';
+  return cell.contentHash === shadowedHash ? 'identical' : 'differs';
 }
 
 export interface TargetCoverageSummary {

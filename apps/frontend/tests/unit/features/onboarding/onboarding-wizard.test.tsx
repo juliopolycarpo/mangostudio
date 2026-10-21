@@ -290,7 +290,7 @@ describe('OnboardingWizard', () => {
     expect(screen.queryByText(en.onboarding.agents.noneFound)).not.toBeInTheDocument();
   });
 
-  it('keeps the reason a runner is unusable readable instead of fading the whole row', async () => {
+  it('keeps an unusable runner readable instead of fading the row, with a warning that says why', async () => {
     scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
       body: {
         environmentId: 'local',
@@ -313,20 +313,21 @@ describe('OnboardingWizard', () => {
     await waitFor(() => expect(screen.getByTestId('onboarding-step-agents')).toBeInTheDocument());
     await userEvent.click(screen.getByTestId('onboarding-step-agents'));
 
-    const row = await screen.findByTestId('onboarding-runner-codex');
-    expect(row).toBeDisabled();
-    // The row is not faded, and its name stays `fg`: the row the person has to
-    // act on must not read as switched off. Only the dot is dimmed, and the
-    // status line is the one thing worth reading here.
+    const radio = await screen.findByTestId('onboarding-runner-codex');
+    expect(radio).toBeDisabled();
+    const row = radio.closest('label') as HTMLElement;
+    // Nothing fades (decision 17): not the row, and not the identity dot, which
+    // keeps its hue at full strength. The name steps down to `fg-muted`.
     expect(row.className).not.toContain('opacity');
-    expect(within(row).getByText('Codex')).toHaveClass('text-fg');
-    expect(row.querySelector('[data-tone]')).toHaveClass('opacity-40');
-    const reason = within(row).getByText(en.onboarding.agents.signedOut);
-    expect(reason).toHaveClass('text-fg-muted');
-    expect(reason).not.toHaveClass('truncate');
+    const dot = row.querySelector('[data-tone]');
+    expect(dot).toHaveClass('bg-agent-codex');
+    expect(dot?.className).not.toContain('opacity');
+    expect(within(row).getByText('Codex').closest('.text-fg-muted')).not.toBeNull();
+    // Signed out is a state the person can fix, so it is a `warning` badge.
+    expect(within(row).getByText(en.onboarding.agents.signedOut)).toHaveClass('text-warning');
   });
 
-  it('draws the runners as one hairline list and names the agent a sign-in command is for', async () => {
+  it('offers the runners as one radio group and names the agent a sign-in command is for', async () => {
     scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
       body: {
         environmentId: 'local',
@@ -362,16 +363,20 @@ describe('OnboardingWizard', () => {
 
     const claude = await screen.findByTestId('onboarding-runner-claude');
     const codex = screen.getByTestId('onboarding-runner-codex');
-    // Rows divided by hairlines, the way the toolchain step lists its runtimes:
-    // no bordered box per runner.
-    for (const row of [claude, codex]) {
-      expect(row).not.toHaveClass('border');
-      expect(row).not.toHaveClass('bg-control');
-    }
-    expect(claude.closest('ul')).toHaveClass('divide-y', 'divide-stroke');
+    // One choice, so one named radio group holding MangoStudio and every CLI:
+    // radios, not a set of pressed toggles.
+    const group = screen.getByRole('radiogroup', { name: en.onboarding.agents.title });
+    expect(within(group).getAllByRole('radio')).toHaveLength(3);
+    expect(within(group).getByTestId('onboarding-runner-mangostudio')).toHaveAttribute(
+      'type',
+      'radio'
+    );
+    expect(screen.queryByRole('button', { pressed: false })).toBeNull();
+    // Nothing is stored yet, so nothing is shown as chosen.
+    for (const radio of within(group).getAllByRole('radio')) expect(radio).not.toBeChecked();
     // Each is led by the runner's own hue.
-    expect(claude.querySelector('[data-tone]')).toHaveClass('bg-agent-claude');
-    expect(codex.querySelector('[data-tone]')).toHaveClass('bg-agent-codex');
+    expect(claude.closest('label')?.querySelector('[data-tone]')).toHaveClass('bg-agent-claude');
+    expect(codex.closest('label')?.querySelector('[data-tone]')).toHaveClass('bg-agent-codex');
 
     // The command is nested under the one row it belongs to and says whose it is,
     // although Codex is listed above it.
@@ -385,6 +390,48 @@ describe('OnboardingWizard', () => {
     expect(
       within(codex.closest('li') as HTMLElement).queryByText(/sign in from a terminal/i)
     ).toBeNull();
+  });
+
+  it('stores the runner picked from the radio group, and refuses an unusable one', async () => {
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        agents: [
+          {
+            targetId: 'codex',
+            environmentId: 'local',
+            installed: true,
+            discoveryState: 'determined',
+            authState: 'signed-in',
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_790_000_000_000, attempts: 1 },
+          },
+        ],
+      },
+    });
+
+    render(<OnboardingWizard onDone={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('onboarding-step-agents')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('onboarding-step-agents'));
+
+    // No model is configured in this scenario, so MangoStudio cannot be taken.
+    await waitFor(() => expect(screen.getByTestId('onboarding-runner-mangostudio')).toBeDisabled());
+    await userEvent.click(await screen.findByRole('radio', { name: /Codex/ }));
+
+    await waitFor(() => {
+      const put = scenario.fetchMock.mock.calls.find(
+        (call) => String(call[1]?.method).toUpperCase() === 'PUT'
+      );
+      expect(put).toBeDefined();
+      const body = JSON.parse(String(put?.[1]?.body)) as {
+        profileSettings: { default: { onboarding: { runner?: unknown } } };
+      };
+      expect(body.profileSettings.default.onboarding.runner).toEqual({
+        kind: 'external',
+        targetId: 'codex',
+      });
+    });
   });
 
   it('refuses a second skip while the first write is still open', async () => {

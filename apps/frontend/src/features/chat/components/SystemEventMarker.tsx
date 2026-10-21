@@ -30,6 +30,8 @@ function resolveLabel(
         label: t.chat.cursorLost.replace('{detail}', detail ?? ''),
         severity: 'info',
       };
+    // Normally folded into the turn's error card by `MessageParts`, which says the
+    // same failure; this draws only an event with no error part after it.
     case 'tool_loop_exhausted':
       return {
         label: detail ? `${t.chat.toolLoopExhausted} — ${detail}` : t.chat.toolLoopExhausted,

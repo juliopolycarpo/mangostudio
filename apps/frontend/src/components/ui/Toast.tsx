@@ -124,13 +124,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           seen: "Chat deleted" and "Could not delete the chat" are otherwise
           silent to a screen reader. An error is an `alert` on top of that.
           360px, the width components.md states, and never wider than the
-          screen it sits on. */}
+          screen it sits on.
+
+          Top-right, 16px under the 48px header, rather than in the bottom
+          corner: down there it sat over the composer's Send button and the
+          workspace panel's file list, and since a toast holds while the
+          pointer is over it, reaching for Send kept it there. The top-right of
+          a page is margin or a panel's heading, never its primary action. */}
       {/* biome-ignore lint/a11y/useSemanticElements: a fixed overlay outside the page's outline. `section` is the page's own element for its content (the transcript is one), and a floating stack of notices is not another of its sections. */}
       <div
         role="region"
         aria-label={t.common.notifications}
         aria-live="polite"
-        className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(22.5rem,calc(100vw-2rem))] flex-col gap-2"
+        className="pointer-events-none fixed right-4 top-16 z-50 flex w-[min(22.5rem,calc(100vw-2rem))] flex-col gap-2"
       >
         <AnimatePresence initial={false}>
           {toasts.map((toastItem) => (

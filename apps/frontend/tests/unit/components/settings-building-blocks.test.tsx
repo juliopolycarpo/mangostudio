@@ -258,4 +258,27 @@ describe('SettingsSliderRow', () => {
     });
     expect(onChange).toHaveBeenLastCalledWith(80);
   });
+
+  it('hands the track how far along the value sits, for the accent fill', () => {
+    const { rerender } = render(
+      <SettingsSliderRow
+        id="t"
+        label="Threshold"
+        value={75}
+        min={50}
+        max={100}
+        onChange={jest.fn()}
+      />
+    );
+    // The wrapper draws the track, so the position is set on it rather than on the input.
+    const track = screen.getByRole('slider', { name: 'Threshold' }).parentElement;
+    expect(track).toHaveClass('range-field');
+    expect(track?.style.getPropertyValue('--range-progress')).toBe('0.5');
+
+    // An empty range reads as the start rather than dividing by zero.
+    rerender(
+      <SettingsSliderRow id="t" label="Threshold" value={5} min={5} max={5} onChange={jest.fn()} />
+    );
+    expect(track?.style.getPropertyValue('--range-progress')).toBe('0');
+  });
 });

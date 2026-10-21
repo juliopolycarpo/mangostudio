@@ -109,15 +109,16 @@ describe('Observability settings pages', () => {
 
     const englishDate = /Nov \d{1,2}, 2023/;
     const portugueseDate = /\d{1,2} de nov\. de 2023/;
-    expect(await screen.findAllByText(englishDate)).toHaveLength(3);
+    // Both pages' "Last updated" captions, the probe entry and the discovery time.
+    expect(await screen.findAllByText(englishDate)).toHaveLength(4);
 
     act(() => screen.getByRole('button', { name: 'Use Portuguese' }).click());
-    expect(await screen.findAllByText(portugueseDate)).toHaveLength(3);
+    expect(await screen.findAllByText(portugueseDate)).toHaveLength(4);
     expect(screen.queryAllByText(englishDate)).toHaveLength(0);
     expect(screen.getByText(/A verificação não confirmou este agente/)).toBeInTheDocument();
 
     act(() => screen.getByRole('button', { name: 'Use English' }).click());
-    expect(await screen.findAllByText(englishDate)).toHaveLength(3);
+    expect(await screen.findAllByText(englishDate)).toHaveLength(4);
     expect(screen.queryAllByText(portugueseDate)).toHaveLength(0);
   });
 

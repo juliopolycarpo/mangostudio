@@ -12,8 +12,10 @@
  *
  * The cards are sized by how many there are, not by how many agents exist: a
  * fixed number of columns left an empty one at the end of every row. And an
- * agent with nothing to compare is one line under the cards, not a card of its
- * own that only repeats the state.
+ * agent with nothing to compare is one caption under the section's cards (or
+ * under its heading, when no agent has any), not a card of its own that only
+ * repeats the state. Sections stand `space-y-8` apart and keep `space-y-3`
+ * inside, so a caption always reads as part of the section above it.
  */
 
 import type {
@@ -25,7 +27,9 @@ import type {
 } from '@mangostudio/shared/library';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Ban, EyeOff } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Badge } from '@/components/ui/Badge';
+import { Card } from '@/components/ui/Card';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
@@ -81,7 +85,7 @@ export function SettingsComparison() {
   }
 
   return (
-    <div className="space-y-4" data-testid="settings-comparison">
+    <div className="space-y-8" data-testid="settings-comparison">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <p className="text-fg-muted text-sm">{l.settings.description}</p>
         <Badge>{l.settings.comparability}</Badge>
@@ -155,13 +159,12 @@ export function SettingsSourcePanel({
       <h3 className="font-semibold text-base text-fg">{l.settings.sourceHeading}</h3>
       <div className={CARD_GRID}>
         {populated.map((snapshot) => (
-          <div
+          <TargetCard
             key={snapshot.targetId}
-            className="space-y-2 rounded-md border border-stroke bg-surface p-4"
-            data-testid="settings-source-target"
-            data-target-id={snapshot.targetId}
+            title={l.targets[snapshot.targetId]}
+            testId="settings-source-target"
+            targetId={snapshot.targetId}
           >
-            <p className="font-medium text-fg text-sm">{l.targets[snapshot.targetId]}</p>
             {snapshot.sources.map((source) => (
               <SettingsSourceRow
                 key={source.locationId}
@@ -169,7 +172,7 @@ export function SettingsSourcePanel({
                 label={locationLabel(source.locationId)}
               />
             ))}
-          </div>
+          </TargetCard>
         ))}
       </div>
     </section>
@@ -220,31 +223,33 @@ function ConceptSection({ comparison }: { readonly comparison: ConceptComparison
     }
   }
 
-  // Said once per state, under the cards when there are some. A concept nothing
-  // detected anywhere has no cards, and a bare caption under its heading read as a
-  // gap beside the sections that do; the same lines sit in a card of their own.
-  const quietLines = (className: string) =>
-    [...quiet].map(([state, agents]) => (
-      <p key={state} className={className} data-testid="concept-quiet" data-state={state}>
-        {formatMessage(l.settings.undetectedLine[state], { agents: formatList(agents, locale) })}
-      </p>
-    ));
-
+  // Said once per state, as one caption under whatever the section has above it:
+  // its cards, or only its heading when no agent has anything here. The same
+  // fact is drawn the same way in every section.
   return (
     <section className="space-y-3" data-testid="concept-section" data-concept={comparison.concept}>
       <h3 className="font-semibold text-base text-fg">{l.settings.concept[comparison.concept]}</h3>
-      {cards.length > 0 ? (
-        <>
-          <div className={CARD_GRID}>
-            {cards.map((entry) => (
-              <ConceptEntry key={entry.targetId} entry={entry} />
-            ))}
-          </div>
-          {quietLines('text-fg-muted text-xs')}
-        </>
-      ) : (
-        <div className="space-y-1 rounded-md border border-stroke bg-surface p-4">
-          {quietLines('text-fg-muted text-sm')}
+      {cards.length > 0 && (
+        <div className={CARD_GRID}>
+          {cards.map((entry) => (
+            <ConceptEntry key={entry.targetId} entry={entry} />
+          ))}
+        </div>
+      )}
+      {quiet.size > 0 && (
+        <div className="space-y-1">
+          {[...quiet].map(([state, agents]) => (
+            <p
+              key={state}
+              className="text-fg-muted text-xs"
+              data-testid="concept-quiet"
+              data-state={state}
+            >
+              {formatMessage(l.settings.undetectedLine[state], {
+                agents: formatList(agents, locale),
+              })}
+            </p>
+          ))}
         </div>
       )}
     </section>
@@ -256,17 +261,48 @@ function ConceptEntry({ entry }: { readonly entry: ConceptComparisonEntry }) {
   const l = t.library;
 
   return (
-    <div
-      className="space-y-2 rounded-md border border-stroke bg-surface p-4"
-      data-testid="concept-entry"
-      data-target-id={entry.targetId}
-      data-state={entry.state}
+    <TargetCard
+      title={l.targets[entry.targetId]}
+      testId="concept-entry"
+      targetId={entry.targetId}
+      state={entry.state}
     >
-      <p className="font-medium text-fg text-sm">{l.targets[entry.targetId]}</p>
-      <p className="text-fg-muted text-xs">{l.settings.conceptState[entry.state]}</p>
+      {/* A card exists because something was detected, so only the other
+          states are worth a line: a card of fields that reads "Detected" says
+          what the card already is. */}
+      {entry.state !== 'detected' && (
+        <p className="text-fg-muted text-xs">{l.settings.conceptState[entry.state]}</p>
+      )}
       {entry.fields.map((field) => (
         <SettingsFieldValue key={field.path} field={field} />
       ))}
+    </TargetCard>
+  );
+}
+
+/**
+ * One agent's card in a comparison grid: the shared `Card` surface at the
+ * compact padding a grid of them needs, the agent's name, then its rows.
+ */
+function TargetCard({
+  title,
+  testId,
+  targetId,
+  state,
+  children,
+}: {
+  readonly title: string;
+  readonly testId: string;
+  readonly targetId: string;
+  readonly state?: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div data-testid={testId} data-target-id={targetId} data-state={state}>
+      <Card padded={false} className="h-full min-w-0 space-y-2 p-4">
+        <p className="font-medium text-fg text-sm">{title}</p>
+        {children}
+      </Card>
     </div>
   );
 }

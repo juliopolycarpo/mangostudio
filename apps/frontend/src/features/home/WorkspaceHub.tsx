@@ -53,8 +53,11 @@ export function WorkspaceHub({
     // space above the composer, so its last row is cut mid-glyph, and without an
     // edge that cut reads as a rendering fault. With one, content ends at a
     // visible frame, the way any clipped list does. No fade (decision 1).
+    // The margin under it matches the composer's own bottom inset, so the
+    // composer's frame sits in the same air above as below instead of touching
+    // the hairline; the chat route has no hairline and needs none.
     <div
-      className="app-scrollbar flex flex-1 scroll-pb-8 flex-col overflow-y-auto border-b border-stroke px-4 py-8 sm:px-6"
+      className="app-scrollbar mb-3 flex flex-1 scroll-pb-8 flex-col overflow-y-auto border-b border-stroke px-4 py-8 sm:mb-4 sm:px-6 md:mb-6"
       data-testid="workspace-hub"
     >
       {/* `my-auto` inside a flex column centres a short hub in the space above

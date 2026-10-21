@@ -1,10 +1,10 @@
 import { createLazyFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
+import { BrandLockup } from '@/components/layout/BrandLockup';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
-import { Logo } from '@/components/ui/Logo';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
 
@@ -48,7 +48,7 @@ function SignupPage() {
   // it changes, and both pages put the logo where the other does.
   return (
     <div className="flex min-h-screen flex-col items-center justify-start gap-6 bg-canvas px-4 pb-8 pt-[18vh]">
-      <Logo className="size-12" />
+      <BrandLockup />
       <Card className="w-full max-w-sm rounded-lg">
         <form
           id="signup-form"

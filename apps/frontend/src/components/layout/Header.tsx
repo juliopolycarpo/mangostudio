@@ -103,13 +103,22 @@ export function Header({
       <div className="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
         {quotaPill}
         {/* New chat is the phone's way to start one without opening the
-            slide-over; from `md` the sidebar carries it. */}
-        {currentPage === 'chat' && (
-          <Button variant="subtle" size="sm" onClick={onNewChat} className="shrink-0 md:hidden">
-            <Plus size={ICON_MD} />
-            <span className="hidden sm:inline">{t.chat.newChat}</span>
-          </Button>
-        )}
+            slide-over; from `md` the sidebar carries it. On every page, as the
+            sidebar's own button is: Home is where a phone most often starts a
+            chat, and a control that comes and goes between pages is not one
+            the hand learns. Below `sm` the word folds away, so the glyph is
+            named for assistive tech and on hover. */}
+        <Button
+          variant="subtle"
+          size="sm"
+          onClick={onNewChat}
+          aria-label={t.chat.newChat}
+          title={t.chat.newChat}
+          className="shrink-0 md:hidden"
+        >
+          <Plus size={ICON_MD} aria-hidden="true" />
+          <span className="hidden sm:inline">{t.chat.newChat}</span>
+        </Button>
 
         {/* Below `md` the palette, Settings and Sign out share one account menu:
             five bare glyphs left the runner's name four letters, and a sign-out

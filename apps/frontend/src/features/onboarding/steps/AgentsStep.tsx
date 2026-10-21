@@ -11,12 +11,13 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQuery } from '@tanstack/react-query';
-import { Check } from 'lucide-react';
+import { useId } from 'react';
+import { PickOneRow } from '@/components/settings/PickOneRow';
+import { Badge } from '@/components/ui/Badge';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Spinner } from '@/components/ui/Spinner';
 import { StatusDot } from '@/components/ui/StatusDot';
-import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { CopyLine } from '@/features/environments/components/CopyLine';
 import {
   externalAgentSelectable,
@@ -25,8 +26,6 @@ import {
 import { useI18n } from '@/hooks/use-i18n';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
-import { ICON_SM } from '@/lib/icon-sizes';
-import { cn } from '@/lib/utils';
 import { StepFrame } from '../StepFrame';
 
 interface AgentsStepProps {
@@ -41,14 +40,6 @@ interface AgentsStepProps {
 }
 
 const MANGOSTUDIO_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' };
-
-/**
- * The rows of a runner list: hairlines between them and above and below, the way
- * the toolchain step lists its runtimes — one list idiom in the wizard, not a
- * bordered box per row. Rows inset their content by `px-3` here and there, so a
- * dot and an icon share one left edge from step to step.
- */
-const RUNNER_LIST_CLASS = 'divide-y divide-stroke border-y border-stroke';
 
 /**
  * Whether every agent here is refused for want of an isolated OS identity.
@@ -66,9 +57,23 @@ function sameRunner(a: ChatRunnerConfiguration | undefined, b: ChatRunnerConfigu
   return a.kind === 'mangostudio' ? true : a.targetId === (b as { targetId: string }).targetId;
 }
 
+/**
+ * The runner's identity dot, centred in the 16px slot every `PickOneRow` glyph
+ * takes, so the names line up with the other pick-one lists. Always at full
+ * strength: being unusable never replaces who is being described.
+ */
+function IdentityDot({ dotClassName }: { readonly dotClassName: string }) {
+  return (
+    <span className="flex size-4 items-center justify-center">
+      <StatusDot tone="neutral" className={dotClassName} />
+    </span>
+  );
+}
+
 export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsStepProps) {
   const { t } = useI18n();
   const s = t.onboarding.agents;
+  const groupName = useId();
   const external = useExternalAgents(environmentId);
   // Loaded here rather than by the route: a catalog that cannot be read is one
   // of the things setup exists to fix, so it must not be able to stop this page
@@ -78,176 +83,135 @@ export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsS
   // asked for again whenever this step mounts.
   const catalog = useQuery({ ...catalogQueryOptions(), retryOnMount: true });
   const hasModel = (catalog.data?.textModels.length ?? 0) > 0;
-  const choose = (runner: ChatRunnerConfiguration) =>
+  const noModel = !catalog.isPending && !hasModel;
+  // A write in flight refuses the pick rather than disabling the rows: it is
+  // over in a moment, and a disabled row reads as a runner that cannot be used.
+  // The radios are controlled, so a refused pick leaves the current one checked.
+  // Nothing is checked until a runner is stored: the step is settled by the
+  // stored choice, and a row that looked chosen before then would say otherwise.
+  const choose = (runner: ChatRunnerConfiguration) => {
+    if (isSaving) return;
     void onChange((current) => ({ ...current, runner }));
+  };
 
   return (
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
-      <ul className={RUNNER_LIST_CLASS}>
-        <li>
-          <RunnerOption
-            title={t.library.targets.mangostudio}
-            description={s.modelDescription}
-            dotClassName={MANGO_IDENTITY.dotClass}
-            selected={sameRunner(state.runner, MANGOSTUDIO_RUNNER)}
-            busy={isSaving}
-            unavailable={!catalog.isPending && !hasModel}
-            testId="onboarding-runner-mangostudio"
-            onSelect={() => choose(MANGOSTUDIO_RUNNER)}
-          />
-        </li>
-      </ul>
+      {/* One choice across both lists: the radios share a name, so the arrow
+          keys walk from MangoStudio into the agent CLIs, and the group is named
+          by the question the step asks. */}
+      <div role="radiogroup" aria-label={s.title} aria-busy={isSaving} className="space-y-4">
+        <PickOneRow
+          name={groupName}
+          checked={sameRunner(state.runner, MANGOSTUDIO_RUNNER)}
+          disabled={noModel}
+          onSelect={() => choose(MANGOSTUDIO_RUNNER)}
+          icon={<IdentityDot dotClassName={MANGO_IDENTITY.dotClass} />}
+          title={t.library.targets.mangostudio}
+          description={s.modelDescription}
+          testId="onboarding-runner-mangostudio"
+        />
 
-      {!catalog.isPending && !hasModel ? (
-        <Callout tone="warning" data-testid="onboarding-no-models">
-          {s.noModels}
-        </Callout>
-      ) : null}
+        {noModel ? (
+          <Callout tone="warning" data-testid="onboarding-no-models">
+            {s.noModels}
+          </Callout>
+        ) : null}
 
-      <div className="space-y-2 pt-1">
-        <MicroLabel as="p">{s.cliHeading}</MicroLabel>
-        {external.isLoading ? (
-          <div className="flex justify-center py-4">
-            <Spinner size="md" label={t.common.loading} />
-          </div>
-        ) : external.isError ? (
-          // A refused probe and a machine with no CLIs on it both arrive as an
-          // empty list. Only one of them is an answer, and telling the person
-          // "none found" about the other sends them to install what they have.
-          <Callout tone="warning" data-testid="onboarding-agents-failed">
-            {s.probeFailed}
-          </Callout>
-        ) : external.agents.length === 0 ? (
-          <p className="text-sm text-fg-muted">{s.noneFound}</p>
-        ) : isolationWithdrawn(external.agents) ? (
-          // Local's agent sign-ins belong to the OS account the hub runs as.
-          // Once a second person has an account here they are no longer this
-          // person's to use, and pretending otherwise would offer a runner
-          // every send would refuse.
-          <Callout tone="info" data-testid="onboarding-agents-isolated">
-            {s.isolated}
-          </Callout>
-        ) : (
-          <ul className={RUNNER_LIST_CLASS}>
-            {external.agents.map((agent) => (
-              <AgentOption
-                key={agent.targetId}
-                agent={agent}
-                busy={isSaving}
-                selected={sameRunner(state.runner, { kind: 'external', targetId: agent.targetId })}
-                onSelect={() => choose({ kind: 'external', targetId: agent.targetId })}
-              />
-            ))}
-          </ul>
-        )}
+        <div className="space-y-2 pt-1">
+          <MicroLabel as="p">{s.cliHeading}</MicroLabel>
+          {external.isLoading ? (
+            <div className="flex justify-center py-4">
+              <Spinner size="md" label={t.common.loading} />
+            </div>
+          ) : external.isError ? (
+            // A refused probe and a machine with no CLIs on it both arrive as an
+            // empty list. Only one of them is an answer, and telling the person
+            // "none found" about the other sends them to install what they have.
+            <Callout tone="warning" data-testid="onboarding-agents-failed">
+              {s.probeFailed}
+            </Callout>
+          ) : external.agents.length === 0 ? (
+            <p className="text-sm text-fg-muted">{s.noneFound}</p>
+          ) : isolationWithdrawn(external.agents) ? (
+            // Local's agent sign-ins belong to the OS account the hub runs as.
+            // Once a second person has an account here they are no longer this
+            // person's to use, and pretending otherwise would offer a runner
+            // every send would refuse.
+            <Callout tone="info" data-testid="onboarding-agents-isolated">
+              {s.isolated}
+            </Callout>
+          ) : (
+            <ul className="space-y-2">
+              {external.agents.map((agent) => (
+                <AgentOption
+                  key={agent.targetId}
+                  agent={agent}
+                  groupName={groupName}
+                  checked={sameRunner(state.runner, {
+                    kind: 'external',
+                    targetId: agent.targetId,
+                  })}
+                  onSelect={() => choose({ kind: 'external', targetId: agent.targetId })}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </StepFrame>
   );
 }
 
+/**
+ * One agent CLI on offer: its identity dot, its name, and a badge for whether
+ * it is signed in. Signed out is `warning`, the state the person can fix
+ * (patterns.md, Status), and the row it disables keeps its dot and its name
+ * readable (decision 17) because it is the one they have to act on.
+ */
 function AgentOption({
   agent,
-  busy,
-  selected,
+  groupName,
+  checked,
   onSelect,
 }: {
   readonly agent: ExternalAgentDescriptor;
-  readonly busy: boolean;
-  readonly selected: boolean;
+  readonly groupName: string;
+  readonly checked: boolean;
   readonly onSelect: () => void;
 }) {
   const { t } = useI18n();
   const s = t.onboarding.agents;
   const selectable = externalAgentSelectable(agent);
-  const name = t.library.targets[agent.targetId];
+  const signedOut = agent.authState === 'signed-out';
 
   return (
     <li>
-      <RunnerOption
-        title={name}
-        description={agent.authState === 'signed-out' ? s.signedOut : s.signedIn}
-        dotClassName={agentIdentityTokens(agent.targetId).dotClass}
-        selected={selected}
-        busy={busy}
-        unavailable={!selectable}
-        testId={`onboarding-runner-${agent.targetId}`}
+      <PickOneRow
+        name={groupName}
+        checked={checked}
+        disabled={!selectable}
         onSelect={onSelect}
+        icon={<IdentityDot dotClassName={agentIdentityTokens(agent.targetId).dotClass} />}
+        title={
+          <span className="flex items-center gap-1.5">
+            <span className="truncate">{t.library.targets[agent.targetId]}</span>
+            <Badge variant={signedOut ? 'warning' : 'success'}>
+              {signedOut ? s.signedOut : s.signedIn}
+            </Badge>
+          </span>
+        }
+        testId={`onboarding-runner-${agent.targetId}`}
       />
       {/* The command is the whole remedy, so it is shown rather than hidden
           behind a disabled control the user cannot learn anything from. It
-          belongs to this row alone — nested under it and indented to its text,
-          so the row names the agent and the hint need not — because Codex may
-          be listed above the Claude Code row it is for. */}
+          belongs to this row alone — outside its label, nested under it and
+          indented to its name, so the row names the agent and the hint need
+          not — because Codex may be listed above the Claude Code row it is for. */}
       {!selectable && agent.loginCommand ? (
-        <div className="pr-3 pb-3 pl-8">
+        <div className="pt-2 pl-10">
           <CopyLine label={s.signInHint} value={agent.loginCommand} />
         </div>
       ) : null}
     </li>
-  );
-}
-
-/**
- * One runner on offer.
- *
- * Two reasons it cannot be clicked, told apart because they look different: a
- * write is in flight (`busy`, over in a moment, so nothing about the row
- * changes), or the runner cannot be used at all (`unavailable`). The second
- * dims only the dot and shows the not-allowed cursor: the name stays `fg` and
- * the description ("Not signed in") stays `fg-muted`, because that row is the
- * one the person has to act on and a muted name made it read as switched off.
- */
-function RunnerOption({
-  title,
-  description,
-  dotClassName,
-  selected,
-  busy = false,
-  unavailable = false,
-  testId,
-  onSelect,
-}: {
-  readonly title: string;
-  readonly description: string;
-  /** The runner's identity hue, the dot the sidebar and the composer know it by. */
-  readonly dotClassName: string;
-  readonly selected: boolean;
-  readonly busy?: boolean;
-  readonly unavailable?: boolean;
-  readonly testId: string;
-  readonly onSelect: () => void;
-}) {
-  const { t } = useI18n();
-
-  return (
-    <button
-      type="button"
-      disabled={busy || unavailable}
-      data-testid={testId}
-      aria-pressed={selected}
-      onClick={onSelect}
-      className={cn(
-        'relative flex w-full items-center gap-3 px-3 py-2 text-left transition-colors',
-        // The chosen runner is the list's current item, marked as in the sidebar.
-        selected
-          ? cn('bg-fill-selected', SELECTION_BAR)
-          : !unavailable && 'enabled:hover:bg-fill-hover',
-        unavailable && 'cursor-not-allowed'
-      )}
-    >
-      {/* Who this is, in the hue every other surface knows it by; the same in
-          every state, so being unusable never replaces who is being described. */}
-      <StatusDot tone="neutral" className={cn(dotClassName, unavailable && 'opacity-40')} />
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-fg">{title}</span>
-        <span className="block text-xs text-fg-muted">{description}</span>
-      </span>
-      {selected ? (
-        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-fg">
-          <Check aria-hidden size={ICON_SM} className="text-accent-fg" />
-          {t.onboarding.agents.selected}
-        </span>
-      ) : null}
-    </button>
   );
 }

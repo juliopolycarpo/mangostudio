@@ -35,8 +35,10 @@ a disabled `subtle` or `subtle-danger` button has no tile and only turns its tex
 `loading` shows a spinner, keeps the variant's colour and sets `aria-busy`.
 
 A destructive action that is not the final confirmation — Remove, Revoke, Delete on a
-row — is `variant="subtle-danger"`: `danger` text at rest, a `danger-subtle` fill on
-hover and press. An icon-only one (a trash can) carries both an `aria-label` and a
+row — is `variant="subtle-danger"`: `fg-muted` at rest, and `danger` text on a
+`danger-subtle` fill on hover, keyboard focus and press. It rests quiet because it
+repeats: a list whose every row ends in a red trash can is a column of red that
+outshouts the rows. An icon-only one (a trash can) carries both an `aria-label` and a
 `title`, so the verb is discoverable. It is never a `subtle` button with a `text-danger` override, which
 loses the press state and hovers neutral beside its siblings.
 
@@ -132,8 +134,11 @@ information ([decision 18](./decisions.md)).
 right-aligned where the action lives. The Return key is drawn as an icon
 (`<KbdHint keys={<ReturnKey />} />`), not as the `⏎` text glyph, which is hairline-thin
 at 11px and left the keycap looking empty. The palette's footer draws its other keys the
-same way (`ArrowUpDown`, `ArrowRightToLine` at `ICON_SM`) and is not drawn on a coarse pointer. `MicroLabel` is the group heading: mono 11px,
-upper-case, `0.06em`, `fg-subtle` — the one place text is upper-cased.
+same way (`ArrowUpDown`, `ArrowRightToLine` at `ICON_SM`). No keycap is drawn on a coarse
+pointer: a touch screen has no Esc or Ctrl+N, so `KbdHint` carries `pointer-coarse:hidden`
+itself rather than leaving it to each call site, and the palette's footer goes with it.
+`MicroLabel` is the group heading: mono 11px, upper-case, `0.06em`, `fg-subtle` — the one
+place text is upper-cased.
 
 ### `Callout`
 
@@ -193,9 +198,13 @@ the navigation's mark — `fill-selected` and the 3px `accent` bar — and the o
 a hover fill. The row is a `<label>` around a visually hidden radio, so the list is a real
 radio group inside a `role="radiogroup"` that names it: one tab stop, arrow keys move the
 choice, and a screen reader hears one choice rather than a set of toggles. A choice that is
-listed but cannot be taken (`disabled`) stays readable at half strength with no hover. It is
-the only pick-one idiom: the add-environment dialog's "how do you reach it", the WSL
-distribution list, the container engine and the onboarding end state all use it, and the
+listed but cannot be taken (`disabled`) does not fade, because its name is information
+([decision 17](./decisions.md)): the glyph keeps its strength (an agent's identity dot stays
+its hue), the name steps from `fg` to `fg-muted`, the hover goes, the radio cannot be focused,
+and the row says why: in its description line, or in a status `Badge` beside the name
+(`warning` for a sign-in the person can fix). It is the only pick-one idiom: the add-environment dialog's "how do you reach it", the WSL
+distribution list, the container engine, the onboarding end state and the setup wizard's
+"Choose who answers" all use it, and the
 bordered check-mark tile they replaced no longer exists. Not for a short set of labels
 (`SettingsSegmented`: the consent profiles, the avatar mode) and not for a pick-several
 list (`CheckboxRow`).
@@ -237,8 +246,9 @@ at natural width — "Cancel" then the destructive verb. No oversized icon disc.
 
 ### `Toast`
 
-Bottom-right, 360px (never wider than the screen), `surface-raised`, `stroke` border,
-`rounded-md`, `shadow-popover`. The type shows in the **glyph** only (`success`, `danger`,
+Top-right, 16px under the header (`top-16 right-4`), so it never covers a region's primary
+action: the bottom corner is where the composer's Send sits. 360px (never wider than the
+screen), `surface-raised`, `stroke` border, `rounded-md`, `shadow-popover`. The type shows in the **glyph** only (`success`, `danger`,
 `info`); the message stays in `fg`. The stack is a labelled, polite live region and an
 error toast is also an `alert`, so a toast is announced as well as seen. It dismisses after
 4s, and the clock stops while the pointer is over the toast or focus is inside it; an error
@@ -268,7 +278,8 @@ The context ring is a 16px glyph with the figure beside it (`62%`, mono, 12px,
 row, where a title is truncating next to it. The arc is `fg` while usage is normal
 or informational and turns `warning` and `danger` as the tracker escalates; mango
 is not used, because a healthy 62% is not the primary action, the current item or
-focus.
+focus. The track under it is the `stroke` hairline: a gauge's track is structure,
+and an arc drawn over `fg-subtle` fused with it at 16px, so 62% read as a full ring.
 
 ### Timeline and tool blocks
 

@@ -145,6 +145,27 @@ describe('AgentSettingsPage', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   });
 
+  /** An empty prompt is a real value, so the field says what the model then gets. */
+  it('explains an empty system prompt, and drops the note once there is text', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
+
+    render(<AgentSettingsPage />);
+
+    const hint = /No instructions: the model gets only the working folder, skills and to-dos/;
+    await screen.findByLabelText('System prompt');
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: /default/i }));
+    const prompt = screen.getByLabelText('System prompt');
+    expect(prompt).toHaveValue('');
+    expect(screen.getByText(hint)).toBeInTheDocument();
+
+    await user.type(prompt, 'Be brief.');
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
+  });
+
   it('does not render markdown controls for built-in agents', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
     fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
@@ -207,7 +228,8 @@ describe('AgentSettingsPage', () => {
     render(<AgentSettingsPage />);
 
     await screen.findByText('No agents yet');
-    await user.click(screen.getAllByRole('button', { name: 'Create agent' })[1]);
+    // One way in: the header does not repeat the empty state's action.
+    await user.click(screen.getByRole('button', { name: 'Create agent' }));
 
     expect(screen.getByRole('heading', { name: 'New agent' })).toBeInTheDocument();
     expect(screen.getByDisplayValue('New agent')).toBeInTheDocument();

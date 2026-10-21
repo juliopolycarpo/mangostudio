@@ -41,6 +41,10 @@ function basename(path: string): string {
  * path is the name of its switch, so the row is the label and the switch
  * carries no word of its own; a custom one lets you edit its path, name its
  * switch and remove it.
+ *
+ * A file that is off is only its path row: settings for a file nothing reads
+ * would look live under a switch that says otherwise. Its role and frequency
+ * stay in the setting and come back with the switch.
  */
 export function RuleFileRows({
   setting,
@@ -96,7 +100,12 @@ export function RuleFileRows({
               onChange={(e) => onUpdate({ enabled: e.target.checked })}
             />
             {onRemove ? (
-              <Button variant="subtle" size="sm" onClick={onRemove} aria-label={labels.removeRule}>
+              <Button
+                variant="subtle-danger"
+                size="sm"
+                onClick={onRemove}
+                aria-label={labels.removeRule}
+              >
                 {labels.removeRule}
               </Button>
             ) : null}
@@ -104,29 +113,33 @@ export function RuleFileRows({
         </div>
       )}
 
-      <SettingsRow label={labels.injectionRoleLabel} layout="stacked">
-        <SettingsSegmented
-          kind="radio"
-          name={`role-${setting.id}`}
-          ariaLabel={labels.injectionRoleLabel}
-          value={setting.injectionRole}
-          options={roleOptions}
-          onChange={(injectionRole) => onUpdate({ injectionRole })}
-        />
-      </SettingsRow>
+      {setting.enabled ? (
+        <>
+          <SettingsRow label={labels.injectionRoleLabel} layout="stacked">
+            <SettingsSegmented
+              kind="radio"
+              name={`role-${setting.id}`}
+              ariaLabel={labels.injectionRoleLabel}
+              value={setting.injectionRole}
+              options={roleOptions}
+              onChange={(injectionRole) => onUpdate({ injectionRole })}
+            />
+          </SettingsRow>
 
-      {/* The hint does not depend on the choice: a line that came and went with it
-          moved the control up by a line under the pointer. */}
-      <SettingsRow label={labels.frequencyLabel} hint={labels.frequencyHint} layout="stacked">
-        <SettingsSegmented
-          kind="radio"
-          name={`freq-${setting.id}`}
-          ariaLabel={labels.frequencyLabel}
-          value={setting.sendFrequency}
-          options={frequencyOptions}
-          onChange={(sendFrequency) => onUpdate({ sendFrequency })}
-        />
-      </SettingsRow>
+          {/* The hint does not depend on the choice: a line that came and went with it
+              moved the control up by a line under the pointer. */}
+          <SettingsRow label={labels.frequencyLabel} hint={labels.frequencyHint} layout="stacked">
+            <SettingsSegmented
+              kind="radio"
+              name={`freq-${setting.id}`}
+              ariaLabel={labels.frequencyLabel}
+              value={setting.sendFrequency}
+              options={frequencyOptions}
+              onChange={(sendFrequency) => onUpdate({ sendFrequency })}
+            />
+          </SettingsRow>
+        </>
+      ) : null}
     </>
   );
 }

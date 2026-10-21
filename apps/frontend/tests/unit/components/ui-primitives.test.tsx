@@ -103,6 +103,13 @@ describe('KbdHint', () => {
     expect(kbd?.textContent).toBe('');
     expect(kbd?.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
   });
+
+  it('is not drawn on a coarse pointer, even when a caller shows it from a breakpoint up', () => {
+    // A touch screen has no Esc or Ctrl+N. The rule is the primitive's, so a
+    // call site's `sm:inline-flex` keeps it alongside rather than replacing it.
+    const { container } = render(<KbdHint keys="Esc" className="hidden sm:inline-flex" />);
+    expect(container.querySelector('kbd')).toHaveClass('pointer-coarse:hidden', 'sm:inline-flex');
+  });
 });
 
 describe('Skeleton', () => {

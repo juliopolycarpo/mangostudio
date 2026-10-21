@@ -216,7 +216,7 @@ describe('HomePage', () => {
       expect(tiles).toHaveLength(2);
       expect(tiles[0]).toHaveTextContent('mango');
       expect(tiles[0]).toHaveTextContent('feat/lsp-plugin');
-      expect(tiles[0]).toHaveTextContent('3 changed');
+      expect(tiles[0]).toHaveTextContent('3 files changed');
       expect(tiles[0]).toHaveTextContent('2 chats');
       expect(tiles[1]).toHaveTextContent('lsp-store');
       expect(tiles[1]).toHaveTextContent('clean tree');
@@ -333,7 +333,7 @@ describe('HomePage', () => {
     try {
       const user = userEvent.setup();
       const row = await screen.findByRole('button', { name: 'Open The forgotten refactor' });
-      expect(row).toHaveTextContent('5 changed');
+      expect(row).toHaveTextContent('5 files changed');
       await user.click(row);
       expect(props.onSelectChat).toHaveBeenCalledWith('chat-2');
     } finally {

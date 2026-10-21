@@ -12,7 +12,7 @@ import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/share
 import { useQueries } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -140,48 +140,54 @@ export function ResourceDetail({
 
   return (
     <div className="space-y-6" data-testid="resource-detail" data-resource-key={resource.key}>
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <Link
-            to={libraryKindPath(resource.ref.kind)}
-            search={libraryEnvironmentSearch(scope.environmentId)}
-            className="inline-flex items-center gap-1.5 text-fg-muted text-xs hover:text-fg"
-          >
-            <ArrowLeft size={ICON_SM} aria-hidden="true" />
-            {l.detail.back}
-          </Link>
-          {/* The name, not the `kind:name` id: the kind is stated once, on the
-              line below, and a second page-level heading under the umbrella's
-              would outrank the page it sits in. It is a `text-base` section title;
-              the groups under it are micro-labels, as in the Backups page, so the
-              name is always the largest thing below the page's own title. */}
-          <h2 className="font-semibold text-base text-fg">{resource.ref.slug}</h2>
-          <p className="flex flex-wrap items-center gap-2 text-fg-muted text-sm">
-            {l.kinds[resource.ref.kind]}
-            <Badge variant={DIVERGENCE_BADGE[resource.divergence]}>
-              {l.divergence[resource.divergence]}
-            </Badge>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {candidates.isDetecting && (
-            <span className="text-fg-muted text-xs" data-testid="detecting-agents">
-              {l.locationSettings.detecting}
-            </span>
-          )}
-          <Button
-            variant="secondary"
-            onClick={() => setRemoving(true)}
-            disabled={!candidates.isResolved}
-            data-testid="remove-resource"
-          >
-            {l.detail.remove}
-          </Button>
-          <Button onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
-            {l.detail.propagate}
-          </Button>
-        </div>
-      </header>
+      {/* The way back sits on its own line above the header, so the actions
+          stay beside the name they act on — or wrap under it on a phone —
+          rather than sharing a line with a 12px link. */}
+      <div className="space-y-3">
+        <Link
+          to={libraryKindPath(resource.ref.kind)}
+          search={libraryEnvironmentSearch(scope.environmentId)}
+          className="inline-flex items-center gap-1.5 text-fg-muted text-xs hover:text-fg"
+        >
+          <ArrowLeft size={ICON_SM} aria-hidden="true" />
+          {l.detail.back}
+        </Link>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            {/* The name, not the `kind:name` id: the kind is stated once, on the
+                line below, and a second page-level heading under the umbrella's
+                would outrank the page it sits in. It is a `text-base` section
+                title; the groups under it are micro-labels, as in the Backups
+                page, so the name is always the largest thing below the page's
+                own title. */}
+            <h2 className="font-semibold text-base text-fg">{resource.ref.slug}</h2>
+            <p className="flex flex-wrap items-center gap-2 text-fg-muted text-sm">
+              {l.kinds[resource.ref.kind]}
+              <Badge variant={DIVERGENCE_BADGE[resource.divergence]}>
+                {l.divergence[resource.divergence]}
+              </Badge>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {candidates.isDetecting && (
+              <span className="text-fg-muted text-xs" data-testid="detecting-agents">
+                {l.locationSettings.detecting}
+              </span>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => setRemoving(true)}
+              disabled={!candidates.isResolved}
+              data-testid="remove-resource"
+            >
+              {l.detail.remove}
+            </Button>
+            <Button onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
+              {l.detail.propagate}
+            </Button>
+          </div>
+        </header>
+      </div>
 
       {resource.divergence === 'not-comparable' && (
         <Callout tone="neutral" data-testid="not-comparable">
@@ -207,10 +213,11 @@ export function ResourceDetail({
             <Button variant="secondary" size="sm" onClick={() => setComparing((open) => !open)}>
               {comparing
                 ? l.detail.compareHide
-                : formatMessage(l.detail.compare, {
-                    left: `${hashPrefix(groups[0].contentHash)}…`,
-                    right: `${hashPrefix(groups[1].contentHash)}…`,
-                  })}
+                : compareLabel(
+                    l.detail.compare,
+                    hashPrefix(groups[0].contentHash),
+                    hashPrefix(groups[1].contentHash)
+                  )}
             </Button>
             {comparing && (
               <InstanceDiff
@@ -250,7 +257,7 @@ export function ResourceDetail({
 
       <section className="space-y-3">
         <MicroLabel as="h3">{l.detail.coverageHeading}</MicroLabel>
-        <CoverageList coverage={resource.coverage} locationLabel={locationLabel} />
+        <CoverageList resource={resource} locationLabel={locationLabel} />
         {targetsQuery.isError && <InlineNote tone="danger">{l.matrix.loadError}</InlineNote>}
       </section>
 
@@ -273,6 +280,29 @@ export function ResourceDetail({
       )}
     </div>
   );
+}
+
+/**
+ * The compare button's label with its two hash prefixes in mono, as the version
+ * rows above it print them: the template is split at its placeholders, so the
+ * words stay in the interface font and only the identifiers change face.
+ *
+ * // Usage: compareLabel(l.detail.compare, '44ef9a', 'c3d457') // Compare 44ef9a… ↔ c3d457…
+ */
+function compareLabel(template: string, left: string, right: string): ReactNode[] {
+  const hashes: Readonly<Record<string, string>> = { '{left}': left, '{right}': right };
+  return template
+    .split(/(\{left\}|\{right\})/)
+    .filter((part) => part.length > 0)
+    .map((part) =>
+      part in hashes ? (
+        <span key={part} className="font-mono text-xs">
+          {hashes[part]}…
+        </span>
+      ) : (
+        part
+      )
+    );
 }
 
 /**

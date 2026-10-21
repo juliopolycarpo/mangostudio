@@ -140,12 +140,16 @@ export function ModelSelector({
                         )}
                       >
                         {/* The one mark a row ever wears, and only when the chat's
-                            provider rules it out. The slot is held for every row so
-                            names keep one left edge; the provider heading already
-                            says who makes the model. */}
-                        <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
-                          {isLocked ? <Lock size={ICON_MD} /> : null}
-                        </span>
+                            provider rules it out. While any row is locked the slot
+                            is held for every row so names keep one left edge; a
+                            list with no lock starts its names at the row's own
+                            inset, like every other composer menu. The provider
+                            heading already says who makes the model. */}
+                        {lockReason ? (
+                          <span className="flex size-4 shrink-0 items-center justify-center text-fg-muted">
+                            {isLocked ? <Lock size={ICON_MD} /> : null}
+                          </span>
+                        ) : null}
                         <span
                           className={cn(
                             'min-w-0 flex-1 truncate text-sm',

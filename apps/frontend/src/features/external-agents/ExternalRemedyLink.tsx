@@ -7,6 +7,11 @@ import { cn } from '@/lib/utils';
 interface ExternalRemedyLinkProps {
   /** The remedy the hub or the discovery descriptor named. */
   remedy: ExternalAgentRemedy;
+  /**
+   * `subtle` as a row action (the runner menu, a card's body); `secondary` as a
+   * `Callout`'s action, the one control a notice offers, like its "Retry".
+   */
+  variant?: 'subtle' | 'secondary';
   className?: string;
 }
 
@@ -18,20 +23,23 @@ interface ExternalRemedyLinkProps {
  * Every other remedy kind has its own control (the sign-in command) or nothing to offer, so this
  * renders nothing for them.
  *
- * It is a `subtle` small button drawn on a router link, like any other row action, so
- * its height, padding and hover are the system's rather than a hand-built copy of them.
+ * It is a small button drawn on a router link, like any other row action, so its height,
+ * padding, colour and hover are the system's rather than a hand-built copy of them. It wears
+ * no colour override: a `subtle` button repainted in `accent-fg` read as a hyperlink and lost
+ * the variant's own states.
  *
  * // Usage: <ExternalRemedyLink remedy={descriptor.remedy} />
  */
-export function ExternalRemedyLink({ remedy, className }: ExternalRemedyLinkProps) {
+export function ExternalRemedyLink({
+  remedy,
+  variant = 'subtle',
+  className,
+}: ExternalRemedyLinkProps) {
   const { t } = useI18n();
   if (remedy.kind !== 'install' && remedy.kind !== 'update') return null;
   return (
     <div className={className}>
-      <Link
-        to="/environments/agents"
-        className={cn(buttonClassName('subtle', 'sm'), 'w-fit text-accent-fg')}
-      >
+      <Link to="/environments/agents" className={cn(buttonClassName(variant, 'sm'), 'w-fit')}>
         {t.externalAgents.remedy[remedy.kind]}
       </Link>
     </div>

@@ -7,9 +7,9 @@
  */
 
 import { MoreVertical, RotateCcw, Tag } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Button } from '@/components/ui/Button';
-import { Menu, MenuItem } from '@/components/ui/Menu';
+import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -24,9 +24,26 @@ interface ToolIdentityMenuProps {
   readonly defaultName: string;
   /** `icon-sm` where the buttons beside it are 28px, as in an MCP server's row of actions. */
   readonly size?: 'icon' | 'icon-sm';
+  /**
+   * The row's own entries, for a row whose actions all live in this one menu (an
+   * MCP server): `before` sits above the identity pair, as what the menu was most
+   * likely opened for, and `after` below a separator, where a destructive entry
+   * goes last. Each receives the function that closes the menu.
+   */
+  readonly before?: (close: () => void) => ReactNode;
+  readonly after?: (close: () => void) => ReactNode;
+  /** Names the trigger when the menu holds more than the identity pair. */
+  readonly label?: string;
 }
 
-export function ToolIdentityMenu({ identity, defaultName, size = 'icon' }: ToolIdentityMenuProps) {
+export function ToolIdentityMenu({
+  identity,
+  defaultName,
+  size = 'icon',
+  before,
+  after,
+  label,
+}: ToolIdentityMenuProps) {
   const { t } = useI18n();
   const labels = t.environments.identity;
   const reset = useResetToolIdentity();
@@ -46,15 +63,16 @@ export function ToolIdentityMenu({ identity, defaultName, size = 'icon' }: ToolI
             variant="subtle"
             size={size}
             {...triggerProps}
-            aria-label={formatMessage(labels.menu, { name: identity.name })}
+            aria-label={label ?? formatMessage(labels.menu, { name: identity.name })}
             data-testid="tool-identity-menu"
           >
             <MoreVertical size={size === 'icon-sm' ? ICON_SM : ICON_MD} />
           </Button>
         )}
       >
+        {before?.(() => setMenuOpen(false))}
         <MenuItem
-          // Not a pencil: on an MCP server card the row's edit button already is one.
+          // Not a pencil: on an MCP server card the menu's Edit entry already is one.
           icon={<Tag size={ICON_MD} />}
           onSelect={() => {
             setMenuOpen(false);
@@ -80,6 +98,12 @@ export function ToolIdentityMenu({ identity, defaultName, size = 'icon' }: ToolI
         >
           {labels.reset}
         </MenuItem>
+        {after ? (
+          <>
+            <MenuSeparator />
+            {after(() => setMenuOpen(false))}
+          </>
+        ) : null}
       </Menu>
 
       {editing && (

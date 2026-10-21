@@ -39,12 +39,13 @@ export function ReasoningSettingsSection({
       {policy.thinkingToggleSupported && (
         <SettingToggle
           label={s.thinkingEnabled}
+          description={s.thinkingEnabledHint}
           checked={form.thinkingEnabled ?? false}
           onChange={(thinkingEnabled) => onChange({ ...form, thinkingEnabled })}
         />
       )}
 
-      <SettingsRow label={s.reasoningEffort} layout="stacked">
+      <SettingsRow label={s.reasoningEffort} hint={s.reasoningEffortHint} layout="stacked">
         <SettingsSegmented
           ariaLabel={s.reasoningEffort}
           value={form.reasoningEffort ?? policy.defaultEffort}

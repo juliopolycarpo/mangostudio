@@ -417,6 +417,61 @@ describe('GitPanel', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeDisabled();
   });
 
+  it('names only the remote under a branch that tracks its namesake there', () => {
+    hooks.data = repoState({
+      status: {
+        branch: {
+          name: 'feat/rate-limit-buckets',
+          upstream: 'origin/feat/rate-limit-buckets',
+          ahead: 0,
+          behind: 0,
+        },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    });
+    const { unmount } = render(<Panel />);
+
+    // The branch name is already above; repeating it in full said nothing new.
+    const tracking = screen.getByTitle('origin/feat/rate-limit-buckets');
+    expect(tracking).toHaveTextContent(/^Tracking origin$/);
+    unmount();
+
+    // An upstream with another name is named in full.
+    hooks.data = repoState({
+      status: {
+        branch: { name: 'feat/git-panel', upstream: 'origin/main', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    });
+    render(<Panel />);
+    expect(screen.getByTitle('origin/main')).toHaveTextContent(/^Tracking origin\/main$/);
+  });
+
+  it('labels a detached HEAD with the seven-character hash', () => {
+    hooks.data = repoState({
+      status: {
+        branch: { name: null, detachedAt: '7a46b996c0ffee00', ahead: 0, behind: 0 },
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        conflicted: [],
+        clean: true,
+      },
+    });
+
+    render(<Panel />);
+
+    expect(screen.getByText('Detached at 7a46b99')).toBeInTheDocument();
+  });
+
   it('reduces the branch pull request to a one-line chip', async () => {
     hooks.data = repoState({
       status: {
@@ -792,7 +847,10 @@ describe('GitPanel', () => {
     expect(screen.getByText('1234567')).toHaveAttribute('title', '1234567890abcdef');
     expect(screen.queryByText('1234567890abcdef')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /src\/git\.ts/ }));
-    expect(await screen.findByRole('region', { name: 'View diff for src/git.ts' })).toBeVisible();
+    const diff = await screen.findByRole('region', { name: 'View diff for src/git.ts' });
+    expect(diff).toBeVisible();
+    // The diff names the commit with the same seven characters the list did.
+    expect(within(diff).getByText('1234567')).toHaveAttribute('title', '1234567890abcdef');
   });
 
   it('sizes a commit on one grouped, signed line instead of three spelled-out clauses', async () => {
@@ -913,8 +971,11 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship Git writes');
-    await user.type(screen.getByRole('textbox', { name: 'Commit body' }), 'Includes UI actions.');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship Git writes');
+    await user.type(
+      screen.getByRole('textbox', { name: 'Description (optional)' }),
+      'Includes UI actions.'
+    );
     await user.click(screen.getByRole('button', { name: 'Commit changes' }));
 
     expect(hooks.commit).toHaveBeenCalledWith({
@@ -922,7 +983,7 @@ describe('GitPanel', () => {
       body: 'Includes UI actions.',
       amend: false,
     });
-    expect(await screen.findByText('Committed abcdef12')).toBeInTheDocument();
+    expect(await screen.findByText('Committed abcdef1')).toBeInTheDocument();
     expect(hooks.gitPush).not.toHaveBeenCalled();
   });
 
@@ -942,7 +1003,7 @@ describe('GitPanel', () => {
     });
 
     render(<Panel />);
-    const title = screen.getByRole('textbox', { name: 'Commit title' });
+    const title = screen.getByRole('textbox', { name: 'Summary' });
 
     await user.type(title, 'Short');
     expect(screen.queryByText('5/72')).not.toBeInTheDocument();
@@ -968,7 +1029,7 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    const titleInput = screen.getByRole('textbox', { name: 'Commit title' });
+    const titleInput = screen.getByRole('textbox', { name: 'Summary' });
     await user.type(titleInput, 'Ship Git writes');
     await user.keyboard('{Control>}{Enter}{/Control}');
 
@@ -995,7 +1056,7 @@ describe('GitPanel', () => {
     });
 
     render(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Stage all and commit' }));
 
@@ -1022,7 +1083,7 @@ describe('GitPanel', () => {
     // An empty title already explains the dead button, so the hint waits for one.
     expect(screen.queryByText(hint)).not.toBeInTheDocument();
 
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
 
     expect(screen.getByRole('button', { name: 'Commit changes' })).toBeDisabled();
     expect(screen.getByText(hint)).toBeVisible();
@@ -1045,14 +1106,14 @@ describe('GitPanel', () => {
       },
     });
     const staged = render(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
     expect(screen.queryByText(hint)).not.toBeInTheDocument();
     staged.unmount();
 
-    // Nothing at all to stage: the hint would point at a menu entry that is off too.
+    // Nothing at all to stage: a clean tree draws no commit form, so no hint either.
     hooks.data = repoState();
     const clean = render(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
+    expect(screen.queryByRole('textbox', { name: 'Summary' })).not.toBeInTheDocument();
     expect(screen.queryByText(hint)).not.toBeInTheDocument();
     clean.unmount();
 
@@ -1067,7 +1128,7 @@ describe('GitPanel', () => {
       },
     });
     render(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
     expect(screen.getByText(hint)).toBeVisible();
 
     // Amending commits with nothing staged, so the explanation no longer applies.
@@ -1123,17 +1184,17 @@ describe('GitPanel', () => {
     });
 
     const { rerender } = render(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Ship');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Commit and push' }));
 
     await waitFor(() => expect(hooks.gitPush).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText('Committed and pushed abcdef12')).toBeInTheDocument();
+    expect(await screen.findByText('Committed and pushed abcdef1')).toBeInTheDocument();
 
     hooks.commit.mockRejectedValue(new Error('hook rejected the commit'));
     hooks.gitPush.mockClear();
     rerender(<Panel />);
-    await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Second');
+    await user.type(screen.getByRole('textbox', { name: 'Summary' }), 'Second');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Commit and push' }));
 
@@ -1164,10 +1225,10 @@ describe('GitPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Generate message' }));
 
     expect(hooks.generate).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('textbox', { name: 'Commit title' })).toHaveValue(
+    expect(screen.getByRole('textbox', { name: 'Summary' })).toHaveValue(
       'feat(git): generate commit messages'
     );
-    expect(screen.getByRole('textbox', { name: 'Commit body' })).toHaveValue(
+    expect(screen.getByRole('textbox', { name: 'Description (optional)' })).toHaveValue(
       'Build the message from worktree context.'
     );
     expect(
@@ -1194,7 +1255,7 @@ describe('GitPanel', () => {
     });
 
     render(<Panel />);
-    const titleInput = screen.getByRole('textbox', { name: 'Commit title' });
+    const titleInput = screen.getByRole('textbox', { name: 'Summary' });
     await user.type(titleInput, 'manual title');
     await user.click(screen.getByRole('button', { name: 'Generate message' }));
 
@@ -1202,7 +1263,24 @@ describe('GitPanel', () => {
     expect(titleInput).toHaveValue('manual title');
     await user.click(screen.getByRole('button', { name: 'Use suggestion' }));
     expect(titleInput).toHaveValue('generated title');
-    expect(screen.getByRole('textbox', { name: 'Commit body' })).toHaveValue('generated body');
+    expect(screen.getByRole('textbox', { name: 'Description (optional)' })).toHaveValue(
+      'generated body'
+    );
+  });
+
+  it('draws no commit form on a clean tree, only the clean state', () => {
+    hooks.data = repoState();
+
+    render(<Panel />);
+
+    expect(screen.getByText('Working tree clean')).toBeVisible();
+    // Nothing can be committed, so none of the commit controls are drawn.
+    expect(screen.queryByRole('textbox', { name: 'Summary' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('textbox', { name: 'Description (optional)' })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Commit changes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Generate message' })).not.toBeInTheDocument();
   });
 
   it('confirms amend once per session, then prefills the HEAD message', async () => {
@@ -1217,18 +1295,19 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    await openCommitMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit' }));
+    // A clean tree has no commit form, so amend is entered from the panel menu.
+    await user.click(screen.getByRole('button', { name: 'More repository actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit…' }));
     expect(screen.getByRole('dialog', { name: 'Amend rewrites history' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Confirm amend' }));
     expect(sessionStorage.getItem('mangostudio.git.amend-confirmed')).toBe('true');
 
     // The mode is visible, and the form shows exactly what would be replaced.
-    expect(await screen.findByRole('textbox', { name: 'Commit title' })).toHaveValue(
-      'previous title'
+    expect(await screen.findByRole('textbox', { name: 'Summary' })).toHaveValue('previous title');
+    expect(screen.getByRole('textbox', { name: 'Description (optional)' })).toHaveValue(
+      'previous body'
     );
-    expect(screen.getByRole('textbox', { name: 'Commit body' })).toHaveValue('previous body');
     expect(screen.getByRole('button', { name: 'Leave amend mode' })).toBeVisible();
 
     // Amending commits with nothing staged, which a plain commit refuses.
@@ -1238,6 +1317,26 @@ describe('GitPanel', () => {
       body: 'previous body',
       amend: true,
     });
+  });
+
+  it('brings the amend form into view when amend is chosen from History', async () => {
+    const user = userEvent.setup();
+    sessionStorage.setItem('mangostudio.git.amend-confirmed', 'true');
+    hooks.headMessage = { hash: 'abcdef1234567890', title: 'previous title', body: '' };
+    hooks.data = repoState();
+
+    render(<Panel />);
+    await user.click(screen.getByRole('tab', { name: 'History' }));
+    await user.click(screen.getByRole('button', { name: 'More repository actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit…' }));
+
+    expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('textbox', { name: 'Summary' })).toHaveValue('previous title');
+
+    // Leaving the mode on a clean tree takes the form away again.
+    await user.click(screen.getByRole('button', { name: 'Leave amend mode' }));
+    expect(screen.queryByRole('textbox', { name: 'Summary' })).not.toBeInTheDocument();
+    expect(screen.getByText('Working tree clean')).toBeVisible();
   });
 
   it('leaves amend mode when the HEAD message cannot be read', async () => {
@@ -1251,8 +1350,8 @@ describe('GitPanel', () => {
 
     render(<Panel />);
 
-    await openCommitMenu(user);
-    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit' }));
+    await user.click(screen.getByRole('button', { name: 'More repository actions' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit…' }));
 
     expect(await screen.findByText('There is no commit to amend.')).toBeInTheDocument();
     await waitFor(() =>
@@ -1325,7 +1424,7 @@ describe('GitPanel', () => {
     render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
-    const prune = screen.getByRole('menuitemcheckbox', { name: 'Prune stale branches' });
+    const prune = screen.getByRole('menuitemcheckbox', { name: 'Prune deleted branches on fetch' });
     expect(prune).toBeChecked();
 
     await user.click(prune);

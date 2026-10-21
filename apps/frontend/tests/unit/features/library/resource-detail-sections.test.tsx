@@ -2,7 +2,7 @@
  * The two lists on a resource's detail page, which read the same facts the
  * matrix does and must not contradict it.
  *
- * Coverage draws a state the way the matrix cell does — a toned glyph and the
+ * Coverage draws a state the way the matrix cell does — a toned icon and the
  * word — so Shadowed and Absent are not the same grey dot; the rows share a
  * column grid so the where-from text starts at one x. Content counts copies in
  * words ("1 copy"), not a bare "×1".
@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
+import type { LibraryResource } from '@mangostudio/shared/library';
 import { ContentGroupList } from '../../../../src/features/library/components/ContentGroupList';
 import { CoverageList } from '../../../../src/features/library/components/CoverageList';
 import {
@@ -18,21 +19,42 @@ import {
   resourceTitle,
 } from '../../../../src/features/library/format';
 import { render, screen, within } from '../../../support/harness/render';
-import { fullCoverage, sourceGroup } from './fixtures';
+import { fullCoverage, instance, resource, sourceGroup } from './fixtures';
 
 const labelOf = (locationId: string) => `/home/dev/${locationId}`;
 
-function renderCoverage() {
+const COVERAGE = fullCoverage({
+  mangostudio: {
+    state: 'shadowed',
+    effectiveLocationId: 'agents-skills',
+    shadowedLocationIds: ['claude-skills'],
+  },
+  claude: { state: 'present', effectiveLocationId: 'claude-skills' },
+});
+
+/**
+ * MangoStudio reads agents-skills over claude-skills, and Claude Code reads
+ * claude-skills. `claudeHash` is what claude-skills holds; agents-skills holds
+ * `a3f9c1`, so the default is two identical copies.
+ */
+function renderCoverage({
+  claudeHash = 'a3f9c1',
+  divergence,
+}: {
+  readonly claudeHash?: string;
+  readonly divergence?: LibraryResource['divergence'];
+} = {}) {
+  const instances = [
+    instance({ locationId: 'agents-skills', contentHash: 'a3f9c1' }),
+    instance({ locationId: 'claude-skills', contentHash: claudeHash }),
+  ];
   render(
     <CoverageList
       locationLabel={labelOf}
-      coverage={fullCoverage({
-        mangostudio: {
-          state: 'shadowed',
-          effectiveLocationId: 'agents-skills',
-          shadowedLocationIds: ['claude-skills'],
-        },
-        claude: { state: 'present', effectiveLocationId: 'claude-skills' },
+      resource={resource({
+        instances,
+        coverage: COVERAGE,
+        divergence: divergence ?? (claudeHash === 'a3f9c1' ? 'uniform' : 'divergent'),
       })}
     />
   );
@@ -49,20 +71,54 @@ describe('CoverageList', () => {
 
     const drawn = (targetId: string) => {
       const glyph = row(targetId).querySelector('[aria-hidden="true"]') as HTMLElement;
-      return { glyph: glyph.textContent, tone: glyph.className, row: row(targetId) };
+      const icon = glyph.querySelector('svg');
+      return { icon: icon?.getAttribute('class') ?? '', tone: glyph.className, row: row(targetId) };
     };
     const present = drawn('claude');
     const shadowed = drawn('mangostudio');
     const absent = drawn('codex');
 
-    expect(present.glyph).toBe('✓');
-    expect(shadowed.glyph).toBe('⧉');
-    expect(absent.glyph).toBe('—');
+    // Lucide icons, never Unicode symbols: each character had its own width,
+    // so the words after them did not line up.
+    expect(present.icon).toContain('lucide-check');
+    expect(shadowed.icon).toContain('lucide-layers');
+    expect(absent.icon).toContain('lucide-minus');
     expect(new Set([present.tone, shadowed.tone, absent.tone]).size).toBe(3);
     // The glyph is decoration; the word is what a reader gets.
-    expect(within(present.row).getByText(en.library.coverage.present)).toBeInTheDocument();
-    expect(within(shadowed.row).getByText(en.library.coverage.shadowed)).toBeInTheDocument();
-    expect(within(absent.row).getByText(en.library.coverage.absent)).toBeInTheDocument();
+    expect(within(present.row).getByText(en.library.cellStateShort.present)).toBeInTheDocument();
+    expect(within(shadowed.row).getByText(en.library.cellStateShort.shadowed)).toBeInTheDocument();
+    expect(within(absent.row).getByText(en.library.cellStateShort.absent)).toBeInTheDocument();
+  });
+
+  // The detail page and the matrix read the same facts; when the two copies
+  // differ, the detail must say so for both agents, exactly as the matrix row does.
+  it('reads each state the way the matrix does, not from the raw coverage state', () => {
+    const { row } = renderCoverage({ claudeHash: 'c3d457' });
+
+    for (const targetId of ['mangostudio', 'claude']) {
+      expect(row(targetId)).toHaveAttribute('data-state', 'divergent');
+      // The second cell is the state: the matrix's glyph and its word.
+      const state = row(targetId).children[1] as HTMLElement;
+      expect(state).toHaveTextContent(en.library.cellStateShort.divergent);
+      expect(state).not.toHaveTextContent(en.library.cellStateShort.present);
+    }
+  });
+
+  it('badges a shadowed copy by comparing its hash with the copy the agent reads', () => {
+    const { row } = renderCoverage({ claudeHash: 'c3d457' });
+
+    const shadow = within(row('mangostudio')).getByTestId('coverage-shadow');
+    expect(shadow).toHaveAttribute('data-comparison', 'differs');
+    expect(within(shadow).getByText(en.library.detail.shadowCopy.differs)).toBeInTheDocument();
+    expect(within(shadow).queryByText(en.library.detail.shadowCopy.identical)).toBeNull();
+  });
+
+  it('never claims two copies are identical when it cannot compare them', () => {
+    const { row } = renderCoverage({ divergence: 'incomparable' });
+
+    const shadow = within(row('mangostudio')).getByTestId('coverage-shadow');
+    expect(shadow).toHaveAttribute('data-comparison', 'unknown');
+    expect(within(shadow).getByText(en.library.detail.shadowCopy.unknown)).toBeInTheDocument();
   });
 
   it('keeps where-from and also-in in one cell, and gives an absent row none', () => {
@@ -77,7 +133,7 @@ describe('CoverageList', () => {
     expect(details).toHaveTextContent(en.library.detail.alsoIn);
     expect(details).toHaveTextContent('/home/dev/claude-skills');
     // A badge, not a trailing word that can wrap onto a line of its own.
-    expect(within(details).getByText(en.library.detail.identical)).toBeInTheDocument();
+    expect(within(details).getByText(en.library.detail.shadowCopy.identical)).toBeInTheDocument();
 
     // No empty third cell: it would add a blank grid row on a phone.
     expect(row('codex').children).toHaveLength(2);

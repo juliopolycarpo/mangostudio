@@ -185,15 +185,22 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
             ) : (
               <h3 className="truncate text-sm font-semibold text-fg">{environment.name}</h3>
             )}
+            {/* The plain facts read as one phrase joined by " · ", the way inline
+                metadata is joined across this area; a badge is kept only for a
+                state that needs a pill. */}
             <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
-              <span>{labels.transport[environment.transportKind]}</span>
+              <span>
+                {[
+                  labels.transport[environment.transportKind],
+                  ...(environment.virtual ? [labels.virtual] : []),
+                  ...(environment.enabled ? [] : [labels.disabled]),
+                ].join(' · ')}
+              </span>
               {environment.transportKind === 'container' ? (
                 <Badge>{labels.container.badge}</Badge>
               ) : null}
-              {environment.virtual ? <span>{labels.virtual}</span> : null}
-              {!environment.enabled ? <span>{labels.disabled}</span> : null}
               {environment.status.offlineRuntimeCache ? (
-                <Badge className="bg-info-subtle text-info" title={labels.offlineCacheHint}>
+                <Badge variant="info" title={labels.offlineCacheHint}>
                   {labels.offlineCache}
                 </Badge>
               ) : null}

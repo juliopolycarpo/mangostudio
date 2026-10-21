@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../support/mocks/router';
@@ -129,6 +129,21 @@ describe('ProviderSettingsMenu', () => {
     // Provider names are rendered
     await screen.findByText('DeepSeek');
     expect(screen.getByText('Anthropic')).toBeInTheDocument();
+  });
+
+  it('lists every provider as one link row in a single list', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/providers', {
+      body: MOCK_DESCRIPTORS,
+    });
+
+    render(<ProviderSettingsMenu />);
+
+    await screen.findByText('DeepSeek');
+    const list = screen.getByRole('list');
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3);
+    // The whole row is the link, named by what it holds.
+    expect(within(list).getAllByRole('link')).toHaveLength(3);
+    expect(screen.getByRole('link', { name: /DeepSeek/ })).toBeInTheDocument();
   });
 
   it('says what the list of efforts is the list of', async () => {

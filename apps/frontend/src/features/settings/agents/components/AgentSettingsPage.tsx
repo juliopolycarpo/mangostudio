@@ -17,7 +17,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
-import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { toolSettingsListQueryOptions } from '../../tools/queries';
 import {
@@ -146,18 +146,15 @@ export function AgentSettingsPage() {
 
   if (agents.length === 0 && !newAgent) {
     return (
-      <SettingsPage {...page} actions={createAction}>
+      // The empty state's own action is the way in, so the header does not
+      // draw a second "Create agent" beside it (patterns.md, Empty).
+      <SettingsPage {...page}>
         <Card padded={false}>
           <EmptyState
             icon={<Bot size={ICON_LG} />}
             title={labels.emptyStateTitle}
             hint={labels.emptyStateDescription}
-            action={
-              <Button variant="primary" onClick={handleCreateAgent}>
-                <Plus size={ICON_MD} />
-                {labels.create}
-              </Button>
-            }
+            action={createAction}
           />
         </Card>
       </SettingsPage>

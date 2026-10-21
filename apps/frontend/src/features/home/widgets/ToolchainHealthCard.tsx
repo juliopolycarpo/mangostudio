@@ -14,7 +14,6 @@
  */
 
 import { Link } from '@tanstack/react-router';
-import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SectionCard } from '@/components/ui/SectionCard';
 import {
   HEALTH_ORDER,
@@ -67,7 +66,7 @@ export function ToolchainHealthCard() {
                 >
                   {counts[health]}
                 </p>
-                <MicroLabel as="p">{healthLabel(t, health)}</MicroLabel>
+                <p className="text-xs text-fg-muted">{healthLabel(t, health)}</p>
               </li>
             ))}
           </ul>

@@ -309,7 +309,7 @@ describe('WorkspaceHub', () => {
     try {
       const user = userEvent.setup();
       const row = await screen.findByRole('button', { name: 'Open The forgotten refactor' });
-      expect(row).toHaveTextContent('5 changed');
+      expect(row).toHaveTextContent('5 files changed');
       expect(row).toHaveTextContent('1 unpushed');
       await user.click(row);
       expect(props.onSelectChat).toHaveBeenCalledWith('chat-2');

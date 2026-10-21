@@ -1,18 +1,21 @@
 import type { ProviderProbeOperation } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
-import { RefreshCw } from 'lucide-react';
+import { ScrollText } from 'lucide-react';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { observabilityLogsQueryOptions } from '../queries';
 import { formatTimestamp } from '../utils';
 import { ExternalAgentDiscoveryLog } from './ExternalAgentDiscoveryLog';
+import { ObservabilityPageActions } from './ObservabilityPageActions';
 
 export function LogsSettingsPage() {
   const { t, locale } = useI18n();
@@ -28,12 +31,17 @@ export function LogsSettingsPage() {
       title={labels.title}
       description={labels.description}
       actions={
-        isLoading || error ? null : (
-          <Button variant="secondary" size="sm" onClick={() => void refetch()} loading={isFetching}>
-            {!isFetching && <RefreshCw size={ICON_SM} />}
-            {labels.refresh}
-          </Button>
-        )
+        data ? (
+          <ObservabilityPageActions
+            updatedLabel={labels.generatedAtLabel.replace(
+              '{value}',
+              formatTimestamp(data.generatedAt, locale)
+            )}
+            refreshLabel={labels.refresh}
+            refreshing={isFetching}
+            onRefresh={() => void refetch()}
+          />
+        ) : null
       }
     >
       {/* The discovery card below is this page's own query, not the probe log's:
@@ -45,7 +53,21 @@ export function LogsSettingsPage() {
           <span className="sr-only">{t.common.loading}</span>
         </div>
       ) : error ? (
-        <Callout tone="danger">{labels.failedToLoad}</Callout>
+        <Callout
+          tone="danger"
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void refetch()}
+              loading={isFetching}
+            >
+              {t.common.retry}
+            </Button>
+          }
+        >
+          {labels.failedToLoad}
+        </Callout>
       ) : data?.entries.length ? (
         <SettingsSection>
           {data.entries.map((entry) => (
@@ -63,9 +85,15 @@ export function LogsSettingsPage() {
           ))}
         </SettingsSection>
       ) : (
-        <SettingsSection>
-          <p className="px-4 py-3 text-sm text-fg-muted">{labels.empty}</p>
-        </SettingsSection>
+        // A quiet log is nothing to fix, so the empty state has no action: its
+        // hint says what would show up here and when.
+        <Card padded={false}>
+          <EmptyState
+            icon={<ScrollText size={ICON_LG} />}
+            title={labels.empty}
+            hint={labels.emptyHint}
+          />
+        </Card>
       )}
 
       <ExternalAgentDiscoveryLog />

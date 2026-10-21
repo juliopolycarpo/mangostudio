@@ -100,7 +100,7 @@ describe('SkillsSettingsPage', () => {
     // The reason is on the page, once, not only in a tooltip a touch screen never shows.
     expect(
       screen.getByText(
-        'Skills marked Shadowed share a name with a skill from a higher-priority source, so those copies are inactive.'
+        'Skills marked “Shadowed” share a name with a skill from a higher-priority source, so those copies are inactive.'
       )
     ).toBeInTheDocument();
     expect(screen.getByText('Shadowed')).toHaveAttribute(

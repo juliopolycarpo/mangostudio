@@ -147,6 +147,34 @@ describe('ComposerChipRow — phone summary', () => {
       expect(source.replace(GATED_SEPARATOR, '')).not.toMatch(/\.composer-chip-row[^{]*::after/);
     });
 
+    // The `·` is drawn inside the strip's child, so the child is always a slot
+    // around a chip, never the chip itself (the dot landed in the pressed
+    // `reasoning` chip's wash), and never a strip of its own (its gap doubled
+    // the lead of the dot after it). Both runners' chips are checked.
+    it.each([
+      ['external', { externalDescriptor: descriptor(openModel) }],
+      [
+        'MangoStudio',
+        {
+          isExternalRunner: false,
+          reasoningVisible: true,
+          thinkingEnabled: true,
+          onThinkingToggle: jest.fn(),
+          onReasoningEffortChange: jest.fn(),
+        },
+      ],
+    ] as const)('sit between slots, never inside a chip, for the %s runner', (_, overrides) => {
+      const { container } = renderRow(overrides);
+
+      const strips = container.querySelectorAll('.composer-chip-row');
+      expect(strips).toHaveLength(1);
+      const children = [...strips[0].children];
+      expect(children.length).toBeGreaterThan(0);
+      for (const child of children) {
+        expect(child.classList.contains('composer-chip')).toBe(false);
+      }
+    });
+
     it('are not left to a utility on the strip', () => {
       const { container } = renderRow({ externalDescriptor: descriptor(openModel) });
 

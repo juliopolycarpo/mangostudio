@@ -39,7 +39,7 @@ interface InstallActionProps {
    * reported as unreachable — by looking at what else is on offer.
    */
   catalog: readonly InstallRecipePreview[];
-  variant?: 'primary' | 'secondary' | 'subtle';
+  variant?: 'primary' | 'secondary' | 'subtle' | 'subtle-danger';
   icon?: ReactNode;
   /** Which machine to install on; omitted means the hub's own. */
   environmentId?: string;

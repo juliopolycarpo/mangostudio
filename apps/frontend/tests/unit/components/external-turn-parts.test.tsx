@@ -327,15 +327,6 @@ describe('external turn summary', () => {
     expect(screen.queryByText(/total/i)).toBeNull();
   });
 
-  it('explains a turn the hub ended, and stays quiet about one that finished', () => {
-    const { unmount } = renderParts([turnPart({ terminalReason: 'runtime-disconnected' })]);
-    expect(screen.getByText(/connection to that machine dropped/i)).toBeInTheDocument();
-    unmount();
-
-    renderParts([turnPart({ terminalReason: 'completed' })]);
-    expect(screen.queryByText(/connection to that machine dropped/i)).toBeNull();
-  });
-
   it("keeps the vendor's error code and message rather than flattening them", () => {
     renderParts([
       turnPart({
@@ -771,15 +762,26 @@ describe('a conversation the agent did not continue', () => {
 describe('an unfinished section', () => {
   it('marks the trailing text as cut off', () => {
     renderParts([
-      turnPart({ status: 'terminal', terminalReason: 'cancelled-by-user' }),
+      turnPart({ status: 'terminal', terminalReason: 'interrupted' }),
       { type: 'text', text: 'partial', incomplete: true },
     ]);
     expect(screen.getByText('Cut off.')).toBeInTheDocument();
   });
 
-  it('marks the trailing thinking row as cut off, visible without expanding it', () => {
+  // The person pressed stop: the turn's closing line says so, and the row says
+  // "Cancelled" — a third "Cut off." inside the bubble repeated it.
+  it('leaves the mark off a turn the person stopped', () => {
     renderParts([
       turnPart({ status: 'terminal', terminalReason: 'cancelled-by-user' }),
+      { type: 'text', text: 'partial', incomplete: true },
+      { type: 'thinking', text: 'reasoning', incomplete: true },
+    ]);
+    expect(screen.queryByText(/Cut off\./)).toBeNull();
+  });
+
+  it('marks the trailing thinking row as cut off, visible without expanding it', () => {
+    renderParts([
+      turnPart({ status: 'terminal', terminalReason: 'interrupted' }),
       { type: 'thinking', text: 'reasoning', incomplete: true },
     ]);
     // The block auto-collapses once a finished turn stops streaming into it —

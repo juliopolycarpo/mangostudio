@@ -167,6 +167,8 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
         />
       </SettingsField>
 
+      {/* A count of days is a short number: the narrow centred field, with the
+          unit in the hint, as every number field in settings. */}
       <Input
         id="api-key-expires"
         label={labels.expiresLabel}
@@ -179,8 +181,10 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
           setExpiresInDays(event.target.value);
           if (expiresError) setExpiresError(null);
         }}
+        placeholder={labels.expiresPlaceholder}
         error={expiresError ?? undefined}
         hint={formatMessage(labels.expiresHint, { max: String(API_KEY_EXPIRY_MAX_DAYS) })}
+        className="w-32 text-center"
       />
     </Dialog>
   );

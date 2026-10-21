@@ -25,6 +25,8 @@ export const messages = {
 
   chat: {
     newChat: 'Novo chat',
+    /** Como um chat se chama até o primeiro prompt dar um nome a ele. */
+    untitled: 'Novo chat',
     empty: 'Inicie um chat',
     deleted: 'Chat excluído',
     newChatRunnerFailed: 'Não foi possível iniciar o chat nesse executor. Tente novamente.',
@@ -85,6 +87,7 @@ export const messages = {
       environmentLabel: 'env',
       environmentLocked:
         'Bloqueado quando o primeiro turno começa — este chat mantém o ambiente em que começou.',
+      environmentOnlyOne: 'O único ambiente até agora. Adicione outro em Ambientes.',
       /**
        * A chave da linha de status para o esforço de raciocínio. Curta de
        * propósito: o título `Esforço de raciocínio` do seletor é longo demais
@@ -112,6 +115,7 @@ export const messages = {
       manageTools: 'Configurar ferramentas',
       manageMcp: 'Configurar MCP',
       manageSkills: 'Configurar skills',
+      manageAgent: 'Configurar agente',
       reasons: {
         'agent-tools-disabled': 'o perfil do agente desativa ferramentas',
         'agent-allowlist': 'fora da lista de permissões do agente',
@@ -157,9 +161,12 @@ export const messages = {
       imageGenerationFailed: 'Falha ao gerar imagem',
       styleParams: 'Parâmetros de estilo',
       thoughtFor: 'Pensou por {time}',
+      generatedIn: 'Gerada em {time}',
       respondedIn: 'Respondeu em {time}',
       failedAfter: 'Falhou após {time}',
       stoppedAfter: 'Interrompido após {time}',
+      toolLoopRoundsOne: 'Parou após {count} rodada de chamadas de ferramentas.',
+      toolLoopRoundsOther: 'Parou após {count} rodadas de chamadas de ferramentas.',
       noResponse: 'Sem resposta',
       neuralDiffusionPath: 'Usando o caminho de difusão neural.',
       createImageBadge: 'Criar imagem',
@@ -319,7 +326,7 @@ export const messages = {
       confirmBody:
         'Isso restaura ou remove arquivos alterados neste turno do assistente. Edições suas depois disso podem impedir a reversão.',
       confirmAction: 'Reverter arquivos',
-      cancel: 'Manter arquivos',
+      cancel: 'Cancelar',
       uncheckpointedShell:
         'Este turno também executou comandos de shell. Quaisquer alterações feitas por comandos de shell não têm checkpoint e não serão revertidas.',
       uncheckpointedMcp:
@@ -365,6 +372,8 @@ export const messages = {
    */
   home: {
     nav: 'Início',
+    filesChangedOne: '{count} arquivo alterado',
+    filesChangedOther: '{count} arquivos alterados',
     greeting: {
       morning: 'Bom dia, {name}.',
       afternoon: 'Boa tarde, {name}.',
@@ -380,8 +389,6 @@ export const messages = {
       label: 'Workspaces',
       clean: 'árvore limpa',
       // Pares `*One` / `*Other`: o componente escolhe pela contagem (`usePlural`).
-      dirtyOne: '{count} alterado',
-      dirtyOther: '{count} alterados',
       sessionsOne: '{count} chat',
       sessionsOther: '{count} chats',
       noSessions: 'Nenhum chat aqui ainda',
@@ -418,8 +425,6 @@ export const messages = {
     workspace: {
       label: 'Workspace',
       cleanTree: 'árvore limpa',
-      dirtyTreeOne: '{count} arquivo alterado',
-      dirtyTreeOther: '{count} arquivos alterados',
       synced: 'sincronizado com origin',
       noUpstream: 'sem upstream',
       detached: 'HEAD desanexado em {hash}',
@@ -476,8 +481,6 @@ export const messages = {
     },
     uncommitted: {
       label: 'Trabalho não commitado',
-      changedOne: '{count} alterado',
-      changedOther: '{count} alterados',
       unpushedOne: '{count} não enviado',
       unpushedOther: '{count} não enviados',
       moreOne: 'E mais {count} chat.',
@@ -638,12 +641,17 @@ export const messages = {
       hardStopThresholdLabel: 'Limite crítico',
       hardStopThresholdDescription:
         'Tratar a pressão de contexto como crítica nesta porcentagem da janela ou acima dela.',
+      thresholdsLabel: 'Limites',
+      thresholdsDescription:
+        'Quando o medidor de contexto avisa, intensifica e para, como fração da janela.',
       summaryModelLabel: 'Modelo preferido para resumo',
       summaryModelDescription:
         'Use o modelo atual do chat ou force um modelo de texto específico para os resumos.',
       summaryModelCurrent: 'Usar o modelo atual do chat',
     },
     prompts: {
+      description:
+        'Os prompts de sistema enviados com cada chat e imagem, e os arquivos de regras somados a eles.',
       defaultPromptsLabel: 'Prompts padrão',
       ruleFilesLabel: 'Arquivos de regras',
       customRulesLabel: 'Regras personalizadas',
@@ -665,6 +673,8 @@ export const messages = {
       frequencyEveryTurn: 'Enviar sempre',
       addRule: 'Adicionar regra',
       customRulesEmpty: 'Nenhuma regra personalizada ainda',
+      customRulesEmptyHint:
+        'Aponte uma regra para um arquivo Markdown para incluí-lo em cada requisição.',
       removeRule: 'Remover',
       rulePathLabel: 'Caminho',
       rulePathPlaceholder: 'ex. ~/meus-projetos/regras.md',
@@ -688,6 +698,8 @@ export const messages = {
         both: 'Ambos',
       },
       systemPrompt: 'System prompt',
+      systemPromptEmptyHint:
+        'Sem instruções: o modelo recebe só a pasta de trabalho, as skills e as tarefas. O texto daqui vem antes delas.',
       model: 'Modelo sobrescrito',
       modelDefaultOption: 'Usar o modelo padrão do agente',
       thinking: 'Ativar raciocínio',
@@ -745,8 +757,7 @@ export const messages = {
       languageDescription: 'Idioma da interface do usuário',
       imageQualityLabel: 'Qualidade de imagem padrão',
       chatTitlesLabel: 'Títulos dos chats',
-      chatTitlesDescription:
-        'Renomeie automaticamente novos chats com timestamp a partir do primeiro prompt do usuário.',
+      chatTitlesDescription: 'Dê a cada novo chat um nome a partir do primeiro prompt.',
       chatTitlesToggleLabel: 'Renomear novos chats automaticamente',
       chatTitleSourceLabel: 'Origem do título',
       chatTitleSourcePrompt: 'Texto inicial do prompt',
@@ -953,14 +964,25 @@ export const messages = {
       loadError: 'Falha ao carregar provedores',
       perProviderSettings: 'Configurações por provedor substituem os padrões globais.',
       noProviders: 'Nenhum provedor de IA disponível.',
+      detailDescription:
+        'Configurações de execução de {provider}. Elas substituem os padrões globais nos turnos dele.',
       thinkingEnabled: 'Ativar raciocínio',
+      thinkingEnabledHint:
+        'Deixa o modelo raciocinar antes de responder. Mais lento, e usa mais tokens.',
       reasoningEffort: 'Esforço de raciocínio',
+      reasoningEffortHint: 'Quanto tempo o modelo raciocina antes de responder.',
       maxOutputTokens: 'Máx. tokens de saída',
       maxToolIterations: 'Máx. iterações de ferramentas',
       maxToolIterationsHint: 'Substitui o valor global da página Ferramentas.',
       parallelToolCalls: 'Chamadas paralelas de ferramentas',
+      parallelToolCallsHint:
+        'Deixa o modelo pedir várias ferramentas num só passo, em vez de uma por vez.',
       compaction: 'Compactação pelo provedor',
+      compactionHint:
+        'Deixa o provedor compactar o próprio estado da conversa perto do seu limite de aviso de contexto.',
       cachePreference: 'Preferência de cache de prompt',
+      cachePreferenceHint:
+        'Guardar em cache o início repetido de cada prompt deixa os turnos seguintes mais rápidos e baratos.',
       cacheAuto: 'Automático',
       cacheStablePrefix: 'Prefixo estável',
       cacheOff: 'Desligado',
@@ -1010,20 +1032,21 @@ export const messages = {
         grep: 'Grep',
       },
       toolDescriptions: {
-        readFile: 'Permite que a IA leia arquivos do disco, como texto ou como bytes brutos.',
-        writeFile: 'Permite que a IA escreva conteúdo de texto em arquivos no disco.',
-        editFile: 'Permite que a IA substitua texto exato em arquivos lidos neste chat.',
-        replaceRange: 'Permite que a IA substitua trechos de linhas em arquivos lidos neste chat.',
+        readFile: 'Permite que o modelo leia arquivos do disco, como texto ou como bytes brutos.',
+        writeFile: 'Permite que o modelo escreva conteúdo de texto em arquivos no disco.',
+        editFile: 'Permite que o modelo substitua texto exato em arquivos lidos neste chat.',
+        replaceRange:
+          'Permite que o modelo substitua trechos de linhas em arquivos lidos neste chat.',
         applyPatch:
-          'Permite que a IA aplique alterações ancoradas por contexto em vários arquivos de texto de uma só vez. Os arquivos de destino devem permanecer graváveis exclusivamente pelo Mango durante a execução.',
+          'Permite que o modelo aplique alterações ancoradas por contexto em vários arquivos de texto de uma só vez. Os arquivos de destino devem permanecer graváveis exclusivamente pelo MangoStudio durante a execução.',
         createFile:
-          'Permite que a IA crie novos arquivos de texto sem sobrescrever caminhos existentes.',
-        deleteFile: 'Permite que a IA exclua arquivos regulares lidos neste chat.',
+          'Permite que o modelo crie novos arquivos de texto sem sobrescrever caminhos existentes.',
+        deleteFile: 'Permite que o modelo exclua arquivos regulares lidos neste chat.',
         moveFile:
-          'Permite que a IA mova ou renomeie arquivos regulares sem sobrescrever caminhos existentes.',
-        listDirectory: 'Permite que a IA liste arquivos e diretórios no disco.',
-        glob: 'Permite que a IA encontre arquivos e diretórios por padrão glob.',
-        grep: 'Permite que a IA pesquise o conteúdo de arquivos com expressões regulares.',
+          'Permite que o modelo mova ou renomeie arquivos regulares sem sobrescrever caminhos existentes.',
+        listDirectory: 'Permite que o modelo liste arquivos e diretórios no disco.',
+        glob: 'Permite que o modelo encontre arquivos e diretórios por padrão glob.',
+        grep: 'Permite que o modelo pesquise o conteúdo de arquivos com expressões regulares.',
       },
       parameters: {
         allowedPathsLabel: 'Caminhos permitidos',
@@ -1128,6 +1151,9 @@ export const messages = {
       testingButton: 'Testando…',
       testSuccess: 'Conectado — {count} ferramentas disponíveis',
       testFailed: 'Falha na conexão',
+      testFailedTitle: 'Não foi possível conectar a “{name}”',
+      testFailedHint: 'Confira o endereço e as credenciais e teste de novo.',
+      moreActions: 'Mais ações para {name}',
       showTools: 'Mostrar ferramentas',
       hideTools: 'Ocultar ferramentas',
       noToolsDiscovered:
@@ -1282,8 +1308,9 @@ export const messages = {
         namePlaceholder: 'ex. pipeline de CI',
         nameRequired: 'O nome é obrigatório',
         scopeLabel: 'Escopo',
-        expiresLabel: 'Expira em (dias)',
-        expiresHint: 'Deixe vazio para uma chave que não expira. Máximo de {max} dias.',
+        expiresLabel: 'Expira em',
+        expiresHint: 'Dias, de 1 a {max}. Deixe vazio para uma chave que não expira.',
+        expiresPlaceholder: 'Nunca',
         expiresInvalid: 'Informe um número inteiro entre 1 e {max}, ou deixe vazio.',
         createButton: 'Criar',
         creatingButton: 'Criando…',
@@ -1328,14 +1355,15 @@ export const messages = {
       shadowedHint:
         'Uma fonte de maior prioridade fornece uma skill com o mesmo nome, então esta cópia está inativa.',
       shadowedNotice:
-        'As skills marcadas como Sombreada têm o mesmo nome de uma skill de uma fonte de maior prioridade, então essas cópias estão inativas.',
+        'As skills marcadas como “Sombreada” têm o mesmo nome de uma skill de uma fonte de maior prioridade, então essas cópias estão inativas.',
       loadError: 'Falha ao carregar skills',
       noSkills: 'Nenhuma skill instalada.',
     },
     metrics: {
       title: 'Métricas',
       description:
-        'Contadores em memória para uso do provider, taxa de acerto de cache e total de timeouts de probes. Os tokens são estimativas e não refletem cobrança.',
+        'Contadores em memória para uso do provider, taxa de acerto de cache e total de timeouts de probes.',
+      refresh: 'Atualizar',
       chatgptUsageEmpty: 'Nenhum dado de uso disponível para esta conta ainda.',
       failedToLoad: 'Falha ao carregar métricas',
       empty: 'Nenhuma métrica de provider foi registrada ainda.',
@@ -1347,7 +1375,7 @@ export const messages = {
       usageTextTurnsLabel: 'Turnos de texto',
       usageImageGenerationsLabel: 'Gerações de imagem',
       usageInputTokensLabel: '~Tokens',
-      usageInputTokensHint: 'Estimativa (reportado pelo provider quando disponível).',
+      usageInputTokensHint: 'Estimativa, não cobrança. Reportado pelo provider quando disponível.',
       usageLastUsedLabel: 'Último uso',
       usageLastUsedAgoLabel: 'há {time}',
       cacheLabel: 'Cache',
@@ -1369,7 +1397,10 @@ export const messages = {
       description: 'Timeouts recentes de probes de provider capturados pelo processo atual.',
       refresh: 'Atualizar',
       failedToLoad: 'Falha ao carregar logs',
+      generatedAtLabel: 'Última atualização: {value}',
       empty: 'Nenhum evento recente de timeout de probe de provider.',
+      emptyHint:
+        'Um timeout aparece aqui quando um provider demora a responder a uma verificação de saúde ou à listagem de modelos.',
       operationLabel: 'Operação',
       externalAgentDiscovery: {
         title: 'Descoberta de agentes externos',
@@ -1519,6 +1550,7 @@ export const messages = {
     },
     searchPlaceholder: 'Buscar chats…',
     searchNoResultsHint: 'Tente outro título, pasta ou agente.',
+    clearSearch: 'Limpar busca',
     // Rótulos de harness estilo terminal — nomes de marca, iguais nos dois idiomas.
     runner: {
       mango: 'mango',
@@ -1591,11 +1623,13 @@ export const messages = {
     menu: {
       open: 'Mais ações do repositório',
       stash: 'Stashes…',
-      prune: 'Remover branches obsoletas',
+      amend: 'Alterar o commit mais recente…',
+      prune: 'Remover branches excluídas ao buscar',
     },
     branch: {
       menu: 'Mudar branch',
       itemMenu: 'Mais ações para {branch}',
+      tracking: 'Acompanha {upstream}',
       current: 'Atual',
       switchTo: 'Mudar para {branch}',
       checkoutRemote: 'Obter {branch}',
@@ -1723,7 +1757,7 @@ export const messages = {
       restoreHint:
         'Restaura apenas o conteúdo não preparado da árvore de trabalho. As alterações preparadas permanecem no índice.',
       deleteHint: 'Exclui permanentemente do disco os arquivos não rastreados selecionados.',
-      cancel: 'Manter arquivos',
+      cancel: 'Cancelar',
       confirmRestore: 'Descartar alterações',
       confirmDelete: 'Excluir arquivos',
       restored: 'Alterações da árvore de trabalho descartadas.',
@@ -1734,11 +1768,11 @@ export const messages = {
     },
     commit: {
       title: 'Commit',
-      titleLabel: 'Título do commit',
+      titleLabel: 'Resumo',
       titlePlaceholder: 'ex. Corrige o redirecionamento após o login',
       titleCount: '{count}/72',
-      bodyLabel: 'Corpo do commit',
-      bodyPlaceholder: 'ex. O redirecionamento usava uma sessão expirada (opcional)',
+      bodyLabel: 'Descrição (opcional)',
+      bodyPlaceholder: 'ex. O redirecionamento usava uma sessão expirada',
       generate: 'Gerar mensagem',
       generating: 'Gerando mensagem…',
       generateError: 'Não foi possível gerar uma mensagem de commit.',
@@ -2052,8 +2086,8 @@ export const messages = {
     openInWindow: 'Este terminal está aberto em outra janela.',
     takeOver: 'Trazer para cá',
     tabs: 'Sessões de terminal',
-    empty: 'Nenhum terminal aberto para este chat.',
-    emptyHint: 'Abra um para executar comandos onde este ambiente roda.',
+    empty: 'Nenhum terminal aberto para este chat',
+    emptyHint: 'Abra um para executar comandos neste ambiente.',
     reconnecting: 'Reconectando…',
     disconnected: 'Desconectado do terminal.',
     notFound: 'Esta sessão de terminal não existe mais.',
@@ -2069,6 +2103,8 @@ export const messages = {
     closeConfirmDescription: 'O shell e tudo o que ele estiver executando serão interrompidos.',
     cancel: 'Cancelar',
     unavailableTitle: 'Terminal indisponível',
+    unavailableTitleLimit: 'Limite de terminais atingido',
+    manageSessions: 'Gerenciar terminais',
     unavailable: {
       disabled: 'Os terminais estão desligados neste hub.',
       limit: 'Você já tem o número máximo de terminais abertos.',
@@ -2085,7 +2121,7 @@ export const messages = {
       title: 'Terminal',
       openHere: 'Abrir aqui',
       hide: 'Ocultar',
-      noSessions: 'Nenhum terminal aberto para este ambiente.',
+      noSessions: 'Nenhum terminal aberto para este ambiente',
     },
     commands: {
       openPanel: 'Abrir painel do terminal',
@@ -2290,9 +2326,15 @@ export const messages = {
       compareHide: 'Fechar comparação',
       compareSelect: 'Escolha duas versões para comparar.',
       // Introduz um caminho posto em linha própria abaixo, sem marcador.
-      via: 'via',
-      alsoIn: 'também em',
-      identical: 'idêntico',
+      via: 'Lido de',
+      alsoIn: 'Também em',
+      // O selo ao lado de cada cópia duplicada: se ela tem os mesmos bytes da
+      // cópia que o agente de fato lê.
+      shadowCopy: {
+        identical: 'Idêntica',
+        differs: 'Difere',
+        unknown: 'Não comparável',
+      },
       propagate: 'Propagar',
       remove: 'Remover',
       notFound: 'Este recurso não existe mais na biblioteca.',
@@ -2319,7 +2361,6 @@ export const messages = {
     wizard: {
       title: 'Propagar {count} recursos',
       titleOne: 'Propagar {kind} {resource}',
-      close: 'Fechar',
       cancel: 'Cancelar',
       back: 'Voltar',
       continue: 'Continuar',
@@ -2534,12 +2575,12 @@ export const messages = {
         'Todas as cópias que o app está guardando de uma propagação ou de uma remoção, com a volta de cada uma.',
       empty: 'Nenhum backup está guardado no momento.',
       undoRemoval: 'Devolver as cópias',
-      undoPropagation: 'Desfazer esta aplicação',
+      undoPropagation: 'Desfazer esta propagação',
       undoUnknown: 'Desfazer',
       undoUnknownHint:
         'Este backup é anterior ao registro do que o criou, então desfazê-lo pode devolver conteúdo ou remover o que foi escrito.',
       origin: {
-        propagation: 'Aplicação',
+        propagation: 'Propagação',
         removal: 'Remoção',
         unknown: 'Não registrado',
       },
@@ -2551,7 +2592,7 @@ export const messages = {
       pinnedBadge: 'Fixado',
       evictsNext: 'Sai na próxima',
       evictsNextHint:
-        'A próxima aplicação vai apagar este backup para respeitar o limite de retenção.',
+        'A próxima propagação vai apagar este backup para respeitar o limite de retenção.',
       bulkHint: 'Backups são restaurados e excluídos um conjunto por vez, de propósito.',
       retentionPerMachine: 'Estes limites valem para cada máquina separadamente.',
       machineUnknown: 'Máquina {id}',
@@ -2653,6 +2694,7 @@ export const messages = {
           'Um serviço por usuário inicia o MangoStudio no login e o traz de volta após reiniciar, para que já esteja lá antes de você abrir o navegador.',
         installed: 'Instalado',
         notInstalled: 'Não instalado',
+        unknown: 'Não foi possível verificar',
         supervisor: {
           linux: 'unidade de usuário do systemd',
           darwin: 'agente do launchd',
@@ -3586,6 +3628,8 @@ export const messages = {
       },
       needsAction: 'Precisa de ação',
       canWait: 'Pode esperar',
+      forInformation: 'Para informação',
+      nothingNeedsAction: 'Nada precisa de ação.',
     },
     install: {
       confirmTitle: 'Executar esta instalação?',
@@ -3794,7 +3838,7 @@ export const messages = {
       required: 'Este agente precisa que o aviso seja aceito antes de rodar.',
       manageDescription:
         'A CLI de um agente de terceiros mostra um aviso antes de receber uma conversa pela primeira vez. Os avisos que você aceitou aparecem aqui.',
-      manageEmpty: 'Você ainda não aceitou nenhum agente externo.',
+      manageEmpty: 'Nenhum agente externo aceito ainda',
       manageEmptyHint:
         'Um aviso é registrado na primeira vez que você usa o Claude Code, o Codex ou o Cursor no MangoStudio.',
       acknowledgedAt: 'Aceito em {date}',
@@ -4260,8 +4304,7 @@ export const messages = {
       lead: 'Um chat é respondido por um modelo configurado com a sua chave de API, ou por uma CLI de agente já instalada aqui.',
       hint: 'CLIs de agente entram com a conta do próprio fornecedor, no terminal delas. O MangoStudio nunca vê essas credenciais.',
       cliHeading: 'CLIs de agente nesta máquina',
-      modelDescription:
-        'As respostas vêm de um provider configurado com a sua chave de API. Não há mais nada a instalar.',
+      modelDescription: 'Usa a sua chave de API. Nada a instalar.',
       noneFound: 'Nenhuma CLI de agente foi encontrada aqui.',
       probeFailed:
         'N\u00e3o foi poss\u00edvel perguntar a esta m\u00e1quina quais CLIs de agente ela tem. Isso n\u00e3o \u00e9 o mesmo que n\u00e3o ter nenhuma \u2014 tente de novo, ou pule este passo e escolha depois.',
@@ -4271,7 +4314,6 @@ export const messages = {
       signedOut: 'Não conectado',
       // O comando abaixo é de um agente só; a linha diz qual.
       signInHint: 'Entre pelo terminal desta máquina e volte aqui.',
-      selected: 'Selecionado',
       isolated:
         'Outra conta já está usando os logins de agente deste computador, então eles não são oferecidos aqui. Use um modelo, ou pule este passo e adicione uma máquina sua em Ambientes depois.',
     },

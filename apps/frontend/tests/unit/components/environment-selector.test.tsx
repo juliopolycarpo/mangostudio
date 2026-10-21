@@ -127,6 +127,27 @@ describe('EnvironmentSelector', () => {
     }
   });
 
+  it('states the only environment as a fact rather than a one-row menu', async () => {
+    const scenario = createFetchScenario();
+    scenario.respondWithJson('GET', '/api/environments', { body: [ENVIRONMENTS[0]] }).install();
+
+    try {
+      render(<EnvironmentSelector environmentId="local" onEnvironmentChange={jest.fn()} />);
+
+      // The picker stands in until the listing lands, then becomes the fact.
+      await waitFor(() =>
+        expect(screen.getByTestId('environment-selector')).toHaveTextContent('env:Local')
+      );
+      const chip = screen.getByTestId('environment-selector');
+      // A menu with one checked row and no way out is a dead end.
+      expect(screen.queryByRole('combobox')).toBeNull();
+      // The reason says where a second environment would come from.
+      expect(chip).toHaveTextContent('Add another from Environments.');
+    } finally {
+      scenario.restore();
+    }
+  });
+
   it('refuses to open while disabled', async () => {
     const scenario = createFetchScenario();
     scenario.respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS }).install();

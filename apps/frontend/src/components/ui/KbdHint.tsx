@@ -9,12 +9,20 @@ interface KbdHintProps {
   className?: string;
 }
 
-/** Keyboard shortcut chip, sized to sit inside buttons and menu rows. */
+/**
+ * Keyboard shortcut chip, sized to sit inside buttons and menu rows.
+ *
+ * Not drawn on a coarse pointer: a phone has no Esc or Ctrl+N, and a keycap
+ * there points at a key the reader does not have. The rule lives here once
+ * rather than at each call site, so the palette, the sidebar and the composer
+ * cannot disagree about it. `pointer-coarse:` sorts after the breakpoints, so a
+ * caller's `sm:inline-flex` does not bring it back on a touch screen.
+ */
 export function KbdHint({ keys, className }: KbdHintProps) {
   return (
     <kbd
       className={cn(
-        'inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-xs border border-stroke bg-control px-1 font-mono text-micro font-medium leading-none text-fg-muted',
+        'inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-xs border border-stroke bg-control px-1 font-mono text-micro font-medium leading-none text-fg-muted pointer-coarse:hidden',
         className
       )}
     >

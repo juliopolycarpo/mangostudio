@@ -289,9 +289,9 @@ export function ToolParameterField({
     return descriptor.description;
   }, [descriptor.name, descriptor.description, t]);
 
-  // A parameter belongs to the tool above it, so its name is a step down from the
-  // tool's own 14px/600: the same row anatomy, one size smaller.
-  const heading = <span className="text-xs">{label}</span>;
+  // A parameter's name is a field label like any other (14px/500), a weight step
+  // under the tool's own 14px/600; the indented `stroke` rule carries the nesting,
+  // so the name does not shrink as well.
 
   const descriptorValue = value ?? descriptor.defaultValue ?? '';
 
@@ -312,7 +312,7 @@ export function ToolParameterField({
     ];
     return (
       <SettingsRow
-        label={heading}
+        label={label}
         hint={description}
         htmlFor={`${fieldId}-model`}
         layout="field"
@@ -336,7 +336,7 @@ export function ToolParameterField({
       // The autosave makes this an immediate setting, so it is a switch. The
       // padding is the card's own: the row sits inside a tool's row.
       return (
-        <SettingsRow as="label" label={heading} hint={description} className="p-0">
+        <SettingsRow as="label" label={label} hint={description} className="p-0">
           <ToggleSwitch
             checked={Boolean(descriptorValue)}
             onChange={(e) => onChange(e.target.checked)}
@@ -349,12 +349,7 @@ export function ToolParameterField({
 
     case 'number': {
       return (
-        <SettingsRow
-          label={heading}
-          hint={description}
-          htmlFor={`${fieldId}-number`}
-          className="p-0"
-        >
+        <SettingsRow label={label} hint={description} htmlFor={`${fieldId}-number`} className="p-0">
           <Input
             id={`${fieldId}-number`}
             type="number"
@@ -374,7 +369,7 @@ export function ToolParameterField({
       const options = descriptor.options ?? [];
       return (
         <SettingsRow
-          label={heading}
+          label={label}
           hint={description}
           htmlFor={`${fieldId}-select`}
           layout="field"
@@ -398,7 +393,7 @@ export function ToolParameterField({
         ? descriptorValue.join('\n')
         : toSafeString(descriptorValue);
       return (
-        <SettingsField label={heading} htmlFor={`${fieldId}-list`} hint={description}>
+        <SettingsField label={label} htmlFor={`${fieldId}-list`} hint={description}>
           <Textarea
             id={`${fieldId}-list`}
             value={listValue}
@@ -418,7 +413,7 @@ export function ToolParameterField({
 
     case 'path_list': {
       return (
-        <SettingsField label={heading}>
+        <SettingsField label={label}>
           <PathListField
             value={descriptorValue}
             onChange={onChange}
@@ -433,7 +428,7 @@ export function ToolParameterField({
     default: {
       return (
         <SettingsRow
-          label={heading}
+          label={label}
           hint={description}
           htmlFor={`${fieldId}-text`}
           layout="field"

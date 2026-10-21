@@ -74,7 +74,7 @@ describe('ContextRing', () => {
     const { container } = render(<ContextRing ratio={0.02} severity="normal" />);
 
     const track = container.querySelector('svg circle:first-of-type');
-    expect(track?.getAttribute('class')).toBe('stroke-fg-subtle');
+    expect(track?.getAttribute('class')).toBe('stroke-stroke');
     expect(container.querySelector('span')?.className).toContain('text-fg');
     expect(container.textContent).toContain('2');
   });

@@ -146,6 +146,23 @@ describe('external availability states', () => {
     expect(props.onSelectExternal).toHaveBeenCalledTimes(1);
   });
 
+  // In a 320px panel the account badge and the fork hint on the name's line left
+  // only the name free to shrink, and "Claude Code" read as "C…".
+  it('keeps the agent name whole, with the account under it and the hint yielding', () => {
+    renderSelector({
+      hasTurns: true,
+      runner: { kind: 'mangostudio', agentId: 'default' },
+      externalAgents: [descriptor({ account: { label: 'ada@example.test' } })],
+    });
+    const option = codexOption();
+    const name = within(option).getByText('Codex CLI');
+    expect(name).not.toHaveClass('truncate');
+    expect(within(option).getByText(/continue in a new chat/i)).toHaveClass('truncate');
+    // Under the name, in the same block, never on the name's own line.
+    expect(name.parentElement).not.toContainElement(within(option).getByText('ada@example.test'));
+    expect(option).toHaveAccessibleDescription(/ada@example\.test/);
+  });
+
   it('keeps an unknown sign-in state selectable, with a note', () => {
     // Claude may keep credentials in an OS keychain, so a missing credential
     // file is not a signed-out verdict. Disabling here would make an installed,
@@ -233,6 +250,47 @@ describe('external availability states', () => {
     expect(
       screen.queryByRole('link', { name: /Install this agent|Update this agent/i })
     ).toBeNull();
+  });
+
+  // Blocked until its notice is read, but selectable: picking it opens the
+  // notice. The row says so — a warning glyph on the reason, and the notice as
+  // its way through where a healthy row would offer a new chat.
+  it('offers the notice, not a new chat, for a runner whose notice is unread', () => {
+    const { props } = renderSelector({
+      hasTurns: true,
+      externalAgents: [
+        descriptor({
+          unavailableReason: 'disclosure-required',
+          remedy: { kind: 'accept-disclosure' },
+        }),
+      ],
+    });
+
+    expect(codexOption()).toBeEnabled();
+    expect(within(codexOption()).queryByText(/continue in a new chat/i)).toBeNull();
+    expect(codexOption()).toHaveAccessibleDescription(/third-party notice/i);
+    expect(codexOption().querySelector('.text-warning')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read the notice' }));
+    expect(props.onForkWithRunner).toHaveBeenCalledWith({ kind: 'external', targetId: 'codex' });
+  });
+
+  it('marks each row with the identity colour of the runner it picks', () => {
+    renderSelector({
+      externalAgents: [descriptor(), descriptor({ targetId: 'claude', installed: false })],
+    });
+
+    const list = screen.getByRole('listbox');
+    expect(
+      within(list)
+        .getByRole('option', { name: /Default/ })
+        .querySelector('.bg-agent-mango')
+    ).not.toBeNull();
+    expect(codexOption().querySelector('.bg-agent-codex')).not.toBeNull();
+    // A runner that cannot run here keeps its colour; only its name steps down.
+    expect(
+      screen.getByRole('option', { name: /Claude Code/ }).querySelector('.bg-agent-claude')
+    ).not.toBeNull();
   });
 
   it('never renders an executable path', () => {
@@ -371,19 +429,37 @@ describe('runner pill availability', () => {
     return screen.getByRole('button', { name: /who runs this chat/i });
   }
 
+  // The availability glyph after the name; `null` when the runner is ready.
   const toneOf = (pill: HTMLElement) =>
-    pill.querySelector('[data-tone]')?.getAttribute('data-tone') ?? null;
+    pill.querySelector('[data-availability]')?.getAttribute('data-availability') ?? null;
+  const dotOf = (pill: HTMLElement) => pill.querySelector('[data-tone]');
 
-  it('reads signed in for a usable descriptor', () => {
+  it('reads signed in for a usable descriptor, with no status glyph', () => {
     const pill = renderPill();
     expect(within(pill).getByText('signed in')).toBeInTheDocument();
-    expect(toneOf(pill)).toBe('success');
+    expect(pill).toHaveAccessibleDescription('signed in');
+    expect(toneOf(pill)).toBeNull();
+  });
+
+  // The dot is the runner's identity — the colour the sidebar, the palette and
+  // Home draw for it — never its availability, and never the accent.
+  it('draws the runner identity dot, whatever the availability', () => {
+    const codex = renderPill();
+    expect(dotOf(codex)).toHaveClass('bg-agent-codex');
+    expect(dotOf(codex)).not.toHaveClass('bg-success');
+  });
+
+  it('draws MangoStudio in its own identity colour with no status glyph', () => {
+    const pill = renderPill({ runner: { kind: 'mangostudio', agentId: 'default' } });
+    expect(dotOf(pill)).toHaveClass('bg-agent-mango');
+    expect(dotOf(pill)).not.toHaveClass('bg-accent');
+    expect(toneOf(pill)).toBeNull();
   });
 
   it('does not claim the agent is unavailable while discovery is still answering', () => {
     const pill = renderPill({ externalAgents: [], isExternalAgentListLoading: true });
     expect(within(pill).queryByText(/cannot run here/i)).toBeNull();
-    expect(toneOf(pill)).toBe('neutral');
+    expect(toneOf(pill)).toBe('loading');
   });
 
   it('reports unavailable once discovery answered without the descriptor', () => {

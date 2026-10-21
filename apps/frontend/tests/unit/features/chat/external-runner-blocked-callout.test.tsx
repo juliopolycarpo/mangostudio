@@ -11,7 +11,7 @@
 import { describe, expect, it, mock } from 'bun:test';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
-import { screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { render } from '../../../support/harness/render';
 import { routerWithLinkStub } from '../../../support/mocks/router';
 
@@ -19,6 +19,9 @@ mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 const { ExternalRunnerBlockedCallout } = await import(
   '../../../../src/features/chat/components/ExternalRunnerBlockedCallout'
+);
+const { onExternalDisclosurePrompt, settleExternalDisclosure } = await import(
+  '../../../../src/features/external-agents/disclosure-prompt'
 );
 
 function descriptor(overrides: Partial<ExternalAgentDescriptor> = {}): ExternalAgentDescriptor {
@@ -131,6 +134,31 @@ describe('ExternalRunnerBlockedCallout', () => {
     const notice = screen.getByRole('status');
     expect(notice).toHaveTextContent('third-party notice first');
     expect(notice).not.toHaveTextContent(/pick another/i);
+  });
+
+  // The composer under this notice is locked until the notice is accepted, so
+  // the notice has to be the way to it: it raises the same prompt the send path
+  // does, for this agent on this machine, which the layout's gate answers.
+  it('opens the third-party notice for this agent on this machine', () => {
+    const requests: unknown[] = [];
+    const unsubscribe = onExternalDisclosurePrompt((request) => requests.push(request));
+    try {
+      render(
+        <ExternalRunnerBlockedCallout
+          descriptor={descriptor({
+            environmentId: 'laptop',
+            unavailableReason: 'disclosure-required',
+            remedy: { kind: 'accept-disclosure' },
+          })}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Read the notice' }));
+      expect(requests.at(-1)).toEqual({ targetId: 'claude', environmentId: 'laptop' });
+    } finally {
+      settleExternalDisclosure(false);
+      unsubscribe();
+    }
   });
 
   it('says the agent cannot run, and what to try, while discovery has no answer', () => {

@@ -170,9 +170,8 @@ export function ThinkingBlock({ messageId, text, isStreaming, incomplete }: Thin
     });
   };
 
-  // `chat.feed.thoughtFor` is the same sentence an image turn already prints
-  // for its own elapsed time; a second key holding the same string would only
-  // give the two translations a way to drift apart.
+  // `chat.feed.thoughtFor` names a thought's own elapsed time and nothing else:
+  // an image's is `generatedIn`, and a turn's is its closing line.
   const label = thinkingLabel(
     { isStreaming, hasText, durationMs },
     {

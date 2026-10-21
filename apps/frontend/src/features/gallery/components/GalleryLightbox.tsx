@@ -9,6 +9,7 @@ import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
+import { MEDIA_CONTROL_CLASS } from './media-control';
 
 interface GalleryLightboxProps {
   /** The image on screen, or null for "closed" — the exit animation needs both. */
@@ -31,9 +32,11 @@ interface GalleryLightboxProps {
  * against, and white `on-scrim-media` text holds 4.5:1 over anything under it.
  * The tile's caption bar keeps the single veil, since it sits on a picture.
  *
- * Both controls draw their focus ring in `on-scrim-media`: the global ring is
- * the theme's `focus`, which in the light theme is a dark brown, and a dark ring
- * on a dark veil is not a ring.
+ * Close is a media control (`MEDIA_CONTROL_CLASS`): white on the veil in both
+ * themes, never the theme's `secondary` tile, which turned bright white in the
+ * light theme. Download stays the one mango primary. Both draw their focus ring
+ * in `on-scrim-media`: the global ring is the theme's `focus`, which in the
+ * light theme is a dark brown, and a dark ring on a dark veil is not a ring.
  *
  * Takes the selected item rather than owning it: the gallery grid and the
  * studio's recent strip both open this, and neither should have to reimplement
@@ -93,11 +96,11 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
               <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="subtle"
                   size="icon"
                   aria-label={t.gallery.close}
                   title={t.gallery.close}
-                  className="focus-visible:outline-on-scrim-media"
+                  className={MEDIA_CONTROL_CLASS}
                   onClick={onClose}
                 >
                   <X size={ICON_MD} />

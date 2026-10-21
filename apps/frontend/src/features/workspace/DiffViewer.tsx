@@ -13,6 +13,7 @@ import { FilePathLabel } from './components/FilePathLabel';
 import { IconButton } from './components/IconButton';
 import type { GitDiffInput } from './hooks/use-git-state';
 import { useGitDiff } from './hooks/use-git-state';
+import { shortHash } from './short-hash';
 
 /**
  * How much of a syntax colour survives on an added or removed line; the rest is
@@ -88,9 +89,12 @@ export function DiffViewer({
         </IconButton>
         <div className="min-w-0 flex-1">
           <FilePathLabel path={selection.path} />
-          <p className={cn('text-micro text-fg-subtle', selection.commit && 'font-mono')}>
+          <p
+            className={cn('text-micro text-fg-subtle', selection.commit && 'font-mono')}
+            title={selection.commit}
+          >
             {selection.commit
-              ? selection.commit.slice(0, 8)
+              ? shortHash(selection.commit)
               : selection.staged
                 ? t.git.diff.staged
                 : t.git.diff.worktree}
@@ -128,9 +132,9 @@ export function DiffViewer({
               >
                 {hunk.header}
               </div>
-              {hunk.lines.map((line) => (
+              {hunk.lines.map((line, index) => (
                 <DiffLineRow
-                  key={`${line.type}:${line.oldLine ?? ''}:${line.newLine ?? ''}:${line.content}`}
+                  key={diffLineKey(hunk.lines, index)}
                   line={line}
                   language={highlightReady ? language : null}
                   theme={resolvedCodeTheme}
@@ -210,6 +214,19 @@ const DiffLineRow = memo(function DiffLineRow({
     </div>
   );
 });
+
+/**
+ * A row's key: its numbers and content, which are unique within a hunk for every
+ * line that has a number. A `\ No newline at end of file` marker has none, and
+ * a hunk where both sides lack the final newline carries two identical ones, so
+ * a marker is keyed by the line it annotates.
+ */
+function diffLineKey(lines: readonly GitDiffLine[], index: number): string {
+  const line = lines[index];
+  if (!line) return String(index);
+  if (line.type === 'metadata' && index > 0) return `${diffLineKey(lines, index - 1)}:meta`;
+  return `${line.type}:${line.oldLine ?? ''}:${line.newLine ?? ''}:${line.content}`;
+}
 
 function tokenColor(color: string | undefined, tinted: boolean): string | undefined {
   if (!color || !tinted) return color;

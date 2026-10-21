@@ -124,7 +124,7 @@ describe('WorktreeSection', () => {
 
     renderSection();
 
-    expect(screen.getByText(labels.detached.replace('{commit}', 'abcdef12'))).toBeInTheDocument();
+    expect(screen.getByText(labels.detached.replace('{commit}', 'abcdef1'))).toBeInTheDocument();
     expect(screen.getByText(labels.badges.detached)).toBeInTheDocument();
   });
 

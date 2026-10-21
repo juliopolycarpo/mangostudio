@@ -5,15 +5,41 @@
  * resource, the target, and the state in words, and the text label appears
  * alongside the glyph once there is room for it, as a short word — the full
  * sentence is the tooltip and the accessible name. The glyph takes the state's
- * colour; the word stays in `fg-muted`. A user who cannot tell ⧉ from
- * ⚠ — or cannot see either — still gets the whole answer.
+ * colour; the word stays in `fg-muted`. A user who cannot tell the stacked
+ * layers from the warning triangle — or cannot see either — still gets the
+ * whole answer.
  */
 
 import type { LibraryLocationStatus } from '@mangostudio/shared/library';
+import {
+  Check,
+  CircleHelp,
+  Layers,
+  type LucideIcon,
+  Minus,
+  Star,
+  TriangleAlert,
+} from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
+import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
-import { CELL_GLYPHS, type CoverageCell as Cell, hashPrefix } from '../format';
+import { type CoverageCell as Cell, hashPrefix } from '../format';
+
+/**
+ * The icon carrying each state. Never the only signal — every cell is also
+ * labelled. Lucide rather than Unicode symbols: each character had its own
+ * advance width and weight (a hairline ✓ beside a filled ⚠), so the words
+ * printed after them started at different x positions down a column.
+ */
+const STATE_ICONS: Readonly<Record<Cell['state'], LucideIcon>> = {
+  present: Check,
+  absent: Minus,
+  shadowed: Layers,
+  divergent: TriangleAlert,
+  'only-here': Star,
+  incomparable: CircleHelp,
+};
 
 /**
  * The glyph's colour per state. Attention (copies that differ, or cannot be
@@ -30,11 +56,15 @@ const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
 };
 
 /**
- * The one drawing of a coverage state: its glyph, in the state's colour.
+ * The one drawing of a coverage state: its icon, in the state's colour.
  *
  * The matrix cells, the legend that explains them and the detail page's
  * per-agent rows all use it, so a state looks the same wherever it is met. It is
  * decoration (`aria-hidden`): the caller prints the state's word beside it.
+ *
+ * A fixed 14px box, so every state takes the same width and the words beside
+ * them line up down a column. Inside a baseline-aligned row the box centres
+ * itself on the line rather than sitting on the baseline.
  */
 export function CoverageGlyph({
   state,
@@ -43,12 +73,17 @@ export function CoverageGlyph({
   readonly state: Cell['state'];
   readonly className?: string;
 }) {
+  const Icon = STATE_ICONS[state];
   return (
     <span
       aria-hidden="true"
-      className={cn('shrink-0 text-sm leading-none', STATE_TONES[state], className)}
+      className={cn(
+        'inline-flex size-3.5 shrink-0 items-center justify-center self-center',
+        STATE_TONES[state],
+        className
+      )}
     >
-      {CELL_GLYPHS[state]}
+      <Icon size={ICON_SM} />
     </span>
   );
 }

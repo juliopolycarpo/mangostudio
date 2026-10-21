@@ -101,7 +101,7 @@ function RepoLines({ status }: { status: Extract<GitRepoState, { state: 'repo' }
         <span className={status.clean ? 'text-success' : 'text-warning'}>
           {status.clean
             ? labels.cleanTree
-            : plural({ one: labels.dirtyTreeOne, other: labels.dirtyTreeOther }, changed)}
+            : plural({ one: t.home.filesChangedOne, other: t.home.filesChangedOther }, changed)}
         </span>
         {' · '}
         {syncLine(branch, labels, t.sidebar.git.sync)}

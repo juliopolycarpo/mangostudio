@@ -106,6 +106,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     const sessions = sessionCommands({
       chats,
       badgeLabels: t.sidebar.runner,
+      untitledLabel: t.chat.untitled,
       locale,
       nowMs,
       onSelect: (chatId) => {

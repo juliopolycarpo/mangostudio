@@ -68,6 +68,15 @@ const STATE_DOT_TONE: Record<Exclude<CapabilityState, 'enabled'>, StatusDotTone>
   unavailable: 'warning',
 };
 
+/**
+ * The dot for a server, and for the tools it is the reason for: a server whose
+ * own status word is `error` is a fault, not a thing to fix, so the glyph says
+ * so too. "GitHub · error" on a warning dot told the reader two different things.
+ */
+function mcpDotTone(server: CapabilityMcpServerEntry): StatusDotTone | undefined {
+  return server.state !== 'enabled' && server.health === 'error' ? 'error' : undefined;
+}
+
 /** The dot is decorative; this label is what carries state to assistive tech. */
 const STATE_LABEL_KEY: Record<
   CapabilityState,
@@ -193,6 +202,7 @@ function CapabilityPanel({
         countLabel={enabledCountLabel(labels, builtinTools)}
         manageLabel={labels.manageTools}
         manageTo="/settings/tools"
+        managesAgent={builtinTools.some((tool) => isAgentSettingsReason(tool.reason))}
         defaultOpen={hasException(builtinTools)}
       >
         <ExceptionsAndEnabled
@@ -208,7 +218,6 @@ function CapabilityPanel({
                 name: tool.environmentName,
                 id: tool.environmentId,
               })}
-              reasonManageTo={reasonManageTo(tool.reason)}
             />
           )}
         />
@@ -224,6 +233,12 @@ function CapabilityPanel({
         )}
         manageLabel={labels.manageMcp}
         manageTo="/settings/mcp"
+        managesAgent={
+          capabilities.mcpServers.some((server) => isAgentSettingsReason(server.reason)) ||
+          capabilities.tools.some(
+            (tool) => tool.source === 'mcp' && isAgentSettingsReason(tool.reason)
+          )
+        }
         // An empty section is one line of text, and the line is the answer.
         defaultOpen={mcpHasException || capabilities.mcpServers.length === 0}
       >
@@ -245,6 +260,7 @@ function CapabilityPanel({
         countLabel={enabledCountLabel(labels, capabilities.skills)}
         manageLabel={labels.manageSkills}
         manageTo="/settings/skills"
+        managesAgent={capabilities.skills.some((skill) => isAgentSettingsReason(skill.reason))}
         defaultOpen={hasException(capabilities.skills) || capabilities.skills.length === 0}
       >
         {capabilities.skills.length === 0 && (
@@ -261,7 +277,6 @@ function CapabilityPanel({
               subtitle={skill.source}
               state={skill.state}
               reasonText={reasonText(labels, skill.reason)}
-              reasonManageTo={reasonManageTo(skill.reason)}
             />
           )}
         />
@@ -337,6 +352,7 @@ function McpServerRows({
   // the tool names it contributes to the turn are untouched by any rename.
   const { resolve } = useToolIdentities();
   const identity = resolve('mcp', server.slug, server.name);
+  const serverTone = mcpDotTone(server);
 
   return (
     <div className="space-y-0.5">
@@ -354,11 +370,11 @@ function McpServerRows({
         }
         subtitle={labels.health[server.health]}
         state={server.state}
+        tone={serverTone}
         reasonText={reasonText(labels, server.reason, {
           name: server.environmentName,
           id: server.environmentId,
         })}
-        reasonManageTo={reasonManageTo(server.reason)}
       />
       {exceptionsFirst(tools).map((tool) => (
         <div key={tool.name} className="pl-4">
@@ -366,11 +382,12 @@ function McpServerRows({
             labels={labels}
             title={tool.title}
             state={tool.state}
+            // A tool that is off *because* its server failed carries the server's dot.
+            tone={tool.reason === 'server-unavailable' ? serverTone : undefined}
             reasonText={reasonText(labels, tool.reason, {
               name: tool.environmentName,
               id: tool.environmentId,
             })}
-            reasonManageTo={reasonManageTo(tool.reason)}
           />
         </div>
       ))}
@@ -385,12 +402,18 @@ function McpServerRows({
  * to be opened when something is not. `defaultOpen` is read again whenever it
  * turns true, so a tool switched off while the panel is up opens its group
  * rather than only changing a number.
+ *
+ * The ways out sit on the heading's line, once each: the section's own settings
+ * page, and — when a row is off because of the agent profile — the agent's
+ * settings. A link under every such row repeated one mango sentence down the
+ * panel and made it the loudest thing in it.
  */
 function CapabilitySection({
   heading,
   countLabel,
   manageLabel,
   manageTo,
+  managesAgent,
   defaultOpen,
   children,
 }: {
@@ -398,9 +421,12 @@ function CapabilitySection({
   countLabel: string;
   manageLabel: string;
   manageTo: string;
+  /** True when a row in the section is off because of the agent profile. */
+  managesAgent: boolean;
   defaultOpen: boolean;
   children: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(defaultOpen);
   const bodyId = useId();
   useEffect(() => {
@@ -422,6 +448,11 @@ function CapabilitySection({
             {heading} · {countLabel}
           </span>
         </button>
+        {managesAgent ? (
+          <Link to="/settings/agents" className="shrink-0 text-xs text-accent-fg hover:underline">
+            {t.chat.capabilities.manageAgent}
+          </Link>
+        ) : null}
         <Link to={manageTo} className="shrink-0 text-xs text-accent-fg hover:underline">
           {manageLabel}
         </Link>
@@ -441,8 +472,8 @@ function CapabilityRow({
   avatar,
   subtitle,
   state,
+  tone,
   reasonText,
-  reasonManageTo,
 }: {
   labels: CapabilityLabels;
   title: string;
@@ -450,8 +481,10 @@ function CapabilityRow({
   avatar?: React.ReactNode;
   subtitle?: string;
   state: CapabilityState;
+  /** Overrides the state's own dot when the row knows more (a server in error). */
+  tone?: StatusDotTone;
+  /** Plain words: the section heading carries the way to change it. */
   reasonText?: string;
-  reasonManageTo?: '/settings/agents';
 }) {
   return (
     <div className="flex items-start gap-2 px-2 py-1">
@@ -459,7 +492,7 @@ function CapabilityRow({
       {state === 'enabled' ? (
         <span aria-hidden="true" className="mt-1 size-2 shrink-0" />
       ) : (
-        <StatusDot tone={STATE_DOT_TONE[state]} className="mt-1" />
+        <StatusDot tone={tone ?? STATE_DOT_TONE[state]} className="mt-1" />
       )}
       {avatar}
       <span className="min-w-0">
@@ -473,17 +506,7 @@ function CapabilityRow({
           <span className="sr-only"> · {labels[STATE_LABEL_KEY[state]]}</span>
           {subtitle && <span className="text-fg-subtle"> · {subtitle}</span>}
         </span>
-        {reasonText && reasonManageTo && (
-          <Link
-            to={reasonManageTo}
-            className="block truncate text-xs text-accent-fg hover:underline"
-          >
-            {reasonText}
-          </Link>
-        )}
-        {reasonText && !reasonManageTo && (
-          <span className="block truncate text-xs text-fg-muted">{reasonText}</span>
-        )}
+        {reasonText && <span className="block truncate text-xs text-fg-muted">{reasonText}</span>}
       </span>
     </div>
   );
@@ -505,8 +528,9 @@ function reasonText(
   return environmentName ? formatMessage(template, { environmentName }) : template;
 }
 
-function reasonManageTo(reason: CapabilityReasonCode | undefined): '/settings/agents' | undefined {
-  return reason && AGENT_SETTINGS_REASONS.has(reason) ? '/settings/agents' : undefined;
+/** A reason the agent profile owns, so the agent's settings are where it changes. */
+function isAgentSettingsReason(reason: CapabilityReasonCode | undefined): boolean {
+  return reason !== undefined && AGENT_SETTINGS_REASONS.has(reason);
 }
 
 function enabledCountLabel(

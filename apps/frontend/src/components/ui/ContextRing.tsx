@@ -20,8 +20,13 @@ interface ContextRingProps {
  * `normal` and `info` are `fg`, not the accent: mango is for the primary
  * action, the current item and focus, and a healthy 62% is none of them. It
  * also sat a shade from `warning`, so a ring that had escalated barely looked
- * different from one that had not. `fg` over the `fg-subtle` track is 2.5:1 or
- * better in both themes; `fg-muted` would not clear the track.
+ * different from one that had not.
+ *
+ * The track is `stroke`, the hairline token, not `fg-subtle`: a gauge's track
+ * is structure, like a card's edge. Against `fg-subtle` the arc was 2.4:1 (dark)
+ * and 3:1 (light), and two 2.5px antialiased strokes that close in value fused
+ * into one band at 16px, so a 62% ring read as a full circle. Against `stroke`
+ * the `fg` arc is 10.5:1 and 12.8:1, and the open segment reads as open.
  */
 const SEVERITY_STROKE: Record<ContextSeverity, string> = {
   normal: 'stroke-fg',
@@ -67,11 +72,13 @@ export function ContextRing({ ratio, severity, showValue = true }: ContextRingPr
           r={r}
           fill="none"
           // A tenth of an opacity was enough on the sidebar's own surface and
-          // vanished on the composer's accent-tinted band: with nothing to see
-          // but a 1px arc, a chat under 15% of its window read as an empty gap
-          // where the chip should be. The track is the thing that says "there
-          // is a ring here" at every value, so it has to survive both surfaces.
-          className="stroke-fg-subtle"
+          // vanished on the composer's band: with nothing to see but a 1px arc,
+          // a chat under 15% of its window read as an empty gap where the chip
+          // should be. The track is the thing that says "there is a ring here"
+          // at every value, so it is a solid token — the same `stroke` hairline
+          // that draws the composer's own frame — rather than a faded one, and
+          // a step quieter than the arc so the unused part reads as unused.
+          className="stroke-stroke"
           strokeWidth={stroke}
         />
         <circle

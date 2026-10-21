@@ -28,6 +28,11 @@ interface EnvironmentSelectorProps {
  * Lives in the header and in a page's title row, both near the top of the
  * viewport, so its listbox opens downward: the composer's upward default would
  * put the panel above the window.
+ *
+ * With only one environment there is nothing to choose: a menu holding one
+ * checked row and no way out read as a broken list. The chip states the fact
+ * instead, as it does for a chat that has started, and its reason says where a
+ * second environment comes from.
  */
 export function EnvironmentSelector({
   environmentId,
@@ -56,6 +61,7 @@ export function EnvironmentSelector({
   };
 
   const unavailable = environments.isPending && !environments.data;
+  const onlyChoice = environments.data?.length === 1 && environments.data[0]?.id === environmentId;
   const status = selected?.status.state ?? 'disconnected';
   const statusLabel = t.environments.entities.status[status];
 
@@ -69,13 +75,13 @@ export function EnvironmentSelector({
       <span id={statusId} className="sr-only">
         {statusLabel}
       </span>
-      {locked ? (
+      {locked || onlyChoice ? (
         <LockedChip
           label={t.chat.input.environmentLabel}
           // The listing may not have landed; until it does the only name for
           // the current environment is its id.
           value={selected?.name ?? environmentId}
-          reason={t.chat.input.environmentLocked}
+          reason={locked ? t.chat.input.environmentLocked : t.chat.input.environmentOnlyOne}
           icon={icon}
           adornment={adornment}
           describedBy={statusId}

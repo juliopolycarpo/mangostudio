@@ -89,7 +89,7 @@ export function ContextSettings({
 
       {/* The number field beside each slider shows the value, and the hint says it
           is a percentage, so the rows carry no readout of their own. */}
-      <SettingsSection>
+      <SettingsSection title={s.thresholdsLabel} description={s.thresholdsDescription}>
         <SettingsSliderRow
           id="context-warning-threshold"
           label={s.warningThresholdLabel}

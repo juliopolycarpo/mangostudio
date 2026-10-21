@@ -99,16 +99,18 @@ reads yellow beside the pink danger wash and is lighter, so `fg-subtle` (4.9:1) 
 
 ### Overlay and identity
 
-| Token            | Utility               | Dark        | Light       | Use                                                                                                                                                                                                                                           |
-| ---------------- | --------------------- | ----------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scrim`          | `bg-scrim`            | `#0000008c` | `#1e1b1652` | The veil behind a dialog or the mobile sidebar. A flat tint, never a blur.                                                                                                                                                                    |
-| `scrim-media`    | `bg-scrim-media`      | `#000000b3` | `#000000b3` | The veil under text laid over a picture — a caption on an image, the bar of a full-bleed viewer. The same in both themes: a photograph is not themed. 70% black, so `on-scrim-media` holds 4.5:1 (about 8.5:1 over white) whatever the image. |
-| `on-scrim-media` | `text-on-scrim-media` | `#ffffff`   | `#ffffff`   | Text and icons on `scrim-media`. White in both themes.                                                                                                                                                                                        |
-| `agent-mango`    | `bg-agent-mango`      | `#f5a623`   | `#a86400`   | MangoStudio's own runner: the dot, the composer border, the prompt mark. Light value darkened to `#a86400` (4.7:1) because it is read as text.                                                                                                |
-| `agent-claude`   | `bg-agent-claude`     | `#e0836a`   | `#b9553a`   | Claude Code runner identity.                                                                                                                                                                                                                  |
-| `agent-codex`    | `bg-agent-codex`      | `#5cc8e8`   | `#1f7a99`   | Codex runner identity.                                                                                                                                                                                                                        |
-| `agent-cursor`   | `bg-agent-cursor`     | `#a78bfa`   | `#6d4fd8`   | Cursor runner identity.                                                                                                                                                                                                                       |
-| `agent-generic`  | `bg-agent-generic`    | `#8b8579`   | `#736d63`   | A runner with no identity of its own.                                                                                                                                                                                                         |
+| Token                | Utility                 | Dark        | Light       | Use                                                                                                                                                                                                                                           |
+| -------------------- | ----------------------- | ----------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scrim`              | `bg-scrim`              | `#0000008c` | `#1e1b1652` | The veil behind a dialog or the mobile sidebar. A flat tint, never a blur.                                                                                                                                                                    |
+| `scrim-media`        | `bg-scrim-media`        | `#000000b3` | `#000000b3` | The veil under text laid over a picture — a caption on an image, the bar of a full-bleed viewer. The same in both themes: a photograph is not themed. 70% black, so `on-scrim-media` holds 4.5:1 (about 8.5:1 over white) whatever the image. |
+| `on-scrim-media`     | `text-on-scrim-media`   | `#ffffff`   | `#ffffff`   | Text and icons on `scrim-media`. White in both themes.                                                                                                                                                                                        |
+| `fill-media-hover`   | `bg-fill-media-hover`   | `#ffffff29` | `#ffffff29` | Hover fill of a control laid on `scrim-media` (the lightbox's Close, a tile's download): `on-scrim-media` at 16%. Unthemed, like the veil.                                                                                                    |
+| `fill-media-pressed` | `bg-fill-media-pressed` | `#ffffff3d` | `#ffffff3d` | Pressed fill of a control on `scrim-media`: `on-scrim-media` at 24%.                                                                                                                                                                          |
+| `agent-mango`        | `bg-agent-mango`        | `#f5a623`   | `#a86400`   | MangoStudio's own runner: the dot, the composer border, the prompt mark. Light value darkened to `#a86400` (4.7:1) because it is read as text.                                                                                                |
+| `agent-claude`       | `bg-agent-claude`       | `#e0836a`   | `#b9553a`   | Claude Code runner identity.                                                                                                                                                                                                                  |
+| `agent-codex`        | `bg-agent-codex`        | `#5cc8e8`   | `#1f7a99`   | Codex runner identity.                                                                                                                                                                                                                        |
+| `agent-cursor`       | `bg-agent-cursor`       | `#a78bfa`   | `#6d4fd8`   | Cursor runner identity.                                                                                                                                                                                                                       |
+| `agent-generic`      | `bg-agent-generic`      | `#8b8579`   | `#736d63`   | A runner with no identity of its own.                                                                                                                                                                                                         |
 
 ### Which surface, which fill
 
@@ -234,15 +236,16 @@ class bundles all of it for menus and listboxes.
   border change (`focus:border-focus focus:ring-1 focus:ring-focus`) because the
   outline would collide with their neighbours.
 - **Hover** changes the fill only, in 120ms. No scale, no lift, no glow, and no
-  `transition-all`.
+  `transition-all`. The one exception is `subtle-danger`, which rests in `fg-muted`
+  and also turns its text `danger` when reached.
 - **Pressed** goes one step darker (`accent-pressed`, `control-pressed`,
   `fill-pressed`).
 - **Disabled** buttons turn neutral grey (`fill-selected` + `fg-subtle`) in the
   filled variants (`primary`, `secondary`, `danger`); the quiet ones (`subtle`,
   `subtle-danger`) have no fill to begin with and only turn their text `fg-subtle`,
   because a tile would read as the hovered or selected row. Other disabled controls
-  drop to 50% opacity — except a disabled menu row whose name is information (a
-  locked model, an unavailable runner): its name steps to `fg-muted` instead of
+  drop to 50% opacity — except a disabled menu row or `PickOneRow` whose name is
+  information (a locked model, an unavailable runner, a taken distribution): its name steps to `fg-muted` instead of
   fading, and the reason sits beside it ([decision 17](./decisions.md)). A composer
   chip that is *locked* because the chat has turns (the agent, the environment) is a
   fact, not a disabled control: it keeps full-strength text and drops its chevron

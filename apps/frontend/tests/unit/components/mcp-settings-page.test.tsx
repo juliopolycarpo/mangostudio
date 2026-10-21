@@ -132,8 +132,8 @@ describe('McpSettingsPage', () => {
 
     await screen.findByText('Everything');
     const testButton = screen.getByRole('button', { name: /^test$/i });
-    expect(testButton.parentElement).toBe(
-      screen.getByRole('button', { name: /^edit$/i }).parentElement
+    expect(testButton.parentElement).toContainElement(
+      screen.getByRole('button', { name: /more actions for everything/i })
     );
 
     const showTools = screen.getByRole('button', { name: /show tools/i });
@@ -206,6 +206,25 @@ describe('McpSettingsPage', () => {
     });
   });
 
+  it('gathers Edit, the rename pair and Delete in one overflow menu, Delete last', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
+      body: { servers: [STDIO_SERVER] },
+    });
+
+    render(<McpSettingsPage />);
+
+    await screen.findByText('Everything');
+    // No loose Edit or Delete button beside the menu.
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete server/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /more actions for everything/i }));
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
+    expect(items[0]).toBe('Edit');
+    expect(items.at(-1)).toBe('Delete server');
+  });
+
   it('shows masked stored headers when editing an http server', async () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/mcp/servers', {
@@ -215,7 +234,8 @@ describe('McpSettingsPage', () => {
     render(<McpSettingsPage />);
 
     await screen.findByText('Remote');
-    await user.click(screen.getByRole('button', { name: /edit/i }));
+    await user.click(screen.getByRole('button', { name: /more actions for remote/i }));
+    await user.click(screen.getByRole('menuitem', { name: /^edit$/i }));
 
     expect(screen.getByText('Authorization')).toBeInTheDocument();
     expect(screen.getByText('value saved')).toBeInTheDocument();
@@ -258,6 +278,10 @@ describe('McpSettingsPage', () => {
     expect(await screen.findByText('connect ECONNREFUSED')).toBeInTheDocument();
     // Stored state rather than an answer the user just asked for: not announced.
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    // The failure says which server and what to do, and offers the way to do it.
+    expect(screen.getByText('Could not connect to “Remote”')).toBeInTheDocument();
+    expect(screen.getByText(/check its address and credentials/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument();
   });
 
   it('replaces the stored cause with the answer of a new test, never showing both', async () => {
@@ -291,7 +315,8 @@ describe('McpSettingsPage', () => {
     render(<McpSettingsPage />);
 
     await screen.findByText('Everything');
-    await user.click(screen.getByRole('button', { name: /delete server/i }));
+    await user.click(screen.getByRole('button', { name: /more actions for everything/i }));
+    await user.click(screen.getByRole('menuitem', { name: /delete server/i }));
     // Confirm inside the dialog (its confirm button carries the same label).
     const dialogButtons = screen.getAllByRole('button', { name: /delete server/i });
     await user.click(dialogButtons[dialogButtons.length - 1]);

@@ -4,18 +4,17 @@
  *
  * The footer keeps the primary action where it was: notes (why Continue is out
  * of reach, what failed) on the left, the actions right-aligned at natural width
- * — the quiet one first, the primary last. Escape and a click on the backdrop
- * close the wizard the same way the X button does.
+ * — the quiet ones first, the primary last. There is no close button on the
+ * title line: every step's footer already has a way out (Cancel, or Done once
+ * the work is finished), and the title-line X is for a dialog with no Cancel.
+ * Escape and a click on the backdrop close the wizard the same way.
  *
  * // Usage:
  * <WizardFrame testId="…" title={title} steps={labels} stepIndex={i} … actions={<Button>…</Button>}>…</WizardFrame>
  */
 
-import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
-import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 
 interface WizardFrameProps {
@@ -24,11 +23,10 @@ interface WizardFrameProps {
   /** One label per step, in order. */
   readonly steps: readonly string[];
   readonly stepIndex: number;
-  readonly closeLabel: string;
   readonly onClose: () => void;
   /** Reasons and errors, left of the actions. */
   readonly notes?: ReactNode;
-  /** The footer buttons: secondary first, primary last. */
+  /** The footer buttons: Cancel (or Done) and Back first, the primary last. */
   readonly actions: ReactNode;
   readonly children: ReactNode;
 }
@@ -38,7 +36,6 @@ export function WizardFrame({
   title,
   steps,
   stepIndex,
-  closeLabel,
   onClose,
   notes,
   actions,
@@ -51,11 +48,6 @@ export function WizardFrame({
       title={title}
       truncateTitle
       onClose={onClose}
-      headerAction={
-        <Button variant="subtle" size="icon" onClick={onClose} aria-label={closeLabel}>
-          <X size={ICON_MD} />
-        </Button>
-      }
       // One segment per step: finished in the control line, the current one
       // in the accent, the rest in the hairline — the same bar the machine
       // onboarding draws, with the step's name under it.

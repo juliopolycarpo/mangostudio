@@ -9,6 +9,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useCommit, useGitPull, useGitPush, useStagePaths } from './hooks/use-git-state';
+import { shortHash } from './short-hash';
 
 export type CommitAction =
   | 'commit'
@@ -74,14 +75,14 @@ export function useCommitActions({
       }
     }
 
-    let shortHash: string;
+    let committed: string;
     try {
       const response = await commitMutation.mutateAsync({
         title: trimmedTitle,
         body: body.trim(),
         amend,
       });
-      shortHash = response.hash.slice(0, 8);
+      committed = shortHash(response.hash);
     } catch (error) {
       toast(resolveApiErrorMessage(error, commitLabels.error), 'error');
       return;
@@ -89,7 +90,7 @@ export function useCommitActions({
     onCommitted();
 
     if (action === 'commit') {
-      toast(commitLabels.success.replace('{hash}', shortHash), 'success');
+      toast(commitLabels.success.replace('{hash}', committed), 'success');
       return;
     }
 
@@ -114,7 +115,7 @@ export function useCommitActions({
     // succeeded retires it, exactly as the branch-row buttons do.
     onRemoteFailure(null);
     const success = action === 'commit-and-sync' ? labels.synced : labels.pushed;
-    toast(success.replace('{hash}', shortHash), 'success');
+    toast(success.replace('{hash}', committed), 'success');
   };
 
   return {

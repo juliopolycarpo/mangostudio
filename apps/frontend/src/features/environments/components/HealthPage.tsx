@@ -1,8 +1,9 @@
 /**
  * Health screen: every finding across runtimes, version managers, and agent
  * CLIs, split by whether anything has to be done — what needs action first, what
- * can wait after it — the page to open when something is broken and you do not
- * know where. Each row opens the tab that can fix it.
+ * can wait after it, and what is only worth knowing last — the page to open
+ * when something is broken and you do not know where. Each row opens the tab
+ * that can fix it.
  *
  * Findings are per machine, so the list names one. Compare mode is the other
  * question this page can answer: not "what is wrong here" but "what does this
@@ -116,19 +117,51 @@ export function HealthPage() {
       {entries.length === 0 ? (
         <EnvironmentPageState variant="empty" title={e.health.empty} hint={e.health.emptyHint} />
       ) : (
-        <div className="space-y-6">
-          <HealthGroup
-            label={e.health.needsAction}
-            entries={entries.filter((entry) => entry.severity === 'fail')}
-            environmentId={scope.environmentId}
-          />
-          <HealthGroup
-            label={e.health.canWait}
-            entries={entries.filter((entry) => entry.severity === 'warn')}
-            environmentId={scope.environmentId}
-          />
-        </div>
+        <HealthGroups entries={entries} environmentId={scope.environmentId} />
       )}
+    </div>
+  );
+}
+
+/**
+ * The findings split by what they ask of the person: a failure blocks
+ * something, a warning can wait, and an informational finding (an optional
+ * tool that is simply not there) asks for nothing at all, so it sits last
+ * under its own heading with the neutral glyph. When nothing asks for action
+ * the page says so in one muted line rather than an empty state, because the
+ * list below it is not empty.
+ */
+function HealthGroups({
+  entries,
+  environmentId,
+}: {
+  readonly entries: readonly HealthEntry[];
+  readonly environmentId: string;
+}) {
+  const { t } = useI18n();
+  const e = t.environments;
+  const needsAction = entries.filter((entry) => entry.severity === 'fail');
+  const canWait = entries.filter((entry) => entry.severity === 'warn' && !entry.quiet);
+  const informational = entries.filter((entry) => entry.severity === 'warn' && entry.quiet);
+
+  return (
+    <div className="space-y-6">
+      {needsAction.length === 0 && canWait.length === 0 && (
+        <p className="text-sm text-fg-muted" data-testid="health-nothing-needs-action">
+          {e.health.nothingNeedsAction}
+        </p>
+      )}
+      <HealthGroup
+        label={e.health.needsAction}
+        entries={needsAction}
+        environmentId={environmentId}
+      />
+      <HealthGroup label={e.health.canWait} entries={canWait} environmentId={environmentId} />
+      <HealthGroup
+        label={e.health.forInformation}
+        entries={informational}
+        environmentId={environmentId}
+      />
     </div>
   );
 }
@@ -179,7 +212,7 @@ function HealthGroup({
                 <p className="text-sm font-medium text-fg">
                   {e.health.scope[entry.scope]} · {resolve(entry.scope, entry.subjectId).name}
                 </p>
-                <p className="text-sm text-fg-muted">{describeFinding(t, entry.finding, lookup)}</p>
+                <p className="text-xs text-fg-muted">{describeFinding(t, entry.finding, lookup)}</p>
               </div>
               <Link
                 to={fix.to}

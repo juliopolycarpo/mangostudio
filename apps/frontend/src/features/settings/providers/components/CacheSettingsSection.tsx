@@ -36,7 +36,7 @@ export function CacheSettingsSection({
   return (
     <SettingsSection title={cachingSupported ? s.sectionCache : s.sectionCompaction}>
       {cachingSupported && (
-        <SettingsRow label={s.cachePreference} layout="field">
+        <SettingsRow label={s.cachePreference} hint={s.cachePreferenceHint} layout="field">
           <Select
             id="cache-preference"
             value={form.promptCachePreference ?? 'auto'}
@@ -54,6 +54,7 @@ export function CacheSettingsSection({
 
       <SettingToggle
         label={s.compaction}
+        description={s.compactionHint}
         checked={form.providerCompactionEnabled ?? false}
         onChange={(providerCompactionEnabled) => onChange({ ...form, providerCompactionEnabled })}
       />

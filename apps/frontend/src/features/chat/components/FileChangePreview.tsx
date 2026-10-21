@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+import { cn } from '@/lib/utils';
 import {
   DIFF_PREVIEW_MAX_LINES,
   type DiffPreviewLine,
@@ -21,6 +22,12 @@ interface FileChangePreviewBodyProps {
    */
   action?: ReactNode;
 }
+
+/**
+ * A diff line's own columns. The gutter starts at the header's 12px inset, so
+ * the `+`/`-` sits under the badge rather than at the panel's edge.
+ */
+const GUTTER_CELL_CLASS = 'w-7 select-none pr-1.5 pl-3 text-left';
 
 /**
  * What each operation reads as. Status colours are for outcomes that matter:
@@ -47,6 +54,11 @@ const LINE_STYLES: Record<DiffPreviewLine['kind'], { row: string; gutter: string
  * Renders a computed file-change preview: one section per touched file with an
  * operation badge, +/- counts, and a capped, color-coded diff body.
  *
+ * Drawn the way a tool's other output is (`ToolOutputSection`): a 32px header on
+ * the card, then the lines as a full-bleed band of `canvas` divided by a
+ * hairline. A framed, inset diff box inside the tool block's own frame was a
+ * second treatment for the same thing, and a frame inside a frame.
+ *
  * // Usage: <FileChangePreviewBody preview={preview} action={<Button size="sm">Raw</Button>} />
  */
 export function FileChangePreviewBody({ preview, action }: FileChangePreviewBodyProps) {
@@ -56,10 +68,12 @@ export function FileChangePreviewBody({ preview, action }: FileChangePreviewBody
   // multiply it away.
   let remainingLines = DIFF_PREVIEW_MAX_LINES;
 
+  const hasRepeatLine = preview.repeatCount !== undefined;
+
   return (
-    <div className="space-y-3 font-mono">
-      {preview.repeatCount !== undefined && (
-        <p className="text-micro text-fg-muted">
+    <div className="font-mono">
+      {hasRepeatLine && (
+        <p className="flex h-8 items-center px-3 text-micro text-fg-muted">
           {d.appliedCount.replace('{count}', String(preview.repeatCount))}
         </p>
       )}
@@ -76,6 +90,7 @@ export function FileChangePreviewBody({ preview, action }: FileChangePreviewBody
             lines={lines}
             hiddenCount={hiddenCount}
             action={index === 0 ? action : undefined}
+            divided={index > 0 || hasRepeatLine}
           />
         );
       })}
@@ -88,11 +103,14 @@ function FileSection({
   lines,
   hiddenCount,
   action,
+  divided,
 }: {
   file: FileChangeFilePreview;
   lines: DiffPreviewLine[];
   hiddenCount: number;
   action?: ReactNode;
+  /** A hairline above the header, for every section but the panel's first. */
+  divided: boolean;
 }) {
   const { t } = useI18n();
   const d = t.tools.diff;
@@ -105,11 +123,11 @@ function FileSection({
   };
 
   return (
-    <div>
-      {/* One line: the path takes the slack and truncates (its full form is the
-          title), so the action at the right end never has to wrap onto a row of
-          its own. */}
-      <div className="mb-1 flex items-center gap-2">
+    <div className={cn(divided && 'border-t border-stroke')}>
+      {/* One 32px line: the path takes the slack and truncates (its full form is
+          the title), so the action at the right end never has to wrap onto a
+          row of its own. */}
+      <div className="flex h-8 items-center gap-2 pr-1.5 pl-3">
         <Badge variant={OP_VARIANTS[file.op]} className="font-sans">
           {opLabels[file.op]}
         </Badge>
@@ -128,13 +146,13 @@ function FileSection({
         {file.removed > 0 && (
           <span className="shrink-0 text-micro text-danger">-{file.removed}</span>
         )}
-        {action ? <span className="-my-1 ml-auto shrink-0">{action}</span> : null}
+        {action ? <span className="ml-auto shrink-0">{action}</span> : null}
       </div>
       {file.op === 'overwrite' && (
-        <p className="mb-1 text-micro italic text-fg-subtle">{d.previousContentHidden}</p>
+        <p className="px-3 pb-2 text-micro italic text-fg-subtle">{d.previousContentHidden}</p>
       )}
       {lines.length > 0 && (
-        <div className="overflow-x-auto rounded-sm border border-stroke bg-canvas">
+        <div className="overflow-x-auto border-t border-stroke bg-canvas py-1">
           <table className="w-full border-collapse">
             <tbody>
               {lines.map((line, index) => (
@@ -143,10 +161,8 @@ function FileSection({
                   key={index}
                   className={`${LINE_STYLES[line.kind].row} leading-relaxed`}
                 >
-                  <td className="w-4 select-none px-1.5 text-center">
-                    {LINE_STYLES[line.kind].gutter}
-                  </td>
-                  <td className="whitespace-pre pr-2">{line.text}</td>
+                  <td className={GUTTER_CELL_CLASS}>{LINE_STYLES[line.kind].gutter}</td>
+                  <td className="whitespace-pre pr-3">{line.text}</td>
                 </tr>
               ))}
             </tbody>
@@ -154,7 +170,7 @@ function FileSection({
         </div>
       )}
       {hiddenCount > 0 && (
-        <p className="mt-1 text-micro text-fg-subtle">
+        <p className="border-t border-stroke px-3 py-2 text-micro text-fg-subtle">
           {d.truncated.replace('{count}', String(hiddenCount))}
         </p>
       )}

@@ -8,9 +8,13 @@ import type { GithubContext } from '@mangostudio/shared/github';
 import type { Messages } from '@mangostudio/shared/i18n';
 import {
   AlertTriangle,
+  Archive,
   Check,
+  Eraser,
   FileCode2,
   FolderGit2,
+  GitBranch,
+  History,
   Minus,
   MoreHorizontal,
   Plus,
@@ -29,7 +33,7 @@ import { Tabs } from '@/components/ui/Tabs';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
@@ -57,6 +61,8 @@ import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
 import { RailPanelActions } from './rail/RailPanel';
 import { StashSheet } from './StashSheet';
+import { shortHash } from './short-hash';
+import { type AmendMode, useAmendMode } from './use-amend-mode';
 import { WorktreeSection } from './WorktreeSection';
 
 interface GitPanelProps {
@@ -90,6 +96,7 @@ export function GitPanel({ chatId }: GitPanelProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [stashOpen, setStashOpen] = useState(false);
   const [prefs, setPrefs] = useState(readGitPanelPrefs);
+  const amend = useAmendMode(chatId);
   const isRepo = stateQuery.data?.state === 'repo';
   // Read here as well as by the worktree section below: both observe one cache
   // entry, and the header's refresh is the only refresh the panel has.
@@ -134,7 +141,14 @@ export function GitPanel({ chatId }: GitPanelProps) {
             </IconButton>
           )}
         >
+          {/*
+            Actions first, then the one preference, below a separator: the
+            check on a toggle reads as "on", and beside an action it read as
+            "done". Amend is here as well as under the commit button because a
+            clean tree draws no commit form, and rewording HEAD needs no changes.
+          */}
           <MenuItem
+            icon={<Archive size={ICON_MD} />}
             disabled={!isRepo}
             onSelect={() => {
               setMenuOpen(false);
@@ -143,7 +157,22 @@ export function GitPanel({ chatId }: GitPanelProps) {
           >
             {labels.menu.stash}
           </MenuItem>
-          <MenuItem checked={prefs.pruneOnFetch} onSelect={togglePrune}>
+          <MenuItem
+            icon={<History size={ICON_MD} />}
+            disabled={!isRepo || amend.active}
+            onSelect={() => {
+              setMenuOpen(false);
+              amend.request();
+            }}
+          >
+            {labels.menu.amend}
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem
+            icon={<GitBranch size={ICON_MD} />}
+            checked={prefs.pruneOnFetch}
+            onSelect={togglePrune}
+          >
             {labels.menu.prune}
           </MenuItem>
         </Menu>
@@ -161,6 +190,7 @@ export function GitPanel({ chatId }: GitPanelProps) {
           loading={stateQuery.isLoading}
           error={stateQuery.error}
           githubContext={githubQuery.data}
+          amend={amend}
           initPending={initMutation.isPending}
           initError={initMutation.error}
           onInitialize={() => initMutation.mutate()}
@@ -171,6 +201,7 @@ export function GitPanel({ chatId }: GitPanelProps) {
       {stashOpen && isRepo ? (
         <StashSheet chatId={chatId} onClose={() => setStashOpen(false)} />
       ) : null}
+      {amend.dialog}
     </section>
   );
 }
@@ -181,6 +212,7 @@ interface GitPanelContentProps {
   readonly loading: boolean;
   readonly error: Error | null;
   readonly githubContext: GithubContext | undefined;
+  readonly amend: AmendMode;
   readonly initPending: boolean;
   readonly initError: Error | null;
   readonly onInitialize: () => void;
@@ -193,6 +225,7 @@ function GitPanelContent({
   loading,
   error,
   githubContext,
+  amend,
   initPending,
   initError,
   onInitialize,
@@ -240,6 +273,7 @@ function GitPanelContent({
             <>
               <Button
                 type="button"
+                variant="secondary"
                 size="sm"
                 onClick={onInitialize}
                 loading={initPending}
@@ -261,6 +295,7 @@ function GitPanelContent({
           status={state.status}
           repoRoot={state.root}
           githubContext={githubContext}
+          amend={amend}
         />
       );
   }
@@ -271,11 +306,13 @@ function RepositoryStatus({
   status,
   repoRoot,
   githubContext,
+  amend,
 }: {
   readonly chatId: string;
   readonly status: GitStatus;
   readonly repoRoot: string;
   readonly githubContext: GithubContext | undefined;
+  readonly amend: AmendMode;
 }) {
   const { t } = useI18n();
   const { toast } = useToast();
@@ -293,7 +330,24 @@ function RepositoryStatus({
   const [remoteFailure, setRemoteFailure] = useState<unknown>(null);
   const branchName = status.branch.name
     ? status.branch.name
-    : labels.detachedAt.replace('{commit}', status.branch.detachedAt?.slice(0, 8) ?? 'HEAD');
+    : labels.detachedAt.replace(
+        '{commit}',
+        status.branch.detachedAt ? shortHash(status.branch.detachedAt) : 'HEAD'
+      );
+  const upstream = status.branch.upstream;
+  const [trackingBefore, trackingAfter = ''] = labels.branch.tracking.split('{upstream}');
+
+  // Amend entered from the panel menu while History is showing brings the form
+  // it fills into view. Adjusted during render, on the change itself, so a
+  // later visit to History while amending stays where the person put it.
+  const [amendShown, setAmendShown] = useState(amend.active);
+  if (amend.active !== amendShown) {
+    setAmendShown(amend.active);
+    if (amend.active && view === 'history') {
+      setView('changes');
+      setDiffSelection(null);
+    }
+  }
 
   // A rejected remote operation describes the branch it was rejected on. Its
   // guidance — and the leased force push it can offer — must not survive a
@@ -349,12 +403,17 @@ function RepositoryStatus({
           failure={remoteFailure}
           onFailureChange={setRemoteFailure}
         />
-        {status.branch.upstream ? (
-          <p
-            className="w-full truncate pl-8 font-mono text-micro text-fg-subtle"
-            title={status.branch.upstream}
-          >
-            {status.branch.upstream}
+        {/*
+          The trigger above truncates a long branch name, and this line used to
+          repeat it in full as `origin/<branch>`. When the upstream is the same
+          branch on its remote, the remote is all that is new; the full ref is
+          shown only when it names something else, and is always a hover away.
+        */}
+        {upstream ? (
+          <p className="w-full min-w-0 truncate pl-8 text-micro text-fg-subtle" title={upstream}>
+            {trackingBefore}
+            <span className="font-mono">{upstreamLabel(upstream, status.branch.name)}</span>
+            {trackingAfter}
           </p>
         ) : null}
       </section>
@@ -381,6 +440,9 @@ function RepositoryStatus({
       ) : (
         // CommitForm stays mounted while a diff is open: it holds the in-progress
         // commit message in local state, and unmounting it would discard the draft.
+        // A clean tree has nothing to commit, so it draws no form: an empty
+        // summary and a dead "Commit changes" above "Working tree clean" read as
+        // an invitation. Amending needs no changes, so amend mode brings it back.
         <>
           {/*
             Above the commit form, because reviewing comes before committing —
@@ -388,14 +450,19 @@ function RepositoryStatus({
             "Auto-review" option means something else entirely.
           */}
           <ExternalReviewAction chatId={chatId} hasChanges={!status.clean} />
-          <CommitForm
-            chatId={chatId}
-            branch={status.branch}
-            hasChanges={!status.clean}
-            hasStagedChanges={status.staged.length > 0}
-            hasUnstagedWork={hasUnstagedWork}
-            onRemoteFailure={setRemoteFailure}
-          />
+          {status.clean && !amend.active ? null : (
+            <CommitForm
+              chatId={chatId}
+              branch={status.branch}
+              hasChanges={!status.clean}
+              hasStagedChanges={status.staged.length > 0}
+              hasUnstagedWork={hasUnstagedWork}
+              amend={amend.active}
+              onEnterAmend={amend.request}
+              onExitAmend={amend.exit}
+              onRemoteFailure={setRemoteFailure}
+            />
+          )}
           {diffSelection ? (
             <LazyDiffViewer
               chatId={chatId}
@@ -403,11 +470,14 @@ function RepositoryStatus({
               onClose={() => setDiffSelection(null)}
             />
           ) : status.clean ? (
+            // The region's own message, top-anchored like the terminal rail's
+            // empty state, unless the amend form sits above it.
             <EmptyState
               icon={<Check size={ICON_LG} />}
               title={labels.cleanTitle}
               hint={labels.cleanHint}
               tone="success"
+              className={amend.active ? undefined : 'justify-start pt-12'}
             />
           ) : (
             <div className="space-y-4">
@@ -485,6 +555,18 @@ function RepositoryStatus({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The upstream as the line under the branch names it: just the remote when it
+ * tracks the branch of the same name there (`origin` for `origin/<branch>`),
+ * the full ref when it tracks anything else.
+ */
+function upstreamLabel(upstream: string, branch: string | null): string {
+  if (branch && upstream.endsWith(`/${branch}`) && upstream.length > branch.length + 1) {
+    return upstream.slice(0, -(branch.length + 1));
+  }
+  return upstream;
 }
 
 type DiscardLabels = Messages['git']['discard'];
@@ -569,6 +651,8 @@ function ChangeGroup({
           bare counter-clockwise arrow reads as "refresh" at rest and sat one
           28px target from "+", the control a person reaches for most. The
           destructive items come last, as every menu in the app orders them.
+          Each carries the glyph its row action wears (a file's restore arrow,
+          its trash can), so a menu of three red items is scanned by shape.
         */}
         {onDiscard ? (
           <Menu
@@ -589,6 +673,13 @@ function ChangeGroup({
               <MenuItem
                 key={selection.mode}
                 tone="danger"
+                icon={
+                  selection.mode === 'untracked' ? (
+                    <Trash2 size={ICON_MD} />
+                  ) : (
+                    <RotateCcw size={ICON_MD} />
+                  )
+                }
                 onSelect={() => {
                   setMenuOpen(false);
                   onDiscard([selection]);
@@ -604,6 +695,7 @@ function ChangeGroup({
                 <MenuSeparator />
                 <MenuItem
                   tone="danger"
+                  icon={<Eraser size={ICON_MD} />}
                   onSelect={() => {
                     setMenuOpen(false);
                     onDiscard(selections);

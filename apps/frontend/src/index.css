@@ -95,6 +95,8 @@
    * over a pure-white pixel (about 8.5:1), so it does not depend on the image. */
   --color-scrim-media: #000000b3;
   --color-on-scrim-media: #ffffff;
+  --color-fill-media-hover: #ffffff29;
+  --color-fill-media-pressed: #ffffff3d;
 
   /* Harness identity (runner dots, composer frame, badges). */
   --color-agent-mango: #f5a623;
@@ -269,6 +271,8 @@
   /* Not themed: see the dark block. Restated so the light block lists every token. */
   --color-scrim-media: #000000b3;
   --color-on-scrim-media: #ffffff;
+  --color-fill-media-hover: #ffffff29;
+  --color-fill-media-pressed: #ffffff3d;
 
   --color-agent-mango: #a86400;
   --color-agent-claude: #b9553a;
@@ -382,6 +386,65 @@ body {
     cursor: pointer;
   }
 
+  /*
+   * A slider that shows how far along it is. The travelled part of the track
+   * wears the accent, the way WinUI's Slider and GtkScale fill theirs, so 85
+   * and 97 read as different amounts rather than as the same pill with the
+   * thumb moved along it.
+   *
+   * WebKit has no progress pseudo-element and a sized fill on the input itself
+   * would take a gradient, which the flat system does not draw. So the track
+   * moves out to this wrapper: `::before` is the pill (`control` + the
+   * `stroke-strong` hairline, the very box `.range-input` draws), `::after` is
+   * one solid accent bar inside that hairline, and the input above both turns
+   * transparent and keeps only its thumb. The caller sets `--range-progress`
+   * (0–1); the bar stops at the thumb's centre — half a thumb in, then the
+   * travel the thumb actually covers — so it never pokes out past it.
+   */
+  .range-field {
+    --range-progress: 0;
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .range-field::before,
+  .range-field::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    translate: 0 -50%;
+    border-radius: 9999px;
+    pointer-events: none;
+  }
+
+  .range-field::before {
+    inset-inline: 0;
+    height: 0.375rem;
+    background: var(--color-control);
+    border: 1px solid var(--color-stroke-strong);
+  }
+
+  .range-field::after {
+    inset-inline-start: 1px;
+    height: calc(0.375rem - 2px);
+    width: calc(0.5rem - 1px + (100% - 1rem) * var(--range-progress));
+    background: var(--color-accent);
+  }
+
+  .range-field:has(> .range-input:disabled)::before,
+  .range-field:has(> .range-input:disabled)::after {
+    opacity: 0.5;
+  }
+
+  .range-field > .range-input {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    background: transparent;
+    border-color: transparent;
+  }
+
   .range-input::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
@@ -408,12 +471,17 @@ body {
     box-shadow: 0 0 0 1px var(--color-stroke-strong);
   }
 
-  .range-input:not(:disabled):hover::-webkit-slider-thumb {
-    background: var(--color-accent-hover);
-  }
+  /* Hover is gated on a pointer that can hover, like Tailwind's own `hover:`
+     variant: a touch browser keeps `:hover` on whatever was last tapped, and the
+     thumb would stay lit after the finger left it. */
+  @media (hover: hover) {
+    .range-input:not(:disabled):hover::-webkit-slider-thumb {
+      background: var(--color-accent-hover);
+    }
 
-  .range-input:not(:disabled):hover::-moz-range-thumb {
-    background: var(--color-accent-hover);
+    .range-input:not(:disabled):hover::-moz-range-thumb {
+      background: var(--color-accent-hover);
+    }
   }
 
   /* The ring goes on the thumb rather than the element: an outline around the
@@ -490,14 +558,29 @@ body {
 
   /* `:not(…, [aria-*])` rather than source order: the hover selector outranks
    * a bare attribute one, so an open or pressed chip would drop back to the
-   * neutral fill under the pointer. */
+   * neutral fill under the pointer.
+   *
+   * Gated on a pointer that can hover, as Tailwind's `hover:` variant is. A
+   * touch browser keeps `:hover` on the last element tapped, so on a phone the
+   * chip that landed under the finger when the strip opened kept the wash and
+   * read as a second pressed chip. There `:active` is the press feedback. */
+  @media (hover: hover) {
+    .composer-chip:is(button, label, select):not(
+        :disabled,
+        [aria-expanded="true"],
+        [aria-pressed="true"]
+      ):hover {
+      background: var(--color-fill-hover);
+      color: var(--color-fg);
+    }
+  }
+
   .composer-chip:is(button, label, select):not(
     :disabled,
     [aria-expanded="true"],
     [aria-pressed="true"]
-  ):hover {
-    background: var(--color-fill-hover);
-    color: var(--color-fg);
+  ):active {
+    background: var(--color-fill-pressed);
   }
 
   /* `focus-within` rather than `focus`: a `<label>` wrapping a `<select>` is the
@@ -536,6 +619,18 @@ body {
    * than `:last-child`, so a component that renders an empty wrapper does not
    * swallow the separator before it.
    *
+   * The `·` lands inside the element it is drawn on, so every child of the
+   * strip is a slot — a plain, gapless flex wrapper around one chip — and never
+   * the chip itself, or the dot sits in the chip's padding and inside its
+   * pressed or open wash. A component with several chips returns them as a
+   * fragment of slots rather than as a nested strip: a strip's own `gap` adds
+   * itself to the dot's lead and the run goes lopsided.
+   *
+   * The dot sets its own type and box instead of inheriting the slot's (the
+   * slot is in the body face; the chip inside it is mono): a fixed 8px box
+   * with a 4px lead, against the strip's 4px gap after it, puts 16px between
+   * any two chips with the dot centred in it.
+   *
    * From `sm` up only. A phone wraps the strip too, and a trailing `·` left at
    * the end of a line with the next chip starting the one below reads as a
    * stray bullet; each chip there is a 44px target and separates itself. The
@@ -545,7 +640,14 @@ body {
   @media (width >= 40rem) {
     .composer-chip-row > *:not(:empty, .sr-only):has(~ *:not(:empty, .sr-only))::after {
       content: "·";
+      display: inline-block;
+      width: 0.5rem;
       margin-inline-start: 0.25rem;
+      flex-shrink: 0;
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      line-height: 1rem;
+      text-align: center;
       color: var(--color-fg-subtle);
     }
   }
@@ -649,9 +751,12 @@ body {
    * Below `sm` the label is hidden and the chip is a bare glyph on a 44px
    * square. A phone has no hover to say "button", so the hairline comes back
    * there as the only affordance; from `sm` up the chip is borderless like its
-   * neighbours. The transparent border keeps the box the same size either side
-   * of the breakpoint. `justify-content: center` is what seats that lone glyph
-   * in the middle of the square instead of packed against its left edge.
+   * neighbours. The hairline is an inset ring rather than a border, so the box
+   * is the same size either side of the breakpoint without a border holding
+   * the place: a transparent one pushed the glyph 1px in from the chip's
+   * padding and the tool row no longer shared a left edge with the status line
+   * and the prompt above it. `justify-content: center` is what seats that lone
+   * glyph in the middle of the square instead of packed against its left edge.
    *
    * Geometry and the disabled treatment belong to the variant, not to each
    * chip: three call sites were repeating the identical utility tail, so the
@@ -661,13 +766,12 @@ body {
     justify-content: center;
     height: 1.75rem;
     flex-shrink: 0;
-    border: 1px solid transparent;
     text-transform: lowercase;
   }
 
   @media (width < 40rem) {
     .composer-tool-chip {
-      border-color: var(--color-stroke);
+      box-shadow: inset 0 0 0 1px var(--color-stroke);
     }
   }
 
@@ -765,9 +869,11 @@ pre:hover .copy-code-btn {
   opacity: 1;
 }
 
-.copy-code-btn:hover {
-  background: var(--color-control-hover);
-  color: var(--color-fg);
+@media (hover: hover) {
+  .copy-code-btn:hover {
+    background: var(--color-control-hover);
+    color: var(--color-fg);
+  }
 }
 
 .copy-code-btn--copied {
@@ -862,6 +968,20 @@ pre:hover .copy-code-btn {
   flex-direction: column;
 }
 
+/* A row is as tall as its touch target. On a coarse pointer the touch floor
+ * below raises a disclosable row (a `<button>`) to 44px, but the node was still
+ * hung from a 24px row, so every dot sat ~10px above its step's label, halfway
+ * into the gap above. Raising the token here moves both at once: the dot's top
+ * is derived from it, and `TimelineRow`'s `min-h-(--timeline-row-height)` gives
+ * a static row (a `<div>`, which the floor does not touch) the same 44px, so
+ * disclosable and static steps keep one rhythm. Block and card items hang their
+ * node from their own first line and do not read this. */
+@media (pointer: coarse) {
+  .chat-timeline {
+    --timeline-row-height: 2.75rem;
+  }
+}
+
 .chat-timeline-item {
   --timeline-pad: var(--timeline-row-gap);
   --timeline-dot-top: calc(var(--timeline-pad) + var(--timeline-row-height) / 2);
@@ -926,8 +1046,11 @@ pre:hover .copy-code-btn {
   background: var(--color-danger);
 }
 
+/* `accent-fg`, not the `accent` fill: a bead is a mark that carries meaning
+ * ("this step is waiting on you"), so it has to clear 3:1 against the canvas on
+ * its own. The light accent fill is under 2:1 there; dark is the same hue. */
 .chat-timeline-item--active::after {
-  background: var(--color-accent);
+  background: var(--color-accent-fg);
   animation: timeline-node-pulse 1.6s ease-in-out infinite;
 }
 

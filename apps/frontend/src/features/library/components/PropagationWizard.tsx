@@ -151,7 +151,6 @@ export function PropagationWizard({
       title={title}
       steps={stepOrder.map((stepId) => stepLabel(l, stepId))}
       stepIndex={stepIndex}
-      closeLabel={l.wizard.close}
       onClose={onClose}
       notes={
         <>
@@ -172,12 +171,16 @@ export function PropagationWizard({
       }
       actions={
         <>
+          {/* Every step until the result offers Cancel, so the footer is always
+              the way out; Back joins it once there is a step to go back to. */}
           {step !== 'result' && (
-            <Button
-              variant="secondary"
-              onClick={stepIndex > 0 ? () => wizard.setStep(stepOrder[stepIndex - 1]) : onClose}
-            >
-              {stepIndex > 0 ? l.wizard.back : l.wizard.cancel}
+            <Button variant="secondary" onClick={onClose}>
+              {l.wizard.cancel}
+            </Button>
+          )}
+          {step !== 'result' && stepIndex > 0 && (
+            <Button variant="secondary" onClick={() => wizard.setStep(stepOrder[stepIndex - 1])}>
+              {l.wizard.back}
             </Button>
           )}
           {step === 'result' ? (

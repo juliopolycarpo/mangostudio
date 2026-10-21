@@ -10,7 +10,7 @@ import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { USAGE_ALERT_THRESHOLDS, type UsageAlertThreshold } from '../lib/usage-alerts';
-import { ConnectorCard } from './ConnectorCard';
+import { ConnectorRow } from './ConnectorRow';
 
 interface ConnectorListProps {
   connectors: Connector[];
@@ -34,18 +34,17 @@ export function ConnectorList({
   const { t } = useI18n();
   const s = t.settings.connectors;
   const hasChatGpt = connectors.some((c) => c.provider === 'chatgpt');
+  // The empty state carries its own Add, so the header's is not drawn beside it.
+  const addAction =
+    connectors.length === 0 ? undefined : (
+      <Button variant="secondary" size="sm" onClick={onAddConnector}>
+        <Plus size={ICON_SM} />
+        {s.addButton}
+      </Button>
+    );
 
   return (
-    <SettingsPage
-      title={s.title}
-      description={s.description}
-      actions={
-        <Button variant="secondary" size="sm" onClick={onAddConnector}>
-          <Plus size={ICON_SM} />
-          {s.addButton}
-        </Button>
-      }
-    >
+    <SettingsPage title={s.title} description={s.description} actions={addAction}>
       {connectors.length === 0 ? (
         <Card padded={false}>
           <EmptyState
@@ -53,16 +52,17 @@ export function ConnectorList({
             title={s.emptyTitle}
             hint={s.emptyDescription}
             action={
-              <Button variant="primary" onClick={onAddConnector}>
+              <Button variant="secondary" size="sm" onClick={onAddConnector}>
+                <Plus size={ICON_SM} />
                 {s.addConnectorButton}
               </Button>
             }
           />
         </Card>
       ) : (
-        <div className="space-y-3">
+        <SettingsSection>
           {connectors.map((c) => (
-            <ConnectorCard
+            <ConnectorRow
               key={c.id}
               connector={c}
               onConfigure={onConfigureConnector}
@@ -70,7 +70,7 @@ export function ConnectorList({
               onReauthenticated={onReauthenticatedConnector}
             />
           ))}
-        </div>
+        </SettingsSection>
       )}
 
       {hasChatGpt && (

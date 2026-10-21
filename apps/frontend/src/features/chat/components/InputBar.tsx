@@ -180,9 +180,10 @@ export function InputBar({
   const externalUnavailableReason = externalDescriptor?.unavailableReason;
   // `disclosure-required` is checked on top of `externalAgentSelectable`, which
   // deliberately leaves it selectable so the *selector* can route the user into
-  // the notice. There is no such route from here: the turn-start gate refuses
-  // the send with a 403 nothing on this screen handles, so a composer that
-  // stayed enabled would accept a message and lose it to a bare error.
+  // the notice. Here the route is the blocked notice's own "Read the notice"
+  // action: the composer stays locked until the acknowledgement is stored and
+  // the refreshed descriptor no longer names the reason, rather than accepting a
+  // message the turn-start gate would refuse with a 403.
   const externalRunnerBlocked =
     isExternalRunner &&
     (!externalDescriptor ||
@@ -426,9 +427,10 @@ export function InputBar({
   };
 
   return (
-    // No top padding: the transcript above runs down to the composer's own
-    // border (its scroller carries the gap), so the clip edge is a line the eye
-    // reads as an edge, not a cut through text 24px above the frame.
+    // No top padding of its own: the dock above it opens on one 8px band
+    // (`ChatPage`), and the transcript's scroller carries the at-rest gap, so
+    // the clip edge sits one grid step above the composer's border rather than
+    // a cut through text 24px above the frame.
     <footer className="shrink-0 px-3 pb-3 sm:px-4 sm:pb-4 md:px-6 md:pb-6">
       <div className={CHAT_COLUMN_CLASS}>
         {externalRunnerBlocked && <ExternalRunnerBlockedCallout descriptor={externalDescriptor} />}

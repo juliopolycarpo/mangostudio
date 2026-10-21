@@ -29,10 +29,13 @@ export function CopyLine({ label, value }: CopyLineProps) {
       {label ? <p className="text-xs text-fg-muted">{label}</p> : null}
       {/* Stacked below `sm`: beside the button a short command is left a
           sliver, and wrapping it there splits a word. `break-words` wraps at
-          a space first and only breaks inside a token that cannot fit. */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
-        <code className="min-w-0 flex-1 break-words rounded-md border border-stroke bg-canvas px-3 py-2 font-mono text-xs text-fg">
-          {value}
+          a space first and only breaks inside a token that cannot fit. The
+          field is on the control rhythm — at least 32px, `rounded-sm` — so it
+          meets the button beside it edge for edge, as a path field and its
+          button do; a long command grows it rather than being cut. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <code className="flex min-h-8 min-w-0 flex-1 items-center break-words rounded-sm border border-stroke bg-canvas px-3 py-1 font-mono text-xs text-fg">
+          <span className="min-w-0">{value}</span>
         </code>
         <Button variant="secondary" className="w-full sm:w-auto" onClick={() => void copy(value)}>
           {copied ? <Check size={ICON_SM} /> : <Copy size={ICON_SM} />}

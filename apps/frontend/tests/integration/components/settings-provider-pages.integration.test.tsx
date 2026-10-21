@@ -61,7 +61,7 @@ describe('ProviderSettingsPage integration', () => {
     render(<ProviderSettingsPage />);
 
     await screen.findByText('DeepSeek');
-    expect(screen.getByText('Reasoning & thinking')).toBeInTheDocument();
+    expect(screen.getByText('Reasoning and thinking')).toBeInTheDocument();
     expect(screen.getByText('Tool configuration')).toBeInTheDocument();
   });
 

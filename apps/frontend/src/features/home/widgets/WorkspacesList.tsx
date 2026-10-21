@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { chatTitleLabel } from '@/features/chat/lib/chat-title';
 import { chatListQueryOptions } from '@/features/chat/queries';
 import { runnerBadge } from '@/features/sidebar/lib/runner-badge';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
@@ -172,7 +173,7 @@ function WorkspaceRow({ group, summary, onSelectChat, onNewChatInWorkdir }: Work
                 >
                   {summary.changedFileCount > 0
                     ? plural(
-                        { one: labels.dirtyOne, other: labels.dirtyOther },
+                        { one: t.home.filesChangedOne, other: t.home.filesChangedOther },
                         summary.changedFileCount
                       )
                     : labels.clean}
@@ -222,7 +223,9 @@ function WorkspaceRow({ group, summary, onSelectChat, onNewChatInWorkdir }: Work
             size="sm"
             onClick={() => onSelectChat(group.representativeChatId as string)}
             aria-label={formatMessage(labels.continueSession, {
-              title: group.representativeTitle ?? group.name,
+              title: group.representativeTitle
+                ? chatTitleLabel(group.representativeTitle, t.chat.untitled)
+                : group.name,
             })}
           >
             <Play size={ICON_SM} />

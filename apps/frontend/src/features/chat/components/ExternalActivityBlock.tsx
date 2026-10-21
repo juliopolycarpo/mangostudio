@@ -35,6 +35,7 @@ import type { ToolIdentityResolver } from '@/features/environments/identity/use-
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+import { agentRunnerName } from '../lib/turn-identity';
 import { TIMELINE_PANEL_CLASS } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
@@ -143,6 +144,7 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
   // it here for free. Most users will have no row, and the derived name and
   // monogram are what they see — so that is the path that has to look finished.
   const identity = resolve('agent', part.targetId);
+  const agentName = agentRunnerName(identity, part.targetId, t.externalAgents.target);
   const hasDetail = Boolean(part.detail);
   const status = executionStatusOf(part);
   const tone = toolStatusTone(status);
@@ -165,7 +167,7 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
         <ToolAvatar
           subjectKey={toolSubjectKey('agent', part.targetId)}
           monogram={identity.monogram}
-          name={identity.name}
+          name={agentName}
           image={identity.image}
           size="2xs"
           className="shrink-0"
@@ -197,7 +199,7 @@ export function ExternalActivityBlock({ part, toolIdentities }: ExternalActivity
       {/* Attribution and outcome for a reader who cannot see the avatar or the
           tone that carry them visually. */}
       <span className="sr-only">
-        {`${formatMessage(labels.attribution, { agent: identity.name })} ${statusLabel(status, labels)}`}
+        {`${formatMessage(labels.attribution, { agent: agentName })} ${statusLabel(status, labels)}`}
       </span>
     </TimelineItem>
   );

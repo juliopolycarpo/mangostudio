@@ -2,7 +2,7 @@ import type {
   PromptSettings as PromptSettingsData,
   RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
-import { Plus } from 'lucide-react';
+import { FileText, Plus } from 'lucide-react';
 import { useCallback } from 'react';
 import { RuleFileRows } from '@/components/settings/RuleFileRows';
 import { SettingsPage } from '@/components/settings/SettingsPage';
@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 
 interface PromptSettingsProps {
   promptSettings: PromptSettingsData;
@@ -57,9 +57,16 @@ export function PromptSettings({
     rulePathLabel: s.rulePathLabel,
     rulePathPlaceholder: s.rulePathPlaceholder,
   };
+  const hasCustomRules = promptSettings.customRules.length > 0;
+  const addRuleButton = (
+    <Button variant="secondary" size="sm" onClick={onAddCustomRule}>
+      <Plus size={ICON_SM} />
+      {s.addRule}
+    </Button>
+  );
 
   return (
-    <SettingsPage title={t.settings.tabs.prompts}>
+    <SettingsPage title={t.settings.tabs.prompts} description={s.description}>
       <SettingsSection title={s.defaultPromptsLabel}>
         <SettingsRow label={s.textSystemPromptLabel} htmlFor="text-system-prompt" layout="stacked">
           <Textarea
@@ -104,12 +111,8 @@ export function PromptSettings({
         title={s.customRulesLabel}
         description={s.customRulesDescription}
         cards
-        action={
-          <Button variant="secondary" size="sm" onClick={onAddCustomRule}>
-            <Plus size={ICON_SM} />
-            {s.addRule}
-          </Button>
-        }
+        // The empty state carries its own Add, so the header's is not drawn beside it.
+        action={hasCustomRules ? addRuleButton : undefined}
       >
         {promptSettings.customRules.map((rule) => (
           <RuleFileRows
@@ -121,8 +124,13 @@ export function PromptSettings({
           />
         ))}
 
-        {promptSettings.customRules.length === 0 && (
-          <EmptyState title={s.customRulesEmpty} className="min-h-0" />
+        {hasCustomRules ? null : (
+          <EmptyState
+            icon={<FileText size={ICON_LG} />}
+            title={s.customRulesEmpty}
+            hint={s.customRulesEmptyHint}
+            action={addRuleButton}
+          />
         )}
       </SettingsSection>
     </SettingsPage>

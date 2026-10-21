@@ -16,7 +16,7 @@ export const messages: Messages = {
     signupLoading: 'Creating…',
     loginLink: 'Sign in',
     signupLink: 'Create account',
-    noAccount: "Don't have an account?",
+    noAccount: 'Don’t have an account?',
     hasAccount: 'Already have an account?',
     loginError: 'Could not sign in. Check your email and password, then try again.',
     signupError: 'Could not create the account. Check the details and try again.',
@@ -27,6 +27,8 @@ export const messages: Messages = {
 
   chat: {
     newChat: 'New chat',
+    /** What a chat is called until its first prompt names it. */
+    untitled: 'New chat',
     empty: 'Start a chat',
     deleted: 'Chat deleted',
     newChatRunnerFailed: 'Could not start the chat on that runner. Try again.',
@@ -92,6 +94,7 @@ export const messages: Messages = {
       environmentLabel: 'env',
       environmentLocked:
         'Locked once the first turn starts — this chat keeps the environment it started on.',
+      environmentOnlyOne: 'The only environment so far. Add another from Environments.',
       /**
        * The status line's key for reasoning effort. Short on purpose: the
        * picker's own `Reasoning effort` heading is too long for a strip that
@@ -119,6 +122,7 @@ export const messages: Messages = {
       manageTools: 'Tool settings',
       manageMcp: 'MCP settings',
       manageSkills: 'Skill settings',
+      manageAgent: 'Agent settings',
       reasons: {
         'agent-tools-disabled': 'the agent profile disables tools',
         'agent-allowlist': 'not in the agent tool allowlist',
@@ -164,9 +168,12 @@ export const messages: Messages = {
       imageGenerationFailed: 'Image generation failed',
       styleParams: 'Style parameters',
       thoughtFor: 'Thought for {time}',
+      generatedIn: 'Generated in {time}',
       respondedIn: 'Responded in {time}',
       failedAfter: 'Failed after {time}',
       stoppedAfter: 'Stopped after {time}',
+      toolLoopRoundsOne: 'Stopped after {count} round of tool calls.',
+      toolLoopRoundsOther: 'Stopped after {count} rounds of tool calls.',
       noResponse: 'No response',
       neuralDiffusionPath: 'Using neural diffusion path.',
       createImageBadge: 'Create image',
@@ -322,7 +329,7 @@ export const messages: Messages = {
       confirmBody:
         'This restores or removes files touched during this assistant turn. Changes you made afterward may block the revert.',
       confirmAction: 'Revert files',
-      cancel: 'Keep files',
+      cancel: 'Cancel',
       uncheckpointedShell:
         'This turn also ran shell commands. Any changes made by shell commands are not checkpointed and will not be reverted.',
       uncheckpointedMcp:
@@ -363,6 +370,10 @@ export const messages: Messages = {
 
   home: {
     nav: 'Home',
+    // One count of uncommitted files for every Home card, so the dashboard and
+    // the new-chat hub never word the same fact two ways.
+    filesChangedOne: '{count} file changed',
+    filesChangedOther: '{count} files changed',
     greeting: {
       morning: 'Good morning, {name}.',
       afternoon: 'Good afternoon, {name}.',
@@ -377,8 +388,6 @@ export const messages: Messages = {
       label: 'Workspaces',
       clean: 'clean tree',
       // `*One` / `*Other` pairs: the component picks by count (`usePlural`).
-      dirtyOne: '{count} changed',
-      dirtyOther: '{count} changed',
       sessionsOne: '{count} chat',
       sessionsOther: '{count} chats',
       noSessions: 'No chat here yet',
@@ -416,8 +425,6 @@ export const messages: Messages = {
     workspace: {
       label: 'Workspace',
       cleanTree: 'clean tree',
-      dirtyTreeOne: '{count} file changed',
-      dirtyTreeOther: '{count} files changed',
       synced: 'synced with origin',
       noUpstream: 'no upstream',
       detached: 'detached HEAD at {hash}',
@@ -477,8 +484,6 @@ export const messages: Messages = {
     },
     uncommitted: {
       label: 'Uncommitted work',
-      changedOne: '{count} changed',
-      changedOther: '{count} changed',
       unpushedOne: '{count} unpushed',
       unpushedOther: '{count} unpushed',
       moreOne: 'And {count} more chat.',
@@ -637,12 +642,17 @@ export const messages: Messages = {
       hardStopThresholdLabel: 'Hard stop threshold',
       hardStopThresholdDescription:
         'Treat context pressure as critical at or above this percentage of the window.',
+      thresholdsLabel: 'Thresholds',
+      thresholdsDescription:
+        'When the context gauge warns, escalates and stops, as a share of the window.',
       summaryModelLabel: 'Preferred summary model',
       summaryModelDescription:
         'Use the current chat model or force a specific text model for summaries.',
       summaryModelCurrent: 'Use current chat model',
     },
     prompts: {
+      description:
+        'The system prompts sent with every chat and image, and the rule files added to them.',
       defaultPromptsLabel: 'Default prompts',
       ruleFilesLabel: 'Rule files',
       customRulesLabel: 'Custom rules',
@@ -664,6 +674,7 @@ export const messages: Messages = {
       frequencyEveryTurn: 'Send every time',
       addRule: 'Add rule',
       customRulesEmpty: 'No custom rules yet',
+      customRulesEmptyHint: 'Point a rule at a Markdown file to add it to every request.',
       removeRule: 'Remove',
       rulePathLabel: 'Path',
       rulePathPlaceholder: 'e.g. ~/my-projects/rules.md',
@@ -687,6 +698,8 @@ export const messages: Messages = {
         both: 'Both',
       },
       systemPrompt: 'System prompt',
+      systemPromptEmptyHint:
+        'No instructions: the model gets only the working folder, skills and to-dos. Text here goes before them.',
       model: 'Model override',
       modelDefaultOption: 'Use the agent default model',
       thinking: 'Enable thinking',
@@ -744,8 +757,7 @@ export const messages: Messages = {
       languageDescription: 'User interface language',
       imageQualityLabel: 'Default image quality',
       chatTitlesLabel: 'Chat titles',
-      chatTitlesDescription:
-        'Automatically rename timestamped new chats from the first user prompt.',
+      chatTitlesDescription: 'Name each new chat from its first prompt.',
       chatTitlesToggleLabel: 'Auto rename new chats',
       chatTitleSourceLabel: 'Title source',
       chatTitleSourcePrompt: 'First prompt text',
@@ -941,7 +953,7 @@ export const messages: Messages = {
     providers: {
       title: 'AI providers',
       backToMenu: 'Back to providers',
-      sectionReasoning: 'Reasoning & thinking',
+      sectionReasoning: 'Reasoning and thinking',
       sectionTools: 'Tool configuration',
       sectionCache: 'Caching and compaction',
       sectionCompaction: 'Compaction',
@@ -950,14 +962,24 @@ export const messages: Messages = {
       loadError: 'Failed to load providers',
       perProviderSettings: 'Per-provider runtime settings override global defaults.',
       noProviders: 'No AI providers available.',
+      detailDescription:
+        'Runtime settings for {provider}. They override the global defaults for its turns.',
       thinkingEnabled: 'Enable thinking',
+      thinkingEnabledHint: 'Let the model reason before it answers. Slower, and uses more tokens.',
       reasoningEffort: 'Reasoning effort',
+      reasoningEffortHint: 'How long the model reasons before it answers.',
       maxOutputTokens: 'Max output tokens',
       maxToolIterations: 'Max tool iterations',
       maxToolIterationsHint: 'Overrides the global value on the Tools page.',
       parallelToolCalls: 'Parallel tool calls',
+      parallelToolCallsHint:
+        'Let the model ask for several tools in one step instead of one at a time.',
       compaction: 'Provider-side compaction',
+      compactionHint:
+        'Let the provider compact its own conversation state near your context warning threshold.',
       cachePreference: 'Prompt cache preference',
+      cachePreferenceHint:
+        'Caching the repeated start of each prompt makes follow-up turns faster and cheaper.',
       cacheAuto: 'Auto',
       cacheStablePrefix: 'Stable prefix',
       cacheOff: 'Off',
@@ -1007,19 +1029,18 @@ export const messages: Messages = {
         grep: 'Grep',
       },
       toolDescriptions: {
-        readFile: 'Allows the AI to read files from disk, as text or as raw bytes.',
-        writeFile: 'Allows the AI to write text content to files on disk.',
-        editFile: 'Allows the AI to replace exact text in files read in this chat.',
-        replaceRange: 'Allows the AI to replace line ranges in files read in this chat.',
+        readFile: 'Lets the model read files from disk, as text or as raw bytes.',
+        writeFile: 'Lets the model write text content to files on disk.',
+        editFile: 'Lets the model replace exact text in files read in this chat.',
+        replaceRange: 'Lets the model replace line ranges in files read in this chat.',
         applyPatch:
-          'Allows the AI to apply context-anchored changes across multiple text files at once. Target files must remain exclusively writable by Mango while it runs.',
-        createFile: 'Allows the AI to create new text files without overwriting existing paths.',
-        deleteFile: 'Allows the AI to delete regular files it has read in this chat.',
-        moveFile:
-          'Allows the AI to move or rename regular files without overwriting existing paths.',
-        listDirectory: 'Allows the AI to list files and directories on disk.',
-        glob: 'Allows the AI to find files and directories by glob pattern.',
-        grep: 'Allows the AI to search file contents with regular expressions.',
+          'Lets the model apply context-anchored changes across multiple text files at once. Target files must remain exclusively writable by MangoStudio while it runs.',
+        createFile: 'Lets the model create new text files without overwriting existing paths.',
+        deleteFile: 'Lets the model delete regular files it has read in this chat.',
+        moveFile: 'Lets the model move or rename regular files without overwriting existing paths.',
+        listDirectory: 'Lets the model list files and directories on disk.',
+        glob: 'Lets the model find files and directories by glob pattern.',
+        grep: 'Lets the model search file contents with regular expressions.',
       },
       parameters: {
         allowedPathsLabel: 'Allowed paths',
@@ -1122,6 +1143,9 @@ export const messages: Messages = {
       testingButton: 'Testing…',
       testSuccess: 'Connected — {count} tools available',
       testFailed: 'Connection failed',
+      testFailedTitle: 'Could not connect to “{name}”',
+      testFailedHint: 'Check its address and credentials, then test again.',
+      moreActions: 'More actions for {name}',
       showTools: 'Show tools',
       hideTools: 'Hide tools',
       noToolsDiscovered: 'No tools discovered yet. Test the connection to refresh the list.',
@@ -1272,8 +1296,9 @@ export const messages: Messages = {
         namePlaceholder: 'e.g. CI pipeline',
         nameRequired: 'Name is required',
         scopeLabel: 'Scope',
-        expiresLabel: 'Expires in (days)',
-        expiresHint: 'Leave empty for a key that does not expire. Maximum {max} days.',
+        expiresLabel: 'Expires in',
+        expiresHint: 'Days, 1–{max}. Leave empty for a key that does not expire.',
+        expiresPlaceholder: 'Never',
         expiresInvalid: 'Enter a whole number between 1 and {max}, or leave empty.',
         createButton: 'Create',
         creatingButton: 'Creating…',
@@ -1315,14 +1340,15 @@ export const messages: Messages = {
       shadowedHint:
         'A higher-priority source provides a skill with the same name, so this copy is inactive.',
       shadowedNotice:
-        'Skills marked Shadowed share a name with a skill from a higher-priority source, so those copies are inactive.',
+        'Skills marked “Shadowed” share a name with a skill from a higher-priority source, so those copies are inactive.',
       loadError: 'Failed to load skills',
       noSkills: 'No skills installed.',
     },
     metrics: {
       title: 'Metrics',
       description:
-        'Live in-memory counters for provider usage, cache hit rates, and probe timeout totals. Token counts are estimates and do not reflect billing.',
+        'Live in-memory counters for provider usage, cache hit rates, and probe timeout totals.',
+      refresh: 'Refresh',
       chatgptUsageEmpty: 'No usage data available for this account yet.',
       failedToLoad: 'Failed to load metrics',
       empty: 'No provider metrics have been recorded yet.',
@@ -1334,7 +1360,7 @@ export const messages: Messages = {
       usageTextTurnsLabel: 'Text turns',
       usageImageGenerationsLabel: 'Image generations',
       usageInputTokensLabel: '~Tokens',
-      usageInputTokensHint: 'Estimated (provider-reported when available).',
+      usageInputTokensHint: 'Estimated, not billing. Provider-reported when available.',
       usageLastUsedLabel: 'Last used',
       usageLastUsedAgoLabel: '{time} ago',
       cacheLabel: 'Cache',
@@ -1356,7 +1382,10 @@ export const messages: Messages = {
       description: 'Recent provider probe timeouts captured by the current runtime process.',
       refresh: 'Refresh',
       failedToLoad: 'Failed to load logs',
+      generatedAtLabel: 'Last updated: {value}',
       empty: 'No recent provider probe timeout events.',
+      emptyHint:
+        'A timeout shows up here when a provider is slow to answer a health check or a model listing.',
       operationLabel: 'Operation',
       externalAgentDiscovery: {
         title: 'External agent discovery',
@@ -1505,6 +1534,7 @@ export const messages: Messages = {
     },
     searchPlaceholder: 'Search chats…',
     searchNoResultsHint: 'Try another title, folder or agent.',
+    clearSearch: 'Clear search',
     // Terminal-style harness labels — brand names, identical in both locales.
     runner: {
       mango: 'mango',
@@ -1575,11 +1605,13 @@ export const messages: Messages = {
     menu: {
       open: 'More repository actions',
       stash: 'Stashes…',
-      prune: 'Prune stale branches',
+      amend: 'Amend latest commit…',
+      prune: 'Prune deleted branches on fetch',
     },
     branch: {
       menu: 'Change branch',
       itemMenu: 'More actions for {branch}',
+      tracking: 'Tracking {upstream}',
       current: 'Current',
       switchTo: 'Switch to {branch}',
       checkoutRemote: 'Check out {branch}',
@@ -1709,7 +1741,7 @@ export const messages: Messages = {
       mixedDone: 'Changes discarded and untracked files deleted.',
       restoreHint: 'Restores only unstaged worktree content. Staged changes stay in the index.',
       deleteHint: 'Permanently deletes the selected untracked files from disk.',
-      cancel: 'Keep files',
+      cancel: 'Cancel',
       confirmRestore: 'Discard changes',
       confirmDelete: 'Delete files',
       restored: 'Worktree changes discarded.',
@@ -1720,11 +1752,11 @@ export const messages: Messages = {
     },
     commit: {
       title: 'Commit',
-      titleLabel: 'Commit title',
+      titleLabel: 'Summary',
       titlePlaceholder: 'e.g. Fix redirect after sign-in',
       titleCount: '{count}/72',
-      bodyLabel: 'Commit body',
-      bodyPlaceholder: 'e.g. The redirect used an expired session (optional)',
+      bodyLabel: 'Description (optional)',
+      bodyPlaceholder: 'e.g. The redirect used an expired session',
       generate: 'Generate message',
       generating: 'Generating message…',
       generateError: 'The commit message could not be generated.',
@@ -2039,8 +2071,8 @@ export const messages: Messages = {
     openInWindow: 'This terminal is open in another window.',
     takeOver: 'Bring it here',
     tabs: 'Terminal sessions',
-    empty: 'No terminal is open for this chat.',
-    emptyHint: 'Open one to run commands where this environment runs.',
+    empty: 'No terminal is open for this chat',
+    emptyHint: 'Open one to run commands in this environment.',
     reconnecting: 'Reconnecting…',
     disconnected: 'Disconnected from the terminal.',
     notFound: 'This terminal session no longer exists.',
@@ -2056,6 +2088,8 @@ export const messages: Messages = {
     closeConfirmDescription: 'The shell and anything it is running will be stopped.',
     cancel: 'Cancel',
     unavailableTitle: 'Terminal is unavailable',
+    unavailableTitleLimit: 'Terminal limit reached',
+    manageSessions: 'Manage terminals',
     unavailable: {
       disabled: 'Terminals are turned off on this hub.',
       limit: 'You already have the maximum number of open terminals.',
@@ -2072,7 +2106,7 @@ export const messages: Messages = {
       title: 'Terminal',
       openHere: 'Open here',
       hide: 'Hide',
-      noSessions: 'No terminals are open for this environment.',
+      noSessions: 'No terminals are open for this environment',
     },
     commands: {
       openPanel: 'Open terminal panel',
@@ -2283,9 +2317,15 @@ export const messages: Messages = {
       compareHide: 'Close comparison',
       compareSelect: 'Pick two versions to compare.',
       // Introduces a path set on its own line below it, so no placeholder.
-      via: 'via',
-      alsoIn: 'also in',
-      identical: 'identical',
+      via: 'Read from',
+      alsoIn: 'Also in',
+      // The badge beside each shadowed copy: whether it holds the same bytes as
+      // the copy the agent actually reads.
+      shadowCopy: {
+        identical: 'Identical',
+        differs: 'Differs',
+        unknown: 'Cannot compare',
+      },
       propagate: 'Propagate',
       remove: 'Remove',
       notFound: 'This resource is no longer in the library.',
@@ -2311,7 +2351,6 @@ export const messages: Messages = {
     wizard: {
       title: 'Propagate {count} resources',
       titleOne: 'Propagate {kind} {resource}',
-      close: 'Close',
       cancel: 'Cancel',
       back: 'Back',
       continue: 'Continue',
@@ -2538,14 +2577,14 @@ export const messages: Messages = {
       empty: 'No backups are being held right now.',
       // Undo means opposite things by origin, so the verb is never generic. A
       // removal set only ever puts content back; a propagation set can also
-      // delete the paths that apply created.
+      // delete the paths that propagation created.
       undoRemoval: 'Put the copies back',
-      undoPropagation: 'Undo this apply',
+      undoPropagation: 'Undo this propagation',
       undoUnknown: 'Undo',
       undoUnknownHint:
         'This backup predates the record of what wrote it, so undoing it may put content back or remove what was written.',
       origin: {
-        propagation: 'Apply',
+        propagation: 'Propagation',
         removal: 'Removal',
         unknown: 'Unrecorded',
       },
@@ -2555,10 +2594,11 @@ export const messages: Messages = {
       columnOrigin: 'Origin',
       contentsUnknown: '{count} entries',
       pinnedBadge: 'Pinned',
-      // Retention evicts on the next apply, so saying it after the fact is
+      // Retention evicts on the next propagation, so saying it after the fact is
       // saying it too late.
       evictsNext: 'Goes next',
-      evictsNextHint: 'The next apply will delete this backup to stay inside the retention budget.',
+      evictsNextHint:
+        'The next propagation will delete this backup to stay inside the retention budget.',
       bulkHint: 'Backups are restored and deleted one set at a time, on purpose.',
       // Backups stay on the machine that owned the file, so the list is grouped
       // by machine rather than merged: two sets from two machines are two
@@ -2666,6 +2706,8 @@ export const messages: Messages = {
           'A per-user service starts MangoStudio at login and brings it back after a reboot, so it is there before you open the browser.',
         installed: 'Installed',
         notInstalled: 'Not installed',
+        // The supervisor could not be asked, so neither of the two above is known.
+        unknown: 'Could not check',
         supervisor: {
           linux: 'systemd user unit',
           darwin: 'launchd agent',
@@ -3598,6 +3640,10 @@ export const messages: Messages = {
       // finding blocks something, a warning does not.
       needsAction: 'Needs action',
       canWait: 'Can wait',
+      // Optional tools that are simply not there: nothing to do, worth knowing.
+      forInformation: 'For information',
+      // One muted line above the informational group when nothing fails or warns.
+      nothingNeedsAction: 'Nothing needs action.',
     },
     install: {
       confirmTitle: 'Run this install?',
@@ -3821,7 +3867,7 @@ export const messages: Messages = {
       required: 'This agent needs its notice acknowledged before it can run.',
       manageDescription:
         'A third-party agent CLI shows a notice before it first receives a conversation. The ones you accepted are listed here.',
-      manageEmpty: 'You have not acknowledged any external agent yet.',
+      manageEmpty: 'No external agents acknowledged yet',
       manageEmptyHint:
         'A notice is recorded the first time you run Claude Code, Codex or Cursor from MangoStudio.',
       acknowledgedAt: 'Acknowledged {date}',
@@ -4040,7 +4086,7 @@ export const messages: Messages = {
       button: 'Steer',
       buttonHint: 'Send this into the running turn instead of waiting for it to finish.',
       sentLabel: 'You, mid-turn',
-      rejectedLabel: "This wasn't delivered",
+      rejectedLabel: 'This wasn’t delivered',
       submitError: 'This could not be sent.',
       reason: {
         'turn-already-completed': 'The turn had already finished.',
@@ -4288,8 +4334,7 @@ export const messages: Messages = {
       lead: 'A chat is answered either by a model you configure with an API key, or by a coding agent CLI already installed here.',
       hint: 'Agent CLIs sign in with their own vendor account, in their own terminal. MangoStudio never sees those credentials.',
       cliHeading: 'Agent CLIs on this machine',
-      modelDescription:
-        'Answers come from a provider you configure with an API key. Nothing else to install.',
+      modelDescription: 'Uses your own API key. Nothing to install.',
       noneFound: 'No agent CLI was found here.',
       probeFailed:
         'This machine could not be asked which agent CLIs it has. That is not the same as having none \u2014 try again, or skip this step and pick a runner later.',
@@ -4299,7 +4344,6 @@ export const messages: Messages = {
       signedOut: 'Not signed in',
       // The command beneath it belongs to one agent; the line says which.
       signInHint: 'Sign in from a terminal on this machine, then come back.',
-      selected: 'Selected',
       isolated:
         'Another account is already using this computer’s agent sign-ins, so they are not offered to you here. Use a model instead, or skip this step and add a machine of your own from Environments afterwards.',
     },

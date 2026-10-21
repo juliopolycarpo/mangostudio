@@ -24,6 +24,15 @@ export interface SessionTabsProps {
 }
 
 /**
+ * Rename and pop out take no room until the tab is hovered or holds focus (and
+ * always on a touch screen, which has no hover). Faded out with `opacity-0`
+ * they still held 48px, so a resting "bash" was followed by a gap with the
+ * accent rule stretched under it. Close stays, as a tab's close always does.
+ */
+const TAB_ACTION_ON_DEMAND =
+  'size-6 hidden group-hover:inline-flex group-focus-within:inline-flex pointer-coarse:inline-flex';
+
+/**
  * The chat's open terminal sessions as a tab strip: select, rename inline,
  * request a close (the caller owns the confirm dialog), pop out to its own
  * window, or start a new one.
@@ -70,10 +79,12 @@ export function SessionTabs({
     if (trimmed.length > 0) onRename(id, trimmed);
   }
 
+  // `pl-1`: the tab pads its label 12px, so the first label lands on the
+  // panel title's 16px edge; the old `px-2` put it 4px to the right of it.
   return (
     <Tabs
       label={t.terminal.tabs}
-      className="px-2"
+      className="pl-1 pr-2"
       tabs={sessions.map((session) => ({
         id: session.id,
         label: session.title,
@@ -103,7 +114,7 @@ export function SessionTabs({
               size="icon"
               onClick={() => startEditing(session)}
               aria-label={t.terminal.rename}
-              className="size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+              className={TAB_ACTION_ON_DEMAND}
             >
               <Pencil size={ICON_SM} />
             </Button>
@@ -113,7 +124,7 @@ export function SessionTabs({
               size="icon"
               onClick={() => onPopOut(session.id)}
               aria-label={t.terminal.popOut}
-              className="size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
+              className={TAB_ACTION_ON_DEMAND}
             >
               <ExternalLink size={ICON_SM} />
             </Button>

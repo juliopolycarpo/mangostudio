@@ -146,6 +146,18 @@ describe('Header page controls', () => {
     }
   );
 
+  it.each(['home', 'chat', 'studio', 'settings'] as const)(
+    'keeps New chat for the phone on every page: %s',
+    async (page) => {
+      const user = userEvent.setup();
+      const { props } = renderHeader({ currentPage: page });
+      const newChat = screen.getByRole('button', { name: 'New chat' });
+      expect(newChat).toHaveClass('md:hidden');
+      await user.click(newChat);
+      expect(props.onNewChat).toHaveBeenCalledTimes(1);
+    }
+  );
+
   it('keeps New chat for the phone, and folds search and Settings into the account menu', async () => {
     const user = userEvent.setup();
     const { props } = renderHeader({ currentPage: 'chat' });

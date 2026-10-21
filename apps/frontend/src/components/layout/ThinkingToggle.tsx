@@ -35,23 +35,27 @@ export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: Th
   };
 
   return (
-    // A strip of its own, like the external controls' one: the toggle and the
-    // effort chip beside it read as `key: value` chips on the status line, and
-    // the line draws its `·` between chips that are siblings in a row.
-    <div className="composer-chip-row">
-      <button
-        type="button"
-        onClick={() => onToggle(!enabled)}
-        aria-pressed={enabled}
-        // The on state is styled off `aria-pressed` in `index.css`: a
-        // `fill-selected` wash and the icon in the composer's runner colour.
-        // The effort chip that appears beside it is the third cue.
-        className="composer-chip"
-      >
-        <Brain size={ICON_SM} className="shrink-0" />
-        {/* The strip's dialect: its keys are lowercase (`model:`, `effort:`). */}
-        <span className="composer-chip-key">{t.thinking.enable}</span>
-      </button>
+    // Two chips on the composer's status line, returned as a fragment so both
+    // are children of that strip and it draws its `·` between them and around
+    // them the way it does between every other pair. Each sits in a slot: the
+    // strip draws its dot inside the child, and a bare chip as the child put
+    // the dot in its own padding and inside its pressed wash.
+    <>
+      <span className="flex items-center">
+        <button
+          type="button"
+          onClick={() => onToggle(!enabled)}
+          aria-pressed={enabled}
+          // The on state is styled off `aria-pressed` in `index.css`: a
+          // `fill-selected` wash and the icon in the composer's runner colour.
+          // The effort chip that appears beside it is the third cue.
+          className="composer-chip"
+        >
+          <Brain size={ICON_SM} className="shrink-0" />
+          {/* The strip's dialect: its keys are lowercase (`model:`, `effort:`). */}
+          <span className="composer-chip-key">{t.thinking.enable}</span>
+        </button>
+      </span>
 
       {/* Effort selector — only visible when reasoning is on */}
       {enabled ? (
@@ -74,6 +78,6 @@ export function ThinkingToggle({ enabled, effort, onToggle, onEffortChange }: Th
           panelClassName="w-40"
         />
       ) : null}
-    </div>
+    </>
   );
 }

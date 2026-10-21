@@ -32,6 +32,7 @@ import { MicroLabel } from '@/components/ui/MicroLabel';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useToast } from '@/components/ui/Toast';
+import { chatTitleLabel } from '@/features/chat/lib/chat-title';
 import type { ContextInfo } from '@/features/generation/types';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
@@ -118,6 +119,7 @@ export function Sidebar({
   const [liveWidth, setLiveWidth] = useState(width);
   const widthRef = useRef(width);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { t, locale } = useI18n();
   const plural = usePlural();
@@ -128,19 +130,30 @@ export function Sidebar({
   }, [width]);
 
   useEffect(() => {
-    if (editingChatId && editInputRef.current) {
-      editInputRef.current.focus();
-      editInputRef.current.select();
+    const field = editInputRef.current;
+    if (editingChatId && field) {
+      field.focus();
+      // The whole name, selected so typing replaces it, with the caret at its
+      // start: `select()` leaves the caret at the end, and a field narrower
+      // than the name scrolls there and hides the beginning of what is being
+      // renamed.
+      field.setSelectionRange(0, field.value.length, 'backward');
+      field.scrollLeft = 0;
     }
   }, [editingChatId]);
 
+  // The field starts from the name the row shows, and saving that name unchanged
+  // is not a rename: it would store "New chat" as a real title and stop the first
+  // prompt from naming the chat.
   const handleStartEdit = (chat: Chat) => {
     setEditingChatId(chat.id);
-    setEditTitle(chat.title);
+    setEditTitle(chatTitleLabel(chat.title, t.chat.untitled));
   };
 
   const handleSaveEdit = (chatId: string) => {
-    if (editTitle.trim() && editTitle !== chats.find((c) => c.id === chatId)?.title) {
+    const current = chats.find((c) => c.id === chatId)?.title;
+    const shown = current === undefined ? undefined : chatTitleLabel(current, t.chat.untitled);
+    if (editTitle.trim() && editTitle !== shown) {
       onUpdateChatTitle(chatId, editTitle.trim());
     }
     setEditingChatId(null);
@@ -280,7 +293,7 @@ export function Sidebar({
             </span>
             <KbdHint
               keys={newChatShortcutHint()}
-              className="hidden border-on-accent bg-transparent text-on-accent md:inline-flex"
+              className="border-on-accent bg-transparent text-on-accent"
             />
           </Button>
         </div>
@@ -288,9 +301,11 @@ export function Sidebar({
         <div className="relative mb-2 px-3">
           <Search
             size={ICON_SM}
+            aria-hidden="true"
             className="pointer-events-none absolute left-6 top-1/2 -translate-y-1/2 text-fg-subtle"
           />
           <input
+            ref={searchInputRef}
             type="text"
             // A query is not prose: the squiggle under "codex" or a folder name
             // reads as an error in a field that has none to report.
@@ -306,8 +321,29 @@ export function Sidebar({
             }}
             placeholder={t.sidebar.searchPlaceholder}
             aria-label={t.sidebar.searchPlaceholder}
-            className={cn(FIELD_CLASS, 'pl-8')}
+            // `pr-8` keeps the query clear of the button below; on a coarse
+            // pointer that button grows to its 44px floor, and the text keeps
+            // clear of that too.
+            className={cn(FIELD_CLASS, 'pl-8 pr-8 pointer-coarse:pr-12')}
           />
+          {/* The clear control, and the sign that the list is filtered once the
+              eye leaves the field. Escape does the same, but a phone has none. */}
+          {query.length > 0 ? (
+            <Button
+              variant="subtle"
+              size="icon-sm"
+              onClick={() => {
+                setQuery('');
+                searchInputRef.current?.focus();
+              }}
+              aria-label={t.sidebar.clearSearch}
+              title={t.sidebar.clearSearch}
+              data-testid="sidebar-search-clear"
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-fg-subtle hover:text-fg"
+            >
+              <X size={ICON_SM} aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
 
         {/* Mobile quick shortcuts */}
@@ -349,6 +385,7 @@ export function Sidebar({
                   const gitSummary = gitSummaries?.[chat.id] ?? null;
                   const isCurrent = currentPage === 'chat' && currentChatId === chat.id;
                   const editing = editingChatId === chat.id;
+                  const title = chatTitleLabel(chat.title, t.chat.untitled);
                   // Hidden from assistive tech so the select button's accessible
                   // name stays the chat title: a button flattens its descendants
                   // into that name, and the ring contributes both an SVG <title>
@@ -398,7 +435,10 @@ export function Sidebar({
                             onKeyDown={(e) => handleKeyDown(e, chat.id)}
                             onBlur={() => handleSaveEdit(chat.id)}
                             aria-label={t.chat.editTitle}
-                            className={cn(FIELD_CLASS, 'h-7 min-w-0 flex-1 px-2')}
+                            // `-ml-2` takes back the field's own `px-2`, so the
+                            // name stays where the row printed it instead of
+                            // stepping 8px right on entering rename.
+                            className={cn(FIELD_CLASS, 'h-7 min-w-0 flex-1 -ml-2 px-2')}
                           />
                         </div>
                       ) : (
@@ -412,8 +452,8 @@ export function Sidebar({
                           className={`${leadClassName} cursor-pointer focus-visible:outline-offset-[-2px]`}
                         >
                           {leadingIcon}
-                          <span className="truncate text-sm" title={chat.title}>
-                            {chat.title}
+                          <span className="truncate text-sm" title={title}>
+                            {title}
                           </span>
                         </button>
                       )}
@@ -477,22 +517,24 @@ export function Sidebar({
                               isCurrent && 'pointer-coarse:flex'
                             )}
                           >
-                            <button
-                              type="button"
+                            <Button
+                              variant="subtle"
+                              size="icon-sm"
                               onClick={() => handleStartEdit(chat)}
-                              className="flex size-7 items-center justify-center rounded-sm transition-colors hover:bg-fill-hover hover:text-fg"
+                              aria-label={t.chat.editTitle}
                               title={t.chat.editTitle}
                             >
-                              <Pencil size={ICON_SM} />
-                            </button>
-                            <button
-                              type="button"
+                              <Pencil size={ICON_SM} aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="subtle-danger"
+                              size="icon-sm"
                               onClick={() => setPendingDelete(chat)}
-                              className="flex size-7 items-center justify-center rounded-sm transition-colors hover:bg-danger-subtle hover:text-danger"
+                              aria-label={t.chat.deleteTitle}
                               title={t.chat.deleteTitle}
                             >
-                              <Trash2 size={ICON_SM} />
-                            </button>
+                              <Trash2 size={ICON_SM} aria-hidden="true" />
+                            </Button>
                           </div>
                         </>
                       )}
@@ -541,7 +583,7 @@ export function Sidebar({
         <ConfirmDialog
           title={t.chat.deleteConfirmTitle}
           description={t.chat.deleteConfirmDescription}
-          entityName={pendingDelete.title}
+          entityName={chatTitleLabel(pendingDelete.title, t.chat.untitled)}
           confirmLabel={t.chat.deleteTitle}
           cancelLabel={t.chat.deleteCancel}
           isPending={isDeleting}

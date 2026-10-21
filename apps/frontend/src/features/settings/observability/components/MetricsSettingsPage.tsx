@@ -5,29 +5,41 @@ import type {
   ProviderUsageMetrics,
 } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
+import { BarChart3 } from 'lucide-react';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { formatCompactDuration } from '@/features/settings/connectors/components/ChatGptUsageMeter';
 import { connectorQueryOptions } from '@/features/settings/connectors/hooks/use-connectors';
 import { useI18n } from '@/hooks/use-i18n';
+import { ICON_LG } from '@/lib/icon-sizes';
 import { observabilityMetricsQueryOptions } from '../queries';
 import { formatPercent, formatTimestamp, formatTokenCount } from '../utils';
 import { ChatGptMetricsCard } from './ChatGptMetricsCard';
+import { ObservabilityPageActions } from './ObservabilityPageActions';
 
 /** ChatGPT usage snapshots are cached ~5 min server-side, so poll leisurely. */
 const CHATGPT_REFETCH_MS = 60_000;
 
-/** A block of a provider's card. The blocks are divided by a hairline, not boxed. */
-const BLOCK = 'space-y-3 border-t border-stroke pt-4 first:border-t-0 first:pt-0';
+/**
+ * A block of a provider's card, at a settings row's inset. The card divides the
+ * blocks with its own `stroke` hairline, as it divides `SettingsRow`s.
+ */
+const BLOCK = 'space-y-3 px-4 py-3';
+
+/** Every cell sits at the card's 16px inset, so the table's rows run edge to edge like `SettingsRow`s. */
+const CELL = 'whitespace-nowrap px-4';
+const NUMERIC_CELL = `${CELL} w-24 text-right`;
 
 /**
  * Hits, misses and hit rate are right-aligned at a fixed width so the digits
- * line up down the column, and the last one ends on the card's edge, where the
+ * line up down the column, and the last one ends on the card's inset, where the
  * probe-timeout counts below it end too. The cache name takes the rest.
  */
 function CacheMetricsTable(props: {
@@ -46,16 +58,16 @@ function CacheMetricsTable(props: {
         <caption className="sr-only">{props.caption}</caption>
         <thead>
           <tr className="text-left text-xs text-fg-muted">
-            <th scope="col" className="whitespace-nowrap py-2 font-medium">
+            <th scope="col" className={`${CELL} pt-3 pb-2 font-medium`}>
               {props.cacheLabel}
             </th>
-            <th scope="col" className="w-16 whitespace-nowrap py-2 pl-4 text-right font-medium">
+            <th scope="col" className={`${NUMERIC_CELL} pt-3 pb-2 font-medium`}>
               {props.hitsLabel}
             </th>
-            <th scope="col" className="w-16 whitespace-nowrap py-2 pl-4 text-right font-medium">
+            <th scope="col" className={`${NUMERIC_CELL} pt-3 pb-2 font-medium`}>
               {props.missesLabel}
             </th>
-            <th scope="col" className="w-20 whitespace-nowrap py-2 pl-4 text-right font-medium">
+            <th scope="col" className={`${NUMERIC_CELL} pt-3 pb-2 font-medium`}>
               {props.hitRateLabel}
             </th>
           </tr>
@@ -63,16 +75,10 @@ function CacheMetricsTable(props: {
         <tbody>
           {props.entries.map((entry) => (
             <tr key={entry.cacheName} className="border-t border-stroke">
-              <td className="whitespace-nowrap py-2 text-fg">
-                {props.cacheLabels[entry.cacheName]}
-              </td>
-              <td className="whitespace-nowrap py-2 pl-4 text-right text-fg tabular-nums">
-                {entry.hits}
-              </td>
-              <td className="whitespace-nowrap py-2 pl-4 text-right text-fg tabular-nums">
-                {entry.misses}
-              </td>
-              <td className="whitespace-nowrap py-2 pl-4 text-right text-fg tabular-nums">
+              <td className={`${CELL} py-3 text-fg`}>{props.cacheLabels[entry.cacheName]}</td>
+              <td className={`${NUMERIC_CELL} py-3 text-fg tabular-nums`}>{entry.hits}</td>
+              <td className={`${NUMERIC_CELL} py-3 text-fg tabular-nums`}>{entry.misses}</td>
+              <td className={`${NUMERIC_CELL} py-3 text-fg tabular-nums`}>
                 {/* A cache nothing has asked yet has no rate. "0%" reads as a cache
                     that always misses, which is a different thing to be told. */}
                 {entry.hits + entry.misses === 0 ? (
@@ -136,7 +142,9 @@ function UsageSummary(props: {
 
 export function MetricsSettingsPage() {
   const { t, locale } = useI18n();
-  const { data, error, isLoading } = useQuery(observabilityMetricsQueryOptions());
+  const { data, error, isLoading, isFetching, refetch } = useQuery(
+    observabilityMetricsQueryOptions()
+  );
   const connectorsQuery = useQuery({
     ...connectorQueryOptions(),
     refetchInterval: CHATGPT_REFETCH_MS,
@@ -146,7 +154,6 @@ export function MetricsSettingsPage() {
   );
   const now = Date.now();
   const labels = t.settings.metrics;
-  const generatedAtLabel = data?.generatedAt ? formatTimestamp(data.generatedAt, locale) : '-';
   const cacheLabels: Record<ProviderCacheName, string> = {
     'sdk-client': labels.caches.sdkClient,
     'prepared-runtime': labels.caches.preparedRuntime,
@@ -162,9 +169,17 @@ export function MetricsSettingsPage() {
       title={labels.title}
       description={labels.description}
       actions={
-        <span className="text-xs text-fg-muted">
-          {labels.generatedAtLabel.replace('{value}', generatedAtLabel)}
-        </span>
+        data ? (
+          <ObservabilityPageActions
+            updatedLabel={labels.generatedAtLabel.replace(
+              '{value}',
+              formatTimestamp(data.generatedAt, locale)
+            )}
+            refreshLabel={labels.refresh}
+            refreshing={isFetching}
+            onRefresh={() => void refetch()}
+          />
+        ) : null
       }
     >
       {chatGptConnectors.map((connector) => (
@@ -181,12 +196,25 @@ export function MetricsSettingsPage() {
           <span className="sr-only">{t.common.loading}</span>
         </div>
       ) : error ? (
-        <Callout tone="danger">{labels.failedToLoad}</Callout>
+        <Callout
+          tone="danger"
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void refetch()}
+              loading={isFetching}
+            >
+              {t.common.retry}
+            </Button>
+          }
+        >
+          {labels.failedToLoad}
+        </Callout>
       ) : data?.providers.length ? (
         data.providers.map((providerMetrics) => (
           <SettingsSection
             key={providerMetrics.provider}
-            padded
             title={t.providers[providerMetrics.provider]}
             action={
               // A count with no weight is easy to miss when it is not zero, so it
@@ -220,7 +248,7 @@ export function MetricsSettingsPage() {
               </section>
             ) : null}
 
-            <section className={BLOCK}>
+            <section>
               <CacheMetricsTable
                 caption={labels.cacheSectionTitle}
                 cacheLabel={labels.cacheLabel}
@@ -255,7 +283,9 @@ export function MetricsSettingsPage() {
           </SettingsSection>
         ))
       ) : (
-        <EmptyState title={labels.empty} />
+        <Card padded={false}>
+          <EmptyState icon={<BarChart3 size={ICON_LG} />} title={labels.empty} />
+        </Card>
       )}
     </SettingsPage>
   );

@@ -144,7 +144,6 @@ export function GitSettingsPage({
             onChange={(event) => setSystemPromptDraft(event.target.value)}
             onBlur={persistSystemPrompt}
             rows={8}
-            className="font-mono text-xs"
           />
         </SettingsRow>
 

@@ -1,6 +1,6 @@
 import type { GenerateCommitMessageResponse, GitBranchInfo } from '@mangostudio/shared/git';
 import { History, X } from 'lucide-react';
-import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
@@ -14,8 +14,6 @@ import { CommitActions, useCommitActions } from './CommitActions';
 import { IconButton } from './components/IconButton';
 import { useGenerateCommitMessage, useGitHeadMessage } from './hooks/use-git-state';
 
-const AMEND_CONFIRMED_KEY = 'mangostudio.git.amend-confirmed';
-
 /** The subject line's soft limit is 72; the counter says so from here on. */
 const TITLE_COUNT_FROM = 50;
 
@@ -25,6 +23,9 @@ export function CommitForm({
   hasChanges,
   hasStagedChanges,
   hasUnstagedWork,
+  amend,
+  onEnterAmend,
+  onExitAmend,
   onRemoteFailure,
 }: {
   readonly chatId: string;
@@ -32,18 +33,19 @@ export function CommitForm({
   readonly hasChanges: boolean;
   readonly hasStagedChanges: boolean;
   readonly hasUnstagedWork: boolean;
+  /** Amend mode is the panel's (`useAmendMode`): its menu can enter it on a clean tree, where this form is not drawn. */
+  readonly amend: boolean;
+  readonly onEnterAmend: () => void;
+  readonly onExitAmend: () => void;
   readonly onRemoteFailure: (error: unknown) => void;
 }) {
   const { t } = useI18n();
   const { toast } = useToast();
   const labels = t.git.commit;
-  const amendLabels = t.git.amendConfirm;
   const overwriteLabels = t.git.commitMessageOverwrite;
   const generateMutation = useGenerateCommitMessage(chatId);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [amend, setAmend] = useState(false);
-  const [confirmAmend, setConfirmAmend] = useState(false);
   const [pendingSuggestion, setPendingSuggestion] = useState<GenerateCommitMessageResponse | null>(
     null
   );
@@ -55,6 +57,7 @@ export function CommitForm({
   const prefilledHash = useRef<string | null>(null);
   const headMessage = useGitHeadMessage(chatId, amend);
 
+  const bodyId = useId();
   const showTitleCount = title.length >= TITLE_COUNT_FROM;
 
   const updateTitle = (value: string) => {
@@ -81,17 +84,10 @@ export function CommitForm({
     onCommitted: () => {
       updateTitle('');
       updateBody('');
-      setAmend(false);
+      onExitAmend();
       setDiffWasTruncated(false);
     },
-    onEnterAmend: () => {
-      if (amend) return;
-      if (sessionStorage.getItem(AMEND_CONFIRMED_KEY) === 'true') {
-        setAmend(true);
-        return;
-      }
-      setConfirmAmend(true);
-    },
+    onEnterAmend,
     onRemoteFailure,
   });
 
@@ -117,8 +113,8 @@ export function CommitForm({
   useEffect(() => {
     if (!amend || !headMessage.error) return;
     toast(resolveApiErrorMessage(headMessage.error, t.git.headMessage.loadError), 'error');
-    setAmend(false);
-  }, [amend, headMessage.error, toast, t.git.headMessage.loadError]);
+    onExitAmend();
+  }, [amend, headMessage.error, toast, t.git.headMessage.loadError, onExitAmend]);
 
   const handleGenerate = async () => {
     if (!hasChanges) return;
@@ -155,7 +151,7 @@ export function CommitForm({
           icon={<History size={ICON_MD} />}
           title={labels.amendLabel}
           action={
-            <IconButton label={labels.amendExit} onClick={() => setAmend(false)}>
+            <IconButton label={labels.amendExit} onClick={onExitAmend}>
               <X size={ICON_SM} />
             </IconButton>
           }
@@ -165,36 +161,46 @@ export function CommitForm({
       ) : null}
 
       {/*
+        Both fields carry a visible label, as every `Input` does: the
+        placeholder is an example message, and an instruction kept there was
+        gone the moment anyone typed.
+
         The counter is the field's own trailing edge and appears only near the
         limit. A row of its own showed `0/72` under an empty field for 20px of
-        a panel whose job is the file list below it.
+        a panel whose job is the file list below it. It is pinned to the field's
+        32px, not to the wrapper, which also holds the label.
       */}
       <div className="relative">
         <Input
+          label={labels.titleLabel}
           value={title}
           onChange={(event) => updateTitle(event.target.value)}
           onKeyDown={handleShortcut}
           maxLength={72}
-          aria-label={labels.titleLabel}
           placeholder={labels.titlePlaceholder}
           className={cn(showTitleCount && 'pr-14')}
         />
         {showTitleCount ? (
-          <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-micro text-fg-subtle">
+          <span className="pointer-events-none absolute right-3 bottom-0 flex h-8 items-center font-mono text-micro text-fg-subtle">
             {labels.titleCount.replace('{count}', String(title.length))}
           </span>
         ) : null}
       </div>
-      {/* Two lines at rest, three once it is being written in or holds text. */}
-      <Textarea
-        value={body}
-        onChange={(event) => updateBody(event.target.value)}
-        onKeyDown={handleShortcut}
-        aria-label={labels.bodyLabel}
-        placeholder={labels.bodyPlaceholder}
-        rows={2}
-        className={cn('max-h-40 min-h-16 focus:min-h-24', body && 'min-h-24')}
-      />
+      <div className="flex flex-col gap-1">
+        <label htmlFor={bodyId} className="text-sm font-medium text-fg">
+          {labels.bodyLabel}
+        </label>
+        {/* Two lines at rest, three once it is being written in or holds text. */}
+        <Textarea
+          id={bodyId}
+          value={body}
+          onChange={(event) => updateBody(event.target.value)}
+          onKeyDown={handleShortcut}
+          placeholder={labels.bodyPlaceholder}
+          rows={2}
+          className={cn('max-h-40 min-h-16 focus:min-h-24', body && 'min-h-24')}
+        />
+      </div>
 
       <CommitActions
         actions={actions}
@@ -209,32 +215,6 @@ export function CommitForm({
       />
 
       {diffWasTruncated ? <Callout tone="info">{labels.truncatedNotice}</Callout> : null}
-
-      {confirmAmend ? (
-        <Dialog
-          size="sm"
-          title={amendLabels.title}
-          description={amendLabels.description}
-          onClose={() => setConfirmAmend(false)}
-          footer={
-            <>
-              <Button type="button" variant="secondary" onClick={() => setConfirmAmend(false)}>
-                {amendLabels.cancel}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => {
-                  sessionStorage.setItem(AMEND_CONFIRMED_KEY, 'true');
-                  setConfirmAmend(false);
-                  setAmend(true);
-                }}
-              >
-                {amendLabels.confirm}
-              </Button>
-            </>
-          }
-        />
-      ) : null}
 
       {pendingSuggestion ? (
         <Dialog

@@ -6,6 +6,7 @@ import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+import { MEDIA_CONTROL_CLASS } from './media-control';
 
 interface GalleryTileProps {
   readonly item: GalleryItem;
@@ -46,8 +47,9 @@ interface GalleryTileProps {
  * picture under it, and the same in both themes, as the picture is. (The theme's
  * `scrim` is not: it is translucent and light-tinted in the light theme, so text
  * on it would have depended on whichever picture sits underneath, which is why
- * this was a solid `surface-raised` strip before.) The download link draws its
- * focus ring in `on-scrim-media` for the same reason the lightbox's controls do.
+ * this was a solid `surface-raised` strip before.) The download link is a media
+ * control (`MEDIA_CONTROL_CLASS`), like the lightbox's Close: a white glyph on
+ * the veil in both themes, with its focus ring in `on-scrim-media`.
  *
  * // Usage: <GalleryTile item={item} onView={setSelectedImage} />
  */
@@ -89,8 +91,9 @@ export function GalleryTile({ item, onView, compact = false }: GalleryTileProps)
             rel="noreferrer"
             aria-label={t.gallery.downloadImage}
             className={cn(
-              buttonClassName('secondary', 'icon-sm'),
-              'pointer-events-none shrink-0 group-hover:pointer-events-auto group-focus-within:pointer-events-auto focus-visible:outline-on-scrim-media'
+              buttonClassName('subtle', 'icon-sm'),
+              MEDIA_CONTROL_CLASS,
+              'pointer-events-none shrink-0 group-hover:pointer-events-auto group-focus-within:pointer-events-auto'
             )}
           >
             <Download size={ICON_MD} />

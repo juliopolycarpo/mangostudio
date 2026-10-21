@@ -219,7 +219,7 @@ describe('ConnectorsSettings', () => {
     // Wait for the initial empty state to load
     await screen.findByText(/no connectors found/i);
 
-    // Open the add modal — pick the first "Add connector" button (header button)
+    // Open the add modal from the empty state (the header button is hidden while it shows)
     const addButtons = screen.getAllByRole('button', { name: /add connector/i });
     await user.click(addButtons[0]);
 

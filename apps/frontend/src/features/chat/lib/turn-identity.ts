@@ -4,7 +4,10 @@ import {
   isExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
 import type { MessagePart } from '@mangostudio/shared/types';
-import { deriveMonogram } from '@/features/environments/identity/resolve';
+import {
+  deriveMonogram,
+  type ResolvedToolIdentity,
+} from '@/features/environments/identity/resolve';
 
 /**
  * Who produced a turn, in the two forms the app can actually draw.
@@ -45,6 +48,27 @@ type TargetLabels = Record<ExternalAgentTargetId, string>;
  */
 function modelDisplayName(modelName: string, targets: TargetLabels): string {
   return isExternalAgentTargetId(modelName) ? targets[modelName] : modelName;
+}
+
+/**
+ * What the chat calls a hosted agent: the person's own name for it, else the
+ * runner's product name — "Codex CLI", the word the runner picker, the composer
+ * placeholder and the disclaimer use on the same screen.
+ *
+ * The identity's derived name comes from the environments dictionary ("Codex"),
+ * which names the installed program; a turn header saying "Codex" under a
+ * picker saying "Codex CLI" gave one runner two names. Only the name changes:
+ * the avatar keeps the identity's own monogram, since "Codex CLI", "Cursor CLI"
+ * and "Claude Code" would all derive "CC".
+ *
+ * Usage: agentRunnerName(resolve('agent', 'codex'), 'codex', t.externalAgents.target)
+ */
+export function agentRunnerName(
+  identity: ResolvedToolIdentity,
+  targetId: ExternalAgentTargetId,
+  targets: TargetLabels
+): string {
+  return identity.storedName ?? targets[targetId];
 }
 
 /**

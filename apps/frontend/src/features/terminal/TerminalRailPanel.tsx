@@ -1,11 +1,13 @@
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
-import { TerminalSquare } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { Plus, TerminalSquare } from 'lucide-react';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/Button';
+import { Button, buttonClassName } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_LG } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { CloseTerminalDialog } from './CloseTerminalDialog';
 import { LazyTerminalView } from './LazyTerminalView';
 import { openFailureMessage } from './open-failure-message';
@@ -49,6 +51,7 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
     unavailable,
     message: unavailableHint,
     tone: unavailableTone,
+    reason: unavailableReason,
   } = useTerminalAvailability(environmentId);
   const sessionsQuery = useTerminalSessionsQuery(
     environmentId ?? '',
@@ -119,7 +122,27 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   if (!environmentId || (unavailable && sessions.length === 0)) {
     return (
       <div className="p-4">
-        <TerminalUnavailableNotice message={unavailableHint} tone={unavailableTone} />
+        <TerminalUnavailableNotice
+          message={unavailableHint}
+          tone={unavailableTone}
+          reason={unavailableReason}
+          action={
+            // At the cap with nothing open in this chat, the terminals filling
+            // it belong to other chats, and nothing in this rail can close
+            // them. `/terminal` lists every session on the machine.
+            environmentId && unavailable && unavailableReason === 'limit' ? (
+              <Link
+                to="/terminal"
+                search={{
+                  environmentId: environmentId === LOCAL_ENVIRONMENT_ID ? undefined : environmentId,
+                }}
+                className={buttonClassName('secondary', 'sm')}
+              >
+                {t.terminal.manageSessions}
+              </Link>
+            ) : undefined
+          }
+        />
       </div>
     );
   }
@@ -135,12 +158,16 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
         title={t.terminal.empty}
         hint={t.terminal.emptyHint}
         action={
+          // `secondary`, as every empty state's way in is: mango marks the one
+          // primary action of the screen, and in the dock that is the chat's.
           <Button
             type="button"
-            variant="primary"
+            variant="secondary"
+            size="sm"
             onClick={openSession}
             loading={openMutation.isPending}
           >
+            <Plus size={ICON_SM} />
             {t.terminal.newSession}
           </Button>
         }

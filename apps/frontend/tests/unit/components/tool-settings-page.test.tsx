@@ -130,7 +130,7 @@ describe('ToolSettingsPage', () => {
     expect(screen.getByText('Delete file')).toBeInTheDocument();
     expect(screen.getByText('Move file')).toBeInTheDocument();
     expect(
-      screen.getByText('Allows the AI to create new text files without overwriting existing paths.')
+      screen.getByText('Lets the model create new text files without overwriting existing paths.')
     ).toBeInTheDocument();
     expect(screen.queryByText(/Server title/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Server description/)).not.toBeInTheDocument();

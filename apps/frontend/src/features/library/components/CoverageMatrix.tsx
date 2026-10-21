@@ -54,7 +54,11 @@ const PINNED_RESOURCE =
 const PINNED_ROW_WASH =
   'after:pointer-events-none after:absolute after:inset-0 after:-z-10 group-hover:after:bg-fill-hover';
 
-/** The selection checkbox (`w-9`) and the resource column (`w-48`), in rem. */
+/**
+ * The selection checkbox (`w-9`) and the resource column at `sm` and up
+ * (`w-48`), in rem. Below `sm` the resource column is `w-40`, narrower than
+ * this counts, so the agent columns only get more than their minimum there.
+ */
 const LEADING_COLUMNS_REM = 14.25;
 /** Room for the widest header — the avatar and "Claude Code" — plus the cell padding, in rem. */
 const AGENT_COLUMN_MIN_REM = 7;
@@ -160,8 +164,10 @@ export function CoverageMatrix({
         <colgroup>
           <col className="w-9" />
           {/* Narrower on a phone, where the pinned half of the table is most of the
-              screen and the agent column beside it has to be visibly cut off. */}
-          <col className="w-32 sm:w-48" />
+              screen and the agent column beside it has to be visibly cut off — but
+              wide enough that a typical slug stays on one line, since a name broken
+              at its own hyphen reads as two words. */}
+          <col className="w-40 sm:w-48" />
           {targets.map((target) => (
             <col key={target.id} />
           ))}
@@ -308,9 +314,16 @@ function ResourceRow({
           params={{ resourceKey: resource.key }}
           search={libraryEnvironmentSearch(environmentId)}
           aria-label={formatMessage(l.matrix.openDetail, { resource: resource.ref.slug })}
-          className="block break-words font-medium text-fg hover:underline"
+          // A slug is an identifier: it never breaks at its own hyphen. One too
+          // long for the column ends in an ellipsis, with the whole name in the
+          // tooltip and the accessible name.
+          title={resource.ref.slug}
+          // A flex row, not a block: on a coarse pointer the link takes the 44px
+          // touch floor, and a block keeps its text on the top line of that box
+          // while the checkbox and the cells beside it centre in the row.
+          className="flex min-w-0 items-center font-medium text-fg hover:underline"
         >
-          {resource.ref.slug}
+          <span className="min-w-0 truncate">{resource.ref.slug}</span>
         </Link>
       </td>
       {cells.map((cell) => (
@@ -354,7 +367,7 @@ export function MatrixLegend() {
     >
       {LEGEND_ORDER.map((state) => (
         <div key={state} className="flex items-center gap-1.5" title={l.cellHint[state]}>
-          <dt aria-hidden="true">
+          <dt aria-hidden="true" className="flex">
             <CoverageGlyph state={state} />
           </dt>
           <dd>{l.cellStateShort[state]}</dd>

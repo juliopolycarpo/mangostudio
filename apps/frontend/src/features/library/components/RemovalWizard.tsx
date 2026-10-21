@@ -115,7 +115,6 @@ export function RemovalWizard({
       title={title}
       steps={STEP_ORDER.map((step) => stepLabel(l, step))}
       stepIndex={stepIndex}
-      closeLabel={l.wizard.close}
       onClose={onClose}
       notes={
         <>
@@ -136,12 +135,16 @@ export function RemovalWizard({
       }
       actions={
         <>
+          {/* Every step until the result offers Cancel, so the footer is always
+              the way out; Back joins it once there is a step to go back to. */}
           {wizard.step !== 'result' && (
-            <Button
-              variant="secondary"
-              onClick={stepIndex > 0 ? () => wizard.setStep(STEP_ORDER[stepIndex - 1]) : onClose}
-            >
-              {stepIndex > 0 ? l.wizard.back : l.wizard.cancel}
+            <Button variant="secondary" onClick={onClose}>
+              {l.wizard.cancel}
+            </Button>
+          )}
+          {wizard.step !== 'result' && stepIndex > 0 && (
+            <Button variant="secondary" onClick={() => wizard.setStep(STEP_ORDER[stepIndex - 1])}>
+              {l.wizard.back}
             </Button>
           )}
           {wizard.step === 'result' ? (

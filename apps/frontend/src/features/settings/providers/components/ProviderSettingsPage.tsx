@@ -211,6 +211,7 @@ function ProviderSettingsEditor({
       <BackToProviders label={s.backToMenu} />
       <SettingsPage
         title={providerName}
+        description={s.detailDescription.replace('{provider}', providerName)}
         actions={
           updateMutation.isPending ? (
             <div

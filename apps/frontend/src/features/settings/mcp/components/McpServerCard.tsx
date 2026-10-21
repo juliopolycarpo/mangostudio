@@ -1,9 +1,12 @@
 /**
  * Card for one MCP server: identity with its last-known status, transport and
- * hosting environment as quiet metadata, the row actions (test, enable, edit,
- * rename, delete) on the right, and expandable tools and resources. One line
- * under the command says why the server is not working: the last test's answer,
- * or until there is one the cause the server last reported.
+ * hosting environment as quiet metadata, then the row's actions on the right —
+ * Test and the enabled switch inline, and one overflow menu holding Edit, the
+ * rename pair and Delete — and expandable tools and resources. Under the command,
+ * a failure is a danger `Callout` that says which server could not be reached and
+ * what to do, with the raw transport error as its detail; a passing test is one
+ * quiet `StatusNote`. The failure is the last test's answer, or until there is
+ * one the cause the server last reported.
  */
 
 import type { McpServer, McpServerStatus, TestMcpServerResponse } from '@mangostudio/shared/mcp';
@@ -12,7 +15,9 @@ import { type ComponentProps, useState } from 'react';
 import { StatusNote } from '@/components/settings/StatusNote';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
+import { MenuItem } from '@/components/ui/Menu';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { Toggle } from '@/components/ui/Toggle';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
@@ -20,7 +25,8 @@ import { ToolIdentityMenu } from '@/features/environments/identity/ToolIdentityM
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
-import { ICON_SM } from '@/lib/icon-sizes';
+import { formatMessage } from '@/lib/i18n-format';
+import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useTestMcpServer, useUpdateMcpServer } from '../hooks/use-mcp-servers';
 import { McpServerResources } from './McpServerResources';
@@ -112,7 +118,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
   const expanded = toolsOpen || resourcesOpen;
 
   return (
-    <Card className="space-y-3">
+    <Card padded={false} className="space-y-3 p-4">
       <div className="space-y-1">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -163,24 +169,38 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
                 onChange={(e) => handleToggleEnabled(e.target.checked)}
               />
             </div>
-            <Button
-              variant="subtle"
+            {/* Everything else the server offers is one overflow menu, so the ⋮ is
+                the usual "more actions" and not a second, unexplained menu between
+                two icon buttons. Delete is last, after a separator. */}
+            <ToolIdentityMenu
+              identity={identity}
+              defaultName={server.name}
               size="icon-sm"
-              aria-label={s.editButton}
-              onClick={() => onEdit(server)}
-            >
-              <Pencil size={ICON_SM} />
-            </Button>
-            <ToolIdentityMenu identity={identity} defaultName={server.name} size="icon-sm" />
-            <Button
-              variant="subtle-danger"
-              size="icon-sm"
-              aria-label={s.deleteServer}
-              title={s.deleteServer}
-              onClick={() => onDelete(server)}
-            >
-              <Trash2 size={ICON_SM} />
-            </Button>
+              label={formatMessage(s.moreActions, { name: identity.name })}
+              before={(close) => (
+                <MenuItem
+                  icon={<Pencil size={ICON_MD} />}
+                  onSelect={() => {
+                    close();
+                    onEdit(server);
+                  }}
+                >
+                  {s.editButton}
+                </MenuItem>
+              )}
+              after={(close) => (
+                <MenuItem
+                  tone="danger"
+                  icon={<Trash2 size={ICON_MD} />}
+                  onSelect={() => {
+                    close();
+                    onDelete(server);
+                  }}
+                >
+                  {s.deleteServer}
+                </MenuItem>
+              )}
+            />
           </div>
         </div>
 
@@ -214,11 +234,29 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
         </div>
       </div>
 
-      {note && (
-        <StatusNote tone={note.ok ? 'success' : 'danger'} role={testOutcome ? 'status' : undefined}>
-          {note.message}
-        </StatusNote>
-      )}
+      {note ? (
+        note.ok ? (
+          <StatusNote tone="success" role="status">
+            {note.message}
+          </StatusNote>
+        ) : (
+          // A failure is something to act on: which server, what to do, and the
+          // way to do it, with the transport's own words as the detail.
+          <Callout
+            tone="danger"
+            role={testOutcome ? 'status' : undefined}
+            title={formatMessage(s.testFailedTitle, { name: identity.name })}
+            action={
+              <Button variant="secondary" size="sm" onClick={() => onEdit(server)}>
+                {s.editButton}
+              </Button>
+            }
+          >
+            <p>{s.testFailedHint}</p>
+            <p className="mt-1 break-all font-mono text-xs text-fg-muted">{note.message}</p>
+          </Callout>
+        )
+      ) : null}
 
       {expanded && (
         <div className="space-y-3 border-t border-stroke pt-3">

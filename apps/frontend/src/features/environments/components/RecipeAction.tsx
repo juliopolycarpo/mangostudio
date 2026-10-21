@@ -16,12 +16,19 @@ import { ICON_MD } from '@/lib/icon-sizes';
 import type { InstallChainStep } from '../install-chain';
 import { InstallAction } from './InstallAction';
 
-/** Install is the card's call to action; update is ordinary; uninstall is deliberately quiet. */
+/**
+ * Install is the card's call to action; update is ordinary; uninstall is a
+ * destructive action that is not the final confirmation, so it is
+ * `subtle-danger` — `fg-muted` at rest, the danger tint only once it is reached.
+ */
 const ACTION_PRESENTATION = {
   install: { variant: 'primary', icon: <Download size={ICON_MD} /> },
   update: {},
-  uninstall: { variant: 'subtle' },
-} as const satisfies Record<string, { variant?: 'primary' | 'subtle'; icon?: React.ReactNode }>;
+  uninstall: { variant: 'subtle-danger' },
+} as const satisfies Record<
+  string,
+  { variant?: 'primary' | 'subtle-danger'; icon?: React.ReactNode }
+>;
 
 export interface RecipeActionProps {
   /** The recipe and its input, or undefined when the catalog offers none — the card then shows no button. */

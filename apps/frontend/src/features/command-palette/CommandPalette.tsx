@@ -408,7 +408,12 @@ function CommandRow({
           reason: the label is what the reader scans for. Visually only; the words
           stay in the accessibility tree and in what the search matches. */}
       {item.hint ? (
-        <span className="min-w-0 shrink truncate font-mono text-xs text-fg-subtle max-sm:sr-only">
+        <span
+          className={cn(
+            'min-w-0 shrink truncate text-xs text-fg-subtle max-sm:sr-only',
+            item.hintIsPath && 'font-mono'
+          )}
+        >
           {item.hint}
         </span>
       ) : null}

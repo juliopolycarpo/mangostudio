@@ -54,10 +54,10 @@ describe('Button disabled look', () => {
     expect(className).toContain(GREY_TEXT);
   });
 
-  // The verb of a destructive row action reads as destructive before anyone
-  // reaches for it: danger text at rest, and a danger wash once reached.
+  // A destructive row action repeats down a list, so it rests quiet — a column
+  // of red trash cans outshouts the rows — and turns danger once reached.
   describe('subtle-danger', () => {
-    it('rests in danger text, not fg-muted', () => {
+    it('rests in fg-muted, not danger text', () => {
       render(
         <Button variant="subtle-danger" size="icon" aria-label="Delete">
           x
@@ -65,12 +65,12 @@ describe('Button disabled look', () => {
       );
 
       const tokens = screen.getByRole('button').className.split(' ');
-      expect(tokens).toContain('text-danger');
-      expect(tokens).not.toContain('text-fg-muted');
+      expect(tokens).toContain('text-fg-muted');
+      expect(tokens).not.toContain('text-danger');
     });
 
     it.each(['hover', 'focus-visible', 'active'] as const)(
-      'fills with danger-subtle on %s',
+      'turns danger text on a danger-subtle fill on %s',
       (state) => {
         render(
           <Button variant="subtle-danger" size="icon" aria-label="Delete">
@@ -80,6 +80,7 @@ describe('Button disabled look', () => {
 
         const tokens = screen.getByRole('button').className.split(' ');
         expect(tokens).toContain(`not-disabled:${state}:bg-danger-subtle`);
+        expect(tokens).toContain(`not-disabled:${state}:text-danger`);
       }
     );
   });

@@ -16,6 +16,15 @@ function createPromptSettings(overrides?: Partial<PromptSettingsData>): PromptSe
   };
 }
 
+/** Both built-in files switched on, so their role and frequency rows are drawn. */
+function createEnabledPromptSettings(overrides?: Partial<PromptSettingsData>): PromptSettingsData {
+  return createPromptSettings({
+    agentsMd: { ...DEFAULT_PROMPT_SETTINGS.agentsMd, enabled: true },
+    claudeMd: { ...DEFAULT_PROMPT_SETTINGS.claudeMd, enabled: true },
+    ...overrides,
+  });
+}
+
 function renderPromptSettings(
   overrides: Partial<React.ComponentProps<typeof PromptSettings>> = {}
 ) {
@@ -51,7 +60,7 @@ describe('PromptSettings', () => {
   });
 
   it('draws each rule file as a card of its own, holding only its three rows', () => {
-    renderPromptSettings();
+    renderPromptSettings({ promptSettings: createEnabledPromptSettings() });
 
     for (const path of ['~/.mango/AGENTS.md', '~/.claude/CLAUDE.md']) {
       const card = screen.getByText(path).closest('.divide-y');
@@ -59,6 +68,23 @@ describe('PromptSettings', () => {
       if (!card) continue;
       expect(within(card as HTMLElement).getAllByRole('radiogroup')).toHaveLength(2);
     }
+  });
+
+  it('draws a file that is off as its path row alone, keeping its role and frequency', () => {
+    renderPromptSettings({
+      promptSettings: createPromptSettings({
+        agentsMd: { ...DEFAULT_PROMPT_SETTINGS.agentsMd, enabled: false },
+        claudeMd: { ...DEFAULT_PROMPT_SETTINGS.claudeMd, enabled: true },
+      }),
+    });
+
+    const offCard = screen.getByText('~/.mango/AGENTS.md').closest('.divide-y');
+    expect(offCard).not.toBeNull();
+    if (!offCard) return;
+    expect(within(offCard as HTMLElement).getByRole('switch')).not.toBeChecked();
+    expect(within(offCard as HTMLElement).queryByRole('radiogroup')).not.toBeInTheDocument();
+    // Only the file that is on carries the two settings rows.
+    expect(screen.getAllByRole('radiogroup')).toHaveLength(2);
   });
 
   it('does not repeat the file name under a path that already ends in it', () => {
@@ -100,7 +126,7 @@ describe('PromptSettings', () => {
   });
 
   it('displays the rule file cards with toggles and radio groups', () => {
-    renderPromptSettings();
+    renderPromptSettings({ promptSettings: createEnabledPromptSettings() });
 
     const enabledToggles = screen.getAllByRole('switch');
     expect(enabledToggles.length).toBeGreaterThanOrEqual(2);
@@ -113,7 +139,7 @@ describe('PromptSettings', () => {
   });
 
   it('shows radio groups for injection roles on rule cards', () => {
-    renderPromptSettings();
+    renderPromptSettings({ promptSettings: createEnabledPromptSettings() });
 
     const radiogroups = screen.getAllByRole('radiogroup');
     expect(radiogroups.length).toBeGreaterThanOrEqual(2);
@@ -125,10 +151,35 @@ describe('PromptSettings', () => {
     expect(screen.getByText('Custom rules')).toBeInTheDocument();
   });
 
-  it('says the custom rules list is empty instead of repeating the Add rule action', () => {
+  it('says the custom rules list is empty and offers Add rule once, from the empty state', () => {
     renderPromptSettings();
 
     expect(screen.getByText('No custom rules yet')).toBeInTheDocument();
+    expect(
+      screen.getByText('Point a rule at a Markdown file to add it to every request.')
+    ).toBeInTheDocument();
+    // The header's Add is not drawn beside the empty state's own.
+    expect(screen.getAllByRole('button', { name: 'Add rule' })).toHaveLength(1);
+  });
+
+  it('moves Add rule to the section header once a custom rule exists', () => {
+    renderPromptSettings({
+      promptSettings: createPromptSettings({
+        customRules: [
+          {
+            id: 'custom-1',
+            label: '',
+            path: '~/my-project/rules.md',
+            enabled: true,
+            injectionRole: 'system',
+            sendFrequency: 'first-turn',
+          },
+        ],
+      }),
+    });
+
+    expect(screen.queryByText('No custom rules yet')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Add rule' })).toHaveLength(1);
   });
 
   it('calls onAddCustomRule when Add rule button is clicked', () => {
@@ -224,7 +275,7 @@ describe('PromptSettings', () => {
   });
 
   it('calls onUpdateRuleFile when injection role is changed', () => {
-    const props = renderPromptSettings();
+    const props = renderPromptSettings({ promptSettings: createEnabledPromptSettings() });
 
     const userRadios = screen.getAllByText('Send as user prompt');
     fireEvent.click(userRadios[0]);
@@ -233,7 +284,7 @@ describe('PromptSettings', () => {
   });
 
   it('calls onUpdateRuleFile when send frequency is changed', () => {
-    const props = renderPromptSettings();
+    const props = renderPromptSettings({ promptSettings: createEnabledPromptSettings() });
 
     const everyTurnRadios = screen.getAllByText('Send every time');
     fireEvent.click(everyTurnRadios[0]);
@@ -244,7 +295,7 @@ describe('PromptSettings', () => {
   });
 
   it('says what is recommended whichever frequency is selected', () => {
-    renderPromptSettings();
+    renderPromptSettings({ promptSettings: createEnabledPromptSettings() });
 
     const hints = screen.getAllByText('Sending once per chat is recommended.');
     expect(hints.length).toBeGreaterThanOrEqual(2);
@@ -253,8 +304,16 @@ describe('PromptSettings', () => {
   it('keeps the recommendation when every turn is selected, so the control does not jump', () => {
     renderPromptSettings({
       promptSettings: createPromptSettings({
-        agentsMd: { ...DEFAULT_PROMPT_SETTINGS.agentsMd, sendFrequency: 'every-turn' },
-        claudeMd: { ...DEFAULT_PROMPT_SETTINGS.claudeMd, sendFrequency: 'every-turn' },
+        agentsMd: {
+          ...DEFAULT_PROMPT_SETTINGS.agentsMd,
+          enabled: true,
+          sendFrequency: 'every-turn',
+        },
+        claudeMd: {
+          ...DEFAULT_PROMPT_SETTINGS.claudeMd,
+          enabled: true,
+          sendFrequency: 'every-turn',
+        },
       }),
     });
 

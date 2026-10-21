@@ -245,24 +245,23 @@ function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['
   ) {
     chips.push({
       key: 'external-controls',
+      // No wrapper: the controls return a fragment of slotted chips, so they
+      // land on this strip as siblings of the chips around them and get the
+      // same `·` at the same spacing. A nested strip drew the dots too, but
+      // its own `gap` doubled the lead of the one after it.
       node: (
-        // A nested strip, not a plain wrapper: these three read as `key: value`
-        // exactly like the chips around them, and without the row class they
-        // were the only run on the line with no `·` between them.
-        <span className="composer-chip-row">
-          <ExternalComposerControls
-            descriptor={props.externalDescriptor}
-            model={props.externalModel}
-            effort={props.externalEffort}
-            level={props.externalLevel}
-            routing={props.externalRouting}
-            disabled={props.disabled || props.isGenerating}
-            onModelChange={props.onExternalModelChange}
-            onEffortChange={props.onExternalEffortChange}
-            onSelectionGone={props.onExternalSelectionGone}
-            onPermissionsChange={props.onExternalPermissionsChange}
-          />
-        </span>
+        <ExternalComposerControls
+          descriptor={props.externalDescriptor}
+          model={props.externalModel}
+          effort={props.externalEffort}
+          level={props.externalLevel}
+          routing={props.externalRouting}
+          disabled={props.disabled || props.isGenerating}
+          onModelChange={props.onExternalModelChange}
+          onEffortChange={props.onExternalEffortChange}
+          onSelectionGone={props.onExternalSelectionGone}
+          onPermissionsChange={props.onExternalPermissionsChange}
+        />
       ),
     });
   }

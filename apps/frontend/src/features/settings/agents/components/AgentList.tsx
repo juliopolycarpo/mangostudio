@@ -35,7 +35,7 @@ export function AgentList({
             <MicroLabel as="h3" className="block">
               {group.title}
             </MicroLabel>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-2">
               {group.agents.map((agent) => (
                 <AgentListItem
                   key={agent.id}

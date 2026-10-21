@@ -95,6 +95,11 @@ describe('auth routes', () => {
 
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sign in');
     expect(screen.getByRole('link', { name: en.auth.signupLink })).toHaveClass('underline');
+    // A first-time visitor reads the product's name here, as on onboarding:
+    // the mark is decorative beside the word, so it is not announced twice.
+    const lockup = screen.getByTestId('brand-lockup');
+    expect(lockup).toHaveTextContent(en.common.appName);
+    expect(lockup.querySelector('img')).toHaveAttribute('alt', '');
   });
 
   it('leaves the password field empty-looking: no placeholder dressed as a value', () => {

@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { Chat } from '@mangostudio/shared/chat';
+import { en } from '@mangostudio/shared/i18n';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { Sidebar } from '../../../src/features/sidebar/components/Sidebar';
 import { flushAsyncRender, render } from '../../support/harness/render';
@@ -124,6 +125,21 @@ describe('sidebar chat row leading slot', () => {
 
     const editor = screen.getByDisplayValue<HTMLInputElement>('Plugin LSP TypeScript');
     expect(editor.previousElementSibling).toHaveClass('size-5', 'justify-center');
+    // The field takes back its own padding, so the name does not step right.
+    expect(editor).toHaveClass('-ml-2', 'px-2');
+  });
+
+  it('opens the rename field with the whole name selected and its start in view', () => {
+    renderSidebar();
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li');
+    if (!row) throw new Error('row not found');
+    fireEvent.click(within(row).getByTitle('Edit title'));
+
+    const editor = screen.getByDisplayValue<HTMLInputElement>('Plugin LSP TypeScript');
+    expect(editor).toHaveFocus();
+    expect(editor.selectionStart).toBe(0);
+    expect(editor.selectionEnd).toBe('Plugin LSP TypeScript'.length);
+    expect(editor.selectionDirection).toBe('backward');
   });
 });
 
@@ -253,6 +269,25 @@ describe('sidebar search', () => {
     expect(input.value).toBe('');
     expect(screen.getByText('Plugin LSP TypeScript')).toBeInTheDocument();
   });
+
+  it('offers a clear button while there is a query, which empties it and returns focus', async () => {
+    renderSidebar();
+    const input = screen.getByLabelText<HTMLInputElement>('Search chats…');
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'zzz' } });
+    const clear = screen.getByRole('button', { name: 'Clear search' });
+    expect(clear).toHaveAttribute('title', 'Clear search');
+    // The query never runs under the button.
+    expect(input).toHaveClass('pr-8');
+
+    fireEvent.click(clear);
+    await flushAsyncRender();
+    expect(input.value).toBe('');
+    expect(input).toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+    expect(screen.getByText('Plugin LSP TypeScript')).toBeInTheDocument();
+  });
 });
 
 describe('sidebar behaviors that must survive the overhaul', () => {
@@ -302,6 +337,37 @@ describe('sidebar behaviors that must survive the overhaul', () => {
     fireEvent.change(editor, { target: { value: 'Renamed' } });
     fireEvent.keyDown(editor, { key: 'Enter' });
     expect(props.onUpdateChatTitle).toHaveBeenCalledWith('c1', 'Renamed');
+  });
+
+  // A chat nobody has named is stored as "New Chat [2026-10-21 14:24]", which a
+  // row truncated to "New Chat [2026-10-…". It reads as the reader's word for an
+  // untitled chat, and keeping that word in the editor is not a rename: storing
+  // it would stop the first prompt from naming the chat.
+  it('shows an untitled chat by name, and saving that name unchanged renames nothing', () => {
+    const untitled = chatFixture('c0', 'New Chat [2026-10-21 14:24]', todayNoon.getTime(), {
+      kind: 'mangostudio',
+      agentId: 'default',
+    } as Chat['runner']);
+    const { props } = renderSidebar({ chats: [untitled, ...CHATS], currentChatId: 'c0' });
+    expect(screen.queryByText(/\[2026-10-21/)).toBeNull();
+    // The row's title span, not the "New chat" button that shares the word.
+    const label = screen
+      .getAllByText(en.chat.untitled)
+      .find((element) => element.getAttribute('title') === en.chat.untitled);
+    const row = label?.closest('li');
+    if (!row) throw new Error('row not found');
+    fireEvent.click(within(row).getByTitle('Edit title'));
+    const editor = screen.getByDisplayValue<HTMLInputElement>(en.chat.untitled);
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    expect(props.onUpdateChatTitle).not.toHaveBeenCalled();
+  });
+
+  it('names the icon-only row actions and draws delete as a quiet destructive button', () => {
+    renderSidebar();
+    const row = screen.getByText('Plugin LSP TypeScript').closest('li') as HTMLElement;
+    expect(within(row).getByRole('button', { name: 'Edit title' })).toBeInTheDocument();
+    const remove = within(row).getByRole('button', { name: 'Delete chat' });
+    expect(remove).toHaveClass('not-disabled:focus-visible:bg-danger-subtle');
   });
 
   it('does not let Enter/Space on the edit or delete buttons activate the row', () => {

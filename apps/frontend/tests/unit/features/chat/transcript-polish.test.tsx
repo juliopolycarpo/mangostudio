@@ -246,6 +246,20 @@ describe('a question card', () => {
     expect(screen.getByRole('button', { name: /SQLite/ })).toHaveAttribute('aria-pressed', 'false');
   });
 
+  // Lettered tiles looked the same whether a pick replaced the answer or added
+  // to it; the face is now the radio's circle or the checkbox's square.
+  it('draws a pick-one question round and a pick-several question square', () => {
+    render(<QuestionCard part={part} onSubmit={jest.fn()} />);
+
+    const faceOf = (name: RegExp) =>
+      screen.getByRole('button', { name }).querySelector('[data-choice-kind]');
+    expect(faceOf(/Postgres/)).toHaveAttribute('data-choice-kind', 'several');
+    expect(faceOf(/Postgres/)).toHaveClass('rounded-xs');
+    expect(faceOf(/Bun/)).toHaveAttribute('data-choice-kind', 'one');
+    expect(faceOf(/Bun/)).toHaveClass('rounded-full');
+    expect(screen.queryByText('a)')).toBeNull();
+  });
+
   it('groups each question’s options under the question’s own words', () => {
     render(<QuestionCard part={part} onSubmit={jest.fn()} />);
 

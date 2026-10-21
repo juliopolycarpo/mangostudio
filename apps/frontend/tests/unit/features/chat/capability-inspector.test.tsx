@@ -171,10 +171,14 @@ describe('CapabilityInspector', () => {
     // Disabled builtin renders its typed reason as a translated string.
     expect(screen.getByText('Bash')).toBeInTheDocument();
     expect(screen.getByText('disabled in tool settings')).toBeInTheDocument();
-    expect(screen.getByText('not in the agent tool allowlist')).toHaveAttribute(
+    // The reason is plain words; the agent's settings are offered once, on the
+    // section's heading line, beside the section's own settings link.
+    expect(screen.getByText('not in the agent tool allowlist').closest('a')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Agent settings' })).toHaveAttribute(
       'href',
       '/settings/agents'
     );
+    expect(screen.getAllByRole('link', { name: 'Agent settings' })).toHaveLength(1);
 
     // MCP servers show health and their tools; disabled server shows a reason.
     expect(screen.getByText(/GitHub/)).toBeInTheDocument();

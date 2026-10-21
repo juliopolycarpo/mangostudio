@@ -81,6 +81,7 @@ export function ToolSettingsSection({
       {toolUseSupported && (
         <SettingToggle
           label={s.parallelToolCalls}
+          description={s.parallelToolCallsHint}
           checked={form.parallelToolCallsEnabled ?? false}
           onChange={(parallelToolCallsEnabled) => onChange({ ...form, parallelToolCallsEnabled })}
         />

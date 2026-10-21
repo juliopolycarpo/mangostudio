@@ -8,7 +8,7 @@ import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
-import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 import { ImageActionBar } from './ImageActionBar';
 import { ReservedAspectImage } from './ReservedAspectImage';
@@ -58,7 +58,8 @@ function hasImageTurnMeta(msg: Message): boolean {
 /**
  * Legacy single-image generation result (predating `generated_image` parts):
  * shows the produced image with its download action, plus the meta column when
- * there is one.
+ * there is one. How long it took is the turn's closing line, drawn under it by
+ * `AssistantMessageBlock` like every other turn's.
  *
  * Usage: <AssistantImageTurn msg={msg} />
  */
@@ -73,55 +74,48 @@ export function AssistantImageTurn({ msg }: AssistantImageTurnProps) {
 
   return (
     // One indent in from the rail, like every other block of a turn.
-    <div className="flex w-full flex-col gap-4 pl-4">
-      {msg.generationTime && (
-        <div className="flex w-fit items-center gap-2 text-xs text-fg-muted">
-          <Sparkles size={ICON_SM} />
-          <span>{t.chat.feed.thoughtFor.replace('{time}', msg.generationTime)}</span>
+    <div
+      className={cn(
+        'grid w-full grid-cols-1 items-start gap-6 pl-4',
+        imageUrl && showsMeta && 'md:grid-cols-2'
+      )}
+    >
+      {imageUrl && (
+        // The same card a generated image part draws: a reserved frame the
+        // picture is fitted into, not a 4:5 crop that cut off its edges. The
+        // frame is the card's own surface, so a picture that is not square
+        // letterboxes into the card rather than into a darker well inside it.
+        <div className="group relative max-w-md overflow-hidden rounded-md border border-stroke bg-surface">
+          {imageFailed ? (
+            <EmptyState
+              icon={<ImageOff size={ICON_LG} />}
+              title={t.chat.feed.imageUnavailable}
+              hint={t.chat.feed.imageUnavailableHint}
+              className="aspect-square"
+            />
+          ) : (
+            <>
+              <ReservedAspectImage
+                src={imageUrl}
+                alt={t.chat.feed.generatedImageAlt}
+                objectFit="contain"
+                onLoadError={() => setImageFailed(true)}
+              />
+              <ImageActionBar className="justify-end">
+                <Button
+                  variant="subtle"
+                  size="icon"
+                  onClick={() => triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix)}
+                  title={t.chat.feed.download}
+                >
+                  <Download size={ICON_MD} />
+                </Button>
+              </ImageActionBar>
+            </>
+          )}
         </div>
       )}
-      <div
-        className={cn(
-          'grid w-full grid-cols-1 items-start gap-6',
-          imageUrl && showsMeta && 'md:grid-cols-2'
-        )}
-      >
-        {imageUrl && (
-          // The same card a generated image part draws: a reserved frame the
-          // picture is fitted into, not a 4:5 crop that cut off its edges.
-          <div className="group relative max-w-md overflow-hidden rounded-md border border-stroke bg-surface">
-            {imageFailed ? (
-              <EmptyState
-                icon={<ImageOff size={ICON_LG} />}
-                title={t.chat.feed.imageUnavailable}
-                hint={t.chat.feed.imageUnavailableHint}
-                className="aspect-square"
-              />
-            ) : (
-              <>
-                <ReservedAspectImage
-                  src={imageUrl}
-                  alt={t.chat.feed.generatedImageAlt}
-                  className="bg-canvas"
-                  objectFit="contain"
-                  onLoadError={() => setImageFailed(true)}
-                />
-                <ImageActionBar className="justify-end">
-                  <Button
-                    variant="subtle"
-                    size="icon"
-                    onClick={() => triggerImageDownload(imageUrl, t.common.downloadFilenamePrefix)}
-                    title={t.chat.feed.download}
-                  >
-                    <Download size={ICON_MD} />
-                  </Button>
-                </ImageActionBar>
-              </>
-            )}
-          </div>
-        )}
-        {showsMeta && <ImageTurnMeta msg={msg} />}
-      </div>
+      {showsMeta && <ImageTurnMeta msg={msg} />}
     </div>
   );
 }

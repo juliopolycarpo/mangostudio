@@ -233,7 +233,11 @@ export function ChatPage({
                 : onSubmit
             }
           />
-          <div className="flex shrink-0 flex-col">
+          {/* The dock opens on an 8px band of canvas: the transcript clips one
+              grid step above the first notice or the composer's border, so a
+              line cut mid-scroll reads as passing under the dock rather than
+              stacked on it. The feed's own bottom padding is the at-rest gap. */}
+          <div className="flex shrink-0 flex-col pt-2">
             {/* Only the notices scroll when they outgrow the dock. Two stacked
                 callouts are taller than a phone, and a dock that grows with them
                 pushes the composer off the screen; capped, the notices scroll in

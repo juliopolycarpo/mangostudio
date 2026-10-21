@@ -193,7 +193,13 @@ function AgentBehaviorSection({
   const id = useId();
   return (
     <AgentEditorSection title={labels.sectionBehavior}>
-      <SettingsField label={labels.systemPrompt} htmlFor={`${id}-prompt`}>
+      {/* An empty prompt is a real value (the built-in Default ships with one), so
+          the hint says what the model then receives instead of leaving a blank box. */}
+      <SettingsField
+        label={labels.systemPrompt}
+        htmlFor={`${id}-prompt`}
+        hint={draft.systemPrompt.trim() ? undefined : labels.systemPromptEmptyHint}
+      >
         <Textarea
           id={`${id}-prompt`}
           value={draft.systemPrompt}
