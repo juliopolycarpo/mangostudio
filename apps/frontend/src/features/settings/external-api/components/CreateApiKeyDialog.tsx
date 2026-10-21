@@ -93,9 +93,12 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
 
   if (created) {
     return (
+      // The plaintext is shown this once and never again, so only "Done" puts it
+      // away: a stray Escape or a click on the backdrop would lose the key.
       <Dialog
         title={reveal.title}
         onClose={onClose}
+        closeDisabled
         footer={<Button onClick={onClose}>{reveal.done}</Button>}
       >
         <Callout tone="warning" icon={<KeyRound size={ICON_MD} />}>

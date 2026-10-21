@@ -121,6 +121,7 @@ export function Dialog({
   children,
 }: DialogProps) {
   const titleId = useId();
+  const descriptionId = useId();
   // Read through refs so the escape handler keeps one identity: the trap
   // re-registers its listener whenever it changes, and a dialog that re-renders
   // while a write is in flight would otherwise churn it on every keystroke.
@@ -161,7 +162,11 @@ export function Dialog({
               >
                 {title}
               </h2>
-              {description ? <p className="text-sm text-fg-muted">{description}</p> : null}
+              {description ? (
+                <p id={descriptionId} className="text-sm text-fg-muted">
+                  {description}
+                </p>
+              ) : null}
             </div>
           </div>
           {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
@@ -221,6 +226,9 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={hasTitle ? titleId : undefined}
         aria-label={hasTitle ? undefined : ariaLabel}
+        // The sentence under the title is read with the name: for a confirmation
+        // it is the question itself, not decoration.
+        aria-describedby={hasTitle && description ? descriptionId : undefined}
         tabIndex={-1}
         className={cn(
           'flex max-h-full w-full flex-col overflow-hidden text-sm text-fg outline-none',

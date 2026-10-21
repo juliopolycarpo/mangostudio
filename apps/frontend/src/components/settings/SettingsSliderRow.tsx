@@ -23,6 +23,15 @@ interface SettingsSliderRowProps {
 }
 
 /**
+ * Keeps a typed number inside the track. An emptied or unparsable field reads as
+ * `NaN` and falls back to the minimum rather than committing `0`.
+ */
+function clamp(value: number, min: number, max: number): number {
+  if (Number.isNaN(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
  * A `SettingsRow` whose control is a range slider, optionally paired with a
  * number field. The track is the `.range-input` class from the stylesheet.
  *
@@ -72,7 +81,7 @@ export function SettingsSliderRow({
             step={step}
             value={value}
             onChange={(event) => onChange(Number(event.target.value))}
-            onBlur={(event) => onChange(Number(event.target.value))}
+            onBlur={(event) => onChange(clamp(event.target.valueAsNumber, min, max))}
             disabled={disabled}
             aria-label={label}
             className="w-32 text-center"
