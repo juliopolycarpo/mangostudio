@@ -10,8 +10,8 @@
  *
  * The same guard protects creation, reuse and deletion: a home is only ever a
  * direct child of the OS temp directory with the caller's name prefix, and
- * never the real home or anything inside it, so a mistaken value can never turn
- * into a recursive delete of a real directory.
+ * never the real home, an ancestor of it, or anything inside its `.mango` directory.
+ * The OS temp directory may itself be inside the real home, as it is on Windows.
  */
 
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
@@ -95,8 +95,8 @@ function findViolation(
 
 /**
  * Throws unless `candidate` is a temporary home of `kind`: a direct child of
- * the OS temp directory named `<prefix>*`, and never the real home or anything
- * inside it. The same check guards deletion.
+ * the OS temp directory named `<prefix>*`, and never the real home, an ancestor
+ * of it, or anything inside its `.mango` directory. The same check guards deletion.
  *
  * @example
  * assertTemporaryHome('/tmp/mangostudio-smoke-a1b2c3', kind); // returns

@@ -210,7 +210,7 @@ describe('lint cache and required cycle scans', () => {
       // each line as a local streamed run does. Require the same task/cache state.
       expect(rejected).toMatch(/@mangostudio\/frontend:check:quick(?:: |\r?\n)cache miss/);
       expect(rejected).toContain('format');
-      expect(rejected).toContain('src/index.ts');
+      expect(rejected.replaceAll('\\', '/')).toContain('src/index.ts');
     },
     ROOT_CHECK_TIMEOUT_MS
   );

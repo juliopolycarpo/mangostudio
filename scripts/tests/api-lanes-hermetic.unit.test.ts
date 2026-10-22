@@ -22,8 +22,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
-import { REAL_HOME_ENV, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { assertTemporaryHome } from '../lib/temp-home';
+import { REAL_HOME_ENV, TEST_HOME_KIND, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
 import { laneById, type TestLaneId } from '../lib/test-lanes';
 import { laneSpec, planWorkers, WORKERS_ENV } from '../lib/test-workers';
 import { canonicalPath as canonical } from './support/canonical-path';
@@ -45,8 +46,6 @@ const LANE_SCRIPTS = [
   'test:coverage:unit',
   'test:coverage:integration',
 ];
-
-const EXPECTED_SHAPE = join(tmpdir(), `${TEST_HOME_PREFIX}<random>`);
 
 const scripts = JSON.parse(readFileSync(join(API_DIR, 'package.json'), 'utf8')).scripts as Record<
   string,
@@ -215,16 +214,12 @@ describe('what an API lane process sees as its home', () => {
       expect(canonical(home), 'expected removed home to retain its canonical OS path').toBe(
         canonicalHome
       );
-      const canonicalRealHome = canonical(realHome);
-      const usable =
-        dirname(canonicalHome) === canonical(tmpDir) &&
-        !isInside(canonicalRealHome, canonicalHome) &&
-        !isInside(canonicalHome, canonicalRealHome) &&
-        basename(canonicalHome).startsWith(TEST_HOME_PREFIX);
-      expect(
-        usable,
-        `apps/api ${name} must start tests with a fresh temporary home | expected shape: ${EXPECTED_SHAPE} | resolved homedir(): ${home} | real home: ${realHome}`
-      ).toBe(true);
+      expect(() =>
+        assertTemporaryHome(canonicalHome, TEST_HOME_KIND, {
+          tmpDir: canonical(tmpDir),
+          realHome: canonical(realHome),
+        })
+      ).not.toThrow();
       expect(existsSync(home), `expected the test home removed | still exists: ${home}`).toBe(
         false
       );
