@@ -9,8 +9,20 @@
 import { existsSync } from 'node:fs';
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { locateLocalRuntimeBinary } from '../lib/runtime-paths';
+import { readVersionProcess, type VersionProbeProcess } from './version-probe-process';
 
-const VERSION_PROBE_TIMEOUT_MS = 5_000;
+export interface RuntimeVersionProcess extends VersionProbeProcess {
+  readonly stdout: ReadableStream<Uint8Array>;
+}
+
+function spawnRuntimeVersion(path: string): RuntimeVersionProcess {
+  return Bun.spawn([path, '--version'], {
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'ignore',
+    ...HIDDEN_WINDOW,
+  });
+}
 
 export interface RuntimeBinaryProbe {
   /** Absolute path that was checked; null when a source checkout has no build. */
@@ -29,7 +41,8 @@ export interface RuntimeBinaryProbe {
  * const probe = await probeRuntimeBinary(); // { path: '…/mangostudio-runtime', present: true, version: '0.1.1', error: null }
  */
 export async function probeRuntimeBinary(
-  path: string | null = locateLocalRuntimeBinary()
+  path: string | null = locateLocalRuntimeBinary(),
+  spawn: (path: string) => RuntimeVersionProcess = spawnRuntimeVersion
 ): Promise<RuntimeBinaryProbe> {
   if (!path) return { path: null, present: false, version: null, error: null };
   if (!existsSync(path)) return { path, present: false, version: null, error: null };
@@ -38,16 +51,19 @@ export async function probeRuntimeBinary(
   // lost its executable bit, or not be an executable format at all. Bun.spawn
   // reports those by throwing here, before any of the work below, and doctor
   // exists to report that as a finding rather than die on it.
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+  let child: RuntimeVersionProcess;
   try {
-    child = Bun.spawn([path, '--version'], { stdout: 'pipe', stderr: 'pipe', ...HIDDEN_WINDOW });
+    child = spawn(path);
   } catch (error) {
     return { path, present: true, version: null, error: describeError(error) };
   }
 
-  const timeout = setTimeout(() => child.kill(), VERSION_PROBE_TIMEOUT_MS);
   try {
-    const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    const { text: stdout, exitCode } = await readVersionProcess(
+      child,
+      child.stdout,
+      'runtime --version'
+    );
     if (exitCode !== 0) {
       return { path, present: true, version: null, error: `exited with code ${exitCode}` };
     }
@@ -57,8 +73,6 @@ export async function probeRuntimeBinary(
       : { path, present: true, version: null, error: 'printed no version' };
   } catch (error) {
     return { path, present: true, version: null, error: describeError(error) };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
