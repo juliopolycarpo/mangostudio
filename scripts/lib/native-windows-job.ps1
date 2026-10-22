@@ -116,6 +116,39 @@ namespace Mango.NativeJobProbe {
         public Member Before, After;
         public bool? SameHandleExited;
     }
+    public sealed class NativeOperationTiming {
+        public string Operation, SlowestIdentity;
+        public long Calls, TotalTicks, MaximumTicks;
+    }
+    /// <summary>Retain aggregate native call timing even when a complete query fails.</summary>
+    /// <example>using(trace.Measure("QueryFullProcessImageNameW",identity)) { QueryImage(); }</example>
+    public sealed class NativeQueryTrace {
+        private readonly Dictionary<string,NativeOperationTiming> operations=new Dictionary<string,NativeOperationTiming>();
+        public readonly long TicksPerSecond=Stopwatch.Frequency;
+        public readonly string StartedAt=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture);
+        public string Context;
+        public long ElapsedMilliseconds;
+        public int Refreshes,Races,Assigned,Attested;
+        public bool Complete;
+        public NativeOperationTiming[] Operations { get { var result=new NativeOperationTiming[operations.Count]; operations.Values.CopyTo(result,0); return result; } }
+        private sealed class Measurement : IDisposable {
+            private readonly NativeOperationTiming operation;
+            private readonly string identity;
+            private readonly long started=Stopwatch.GetTimestamp();
+            internal Measurement(NativeOperationTiming timing,string processIdentity) { operation=timing; identity=processIdentity; }
+            public void Dispose() {
+                long elapsed=Stopwatch.GetTimestamp()-started; operation.Calls++; operation.TotalTicks+=elapsed;
+                if(elapsed>operation.MaximumTicks) { operation.MaximumTicks=elapsed; operation.SlowestIdentity=identity; }
+            }
+        }
+        /// <summary>Measure one native call without changing its return, last-error handling or exception.</summary>
+        /// <example>using(trace.Measure("GetProcessTimes",identity)) { ReadCreationTime(); }</example>
+        public IDisposable Measure(string operation,string identity) {
+            NativeOperationTiming timing;
+            if(!operations.TryGetValue(operation,out timing)) { timing=new NativeOperationTiming {Operation=operation}; operations.Add(operation,timing); }
+            return new Measurement(timing,identity);
+        }
+    }
     /// <summary>Translate a complete native image only through one unambiguous current kernel drive mapping.</summary>
     /// <example>NativeImagePathPolicy.Translate(@"\Device\HarddiskVolume1\tool.exe",kernelMappings);</example>
     public static class NativeImagePathPolicy {
@@ -150,10 +183,11 @@ namespace Mango.NativeJobProbe {
         /// <summary>Largest complete-query budget. Hosted queries with53/54 live members exhausted10s; allow20s total without scaling the cap with membership.</summary>
         public const int MaximumMilliseconds=20000;
         public readonly int Milliseconds;
-        public readonly string StartedAt=DateTime.UtcNow.ToString("o",CultureInfo.InvariantCulture);
+        public readonly NativeQueryTrace Trace=new NativeQueryTrace();
+        public readonly string StartedAt;
         public ImageQueryBudget(int milliseconds,Func<long> monotonicClock) {
             if(milliseconds<1 || milliseconds>MaximumMilliseconds || monotonicClock==null) throw new ArgumentException("Invalid image query budget " + milliseconds + "; expected1.." + MaximumMilliseconds + "ms and monotonic clock");
-            Milliseconds=milliseconds; clock=monotonicClock; started=clock();
+            Milliseconds=milliseconds; clock=monotonicClock; started=clock(); StartedAt=Trace.StartedAt;
         }
         public long ElapsedMilliseconds { get { long elapsed=clock()-started; if(elapsed<0) throw new InvalidOperationException("Invalid negative image query elapsed " + elapsed + "; expected monotonic clock"); return elapsed; } }
         /// <summary>Reject exhausted shared time instead of multiplying waits by members or list refreshes.</summary>
@@ -272,6 +306,7 @@ namespace Mango.NativeJobProbe {
         private readonly Dictionary<string, HeldProcess> held = new Dictionary<string, HeldProcess>();
         private readonly Dictionary<string, ToolMetadata> tools = new Dictionary<string, ToolMetadata>(StringComparer.OrdinalIgnoreCase);
         private readonly List<ImageAttempt> imageAttempts = new List<ImageAttempt>();
+        private readonly List<NativeQueryTrace> queryDiagnostics = new List<NativeQueryTrace>();
         private readonly object outputLock = new object();
         private uint rootPid;
         private uint? exitCode;
@@ -284,6 +319,7 @@ namespace Mango.NativeJobProbe {
         public bool PipesClosed { get { return stdoutEof && stderrEof && stdoutTask.IsCompleted && stderrTask.IsCompleted; } }
         public string[] PipeErrors { get { lock(outputLock) return pipeErrors.ToArray(); } }
         public ImageAttempt[] ImageQueryDiagnostics { get { return imageAttempts.ToArray(); } }
+        public NativeQueryTrace[] QueryDiagnostics { get { return queryDiagnostics.ToArray(); } }
 
         /// <summary>Create the suspended root with only the intended stdio handles inherited.</summary>
         /// <example>new JobProcess(cargoExe, new[]{"cargo","build"}, cwd, env, logs);</example>
@@ -392,28 +428,33 @@ namespace Mango.NativeJobProbe {
                 }
             } catch(Exception error) { lock(outputLock) pipeErrors.Add(error.ToString()); }
         }
-        private static bool Alive(IntPtr process) {
-            uint wait=Win32.WaitForSingleObject(process,0);
+        private static bool Alive(IntPtr process,ImageQueryBudget budget=null) {
+            uint wait; int error;
+            using(budget==null?null:budget.Trace.Measure("WaitForSingleObject(0)",null)) { wait=Win32.WaitForSingleObject(process,0); error=Marshal.GetLastWin32Error(); }
             if(wait==Win32.WaitTimeout) return true;
             if(wait==Win32.WaitObject) return false;
-            throw new Win32Exception(Marshal.GetLastWin32Error(),"WaitForSingleObject; expected live or exited process");
+            throw new Win32Exception(error,"WaitForSingleObject; expected live or exited process");
         }
-        private Member ReadState(IntPtr process,uint pid,string knownIdentity) {
-            long created,exit,kernel,user; Win32.Check(Win32.GetProcessTimes(process,out created,out exit,out kernel,out user),"GetProcessTimes PID=" + pid + " retainedIdentity=" + (knownIdentity??"not-yet-attested"));
+        private Member ReadState(IntPtr process,uint pid,string knownIdentity,ImageQueryBudget budget=null) {
+            long created,exit,kernel,user;
+            using(budget==null?null:budget.Trace.Measure("GetProcessTimes",knownIdentity??pid.ToString(CultureInfo.InvariantCulture))) { Win32.Check(Win32.GetProcessTimes(process,out created,out exit,out kernel,out user),"GetProcessTimes PID=" + pid + " retainedIdentity=" + (knownIdentity??"not-yet-attested")); }
             string date=DateTime.FromFileTimeUtc(created).ToString("o",CultureInfo.InvariantCulture);
             string identity=pid.ToString(CultureInfo.InvariantCulture)+":"+date;
-            bool member; Win32.Check(Win32.IsProcessInJob(process,job,out member),"IsProcessInJob(exact job) PID=" + pid + " FILETIME=" + created + " identity=" + identity);
+            bool member;
+            using(budget==null?null:budget.Trace.Measure("IsProcessInJob",identity)) { Win32.Check(Win32.IsProcessInJob(process,job,out member),"IsProcessInJob(exact job) PID=" + pid + " FILETIME=" + created + " identity=" + identity); }
             string censusDate=DateTime.FromFileTimeUtc(created-created%10).ToString("o",CultureInfo.InvariantCulture);
-            return new Member {Pid=pid,Identity=identity,CreationFileTime=created.ToString(CultureInfo.InvariantCulture),Created=date,CensusIdentity=pid.ToString(CultureInfo.InvariantCulture)+":"+censusDate,IsMember=member,Alive=!WaitExited(process,pid,0,identity)};
+            return new Member {Pid=pid,Identity=identity,CreationFileTime=created.ToString(CultureInfo.InvariantCulture),Created=date,CensusIdentity=pid.ToString(CultureInfo.InvariantCulture)+":"+censusDate,IsMember=member,Alive=!WaitExited(process,pid,0,identity,budget)};
         }
-        private static bool WaitExited(IntPtr process,uint pid,int milliseconds,string knownIdentity) {
-            uint result=Win32.WaitForSingleObject(process,checked((uint)milliseconds)); int error=Marshal.GetLastWin32Error();
+        private static bool WaitExited(IntPtr process,uint pid,int milliseconds,string knownIdentity,ImageQueryBudget budget=null) {
+            uint result; int error;
+            using(budget==null?null:budget.Trace.Measure(milliseconds==0?"WaitForSingleObject(0)":"WaitForSingleObject(image-retry)",knownIdentity)) { result=Win32.WaitForSingleObject(process,checked((uint)milliseconds)); error=Marshal.GetLastWin32Error(); }
             if(result==Win32.WaitObject) return true;
             if(result==Win32.WaitTimeout) return false;
             throw new Win32Exception(error,"WaitForSingleObject PID=" + pid + " retainedIdentity=" + (knownIdentity??"not-yet-attested") + " wait=" + milliseconds + " Win32Error=" + error + "; expected same-handle live or signaled exit");
         }
-        private static ImageQueryBudget NewImageBudget() {
-            var clock=Stopwatch.StartNew(); return new ImageQueryBudget(ImageQueryBudget.MaximumMilliseconds,()=>clock.ElapsedMilliseconds);
+        private ImageQueryBudget NewImageBudget() {
+            var clock=Stopwatch.StartNew(); var budget=new ImageQueryBudget(ImageQueryBudget.MaximumMilliseconds,()=>clock.ElapsedMilliseconds);
+            budget.Trace.Context="image-attestation"; queryDiagnostics.Add(budget.Trace); return budget;
         }
         private static ImageResult QueryImage(IntPtr process,ImageQueryBudget budget,string identity) {
             ImageResult native=ReadImage(process,1,budget,identity);
@@ -429,12 +470,12 @@ namespace Mango.NativeJobProbe {
         private static ImageResult ReadImage(IntPtr process,uint flags,ImageQueryBudget budget,string identity) {
             uint capacity=32768; var path=new StringBuilder((int)capacity);
             bool success; int error;
-            success=Win32.QueryFullProcessImageNameW(process,flags,path,ref capacity); error=Marshal.GetLastWin32Error();
+            using(budget.Trace.Measure(flags==1?"QueryFullProcessImageNameW(native)":"QueryFullProcessImageNameW(Win32 fallback)",identity)) { success=Win32.QueryFullProcessImageNameW(process,flags,path,ref capacity); error=Marshal.GetLastWin32Error(); }
             return new ImageResult {Success=success,Error=success?0:error,Characters=capacity,Path=success?path.ToString():null};
         }
         private static IDictionary<string,string> ReadDosDevices(ImageQueryBudget budget,string identity) {
             var result=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase); uint drives;
-            drives=Win32.GetLogicalDrives();
+            using(budget.Trace.Measure("GetLogicalDrives",identity)) { drives=Win32.GetLogicalDrives(); }
             budget.Require("logical drive mappings(" + identity + ")");
             if((drives>>26)!=0) throw new InvalidOperationException("Invalid logical drive mask " + drives + "; expected only26 drive-letter bits");
             if(drives==0) return result;
@@ -442,7 +483,7 @@ namespace Mango.NativeJobProbe {
             for(int index=0;index<26;index++) {
                 if((drives&(1u<<index))==0) continue;
                 string drive=((char)('A'+index)).ToString()+":"; uint length;
-                length=Win32.QueryDosDeviceW(drive,target,(uint)target.Length);
+                using(budget.Trace.Measure("QueryDosDeviceW",identity)) { length=Win32.QueryDosDeviceW(drive,target,(uint)target.Length); }
                 budget.Require("current kernel device mapping(" + identity + ")");
                 if(length==0) return new Dictionary<string,string>(); // An unavailable mapping requires the authoritative Win32 query.
                 int end=Array.IndexOf(target,'\0',0,checked((int)Math.Min(length,(uint)target.Length)));
@@ -454,9 +495,11 @@ namespace Mango.NativeJobProbe {
         }
         private Member Attest(IntPtr process,uint pid,string expected,ImageQueryBudget budget=null,string expectedImage=null,bool requireMember=true) {
             string knownIdentity=expected; budget=budget??NewImageBudget();
-            Func<Member> read=()=> { Member state=ReadState(process,pid,knownIdentity); if(knownIdentity==null) knownIdentity=state.Identity; return state; };
-            Member member=ImageQueryPolicy.Resolve(read,()=>QueryImage(process,budget,knownIdentity),milliseconds=>WaitExited(process,pid,milliseconds,knownIdentity),budget,imageAttempts,expected,expectedImage,requireMember);
-            member.Tool=Metadata(member.Path); return member;
+            Func<Member> read=()=> { Member state=ReadState(process,pid,knownIdentity,budget); if(knownIdentity==null) knownIdentity=state.Identity; return state; };
+            try {
+                Member member=ImageQueryPolicy.Resolve(read,()=>QueryImage(process,budget,knownIdentity),milliseconds=>WaitExited(process,pid,milliseconds,knownIdentity,budget),budget,imageAttempts,expected,expectedImage,requireMember);
+                using(budget.Trace.Measure("tool-metadata",member.Identity)) { member.Tool=Metadata(member.Path); } return member;
+            } finally { budget.Trace.ElapsedMilliseconds=budget.ElapsedMilliseconds; }
         }
         private ToolMetadata Metadata(string path) {
             string name=System.IO.Path.GetFileName(path);
@@ -487,10 +530,11 @@ namespace Mango.NativeJobProbe {
             uint code; Win32.Check(Win32.GetExitCodeProcess(root,out code),"GetExitCodeProcess"); exitCode=code;
             Win32.Close(ref root); return exitCode;
         }
-        private Win32.Accounting Accounting() {
+        private Win32.Accounting Accounting(ImageQueryBudget budget=null) {
             int bytes=Marshal.SizeOf(typeof(Win32.Accounting)); IntPtr data=Marshal.AllocHGlobal(bytes);
             try {
-                uint returned; Win32.Check(Win32.QueryInformationJobObject(job,1,data,(uint)bytes,out returned),"QueryInformationJobObject(Accounting)");
+                uint returned;
+                using(budget==null?null:budget.Trace.Measure("QueryInformationJobObject(Accounting)",null)) { Win32.Check(Win32.QueryInformationJobObject(job,1,data,(uint)bytes,out returned),"QueryInformationJobObject(Accounting)"); }
                 if(returned!=(uint)bytes) throw new InvalidOperationException("Invalid accounting length " + returned + "; expected " + bytes);
                 return (Win32.Accounting)Marshal.PtrToStructure(data,typeof(Win32.Accounting));
             } finally { Marshal.FreeHGlobal(data); }
@@ -509,12 +553,13 @@ namespace Mango.NativeJobProbe {
             }
             return pids;
         }
-        private uint[] ProcessList(out int nativeBytes) {
+        private uint[] ProcessList(out int nativeBytes,ImageQueryBudget budget=null) {
             int capacity=32;
             for(int attempt=0;attempt<10;attempt++) {
                 int bytes=checked(8+capacity*IntPtr.Size); IntPtr data=Marshal.AllocHGlobal(bytes);
                 try {
-                    uint returned; bool success=Win32.QueryInformationJobObject(job,3,data,(uint)bytes,out returned); int error=Marshal.GetLastWin32Error();
+                    uint returned; bool success; int error;
+                    using(budget==null?null:budget.Trace.Measure("QueryInformationJobObject(ProcessIdList)",null)) { success=Win32.QueryInformationJobObject(job,3,data,(uint)bytes,out returned); error=Marshal.GetLastWin32Error(); }
                     if(!success && error!=234) throw new Win32Exception(error,"QueryInformationJobObject(ProcessIdList)");
                     uint assigned=unchecked((uint)Marshal.ReadInt32(data,0)), count=unchecked((uint)Marshal.ReadInt32(data,4));
                     if(!success || count<assigned) {
@@ -527,41 +572,50 @@ namespace Mango.NativeJobProbe {
             }
             throw new InvalidOperationException("Incomplete job process list after10 queries; expected complete native result");
         }
-        private void ReleaseExited() {
+        private void ReleaseExited(ImageQueryBudget budget=null) {
             var remove=new List<string>();
-            foreach(var pair in held) if(!Alive(pair.Value.Handle)) { Win32.Close(ref pair.Value.Handle); remove.Add(pair.Key); }
+            foreach(var pair in held) if(!Alive(pair.Value.Handle,budget)) { Win32.Close(ref pair.Value.Handle); remove.Add(pair.Key); }
             foreach(string identity in remove) held.Remove(identity);
         }
         /// <summary>Query exact job membership and live process-handle identities; transient exited members trigger bounded refresh.</summary>
         /// <example>Snapshot before = child.Query();</example>
         public Snapshot Query() {
             if(job==IntPtr.Zero) throw new InvalidOperationException("Invalid closed job handle; expected retained exact job");
-            int races=0; ImageQueryBudget budget=NewImageBudget();
+            ImageQueryBudget budget=NewImageBudget(); budget.Trace.Context="complete-job-query";
+            try { return QueryComplete(budget); }
+            finally { budget.Trace.ElapsedMilliseconds=budget.ElapsedMilliseconds; }
+        }
+        private Snapshot QueryComplete(ImageQueryBudget budget) {
             for(int attempt=0;attempt<12;attempt++) {
+                budget.Trace.Refreshes=attempt;
                 budget.Require("complete job list refresh" + attempt);
-                ReleaseExited(); Win32.Accounting before=Accounting(); int bytes; uint[] pids=ProcessList(out bytes); var members=new List<Member>(); bool retry=false;
+                ReleaseExited(budget); Win32.Accounting before=Accounting(budget); int bytes; uint[] pids=ProcessList(out bytes,budget); var members=new List<Member>(); bool retry=false;
+                budget.Trace.Assigned=pids.Length; budget.Trace.Attested=0;
                 foreach(uint pid in pids) {
-                    IntPtr handle=Win32.OpenProcess(Win32.QueryProcess|Win32.Synchronize,false,pid);
+                    IntPtr handle; int error;
+                    using(budget.Trace.Measure("OpenProcess",pid.ToString(CultureInfo.InvariantCulture))) { handle=Win32.OpenProcess(Win32.QueryProcess|Win32.Synchronize,false,pid); error=Marshal.GetLastWin32Error(); }
                     if(handle==IntPtr.Zero) {
-                        int error=Marshal.GetLastWin32Error();
-                        if(error==87 || error==1168) { retry=true; races++; break; }
+                        if(error==87 || error==1168) { retry=true; budget.Trace.Races++; break; }
                         throw new Win32Exception(error,"OpenProcess(" + pid + "); expected queryable exact job member");
                     }
                     try {
-                        if(!Alive(handle)) { retry=true; races++; break; }
-                        Member member=Attest(handle,pid,null,budget);
-                        if(!member.IsMember) throw new InvalidOperationException("Invalid recycled/outside-job PID " + pid + "; expected exact-job process object");
-                        if(!member.Alive) { retry=true; races++; break; }
-                        HeldProcess existing;
-                        if(held.TryGetValue(member.Identity,out existing)) member=Attest(existing.Handle,pid,member.Identity,budget,existing.Member.Path);
-                        else { held.Add(member.Identity,new HeldProcess{Handle=handle,Member=member}); handle=IntPtr.Zero; }
-                        members.Add(member);
-                    } catch(MemberExitedException) { retry=true; races++; break; }
+                        if(!Alive(handle,budget)) { retry=true; budget.Trace.Races++; break; }
+                        Member state=ReadState(handle,pid,null,budget);
+                        if(!state.IsMember) throw new InvalidOperationException("Invalid recycled/outside-job PID " + pid + "; expected exact-job process object");
+                        if(!state.Alive) { retry=true; budget.Trace.Races++; break; }
+                        // The PID-opened handle selects the full creation identity; the retained handle supplies one fresh image attestation.
+                        // New identities still require full attestation before the handle is retained. Never reuse a cached image as authority.
+                        HeldProcess existing; Member member;
+                        if(held.TryGetValue(state.Identity,out existing)) member=Attest(existing.Handle,pid,state.Identity,budget,existing.Member.Path);
+                        else { member=Attest(handle,pid,state.Identity,budget); held.Add(member.Identity,new HeldProcess{Handle=handle,Member=member}); handle=IntPtr.Zero; }
+                        members.Add(member); budget.Trace.Attested=members.Count;
+                    } catch(MemberExitedException) { retry=true; budget.Trace.Races++; break; }
                     finally { Win32.Close(ref handle); }
                 }
-                if(retry) { Thread.Sleep(10); continue; }
-                Win32.Accounting after=Accounting(); budget.Require("complete job accounting result"); bool stable=before.Active==after.Active && after.Active==(uint)members.Count;
-                return new Snapshot {At=DateTime.UtcNow.ToString("o"),Assigned=(uint)pids.Length,Returned=(uint)pids.Length,ActiveBefore=before.Active,ActiveAfter=after.Active,TotalProcesses=after.Total,NativeBytes=bytes,Races=races,Stable=stable,Empty=stable && members.Count==0,Members=members.ToArray()};
+                if(retry) { using(budget.Trace.Measure("refresh-backoff",null)) { Thread.Sleep(10); } continue; }
+                Win32.Accounting after=Accounting(budget); budget.Require("complete job accounting result"); bool stable=before.Active==after.Active && after.Active==(uint)members.Count;
+                budget.Trace.Complete=true;
+                return new Snapshot {At=DateTime.UtcNow.ToString("o"),Assigned=(uint)pids.Length,Returned=(uint)pids.Length,ActiveBefore=before.Active,ActiveAfter=after.Active,TotalProcesses=after.Total,NativeBytes=bytes,Races=budget.Trace.Races,Stable=stable,Empty=stable && members.Count==0,Members=members.ToArray()};
             }
             throw new InvalidOperationException("Unstable member identity after12 refreshes; expected complete attested membership");
         }
@@ -786,6 +840,7 @@ function Complete-NativeJobEvidence([object]$Receipt, [object]$Child, [object[]]
         if ($unknown.Count) { throw "Final open-job census has $($unknown.Count) new unattributed MSVC helpers; expected none" }
     } catch { $Receipt.finalClose.queryError = $_.Exception.ToString(); $Receipt.errors += "Final boundary failed: $($_.Exception.ToString())"; $Receipt.status = 'failed' }
     if ($Child.PSObject.Properties['ImageQueryDiagnostics']) { $Receipt.imageQueryDiagnostics = @($Child.ImageQueryDiagnostics) }
+    if ($Child.PSObject.Properties['QueryDiagnostics']) { $Receipt.nativeQueryDiagnostics = @($Child.QueryDiagnostics) }
     $Receipt.finalClose.outcomeBeforeClose = $Receipt.status
     Write-NativeJobJson $receiptPath $Receipt
     try { $Child.CloseJob(); $Child.Dispose() } catch { $Receipt.errors += "Final exact-job close failed: $($_.Exception.ToString())"; $Receipt.status = 'failed' }
@@ -871,7 +926,7 @@ function Invoke-NativeWindowsJob([object]$Request) {
         timeoutSeconds = $Request.timeoutSeconds; observationMs = $Request.observationMs; timedOut = $false
         rootIdentity = $null; rootExitAt = $null; exitCode = $null; stdoutEof = $false; stderrEof = $false
         job = $null; naturalSettlement = $null; eligibility = $null; preCleanup = $null; cleanupActions = @(); naturalExits = @(); postCleanup = $null
-        before = @(); preCleanupCensus = @(); postCleanupCensus = @(); ambiguity = @(); censusMappings = [Collections.Generic.List[object]]::new(); finalClose = $null; postCloseCensus = @(); observed = @(); imageQueryDiagnostics = @(); errors = @()
+        before = @(); preCleanupCensus = @(); postCleanupCensus = @(); ambiguity = @(); censusMappings = [Collections.Generic.List[object]]::new(); finalClose = $null; postCloseCensus = @(); observed = @(); imageQueryDiagnostics = @(); nativeQueryDiagnostics = @(); errors = @()
     }
     Write-NativeJobJson $receiptPath $receipt
     $child = $null; $seen = @{}; $before = @(); $snapshot = $null
