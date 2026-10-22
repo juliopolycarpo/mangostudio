@@ -16,7 +16,8 @@
 // FAKE_SMOKE_SERVER_EVENTS=/tmp/events.jsonl FAKE_SMOKE_SERVER_VERSION=1.2.3 \
 //   ./mangostudio serve 127.0.0.1:13003
 
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const SHUTDOWN_DELAY_MS = 250;
 // Backstop for a test that dies before it can clean up: the server leaves by
@@ -76,14 +77,21 @@ if (args.length === 1 && args[0] === '--version') {
 }
 
 const address = args[1] ?? '';
-const match = /^127\.0\.0\.1:(\d{1,5})$/.exec(address);
+const match = /^(?:127\.0\.0\.1:)?(\d{1,5})$/.exec(address);
 if (args.length !== 2 || args[0] !== 'serve' || !match) {
   throw new Error(
-    `Invalid fake server arguments ${JSON.stringify(args)}; expected serve 127.0.0.1:<port>`
+    `Invalid fake server arguments ${JSON.stringify(args)}; expected serve <port> or serve 127.0.0.1:<port>`
   );
 }
 
 const server = Bun.serve({ hostname: '127.0.0.1', port: Number(match[1]), fetch: respond });
+const stateDir = join(process.env.HOME as string, '.mango', 'run');
+mkdirSync(stateDir, { recursive: true });
+writeFileSync(
+  join(stateDir, 'server.json'),
+  JSON.stringify({ host: process.env.FAKE_SMOKE_BIND_HOST ?? process.env.API_HOST ?? 'localhost' })
+);
+
 let stopping = false;
 
 // Every delivery is recorded; only the first starts the shutdown, so a smoke
@@ -103,4 +111,9 @@ setTimeout(() => {
   process.exit(3);
 }, DEADMAN_MS);
 
-record('startup', { args, cwd: process.cwd(), executable: process.argv[1] });
+record('startup', {
+  args,
+  cwd: process.cwd(),
+  executable: process.argv[1],
+  apiHost: process.env.API_HOST ?? null,
+});
