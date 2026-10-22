@@ -13,8 +13,11 @@ import {
 } from './support/fixture-command';
 
 const roots: string[] = [];
-const fixtureCommands = new FixtureCommands();
-const COMMAND_BUDGET_MS = FIXTURE_COMMAND_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS;
+// Native PowerShell archive commands can exceed the default fixture deadline on Windows CI.
+const ARCHIVE_COMMAND_TIMEOUT_MS =
+  process.platform === 'win32' ? 30_000 : FIXTURE_COMMAND_TIMEOUT_MS;
+const fixtureCommands = new FixtureCommands(undefined, ARCHIVE_COMMAND_TIMEOUT_MS);
+const COMMAND_BUDGET_MS = ARCHIVE_COMMAND_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS;
 const captureCommand = (cmd: string[], options?: { cwd?: string }) =>
   fixtureCommands.run(cmd, options?.cwd ?? ROOT_DIR);
 afterEach(async () => {
