@@ -4,7 +4,7 @@
   "files": {
     "ignoreUnknown": true,
     "maxSize": 9007199254740991,
-    "includes": ["**", "!!**/node_modules", "!!**/.git"]
+    "includes": ["**", "!!**/node_modules", "!!**/.git", "!!.mango/artifacts", "!!.mango/out"]
   },
   "formatter": { "enabled": false },
   "assist": { "enabled": false },

@@ -72,9 +72,11 @@ and each workspace's `check` script. The cycle pass uses the independent
 `biome.cycles.json`, so formatting exclusions and `.gitignore` cannot hide TS/JS
 cycles. It checks TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including JavaScript
 dependencies reached from TypeScript roots and independent JavaScript roots.
-It includes declarations and generated/build files, excludes only
-`node_modules` and `.git`, and raises the file-size limit to JavaScript's largest
-safe integer instead of inheriting Biome's one-MiB limit. Turbo always reruns
+It includes declarations and generated/build source files. It force-excludes
+`node_modules`, `.git`, and the repository's `.mango/artifacts` and `.mango/out`
+caches so concurrent tool installation cannot race scanner discovery. The scan
+raises the file-size limit to JavaScript's largest safe integer instead of
+inheriting Biome's one-MiB limit. Turbo always reruns
 `check:cycles` because ignored files are absent from its VCS cache inputs.
 
 Run one scan from the repository root with
