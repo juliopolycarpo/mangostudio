@@ -8,8 +8,8 @@
       "!**/node_modules",
       "!apps/*/dist",
       "!apps/*/coverage",
-      "!.mango/artifacts",
-      "!.mango/out",
+      "!!.mango/artifacts",
+      "!!.mango/out",
       "!apps/frontend/src/routeTree.gen.ts",
       "!apps/shared/src/runtime-contract/generated"
     ]

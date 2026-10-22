@@ -613,6 +613,31 @@ describe('Biome import cycle checks', () => {
     );
   });
 
+  test.each(['biome.json', 'biome.cycles.json'])(
+    '%s excludes root artifact and output staging metadata from discovery',
+    async (config) => {
+      const root = createFixture();
+      const paths = ['.mango/artifacts/tools/.shellcheck-staging', '.mango/out/staging'];
+      for (const path of paths) {
+        injectCycle(root, path, { 'biome.json': '{ "files": { "includes": 42 } }' });
+      }
+      const command = ['bunx', 'biome', 'check', `--config-path=${config}`, 'apps/api'];
+      const clean = Bun.spawnSync(command, { cwd: root, stdout: 'pipe', stderr: 'pipe' });
+      const output = clean.stdout.toString() + clean.stderr.toString();
+      expectCheck(
+        { exitCode: clean.exitCode, output },
+        'pass',
+        `${config}: invalid ${paths.map((path) => `${path}/biome.json`).join(', ')} expected excluded cache metadata`
+      );
+      injectCycle(root, 'apps/api/src', TYPE_CYCLE);
+      expectCycleCount(
+        await countCycles(root, ['apps/api']),
+        1,
+        'API source remains checked beside excluded cache metadata'
+      );
+    }
+  );
+
   test('ignores witness-like source comments in actual Biome diagnostics', async () => {
     const root = createFixture();
     injectCycle(root, 'apps/api', {
