@@ -9,12 +9,13 @@
 
 import { describe, expect, it } from 'bun:test';
 import { createServer, type Server as HttpServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 import {
+  type McpClientHandle,
   McpConnectionError,
   type McpServerRuntimeConfig,
 } from '../../../../src/services/mcp/types';
@@ -38,6 +39,7 @@ interface LegacySseServer {
   readonly url: string;
   /** `METHOD path` of every request, in arrival order. */
   readonly requests: string[];
+  readonly requestsByConnection: string[][];
   stop(): Promise<void>;
 }
 
@@ -50,10 +52,20 @@ async function startLegacySseServer(answer: {
   text?: boolean;
 }): Promise<LegacySseServer> {
   const requests: string[] = [];
+  const requestsByConnection: string[][] = [];
+  const connectionRequests = new Map<Socket, string[]>();
   const server = createEchoMcpServer();
   let sse: SSEServerTransport | undefined;
   const httpServer: HttpServer = createServer((request, response) => {
-    requests.push(`${request.method} ${request.url?.split('?')[0]}`);
+    const label = `${request.method} ${request.url?.split('?')[0]}`;
+    requests.push(label);
+    let connection = connectionRequests.get(request.socket);
+    if (!connection) {
+      connection = [];
+      connectionRequests.set(request.socket, connection);
+      requestsByConnection.push(connection);
+    }
+    connection.push(label);
     void (async () => {
       if (request.method === 'GET' && request.url === '/') {
         sse = new SSEServerTransport('/messages', response);
@@ -76,6 +88,7 @@ async function startLegacySseServer(answer: {
   return {
     url: `http://127.0.0.1:${port}/`,
     requests,
+    requestsByConnection,
     stop: async () => {
       await server.close();
       httpServer.closeAllConnections();
@@ -85,8 +98,12 @@ async function startLegacySseServer(answer: {
 }
 
 describe('mcp http transport', () => {
-  it('connects over Streamable HTTP and sends stored auth headers on every request', async () => {
-    const seenAuth: Array<string | null> = [];
+  it('keeps authenticated Streamable HTTP POSTs separate from the active GET stream', async () => {
+    const requests: Array<{ method: string; port: number | undefined; auth: string | null }> = [];
+    let streamRequest: Request | undefined;
+    let streamResponse: Response | undefined;
+    let streamBodyState = 'pending';
+    let streamBodySettled: Promise<void> | undefined;
     // Stateful mode: one transport serves the whole session (stateless mode
     // requires a fresh transport per request, which doesn't fit one client).
     const transport = new WebStandardStreamableHTTPServerTransport({
@@ -97,33 +114,88 @@ describe('mcp http transport', () => {
     await server.connect(transport);
     const bunServer = Bun.serve({
       port: 0,
-      fetch: (request) => {
-        seenAuth.push(request.headers.get('authorization'));
-        return transport.handleRequest(request);
+      hostname: '127.0.0.1',
+      fetch: async (request, host) => {
+        requests.push({
+          method: request.method,
+          port: host.requestIP(request)?.port,
+          auth: request.headers.get('authorization'),
+        });
+        if (request.method === 'GET') streamRequest = request;
+        const response = await transport.handleRequest(request);
+        if (request.method !== 'GET' || !response.body) return response;
+        streamResponse = response;
+        streamBodyState = 'open';
+        const observedBody = new TransformStream<Uint8Array, Uint8Array>();
+        // pipeTo settles on EOF, source error, or downstream cancellation.
+        streamBodySettled = response.body.pipeTo(observedBody.writable).then(
+          () => {
+            streamBodyState = 'ended';
+          },
+          () => {
+            streamBodyState = 'errored or canceled';
+          }
+        );
+        return new Response(observedBody.readable, response);
       },
     });
 
+    let handle: McpClientHandle | undefined;
     try {
-      const handle = await connectMcpClient(httpConfig(`http://localhost:${bunServer.port}/`), {
+      handle = await connectMcpClient(httpConfig(`http://127.0.0.1:${bunServer.port}/`), {
         userId: 'http-transport-user',
         resolveHeaders: () => Promise.resolve({ Authorization: 'Bearer test-token' }),
       });
 
+      const deadline = performance.now() + 5_000;
+      while (!streamResponse && performance.now() < deadline) await Bun.sleep(5);
+      expect(
+        streamResponse,
+        'Streamable HTTP session must return its GET stream within 5s'
+      ).toBeDefined();
+      expect(streamResponse?.status, 'GET stream must return HTTP 200').toBe(200);
+      expect(streamResponse?.headers.get('content-type')).toContain('text/event-stream');
+      expect(streamBodyState, 'GET response body must remain open before tool POSTs').toBe('open');
+      const activeStream = streamRequest;
+      expect(activeStream?.signal.aborted, 'GET stream must stay active before tool POSTs').toBe(
+        false
+      );
+      const beforeTools = requests.length;
       const tools = await handle.listTools();
       expect(tools.map((tool) => tool.name)).toEqual(['echo', 'env-keys', 'crash']);
+      expect(streamBodyState, 'GET response body must remain open after listTools POST').toBe(
+        'open'
+      );
 
-      const result = await handle.callTool('echo', { text: 'over http' });
-      expect(result.contentText).toBe('over http');
-
-      expect(seenAuth.length).toBeGreaterThan(0);
-      expect(seenAuth.every((value) => value === 'Bearer test-token')).toBe(true);
-
-      await handle.close();
+      for (const text of ['first over http', 'second over http', 'third over http']) {
+        expect((await handle.callTool('echo', { text })).contentText).toBe(text);
+        expect(streamBodyState, 'GET response body must remain open during tool POSTs').toBe(
+          'open'
+        );
+        expect(activeStream?.signal.aborted, 'GET stream must stay active during tool POSTs').toBe(
+          false
+        );
+      }
+      expect(requests.every((request) => request.auth === 'Bearer test-token')).toBe(true);
+      const streamRequests = requests.filter((request) => request.method === 'GET');
+      expect(streamRequests).toHaveLength(1);
+      const streamPort = streamRequests[0]?.port;
+      expect(streamPort, 'GET stream must have a peer connection port').toBeDefined();
+      const toolRequests = requests.slice(beforeTools);
+      expect(toolRequests).toHaveLength(4);
+      expect(toolRequests.every((request) => request.method === 'POST')).toBe(true);
+      expect(toolRequests.every((request) => request.port !== undefined)).toBe(true);
+      expect(toolRequests.every((request) => request.port !== streamPort)).toBe(true);
     } finally {
-      await server.close();
-      bunServer.stop(true);
+      try {
+        await handle?.close();
+      } finally {
+        await server.close().finally(() => bunServer.stop(true));
+        await streamBodySettled;
+      }
     }
-  });
+    // Connect (10s), GET wait (5s), four calls (40s), close (5s), plus startup/cleanup.
+  }, 75_000);
 
   it('falls back to SSE when the Streamable HTTP POST is rejected with a 4xx', async () => {
     const server = createEchoMcpServer();
@@ -161,6 +233,29 @@ describe('mcp http transport', () => {
     } finally {
       await server.close();
       httpServer.close();
+    }
+  });
+
+  it('keeps the legacy event stream on a connection separate from message POSTs', async () => {
+    const legacy = await startLegacySseServer({ status: 405 });
+    let handle: McpClientHandle | undefined;
+    try {
+      handle = await connectMcpClient(httpConfig(legacy.url), {
+        userId: 'http-transport-user',
+      });
+      expect((await handle.callTool('echo', { text: 'isolated stream' })).contentText).toBe(
+        'isolated stream'
+      );
+      const streamRequests = legacy.requestsByConnection.find((requests) =>
+        requests.includes('GET /')
+      );
+      // A streaming response occupies its HTTP/1 connection until close. It must
+      // never enter the pool that serves the initialize and message POSTs.
+      expect(streamRequests).toEqual(['GET /']);
+      expect(legacy.requests.filter((request) => request === 'POST /messages')).toHaveLength(3);
+    } finally {
+      await handle?.close();
+      await legacy.stop();
     }
   });
 
