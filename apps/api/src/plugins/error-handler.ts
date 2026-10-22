@@ -33,7 +33,7 @@ function isFileTypeRejection(errors: unknown): boolean {
 }
 
 export const errorHandler = new Elysia({ name: 'error-handler' })
-  // Seated before the `.error` arms so it also covers what they return.
+  // Seated before the `.onError` arms so it also covers what they return.
   //
   // `global` reaches further than `/api/**`: the same scope that lets this
   // plugin's `NotFound` arm answer a non-API miss also lets the negotiator
@@ -44,7 +44,7 @@ export const errorHandler = new Elysia({ name: 'error-handler' })
   .mapResponse('global', ({ request, set, responseValue }) =>
     negotiateErrorRepresentation(request, set, responseValue)
   )
-  .error(
+  .onError(
     'global',
     ValidationError,
     ({ error }): ElysiaStatus<422, ApiErrorResponse> | ElysiaStatus<500, ApiErrorResponse> => {
@@ -67,13 +67,13 @@ export const errorHandler = new Elysia({ name: 'error-handler' })
       return status(422, { error: 'Invalid request body', code: ERROR_CODES.VALIDATION });
     }
   )
-  .error(
+  .onError(
     'global',
     NotFound,
     (): ElysiaStatus<404, ApiErrorResponse> =>
       status(404, { error: 'Not found', code: ERROR_CODES.NOT_FOUND })
   )
-  .error('global', ({ error }): ElysiaStatus<500, ApiErrorResponse> => {
+  .onError('global', ({ error }): ElysiaStatus<500, ApiErrorResponse> => {
     // The raw error is deliberately logged server-side — it is the only record
     // of what actually failed — while the client is told nothing about it.
     console.error(`[error-handler][${error instanceof Error ? error.name : 'unknown'}]`, error);

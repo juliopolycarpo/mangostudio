@@ -45,7 +45,7 @@ const temporaryDirs: string[] = [];
 
 function buildApp(frontendDir = '/nonexistent-frontend-dir'): (path: string) => Promise<Response> {
   const app = new Elysia()
-    .error(NotFound, ({ request }) => frontendNotFound(request))
+    .onError(NotFound, ({ request }) => frontendNotFound(request))
     .use(new Elysia({ prefix: '/api' }).use(errorHandler));
   registerFrontend(app as unknown as App, frontendDir);
   return (path: string) => app.handle(new Request(`http://localhost${path}`));
@@ -262,7 +262,7 @@ describe('registerFrontend from the filesystem', () => {
     writeFileSync(join(uploadsDir, 'photo.png'), UPLOAD_BYTES);
 
     const app = new Elysia()
-      .error(NotFound, ({ request }) => frontendNotFound(request))
+      .onError(NotFound, ({ request }) => frontendNotFound(request))
       .use(createUploadedFileRoutes(uploadsDir))
       .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, frontendDir);
@@ -313,7 +313,7 @@ describe('registerFrontend from the filesystem', () => {
     writeFileSync(join(frontendDir, 'index.html'), INDEX_HTML);
     writeFileSync(join(frontendDir, 'favicon.ico'), UPLOAD_BYTES);
 
-    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    const app = new Elysia().onError(NotFound, ({ request }) => frontendNotFound(request));
     registerFrontend(app as unknown as App, frontendDir);
     await app.modules;
     const get = (path: string) => app.handle(new Request(`http://localhost${path}`));
@@ -432,7 +432,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     // precedence rather than about Better Auth or the image store. The method
     // is the load-bearing part: `.all` is the shape that broke, `.get` is the
     // control that never did, so the guard cannot pass for the wrong reason.
-    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    const app = new Elysia().onError(NotFound, ({ request }) => frontendNotFound(request));
     app.use(
       new Elysia({ prefix: '/api' }).group('/auth', (auth) =>
         auth.all('/*', { parse: 'none' }, fakeMountedAuthHandler)
@@ -1060,7 +1060,7 @@ describe('registerFrontend with embedded assets, over a listening server', () =>
       '/config.js': join(assetDir, 'config.js'),
     });
 
-    const app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+    const app = new Elysia().onError(NotFound, ({ request }) => frontendNotFound(request));
     registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
     await app.modules;
 
@@ -1183,7 +1183,7 @@ describe('registerFrontend without embedded assets', () => {
     // claims `/api/*`, that outer handler answers first and the JSON 404 never
     // runs.
     const app = new Elysia()
-      .error(NotFound, ({ request }) => frontendNotFound(request))
+      .onError(NotFound, ({ request }) => frontendNotFound(request))
       .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
 

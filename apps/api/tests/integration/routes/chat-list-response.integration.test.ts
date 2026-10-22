@@ -188,7 +188,7 @@ function expectedChats(prefix: string) {
 }
 
 /** A probe plugin that writes a response header the way rate limiting and CORS do. */
-const headerProbe = new Elysia({ name: 'chat-list-header-probe' }).request(({ set }) => {
+const headerProbe = new Elysia({ name: 'chat-list-header-probe' }).onRequest(({ set }) => {
   set.headers['x-parity-probe'] = 'kept';
 });
 

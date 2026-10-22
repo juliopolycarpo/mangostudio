@@ -202,7 +202,7 @@ describe('a spec request a hook refuses with status()', () => {
   function refusingSpecApp() {
     return new Elysia()
       .use(openapiProblemDetails)
-      .beforeHandle('global', () => status(429, REFUSAL))
+      .onBeforeHandle('global', () => status(429, REFUSAL))
       .use(openapi({ path: OPENAPI_PATH }));
   }
 

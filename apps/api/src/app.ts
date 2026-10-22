@@ -140,8 +140,8 @@ export const app = new Elysia()
   // module is evaluated, so its own handler would never be reached. This one
   // defers (returns nothing) for anything the frontend does not claim, leaving
   // API 404s to answer with `ApiErrorResponse` as before.
-  .error(NotFound, ({ request, set }) => frontendNotFound(request, set))
-  .request(({ request }) => {
+  .onError(NotFound, ({ request, set }) => frontendNotFound(request, set))
+  .onRequest(({ request }) => {
     // Only log API and auth requests to avoid spamming frontend assets logs
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api')) {

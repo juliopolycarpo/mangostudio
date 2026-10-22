@@ -64,7 +64,7 @@ beforeEach(async () => {
   }
   mock.module('node:fs', fakeLargeInodeFs);
   const { registerFrontend } = await import('../../../src/server/frontend-static');
-  app = new Elysia().error(NotFound, ({ request }) => frontendNotFound(request));
+  app = new Elysia().onError(NotFound, ({ request }) => frontendNotFound(request));
   registerFrontend(app as unknown as App, frontendDir);
   await app.modules;
   app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });

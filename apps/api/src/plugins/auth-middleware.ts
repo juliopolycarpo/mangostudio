@@ -57,7 +57,7 @@ const authMiddleware = new Elysia({ name: 'auth-middleware' }).derive(
  */
 export const requireAuth = new Elysia({ name: 'require-auth' })
   .use(authMiddleware)
-  .beforeHandle('plugin', ({ user }) => {
+  .onBeforeHandle('plugin', ({ user }) => {
     if (!user) {
       return status(401, {
         error: 'Unauthorized',
@@ -74,7 +74,7 @@ export const requireAuth = new Elysia({ name: 'require-auth' })
  */
 export const requireCookieAuth = new Elysia({ name: 'require-cookie-auth' })
   .use(requireAuth)
-  .beforeHandle('plugin', ({ authenticationMethod }) => {
+  .onBeforeHandle('plugin', ({ authenticationMethod }) => {
     if (authenticationMethod === 'api-key') {
       return status(403, {
         error: 'API keys cannot manage API keys',

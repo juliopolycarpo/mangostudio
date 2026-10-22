@@ -208,7 +208,7 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
       headers: { 'content-type': 'application/json;charset=utf-8' },
     });
   })
-  .error('global', ({ error, path }): ElysiaStatus<500, ApiErrorResponse> | undefined => {
+  .onError('global', ({ error, path }): ElysiaStatus<500, ApiErrorResponse> | undefined => {
     // Scoped to the document route this module owns. A miss on that path —
     // POST, an unknown method — is still a NotFound, and rewriting it to
     // INTERNAL would be this arm classifying a 404 it does not own. Returning
