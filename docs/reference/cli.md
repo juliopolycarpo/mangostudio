@@ -6,19 +6,25 @@ managing one local server. The same commands work from the installed binary
 
 ## Install channels
 
-Pick any distribution channel — each ships the same prebuilt binary and frontend
-sidecar. See the [README install matrix](../../README.md#install) for
+Choose a distribution channel for the prebuilt app; prerequisites and installed
+contents depend on the channel. See the [README install matrix](../../README.md#install) for
 copy-paste commands, or:
 
-| Channel            | Entry point                                                                                                                                                          |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| npm / bun          | `mangostudio` — see [`packages/cli/README.md`](../../packages/cli/README.md)                                                                                         |
-| Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                                                                        |
-| Shell / PowerShell | `install.sh` / `install.ps1` from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh) (mirrored at mangostudio.dev) |
-| Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                                                                          |
-| Cargo              | `cargo install mangostudio` — see [`crates/mangostudio-launcher/README.md`](../../crates/mangostudio-launcher/README.md)                                             |
-| Docker             | `ghcr.io/juliopolycarpo/mangostudio` — see [`docs/operations/deployment.md`](../operations/deployment.md#docker)                                                     |
-| Manual             | Download platform archives from GitHub Releases and verify `SHA256SUMS`                                                                                              |
+| Channel   | Entry point                                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| npm / bun | `mangostudio` — see [`packages/cli/README.md`](../../packages/cli/README.md)                                             |
+| Homebrew  | `brew install juliopolycarpo/tap/mangostudio`                                                                            |
+| Scoop     | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                              |
+| Cargo     | `cargo install mangostudio` — see [`crates/mangostudio-launcher/README.md`](../../crates/mangostudio-launcher/README.md) |
+| Docker    | `ghcr.io/juliopolycarpo/mangostudio` — see [`docs/operations/deployment.md`](../operations/deployment.md#docker)         |
+| Manual    | Download platform archives from GitHub Releases and verify `SHA256SUMS`                                                  |
+
+The standalone binary needs no JavaScript runtime. The package wrapper uses a Node
+shebang and requires Node.js 18+ on PATH, including after `bun add -g`; explicit Bun
+execution is described in the wrapper guide. As checked on 2026-10-22, stable
+`v0.1.1` has no installer-script assets; use the package or manual archive channel.
+Its CLI supports `serve`; the table below describes the current source, including
+commands introduced after that stable release.
 
 ## Commands
 

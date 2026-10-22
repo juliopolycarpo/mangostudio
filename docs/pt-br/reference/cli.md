@@ -9,19 +9,25 @@ instalado (`mangostudio`) e a partir do código-fonte
 
 ## Canais de instalação
 
-Escolha qualquer canal de distribuição — cada um entrega o mesmo binário
-pré-compilado e sidecar do frontend. Veja a
+Escolha um canal para o app pré-compilado; os pré-requisitos e o conteúdo
+instalado dependem do canal. Veja a
 [matriz de instalação do README](../../../README.md#install) ou:
 
-| Canal              | Ponto de entrada                                                                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| npm / bun          | `mangostudio` — veja [`packages/cli/README.md`](../../../packages/cli/README.md)                                                                                    |
-| Homebrew           | `brew install juliopolycarpo/tap/mangostudio`                                                                                                                       |
-| Shell / PowerShell | `install.sh` / `install.ps1` do [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh) (espelhado em mangostudio.dev) |
-| Scoop              | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                                                                         |
-| Cargo              | `cargo install mangostudio` — veja [`crates/mangostudio-launcher/README.md`](../../../crates/mangostudio-launcher/README.md)                                        |
-| Docker             | `ghcr.io/juliopolycarpo/mangostudio` — veja [`deployment.md`](../operations/deployment.md#docker)                                                                   |
-| Manual             | Baixe arquivos de plataforma do GitHub Releases e verifique `SHA256SUMS`                                                                                            |
+| Canal     | Ponto de entrada                                                                                                             |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| npm / bun | `mangostudio` — veja [`packages/cli/README.md`](../../../packages/cli/README.md)                                             |
+| Homebrew  | `brew install juliopolycarpo/tap/mangostudio`                                                                                |
+| Scoop     | `juliopolycarpo/scoop-bucket` → `scoop install mangostudio`                                                                  |
+| Cargo     | `cargo install mangostudio` — veja [`crates/mangostudio-launcher/README.md`](../../../crates/mangostudio-launcher/README.md) |
+| Docker    | `ghcr.io/juliopolycarpo/mangostudio` — veja [`deployment.md`](../operations/deployment.md#docker)                            |
+| Manual    | Baixe arquivos de plataforma do GitHub Releases e verifique `SHA256SUMS`                                                     |
+
+O binário standalone não precisa de runtime JavaScript. O wrapper do pacote usa
+shebang Node e exige Node.js 18+ no PATH, inclusive após `bun add -g`; o guia do
+wrapper descreve a execução explícita com Bun. Verificado em 2026-10-22: a release
+estável `v0.1.1` não tem assets de scripts instaladores; use pacotes ou arquivos manuais.
+Sua CLI suporta `serve`; a tabela abaixo descreve o código atual, incluindo comandos
+introduzidos depois dessa release estável.
 
 ## Comandos
 

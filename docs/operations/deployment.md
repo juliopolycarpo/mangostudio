@@ -95,12 +95,14 @@ curl -LO "https://github.com/juliopolycarpo/mangostudio/releases/download/v${VER
 grep "mangostudio-${VERSION}-${PLATFORM}.tar.gz" SHA256SUMS | sha256sum -c -
 
 # macOS — verify checksum
-grep "mangostudio-${VERSION}-darwin-arm64.tar.gz" SHA256SUMS | shasum -a 256 -c -
+grep "mangostudio-${VERSION}-${PLATFORM}.tar.gz" SHA256SUMS | shasum -a 256 -c -
 
 # Or use the project helper (from a clone)
 bun ./scripts/release/verify-checksum.ts SHA256SUMS "mangostudio-${VERSION}-${PLATFORM}.tar.gz"
 
-tar -xzf "mangostudio-${VERSION}-${PLATFORM}.tar.gz" -C /opt/mangostudio
+# Create the destination before tar -C (sudo is needed for /opt).
+sudo install -d -m 0755 /opt/mangostudio
+sudo tar -xzf "mangostudio-${VERSION}-${PLATFORM}.tar.gz" -C /opt/mangostudio
 ```
 
 Windows archives use `.zip` instead of `.tar.gz` (`windows-x64`, `windows-arm64`).

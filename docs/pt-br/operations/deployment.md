@@ -33,7 +33,9 @@ curl -LO "https://github.com/juliopolycarpo/mangostudio/releases/download/v${VER
 curl -LO "https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/mangostudio-${VERSION}-${PLATFORM}.tar.gz"
 
 grep "mangostudio-${VERSION}-${PLATFORM}.tar.gz" SHA256SUMS | sha256sum -c -
-tar -xzf "mangostudio-${VERSION}-${PLATFORM}.tar.gz" -C /opt/mangostudio
+# Crie o destino antes de tar -C (sudo é necessário para /opt).
+sudo install -d -m 0755 /opt/mangostudio
+sudo tar -xzf "mangostudio-${VERSION}-${PLATFORM}.tar.gz" -C /opt/mangostudio
 ```
 
 Arquivos Windows usam `.zip` (`windows-x64`, `windows-arm64`). Nomes e layout

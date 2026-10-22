@@ -25,9 +25,7 @@ downloads contra `SHA256SUMS` quando aplicável.
 | Canal                  | Comando                                                                                                                |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | npm / bun              | `npm i -g mangostudio` / `bun add -g mangostudio`                                                                      |
-| PowerShell (Windows)   | `irm https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.ps1 \| iex`                        |
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                          |
-| Instalador shell       | `curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \| bash`                 |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` e depois `scoop install mangostudio`  |
 | Cargo                  | `cargo install mangostudio` (app completo) ou `cargo binstall mangostudio` (pré-compilado)                             |
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                       |
@@ -39,18 +37,29 @@ quando disponível; a compilação de fallback exige a mesma versão do Rust. Ve
 [política de suporte e releases Rust](reference/releasing.md#suporte-rust-e-releases) ao migrar
 do Rust 1.96 ou 1.97.
 
-Início rápido com o instalador shell:
+Início rápido pelo pacote publicado (Node.js 18+ no PATH para o wrapper):
 
 ```bash
-curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh | bash
-mangostudio setup           # segredo, serviço, início e abre o navegador
+bun add -g mangostudio
+mangostudio serve           # executa o servidor instalado em foreground
 ```
 
-Em um Alpine (musl) puro, rode `apk add bash curl libstdc++` antes: o instalador é um
-script bash, e o hub linka `libstdc++` dinamicamente. Sem ele a verificação de versão do
-instalador falha com a mensagem do loader e esta mesma dica.
+Verificado em 2026-10-22: o pacote `latest` é `0.1.1`; uma instalação Linux
+isolada executou `mangostudio --version` com sucesso. Essa CLI estável usa `serve`;
+os comandos `setup`, serviço e atualização descritos abaixo existem em builds mais novos.
+Configure um segredo de autenticação de pelo menos 32 caracteres antes de servir
+quando a versão instalada não oferecer configuração interativa.
 
-`setup` é o único comando de que uma instalação nova precisa: gera um segredo de
+O executável standalone não precisa de Node.js nem Bun. O comando do pacote é um
+wrapper JavaScript com shebang Node e `engines.node >=18`; instalá-lo com Bun não
+remove esse requisito no PATH. Executar explicitamente
+`bun /caminho/para/mangostudio/bin/mangostudio.js <comando>` também é suportado; veja
+[o guia do wrapper em inglês](../../packages/cli/README.md).
+
+No Alpine (musl), use o arquivo manual da release correspondente e instale
+`libstdc++` (`apk add libstdc++`). O wrapper não tem pacote musl.
+
+Em builds mais novos, `setup` é o único comando de que uma instalação nova precisa: gera um segredo de
 autenticação se não houver, pergunta se o hub deve continuar rodando depois do
 logout, inicia (ou reaproveita um já em execução) e abre. Por SSH ele imprime o
 endereço e uma linha de encaminhamento de porta em vez de fingir que abriu uma
@@ -62,21 +71,18 @@ Na primeira vez que você entra, o navegador abre um fluxo curto de configuraç�
 projeto. Todo passo é pulável e refazível em **Configurações → Geral**. Veja
 [`docs/pt-br/guides/first-run.md`](guides/first-run.md).
 
-No Windows, execute o instalador PowerShell:
+No Windows, use o canal de pacotes com Node.js 18+ ou Scoop (veja a tabela).
+O canal Cargo instala um [launcher pequeno](../../crates/mangostudio-launcher/README.md)
+que baixa um arquivo verificado por checksum na primeira execução.
 
-```powershell
-irm https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.ps1 | iex
-```
-
-ou use Scoop (veja a tabela acima). O canal Cargo instala um
-[launcher pequeno](../../crates/mangostudio-launcher/README.md) que baixa o mesmo
-arquivo verificado por checksum na primeira execução.
-
-Os dois scripts de instalação vivem neste repositório (`scripts/install/`), são
-publicados como assets de release ao lado dos arquivos que instalam e constam
-em `SHA256SUMS`; as cópias em `https://mangostudio.dev/install.sh` e
-`install.ps1` são espelhos. Use `--canary` (`-Canary`) para o pre-release
-canary mais recente ou `--version x.y.z` (`-Version`) para fixar uma versão.
+**Disponibilidade dos instaladores estáveis (2026-10-22):** a release GitHub mais
+recente, `v0.1.1`, contém arquivos de plataforma e `SHA256SUMS`, mas não
+`install.sh` ou `install.ps1`. As URLs `releases/latest/download/install.*` não
+conseguem instalá-la. Scripts em `scripts/install/` e a automação atual não provam
+que esses assets existem em uma release antiga. Use um canal de pacotes acima ou
+[a extração manual](operations/deployment.md#deploy-manual-do-binário).
+As cópias do site não são recomendadas aqui sem evidência funcional do par
+script/arquivo selecionado.
 
 ### Atualizar
 

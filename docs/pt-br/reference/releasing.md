@@ -268,14 +268,9 @@ Ressalvas:
   atualizados. As tags GHCR canary existentes permanecem no registry até serem
   limpas manualmente. Releases por tag ainda publicam o conjunto completo de
   imagens Docker.
-- O workflow não publica mais canaries no crates.io. O launcher `<root>-canary`
-  atualmente publicado continua funcionando porque aponta para a pre-release
-  `v<root>-canary` congelada — releases imutáveis significam que os assets
-  dela nunca podem ser substituídos, então a URL do launcher continua
-  resolvendo mesmo que essa release nunca mais seja republicada. Nenhum crate
-  canary novo é publicado, e um bump futuro de versão raiz não ganha um
-  `<root>-canary` a menos que o publish canary no crates.io seja
-  reintroduzido de propósito.
+- O workflow não publica mais canaries no crates.io. Veja o
+  [registro histórico de canary Cargo](#registro-histórico-de-canary-cargo); ele
+  não prova resolução do canary mais recente hoje.
 - Tags `v<version>-canary.<sha7>` continuam excluídas do trigger de release
   (`!v*-canary*`) como guarda para tags antigas ou manuais.
 
@@ -335,3 +330,23 @@ O workflow executa 14 jobs: `prepare`, `build`, `verify-build`, `github-release`
 `release-summary`. Veja a
 [versão em inglês](../../reference/releasing.md#cutting-a-release) para a tabela
 completa de jobs e detalhes por canal (npm, Docker, Homebrew, Scoop, crates.io).
+
+### Registro histórico de canary Cargo
+
+O registro de publicação anterior a 2026-09-16 descrevia um launcher
+`<root>-canary` publicado manualmente e uma pre-release GitHub `v<root>-canary`
+congelada. É evidência histórica desse par versionado, não uma promessa de que
+uma versão raiz atual tem crate canary ou de que o launcher resolve o canary mais
+recente. O launcher constrói a URL da release a partir da própria versão exata
+do crate e faz três tentativas totais de download (duas repetições); launchers
+`*-canary` atualizam essa instalação versionada em toda execução. Verifique o
+registro e os assets correspondentes antes de usar um par antigo hoje.
+
+### Disponibilidade dos scripts instaladores
+
+A automação atual prepara `install.sh` e `install.ps1` em `release-assets/` e os
+inclui em `SHA256SUMS`; isso não prova sua presença em releases antigas.
+Em 2026-10-22, a estável mais recente `v0.1.1` não tem esses scripts, então as URLs
+`releases/latest/download/install.*` falham. Use os pacotes ou arquivos manuais do
+README até existir um par script/arquivo publicado e compatível. Espelhos do site
+exigem a mesma verificação funcional; HTTP bem-sucedido é insuficiente.
