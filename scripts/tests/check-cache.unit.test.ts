@@ -17,7 +17,8 @@ const fixtures: TypecheckFixture[] = [];
 const commands = new FixtureCommands();
 // Each cache replay case runs three commands in sequence. The Bun test deadline
 // must leave each command its own execution and tree-stop allowance, plus setup.
-const CACHE_CHECK_TIMEOUT_MS = 3 * (FIXTURE_COMMAND_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS) + 5_000;
+const COMMAND_BUDGET_MS = FIXTURE_COMMAND_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS;
+const CACHE_CHECK_TIMEOUT_MS = 3 * COMMAND_BUDGET_MS + 5_000;
 // These CLI cases also compile dprint's plugins in a fresh writable cache.
 // Keep that tool startup bounded separately from the small Turbo-only cases.
 const ROOT_CHECK_TIMEOUT_MS = CACHE_CHECK_TIMEOUT_MS;
@@ -125,7 +126,7 @@ function expectOutcome(
 afterEach(async () => {
   await commands.settle();
   for (const fixture of fixtures.splice(0)) fixture.dispose();
-});
+}, COMMAND_BUDGET_MS + 5_000);
 
 describe('lint cache and required cycle scans', () => {
   const cycles = [
@@ -241,20 +242,26 @@ describe('lint cache inputs', () => {
     'apps/shared/src/index.ts',
     'packages/protocol/src/index.ts',
   ]) {
-    test(`editing ${file} invalidates frontend lint`, async () => {
-      const fixture = createFixture();
-      const args = ['run', 'check:quick', '--filter=@mangostudio/frontend', ...fixture.turboArgs];
-      const hash = async () => {
-        const task = (await turboDryRun(fixture.root, args)).find(
-          (task) => task.taskId === '@mangostudio/frontend#check:quick'
+    test(
+      `editing ${file} invalidates frontend lint`,
+      async () => {
+        const fixture = createFixture();
+        const args = ['run', 'check:quick', '--filter=@mangostudio/frontend', ...fixture.turboArgs];
+        const hash = async () => {
+          const task = (await turboDryRun(fixture.root, args, commands.run)).find(
+            (task) => task.taskId === '@mangostudio/frontend#check:quick'
+          );
+          expect(task, 'frontend lint must be selected').toBeDefined();
+          return task?.hash;
+        };
+        const before = await hash();
+        const path = join(fixture.root, file);
+        writeFileSync(path, `${readFileSync(path, 'utf8')}\n`);
+        expect(await hash(), `${file} changed but frontend lint retained its hash`).not.toBe(
+          before
         );
-        expect(task, 'frontend lint must be selected').toBeDefined();
-        return task?.hash;
-      };
-      const before = await hash();
-      const path = join(fixture.root, file);
-      writeFileSync(path, `${readFileSync(path, 'utf8')}\n`);
-      expect(await hash(), `${file} changed but frontend lint retained its hash`).not.toBe(before);
-    });
+      },
+      2 * COMMAND_BUDGET_MS + 5_000
+    );
   }
 });

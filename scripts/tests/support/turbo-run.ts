@@ -32,33 +32,20 @@ export interface TurboResult {
 }
 
 /**
- * Run the repository's own Turbo binary in `cwd`, with optional fixture environment overrides.
+ * Run the repository's Turbo binary through its fixture owner, with environment overrides.
  *
  * @example
- * const { exitCode } = await runTurbo(root, ['run', 'typecheck'], { TURBO_CONFIG_DIR_PATH: configDir });
+ * const { exitCode } = await runTurbo(root, ['run', 'typecheck'], {}, commands.run);
  */
-export async function runTurbo(
+export function runTurbo(
   cwd: string,
   args: readonly string[],
-  extraEnv: Record<string, string> = {},
-  capture?: (cmd: readonly string[], cwd: string, env: NodeJS.ProcessEnv) => Promise<TurboResult>
+  extraEnv: Record<string, string>,
+  capture: (cmd: readonly string[], cwd: string, env: NodeJS.ProcessEnv) => Promise<TurboResult>
 ): Promise<TurboResult> {
   const cmd = [join(ROOT_DIR, 'node_modules', '.bin', 'turbo'), ...args];
   const env = { ...(process.env as Record<string, string>), ...extraEnv, ...QUIET_TURBO_ENV };
-  if (capture) return capture(cmd, cwd, env);
-  const proc = Bun.spawn({
-    cmd,
-    cwd,
-    env,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { exitCode, stdout, stderr };
+  return capture(cmd, cwd, env);
 }
 
 /**
@@ -67,10 +54,14 @@ export async function runTurbo(
  * Turbo refuses the configuration.
  *
  * @example
- * const tasks = await turboDryRun(ROOT_DIR, ['run', 'typecheck', '--filter=@mangostudio/api']);
+ * const tasks = await turboDryRun(ROOT_DIR, ['run', 'typecheck'], commands.run);
  */
-export async function turboDryRun(cwd: string, args: readonly string[]): Promise<DryRunTask[]> {
-  const { exitCode, stdout, stderr } = await runTurbo(cwd, [...args, '--dry=json']);
+export async function turboDryRun(
+  cwd: string,
+  args: readonly string[],
+  capture: (cmd: readonly string[], cwd: string, env: NodeJS.ProcessEnv) => Promise<TurboResult>
+): Promise<DryRunTask[]> {
+  const { exitCode, stdout, stderr } = await runTurbo(cwd, [...args, '--dry=json'], {}, capture);
   if (exitCode !== 0) {
     throw new Error(
       `expected turbo dry run exit: 0 | received: ${exitCode} | args: ${args.join(' ')} | stderr: ${stderr.trim()}`
