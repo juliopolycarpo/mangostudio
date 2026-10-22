@@ -39,8 +39,11 @@ Rust compiler. If binstall falls back to compiling the launcher, it requires Rus
 
 - Downloads make three total attempts (two retries) with backoff and never run an archive that fails checksum verification.
 - musl is detected at **compile** time (`target_env = "musl"`). A glibc-built launcher on Alpine
-  picks the glibc archive; Alpine users should prefer the shell installer (runtime musl detection)
-  or build this crate with a musl toolchain.
+  picks the glibc archive. On Alpine, manually extract the matching `linux-x64-musl` or
+  `linux-arm64-musl` release archive and install `libstdc++` (`apk add libstdc++`), or build
+  this crate with a musl toolchain. See the
+  [manual deployment guide](../../docs/operations/deployment.md#manual-binary-deploy);
+  stable `v0.1.1` has no installer-script assets.
 - `cargo binstall` uses the release archive for the matching platform and
   extracts `mangostudio` (or `mangostudio.exe`) directly. If no matching release
   archive exists, binstall can still fall back to compiling this launcher.

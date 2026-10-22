@@ -147,13 +147,16 @@ the two questions — *how is this release labelled* and *what does
 Install a pre-release explicitly:
 
 ```bash
-# The binary installer resolves /releases/latest only when no version is given.
-curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \
-  | bash -s -- --version 0.2.0-rc.1
 npm install -g mangostudio@next
 docker pull ghcr.io/juliopolycarpo/mangostudio:0.2.0-rc.1
 cargo install mangostudio --version 0.2.0-rc.1
 ```
+
+For a standalone install, download the selected published pre-release's platform
+archive and `SHA256SUMS`, then follow the
+[manual deployment guide](../operations/deployment.md#manual-binary-deploy) with
+that version and platform. Do not fetch its installer from `/releases/latest`:
+the latest stable `v0.1.1` has no installer-script assets (checked 2026-10-22).
 
 `brew` and `scoop` have no pre-release form, by the same constraint that skips
 their jobs above.
@@ -968,7 +971,8 @@ One-time setup (already done; documented for future projects):
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
 GitHub release archive matching the crate version and target. binstall extracts
 only the `mangostudio` binary, so a binstall install has no execution host
-beside it and cannot start stdio environments; use the shell installer or
+beside it and cannot start stdio environments; extract the entire archive
+[manually](../operations/deployment.md#manual-binary-deploy) or use
 `cargo install` (below) for a complete install.
 
 The binstall binary does not use the launcher
@@ -988,10 +992,12 @@ Design notes:
   (`linux-x64`, `darwin-arm64`, `windows-x64`, and so on). The archives have a
   flat root, identical on every platform: `mangostudio` (or `mangostudio.exe`),
   `mangostudio-runtime`, and `README.md`. binstall installs only the first of
-  those, which is why `cargo install`/the shell installer remain the paths that
-  deliver a complete install.
+  those; manual extraction of the entire archive and `cargo install` deliver
+  both binaries.
 - musl is detected at compile time (`target_env = "musl"`); Alpine users should
-  prefer the shell installer, which detects musl at runtime.
+  manually extract the matching `linux-x64-musl` or `linux-arm64-musl` archive
+  and install `libstdc++` (`apk add libstdc++`), or compile the launcher with a
+  musl toolchain. Stable `v0.1.1` has no installer-script assets.
 - The root Rust CI lane (`.github/workflows/cargo-shim.yml`) triggers on every
   PR to either protected target, but a cheap `changes` job skips the toolchain
   when no Rust path changed. It builds and tests the locked workspace on Linux,

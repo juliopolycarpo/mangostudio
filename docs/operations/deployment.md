@@ -165,8 +165,9 @@ The runtime is a native Rust binary with no interpreter or shared runtime to ins
 - **Linux glibc** (`linux-x64`, `linux-arm64`): glibc 2.17 or newer, the same floor as the hub.
 - **Linux musl** (`*-musl`): the runtime is statically linked and needs no extra packages. The
   hub is a Bun-compiled binary that links `libstdc++` dynamically, so a bare Alpine needs
-  `apk add libstdc++` (plus `bash` and `curl`, which the installer uses) before `install.sh`. Without it the installer's version check fails; it
-  prints the loader's own message and that `apk` hint.
+  `apk add libstdc++` before running the hub from a matching `*-musl` archive.
+  Use [manual extraction](#manual-binary-deploy); latest stable `v0.1.1` has no
+  installer-script assets (checked 2026-10-22).
 - **Windows**: the MSVC C runtime is linked statically, so no Visual C++ Redistributable is
   needed.
 - **macOS**: one binary per architecture (`darwin-x64`, `darwin-arm64`).
