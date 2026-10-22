@@ -80,7 +80,7 @@ recente, `v0.1.1`, contém arquivos de plataforma e `SHA256SUMS`, mas não
 `install.sh` ou `install.ps1`. As URLs `releases/latest/download/install.*` não
 conseguem instalá-la. Scripts em `scripts/install/` e a automação atual não provam
 que esses assets existem em uma release antiga. Use um canal de pacotes acima ou
-[a extração manual](operations/deployment.md#deploy-manual-do-binário).
+[a extração manual](operations/deployment.md#deploy-manual-de-binário).
 As cópias do site não são recomendadas aqui sem evidência funcional do par
 script/arquivo selecionado.
 
