@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { assertTemporaryHome, type TemporaryHomeHost } from '../lib/temp-home';
 import {
   launcherHost,
@@ -185,6 +185,26 @@ describe('the test home shape check', () => {
     expect(() =>
       assertTemporaryHome(join(host.tmpDir, `${TEST_HOME_PREFIX}abc`), TEST_HOME_KIND, host)
     ).not.toThrow();
+  });
+
+  test('accepts temporary homes under the real home while protecting home, ancestors and .mango', () => {
+    const realHome = resolve(tmpdir(), 'mango-test-home-policy');
+    const tmpDir = join(realHome, 'AppData', 'Local', 'Temp');
+    const nestedHost = { realHome, tmpDir };
+    expect(() =>
+      assertTemporaryHome(join(tmpDir, `${TEST_HOME_PREFIX}abc`), TEST_HOME_KIND, nestedHost)
+    ).not.toThrow();
+    for (const candidate of [realHome, dirname(realHome)]) {
+      expect(() => assertTemporaryHome(candidate, TEST_HOME_KIND, nestedHost)).toThrow(
+        'it is, or contains, the real home'
+      );
+    }
+    const mango = join(realHome, '.mango');
+    for (const candidate of [mango, join(mango, `${TEST_HOME_PREFIX}abc`)]) {
+      expect(() =>
+        assertTemporaryHome(candidate, TEST_HOME_KIND, { realHome, tmpDir: mango })
+      ).toThrow('it is inside ~/.mango');
+    }
   });
 
   test('refuses the real home, naming the value and the expected shape', () => {

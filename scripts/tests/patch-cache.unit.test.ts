@@ -1,10 +1,19 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
+import {
+  FIXTURE_COMMAND_TIMEOUT_MS,
+  FIXTURE_STOP_TIMEOUT_MS,
+  FixtureCommands,
+} from './support/fixture-command';
 import { readText } from './support/read-text';
 import { turboDryRun } from './support/turbo-run';
+
+const commands = new FixtureCommands();
+const COMMAND_BUDGET_MS = FIXTURE_COMMAND_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS;
+afterEach(() => commands.settle(), COMMAND_BUDGET_MS + 5_000);
 
 const PATCH_PATHS = Object.values(
   (JSON.parse(readText('package.json')) as { patchedDependencies: Record<string, string> })
@@ -39,7 +48,7 @@ function createPatchFixture(): string {
 
 /** Asserts the intended tasks exist before comparing the real Turbo cache keys. */
 async function affectedHashes(root: string): Promise<Record<string, string>> {
-  const tasks = await turboDryRun(root, ['run', 'build', 'typecheck', 'test:unit']);
+  const tasks = await turboDryRun(root, ['run', 'build', 'typecheck', 'test:unit'], commands.run);
   const hashes = Object.fromEntries(tasks.map((task) => [task.taskId, task.hash]));
   for (const taskId of AFFECTED_TASKS) {
     expect(hashes[taskId], `expected a cache key for ${taskId} | received: no task`).toBeDefined();
@@ -48,41 +57,51 @@ async function affectedHashes(root: string): Promise<Record<string, string>> {
 }
 
 describe('Bun patch inputs in Turbo cache keys', () => {
-  test('keeps affected keys stable when no dependency input changes', async () => {
-    const root = createPatchFixture();
-    try {
-      expect(await affectedHashes(root)).toEqual(await affectedHashes(root));
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  for (const patchPath of PATCH_PATHS) {
-    test(`changes affected keys when only ${patchPath} bytes change`, async () => {
+  test(
+    'keeps affected keys stable when no dependency input changes',
+    async () => {
       const root = createPatchFixture();
       try {
-        const before = await affectedHashes(root);
-        const manifests = ['package.json', 'bun.lock'].map((path) =>
-          readFileSync(join(root, path))
-        );
-        const path = join(root, patchPath);
-        const original = readFileSync(path);
-        // A trailing LF keeps the patch valid without changing its path, manifest or lockfile.
-        writeFileSync(path, Buffer.concat([original, Buffer.from('\n')]));
-        const changed = await affectedHashes(root);
-        for (const taskId of AFFECTED_TASKS) {
-          expect(
-            changed[taskId],
-            `expected ${taskId} cache key to change after ${patchPath} bytes changed | received: unchanged ${before[taskId]}`
-          ).not.toBe(before[taskId]);
-        }
-        expect(readFileSync(join(root, 'package.json'))).toEqual(manifests[0]);
-        expect(readFileSync(join(root, 'bun.lock'))).toEqual(manifests[1]);
-        writeFileSync(path, original);
-        expect(await affectedHashes(root)).toEqual(before);
+        expect(await affectedHashes(root)).toEqual(await affectedHashes(root));
       } finally {
+        await commands.settle();
         rmSync(root, { recursive: true, force: true });
       }
-    });
+    },
+    2 * COMMAND_BUDGET_MS + 5_000
+  );
+
+  for (const patchPath of PATCH_PATHS) {
+    test(
+      `changes affected keys when only ${patchPath} bytes change`,
+      async () => {
+        const root = createPatchFixture();
+        try {
+          const before = await affectedHashes(root);
+          const manifests = ['package.json', 'bun.lock'].map((path) =>
+            readFileSync(join(root, path))
+          );
+          const path = join(root, patchPath);
+          const original = readFileSync(path);
+          // A trailing LF keeps the patch valid without changing its path, manifest or lockfile.
+          writeFileSync(path, Buffer.concat([original, Buffer.from('\n')]));
+          const changed = await affectedHashes(root);
+          for (const taskId of AFFECTED_TASKS) {
+            expect(
+              changed[taskId],
+              `expected ${taskId} cache key to change after ${patchPath} bytes changed | received: unchanged ${before[taskId]}`
+            ).not.toBe(before[taskId]);
+          }
+          expect(readFileSync(join(root, 'package.json'))).toEqual(manifests[0]);
+          expect(readFileSync(join(root, 'bun.lock'))).toEqual(manifests[1]);
+          writeFileSync(path, original);
+          expect(await affectedHashes(root)).toEqual(before);
+        } finally {
+          await commands.settle();
+          rmSync(root, { recursive: true, force: true });
+        }
+      },
+      3 * COMMAND_BUDGET_MS + 5_000
+    );
   }
 });

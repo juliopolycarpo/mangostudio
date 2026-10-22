@@ -13,10 +13,38 @@ import {
   releaseArchiveFileName,
   runtimeBinaryName,
 } from '../lib/release-targets';
-import { archiveReleaseAssets } from '../release/archive-assets';
-import { extractTargetArchive } from '../release/extract-target';
+import type { extractTargetArchive as extractTarget } from '../release/extract-target';
+import {
+  FIXTURE_COMMAND_TIMEOUT_MS,
+  FIXTURE_STOP_TIMEOUT_MS,
+  FixtureCommands,
+} from './support/fixture-command';
 
 let tempDirs: string[] = [];
+// A fixture plan creates up to two platform archives and one frontend archive.
+// The serial/parallel comparison executes that plan twice in one test body.
+const ARCHIVE_OPERATION_TIMEOUT_MS = 3 * FIXTURE_COMMAND_TIMEOUT_MS;
+const ARCHIVE_TEST_TIMEOUT_MS =
+  2 * (ARCHIVE_OPERATION_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS) + 5_000;
+const commands = new FixtureCommands(undefined, ARCHIVE_OPERATION_TIMEOUT_MS);
+
+async function runArchiveFixture(operation: 'archive' | 'extract', input: unknown): Promise<void> {
+  const result = await commands.run(
+    [
+      process.execPath,
+      join(import.meta.dir, 'support/archive-assets-fixture.ts'),
+      operation,
+      JSON.stringify(input),
+    ],
+    import.meta.dir
+  );
+  if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout);
+}
+
+const archiveReleaseAssets = (plan: ReleaseAssetPlan): Promise<void> =>
+  runArchiveFixture('archive', plan);
+const extractTargetArchive = (options: Parameters<typeof extractTarget>[0]): Promise<void> =>
+  runArchiveFixture('extract', options);
 
 const makeTempDir = (): string => {
   const dir = mkdtempSync(join(tmpdir(), 'mangostudio-release-assets-'));
@@ -24,7 +52,8 @@ const makeTempDir = (): string => {
   return dir;
 };
 
-afterEach(() => {
+afterEach(async () => {
+  await commands.settle();
   for (const dir of tempDirs) {
     rmSync(dir, { force: true, recursive: true });
   }
@@ -147,177 +176,205 @@ const createMuslReleasePlan = (options: {
 };
 
 describe.serial('archiveReleaseAssets', () => {
-  test('writes a flat Windows ZIP with matching binaries and checksum', async () => {
-    const rootDir = makeTempDir();
-    const outDir = join(rootDir, 'out');
-    const sourceDir = join(outDir, 'windows-x64');
-    mkdirSync(sourceDir, { recursive: true });
-    writeFileSync(join(sourceDir, 'mangostudio.exe'), 'hub binary');
-    writeFileSync(join(sourceDir, 'mangostudio-runtime.exe'), 'runtime binary');
-    writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
-    stageFrontendDist(rootDir);
-    mkdirSync(join(rootDir, 'scripts', 'install'), { recursive: true });
-    writeFileSync(join(rootDir, 'scripts', 'install', 'install.sh'), '#!/usr/bin/env bash\n');
-    writeFileSync(join(rootDir, 'scripts', 'install', 'install.ps1'), '# fixture\n');
-    const plan = createReleaseAssetPlan({
-      version: '1.2.3',
-      rootDir,
-      outDir,
-      assetsDir: join(rootDir, 'release-assets'),
-      onlyPlatform: 'windows-x64',
-    });
-    await archiveReleaseAssets(plan);
-    const [archive] = plan.platformArchives;
-    if (!archive) throw new Error('expected a Windows platform archive | received: none');
-    const destination = join(rootDir, '.mango', 'out', 'windows-x64');
-    await extractTargetArchive({
-      archivePath: archive.archivePath,
-      archiveFormat: 'zip',
-      destination,
-      expectedMembers: ['mangostudio.exe', 'mangostudio-runtime.exe', 'README.md'],
-      rootDir,
-    });
-    expect(readFileSync(join(destination, 'mangostudio.exe'), 'utf8')).toBe('hub binary');
-    expect(readFileSync(join(destination, 'mangostudio-runtime.exe'), 'utf8')).toBe(
-      'runtime binary'
-    );
-    expect(readFileSync(join(destination, 'README.md'), 'utf8')).toBe('# Standalone build\n');
-    const digest = createHash('sha256').update(readFileSync(archive.archivePath)).digest('hex');
-    expect(readFileSync(plan.checksumPath, 'utf8')).toContain(`${digest}  ${archive.assetName}\n`);
-  });
+  test(
+    'writes a flat Windows ZIP with matching binaries and checksum',
+    async () => {
+      const rootDir = makeTempDir();
+      const outDir = join(rootDir, 'out');
+      const sourceDir = join(outDir, 'windows-x64');
+      mkdirSync(sourceDir, { recursive: true });
+      writeFileSync(join(sourceDir, 'mangostudio.exe'), 'hub binary');
+      writeFileSync(join(sourceDir, 'mangostudio-runtime.exe'), 'runtime binary');
+      writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
+      stageFrontendDist(rootDir);
+      mkdirSync(join(rootDir, 'scripts', 'install'), { recursive: true });
+      writeFileSync(join(rootDir, 'scripts', 'install', 'install.sh'), '#!/usr/bin/env bash\n');
+      writeFileSync(join(rootDir, 'scripts', 'install', 'install.ps1'), '# fixture\n');
+      const plan = createReleaseAssetPlan({
+        version: '1.2.3',
+        rootDir,
+        outDir,
+        assetsDir: join(rootDir, 'release-assets'),
+        onlyPlatform: 'windows-x64',
+      });
+      await archiveReleaseAssets(plan);
+      const [archive] = plan.platformArchives;
+      if (!archive) throw new Error('expected a Windows platform archive | received: none');
+      const destination = join(rootDir, '.mango', 'out', 'windows-x64');
+      await extractTargetArchive({
+        archivePath: archive.archivePath,
+        archiveFormat: 'zip',
+        destination,
+        expectedMembers: ['mangostudio.exe', 'mangostudio-runtime.exe', 'README.md'],
+        rootDir,
+      });
+      expect(readFileSync(join(destination, 'mangostudio.exe'), 'utf8')).toBe('hub binary');
+      expect(readFileSync(join(destination, 'mangostudio-runtime.exe'), 'utf8')).toBe(
+        'runtime binary'
+      );
+      expect(readFileSync(join(destination, 'README.md'), 'utf8')).toBe('# Standalone build\n');
+      const digest = createHash('sha256').update(readFileSync(archive.archivePath)).digest('hex');
+      expect(readFileSync(plan.checksumPath, 'utf8')).toContain(
+        `${digest}  ${archive.assetName}\n`
+      );
+    },
+    ARCHIVE_TEST_TIMEOUT_MS
+  );
   // What a platform archive needs is now just the two binaries and the README.
   // Kept as a rejection test rather than deleted: the vendored-SDK layout check
   // that used to live here was the only thing asserting the archive step
   // validates its inputs at all.
-  test('rejects a platform whose runtime binary was never built', async () => {
-    const rootDir = makeTempDir();
-    const outDir = join(rootDir, 'out');
-    const sourceDir = join(outDir, 'linux-x64');
-    mkdirSync(sourceDir, { recursive: true });
-    writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
-    writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
+  test(
+    'rejects a platform whose runtime binary was never built',
+    async () => {
+      const rootDir = makeTempDir();
+      const outDir = join(rootDir, 'out');
+      const sourceDir = join(outDir, 'linux-x64');
+      mkdirSync(sourceDir, { recursive: true });
+      writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
+      writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
 
-    const plan = createReleaseAssetPlan({
-      version: '1.2.3',
-      rootDir,
-      outDir,
-      assetsDir: join(rootDir, 'release-assets'),
-      onlyPlatform: 'linux-x64',
-    });
+      const plan = createReleaseAssetPlan({
+        version: '1.2.3',
+        rootDir,
+        outDir,
+        assetsDir: join(rootDir, 'release-assets'),
+        onlyPlatform: 'linux-x64',
+      });
 
-    await expect(archiveReleaseAssets(plan)).rejects.toThrow(/runtime binary/);
-  });
+      await expect(archiveReleaseAssets(plan)).rejects.toThrow(/runtime binary/);
+    },
+    ARCHIVE_TEST_TIMEOUT_MS
+  );
 
-  test('names the earlier build step when the README was never written', async () => {
-    const rootDir = makeTempDir();
-    const outDir = join(rootDir, 'out');
-    stageFailedVerificationBuild(outDir, 'linux-x64');
-    const plan = createReleaseAssetPlan({
-      version: '1.2.3',
-      rootDir,
-      outDir,
-      assetsDir: join(rootDir, 'release-assets'),
-      onlyPlatform: 'linux-x64',
-    });
+  test(
+    'names the earlier build step when the README was never written',
+    async () => {
+      const rootDir = makeTempDir();
+      const outDir = join(rootDir, 'out');
+      stageFailedVerificationBuild(outDir, 'linux-x64');
+      const plan = createReleaseAssetPlan({
+        version: '1.2.3',
+        rootDir,
+        outDir,
+        assetsDir: join(rootDir, 'release-assets'),
+        onlyPlatform: 'linux-x64',
+      });
 
-    const message = await archiveReleaseAssets(plan).then(
-      () => 'archived a build that never finished',
-      (caught: unknown) => (caught instanceof Error ? caught.message : String(caught))
-    );
+      const message = await archiveReleaseAssets(plan).then(
+        () => 'archived a build that never finished',
+        (caught: unknown) => (caught instanceof Error ? caught.message : String(caught))
+      );
 
-    expect(message, 'message must name the missing file').toContain(join(outDir, 'README.md'));
-    expect(
-      message,
-      `expected a message naming the failed build step | received: ${message}`
-    ).toContain('bun run build --binary');
-  });
+      expect(message, 'message must name the missing file').toContain(join(outDir, 'README.md'));
+      expect(
+        message,
+        `expected a message naming the failed build step | received: ${message}`
+      ).toContain('bun run build --binary');
+    },
+    ARCHIVE_TEST_TIMEOUT_MS
+  );
 
-  test('writes every archive and checksum manifest with bounded parallelism', async () => {
-    const rootDir = makeTempDir();
-    const arches = ['linux-x64-musl', 'linux-arm64-musl'] as const;
-    stageMuslPlatforms(join(rootDir, 'out'), arches);
-    stageFrontendDist(rootDir);
-    const plan = createMuslReleasePlan({ rootDir, version: '1.2.3', arches });
+  test(
+    'writes every archive and checksum manifest with bounded parallelism',
+    async () => {
+      const rootDir = makeTempDir();
+      const arches = ['linux-x64-musl', 'linux-arm64-musl'] as const;
+      stageMuslPlatforms(join(rootDir, 'out'), arches);
+      stageFrontendDist(rootDir);
+      const plan = createMuslReleasePlan({ rootDir, version: '1.2.3', arches });
 
-    await withArchiveConcurrency('4', async () => {
-      await archiveReleaseAssets(plan);
-    });
-
-    for (const archive of plan.platformArchives) {
-      expect(existsSync(archive.archivePath)).toBe(true);
-    }
-    for (const asset of plan.rawBinaries) {
-      expect(existsSync(asset.assetPath)).toBe(true);
-    }
-    expect(existsSync(plan.frontendArchive.archivePath)).toBe(true);
-    const frontendMembers = (await openTarArchive(plan.frontendArchive.archivePath)).entries.join(
-      '\n'
-    );
-    expect(frontendMembers).toContain('./index.html');
-    expect(frontendMembers).not.toContain(BUILD_STATE_FILE);
-    expect(existsSync(plan.checksumPath)).toBe(true);
-
-    const checksumLines = readFileSync(plan.checksumPath, 'utf8').trimEnd().split('\n');
-    expect(checksumLines.map((line) => line.split('  ')[1])).toEqual(
-      plan.checksummedAssetPaths.map((assetPath) => basename(assetPath))
-    );
-    expect(
-      plan.rawBinaries.every((asset) =>
-        checksumLines.some((line) => line.endsWith(`  ${asset.assetName}`))
-      )
-    ).toBe(true);
-  });
-
-  test('copies the install scripts verbatim and checksums them', async () => {
-    const rootDir = makeTempDir();
-    const arches = ['linux-x64-musl'] as const;
-    stageMuslPlatforms(join(rootDir, 'out'), arches);
-    stageFrontendDist(rootDir);
-    mkdirSync(join(rootDir, 'scripts', 'install'), { recursive: true });
-    writeFileSync(
-      join(rootDir, 'scripts', 'install', 'install.sh'),
-      '#!/usr/bin/env bash\necho fixture\n'
-    );
-    writeFileSync(join(rootDir, 'scripts', 'install', 'install.ps1'), '# fixture\n');
-
-    const plan = createReleaseAssetPlan({
-      version: '1.2.3',
-      rootDir,
-      outDir: join(rootDir, 'out'),
-      assetsDir: join(rootDir, 'release-assets'),
-      onlyPlatform: 'linux-x64-musl',
-    });
-
-    await archiveReleaseAssets(plan);
-
-    for (const script of plan.installerScripts) {
-      expect(existsSync(script.assetPath)).toBe(true);
-      expect(readFileSync(script.assetPath, 'utf8')).toBe(readFileSync(script.sourcePath, 'utf8'));
-    }
-    const checksumLines = readFileSync(plan.checksumPath, 'utf8').trimEnd().split('\n');
-    expect(checksumLines.some((line) => line.endsWith('  install.sh'))).toBe(true);
-    expect(checksumLines.some((line) => line.endsWith('  install.ps1'))).toBe(true);
-  });
-
-  test('produces identical SHA256SUMS for serial and parallel archiving', async () => {
-    // Stage once and re-archive the same sources. Restaging between runs picks up
-    // fresh file mtimes, and GNU tar embeds those in the archive, so checksums
-    // diverge across a second boundary even when concurrency is irrelevant.
-    const rootDir = makeTempDir();
-    const arches = ['linux-x64-musl', 'linux-arm64-musl'] as const;
-    stageMuslPlatforms(join(rootDir, 'out'), arches);
-    stageFrontendDist(rootDir);
-    const plan = createMuslReleasePlan({ rootDir, version: '9.9.9', arches });
-
-    const runArchiving = async (concurrency: string): Promise<string> => {
-      await withArchiveConcurrency(concurrency, async () => {
+      await withArchiveConcurrency('4', async () => {
         await archiveReleaseAssets(plan);
       });
-      return readFileSync(plan.checksumPath, 'utf8');
-    };
 
-    const serialChecksums = await runArchiving('1');
-    const parallelChecksums = await runArchiving('4');
-    expect(parallelChecksums).toBe(serialChecksums);
-  });
+      for (const archive of plan.platformArchives) {
+        expect(existsSync(archive.archivePath)).toBe(true);
+      }
+      for (const asset of plan.rawBinaries) {
+        expect(existsSync(asset.assetPath)).toBe(true);
+      }
+      expect(existsSync(plan.frontendArchive.archivePath)).toBe(true);
+      const frontendMembers = (await openTarArchive(plan.frontendArchive.archivePath)).entries.join(
+        '\n'
+      );
+      expect(frontendMembers).toContain('./index.html');
+      expect(frontendMembers).not.toContain(BUILD_STATE_FILE);
+      expect(existsSync(plan.checksumPath)).toBe(true);
+
+      const checksumLines = readFileSync(plan.checksumPath, 'utf8').trimEnd().split('\n');
+      expect(checksumLines.map((line) => line.split('  ')[1])).toEqual(
+        plan.checksummedAssetPaths.map((assetPath) => basename(assetPath))
+      );
+      expect(
+        plan.rawBinaries.every((asset) =>
+          checksumLines.some((line) => line.endsWith(`  ${asset.assetName}`))
+        )
+      ).toBe(true);
+    },
+    ARCHIVE_TEST_TIMEOUT_MS
+  );
+
+  test(
+    'copies the install scripts verbatim and checksums them',
+    async () => {
+      const rootDir = makeTempDir();
+      const arches = ['linux-x64-musl'] as const;
+      stageMuslPlatforms(join(rootDir, 'out'), arches);
+      stageFrontendDist(rootDir);
+      mkdirSync(join(rootDir, 'scripts', 'install'), { recursive: true });
+      writeFileSync(
+        join(rootDir, 'scripts', 'install', 'install.sh'),
+        '#!/usr/bin/env bash\necho fixture\n'
+      );
+      writeFileSync(join(rootDir, 'scripts', 'install', 'install.ps1'), '# fixture\n');
+
+      const plan = createReleaseAssetPlan({
+        version: '1.2.3',
+        rootDir,
+        outDir: join(rootDir, 'out'),
+        assetsDir: join(rootDir, 'release-assets'),
+        onlyPlatform: 'linux-x64-musl',
+      });
+
+      await archiveReleaseAssets(plan);
+
+      for (const script of plan.installerScripts) {
+        expect(existsSync(script.assetPath)).toBe(true);
+        expect(readFileSync(script.assetPath, 'utf8')).toBe(
+          readFileSync(script.sourcePath, 'utf8')
+        );
+      }
+      const checksumLines = readFileSync(plan.checksumPath, 'utf8').trimEnd().split('\n');
+      expect(checksumLines.some((line) => line.endsWith('  install.sh'))).toBe(true);
+      expect(checksumLines.some((line) => line.endsWith('  install.ps1'))).toBe(true);
+    },
+    ARCHIVE_TEST_TIMEOUT_MS
+  );
+
+  test(
+    'produces identical SHA256SUMS for serial and parallel archiving',
+    async () => {
+      // Stage once and re-archive the same sources. Restaging between runs picks up
+      // fresh file mtimes, and GNU tar embeds those in the archive, so checksums
+      // diverge across a second boundary even when concurrency is irrelevant.
+      const rootDir = makeTempDir();
+      const arches = ['linux-x64-musl', 'linux-arm64-musl'] as const;
+      stageMuslPlatforms(join(rootDir, 'out'), arches);
+      stageFrontendDist(rootDir);
+      const plan = createMuslReleasePlan({ rootDir, version: '9.9.9', arches });
+
+      const runArchiving = async (concurrency: string): Promise<string> => {
+        await withArchiveConcurrency(concurrency, async () => {
+          await archiveReleaseAssets(plan);
+        });
+        return readFileSync(plan.checksumPath, 'utf8');
+      };
+
+      const serialChecksums = await runArchiving('1');
+      const parallelChecksums = await runArchiving('4');
+      expect(parallelChecksums).toBe(serialChecksums);
+    },
+    ARCHIVE_TEST_TIMEOUT_MS
+  );
 });

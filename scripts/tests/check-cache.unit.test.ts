@@ -4,14 +4,24 @@ import { join } from 'node:path';
 import { createTurboCheckCommand } from '../lib/check';
 import { ROOT_DIR, type WorkspaceName } from '../lib/config';
 import { protocolCheckTasks } from '../protocol/tasks';
+import {
+  FIXTURE_COMMAND_TIMEOUT_MS,
+  FIXTURE_STOP_TIMEOUT_MS,
+  FixtureCommands,
+} from './support/fixture-command';
 import { runTurbo, turboDryRun } from './support/turbo-run';
 import { createTypecheckFixture, type TypecheckFixture } from './support/typecheck-fixture';
 
 const WORKSPACES = ['apps/api', 'apps/frontend', 'apps/shared', 'packages/protocol'];
 const fixtures: TypecheckFixture[] = [];
+const commands = new FixtureCommands();
+// Each cache replay case runs three commands in sequence. The Bun test deadline
+// must leave each command its own execution and tree-stop allowance, plus setup.
+const COMMAND_BUDGET_MS = FIXTURE_COMMAND_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS;
+const CACHE_CHECK_TIMEOUT_MS = 3 * COMMAND_BUDGET_MS + 5_000;
 // These CLI cases also compile dprint's plugins in a fresh writable cache.
 // Keep that tool startup bounded separately from the small Turbo-only cases.
-const ROOT_CHECK_TIMEOUT_MS = 60_000;
+const ROOT_CHECK_TIMEOUT_MS = CACHE_CHECK_TIMEOUT_MS;
 
 /** Real lint/cycle scripts and Turbo config, with only tsc replaced by the existing fake. */
 function createFixture(): TypecheckFixture {
@@ -82,33 +92,24 @@ function requiredCheck(fixture: TypecheckFixture, workspace: string) {
       ? protocolCheckTasks(['--ts-only'], { cargo: false, cargoHack: false })[0]?.cmd
       : createTurboCheckCommand([workspace.slice(5) as WorkspaceName]);
   expect(command?.[0]).toBe('turbo');
-  return runTurbo(fixture.root, [
-    ...(command?.slice(1) ?? []),
-    ...fixture.turboArgs.filter((arg) => !arg.startsWith('--ui=')),
-  ]);
+  return runTurbo(
+    fixture.root,
+    [...(command?.slice(1) ?? []), ...fixture.turboArgs.filter((arg) => !arg.startsWith('--ui='))],
+    {},
+    commands.run
+  );
 }
 
-async function rootCheck(fixture: TypecheckFixture, workspace: WorkspaceName) {
-  const proc = Bun.spawn(['bun', 'run', 'check', `--${workspace}`], {
-    cwd: fixture.root,
-    env: {
-      ...process.env,
-      // Root test workers can inherit a read-only formatter cache. Keep this
-      // fixture's real dprint invocation writable and independent of that home.
-      DPRINT_CACHE_DIR: join(fixture.root, '.dprint-cache'),
-      TURBO_CACHE_DIR: join(fixture.root, '.turbo-cache'),
-      TURBO_TELEMETRY_DISABLED: '1',
-      TURBO_NO_UPDATE_NOTIFIER: '1',
-    },
-    stdout: 'pipe',
-    stderr: 'pipe',
+function rootCheck(fixture: TypecheckFixture, workspace: WorkspaceName) {
+  return commands.run(['bun', 'run', 'check', `--${workspace}`], fixture.root, {
+    ...process.env,
+    // Root test workers can inherit a read-only formatter cache. Keep this
+    // fixture's real dprint invocation writable and independent of that home.
+    DPRINT_CACHE_DIR: join(fixture.root, '.dprint-cache'),
+    TURBO_CACHE_DIR: join(fixture.root, '.turbo-cache'),
+    TURBO_TELEMETRY_DISABLED: '1',
+    TURBO_NO_UPDATE_NOTIFIER: '1',
   });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  return { stdout, stderr, exitCode };
 }
 
 function expectOutcome(
@@ -122,9 +123,10 @@ function expectOutcome(
   return Bun.stripANSI(output);
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await commands.settle();
   for (const fixture of fixtures.splice(0)) fixture.dispose();
-});
+}, COMMAND_BUDGET_MS + 5_000);
 
 describe('lint cache and required cycle scans', () => {
   const cycles = [
@@ -154,23 +156,27 @@ describe('lint cache and required cycle scans', () => {
   ];
   for (const workspace of WORKSPACES) {
     for (const cycle of cycles) {
-      test(`${workspace} rejects a new ignored ${cycle.name} while replaying cached lint`, async () => {
-        const fixture = createFixture();
-        const packageName = JSON.parse(
-          readFileSync(join(fixture.root, workspace, 'package.json'), 'utf8')
-        ).name;
-        expectOutcome(await requiredCheck(fixture, workspace), 'pass');
-        for (const [file, source] of Object.entries(cycle.files)) {
-          await Bun.write(join(fixture.root, workspace, 'build', file), source);
-        }
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const rejected = expectOutcome(await requiredCheck(fixture, workspace), 'fail');
-          expect(rejected).toContain(`${packageName}:check:quick: cache hit`);
-          expect(rejected).toContain(`${packageName}:check:cycles: cache bypass`);
-          expect(rejected).toContain(cycle.rule);
-          expect(rejected.replaceAll('\\', '/')).toContain('build/a.ts');
-        }
-      });
+      test(
+        `${workspace} rejects a new ignored ${cycle.name} while replaying cached lint`,
+        async () => {
+          const fixture = createFixture();
+          const packageName = JSON.parse(
+            readFileSync(join(fixture.root, workspace, 'package.json'), 'utf8')
+          ).name;
+          expectOutcome(await requiredCheck(fixture, workspace), 'pass');
+          for (const [file, source] of Object.entries(cycle.files)) {
+            await Bun.write(join(fixture.root, workspace, 'build', file), source);
+          }
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const rejected = expectOutcome(await requiredCheck(fixture, workspace), 'fail');
+            expect(rejected).toContain(`${packageName}:check:quick: cache hit`);
+            expect(rejected).toContain(`${packageName}:check:cycles: cache bypass`);
+            expect(rejected).toContain(cycle.rule);
+            expect(rejected.replaceAll('\\', '/')).toContain('build/a.ts');
+          }
+        },
+        CACHE_CHECK_TIMEOUT_MS
+      );
     }
   }
 
@@ -204,7 +210,7 @@ describe('lint cache and required cycle scans', () => {
       // each line as a local streamed run does. Require the same task/cache state.
       expect(rejected).toMatch(/@mangostudio\/frontend:check:quick(?:: |\r?\n)cache miss/);
       expect(rejected).toContain('format');
-      expect(rejected).toContain('src/index.ts');
+      expect(rejected.replaceAll('\\', '/')).toContain('src/index.ts');
     },
     ROOT_CHECK_TIMEOUT_MS
   );
@@ -236,20 +242,26 @@ describe('lint cache inputs', () => {
     'apps/shared/src/index.ts',
     'packages/protocol/src/index.ts',
   ]) {
-    test(`editing ${file} invalidates frontend lint`, async () => {
-      const fixture = createFixture();
-      const args = ['run', 'check:quick', '--filter=@mangostudio/frontend', ...fixture.turboArgs];
-      const hash = async () => {
-        const task = (await turboDryRun(fixture.root, args)).find(
-          (task) => task.taskId === '@mangostudio/frontend#check:quick'
+    test(
+      `editing ${file} invalidates frontend lint`,
+      async () => {
+        const fixture = createFixture();
+        const args = ['run', 'check:quick', '--filter=@mangostudio/frontend', ...fixture.turboArgs];
+        const hash = async () => {
+          const task = (await turboDryRun(fixture.root, args, commands.run)).find(
+            (task) => task.taskId === '@mangostudio/frontend#check:quick'
+          );
+          expect(task, 'frontend lint must be selected').toBeDefined();
+          return task?.hash;
+        };
+        const before = await hash();
+        const path = join(fixture.root, file);
+        writeFileSync(path, `${readFileSync(path, 'utf8')}\n`);
+        expect(await hash(), `${file} changed but frontend lint retained its hash`).not.toBe(
+          before
         );
-        expect(task, 'frontend lint must be selected').toBeDefined();
-        return task?.hash;
-      };
-      const before = await hash();
-      const path = join(fixture.root, file);
-      writeFileSync(path, `${readFileSync(path, 'utf8')}\n`);
-      expect(await hash(), `${file} changed but frontend lint retained its hash`).not.toBe(before);
-    });
+      },
+      2 * COMMAND_BUDGET_MS + 5_000
+    );
   }
 });
