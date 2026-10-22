@@ -147,6 +147,11 @@ const ALLOWED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
 };
 
+/** Looks up one exact file/rule exception using POSIX or Windows path separators. */
+function isAllowed(file: string, why: string): boolean {
+  return Boolean(ALLOWED[file.replaceAll('\\', '/')]?.[why]);
+}
+
 function stripComments(source: string, file: string): string {
   const blank = (m: string) => m.replace(/[^\n]/g, ' ');
   let out = source.replace(/\/\*[\s\S]*?\*\//g, blank);
@@ -169,7 +174,7 @@ async function violations(): Promise<string[]> {
     const raw = await Bun.file(join(SRC, file)).text();
     const code = stripComments(raw, file);
     for (const rule of RULES) {
-      if (ALLOWED[file]?.[rule.why]) continue;
+      if (isAllowed(file, rule.why)) continue;
       if (rule.sourceOnly && file.endsWith('.css')) continue;
       const text = rule.includeComments ? raw : code;
       for (const match of text.matchAll(rule.pattern)) {
@@ -185,6 +190,38 @@ async function violations(): Promise<string[]> {
 }
 
 describe('design system conformance', () => {
+  const typeScaleRule =
+    'type scale is text-micro/xs/sm/base/title/headline — other sizes compile to nothing';
+
+  it.each([
+    'components/ui/ToolAvatar.tsx',
+    'components\\ui\\ToolAvatar.tsx',
+    'components/ui/ContextRing.tsx',
+    'components\\ui\\ContextRing.tsx',
+  ])('recognizes the declared type scale exception for %s', (file) => {
+    expect(isAllowed(file, typeScaleRule)).toBe(true);
+  });
+
+  it.each([
+    ['components/ui/Unlisted.tsx', typeScaleRule],
+    ['components\\ui\\Unlisted.tsx', typeScaleRule],
+    ['nested/components\\ui\\ToolAvatar.tsx', typeScaleRule],
+    [
+      'components\\ui\\ContextRing.tsx',
+      'upper-case and letter-spacing belong to .micro-label only; badges and buttons are sentence case',
+    ],
+    [
+      'components/ui/ToolAvatar.tsx',
+      'raw palette colours do not follow the theme — use a token from foundations.md',
+    ],
+    [
+      'components\\ui\\ToolAvatar.tsx',
+      'raw palette colours do not follow the theme — use a token from foundations.md',
+    ],
+  ])('rejects an undeclared exception for %s: %s', (file, why) => {
+    expect(isAllowed(file, why)).toBe(false);
+  });
+
   it('keeps every source file inside the flat design vocabulary', async () => {
     const found = await violations();
     // A bare `toEqual([])` prints a wall of JSON; the joined list is what a

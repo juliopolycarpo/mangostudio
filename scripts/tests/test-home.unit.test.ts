@@ -188,7 +188,7 @@ describe('the test home shape check', () => {
   });
 
   test('accepts temporary homes under the real home while protecting home, ancestors and .mango', () => {
-    const realHome = resolve(tmpdir(), 'mango-test-home-policy');
+    const realHome = resolve(realpathSync(tmpdir()), 'mango-test-home-policy');
     const tmpDir = join(realHome, 'AppData', 'Local', 'Temp');
     const nestedHost = { realHome, tmpDir };
     expect(() =>
