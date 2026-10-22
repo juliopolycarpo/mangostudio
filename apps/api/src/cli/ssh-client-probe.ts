@@ -9,7 +9,7 @@
 
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 
-const VERSION_PROBE_TIMEOUT_MS = 5_000;
+import { readVersionProcess, type VersionProbeProcess } from './version-probe-process';
 
 export interface SshClientProbe {
   /** Resolved executable, or null when nothing named `ssh` is on PATH. */
@@ -18,41 +18,52 @@ export interface SshClientProbe {
   readonly error: string | null;
 }
 
+export interface SshClientProcess extends VersionProbeProcess {
+  readonly stderr: ReadableStream<Uint8Array>;
+}
+
+/** Starts the exact executable doctor found, without invoking a shell. */
+function spawnSshClient(path: string): SshClientProcess {
+  return Bun.spawn([path, '-V'], {
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'pipe',
+    ...HIDDEN_WINDOW,
+  });
+}
+
+/**
+ * Reads the installed SSH client's version, retaining failures for doctor.
+ *
+ * @example
+ * const client = await probeSshClient(); // { path: '/usr/bin/ssh', version: 'OpenSSH_...', error: null }
+ */
 export async function probeSshClient(
-  path: string | null = Bun.which('ssh')
+  path: string | null = Bun.which('ssh'),
+  spawn: (path: string) => SshClientProcess = spawnSshClient
 ): Promise<SshClientProbe> {
   if (!path) return { path: null, version: null, error: null };
 
-  let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+  let child: SshClientProcess;
   try {
-    child = Bun.spawn([path, '-V'], { stdout: 'pipe', stderr: 'pipe', ...HIDDEN_WINDOW });
+    child = spawn(path);
   } catch (error) {
     return { path, version: null, error: describeError(error) };
   }
 
-  const timeout = setTimeout(() => child.kill(), VERSION_PROBE_TIMEOUT_MS);
   try {
-    // OpenSSH prints its banner on stderr, and has since forever. Reading
-    // stdout here would report a client that answered as one that said nothing.
-    const [stderr, exitCode] = await Promise.all([new Response(child.stderr).text(), child.exited]);
-    const version = stderr.trim().split(/\r?\n/)[0]?.trim() ?? '';
-    // OpenSSH prints the banner on stderr and exits 0. A nonzero status with
-    // leftover text is still a broken client (unsupported option, wrong binary
-    // on PATH) — do not treat that text as a version string.
+    const { text, exitCode } = await readVersionProcess(child, child.stderr, 'ssh -V');
+    const version = text.trim().split(/\r?\n/)[0]?.trim() ?? '';
+    // OpenSSH prints its banner on stderr and exits 0. Leftover error text
+    // from a wrong binary or unsupported option is not a version string.
     if (exitCode !== 0) {
-      return {
-        path,
-        version: null,
-        error: version || `exited with code ${exitCode}`,
-      };
+      return { path, version: null, error: version || `exited with code ${exitCode}` };
     }
     return version
       ? { path, version, error: null }
       : { path, version: null, error: 'printed no version' };
   } catch (error) {
     return { path, version: null, error: describeError(error) };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
