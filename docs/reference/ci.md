@@ -252,6 +252,11 @@ recorded as a natural exit instead, with the same identity proof and a stable
 snapshot that no longer lists it. Final Job closure
 is containment and never establishes successful settlement. Full native
 censuses before and after each command reject unattributed compiler helpers.
+The TypeScript producer’s outer Windows census runs one PowerShell CIM query
+with a 30-second budget; its POSIX `ps` census has 10 seconds. An outer census
+that fails or reaches its budget is incomplete, and its error names the elapsed
+time and the last phase PowerShell reported on stderr. The Windows Job helper’s
+per-command CIM census keeps its separate 10-second operation timeout.
 
 The producer installs its own frozen dependencies and seals its Windows helper
 checkout separately from the fresh tested source. Requests containing the inherited environment live outside uploaded

@@ -5,12 +5,15 @@ import { join } from 'node:path';
 import { Writable } from 'node:stream';
 
 import {
+  captureSnapshot,
   type NativeProcess,
+  POSIX_CENSUS_TIMEOUT_MS,
   parseNativeProcesses,
   readLinuxProcessIdentity,
   runNativeCommand,
   scopeNativeProcesses,
   snapshotNativeProcesses,
+  WINDOWS_CENSUS_TIMEOUT_MS,
 } from '../lib/native-bun-qualification-process';
 
 const temporary: string[] = [];
@@ -173,6 +176,25 @@ class FailingOnceCensus {
   };
 }
 
+/** Separates process outcome from elapsed time observed after its output settles. */
+class SnapshotClock {
+  private calls = 0;
+  constructor(private readonly elapsedMs: number) {}
+
+  now = (): number => (this.calls++ === 0 ? 0 : this.elapsedMs);
+}
+
+/** Records each census command and its budget, and answers with one fixed snapshot. */
+class FakeCensusCapture {
+  readonly calls: Array<{ command: readonly string[]; timeoutMs: number }> = [];
+  constructor(private readonly stdout: string) {}
+
+  run = (command: readonly string[], timeoutMs: number): Promise<string> => {
+    this.calls.push({ command, timeoutMs });
+    return Promise.resolve(this.stdout);
+  };
+}
+
 function briefFixtureCommand(pidFile: string): readonly string[] {
   return [
     process.execPath,
@@ -310,11 +332,107 @@ describe('native process identity', () => {
     expect(reusedRoot.current).toEqual([]);
   });
 
-  test('reads a native census containing this test process', async () => {
-    const rows = await snapshotNativeProcesses();
-    const self = rows.find((row) => row.pid === process.pid);
-    expect(self?.identity).toBeTruthy();
-    expect(self?.parentPid).toBeGreaterThanOrEqual(0);
+  // The lane's 15 s default would stop a slow Windows census before its own budget does.
+  test(
+    'reads a native census containing this test process',
+    async () => {
+      const rows = await snapshotNativeProcesses();
+      const self = rows.find((row) => row.pid === process.pid);
+      expect(self?.identity).toBeTruthy();
+      expect(self?.parentPid).toBeGreaterThanOrEqual(0);
+    },
+    WINDOWS_CENSUS_TIMEOUT_MS + 5_000
+  );
+});
+
+describe('native process census budget', () => {
+  test('gives a Windows census its own budget and a script that reports its phase', async () => {
+    const created = '2026-10-19T23:15:06.0000000Z';
+    const capture = new FakeCensusCapture(
+      JSON.stringify([{ pid: 7, parentPid: 1, created, command: 'bun test', name: 'bun.exe' }])
+    );
+    const rows = await snapshotNativeProcesses({
+      platform: 'win32',
+      findExecutable: (name) => (name === 'pwsh.exe' ? 'C:\\pwsh\\pwsh.exe' : null),
+      capture: capture.run,
+    });
+    expect(rows.map((row) => row.identity)).toEqual([`7:${created}`]);
+    expect(capture.calls.map((call) => call.timeoutMs)).toEqual([WINDOWS_CENSUS_TIMEOUT_MS]);
+    const [shell, ...flags] = capture.calls[0].command;
+    expect(shell).toBe('C:\\pwsh\\pwsh.exe');
+    expect(flags.slice(0, 4)).toEqual(['-NoLogo', '-NoProfile', '-NonInteractive', '-Command']);
+    expect(flags[4]).toContain("[Console]::Error.WriteLine('census: started')");
+    expect(flags[4]).toContain("[Console]::Error.WriteLine('census: queried '");
+  });
+
+  test('keeps a ps census on the POSIX budget', async () => {
+    const capture = new FakeCensusCapture(' 10 1 10 Thu Oct 8 12:00:00 2026 bun run test\n');
+    const rows = await snapshotNativeProcesses({
+      platform: 'darwin',
+      findExecutable: () => null,
+      capture: capture.run,
+    });
+    expect(rows.map((row) => row.pid)).toEqual([10]);
+    expect(capture.calls).toEqual([
+      {
+        command: ['ps', '-axo', 'pid=,ppid=,pgid=,lstart=,args='],
+        timeoutMs: POSIX_CENSUS_TIMEOUT_MS,
+      },
+    ]);
+  });
+
+  test('returns the stdout of a census that finishes inside its budget', async () => {
+    const command = [process.execPath, '-e', 'process.stdout.write("rows")'];
+    expect(await captureSnapshot(command, 10_000)).toBe('rows');
+  });
+
+  test('names the exit code, elapsed time and stderr of a census that fails', async () => {
+    const command = [process.execPath, '-e', 'console.error("census: started"); process.exit(3)'];
+    await expect(captureSnapshot(command, 10_000)).rejects.toThrow(
+      /exited 3 after \d+ms: census: started; expected a complete process census$/
+    );
+  });
+
+  test('retains a natural failure when observation finishes after the budget', async () => {
+    const command = [
+      process.execPath,
+      '-e',
+      'console.error("census: natural failure"); process.exit(3)',
+    ];
+    const clock = new SnapshotClock(10_001);
+    await expect(captureSnapshot(command, 10_000, clock.now)).rejects.toThrow(
+      /exited 3 after 10001ms: census: natural failure; expected a complete process census$/
+    );
+  });
+
+  test('reports the actual signal even when the observed clock is below the budget', async () => {
+    const command = [process.execPath, '-e', 'setTimeout(() => {}, 30_000)'];
+    const clock = new SnapshotClock(999);
+    await expect(captureSnapshot(command, 1_000, clock.now)).rejects.toThrow(
+      /terminated by SIGTERM after 999ms \(exit \d+; budget 1000ms\): no stderr; expected a complete process census$/
+    );
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'reports a self-signal without claiming the budget stopped it',
+    async () => {
+      const command = [process.execPath, '-e', 'process.kill(process.pid, "SIGTERM")'];
+      const clock = new SnapshotClock(10_001);
+      await expect(captureSnapshot(command, 10_000, clock.now)).rejects.toThrow(
+        /terminated by SIGTERM after 10001ms \(exit \d+; budget 10000ms\): no stderr; expected a complete process census$/
+      );
+    }
+  );
+
+  test('names the signal, budget and last phase of a terminated census', async () => {
+    const command = [
+      process.execPath,
+      '-e',
+      'console.error("census: queried 240 processes"); setTimeout(() => {}, 30_000)',
+    ];
+    await expect(captureSnapshot(command, 1_000)).rejects.toThrow(
+      /terminated by SIGTERM after \d+ms \(exit \d+; budget 1000ms\): census: queried 240 processes; expected a complete process census$/
+    );
   });
 });
 

@@ -75,6 +75,8 @@ namespace Mango.NativeJobProbe {
         [DllImport("kernel32.dll", SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] internal static extern bool GetExitCodeProcess(IntPtr process, out uint code);
         [DllImport("kernel32.dll", SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] internal static extern bool GetProcessTimes(IntPtr process, out long creation, out long exit, out long kernel, out long user);
         [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] internal static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, StringBuilder path, ref uint size);
+        [DllImport("kernel32.dll", SetLastError=true)] internal static extern uint GetLogicalDrives();
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] internal static extern uint QueryDosDeviceW(string device, [Out] char[] target, uint capacity);
         [DllImport("kernel32.dll", SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] internal static extern bool IsProcessInJob(IntPtr process, IntPtr job, [MarshalAs(UnmanagedType.Bool)] out bool member);
         [DllImport("kernel32.dll", SetLastError=true)] internal static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
         [DllImport("kernel32.dll", SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] internal static extern bool TerminateProcess(IntPtr process, uint code);
@@ -113,6 +115,32 @@ namespace Mango.NativeJobProbe {
         public uint BufferCapacity, Characters;
         public Member Before, After;
         public bool? SameHandleExited;
+    }
+    /// <summary>Translate a complete native image only through one unambiguous current kernel drive mapping.</summary>
+    /// <example>NativeImagePathPolicy.Translate(@"\Device\HarddiskVolume1\tool.exe",kernelMappings);</example>
+    public static class NativeImagePathPolicy {
+        /// <summary>Return a drive path or null to require a fresh authoritative Win32 image query.</summary>
+        /// <example>string path=NativeImagePathPolicy.Translate(nativeImage,currentDosDevices);</example>
+        public static string Translate(string nativeImage,IDictionary<string,string> currentDosDevices) {
+            if(String.IsNullOrEmpty(nativeImage) || !nativeImage.StartsWith("\\",StringComparison.Ordinal) || nativeImage.StartsWith("\\\\",StringComparison.Ordinal) || nativeImage.IndexOf('\0')>=0 || nativeImage.Length>=32768)
+                throw new InvalidOperationException("Invalid native image " + nativeImage + "; expected complete absolute NT image path");
+            string[] parts=nativeImage.Substring(1).Split('\\');
+            if(parts.Length<3) throw new InvalidOperationException("Invalid native image " + nativeImage + "; expected device, volume and image components");
+            foreach(string part in parts) if(part.Length==0 || part=="." || part=="..") throw new InvalidOperationException("Invalid native image " + nativeImage + "; expected nonempty resolved NT components");
+            if(currentDosDevices==null) throw new InvalidOperationException("Invalid kernel drive mappings null; expected fresh current device mappings");
+            string translated=null;
+            foreach(var mapping in currentDosDevices) {
+                string drive=mapping.Key, target=mapping.Value;
+                if(drive==null || drive.Length!=2 || Char.ToUpperInvariant(drive[0])<'A' || Char.ToUpperInvariant(drive[0])>'Z' || drive[1]!=':' || String.IsNullOrEmpty(target) || target.IndexOf('\0')>=0)
+                    throw new InvalidOperationException("Invalid kernel drive mapping " + drive + "=" + target + "; expected drive letter and complete current target");
+                // SUBST and other object-manager aliases need the documented Win32 query, rather than guessed resolution.
+                if(!target.StartsWith(@"\Device\",StringComparison.OrdinalIgnoreCase)) return null;
+                if(!nativeImage.StartsWith(target+"\\",StringComparison.OrdinalIgnoreCase)) continue;
+                if(translated!=null) return null;
+                translated=drive+nativeImage.Substring(target.Length);
+            }
+            return translated;
+        }
     }
     /// <summary>Bound every image retry and list refresh in one complete job query with one monotonic clock.</summary>
     /// <example>var budget=new ImageQueryBudget(ImageQueryBudget.MaximumMilliseconds, ()=>clock.ElapsedMilliseconds);</example>
@@ -387,15 +415,47 @@ namespace Mango.NativeJobProbe {
         private static ImageQueryBudget NewImageBudget() {
             var clock=Stopwatch.StartNew(); return new ImageQueryBudget(ImageQueryBudget.MaximumMilliseconds,()=>clock.ElapsedMilliseconds);
         }
-        private static ImageResult QueryImage(IntPtr process) {
+        private static ImageResult QueryImage(IntPtr process,ImageQueryBudget budget,string identity) {
+            ImageResult native=ReadImage(process,1,budget,identity);
+            if(!native.Success) return native;
+            if(native.Path==null || native.Characters!=native.Path.Length || native.Characters>=32768)
+                throw new InvalidOperationException("Invalid native image length " + native.Characters + "; expected complete NT image within32768 characters");
+            budget.Require("native image result(" + identity + ")");
+            string path=NativeImagePathPolicy.Translate(native.Path,ReadDosDevices(budget,identity));
+            if(path!=null) return new ImageResult {Success=true,Characters=(uint)path.Length,Path=path};
+            budget.Require("Win32 image fallback(" + identity + ")");
+            return ReadImage(process,0,budget,identity);
+        }
+        private static ImageResult ReadImage(IntPtr process,uint flags,ImageQueryBudget budget,string identity) {
             uint capacity=32768; var path=new StringBuilder((int)capacity);
-            bool success=Win32.QueryFullProcessImageNameW(process,0,path,ref capacity); int error=Marshal.GetLastWin32Error();
+            bool success; int error;
+            success=Win32.QueryFullProcessImageNameW(process,flags,path,ref capacity); error=Marshal.GetLastWin32Error();
             return new ImageResult {Success=success,Error=success?0:error,Characters=capacity,Path=success?path.ToString():null};
         }
+        private static IDictionary<string,string> ReadDosDevices(ImageQueryBudget budget,string identity) {
+            var result=new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase); uint drives;
+            drives=Win32.GetLogicalDrives();
+            budget.Require("logical drive mappings(" + identity + ")");
+            if((drives>>26)!=0) throw new InvalidOperationException("Invalid logical drive mask " + drives + "; expected only26 drive-letter bits");
+            if(drives==0) return result;
+            var target=new char[32768];
+            for(int index=0;index<26;index++) {
+                if((drives&(1u<<index))==0) continue;
+                string drive=((char)('A'+index)).ToString()+":"; uint length;
+                length=Win32.QueryDosDeviceW(drive,target,(uint)target.Length);
+                budget.Require("current kernel device mapping(" + identity + ")");
+                if(length==0) return new Dictionary<string,string>(); // An unavailable mapping requires the authoritative Win32 query.
+                int end=Array.IndexOf(target,'\0',0,checked((int)Math.Min(length,(uint)target.Length)));
+                if(length>target.Length || length<2 || end<1 || target[length-1]!='\0' || target[length-2]!='\0')
+                    throw new InvalidOperationException("Invalid QueryDosDeviceW result " + drive + "/" + length + "; expected complete current mapping and terminated MULTI_SZ");
+                result.Add(drive,new string(target,0,end)); // Only the first entry is current; later entries are prior mappings.
+            }
+            return result;
+        }
         private Member Attest(IntPtr process,uint pid,string expected,ImageQueryBudget budget=null,string expectedImage=null,bool requireMember=true) {
-            string knownIdentity=expected;
+            string knownIdentity=expected; budget=budget??NewImageBudget();
             Func<Member> read=()=> { Member state=ReadState(process,pid,knownIdentity); if(knownIdentity==null) knownIdentity=state.Identity; return state; };
-            Member member=ImageQueryPolicy.Resolve(read,()=>QueryImage(process),milliseconds=>WaitExited(process,pid,milliseconds,knownIdentity),budget??NewImageBudget(),imageAttempts,expected,expectedImage,requireMember);
+            Member member=ImageQueryPolicy.Resolve(read,()=>QueryImage(process,budget,knownIdentity),milliseconds=>WaitExited(process,pid,milliseconds,knownIdentity),budget,imageAttempts,expected,expectedImage,requireMember);
             member.Tool=Metadata(member.Path); return member;
         }
         private ToolMetadata Metadata(string path) {
