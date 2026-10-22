@@ -176,6 +176,14 @@ class FailingOnceCensus {
   };
 }
 
+/** Separates process outcome from elapsed time observed after its output settles. */
+class SnapshotClock {
+  private calls = 0;
+  constructor(private readonly elapsedMs: number) {}
+
+  now = (): number => (this.calls++ === 0 ? 0 : this.elapsedMs);
+}
+
 /** Records each census command and its budget, and answers with one fixed snapshot. */
 class FakeCensusCapture {
   readonly calls: Array<{ command: readonly string[]; timeoutMs: number }> = [];
@@ -385,14 +393,45 @@ describe('native process census budget', () => {
     );
   });
 
-  test('names the budget and the last phase of a census it stops', async () => {
+  test('retains a natural failure when observation finishes after the budget', async () => {
+    const command = [
+      process.execPath,
+      '-e',
+      'console.error("census: natural failure"); process.exit(3)',
+    ];
+    const clock = new SnapshotClock(10_001);
+    await expect(captureSnapshot(command, 10_000, clock.now)).rejects.toThrow(
+      /exited 3 after 10001ms: census: natural failure; expected a complete process census$/
+    );
+  });
+
+  test('reports the actual signal even when the observed clock is below the budget', async () => {
+    const command = [process.execPath, '-e', 'setTimeout(() => {}, 30_000)'];
+    const clock = new SnapshotClock(999);
+    await expect(captureSnapshot(command, 1_000, clock.now)).rejects.toThrow(
+      /terminated by SIGTERM after 999ms \(exit \d+; budget 1000ms\): no stderr; expected a complete process census$/
+    );
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'reports a self-signal without claiming the budget stopped it',
+    async () => {
+      const command = [process.execPath, '-e', 'process.kill(process.pid, "SIGTERM")'];
+      const clock = new SnapshotClock(10_001);
+      await expect(captureSnapshot(command, 10_000, clock.now)).rejects.toThrow(
+        /terminated by SIGTERM after 10001ms \(exit \d+; budget 10000ms\): no stderr; expected a complete process census$/
+      );
+    }
+  );
+
+  test('names the signal, budget and last phase of a terminated census', async () => {
     const command = [
       process.execPath,
       '-e',
       'console.error("census: queried 240 processes"); setTimeout(() => {}, 30_000)',
     ];
     await expect(captureSnapshot(command, 1_000)).rejects.toThrow(
-      /stopped at its 1000ms budget after \d+ms \(exit \d+\): census: queried 240 processes; expected a complete process census$/
+      /terminated by SIGTERM after \d+ms \(exit \d+; budget 1000ms\): census: queried 240 processes; expected a complete process census$/
     );
   });
 });

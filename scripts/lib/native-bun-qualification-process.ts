@@ -201,9 +201,10 @@ const WINDOWS_CENSUS_SCRIPT = [
  */
 export async function captureSnapshot(
   command: readonly string[],
-  timeoutMs: number
+  timeoutMs: number,
+  now: () => number = () => performance.now()
 ): Promise<string> {
-  const started = performance.now();
+  const started = now();
   const child = Bun.spawn([...command], {
     stdout: 'pipe',
     stderr: 'pipe',
@@ -216,11 +217,12 @@ export async function captureSnapshot(
     child.exited,
   ]);
   if (code === 0) return out;
-  const elapsedMs = Math.round(performance.now() - started);
-  const outcome =
-    elapsedMs >= timeoutMs
-      ? `stopped at its ${timeoutMs}ms budget after ${elapsedMs}ms (exit ${code})`
-      : `exited ${code} after ${elapsedMs}ms`;
+  const elapsedMs = Math.round(now() - started);
+  // Bun 1.4.3 marks even natural exits as killed. A signal is observable, but
+  // does not prove whether the configured timeout or another actor sent it.
+  const outcome = child.signalCode
+    ? `terminated by ${child.signalCode} after ${elapsedMs}ms (exit ${code}; budget ${timeoutMs}ms)`
+    : `exited ${code} after ${elapsedMs}ms`;
   throw new Error(
     `Snapshot ${command[0]} ${outcome}: ${error.trim() || 'no stderr'}; expected a complete process census`
   );
