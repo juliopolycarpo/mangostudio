@@ -43,6 +43,6 @@ describe('code-health check', () => {
     const checkScript = readText('scripts/check.ts');
 
     expect(checkScript).toContain('touchesCodeHealthSurface');
-    expect(checkScript).toContain("runCommand('root:code-health'");
+    expect(checkScript).toContain("commandTask('root:code-health'");
   });
 });

@@ -50,7 +50,7 @@ describe('check script', () => {
     const checkScript = readText('scripts/check.ts');
 
     expect(checkScript).toContain('createTurboCheckCommand');
-    expect(checkScript).toContain("runCommand('workspaces:check'");
+    expect(checkScript).toContain("commandTask('workspaces:check'");
     expect(checkScript).not.toContain('runWorkspaceScript');
     expect(checkScript).not.toContain('root:madge');
   });
@@ -58,7 +58,7 @@ describe('check script', () => {
   test('gates duplicate lockfile versions in the root checks', () => {
     const checkScript = readText('scripts/check.ts');
 
-    const dedupeTask = "runCommand('root:dedupe', ['bun', 'dedupe', '--check']";
+    const dedupeTask = "commandTask('root:dedupe', ['bun', 'dedupe', '--check']";
 
     expect(
       checkScript.includes(dedupeTask),
