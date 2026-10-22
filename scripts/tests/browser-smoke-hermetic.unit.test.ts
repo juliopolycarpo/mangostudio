@@ -112,7 +112,7 @@ describe('browser smoke lane hermeticity', () => {
       const host = effectiveEnv(server, 'API_HOST');
       expect(
         host,
-        `expected API_HOST: 127.0.0.1 | received: ${host || '(unset, the hub binds 0.0.0.0)'}`
+        `expected API_HOST: 127.0.0.1 | received: ${host || '(unset, the suite requires an explicit IPv4 loopback bind)'}`
       ).toBe('127.0.0.1');
     }
   });

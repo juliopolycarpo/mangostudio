@@ -78,7 +78,11 @@ fazer, enquanto o `general` precisa absorver o fan-out por página do navegador.
 
 ## Notas de segurança
 
-- A API escuta em `0.0.0.0` por padrão. Fora de localhost, termine TLS no proxy
+- A API escuta em `localhost` por padrão. Acesso remoto exige host explícito
+  (`mangostudio serve 0.0.0.0`, `API_HOST=0.0.0.0` ou `server.host` no
+  config.toml). O host da CLI prevalece sobre ambiente, que prevalece sobre TOML.
+  As duas imagens Docker definem `API_HOST=0.0.0.0` para portas publicadas.
+  Para acesso remoto, termine TLS no proxy
   reverso e defina `TRUST_PROXY=true` apenas quando o proxy substitui headers de
   IP do cliente (veja `docs/pt-br/operations/deployment.md`).
 - Chaves são armazenadas hasheadas no servidor; só o prefixo aparece na lista.

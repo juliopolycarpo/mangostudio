@@ -92,8 +92,33 @@ describe('runServe (detached)', () => {
     );
 
     expect(spawnedPort).toBe(3000);
-    expect(spawnedHost).toBe('0.0.0.0');
+    expect(spawnedHost).toBe('localhost');
     expect(lines.join('\n')).toContain('PID 7');
+  });
+
+  it.each([
+    { configured: '192.168.1.5', explicit: undefined, expected: '192.168.1.5' },
+    { configured: '192.168.1.5', explicit: '0.0.0.0', expected: '0.0.0.0' },
+  ])('forwards host $expected with configured and CLI precedence', async (entry) => {
+    loadConfigForTest({
+      server: { host: entry.configured, port: 3001, publicUrl: '', allowedOrigins: [] },
+      auth: { secret: 'test-secret-at-least-32-characters-long', url: '' },
+    });
+    let spawnedHost = '';
+    await runServe(
+      { host: entry.explicit, port: 3000, detached: true },
+      {
+        readState: () => Promise.resolve(null),
+        controller: new FakeProcessController(),
+        ensureAuthSecret: noop,
+        spawnDetached: (port, host) => {
+          spawnedHost = host;
+          return Promise.resolve({ pid: 7, port, logFile: '/l.log' });
+        },
+        log: () => undefined,
+      }
+    );
+    expect(spawnedHost).toBe(entry.expected);
   });
 
   it('rejects an invalid port before touching state', async () => {

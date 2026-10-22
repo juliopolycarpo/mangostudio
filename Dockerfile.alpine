@@ -31,6 +31,7 @@ COPY --chmod=0755 docker-ctx/alpine/${TARGETARCH}/mangostudio /usr/local/bin/man
 COPY --chmod=0755 docker-ctx/alpine/${TARGETARCH}/mangostudio-runtime /usr/local/bin/mangostudio-runtime
 
 ENV HOME=/data
+ENV API_HOST=0.0.0.0
 ENV TMPDIR=/tmp
 
 USER mango

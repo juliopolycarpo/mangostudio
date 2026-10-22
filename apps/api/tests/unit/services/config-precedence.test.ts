@@ -97,6 +97,7 @@ describe('config precedence', () => {
     const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
 
     expect(cfg.server.port).toBe(3001);
+    expect(cfg.server.host).toBe('localhost');
   });
 
   test('process.env API_PORT overrides config.toml server.port', () => {
@@ -177,13 +178,26 @@ describe('config precedence', () => {
     expect(cfg.auth.secret).toBe('process-secret-at-least-32-characters');
   });
 
-  test('auth.url falls back to localhost when the default host is the 0.0.0.0 wildcard', () => {
-    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+  test('an explicit wildcard still uses localhost for auth.url', () => {
+    writeFileSync(TMP_TOML, '[server]\nhost = "0.0.0.0"\n');
 
-    // The default bind host is 0.0.0.0, but that wildcard is not browser-routable,
-    // so the derived Better Auth baseURL must use localhost.
+    const cfg = loadConfig(TMP_TOML);
+
     expect(cfg.server.host).toBe('0.0.0.0');
     expect(cfg.auth.url).toBe('http://localhost:3001');
+  });
+
+  test('server.host and its overrides retain their bind precedence', () => {
+    writeFileSync(TMP_TOML, '[server]\nhost = "192.168.1.5"\n');
+    expect(loadConfig(TMP_TOML).server.host).toBe('192.168.1.5');
+
+    resetConfig();
+    writeFileSync(join(TMP_DIR, '.env'), 'API_HOST=0.0.0.0\n');
+    expect(loadConfig(TMP_TOML).server.host).toBe('0.0.0.0');
+
+    resetConfig();
+    process.env.API_HOST = '127.0.0.1';
+    expect(loadConfig(TMP_TOML).server.host).toBe('127.0.0.1');
   });
 
   test('auth.url uses an explicit non-wildcard host from config.toml', () => {
@@ -652,7 +666,6 @@ describe('corsOrigins: the server origin plus configured allowed origins', () =>
     expect(cfg.corsOrigins).toEqual([
       'http://localhost:3001',
       'http://127.0.0.1:3001',
-      'http://0.0.0.0:3001',
       'https://studio.example.com',
     ]);
   });
@@ -737,11 +750,7 @@ describe('corsOrigins: the server origin plus configured allowed origins', () =>
     const cfg = loadConfig(TMP_TOML);
 
     // The API serves the frontend, so the only origins are the server's own.
-    expect(cfg.corsOrigins).toEqual([
-      'http://localhost:3001',
-      'http://127.0.0.1:3001',
-      'http://0.0.0.0:3001',
-    ]);
+    expect(cfg.corsOrigins).toEqual(['http://localhost:3001', 'http://127.0.0.1:3001']);
   });
 });
 

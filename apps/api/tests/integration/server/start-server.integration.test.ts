@@ -127,6 +127,46 @@ describe('startServer via __serve', () => {
     TEST_TIMEOUT_MS
   );
 
+  it.each([
+    {
+      label: 'unconfigured foreground serve',
+      target: undefined,
+      envHost: undefined,
+      expected: 'localhost',
+    },
+    {
+      label: 'foreground CLI host over API_HOST',
+      target: '127.0.0.1',
+      envHost: '0.0.0.0',
+      expected: '127.0.0.1',
+    },
+  ])(
+    '$label binds the expected interface',
+    async (entry) => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const { port, tempDir: home } = fixture;
+      const pidFile = join(home, '.mango', 'run', 'server.json');
+      const target = entry.target ? `${entry.target}:${port}` : String(port);
+      fixture.spawn({
+        cmd: ['bun', ENTRY, 'serve', target],
+        env: {
+          ...serverEnv(home, port),
+          API_HOST: entry.envHost,
+          BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+        },
+      });
+      await fixture.waitUntilReady(() => probeHealthOnce(entry.expected, port), {
+        label: `server health at ${entry.expected}:${port}`,
+        timeoutMs: START_TIMEOUT_MS,
+      });
+      await waitForState(pidFile);
+      const state = JSON.parse(await readFile(pidFile, 'utf8'));
+      expect(state.host).toBe(entry.expected);
+      expect(state.port).toBe(port);
+    },
+    TEST_TIMEOUT_MS
+  );
+
   // Windows has no SIGTERM: a kill there terminates the process, so no handler runs.
   it.skipIf(process.platform === 'win32')(
     'exits cleanly and removes its state on SIGTERM',
