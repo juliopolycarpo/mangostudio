@@ -98,8 +98,9 @@ async function startLegacySseServer(answer: {
 }
 
 describe('mcp http transport', () => {
-  it('connects over Streamable HTTP and sends stored auth headers on every request', async () => {
-    const seenAuth: Array<string | null> = [];
+  it('keeps authenticated Streamable HTTP POSTs separate from the active GET stream', async () => {
+    const requests: Array<{ method: string; port: number | undefined; auth: string | null }> = [];
+    let streamRequest: Request | undefined;
     // Stateful mode: one transport serves the whole session (stateless mode
     // requires a fresh transport per request, which doesn't fit one client).
     const transport = new WebStandardStreamableHTTPServerTransport({
@@ -110,31 +111,61 @@ describe('mcp http transport', () => {
     await server.connect(transport);
     const bunServer = Bun.serve({
       port: 0,
-      fetch: (request) => {
-        seenAuth.push(request.headers.get('authorization'));
+      hostname: '127.0.0.1',
+      fetch: (request, host) => {
+        requests.push({
+          method: request.method,
+          port: host.requestIP(request)?.port,
+          auth: request.headers.get('authorization'),
+        });
+        if (request.method === 'GET') streamRequest = request;
         return transport.handleRequest(request);
       },
     });
 
+    let handle: McpClientHandle | undefined;
     try {
-      const handle = await connectMcpClient(httpConfig(`http://localhost:${bunServer.port}/`), {
+      handle = await connectMcpClient(httpConfig(`http://127.0.0.1:${bunServer.port}/`), {
         userId: 'http-transport-user',
         resolveHeaders: () => Promise.resolve({ Authorization: 'Bearer test-token' }),
       });
 
+      const deadline = performance.now() + 5_000;
+      while (!streamRequest && performance.now() < deadline) await Bun.sleep(5);
+      expect(
+        streamRequest,
+        'Streamable HTTP session must open its GET stream within 5s'
+      ).toBeDefined();
+      const activeStream = streamRequest;
+      expect(activeStream?.signal.aborted, 'GET stream must stay active before tool POSTs').toBe(
+        false
+      );
+      const beforeTools = requests.length;
       const tools = await handle.listTools();
       expect(tools.map((tool) => tool.name)).toEqual(['echo', 'env-keys', 'crash']);
 
-      const result = await handle.callTool('echo', { text: 'over http' });
-      expect(result.contentText).toBe('over http');
-
-      expect(seenAuth.length).toBeGreaterThan(0);
-      expect(seenAuth.every((value) => value === 'Bearer test-token')).toBe(true);
-
-      await handle.close();
+      for (const text of ['first over http', 'second over http', 'third over http']) {
+        expect((await handle.callTool('echo', { text })).contentText).toBe(text);
+        expect(activeStream?.signal.aborted, 'GET stream must stay active during tool POSTs').toBe(
+          false
+        );
+      }
+      expect(requests.every((request) => request.auth === 'Bearer test-token')).toBe(true);
+      const streamRequests = requests.filter((request) => request.method === 'GET');
+      expect(streamRequests).toHaveLength(1);
+      const streamPort = streamRequests[0]?.port;
+      expect(streamPort, 'GET stream must have a peer connection port').toBeDefined();
+      const toolRequests = requests.slice(beforeTools);
+      expect(toolRequests).toHaveLength(4);
+      expect(toolRequests.every((request) => request.method === 'POST')).toBe(true);
+      expect(toolRequests.every((request) => request.port !== undefined)).toBe(true);
+      expect(toolRequests.every((request) => request.port !== streamPort)).toBe(true);
     } finally {
-      await server.close();
-      bunServer.stop(true);
+      try {
+        await handle?.close();
+      } finally {
+        await server.close().finally(() => bunServer.stop(true));
+      }
     }
   });
 
