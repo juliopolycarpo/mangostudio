@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { createImportCycleCommand } from '../lib/import-cycles';
 import { protocolCheckTasks } from '../protocol/tasks';
 import { countCircularDeps } from '../qa-gate/collect/circular';
 import { runCapture } from '../qa-gate/collect/support';
@@ -613,30 +614,43 @@ describe('Biome import cycle checks', () => {
     );
   });
 
-  test.each(['biome.json', 'biome.cycles.json'])(
-    '%s excludes root artifact and output staging metadata from discovery',
-    async (config) => {
-      const root = createFixture();
-      const paths = ['.mango/artifacts/tools/.shellcheck-staging', '.mango/out/staging'];
-      for (const path of paths) {
-        injectCycle(root, path, { 'biome.json': '{ "files": { "includes": 42 } }' });
-      }
-      const command = ['bunx', 'biome', 'check', `--config-path=${config}`, 'apps/api'];
-      const clean = Bun.spawnSync(command, { cwd: root, stdout: 'pipe', stderr: 'pipe' });
-      const output = clean.stdout.toString() + clean.stderr.toString();
-      expectCheck(
-        { exitCode: clean.exitCode, output },
-        'pass',
-        `${config}: invalid ${paths.map((path) => `${path}/biome.json`).join(', ')} expected excluded cache metadata`
-      );
-      injectCycle(root, 'apps/api/src', TYPE_CYCLE);
-      expectCycleCount(
-        await countCycles(root, ['apps/api']),
-        1,
-        'API source remains checked beside excluded cache metadata'
-      );
-    }
-  );
+  test.each([
+    ['biome.json', '.mango/artifacts/tools/.shellcheck-staging'],
+    ['biome.json', '.mango/out/staging'],
+    ['biome.cycles.json', '.mango/artifacts/tools/.shellcheck-staging'],
+    ['biome.cycles.json', '.mango/out/staging'],
+  ])('%s excludes root cache metadata at %s from discovery', async (config, path) => {
+    const root = createFixture();
+    injectCycle(root, path, { 'biome.json': '{ "files": { "includes": 42 } }' });
+    // Disable the primary config's VCS safety net to test its own exclusions
+    // rather than let .gitignore hide missing cache exclusions.
+    const command =
+      config === 'biome.cycles.json'
+        ? createImportCycleCommand(['.'])
+        : [
+            'bunx',
+            'biome',
+            'lint',
+            `--config-path=${config}`,
+            '--only=suspicious/noImportCycles',
+            '--only=nursery/noSelfImport',
+            '--vcs-enabled=false',
+            '.',
+          ];
+    const clean = Bun.spawnSync(command, { cwd: root, stdout: 'pipe', stderr: 'pipe' });
+    const output = clean.stdout.toString() + clean.stderr.toString();
+    expectCheck(
+      { exitCode: clean.exitCode, output },
+      'pass',
+      `${config}: invalid ${path}/biome.json expected excluded cache metadata`
+    );
+    injectCycle(root, 'apps/api/src', TYPE_CYCLE);
+    expectCycleCount(
+      await countCycles(root, ['apps/api']),
+      1,
+      'API source remains checked beside excluded cache metadata'
+    );
+  });
 
   test('ignores witness-like source comments in actual Biome diagnostics', async () => {
     const root = createFixture();
