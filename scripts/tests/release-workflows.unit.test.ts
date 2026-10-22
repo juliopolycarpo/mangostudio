@@ -1301,14 +1301,14 @@ describe('release workflow binary gate', () => {
 
   test('binary smoke helper checks version, delegates the health poll, and surfaces failure logs', () => {
     const helper = readText('scripts/release/smoke-binary.sh');
-    const portVar = '$' + '{port}';
     const bashSource = '$' + '{BASH_SOURCE[0]}';
 
     expect(helper).toContain('"$binary_path" --version');
-    expect(helper).toContain('API_HOST=127.0.0.1');
+    expect(helper).toContain('unset API_HOST');
+    expect(helper).toContain('expected default bind: localhost');
     // The server boots from a staged copy of the binary with a doctored stale
     // public/ sidecar beside it, proving the embedded frontend wins.
-    expect(helper).toContain(`"$staged_binary" serve "127.0.0.1:${portVar}"`);
+    expect(helper).toContain('"$staged_binary" serve "$port"');
     expect(helper).toContain('stale_sentinel=');
     expect(helper).toContain('grep -q "$stale_sentinel" "$served_index"');
     expect(helper).toContain('grep -q "$stale_sentinel" "$served_asset"');
