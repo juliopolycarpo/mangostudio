@@ -101,6 +101,21 @@ class FailedProcessCensus {
   }
 }
 
+test('real command output preserves UTF-8 characters split across pipe reads', async () => {
+  const commands = new FixtureCommands();
+  try {
+    const result = await commands.run(
+      [process.execPath, join(import.meta.dir, 'support/split-utf8-fixture-command.ts')],
+      import.meta.dir
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout, 'stdout: expected intact UTF-8 euro sign').toBe('€');
+    expect(result.stderr, 'stderr: expected intact UTF-8 euro sign').toBe('€');
+  } finally {
+    await commands.settle();
+  }
+});
+
 test.skipIf(process.platform === 'win32')(
   'a generic Unix census error retains real command storage ownership',
   async () => {

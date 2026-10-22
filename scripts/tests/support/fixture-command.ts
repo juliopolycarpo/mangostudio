@@ -80,11 +80,13 @@ export const fixtureCommandHost: FixtureCommandHost = {
     );
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (data: string) => {
+      stdout += data;
     });
-    child.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
+    child.stderr.on('data', (data: string) => {
+      stderr += data;
     });
     let stopped = false;
     const closed = new Promise<CommandResult>((resolve, reject) => {
