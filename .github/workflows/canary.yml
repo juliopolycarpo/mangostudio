@@ -51,7 +51,8 @@ jobs:
   npm-canary:
     name: Publish npm (canary dist-tag)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Seven sequential publishes reached the old 10-minute job limit after setup.
+    timeout-minutes: 15
     outputs:
       auth: ${{ steps.publish.outputs.auth }}
       provenance: ${{ steps.publish.outputs.provenance }}
