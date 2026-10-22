@@ -19,15 +19,17 @@ Only the latest commit on the `main` branch receives security fixes. We do not m
 - **Better Auth** with email/password strategy.
 - Session-based authentication via HTTP-only cookies.
 - Sessions are validated on every protected API request via `requireAuth` middleware.
-- User passwords are hashed using bcrypt (configured via Better Auth).
+- User passwords use Better Auth’s default scrypt hashing. The locked Better Auth 1.7.10 delegates to `@better-auth/utils` 0.5.0; `apps/api/src/auth.ts` configures no password hash/verify override.
 
 ### API Key Storage
 
-API keys (Gemini, OpenAI, Anthropic, DeepSeek) support three persistence methods, in priority order:
+Each connector persists its selected secret backend in its `source` metadata. Resolution reads that backend; there is no global environment → TOML → OS-store priority chain.
 
-1. **Environment variables** (`~/.mango/.env`) — Highest priority, never committed.
-2. **config.toml** (`~/.mango/config.toml`) — Flat file, never committed.
-3. **OS Secret Store** (`Bun.secrets`) — Native OS-level secure storage. Recommended for maximum security.
+- **`environment`** — Reads the connector-specific variable first (for example, `OPENAI_API_KEY_WORK` for a connector named `work`), then the provider’s generic variable (`OPENAI_API_KEY`). UI writes go to the `.env` file beside the selected config file (by default `~/.mango/.env`). This variable-name fallback applies only within this backend.
+- **`config-file`** — Reads the connector’s named entry in its provider section of the selected `config.toml` (by default `~/.mango/config.toml`).
+- **`bun-secrets`** — Reads the connector’s key from the OS secret store through `Bun.secrets`, under its provider and connector ID.
+
+Protect `.env`, `config.toml` and the data directory with filesystem permissions; keep populated files out of version control. OS-store availability depends on the host. Source: `apps/api/src/services/providers/core/secret-service.ts` and `apps/api/src/modules/connectors/infrastructure/secret-persistence.ts`.
 
 Keys are never exposed to the frontend. The API resolves secrets server-side and never includes them in responses.
 
@@ -50,7 +52,7 @@ In-memory rate limiter with configurable window and max requests per window. Pro
 
 ### Build Security
 
-- `bun build --compile` produces standalone binaries without exposing source code.
+- `bun build --compile` packages the hub as a standalone executable; compilation is not a confidentiality boundary. Bundled JavaScript and function bodies may remain inspectable. Do not embed secrets or rely on packaging to keep source private. The shipping flags in `scripts/lib/build.ts` include bytecode, ESM and external source maps, plus minification for production.
 - Frontend assets are minified and tree-shaken.
 - Environment variables are not bundled into the binary.
 
