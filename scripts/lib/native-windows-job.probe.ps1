@@ -273,7 +273,8 @@ namespace Mango.NativeImageFakes {
         public readonly Queue<bool> Waits=new Queue<bool>();
         public Member Current;
         public int Reads,Queries,WaitCalls,FailReadAt,FailWaitAt,QueryMilliseconds;
-        public bool PersistentFailure,Signaled;
+        public bool PersistentFailure,Signaled,NativeFormat;
+        private ImageQueryBudget activeBudget;
         public FakeImageProcess() : this(new FakeClock()) {}
         public FakeImageProcess(FakeClock clock) { Clock=clock; Current=State(42,134359891225276227,true); }
         public static Member State(uint pid,long created,bool member) {
@@ -286,7 +287,8 @@ namespace Mango.NativeImageFakes {
             return State(Current.Pid,Int64.Parse(Current.CreationFileTime),Current.IsMember);
         }
         public ImageResult Query() {
-            Queries++; Clock.Now+=QueryMilliseconds; if(Images.Count>0) return Images.Dequeue();
+            Queries++; Clock.Now+=QueryMilliseconds; if(NativeFormat) return Mango.NativeImageFormatFakes.ImageFixture.Read(activeBudget,Current.Identity);
+            if(Images.Count>0) return Images.Dequeue();
             if(PersistentFailure) return new ImageResult {Success=false,Error=5,Characters=32768};
             const string path=@"C:\tools\owned.exe"; return new ImageResult {Success=true,Characters=(uint)path.Length,Path=path};
         }
@@ -295,7 +297,7 @@ namespace Mango.NativeImageFakes {
             Clock.Now+=milliseconds; if(Waits.Count>0 && Waits.Dequeue()) Signaled=true; return Signaled;
         }
         public Member Resolve(ImageQueryBudget budget,List<ImageAttempt> diagnostics,string identity,string image) {
-            return ImageQueryPolicy.Resolve(Read,Query,Wait,budget,diagnostics,identity,image,true);
+            activeBudget=budget; return ImageQueryPolicy.Resolve(Read,Query,Wait,budget,diagnostics,identity,image,true);
         }
     }
 }
@@ -304,6 +306,46 @@ namespace Mango.NativeImageFakes {
     $queryEnd = $script:NativeWindowsJobCode.IndexOf('        /// <summary>Terminate only one retained identity', $queryStart, [StringComparison]::Ordinal)
     if ($queryStart -lt 0 -or $queryEnd -le $queryStart) { throw 'Invalid query source boundaries; expected exact production Query method for named kernel caller fakes' }
     $queryMethod = $script:NativeWindowsJobCode.Substring($queryStart, $queryEnd - $queryStart)
+    $imageStart = $script:NativeWindowsJobCode.IndexOf('        private static ImageResult QueryImage(', [StringComparison]::Ordinal)
+    $imageEnd = $script:NativeWindowsJobCode.IndexOf('        private Member Attest(', $imageStart, [StringComparison]::Ordinal)
+    if ($imageStart -lt 0 -or $imageEnd -le $imageStart) { throw 'Invalid image-query boundaries; expected exact production native image query and mapping methods' }
+    $imageMethods = $script:NativeWindowsJobCode.Substring($imageStart, $imageEnd - $imageStart)
+    $imageCallerCode = @'
+namespace Mango.NativeImageFormatFakes {
+    using System;
+    using System.Collections.Generic;
+    using System.Runtime.InteropServices;
+    using System.Text;
+    using Mango.NativeJobProbe;
+    using Mango.NativeImageFakes;
+    internal static class Win32 {
+        internal static bool QueryFullProcessImageNameW(IntPtr process,uint flags,StringBuilder path,ref uint capacity) {
+            ImageFixture.Flags.Add(flags); ImageFixture.Clock.Now+=flags==0?13500:1;
+            string value=flags==0?ImageFixture.DosImage:ImageFixture.NativeImage;
+            path.Append(value); capacity=flags==1 && ImageFixture.NativeCharacters.HasValue?ImageFixture.NativeCharacters.Value:(uint)value.Length; return true;
+        }
+        internal static uint GetLogicalDrives() { return ImageFixture.DriveMask; }
+        internal static uint QueryDosDeviceW(string drive,char[] buffer,uint size) {
+            if(!ImageFixture.Devices.ContainsKey(drive)) throw new InvalidOperationException("Invalid unexpected fake drive " + drive + "; expected named kernel mapping");
+            if(ImageFixture.MappingUnavailable) return 0;
+            char[] value=(ImageFixture.Devices[drive]+(ImageFixture.MalformedMapping?"\0":"\0\0")).ToCharArray(); Array.Copy(value,buffer,value.Length); return (uint)value.Length;
+        }
+    }
+    public static class ImageFixture {
+        public static FakeClock Clock;
+        public static readonly List<uint> Flags=new List<uint>();
+        public static readonly Dictionary<string,string> Devices=new Dictionary<string,string>();
+        public static string NativeImage,DosImage;
+        public static uint DriveMask;
+        public static uint? NativeCharacters;
+        public static bool MappingUnavailable,MalformedMapping;
+        public static void Reset(FakeClock clock) {
+            Clock=clock; Flags.Clear(); Devices.Clear(); Devices.Add("C:",@"\Device\HarddiskVolume1");
+            NativeImage=@"\Device\HarddiskVolume1\tools\owned.exe"; DosImage=@"C:\tools\owned.exe"; DriveMask=4;
+            NativeCharacters=null; MappingUnavailable=false; MalformedMapping=false;
+        }
+        public static ImageResult Read(ImageQueryBudget budget,string identity) { return QueryImage(new IntPtr(42),budget,identity); }
+'@
     $callerCode = @'
 namespace Mango.NativeImageCallerFakes {
     using System;
@@ -345,7 +387,7 @@ namespace Mango.NativeImageCallerFakes {
         private Member Attest(IntPtr token,uint pid,string expected,ImageQueryBudget budget,string image=null) { return Processes[token].Resolve(budget,Diagnostics,expected,image); }
         public Snapshot Run() { Win32.Fixture=this; return Query(); }
 '@
-    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $fakeCode + "`n" + $callerCode + $queryMethod + "`n    }`n}")
+    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $fakeCode + "`n" + $callerCode + $queryMethod + "`n    }`n}" + "`n" + $imageCallerCode + $imageMethods + "`n    }`n}")
 }
 
 try {
@@ -704,6 +746,72 @@ $startedChild.Dispose()
             $cases.Add([pscustomobject]@{ queryCostMilliseconds = $cost; elapsedMilliseconds = $fixture.Clock.Now; snapshot = $snapshot; error = $failure; events = @($fixture.Events) })
         }
         return @{ sharedBudgetMilliseconds = [Mango.NativeJobProbe.ImageQueryBudget]::MaximumMilliseconds; cases = @($cases); exactProductionQueryExtracted = $true; nativeAPIInvocations = 0 }
+    }
+    Invoke-NativeProbe 'native image queries avoid slow Win32 translation within one shared deadline' {
+        $fixture = [Mango.NativeImageCallerFakes.QueryFixture]::new()
+        $fixture.QueryBudgetMilliseconds = [Mango.NativeJobProbe.ImageQueryBudget]::MaximumMilliseconds
+        [Mango.NativeImageFormatFakes.ImageFixture]::Reset($fixture.Clock)
+        foreach ($pidValue in 42..44) {
+            $process = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock)
+            $process.Current = [Mango.NativeImageFakes.FakeImageProcess]::State($pidValue, 134359891225276227 + $pidValue, $true); $process.NativeFormat = $true
+            $token = [IntPtr]::new($pidValue); $fixture.Processes.Add($token, $process); $fixture.OpenOrder.Enqueue($token)
+        }
+        $fixture.Lists.Enqueue([uint32[]]@(42, 43, 44)); $fixture.Counts.Enqueue(3); $fixture.Counts.Enqueue(3)
+        $snapshot = $null; $failure = $null
+        try { $snapshot = $fixture.Run() } catch { $failure = $_.Exception.ToString() }
+        $flags = @([Mango.NativeImageFormatFakes.ImageFixture]::Flags)
+        Assert-NativeProbe (-not $failure -and $snapshot.Stable -and $snapshot.Members.Count -eq 3 -and $fixture.Clock.Now -eq 3 -and $flags.Count -eq 3 -and -not @($flags | Where-Object { $_ -ne 1 }).Count) "Invalid native image query elapsed=$($fixture.Clock.Now)ms flags=$($flags -join ',') error=$failure; expected three fresh exact-member images mapped from native paths within the shared20000ms deadline"
+        Assert-NativeProbe (-not @($snapshot.Members | Where-Object { $_.Path -cne 'C:\tools\owned.exe' }).Count) 'kernel mapping preserves the complete Win32 image path used for eligibility and expected-image comparison'
+        return @{ elapsedMilliseconds = $fixture.Clock.Now; flags = $flags; snapshot = $snapshot; exactProductionImageQueryExtracted = $true; nativeAPIInvocations = 0 }
+    }
+    Invoke-NativeProbe 'native image conversion preserves authoritative fallback and rejects malformed results' {
+        $cases = [Collections.Generic.List[object]]::new()
+        foreach ($case in @('unc', 'unmapped', 'alias', 'ambiguous', 'unavailable', 'mask-unavailable', 'prefix-boundary', 'relative-native', 'nul-native', 'short-native', 'truncated-native', 'malformed-map', 'invalid-mask')) {
+            $clock = [Mango.NativeImageFakes.FakeClock]::new(); [Mango.NativeImageFormatFakes.ImageFixture]::Reset($clock)
+            $budget = [Mango.NativeJobProbe.ImageQueryBudget]::new(20000, [Func[long]]{ return $clock.Now })
+            switch ($case) {
+                'unc' { [Mango.NativeImageFormatFakes.ImageFixture]::NativeImage = '\Device\Mup\server\share\owned.exe'; [Mango.NativeImageFormatFakes.ImageFixture]::DosImage = '\\server\share\owned.exe' }
+                'unmapped' { [Mango.NativeImageFormatFakes.ImageFixture]::NativeImage = '\Device\HarddiskVolume9\tools\owned.exe' }
+                'alias' { [Mango.NativeImageFormatFakes.ImageFixture]::DriveMask = 12; [Mango.NativeImageFormatFakes.ImageFixture]::Devices.Add('D:', '\??\C:\tools'); [Mango.NativeImageFormatFakes.ImageFixture]::DosImage = 'D:\owned.exe' }
+                'ambiguous' { [Mango.NativeImageFormatFakes.ImageFixture]::DriveMask = 12; [Mango.NativeImageFormatFakes.ImageFixture]::Devices.Add('D:', '\Device\HarddiskVolume1'); [Mango.NativeImageFormatFakes.ImageFixture]::DosImage = 'D:\tools\owned.exe' }
+                'unavailable' { [Mango.NativeImageFormatFakes.ImageFixture]::MappingUnavailable = $true }
+                'mask-unavailable' { [Mango.NativeImageFormatFakes.ImageFixture]::DriveMask = 0 }
+                'prefix-boundary' { [Mango.NativeImageFormatFakes.ImageFixture]::NativeImage = '\Device\HarddiskVolume10\tools\owned.exe' }
+                'relative-native' { [Mango.NativeImageFormatFakes.ImageFixture]::NativeImage = 'C:\tools\owned.exe' }
+                'nul-native' { [Mango.NativeImageFormatFakes.ImageFixture]::NativeImage = "\Device\HarddiskVolume1\bad$([char]0)owned.exe" }
+                'short-native' { [Mango.NativeImageFormatFakes.ImageFixture]::NativeImage = '\Device\HarddiskVolume1' }
+                'truncated-native' { [Mango.NativeImageFormatFakes.ImageFixture]::NativeCharacters = 32768 }
+                'malformed-map' { [Mango.NativeImageFormatFakes.ImageFixture]::MalformedMapping = $true }
+                'invalid-mask' { [Mango.NativeImageFormatFakes.ImageFixture]::DriveMask = [uint32]::MaxValue }
+            }
+            $result = $null; $failure = $null
+            try { $result = [Mango.NativeImageFormatFakes.ImageFixture]::Read($budget, '42:full-birth') } catch { $failure = $_.Exception.ToString() }
+            $flags = @([Mango.NativeImageFormatFakes.ImageFixture]::Flags)
+            if ($case -in @('relative-native', 'nul-native', 'short-native', 'truncated-native', 'malformed-map', 'invalid-mask')) {
+                Assert-NativeProbe ($failure -match 'Invalid (native image|QueryDosDeviceW result|logical drive mask)' -and -not $result -and $flags.Count -eq 1 -and $flags[0] -eq 1) "Invalid malformed-image handling case=$case error=$failure; expected explicit shape failure without fallback authority"
+            } else {
+                Assert-NativeProbe (-not $failure -and $result.Success -and $result.Path -ceq [Mango.NativeImageFormatFakes.ImageFixture]::DosImage -and ($flags -join ',') -eq '1,0' -and $clock.Now -eq 13501) "Invalid fallback case=$case path=$($result.Path) flags=$($flags -join ',') error=$failure; expected fresh authoritative Win32 image under the same budget"
+            }
+            $cases.Add([pscustomobject]@{ case = $case; result = $result; flags = $flags; elapsedMilliseconds = $clock.Now; error = $failure })
+        }
+        [Mango.NativeImageFormatFakes.ImageFixture]::Reset([Mango.NativeImageFakes.FakeClock]::new())
+        return @{ cases = @($cases); exactProductionImageQueryExtracted = $true; nativeAPIInvocations = 0 }
+    }
+    Invoke-NativeProbe 'native image fallback cannot reset the shared snapshot deadline' {
+        $fixture = [Mango.NativeImageCallerFakes.QueryFixture]::new(); $fixture.QueryBudgetMilliseconds = 20000
+        [Mango.NativeImageFormatFakes.ImageFixture]::Reset($fixture.Clock)
+        [Mango.NativeImageFormatFakes.ImageFixture]::NativeImage = '\Device\Mup\server\share\owned.exe'
+        [Mango.NativeImageFormatFakes.ImageFixture]::DosImage = '\\server\share\owned.exe'
+        foreach ($pidValue in 42..43) {
+            $process = [Mango.NativeImageFakes.FakeImageProcess]::new($fixture.Clock); $process.NativeFormat = $true
+            $process.Current = [Mango.NativeImageFakes.FakeImageProcess]::State($pidValue, 134359891225276227 + $pidValue, $true)
+            $token = [IntPtr]::new($pidValue); $fixture.Processes.Add($token, $process); $fixture.OpenOrder.Enqueue($token)
+        }
+        $fixture.Lists.Enqueue([uint32[]]@(42, 43)); $fixture.Counts.Enqueue(2)
+        $snapshot = $null; $failure = $null
+        try { $snapshot = $fixture.Run() } catch { $failure = $_.Exception.ToString() }
+        Assert-NativeProbe (-not $snapshot -and $failure -match 'Image query budget exhausted after 27002ms' -and $fixture.Clock.Now -eq 27002 -and (@([Mango.NativeImageFormatFakes.ImageFixture]::Flags) -join ',') -eq '1,0,1,0') "Invalid fallback deadline elapsed=$($fixture.Clock.Now) error=$failure; expected shared20000ms refusal without any partial snapshot"
+        return @{ elapsedMilliseconds = $fixture.Clock.Now; error = $failure; nativeAPIInvocations = 0 }
     }
     Invoke-NativeProbe 'exact query caller refreshes complete accounting and never drops a still-present member' {
         $cases = [Collections.Generic.List[object]]::new()
