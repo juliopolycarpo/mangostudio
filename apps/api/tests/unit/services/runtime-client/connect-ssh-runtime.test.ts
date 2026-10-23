@@ -2,13 +2,97 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { CLOSE_CODES } from '@mangostudio/protocol';
+import { createInProcessPortPair } from '@mangostudio/protocol/in-process';
+import type { LaunchedPeer, SpawnOptions } from '@mangostudio/protocol/spawn';
 import { SSH_FORCED_OPTIONS } from '@mangostudio/shared/environments';
 import {
   connectSshRuntime,
   sshLaunch,
 } from '../../../../src/services/runtime-client/connect-ssh-runtime';
 
+/** A named, already-exited SSH launcher with no process or resolver behind it. */
+class FailedSshLauncher {
+  readonly launches: SpawnOptions[] = [];
+
+  constructor(readonly stderr: string) {}
+
+  readonly spawnPort = (options: SpawnOptions): LaunchedPeer => {
+    if (options.argv[0] !== 'ssh') {
+      throw new Error(`expected SSH launcher command: ssh | received: ${options.argv[0]}`);
+    }
+    this.launches.push(options);
+    const { a, b } = createInProcessPortPair();
+    const exit = { code: 255, signal: null };
+    queueMicrotask(() => b.close(CLOSE_CODES.RELEASED, 'ssh exited before hello'));
+    return {
+      port: a,
+      pid: 4321,
+      exited: Promise.resolve(exit),
+      stderrTail: () => this.stderr,
+      startError: () =>
+        Promise.resolve({ exit, spawnErrorCode: undefined, stderrLine: this.stderr }),
+      setTerminateGraceMs: () => false,
+      terminate: () => {
+        b.close(CLOSE_CODES.RELEASED, 'launcher terminated');
+        return Promise.resolve(exit);
+      },
+    };
+  };
+}
+
+const DNS_FAILURE = 'ssh: Could not resolve hostname ssh-target.invalid: Name or service not known';
+
 describe('connectSshRuntime', () => {
+  it('classifies a supplied DNS failure without resolving a hostname', async () => {
+    const launcher = new FailedSshLauncher(DNS_FAILURE);
+    const controller = new AbortController();
+    const attempt = connectSshRuntime(
+      { userId: 'test-user', id: 'build-01', config: { host: 'ssh-target.invalid' } },
+      () => undefined,
+      { signal: controller.signal },
+      { spawnPort: launcher.spawnPort }
+    ).catch((caught) => caught);
+
+    try {
+      // Assert before awaiting: losing injection must fail without waiting on DNS.
+      expect(launcher.launches).toHaveLength(1);
+      const launch = sshLaunch({ host: 'ssh-target.invalid' });
+      expect(launcher.launches[0]?.argv).toEqual([launch.command, ...launch.args, '--stdio']);
+      const error = await attempt;
+      expect({ code: error.code, message: error.message, details: error.details }).toEqual({
+        code: 'UNAVAILABLE',
+        message: expect.stringContaining('ssh-target.invalid'),
+        details: { closeCode: CLOSE_CODES.RELEASED, sshFailureReason: 'unreachable' },
+      });
+    } finally {
+      // Also settles an accidentally real launch in the isolated regression mutation.
+      controller.abort();
+      await attempt;
+    }
+  });
+
+  it.each(['', 'ssh: remote side closed without a diagnostic signature'])(
+    'keeps an unclassified failure generic: %j',
+    async (stderr) => {
+      const launcher = new FailedSshLauncher(stderr);
+      const error = await connectSshRuntime(
+        { userId: 'test-user', id: 'build-01', config: { host: 'ssh-target.invalid' } },
+        () => undefined,
+        {},
+        { spawnPort: launcher.spawnPort }
+      ).catch((caught) => caught);
+
+      expect(launcher.launches).toHaveLength(1);
+      expect({ code: error.code, message: error.message, details: error.details }).toEqual({
+        code: 'UNAVAILABLE',
+        message: expect.stringContaining('did not complete its handshake'),
+        details: { closeCode: CLOSE_CODES.RELEASED },
+      });
+      if (stderr) expect(error.message).toContain(stderr);
+    }
+  );
+
   it('names a missing identity file instead of letting ssh report a refused key', async () => {
     // ssh only warns about a key file it cannot read, then fails authentication
     // — which sends the user to the server's authorized_keys over a path typo.
@@ -31,6 +115,7 @@ describe('connectSshRuntime', () => {
     // key the client would open. Place the file under $HOME so `~/…` resolves.
     const directory = await mkdtemp(join(homedir(), '.mango-ssh-tilde-'));
     const identityFile = `~/${directory.slice(homedir().length + 1)}/id_ed25519`;
+    const launcher = new FailedSshLauncher(DNS_FAILURE);
     await writeFile(join(directory, 'id_ed25519'), 'not a real key\n');
 
     try {
@@ -40,12 +125,18 @@ describe('connectSshRuntime', () => {
           id: 'build-01',
           config: { host: 'ssh-target.invalid', identityFile },
         },
-        () => undefined
+        () => undefined,
+        {},
+        { spawnPort: launcher.spawnPort }
       ).catch((caught) => caught);
 
-      expect(error.code).toBe('UNAVAILABLE');
-      expect(error.message).not.toMatch(/does not exist/);
-      expect(error.details?.sshFailureReason).not.toBe('auth-refused');
+      expect(launcher.launches).toHaveLength(1);
+      expect(launcher.launches[0]?.argv).toContain(join(directory, 'id_ed25519'));
+      expect({ code: error.code, message: error.message, details: error.details }).toEqual({
+        code: 'UNAVAILABLE',
+        message: expect.stringContaining('ssh-target.invalid'),
+        details: { closeCode: CLOSE_CODES.RELEASED, sshFailureReason: 'unreachable' },
+      });
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -79,12 +170,11 @@ describe('connectSshRuntime', () => {
   });
 
   it('starts the launch once the identity file is real', async () => {
-    // Everything up to the spawn is covered here; the spawn itself needs a
-    // reachable sshd and lives in the integration suite. The host is chosen to
-    // fail fast on name resolution, so this asserts the classified outcome
-    // rather than a timeout.
+    // The named launcher proves the identity precheck reaches the spawn without
+    // relying on real DNS. The real client/server path stays in integration.
     const directory = await mkdtemp(join(tmpdir(), 'mango-ssh-identity-'));
     const identityFile = join(directory, 'id_ed25519');
+    const launcher = new FailedSshLauncher(DNS_FAILURE);
     await writeFile(identityFile, 'not a real key\n');
 
     try {
@@ -94,11 +184,18 @@ describe('connectSshRuntime', () => {
           id: 'build-01',
           config: { host: 'ssh-target.invalid', identityFile },
         },
-        () => undefined
+        () => undefined,
+        {},
+        { spawnPort: launcher.spawnPort }
       ).catch((caught) => caught);
 
-      expect(error.code).toBe('UNAVAILABLE');
-      expect(error.details?.sshFailureReason).not.toBe('auth-refused');
+      expect(launcher.launches).toHaveLength(1);
+      expect(launcher.launches[0]?.argv).toContain(identityFile);
+      expect({ code: error.code, message: error.message, details: error.details }).toEqual({
+        code: 'UNAVAILABLE',
+        message: expect.stringContaining('ssh-target.invalid'),
+        details: { closeCode: CLOSE_CODES.RELEASED, sshFailureReason: 'unreachable' },
+      });
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
