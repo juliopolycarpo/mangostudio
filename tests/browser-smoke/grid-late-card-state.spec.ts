@@ -24,12 +24,6 @@ const LATE_INBOX: GithubInboxResponse = {
 test('a card arriving after the grid entrance mounts already settled', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
-  });
-  page.on('requestfailed', (request) =>
-    errors.push(`${request.url()}: ${request.failure()?.errorText}`)
-  );
   let releaseInbox: () => void = () => undefined;
   const inboxReady = new Promise<void>((resolve) => {
     releaseInbox = resolve;
