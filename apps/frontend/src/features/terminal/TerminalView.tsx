@@ -13,6 +13,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { createAckAccounting } from './ack-accounting';
 import { clampTerminalSize } from './terminal-fit';
 import { buildTerminalTheme, fontSizePx } from './terminal-theme';
+import { attachWebglRenderer } from './terminal-webgl';
 import { type TerminalSocketStatus, useTerminalSocket } from './use-terminal-socket';
 
 /** Dim-line SGR: readable as output, distinct from anything the shell prints. */
@@ -167,9 +168,7 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
     // real GPU context have no `webgl2`, and a constructor throw there must
     // not take the whole terminal down with it — the DOM renderer is the
     // correct, working fallback, not a degraded one.
-    if (canUseWebgl()) {
-      void loadWebglAddon(term, () => disposed);
-    }
+    const webglRenderer = attachWebglRenderer(term);
 
     termRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -195,6 +194,7 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
     return () => {
       disposed = true;
       resizeObserver.disconnect();
+      webglRenderer.dispose();
       term.dispose();
       termRef.current = null;
       fitAddonRef.current = null;
@@ -287,55 +287,6 @@ function noticeMessage(t: ReturnType<typeof useI18n>['t'], notice: TerminalNotic
       return formatMessage(t.terminal.dropped, { bytes: String(notice.bytes ?? 0) });
     case 'runtime_disconnected':
       return t.terminal.runtimeDisconnected;
-  }
-}
-
-/**
- * Answered once per page, and the probe context is released as soon as it has
- * answered. A browser caps how many live WebGL contexts a document may hold
- * (Chrome force-loses the *oldest* past ~16), so a probe left for the garbage
- * collector on every mount — and the rail remounts this view on every tab
- * switch — evicts the contexts the visible terminals are rendering with.
- */
-let webglSupported: boolean | null = null;
-
-function canUseWebgl(): boolean {
-  if (webglSupported !== null) return webglSupported;
-  try {
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('webgl2');
-    context?.getExtension('WEBGL_lose_context')?.loseContext();
-    webglSupported = context !== null;
-  } catch {
-    webglSupported = false;
-  }
-  return webglSupported;
-}
-
-/**
- * Loads the WebGL renderer into a terminal that is still alive when the chunk
- * arrives.
- *
- * The import is asynchronous even when the chunk is cached, and the rail
- * disposes this view on every tab switch, so the terminal can be gone by the
- * time this resumes. Nothing downstream would say so: `loadAddon` does not
- * refuse a disposed terminal, and `dispose()` only detaches `element` rather
- * than clearing it, which is the one thing `WebglAddon.activate` checks. It
- * would build a renderer, take a real `webgl2` context, and leave it held by
- * an addon nobody can reach to dispose.
- *
- * @example
- * void loadWebglAddon(term, () => disposed); // `disposed` latched in cleanup
- */
-async function loadWebglAddon(term: Terminal, isDisposed: () => boolean): Promise<void> {
-  try {
-    const { WebglAddon } = await import('@xterm/addon-webgl');
-    if (isDisposed()) return;
-    const webgl = new WebglAddon();
-    webgl.onContextLoss(() => webgl.dispose());
-    term.loadAddon(webgl);
-  } catch {
-    // The DOM renderer term.open() already installed is the fallback.
   }
 }
 
