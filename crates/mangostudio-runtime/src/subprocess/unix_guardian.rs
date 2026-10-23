@@ -2307,7 +2307,7 @@ mod tests {
     /// The fallback is exercised on every Linux runner, including kernels with `children`.
     #[cfg(target_os = "linux")]
     #[test]
-    fn procfs_fallback_lists_only_owned_children_and_excludes_the_watchdog() {
+    fn procfs_fallback_lists_owned_children_but_not_nonchildren_or_the_watchdog() {
         let mut child = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
@@ -2320,9 +2320,10 @@ mod tests {
         let owned = found.map(|count| children[..count].to_vec());
         let mut excluded = [0; 512];
         let hidden = unsafe { super::find_own_children(pid, &mut excluded, &deadline) };
-        let only_owned = owned
-            .as_ref()
-            .is_some_and(|pids| pids.iter().all(|pid| unsafe { super::is_own_child(*pid) }));
+        // Other libtest threads may reap their own children after the scan. Keep the
+        // positive fixture alive until both scans finish, and use stable non-child
+        // identities for negative assertions rather than rechecking those transient PIDs.
+        let parent = unsafe { libc::getppid() };
         let _ = child.kill();
         child.wait().expect("child reaped");
         let owned = owned.expect("procfs traversal succeeds");
@@ -2331,8 +2332,8 @@ mod tests {
             "expected owned child {pid} | received {owned:?}"
         );
         assert!(
-            only_owned,
-            "expected every candidate to be this process's child"
+            !owned.contains(&parent),
+            "expected non-child parent {parent} to stay excluded | received {owned:?}"
         );
         let hidden = hidden.expect("filtered traversal succeeds");
         assert!(
