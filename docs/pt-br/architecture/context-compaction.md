@@ -94,7 +94,7 @@ A compactação no lado do provedor é habilitada por padrão e pode ser desativ
 
 ### Limites De Contexto Dos Modelos
 
-Uma tabela curada cobre mais de 120 variantes de modelo. Prioridade de lookup:
+A tabela curada de modelos usa esta prioridade de lookup:
 
 1. Match exato pelo nome do modelo.
 2. Match pelo prefixo mais longo.

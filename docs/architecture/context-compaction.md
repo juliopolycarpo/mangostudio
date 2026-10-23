@@ -84,17 +84,17 @@ Provider-side compaction is enabled by default and can be disabled per-request v
 
 `context-policy.ts` provides:
 
-| Function                           | Purpose                                                             |
-| ---------------------------------- | ------------------------------------------------------------------- |
-| `getModelContextLimit(modelName)`  | Returns the model's max input tokens (curated table of 120+ models) |
-| `computeContextSnapshot(...)`      | Estimates token usage and continuation mode                         |
-| `getContextSeverity(ratio)`        | Maps ratio to severity band                                         |
-| `recommendContextAction(snapshot)` | Suggests compaction action                                          |
-| `estimateTokenCount(text)`         | Rough char-to-token conversion                                      |
+| Function                           | Purpose                                                      |
+| ---------------------------------- | ------------------------------------------------------------ |
+| `getModelContextLimit(modelName)`  | Returns the model's max input tokens from the curated lookup |
+| `computeContextSnapshot(...)`      | Estimates token usage and continuation mode                  |
+| `getContextSeverity(ratio)`        | Maps ratio to severity band                                  |
+| `recommendContextAction(snapshot)` | Suggests compaction action                                   |
+| `estimateTokenCount(text)`         | Rough char-to-token conversion                               |
 
 ### Model Context Limits
 
-A curated table covers 120+ model variants. Lookup priority:
+The curated model table uses this lookup priority:
 
 1. Exact model name match.
 2. Longest prefix match.
