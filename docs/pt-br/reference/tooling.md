@@ -2,6 +2,18 @@
 
 > 🇺🇸 [English version](../../reference/tooling.md)
 
+## Bun
+
+A versão instalada vem de [`.bun-version`](../../../.bun-version); o campo
+`packageManager` no [`package.json`](../../../package.json) precisa indicar a mesma versão
+para o Turborepo. `scripts/tests/bun-toolchain.unit.test.ts` verifica a igualdade.
+Instale a versão exata indicada em `.bun-version` a partir da
+[release oficial correspondente do Bun](https://github.com/oven-sh/bun/releases). O instalador
+sem versão ou `bun upgrade` seleciona a release estável mais recente, que pode diferir do pin.
+As chaves de cache de instalação usam `bun --revision`, e o manifesto de distribuição grava
+`bunRevision` além de `bunVersion`. A seção [Bun em inglês](../../reference/tooling.md#bun)
+mantém os detalhes do pin e o histórico do canal canary.
+
 ## TypeScript 7
 
 O monorepo verifica tipos com [TypeScript 7](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/),
@@ -12,9 +24,13 @@ builds completos.
 ### Type-checking
 
 Cada workspace executa `tsc --noEmit` (fixado em `7.0.2`) via seu script
-`typecheck`. O Turbo orquestra esses scripts entre workspaces em paralelo, e
-cada invocação do `tsc` paraleliza internamente — as duas camadas compõem sem
-conflito.
+`typecheck`. O Turbo inicia esses scripts em paralelo, e cada `tsc` paraleliza
+internamente. Nenhum workspace espera pelo typecheck upstream: o `tsc` lê as fontes e não
+produz saída. A task sem script `transit` inclui as fontes upstream na chave de cache.
+
+Não use `with` para selecionar typechecks upstream: o Turbo encerra uma task `with` quando a
+task que a lista termina, podendo perder um erro de tipo mais lento. `typecheck:with-deps`
+seleciona esses workspaces sem esse limite de duração.
 
 ### Ajuste de paralelismo
 
@@ -41,8 +57,8 @@ de compatibilidade pode ser removida.
 
 ## Turborepo
 
-Este monorepo usa [Turborepo](https://turborepo.dev) **2.x** (atualmente
-`2.9.16`) como camada compartilhada de build system. O Turborepo orquestra a
+Este monorepo usa [Turborepo](https://turborepo.dev) **2.x** estável, com versão exata
+fixada no [`package.json`](../../../package.json) raiz, como camada compartilhada de build system. O Turborepo orquestra a
 execução de tasks entre workspaces e fornece cache endereçável por conteúdo.
 
 ### Política
@@ -56,29 +72,41 @@ execução de tasks entre workspaces e fornece cache endereçável por conteúdo
 
 ### Tasks atuais
 
-| Task               | Cache | Outputs / Env                                      | Notas                                                                                                                                      |
-| ------------------ | ----- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `dev`              | off   | —                                                  | Persistente — roda servidores de dev                                                                                                       |
-| `build`            | on    | `dist/**`                                          | Depende de `^build` upstream; `apps/frontend` sobrescreve `env` para `MANGO_API_URL`, `VITE_*` e adiciona `dist-metafile.json` a `outputs` |
-| `check:quick`      | off   | —                                                  | Lint / format e verificação separada de ciclos TS/JS; arquivos gerados e ignorados não entram nos inputs de cache do VCS                   |
-| `typecheck`        | on    | —                                                  | Inputs em `tsconfig.json` raiz                                                                                                             |
-| `test:unit`        | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Testes unitários                                                                                                                           |
-| `test:integration` | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Testes de integração (sempre reexecutados)                                                                                                 |
-| `test:coverage`    | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑ | Relatórios de cobertura                                                                                                                    |
-| `//#test:scripts`  | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`             | Testes de scripts na raiz (cache via turbo)                                                                                                |
+[`turbo.jsonc`](../../../turbo.jsonc) define o grafo e os inputs de cada task:
 
-### Cache em CI
+| Task                      | Cache | Outputs / Env                                                                    | Notas                                                                                                                           |
+| ------------------------- | ----- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`                     | off   | —                                                                                | Persistente — roda servidores de dev                                                                                            |
+| `build`                   | on    | `dist/**`                                                                        | Depende de `^build`; `apps/frontend` sobrescreve `env` para `MANGO_API_URL`, `VITE_*` e inclui `dist-metafile.json` nos outputs |
+| `check:quick`             | on    | —                                                                                | Lint / formato Biome; inclui configurações da raiz e fontes upstream via `transit` na chave                                     |
+| `check:cycles`            | off   | —                                                                                | Ciclos TS/JS, incluindo arquivos gerados e ignorados ausentes dos inputs de cache do VCS                                        |
+| `transit`                 | —     | —                                                                                | Sem script; inclui fontes upstream na chave sem ordenar sua execução; opt-in com `dependsOn: ["transit"]`                       |
+| `typecheck`               | on    | —                                                                                | Inclui `tsconfig.json` raiz e depende de `transit`; workspaces verificam tipos em paralelo                                      |
+| `typecheck:with-deps`     | —     | —                                                                                | Sem script; seleciona `typecheck` do workspace e de suas dependências; usado por `bun run check`                                |
+| `test:unit`               | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`                                       | Depende de `transit`; editar uma dependência importada invalida o cache                                                         |
+| `test:integration`        | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`                                       | Testes de integração, sempre reexecutados                                                                                       |
+| `test:coverage`           | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑                               | Relatórios de cobertura, sempre reexecutados                                                                                    |
+| `//#test:scripts`         | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`; output `.mango/artifacts/junit/root.xml` | Testes da raiz usados pela cobertura e pelos shards de CI; restaura a evidência JUnit em um hit                                 |
+| `//#test:scripts:workers` | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`; env `CI`, `MANGOSTUDIO_*`                | Testes da raiz divididos em processos de workers na fase unit comum; sem relatório restaurado do cache                          |
 
-O CI persiste o cache local do Turbo com `actions/cache` nas lanes check, test e
-build. Cada lane usa um prefixo de chave separado:
+### Cache local e em CI
 
-```text
-${{ runner.os }}-${{ env.CACHE_VERSION }}-turbo-<lane>-${{ github.sha }}
-```
+O cache local fica em `.turbo/cache` e é ignorado pelo Git. Worktrees compartilham por padrão
+o cache do checkout principal; defina `TURBO_CACHE_DIR=.turbo/cache` para um cache próprio.
 
-O sufixo `github.sha` salva um cache novo a cada execução bem-sucedida, enquanto
-o prefixo de restore traz o cache mais recente da lane. Incrementar
-`CACHE_VERSION` invalida todos os caches de CI quando necessário.
+O CI persiste o cache local pelo composite compartilhado `cache-scoped`. Check, test e build
+mantêm escopos separados de validade e escrita. Um run bem-sucedido salva um snapshot
+rotacionado apenas quando o Turbo cria novos payloads `*.tar.zst`; ID e tentativa do run
+distinguem cada save. Um run que só usa hits não salva nada. PRs restauram seus snapshots
+anteriores e entradas confiáveis de `main`; `main` nunca restaura o cache de um PR.
+
+`CI_CACHE_EPOCH` é a variável de invalidação emergencial do repositório, com fallback `v1`.
+A [política de cache de CI em inglês](../../reference/testing.md#ci-cache-policy) mantém as
+chaves, a ordem de restauração, a retenção e os invalidadores completos.
+
+A lane check não tem cache separado de build-info TypeScript: `incremental` está desativado
+em todos os tsconfigs. O Turbo é o único cache de typecheck. O teste
+`scripts/tests/typescript-incremental.unit.test.ts` fixa esse contrato.
 
 ### Trabalho futuro
 

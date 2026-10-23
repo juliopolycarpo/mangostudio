@@ -21,7 +21,7 @@ it as the living example for current idioms when it differs from this skill.
 2. **Create the migration file** `apps/api/src/db/migrations/NNN_<snake_description>.ts`
    from [template.ts.txt](template.ts.txt):
    - Export the camel-case description as a named `Migration` (for example,
-     `026_audit_events.ts` exports `auditEvents`).
+     `NNN_audit_events.ts` exports `auditEvents`).
    - Implement both `up` and `down`; make `down` reverse `up` in reverse order.
    - Use `ifNotExists()` on creates and `ifExists()` on drops so reruns are idempotent.
    - Choose FK `onDelete` behavior deliberately: use `cascade` for owned child rows;

@@ -8,12 +8,12 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) 1.4.3 or newer — `bun upgrade`, or
-  `curl -fsSL https://bun.sh/install | bash` for a first install
+- [Bun](https://bun.sh/) at the exact version in [`.bun-version`](../.bun-version) —
+  select the matching [official release](https://github.com/oven-sh/bun/releases)
 - Rust 1.99.0 or newer via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. The hub launches
   Local as the cargo-built `mangostudio-runtime`; `bun run dev` builds it first, and
   `rust-toolchain.toml` pins the version
-- Git with GPG signing configured (see [Commit Guidelines](#commit-guidelines))
+- Git with commit signing configured (see [Commit Guidelines](#commit-guidelines))
 
 The repo pins Bun 1.4.3. The pin moved to the 1.4.x line at 1.4.0, the release that made the post-rewrite runtime generally available; it tracked the `canary` channel until then. `.bun-version` is what CI installs, and `packageManager` must name the same version — see [`docs/reference/tooling.md`](../docs/reference/tooling.md#bun).
 
@@ -107,7 +107,7 @@ bun run test --e2e
 bun run check
 ```
 
-This runs Biome, dprint, circular dependency checks, and TypeScript type-checking across all workspaces.
+This includes Biome, dprint, circular dependency checks, and TypeScript type-checking across all workspaces. See `bun run check --help` and [`scripts/check.ts`](../scripts/check.ts) for the complete command contract, including code-health, generated-contract, lockfile and protocol checks.
 
 ## Building
 
@@ -119,11 +119,13 @@ This builds the frontend with `Bun.build()` (`apps/frontend/build.ts`) by defaul
 
 ## Commit Guidelines
 
-This project uses [Conventional Commits](https://www.conventionalcommits.org/). Every commit must be GPG-signed and include a sign-off:
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). Every commit must be signed through Git's configured signing backend (including SSH or GPG) and include a sign-off:
 
 ```bash
 git commit -S -s -m "feat(scope): short imperative summary"
 ```
+
+Configure the signing key and backend in Git before committing. `-S` uses that configuration; `-s` adds the DCO sign-off from your Git identity. Let Git generate the trailer.
 
 Common types: `feat`, `fix`, `chore`, `test`, `docs`, `refactor`, `ci`.
 
@@ -156,9 +158,10 @@ Preview the changelog locally with `bun run changelog --preview`. See
 2. Run the full validation suite locally before pushing:
    ```bash
    bun run check && bun run test
-   # or use the full CI gate shortcut:
+   # Local check, coverage and build sequence:
    bun run verify
    ```
+   `verify` runs `check → test --coverage → build --all` and stops on the first failure. Its coverage phase omits protocol TypeScript tests; add `bun run protocol:test --ts-only`. Rust, full protocol validation and hosted smoke remain separate; follow the [validation checklist](../docs/reference/testing.md#verification-checklist) for the affected area.
 3. Open a PR against `main` and fill out the PR template.
 4. PRs require all CI checks to pass before merging.
 5. Screenshots or GIFs are required for UI changes.

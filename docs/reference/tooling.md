@@ -7,8 +7,9 @@ that made the Rust runtime rewrite generally available; before that it tracked
 the `canary` channel for the three months 1.3.14 spent as the newest stable. That
 is over, and nothing here floats any more.
 
-Install it with `bun upgrade`, or `curl -fsSL https://bun.sh/install | bash` from
-cold.
+Install the exact version named in [`.bun-version`](../../.bun-version) from the
+matching [official Bun release](https://github.com/oven-sh/bun/releases). An unversioned
+installer or `bun upgrade` selects the newest stable release, which may differ from the pin.
 
 ### Two fields name the same toolchain, for two different consumers
 
@@ -119,8 +120,8 @@ be removed.
 
 ## Turborepo
 
-This monorepo uses [Turborepo](https://turborepo.dev) **2.x** (currently
-`2.11.7`) as its shared build-system layer. Turborepo orchestrates task
+This monorepo uses stable [Turborepo](https://turborepo.dev) **2.x**, pinned exactly
+in the root [`package.json`](../../package.json), as its shared build-system layer. Turborepo orchestrates task
 execution across workspaces and provides a content-addressable cache so that
 unchanged work is never rebuilt.
 
@@ -140,19 +141,20 @@ extension is used so that inline comments can document migration decisions.
 
 Current task definitions:
 
-| Task                  | Cache | Outputs / Env                                      | Notes                                                                                                                                 |
-| --------------------- | ----- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `dev`                 | off   | —                                                  | Persistent — runs dev servers                                                                                                         |
-| `build`               | on    | `dist/**`                                          | Depends on upstream `^build`; `apps/frontend` overrides `env` to `MANGO_API_URL`, `VITE_*` and adds `dist-metafile.json` to `outputs` |
-| `check:quick`         | on    | —                                                  | Biome lint / format; hashes workspace and root lint configuration inputs plus upstream workspace sources through `transit`            |
-| `check:cycles`        | off   | —                                                  | TS/JS cycle scan, including generated and ignored files absent from VCS cache inputs                                                  |
-| `transit`             | —     | —                                                  | Script-less. Hashes upstream sources into a dependent's key without ordering it; opt in with `dependsOn: ["transit"]`                 |
-| `typecheck`           | on    | —                                                  | Inputs scoped to root `tsconfig.json`; depends on `transit`, so workspaces check at once                                              |
-| `typecheck:with-deps` | —     | —                                                  | Script-less. A workspace's `typecheck` plus its dependencies'; `bun run check` requests it                                            |
-| `test:unit`           | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Unit tests; depends on `transit`, so an edit in an imported workspace is a cache miss                                                 |
-| `test:integration`    | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Integration tests (always re-run)                                                                                                     |
-| `test:coverage`       | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑ | Coverage reports (always re-run)                                                                                                      |
-| `//#test:scripts`     | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`             | Root scripts tests (cached via turbo)                                                                                                 |
+| Task                      | Cache | Outputs / Env                                                                    | Notes                                                                                                                                 |
+| ------------------------- | ----- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`                     | off   | —                                                                                | Persistent — runs dev servers                                                                                                         |
+| `build`                   | on    | `dist/**`                                                                        | Depends on upstream `^build`; `apps/frontend` overrides `env` to `MANGO_API_URL`, `VITE_*` and adds `dist-metafile.json` to `outputs` |
+| `check:quick`             | on    | —                                                                                | Biome lint / format; hashes workspace and root lint configuration inputs plus upstream workspace sources through `transit`            |
+| `check:cycles`            | off   | —                                                                                | TS/JS cycle scan, including generated and ignored files absent from VCS cache inputs                                                  |
+| `transit`                 | —     | —                                                                                | Script-less. Hashes upstream sources into a dependent's key without ordering it; opt in with `dependsOn: ["transit"]`                 |
+| `typecheck`               | on    | —                                                                                | Inputs scoped to root `tsconfig.json`; depends on `transit`, so workspaces check at once                                              |
+| `typecheck:with-deps`     | —     | —                                                                                | Script-less. A workspace's `typecheck` plus its dependencies'; `bun run check` requests it                                            |
+| `test:unit`               | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`                                       | Unit tests; depends on `transit`, so an edit in an imported workspace is a cache miss                                                 |
+| `test:integration`        | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`                                       | Integration tests (always re-run)                                                                                                     |
+| `test:coverage`           | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑                               | Coverage reports (always re-run)                                                                                                      |
+| `//#test:scripts`         | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`; output `.mango/artifacts/junit/root.xml` | Root script tests used by coverage and CI shards; restores their JUnit evidence on a cache hit                                        |
+| `//#test:scripts:workers` | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`; env `CI`, `MANGOSTUDIO_*`                | Root script tests split across worker processes in the ordinary unit phase; no cached report output                                   |
 
 ### Inspection Scripts
 

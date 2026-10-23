@@ -26,11 +26,12 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
 
 - Unit: `bun run --filter @mangostudio/api test:unit`
 - Integration: `bun run --filter @mangostudio/api test:integration`
-- **Run API tests from the workspace, not the repo root.** `bunfig.toml` (which
-  declares the preload) is resolved relative to the working directory, so
-  `bun test apps/api/...` from the root silently skips the bootstrap. Use the
-  `--filter` commands above or `cd apps/api && bun test`. If you get them wrong,
-  the harness throws an actionable error instead of touching real data.
+- Run the `--filter` commands above from the repo root. They enter the API workspace,
+  where `bunfig.toml` supplies the preload, and the worker runner starts each test process
+  through `runWithTestHome` with a throwaway home. For one file, preserve both boundaries:
+  `(cd apps/api && bun ../../scripts/with-test-home.ts bun test --timeout 15000 tests/unit/services/preload-smoke.test.ts)`.
+  A bare `bun test apps/api/...` from the root also skips the preload; the harness reports
+  the missing bootstrap.
 - The `test:*` scripts start Bun with a throwaway `HOME` (`scripts/with-test-home.ts`), so tests
   may create and read `~/.mango` freely inside it. A bare `bun test` bypasses that and uses your
   real home: use the scripts. A fixture that spawns `git` with its own `env` forwards

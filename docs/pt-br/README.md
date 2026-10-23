@@ -128,8 +128,8 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 
 ## Pré-requisitos (desenvolvimento)
 
-- [Bun](https://bun.sh/) 1.4.3 ou mais recente (`bun upgrade` ou
-  `curl -fsSL https://bun.sh/install | bash` na primeira instalação)
+- [Bun](https://bun.sh/) na versão exata de [`.bun-version`](../../.bun-version) —
+  selecione a [release oficial correspondente](https://github.com/oven-sh/bun/releases)
 - Rust 1.99.0 ou mais recente via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). O hub inicia o
   Local como o `mangostudio-runtime` construído com cargo, e o `rust-toolchain.toml` fixa a
   versão que o rustup instala no primeiro build.
@@ -290,15 +290,20 @@ mangostudio/
 | `bun run test --coverage` | Coleta cobertura de testes nos workspaces aplicáveis                   |
 | `bun run test:scripts`    | Executa testes de automação em `scripts/`                              |
 | `bun run fix`             | Aplica correções do Biome e dprint                                     |
-| `bun run verify`          | Gate CI local completo: check, test --coverage, build --all            |
+| `bun run verify`          | Sequência local: check, test --coverage, build --all                   |
 | `bun run clean`           | Remove dist, relatórios locais de teste, coverage e artefatos de build |
+
+`verify` executa a sequência local de checks, cobertura e build. Os testes TypeScript do protocolo
+omitidos pela cobertura, os gates completos de Rust/protocolo e o smoke hospedado ficam
+separados; veja o [checklist de validação](reference/testing.md#checklist-de-verificação).
 
 ## Ferramentas de Desenvolvimento
 
 | Ferramenta     | Escopo                                                  | Funcionalidade Principal                          |
 | -------------- | ------------------------------------------------------- | ------------------------------------------------- |
 | **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML                | Linter e formatador com regras unificadas         |
-| **dprint**     | Markdown, MDX, TOML, YAML, Dockerfile                   | Formatador plugável com plugins WASM              |
+| **dprint**     | Markdown, MDC, MDX, TOML, YAML, Dockerfile              | Formatador plugável com plugins WASM              |
+| **Knip**       | Grafos de entrypoints da raiz e dos workspaces          | Detecção de código e dependências não utilizados  |
 | **lefthook**   | Git hooks (pre-commit)                                  | Gerenciador de hooks Git para validação em commit |
 | **jscpd**      | Todos os arquivos fonte                                 | Detecção de código duplicado                      |
 | **bun:test**   | Testes unitários e de integração de todos os workspaces | Executor nativo rápido com cobertura LCOV         |
@@ -312,18 +317,18 @@ Estes binários são instalados como devDependencies e invocados através dos sc
 
 Um hook [lefthook](https://github.com/evilmartians/lefthook) de pre-commit é instalado automaticamente via `bun install` (através do script `prepare`). Ele executa as seguintes verificações em paralelo a cada `git commit`:
 
-| Hook                | Gatilho      | Arquivos alvo               | Comando                                                                |
-| ------------------- | ------------ | --------------------------- | ---------------------------------------------------------------------- |
-| `biome`             | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | `bunx biome check --write {staged_files}`                              |
-| `dprint`            | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | `bunx dprint fmt {staged_files}`                                       |
-| `dprint-dockerfile` | `pre-commit` | `{Dockerfile,Dockerfile.*}` | `bunx dprint fmt {staged_files}`                                       |
-| `check-affected`    | `pre-commit` | Todos os arquivos staged    | `bun run check --staged --skip-format` (ignorado durante merge/rebase) |
+| Hook                | Gatilho      | Arquivos alvo                  | Comando                                                                |
+| ------------------- | ------------ | ------------------------------ | ---------------------------------------------------------------------- |
+| `biome`             | `pre-commit` | `*.{ts,tsx,js,jsx,json}`       | `bunx biome check --write --no-errors-on-unmatched {staged_files}`     |
+| `dprint`            | `pre-commit` | `*.{md,mdc,mdx,toml,yml,yaml}` | `bunx dprint fmt --allow-no-files {staged_files}`                      |
+| `dprint-dockerfile` | `pre-commit` | `{Dockerfile,Dockerfile.*}`    | `bunx dprint fmt --allow-no-files {staged_files}`                      |
+| `check-affected`    | `pre-commit` | Todos os arquivos staged       | `bun run check --staged --skip-format` (ignorado durante merge/rebase) |
 
 Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks devem ser bem-sucedidos para o commit prosseguir.
 
 ### Verificações Manuais
 
-- `bun run check` — verificação completa (Biome, dprint, typecheck, dependências circulares).
+- `bun run check` — verifica todos os workspaces e as políticas da raiz; `bun run check --help` e [`scripts/check.ts`](../../scripts/check.ts) definem o contrato completo das lanes.
 - `bun run check --staged` — apenas os workspaces afetados pelos arquivos staged (usado pelo hook pre-commit).
 - `bun run check --changed` — apenas os workspaces modificados em relação a `origin/main`.
 - `bun run fix --staged` — correção automática apenas nos workspaces afetados.
@@ -414,7 +419,7 @@ Configurado em `dprint.json` com o seguinte escopo e configurações:
 | Fim de linha             | LF                                                                                                                                                                                           |
 | Tabulação                | false                                                                                                                                                                                        |
 | Quebra de texto Markdown | `maintain`                                                                                                                                                                                   |
-| Inclusões                | `**/*.{md,mdx,toml,yml,yaml}`, `**/Dockerfile`, `**/Dockerfile.*`                                                                                                                            |
+| Inclusões                | `**/*.{md,mdc,mdx,toml,yml,yaml}`, `**/Dockerfile`, `**/Dockerfile.*`                                                                                                                        |
 | Exclusões                | `node_modules`, `dist`, `coverage`, `build`, `test-results`, `playwright-report`, `.jscpd-out`, `.qa-gate`, `.mango/artifacts`, `.mango/out`, `routeTree.gen.ts`, `CHANGELOG.md`, `bun.lock` |
 | Plugins                  | markdown (WASM), toml (WASM), dockerfile (WASM), pretty_yaml                                                                                                                                 |
 

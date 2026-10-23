@@ -11,7 +11,7 @@ scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── build-runtime.ts  Build the cargo mangostudio-runtime per release target (bun run build:runtime)
-├── check.ts          Biome lint/format + import cycles + dprint + tsc + workflow static analysis, in parallel (bun run check)
+├── check.ts          Check orchestrator (bun run check; see full command contract below)
 ├── check-import-cycles.ts
 │                     Cycle-only TS/JS scan, including generated and gitignored files
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
@@ -34,6 +34,12 @@ scripts/
 ├── runtime-contract/ Emit + drift-check the cross-language hub/runtime artifacts (bun run contracts:emit)
 └── tests/            Cross-cutting unit tests (co-located tests live beside sources)
 ```
+
+`bun run check --help` and [`check.ts`](./check.ts) define the complete check contract.
+The orchestrator includes workspace lint, format, import-cycle and type checks; root policy
+and lockfile-dedupe checks; Knip code health; generated-contract freshness; the TypeScript
+protocol lanes; and workflow static analysis. Staged/changed modes select relevant lanes.
+The full Rust protocol gates run separately through `bun run protocol:check`.
 
 ## lib/ — shared toolkit
 
