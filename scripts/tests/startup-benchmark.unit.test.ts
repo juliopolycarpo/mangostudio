@@ -33,10 +33,16 @@ class DiscardedBenchmarkOutput extends Writable {
 
 /** A local executable which succeeds once after warmup, then rejects its next startup. */
 class FakeStartupBinary {
+  readonly environment: Record<string, string>;
   constructor(
     private readonly directory: string,
-    private readonly stall = false
-  ) {}
+    stall = false
+  ) {
+    this.environment = {
+      BENCHMARK_FIXTURE_ROOT: directory,
+      BENCHMARK_FIXTURE_STALL: String(stall),
+    };
+  }
 
   async create(): Promise<string> {
     const binary = join(this.directory, 'fake-startup-binary');
@@ -46,10 +52,12 @@ class FakeStartupBinary {
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 const home = process.env.HOME;
+const fixtureRoot = process.env.BENCHMARK_FIXTURE_ROOT;
+const stall = process.env.BENCHMARK_FIXTURE_STALL === 'true';
 const counterPath = join(home, 'startup-counter');
 const count = Number(await Bun.file(counterPath).text().catch(() => '0')) + 1;
 await Bun.write(counterPath, String(count));
-if (count === 3 && ${this.stall}) { await Bun.write(${JSON.stringify(join(this.directory, 'stall-reached'))}, 'later startup attempt'); console.error('Intentional fixture startup cancellation'); setInterval(() => {}, 1000); while (!(await Bun.file(${JSON.stringify(join(this.directory, 'cancel-now'))}).exists())) await Bun.sleep(5); process.kill(process.ppid, 'SIGTERM'); await new Promise(() => {}); }
+if (count === 3 && stall) { await Bun.write(join(fixtureRoot, 'stall-reached'), 'later startup attempt'); console.error('Intentional fixture startup cancellation'); setInterval(() => {}, 1000); while (!(await Bun.file(join(fixtureRoot, 'cancel-now')).exists())) await Bun.sleep(5); process.kill(process.ppid, 'SIGTERM'); await new Promise(() => {}); }
 if (count === 3) {
   console.error('Intentional fixture startup failure after one measured success');
   process.exit(3);
@@ -68,10 +76,20 @@ process.on('SIGTERM', () => { server.stop(true); process.exit(0); });
 }
 
 describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () => {
+  it('keeps executable source independent of fixture paths and settings', async () => {
+    const first = await mkdtemp(join(tmpdir(), 'benchmark-program-first-'));
+    const second = await mkdtemp(join(tmpdir(), 'benchmark-program-second-'));
+    scratch.push(first, second);
+    const a = await new FakeStartupBinary(first, false).create();
+    const b = await new FakeStartupBinary(second, true).create();
+    expect(await Bun.file(a).text()).toBe(await Bun.file(b).text());
+  });
+
   it('preserves finished samples when the intended later attempt cancels the benchmark', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'mango-startup-cancel-test-'));
+    const directory = await mkdtemp(join(tmpdir(), 'mango-startup-cancel-\'"`-${literal}-'));
     scratch.push(directory);
-    const binary = await new FakeStartupBinary(directory, true).create();
+    const fixture = new FakeStartupBinary(directory, true);
+    const binary = await fixture.create();
     const output = join(directory, 'receipt.json');
     const journal = `${output}.jsonl`;
     const pending = runNativeCommand({
@@ -89,7 +107,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       ],
       root: ROOT,
       out: directory,
-      env: { ...process.env },
+      env: { ...process.env, ...fixture.environment },
       timeoutSeconds: 20,
       pollIntervalMs: 20,
       stream: new DiscardedBenchmarkOutput(),
@@ -129,7 +147,8 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
   it('retains warmup, successful and failed attempts when a later startup fails', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mango-startup-receipt-test-'));
     scratch.push(directory);
-    const binary = await new FakeStartupBinary(directory).create();
+    const fixture = new FakeStartupBinary(directory);
+    const binary = await fixture.create();
     const result = await runNativeCommand({
       label: 'startup-receipt',
       command: [
@@ -143,7 +162,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       ],
       root: ROOT,
       out: directory,
-      env: { ...process.env },
+      env: { ...process.env, ...fixture.environment },
       timeoutSeconds: 8,
       pollIntervalMs: 20,
       stream: new DiscardedBenchmarkOutput(),

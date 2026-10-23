@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
+import { nativeQualificationEnvironment } from '../lib/native-bun-qualification';
 import {
   type NativeProcess,
   runNativeCommand,
@@ -39,6 +40,13 @@ class DiscardedDriverOutput extends Writable {
 
 /** No Rust compilation: a named Cargo fake stops inside the first declared build. */
 class FakeRustCostCommands {
+  environment(ambient: NodeJS.ProcessEnv, bin: string): NodeJS.ProcessEnv {
+    const environment = nativeQualificationEnvironment(ambient);
+    delete environment.RUSTC;
+    delete environment.RUSTC_WRAPPER;
+    delete environment.RUSTC_WORKSPACE_WRAPPER;
+    return { ...environment, PATH: `${bin}:${environment.PATH}` };
+  }
   constructor(private readonly directory: string) {}
   async create(): Promise<string> {
     const bin = join(this.directory, 'bin');
@@ -75,17 +83,55 @@ else if (args[0] === 'build') {
 describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
   'Rust cost driver cancellation',
   () => {
+    it('preserves the production guard against an inherited Cargo target', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-guard-test-'));
+      scratch.push(root);
+      const fixture = new FakeRustCostCommands(root);
+      const bin = await fixture.create();
+      const environment = fixture.environment(process.env, bin);
+      const result = await runNativeCommand({
+        label: 'driver-rejected-environment',
+        command: [
+          process.execPath,
+          'scripts/bench/rust-costs.ts',
+          '--execute',
+          '--out',
+          join(root, 'study'),
+        ],
+        root: ROOT,
+        out: root,
+        env: { ...environment, CARGO_TARGET_DIR: join(root, 'inherited-target') },
+        timeoutSeconds: 10,
+        pollIntervalMs: 20,
+        stream: new DiscardedDriverOutput(),
+      });
+      const stderr = await readFile(
+        join(root, 'logs/driver-rejected-environment.stderr.log'),
+        'utf8'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.timedOut).toBe(false);
+      expect(result.settlement.empty).toBe(true);
+      expect(stderr).toContain(
+        'Rust baseline environment: expected repository profile and compiler | received override names: CARGO_TARGET_DIR'
+      );
+      expect(await Bun.file(join(root, 'stall-reached')).exists()).toBe(false);
+    });
     it('cancels the actual driver build, retains its interrupted attempt and settles the Cargo family', async () => {
       const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-cancel-test-'));
       scratch.push(root);
-      const bin = await new FakeRustCostCommands(root).create();
+      const fixture = new FakeRustCostCommands(root);
+      const bin = await fixture.create();
       const out = join(root, 'study');
       const pending = runNativeCommand({
         label: 'driver-cancel',
         command: [process.execPath, 'scripts/bench/rust-costs.ts', '--execute', '--out', out],
         root: ROOT,
         out: root,
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+        env: fixture.environment(
+          { ...process.env, CARGO_TARGET_DIR: join(root, 'inherited-qualification-target') },
+          bin
+        ),
         timeoutSeconds: 20,
         pollIntervalMs: 20,
         stream: new DiscardedDriverOutput(),
