@@ -37,8 +37,7 @@ against `SHA256SUMS` where applicable.
 | Manual                 | Download from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest), verify with `SHA256SUMS` |
 
 The prebuilt app needs no local Rust compiler. `cargo install mangostudio` compiles the launcher
-and requires Rust 1.99.0 or newer. `cargo binstall` uses a prebuilt archive when available; its
-compilation fallback has the same Rust requirement. See the
+and requires Rust 1.99.0 or newer. See the
 [Rust support and release policy](docs/reference/releasing.md#rust-support-and-releases) when
 upgrading from Rust 1.96 or 1.97.
 

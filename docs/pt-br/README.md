@@ -32,8 +32,7 @@ downloads contra `SHA256SUMS` quando aplicável.
 | Manual                 | Baixe em [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest) e verifique com `SHA256SUMS` |
 
 O app pré-compilado não precisa de um compilador Rust local. `cargo install mangostudio` compila
-o launcher e exige Rust 1.99.0 ou mais recente. `cargo binstall` usa um arquivo pré-compilado
-quando disponível; a compilação de fallback exige a mesma versão do Rust. Veja a
+o launcher e exige Rust 1.99.0 ou mais recente. Veja a
 [política de suporte e releases Rust](reference/releasing.md#suporte-rust-e-releases) ao migrar
 do Rust 1.96 ou 1.97.
 
