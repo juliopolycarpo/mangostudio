@@ -6,12 +6,12 @@ Obrigado pelo seu interesse em contribuir com o MangoStudio!
 
 ## Pré-requisitos
 
-- [Bun](https://bun.sh/) 1.4.3 ou mais recente — `bun upgrade` ou
-  `curl -fsSL https://bun.sh/install | bash` na primeira instalação
+- [Bun](https://bun.sh/) na versão exata de [`.bun-version`](../../.bun-version) —
+  selecione a [release oficial correspondente](https://github.com/oven-sh/bun/releases)
 - Rust 1.99.0 ou mais recente via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. O hub inicia o
   Local como o `mangostudio-runtime` construído com cargo; o `bun run dev` o compila antes, e o
   `rust-toolchain.toml` fixa a versão
-- Git com assinatura GPG configurada (veja [Diretrizes de Commit](#diretrizes-de-commit))
+- Git com assinatura de commits configurada (veja [Diretrizes de Commit](#diretrizes-de-commit))
 
 O repositório fixa o Bun 1.4.3. O pin passou para a linha 1.4.x na 1.4.0, a release que tornou o runtime pós-reescrita disponível de forma geral; até então ele seguia o canal `canary`. O `.bun-version` é o que a CI instala, e o `packageManager` precisa indicar a mesma versão — veja [`docs/reference/tooling.md`](../reference/tooling.md#bun).
 
@@ -90,7 +90,7 @@ bun run test --e2e
 bun run check
 ```
 
-Executa Biome, dprint, verificação de dependências circulares e verificação de tipos TypeScript em todos os workspaces.
+Inclui Biome, dprint, verificação de dependências circulares e verificação de tipos TypeScript em todos os workspaces. Veja `bun run check --help` e [`scripts/check.ts`](../../scripts/check.ts) para o contrato completo do comando, incluindo verificações de código não utilizado, contratos gerados, lockfile e protocolo.
 
 ## Build
 
@@ -102,11 +102,13 @@ Gera o build do frontend com `Bun.build()` (`apps/frontend/build.ts`) por padrã
 
 ## Diretrizes de Commit
 
-Este projeto usa [Conventional Commits](https://www.conventionalcommits.org/). Todo commit deve ser assinado com GPG e incluir um sign-off:
+Este projeto usa [Conventional Commits](https://www.conventionalcommits.org/). Todo commit deve ser assinado pelo backend configurado no Git (incluindo SSH ou GPG) e incluir um sign-off:
 
 ```bash
-git commit -S -s -m "feat(scope): resumo imperativo curto"
+git commit -S -s -m "feat(scope): short imperative summary"
 ```
+
+Configure a chave e o backend de assinatura no Git antes de fazer commit. `-S` usa essa configuração; `-s` adiciona o sign-off DCO a partir da sua identidade do Git. Deixe o Git gerar o trailer.
 
 Tipos comuns: `feat`, `fix`, `chore`, `test`, `docs`, `refactor`, `ci`.
 
@@ -130,7 +132,10 @@ Esta é uma configuração local única. O template está em `.gitmessage` na ra
 2. Execute a suíte de validação completa localmente antes de fazer push:
    ```bash
    bun run check && bun run test
+   # Sequência local de checks, cobertura e build:
+   bun run verify
    ```
+   `verify` executa `check → test --coverage → build --all` e para na primeira falha. A fase de cobertura omite os testes TypeScript do protocolo; adicione `bun run protocol:test --ts-only`. Rust, validação completa do protocolo e smoke hospedado continuam separados; siga o [checklist de validação](reference/testing.md#checklist-de-verificação) da área afetada.
 3. Abra um PR contra `main` e preencha o template de PR.
 4. PRs exigem que todas as verificações de CI passem antes do merge.
 5. Screenshots ou GIFs são obrigatórios para mudanças de UI.

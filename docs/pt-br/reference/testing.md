@@ -57,7 +57,7 @@ bun run test --coverage     # coleta de cobertura nos workspaces aplicáveis
 bun run test --all          # todas as lanes, incluindo e2e
 bun run test --changed      # só os testes afetados desde merge-base HEAD origin/main
 bun run test --changed --base <ref>  # ... desde merge-base HEAD <ref>
-bun run verify              # gate CI local completo: check → test --coverage → build --all
+bun run verify              # sequência local: check → test --coverage → build --all
 ```
 
 `--changed` é um loop local rápido, não um gate. Ele compara o merge-base com a
@@ -208,7 +208,9 @@ As lanes unit e integration da API rodam em um home descartável. O código sob 
 `test:unit`, `test:integration` e `test:coverage:*` de `apps/api` iniciam o `bun test` por
 `scripts/with-test-home.ts`, que cria um `<tmpdir>/mangostudio-test-home-<aleatório>` novo,
 inicia os testes com `HOME` (e `USERPROFILE`) apontando para ele e o remove quando a execução
-termina. Essa única mudança cobre `bun run test`, os shards de CI atrás do watchdog, o
+termina. `test:unit` e `test:integration` chegam ao launcher pelo runner de workers
+(`scripts/run-test-workers.ts`), que dá a cada processo seu próprio home. Isso cobre
+`bun run test`, os shards de CI atrás do watchdog, o
 orquestrador de cobertura e um `bun run test:unit` direto em `apps/api`; o workflow noturno de
 ordem aleatória encapsula o seu `bun test` da mesma forma.
 
@@ -228,7 +230,15 @@ O que o launcher define, além do home:
   launcher cujo `HOME` não teve efeito é pego antes do primeiro teste.
 
 Um `bun test` direto em `apps/api` ignora o launcher e roda no seu home real — use os scripts
-do pacote. `scripts/tests/api-lanes-hermetic.unit.test.ts` falha, nomeando o `homedir()`
+do pacote a partir da raiz: `bun run --filter @mangostudio/api test:unit` ou
+`bun run --filter @mangostudio/api test:integration`. Eles também entram no workspace da API,
+onde `bunfig.toml` fornece o preload. Para selecionar um arquivo, preserve os dois limites:
+
+```bash
+(cd apps/api && bun ../../scripts/with-test-home.ts bun test --timeout 15000 tests/unit/services/preload-smoke.test.ts)
+```
+
+`scripts/tests/api-lanes-hermetic.unit.test.ts` falha, nomeando o `homedir()`
 resolvido e o formato esperado `<tmpdir>/mangostudio-test-home-<aleatório>`, se um script de
 lane da API deixar de passar por ele. O launcher reutiliza a criação, verificação de formato
 e remoção protegidas de `scripts/lib/temp-home.ts`, sobre as quais o home do browser-smoke é
@@ -517,10 +527,18 @@ Antes de fazer merge, rode:
 ```bash
 bun run check
 bun run test
-# ou use o atalho do gate completo de CI:
+# Sequência local de checks, cobertura e build:
 bun run verify
 ```
 
-`bun run verify` corresponde ao pipeline de CI menos os jobs de smoke (browser e
-binary), que exigem runners de plataforma nem sempre disponíveis localmente.
-Rode-os separadamente com `bun run test --e2e` e `bun scripts/test-build.ts`.
+`bun run verify` executa `check → test --coverage → build --all` e para na primeira
+falha. A fase de cobertura não agenda os testes TypeScript do protocolo; adicione
+`bun run protocol:test --ts-only` para cobri-los. A fase unit do `bun run test` comum
+inclui essa suíte do protocolo.
+
+Mudanças relevantes ainda exigem os gates completos de Rust e do protocolo:
+siga a [validação do workspace Rust](../../reference/testing.md#rust-workspace-tests)
+e `bun run protocol:check && bun run protocol:test`. O complemento só de TypeScript
+não substitui Rust, combinações de features ou qualificação de interoperabilidade.
+Rode browser e binary smoke separadamente com `bun run test --e2e` e
+`PLATFORM=linux-x64 bun run scripts/test-build.ts` em runners compatíveis.

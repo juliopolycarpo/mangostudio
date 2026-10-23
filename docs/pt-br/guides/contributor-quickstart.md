@@ -4,7 +4,9 @@ Use este guia quando quiser o caminho mais curto entre o clone do repositório e
 
 ## 1. Configuração
 
-Você precisa do [Bun](https://bun.sh/) e do Rust 1.99.0 ou mais recente instalado pelo
+Você precisa do [Bun](https://bun.sh/) na versão de [`.bun-version`](../../../.bun-version)
+(selecione a [release oficial correspondente](https://github.com/oven-sh/bun/releases))
+e do Rust 1.99.0 ou mais recente instalado pelo
 [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
 O hub inicia o Local como o binário `mangostudio-runtime` compilado pelo cargo, e o
 `rust-toolchain.toml` fixa a versão que o rustup instala no primeiro build.
@@ -55,23 +57,32 @@ bun run --filter @mangostudio/frontend build
 
 Um hook [lefthook](https://github.com/evilmartians/lefthook) de pre-commit é instalado automaticamente durante `bun install`. Ele executa estas verificações em cada commit:
 
-| Verificação        | Gatilho      | Arquivos alvo               | Impede o commit em caso de            |
-| ------------------ | ------------ | --------------------------- | ------------------------------------- |
-| Biome formato/lint | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | Erros de formato ou lint              |
-| dprint formato     | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | Erros de formato                      |
-| dprint Dockerfile  | `pre-commit` | `{Dockerfile,Dockerfile.*}` | Erros de formato                      |
-| Typecheck afetados | `pre-commit` | Todos os arquivos staged    | Erros de tipo nos workspaces afetados |
+| Verificação        | Gatilho      | Arquivos alvo                  | Impede o commit em caso de                                           |
+| ------------------ | ------------ | ------------------------------ | -------------------------------------------------------------------- |
+| Biome formato/lint | `pre-commit` | `*.{ts,tsx,js,jsx,json}`       | Erros de formato ou lint                                             |
+| dprint formato     | `pre-commit` | `*.{md,mdc,mdx,toml,yml,yaml}` | Erros de formato                                                     |
+| dprint Dockerfile  | `pre-commit` | `{Dockerfile,Dockerfile.*}`    | Erros de formato                                                     |
+| Checks afetados    | `pre-commit` | Todos os arquivos staged       | Erros de validação dos workspaces e checks relevantes do repositório |
 
-Arquivos formatados são re-adicionados ao stage automaticamente. A verificação de typecheck é ignorada durante merge ou rebase.
+Arquivos formatados são re-adicionados ao stage automaticamente. O comando de checks afetados
+é `bun run check --staged --skip-format`: executa lint, ciclos de importação e tipos dos
+workspaces, além de checks relevantes do repositório. Os checks de formato da raiz são
+ignorados porque os hooks de formatação cuidam dos arquivos staged; o lint dos workspaces
+ainda pode apontar erros de formato. A etapa de checks afetados é ignorada durante merge ou
+rebase. [`lefthook.yml`](../../../lefthook.yml) define a configuração dos hooks.
 
 ## 5. Comandos Comuns
 
 ```bash
 bun run check
 bun run test
-bun run verify   # gate CI local: check → test --coverage → build --all
+bun run verify   # sequência local: check → test --coverage → build --all
 bun run build
 ```
+
+`verify` omite a suíte de testes TypeScript do protocolo na fase de cobertura; adicione
+`bun run protocol:test --ts-only`. Rust, checks completos do protocolo e smoke hospedado têm
+comandos separados no [checklist de validação](../reference/testing.md#checklist-de-verificação).
 
 Lanes direcionadas:
 

@@ -44,9 +44,10 @@ function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
 Runs Biome lint/format and import-cycle checks, dprint, tsc typechecks, Knip code health,
-generated contract-artifact freshness, lockfile dedupe, the Mango Protocol
-lanes (spec, schema equality, fixtures, Cargo) and workflow static analysis
+generated contract-artifact freshness, lockfile dedupe, the TypeScript Mango Protocol
+lanes (spec, schema equality, fixtures) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.
+Run bun run protocol:check separately for the full protocol gate, including Rust.
 Default workspace selection: --all
 Workspace cycle scans include generated and gitignored TS/JS source files.
 Repository .mango/artifacts and .mango/out caches are excluded from scanning.

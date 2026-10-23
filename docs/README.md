@@ -10,6 +10,7 @@ right depth quickly instead of scanning a flat list of files.
 | `architecture/` | Maintainers, feature authors | System design, cross-cutting runtime behavior, and internal flows |
 | `features/`     | Feature authors              | Behavior and implementation notes for product areas               |
 | `design/`       | Frontend and native authors  | The flat design system: tokens, components, patterns, decisions   |
+| `protocol/`     | Protocol implementers, hosts | Mango Protocol adoption, conformance and independent releases     |
 | `providers/`    | Provider integrators         | Provider-specific notes and provider onboarding guides            |
 | `reference/`    | Contributors, agents         | API surface, testing rules, and file-map navigation               |
 | `guides/`       | New contributors             | Task-oriented onboarding and contributor workflows                |

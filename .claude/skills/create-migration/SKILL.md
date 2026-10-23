@@ -22,7 +22,7 @@ that has drifted.
    `apps/api/src/db/migrations/` and add 1, zero-padded to 3 digits.
 2. **Create the migration file** `apps/api/src/db/migrations/NNN_<snake_description>.ts`
    from [template.ts.txt](template.ts.txt):
-   - Named export: `camelCase` of the description (e.g. `026_audit_events.ts` exports
+   - Named export: `camelCase` of the description (e.g. `NNN_audit_events.ts` exports
      `auditEvents`), typed as `Migration` from `'kysely/migration'`.
    - Implement **both** `up` and `down`; `down` reverses `up` in reverse order.
    - Use `ifNotExists()` on creates and `ifExists()` on drops so reruns are idempotent.

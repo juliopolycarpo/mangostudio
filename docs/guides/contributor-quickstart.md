@@ -4,7 +4,9 @@ Use this guide when you want the shortest path from clone to a validated change.
 
 ## 1. Set Up
 
-You need [Bun](https://bun.sh/) and Rust 1.99.0 or newer from [rustup](https://rustup.rs/)
+You need [Bun](https://bun.sh/) at the version in [`.bun-version`](../../.bun-version)
+(select the matching [official release](https://github.com/oven-sh/bun/releases))
+and Rust 1.99.0 or newer from [rustup](https://rustup.rs/)
 (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). The hub launches Local as
 the cargo-built `mangostudio-runtime` binary, and `rust-toolchain.toml` pins the version rustup
 installs on first build.
@@ -55,24 +57,31 @@ bun run --filter @mangostudio/frontend build
 
 A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook is installed automatically during `bun install`. It runs these checks on every commit:
 
-| Check             | Trigger      | Files targeted              | Fails commit on                                                      |
-| ----------------- | ------------ | --------------------------- | -------------------------------------------------------------------- |
-| Biome format/lint | `pre-commit` | `*.{ts,tsx,js,jsx,json}`    | Format or lint errors                                                |
-| dprint format     | `pre-commit` | `*.{md,mdx,toml,yml,yaml}`  | Format errors                                                        |
-| dprint Dockerfile | `pre-commit` | `{Dockerfile,Dockerfile.*}` | Format errors                                                        |
-| Affected checks   | `pre-commit` | All staged files            | Workspace validation and relevant repository-wide code-health errors |
+| Check             | Trigger      | Files targeted                 | Fails commit on                                                      |
+| ----------------- | ------------ | ------------------------------ | -------------------------------------------------------------------- |
+| Biome format/lint | `pre-commit` | `*.{ts,tsx,js,jsx,json}`       | Format or lint errors                                                |
+| dprint format     | `pre-commit` | `*.{md,mdc,mdx,toml,yml,yaml}` | Format errors                                                        |
+| dprint Dockerfile | `pre-commit` | `{Dockerfile,Dockerfile.*}`    | Format errors                                                        |
+| Affected checks   | `pre-commit` | All staged files               | Workspace validation and relevant repository-wide code-health errors |
 
-Formatted files are re-staged automatically. The affected-check step is skipped during merge or
-rebase.
+Formatted files are re-staged automatically. The affected-check command is
+`bun run check --staged --skip-format`: it runs workspace lint, import-cycle and type checks,
+plus relevant repository-wide checks. Root format checks are skipped because the format hooks
+handle staged files; workspace lint may still report formatting errors. The affected-check
+step is skipped during merge or rebase. [`lefthook.yml`](../../lefthook.yml) owns the hook configuration.
 
 ## 5. Common Commands
 
 ```bash
 bun run check
 bun run test
-bun run verify   # full local CI gate: check → test --coverage → build --all
+bun run verify   # local sequence: check → test --coverage → build --all
 bun run build
 ```
+
+`verify` omits the protocol TypeScript test suite from its coverage phase; add
+`bun run protocol:test --ts-only`. Rust, full protocol checks and hosted smoke have separate
+commands in the [validation checklist](../reference/testing.md#verification-checklist).
 
 Targeted lanes:
 

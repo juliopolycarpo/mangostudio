@@ -1251,8 +1251,9 @@ bun run --filter @mangostudio/api test:integration
 > **Run API tests from the workspace.** `apps/api/bunfig.toml` declares the test
 > preload, and Bun resolves `bunfig.toml` relative to the current directory. Running
 > `bun test apps/api/...` from the repo root silently skips the preload — so always use
-> `bun run --filter @mangostudio/api test:unit` / `test:integration`, or
-> `cd apps/api && bun test`. When the preload is skipped, the config layer falls back to
+> `bun run --filter @mangostudio/api test:unit` / `test:integration` from the root.
+> These scripts also provide the throwaway home described below. When the preload is skipped,
+> the config layer falls back to
 > an isolated in-memory sandbox (never the real `~/.mango`) and the harness throws an
 > actionable error, so a wrong-directory run fails loudly instead of corrupting data.
 
@@ -1286,7 +1287,14 @@ What the launcher sets, besides the home:
   launcher whose `HOME` did not take effect is caught before the first test.
 
 A bare `bun test` from `apps/api` bypasses the launcher and runs on your real home — use the
-package scripts. `scripts/tests/api-lanes-hermetic.unit.test.ts` fails, naming the resolved
+package scripts. To select one file, run the launcher from the API workspace so the preload
+and disposable home both apply:
+
+```bash
+(cd apps/api && bun ../../scripts/with-test-home.ts bun test --timeout 15000 tests/unit/services/preload-smoke.test.ts)
+```
+
+`scripts/tests/api-lanes-hermetic.unit.test.ts` fails, naming the resolved
 `homedir()` and the expected `<tmpdir>/mangostudio-test-home-<random>` shape, if an API lane
 script stops going through it. The launcher reuses the guarded create/shape-check/delete of
 `scripts/lib/temp-home.ts`, which the browser-smoke home is built on: it only ever deletes a
@@ -1307,7 +1315,7 @@ needs more than a tool, so it is told what to use:
 cd apps/api
 MANGO_CONTAINER_E2E_IMAGE=mango-container-smoke:test \
 MANGO_CONTAINER_E2E_RUNTIME=/abs/path/to/mangostudio-runtime \
-bun test tests/integration/services/connect-container-runtime.integration.test.ts
+bun ../../scripts/with-test-home.ts bun test --timeout 15000 tests/integration/services/connect-container-runtime.integration.test.ts
 ```
 
 A compiled Linux runtime binary matching the image's libc is the part a checkout does not
