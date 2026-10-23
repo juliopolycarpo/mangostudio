@@ -1,6 +1,6 @@
 /**
  * Built-in tool: glob
- * Returns filesystem paths matching a glob pattern, evaluated by Bun.Glob.
+ * Returns filesystem paths matching a glob pattern through the selected runtime.
  */
 
 import { getRuntimeClient } from '../../runtime-client';
