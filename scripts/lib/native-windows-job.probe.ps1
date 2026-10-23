@@ -394,6 +394,9 @@ namespace Mango.NativeImageCallerFakes {
     $processListEnd = $script:NativeWindowsJobCode.IndexOf('        private void ReleaseExited(', $processListStart, [StringComparison]::Ordinal)
     if ($processListStart -lt 0 -or $processListEnd -le $processListStart) { throw 'Invalid process-list source boundaries; expected exact production ProcessList method for named native API fakes' }
     $processListMethod = $script:NativeWindowsJobCode.Substring($processListStart, $processListEnd - $processListStart)
+    $releaseExitedEnd = $script:NativeWindowsJobCode.IndexOf('        /// <summary>Query exact job membership', $processListEnd, [StringComparison]::Ordinal)
+    if ($releaseExitedEnd -le $processListEnd) { throw 'Invalid release-exited source boundaries; expected exact production retained-handle checks' }
+    $releaseExitedMethod = $script:NativeWindowsJobCode.Substring($processListEnd, $releaseExitedEnd - $processListEnd).Replace('private void ReleaseExited(', 'private void ReleaseExitedCore(')
     $processListCallerCode = @'
 namespace Mango.NativeProcessListFakes {
     using System;
@@ -431,8 +434,22 @@ namespace Mango.NativeProcessListFakes {
         public readonly List<string> Events=new List<string>();
         public NativeQueryTrace LastTrace;
         private ImageQueryBudget NewImageBudget() { var budget=new ImageQueryBudget(2000,()=>0); LastTrace=budget.Trace; return budget; }
-        private bool Alive(IntPtr handle,ImageQueryBudget budget=null) { throw new InvalidOperationException("Unexpected named fake handle read; expected no retained members"); }
-        private void ReleaseExited(ImageQueryBudget budget=null) { Events.Add("release-exited"); }
+        private readonly Dictionary<IntPtr,Queue<int>> waitResults=new Dictionary<IntPtr,Queue<int>>();
+        /// <summary>Retain an actual fixture dictionary entry with ordered native wait outcomes.</summary>
+        /// <example>fixture.Retain("owned",101,new[]{258,6});</example>
+        public void Retain(string identity,int token,int[] results) {
+            var handle=new IntPtr(token); held.Add(identity,new HeldProcess {Handle=handle,Member=new Member {Identity=identity}});
+            waitResults.Add(handle,new Queue<int>(results));
+        }
+        private bool Alive(IntPtr handle,ImageQueryBudget budget=null) {
+            Queue<int> results;
+            if(!waitResults.TryGetValue(handle,out results) || results.Count==0) throw new InvalidOperationException("Unexpected named fake handle read "+handle+"; expected configured mandatory/diagnostic wait outcome");
+            int result=results.Dequeue(); Events.Add("held-read:"+handle+":"+result);
+            if(result==258) return true;
+            if(result==0) return false;
+            throw new Win32Exception(result,"WaitForSingleObject named retained handle="+handle+"; expected live or exited process");
+        }
+        private void ReleaseExited(ImageQueryBudget budget=null) { Events.Add("release-exited"); ReleaseExitedCore(budget); }
         private Win32.Accounting Accounting(ImageQueryBudget budget=null) { Events.Add("complete-accounting"); return new Win32.Accounting {Active=Counts.Count>0?Counts.Dequeue():0,Total=5586}; }
         private static uint[] DecodeProcessList(IntPtr data,int bytes,uint returned) { return JobProcess.DecodeProcessList(data,bytes,returned); }
         private Member ReadState(IntPtr handle,uint pid,string identity,ImageQueryBudget budget=null) { throw new InvalidOperationException("Unexpected named fake state read; expected no accepted partial PID list"); }
@@ -444,7 +461,7 @@ namespace Mango.NativeProcessListFakes {
         /// <example>uint[] pids=fixture.RunList();</example>
         public uint[] RunList() { Win32.Fixture=this; int bytes; return ProcessList(out bytes,NewImageBudget()); }
 '@
-    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $fakeCode + "`n" + $callerCode + $queryMethod + "`n    }`n}" + "`n" + $imageCallerCode + $imageMethods + "`n    }`n}" + "`n" + $processListCallerCode + $processListMethod + $queryMethod + "`n    }`n}")
+    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $fakeCode + "`n" + $callerCode + $queryMethod + "`n    }`n}" + "`n" + $imageCallerCode + $imageMethods + "`n    }`n}" + "`n" + $processListCallerCode + $processListMethod + $releaseExitedMethod + $queryMethod + "`n    }`n}")
 }
 
 try {
@@ -951,6 +968,43 @@ $startedChild.Dispose()
         $rows=@($fixture.LastTrace.ProcessListAttempts)
         Assert-NativeProbe ($rows.Count -eq 10 -and @($rows | Where-Object { $_.Capacity -ne 32 }).Count -eq 0 -and @($fixture.Events | Where-Object { $_ -eq 'release-exited' }).Count -eq 10 -and @($fixture.Events | Where-Object { $_ -eq 'complete-accounting' }).Count -eq 11) 'within-capacity churn must release exited handles and refresh accounting; no partial list or needless buffer growth is accepted'
         return @{ snapshot=$snapshot; headers=$rows; events=@($fixture.Events); exactProductionMethods=$true; nativeProcessListAPIInvocations=0 }
+    }
+    foreach($case in @('native-error','partial-refresh','mandatory-failure')) {
+        Invoke-NativeProbe "process list diagnostic $case preserves authoritative outcome" {
+            $fixture=[Mango.NativeProcessListFakes.QueryFixture]::new()
+            if($case -eq 'mandatory-failure') {
+                $fixture.Retain('failed-owned',101,[int[]]@(6))
+            } else {
+                $fixture.Retain('failed-owned',101,[int[]]@(258,6,0))
+                $fixture.Retain('live-owned',102,[int[]]@(258,258,0))
+                $fixture.Retain('exited-owned',103,[int[]]@(258,0,0))
+            }
+            if($case -eq 'native-error') {
+                $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Success=$false; Error=5 })
+            } else {
+                $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Assigned=29; Count=28; Returned=240 })
+                $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Assigned=0; Count=0; Returned=8 })
+                $fixture.Counts.Enqueue(29); $fixture.Counts.Enqueue(0); $fixture.Counts.Enqueue(0)
+            }
+            $snapshot=$null; $failure=$null
+            try { $snapshot=$fixture.Run() } catch { $failure=$_.Exception; while($failure.InnerException) { $failure=$failure.InnerException } }
+            $rows=@($fixture.LastTrace.ProcessListAttempts)
+            if($case -eq 'mandatory-failure') {
+                Assert-NativeProbe ($failure -is [ComponentModel.Win32Exception] -and $failure.NativeErrorCode -eq 6 -and $failure.Message.Contains('WaitForSingleObject') -and -not $snapshot -and $rows.Count -eq 0 -and @($fixture.Events | Where-Object { $_.StartsWith('native-list:') }).Count -eq 0) 'mandatory retained-handle failure 6 must propagate before querying or accepting native membership'
+            } else {
+                if($case -eq 'native-error') {
+                    Assert-NativeProbe ($failure -is [ComponentModel.Win32Exception] -and $failure.NativeErrorCode -eq 5 -and $failure.Message.Contains('QueryInformationJobObject') -and -not $snapshot) "Invalid primary native list error: $failure; expected QueryInformationJobObject error 5 despite diagnostic wait error 6"
+                    Assert-NativeProbe ($rows[0].NativeError -eq 5 -and -not $rows[0].Success -and $null -eq $rows[0].Assigned -and $null -eq $rows[0].Count) 'failed native error 5 retains its header row without invented counts'
+                } else {
+                    Assert-NativeProbe (-not $failure -and $snapshot.Empty -and $snapshot.Stable -and $snapshot.Races -eq 1 -and $rows.Count -eq 2 -and $rows[0].Assigned -eq 29 -and $rows[0].Count -eq 28 -and @($fixture.Events | Where-Object { $_ -eq 'release-exited' }).Count -eq 2) "Invalid partial refresh: $failure; expected native 29/28 to refresh mandatory accounting and reach complete empty despite diagnostic wait error 6"
+                }
+                $states=@($rows[0].HeldStates)
+                $unknown=@($states | Where-Object Identity -EQ 'failed-owned'); $live=@($states | Where-Object Identity -EQ 'live-owned'); $exited=@($states | Where-Object Identity -EQ 'exited-owned')
+                Assert-NativeProbe ($states.Count -eq 3 -and $unknown.Count -eq 1 -and $null -eq $unknown[0].Alive -and $unknown[0].NativeError -eq 6 -and $unknown[0].Error.Contains('WaitForSingleObject')) 'diagnostic failure retains exact identity, unknown Alive and native error 6'
+                Assert-NativeProbe ($live.Count -eq 1 -and $live[0].Alive -eq $true -and $null -eq $live[0].NativeError -and $null -eq $live[0].Error -and $exited.Count -eq 1 -and $exited[0].Alive -eq $false -and $null -eq $exited[0].NativeError -and $null -eq $exited[0].Error) 'later held handles remain scanned; live, exited and failed observations stay distinct'
+            }
+            return @{ name=$case; snapshot=$snapshot; error=if($failure) { $failure.ToString() } else { $null }; headers=$rows; events=@($fixture.Events); exactProductionMethods=$true; nativeProcessListAPIInvocations=0 }
+        }
     }
     Invoke-NativeProbe 'process list true shortage grows while successful last-error is ignored' {
         $fixture=[Mango.NativeProcessListFakes.QueryFixture]::new()
