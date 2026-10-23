@@ -42,7 +42,7 @@ describe('mandatory dependency audit', () => {
       workflow_dispatch: null,
     });
     expect(audit.permissions).toEqual({ contents: 'read' });
-    expect(Object.keys(audit.jobs)).toEqual(['audit']);
+    expect(Object.keys(audit.jobs)).toEqual(['audit', 'cargo-audit']);
     const job = audit.jobs.audit;
     expect(job.if).toBeUndefined();
     expect(job['continue-on-error']).toBeUndefined();
@@ -50,6 +50,19 @@ describe('mandatory dependency audit', () => {
     expect(commands).toEqual([{ name: 'Audit bun.lock', run: 'bun audit --audit-level=moderate' }]);
     expect(readText('.github/workflows/dependency-audit.yml')).toContain(
       'persist-credentials: false'
+    );
+  });
+
+  test('Cargo advisories use the existing policy once, independently of Bun', () => {
+    const job = audit.jobs['cargo-audit'];
+    expect(job.if).toBeUndefined();
+    expect(job['continue-on-error']).toBeUndefined();
+    expect(job.steps?.filter((step) => step.run)).toEqual([
+      { name: 'Audit Cargo.lock', run: 'cargo deny check advisories' },
+    ]);
+    expect(readText('deny.toml')).toContain('[advisories]\nignore = []');
+    expect(extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'deny')).toContain(
+      'run: cargo deny check bans licenses sources'
     );
   });
 
