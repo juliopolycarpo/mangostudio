@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, sep } from 'node:path';
+import { delimiter, dirname, join, relative, sep } from 'node:path';
 import {
   binaryCompileDefines,
   binaryCompileFlags,
@@ -83,6 +83,53 @@ describe('build script', () => {
       tasks: { taskId: string }[];
     };
     expect(result.tasks.map((task) => task.taskId)).toEqual(['@mangostudio/protocol#build']);
+  });
+
+  test('keeps owned Turbo cache flags before a forwarded task separator', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'turbo-cache-arguments-'));
+    try {
+      const preload = join(directory, 'force-uncacheable.ts');
+      writeFileSync(
+        preload,
+        `
+        import { mock } from 'bun:test';
+        function fakeUncacheableFrontendInputs() { return ['--cache=local:,remote:']; }
+        function fakeFrontendBuildHost() { return { frontendBuildCacheArguments: fakeUncacheableFrontendInputs }; }
+        mock.module('@mangostudio/shared/frontend-build/host', fakeFrontendBuildHost);
+      `
+      );
+      const child = Bun.spawnSync(
+        [
+          process.execPath,
+          '--preload',
+          preload,
+          join(ROOT_DIR, 'scripts/build-turbo.ts'),
+          '--dry=json',
+          '--filter=@mangostudio/protocol',
+          '--',
+          '--tailwind-cache-probe',
+        ],
+        {
+          cwd: ROOT_DIR,
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: {
+            ...process.env,
+            PATH: `${join(ROOT_DIR, 'node_modules/.bin')}${delimiter}${process.env.PATH ?? ''}`,
+          },
+        }
+      );
+      expect(child.exitCode, new TextDecoder().decode(child.stderr)).toBe(0);
+      const result = JSON.parse(new TextDecoder().decode(child.stdout)) as {
+        tasks: { cliArguments: string[] }[];
+      };
+      expect(
+        result.tasks[0].cliArguments,
+        'owned cache flags must configure Turbo, not the task'
+      ).toEqual(['--tailwind-cache-probe']);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   test('exposes explicit root build scripts for turbo and binary packaging', () => {

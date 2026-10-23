@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createTailwindInputs, readSourceInventory } from '@mangostudio/shared/frontend-build/host';
@@ -564,6 +564,27 @@ describe('distIsCurrent', () => {
       expect(distIsCurrent(root, shared, repository)).toBe(false);
     } finally {
       rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a bundle restored below a different inherited ignore boundary', () => {
+    const original = fixture();
+    const shared = sharedFixture(original);
+    const repository = dependencyFixture(original);
+    const destinationParent = mkdtempSync(join(tmpdir(), 'frontend-restored-'));
+    try {
+      writeAt(join(original, 'src/main.tsx'), OLD);
+      writeAt(join(original, 'dist/index.html'), NEW);
+      holdDirs(original);
+      writeBuildState(original, effectiveApiUrl());
+      expect(distIsCurrent(original, shared, repository)).toBe(true);
+      const destination = join(destinationParent, 'checkout');
+      renameSync(original, destination);
+      writeFileSync(join(destinationParent, '.ignore'), 'checkout/src/main.tsx');
+      expect(distIsCurrent(destination, join(destination, 'shared'), destination)).toBe(false);
+    } finally {
+      rmSync(original, { recursive: true, force: true });
+      rmSync(destinationParent, { recursive: true, force: true });
     }
   });
 

@@ -278,6 +278,29 @@ describe('frontend Turbo prelookup policy', () => {
     rmSync(join(f.repository, '.git'));
     expect(frontendBuildCacheArguments(f.repository)).toEqual(['--cache=local:,remote:']);
   });
+  test('rejects a restored manifest whose destination has different ancestor controls', () => {
+    const f = fixture();
+    const before = f.capture();
+    expect(tailwindInputsAreCurrent(f.repository, before)).toBe(true);
+    const destinationParent = mkdtempSync(join(tmpdir(), 'tailwind-destination-'));
+    fixtures.push(destinationParent);
+    const destination = join(destinationParent, 'repo');
+    renameSync(f.repository, destination);
+    writeFileSync(join(destinationParent, '.ignore'), 'repo/apps/frontend/src/main.tsx');
+    expect(
+      tailwindInputsAreCurrent(destination, before),
+      'restored manifest must check the destination ancestor controls'
+    ).toBe(false);
+    expect(() => assertTailwindInputsUnchanged(destination, before)).toThrow(
+      'expected current repository ancestor controls'
+    );
+    rmSync(join(destinationParent, '.ignore'));
+    expect(
+      tailwindInputsAreCurrent(destination, before),
+      'foreign ancestor inventory remains stale even without an ignore file'
+    ).toBe(false);
+  });
+
   test('disables lookup for inherited outside controls and detects their creation/deletion', () => {
     const f = fixture();
     turboInputs(f.project);
