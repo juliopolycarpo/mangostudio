@@ -22,7 +22,7 @@ import type {
   ToolchainRuntimeId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
-import { TOOLCHAIN_RUNTIME_IDS } from '@mangostudio/shared/environments';
+import { TOOLCHAIN_RUNTIME_IDS } from '@mangostudio/shared/environments/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';

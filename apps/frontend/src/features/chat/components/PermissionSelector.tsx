@@ -38,7 +38,7 @@ import {
   EXTERNAL_PERMISSION_PRESETS,
   externalPresetFor,
   externalPresetPair,
-} from '@mangostudio/shared/external-agents';
+} from '@mangostudio/shared/external-agents/values';
 import { AlertTriangle, Check, ChevronDown, Shield } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { ComposerPopover } from '@/components/ui/ComposerPopover';

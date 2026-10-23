@@ -12,7 +12,7 @@
  * being signed in on the laptop says nothing about the build server.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type {
   ExternalAccountLimits,
   ExternalAgentCommand,

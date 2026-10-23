@@ -6,7 +6,7 @@
  * of work, and the wizard opens once for the whole set.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { ResourceKind } from '@mangostudio/shared/library';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';

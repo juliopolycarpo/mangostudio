@@ -21,7 +21,7 @@
  * on this screen asked.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import * as motion from 'motion/react-m';
 import { ACTIVITY_PANEL_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
 import { useI18n } from '@/hooks/use-i18n';

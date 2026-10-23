@@ -20,7 +20,7 @@ import {
   EXTERNAL_PERMISSION_LEVELS,
   type ExternalApprovalRouting,
   type ExternalPermissionLevel,
-} from './schemas';
+} from './choices';
 
 /** The value to use, plus whether it is the one that was stored. */
 export interface NormalizedPermissionValue<T> {

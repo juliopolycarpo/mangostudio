@@ -19,7 +19,7 @@ import type {
   CapabilityToolEntry,
   ChatCapabilitiesResponse,
 } from '@mangostudio/shared/capabilities';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';

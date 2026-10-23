@@ -10,7 +10,10 @@
  */
 
 import type { Environment, SshEnvironmentConfig } from '@mangostudio/shared/environments';
-import { DEFAULT_SSH_RUNTIME_PATH, sshPreflightCommands } from '@mangostudio/shared/environments';
+import {
+  DEFAULT_SSH_RUNTIME_PATH,
+  sshPreflightCommands,
+} from '@mangostudio/shared/environments/values';
 import { Terminal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';

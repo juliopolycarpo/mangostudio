@@ -17,7 +17,7 @@ import type {
   ContainerMount,
   ContainerMountRefusal,
 } from '@mangostudio/shared/environments';
-import { containerConfigRefusal } from '@mangostudio/shared/environments';
+import { containerConfigRefusal } from '@mangostudio/shared/environments/values';
 
 /** Mirrors `ContainerEnvironmentConfigSchema.image`; the server is the authority. */
 const CONTAINER_IMAGE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/:@-]*$/;

@@ -10,6 +10,9 @@ import Type from 'typebox';
 import { InstallGuardSchema } from '../environments/schemas';
 import { RuntimeConsentProfileSchema, UserServiceStatusSchema } from '../runtime-home/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
+import { MACHINE_LOG_TAIL_MAX } from './limits';
+
+export { MACHINE_LOG_TAIL_DEFAULT, MACHINE_LOG_TAIL_MAX } from './limits';
 
 /** How the serving process came to exist, which decides how it can be restarted. */
 export const HubLaunchModeSchema = Type.Union([
@@ -184,9 +187,6 @@ export const MachineStatusSchema = Type.Object({
   actions: MachineActionsSchema,
 });
 export type MachineStatus = Static<typeof MachineStatusSchema>;
-
-export const MACHINE_LOG_TAIL_DEFAULT = 200;
-export const MACHINE_LOG_TAIL_MAX = 2_000;
 
 export const MachineLogTailSchema = Type.Object({
   /** Null when the serving process writes to a terminal, not a file. */

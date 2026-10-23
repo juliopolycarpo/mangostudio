@@ -5,7 +5,7 @@
  * covers required-field feedback before a request is made.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type {
   AddMcpServerBody,

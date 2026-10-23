@@ -293,6 +293,19 @@ shared/src/
 
 Cross-workspace imports use package names (`@mangostudio/shared`), never relative paths.
 
+Browser code imports UI constants and pure helpers through the `environments/values`,
+`external-agents/values`, `library/values`, `runtime-home/values`, and `generation/values`
+subpaths. Machine log bounds use `machine/limits`. For example:
+
+```ts
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
+```
+
+The original context entrypoints still export their complete wire schemas. Small choice schemas
+are shared by those schemas and the lightweight values; runtime validators keep their TypeBox
+checks. `apps/shared/tests/unit/browser-values.test.ts` checks the compatibility exports and
+schema-derived choices.
+
 ## Database
 
 SQLite via Kysely with 18 migrations covering:

@@ -7,7 +7,7 @@
  * version is frequently the one held in only one place.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/shared/library';
 import { useQueries } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';

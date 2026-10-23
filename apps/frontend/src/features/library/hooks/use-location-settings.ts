@@ -16,13 +16,15 @@ import {
   libraryLocationsPatch,
   normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
+import type {
+  LibraryLocationId,
+  LibraryLocationStatus,
+  ResourceKind,
+} from '@mangostudio/shared/library';
 import {
   ALWAYS_ENABLED_LIBRARY_LOCATIONS,
   enabledLibraryLocations,
-  type LibraryLocationId,
-  type LibraryLocationStatus,
-  type ResourceKind,
-} from '@mangostudio/shared/library';
+} from '@mangostudio/shared/library/values';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { updateAppSettings } from '@/features/settings/app/api';

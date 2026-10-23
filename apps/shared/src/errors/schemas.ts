@@ -2,7 +2,7 @@ import Type, { type Static } from 'typebox';
 import {
   ExternalAgentRemedySchema,
   ExternalAgentUnavailableReasonSchema,
-} from '../external-agents/schemas';
+} from '../external-agents/choices';
 
 /** Generic API error response returned by all HTTP error paths. */
 export const ApiErrorResponseSchema = Type.Object({

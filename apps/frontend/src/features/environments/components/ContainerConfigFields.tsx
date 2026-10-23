@@ -8,7 +8,7 @@
  */
 
 import type { ContainerDetection, ContainerEngine } from '@mangostudio/shared/environments';
-import { CONTAINER_MAX_MOUNTS } from '@mangostudio/shared/environments';
+import { CONTAINER_MAX_MOUNTS } from '@mangostudio/shared/environments/values';
 import { Container, Plus, X } from 'lucide-react';
 import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';

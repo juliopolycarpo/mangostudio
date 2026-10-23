@@ -8,7 +8,7 @@
  * not make that trust decision on anybody's behalf.
  */
 
-import { sshPreflightCommands } from '@mangostudio/shared/environments';
+import { sshPreflightCommands } from '@mangostudio/shared/environments/values';
 import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
