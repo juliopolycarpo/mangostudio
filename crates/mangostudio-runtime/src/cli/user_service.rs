@@ -27,6 +27,8 @@ use crate::runtime_home::{
     RuntimeSlot, read_runtime_slot_config, read_runtime_slot_credentials, slot_current_binary_path,
 };
 
+#[cfg(test)]
+mod process_lifetime_test_receipt;
 mod scheduled_task;
 
 #[cfg(target_os = "linux")]
@@ -921,15 +923,17 @@ mod windows {
 
 #[cfg(all(test, windows))]
 mod windows_tests {
+    use super::process_lifetime_test_receipt::ensure_stopped;
     use super::windows::{Exec, operate};
     use super::*;
     use crate::test_support::scratch_dir;
     use std::sync::Mutex;
 
-    // CIM property enumeration can return several leaf IDs. These receipts
-    // are consumed as PowerShell PID lists by the survivor checks below.
-    const RUNNER_TREE_PID_RECEIPT: &str = "(@($shell.ProcessId) + @($leaf.ProcessId)) -join ','";
-    const SLOT_LEAF_PID_RECEIPT: &str = "@($leaf.ProcessId) -join ','";
+    // Capture complete CIM lifetimes before teardown, then query the same API.
+    const PROCESS_LIFETIME_HELPERS: &str =
+        include_str!("../../tests/fixtures/windows-service-process-lifetimes.ps1");
+    const PROCESS_LIFETIME_PROBE: &str =
+        include_str!("../../tests/fixtures/windows-service-process-lifetimes.probe.ps1");
 
     struct FakeTaskExec {
         calls: Mutex<Vec<String>>,
@@ -1126,37 +1130,36 @@ mod windows_tests {
     }
 
     #[test]
-    fn fixture_receipts_preserve_every_pid_from_single_and_multiple_cim_rows() {
+    fn fixture_receipts_distinguish_original_and_reused_process_lifetimes() {
         use super::windows::ProcessExec;
 
-        let fake_single_leaf = "$shell = [pscustomobject]@{ ProcessId = 748 }\n$leaf = [pscustomobject]@{ ProcessId = 756 }";
-        let fake_multiple_leaves = "$shell = [pscustomobject]@{ ProcessId = 748 }\n$leaf = @(756, 860, 4172 | ForEach-Object { [pscustomobject]@{ ProcessId = $_ } })";
-        for (fake_rows, expected_tree, expected_leaf) in [
-            (fake_single_leaf, "748,756", "756"),
-            (fake_multiple_leaves, "748,756,860,4172", "756,860,4172"),
-        ] {
-            for (expression, expected) in [
-                (RUNNER_TREE_PID_RECEIPT, expected_tree),
-                (SLOT_LEAF_PID_RECEIPT, expected_leaf),
-            ] {
-                let script = [fake_rows, expression].join("\n");
-                let (ok, receipt) = ProcessExec
-                    .run(&script, Duration::from_secs(30))
-                    .expect("PowerShell reads the named fake CIM rows");
-                assert!(ok, "expected a fixture PID receipt | received: {receipt}");
-                assert_eq!(
-                    receipt, expected,
-                    "expected every PID separated by commas | received rows: {fake_rows}"
-                );
-                let (ok, parsed) = ProcessExec
-                    .run(&format!("@({receipt}) -join ','"), Duration::from_secs(30))
-                    .expect("PowerShell consumes the receipt as a PID list");
-                assert!(
-                    ok && parsed == expected,
-                    "expected PID list {expected} | received: {parsed}"
-                );
-            }
-        }
+        let fixture = scratch_dir("win-service-lifetime-fixtures");
+        let helpers = fixture.join("lifetimes.ps1");
+        let probe = fixture.join("lifetimes.probe.ps1");
+        std::fs::write(&helpers, PROCESS_LIFETIME_HELPERS)
+            .expect("write the lifetime helper fixture");
+        std::fs::write(&probe, PROCESS_LIFETIME_PROBE).expect("write the named CIM query fixtures");
+        // Dot-source the owned files instead of approaching Windows' encoded argv limit.
+        let script = format!(
+            ". {}\n. {}\nInvoke-ServiceTestIdentityProbe | ConvertTo-Json -Compress -Depth 5",
+            super::scheduled_task::ps_quote(&helpers.to_string_lossy()),
+            super::scheduled_task::ps_quote(&probe.to_string_lossy()),
+        );
+        let (ok, output) = ProcessExec
+            .run(&script, Duration::from_secs(30))
+            .expect("PowerShell runs the named CIM query fakes");
+        assert!(
+            ok,
+            "expected strict process-lifetime fixtures | received: {output}"
+        );
+        let report: Value = serde_json::from_str(&output).unwrap_or_else(|error| {
+            panic!("expected a fixture JSON report | received: {output:?}: {error}")
+        });
+        assert_eq!(
+            report["count"], 12,
+            "expected twelve fixture groups | received: {report}"
+        );
+        assert_eq!(report["native"], false, "received: {report}");
     }
 
     /// What `Stop-ScheduledTask` leaves behind, rebuilt without Task Scheduler: a
@@ -1183,15 +1186,18 @@ mod windows_tests {
         // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
         let script = [
             "$ErrorActionPreference = 'Stop'".to_owned(),
-            format!("$runners = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\")"),
+            PROCESS_LIFETIME_HELPERS.to_owned(),
+            format!("$runners = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop)"),
+            format!("if ($runners.Count -ne 1) {{ throw ('expected one owned runner CIM row for PID {pid} | received: ' + $runners.Count) }}"),
             "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
             "$shell = $null; $leaf = $null".to_owned(),
-            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $shell = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid} AND Name = 'cmd.exe'\"; if ($null -ne $shell) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = $($shell.ProcessId)\" }}; Start-Sleep -Milliseconds 100 }}"),
+            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $shell = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid} AND Name = 'cmd.exe'\" -ErrorAction Stop; if ($null -ne $shell) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = $($shell.ProcessId)\" -ErrorAction Stop }}; Start-Sleep -Milliseconds 100 }}"),
             "if ($null -eq $leaf) { throw 'the stand-in runner never started cmd.exe and its child' }".to_owned(),
+            "$serviceTestCaptured = @(Capture-ServiceTestIdentities (@($runners) + @($shell) + @($leaf)))".to_owned(),
             format!("Stop-Process -Id {pid} -Force"),
             "Start-Sleep -Milliseconds 300".to_owned(),
             super::scheduled_task::terminate_runner_tree().to_owned(),
-            RUNNER_TREE_PID_RECEIPT.to_owned(),
+            "Get-ServiceTestReceipt $serviceTestCaptured | ConvertTo-Json -Compress -Depth 5".to_owned(),
         ]
         .join("\n");
         let result = ProcessExec.run(&script, Duration::from_secs(60));
@@ -1202,18 +1208,9 @@ mod windows_tests {
             ok,
             "expected the runner tree terminated | received: {output}"
         );
-        let (ok, alive) = ProcessExec
-            .run(
-                &format!(
-                    "@({output} | ForEach-Object {{ Get-Process -Id $_ -ErrorAction SilentlyContinue }}).Count"
-                ),
-                Duration::from_secs(30),
-            )
-            .expect("PowerShell counts the survivors");
-        assert!(
-            ok && alive == "0",
-            "expected orphans {output} gone | received: {alive} alive"
-        );
+        ensure_stopped(&output).unwrap_or_else(|error| {
+            panic!("expected runner {pid} and all captured descendants stopped | received: {error}")
+        });
     }
 
     /// A runtime started by hand through the shim, with no task run behind
@@ -1248,35 +1245,30 @@ mod windows_tests {
         // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
         let script = [
             "$ErrorActionPreference = 'Stop'".to_owned(),
+            PROCESS_LIFETIME_HELPERS.to_owned(),
             "$runners = @()".to_owned(),
             "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
             "$leaf = $null".to_owned(),
-            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid}\"; Start-Sleep -Milliseconds 100 }}"),
+            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid}\" -ErrorAction Stop; Start-Sleep -Milliseconds 100 }}"),
             "if ($null -eq $leaf) { throw 'the hand-started shim never started its child' }".to_owned(),
             capture_slot_orphans(&slot),
             format!("if (@($orphans | Where-Object {{ $_.ProcessId -eq {pid} }}).Count -ne 1) {{ throw ('expected the shim cmd.exe {pid} among the orphans | received: ' + (($orphans | ForEach-Object {{ $_.ProcessId }}) -join ',')) }}"),
+            "$serviceTestCaptured = @(Capture-ServiceTestIdentities (@($orphans) + @($leaf)))".to_owned(),
             terminate_runner_tree().to_owned(),
-            SLOT_LEAF_PID_RECEIPT.to_owned(),
+            "Get-ServiceTestReceipt $serviceTestCaptured | ConvertTo-Json -Compress -Depth 5".to_owned(),
         ]
         .join("\n");
         let result = ProcessExec.run(&script, Duration::from_secs(60));
         let _ = orphan.kill();
         let _ = orphan.wait();
-        let (ok, leaf) = result.expect("PowerShell runs the fallback");
+        let (ok, output) = result.expect("PowerShell runs the fallback");
         assert!(
             ok,
-            "expected the hand-started shim tree terminated | received: {leaf}"
+            "expected the hand-started shim tree terminated | received: {output}"
         );
-        let (ok, alive) = ProcessExec
-            .run(
-                &format!("@(Get-Process -Id {pid},{leaf} -ErrorAction SilentlyContinue).Count"),
-                Duration::from_secs(30),
-            )
-            .expect("PowerShell counts the survivors");
-        assert!(
-            ok && alive == "0",
-            "expected the shim {pid} and its child {leaf} gone | received: {alive} alive"
-        );
+        ensure_stopped(&output).unwrap_or_else(|error| {
+            panic!("expected shim {pid} and all captured descendants stopped | received: {error}")
+        });
     }
 
     #[test]
