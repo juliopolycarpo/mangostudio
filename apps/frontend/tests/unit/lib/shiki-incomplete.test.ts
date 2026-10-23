@@ -35,7 +35,7 @@ class EarlyStopTokenizer {
   tokenize = (...args: Parameters<Grammar['tokenizeLine2']>) => {
     this.calls.push(args);
     const result = this.original.apply(this.grammar, args);
-    return { ...result, stoppedEarly: this.calls.length === this.stopOn };
+    return { ...result, stoppedEarly: result.stoppedEarly || this.calls.length === this.stopOn };
   };
 }
 
@@ -139,7 +139,7 @@ describe('incomplete highlighting', () => {
       highlightCode('const first = 1;\nconst second = 2;\nconst third = 3;', 'ts', 'one-dark-pro')
     ).toBeNull();
     expect(tokenizer.calls).toHaveLength(2);
-    expect(highlightCode('const complete = 3;', 'ts', 'one-dark-pro')).toContain('shiki');
+    expect(completeRender('const complete = 3;', 'ts')).toContain('shiki');
     expect(tokenizer.calls).toHaveLength(3);
   });
 
@@ -148,7 +148,7 @@ describe('incomplete highlighting', () => {
     const tokenizer = spyOn(grammar, 'tokenizeLine2').mockImplementationOnce(failTokenization);
     restoreTokenizer = () => tokenizer.mockRestore();
     expect(highlightCode('const value = 42;', 'ts', 'one-dark-pro')).toBeNull();
-    expect(highlightCode('const value = 42;', 'ts', 'one-dark-pro')).toContain('shiki');
+    expect(completeRender('const value = 42;', 'ts')).toContain('shiki');
   });
 
   for (const language of ['typescript', 'cpp'] as const) {
@@ -180,7 +180,7 @@ describe('incomplete highlighting', () => {
         expect(stops.at(-1)).toBe(true);
         expect(result).toBeNull();
       }
-      expect(highlightCode(source, language, 'one-dark-pro')).toContain('shiki');
+      expect(completeRender(source, language)).toContain('shiki');
       expect(stops.at(-1)).toBe(false);
     });
   }
@@ -196,6 +196,16 @@ function failLanguageLoad(): Promise<void> {
 
 function unchangedClock(): number {
   return 0;
+}
+
+function completeRender(source: string, language: string): string | null {
+  const realNow = Date.now;
+  try {
+    Date.now = unchangedClock;
+    return highlightCode(source, language, 'one-dark-pro');
+  } finally {
+    Date.now = realNow;
+  }
 }
 
 class TokenizationBudgetClock {
