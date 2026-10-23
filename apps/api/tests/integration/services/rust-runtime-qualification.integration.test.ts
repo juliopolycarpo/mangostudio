@@ -537,8 +537,11 @@ describe('Real Rust runtime qualification', () => {
           hubVersion: runtimeVersion,
           onClosed: () => undefined,
         });
-        const scratch = await realpath(await scratchMangoHome('stdio-install-dir'));
+        const scratchRoot = await realpath(await scratchMangoHome('stdio-install-dir'));
+        const scratch = join(scratchRoot, "O'Brien O’Brien café 雪");
         try {
+          // Real relay coverage must preserve valid profile/temp names for both native dialects.
+          await mkdir(scratch);
           const client = new RuntimeClient(connection.hub, () => undefined, 'rust-stdio-install');
           // The hub's install gate reads `features.shell !== false`; install is now implemented.
           expect(client.manifest.features.shell).toBe(true);
@@ -595,7 +598,7 @@ describe('Real Rust runtime qualification', () => {
           expect(await Bun.file(early.marker).exists()).toBe(false);
         } finally {
           await connection.close();
-          await cleanupMangoHome(scratch);
+          await cleanupMangoHome(scratchRoot);
         }
       },
       30_000
