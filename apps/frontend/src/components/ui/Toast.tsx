@@ -1,5 +1,6 @@
 import { CircleCheck, CircleX, Info, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import * as motion from 'motion/react-m';
 import {
   createContext,
   type ReactNode,

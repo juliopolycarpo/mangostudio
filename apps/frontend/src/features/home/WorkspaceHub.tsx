@@ -9,7 +9,7 @@
  */
 
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
-import { motion } from 'motion/react';
+import * as motion from 'motion/react-m';
 import { ACTIVITY_STRIP_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
 import { useCardGrid } from '@/lib/motion/use-card-grid';
 import { AgentsCard } from './widgets/AgentsCard';
