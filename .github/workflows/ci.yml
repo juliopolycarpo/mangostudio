@@ -133,6 +133,12 @@ jobs:
     name: Check
     uses: ./.github/workflows/lint.yml
 
+  dependency-audit:
+    # Unconditional: advisories against an unchanged lockfile still block CI.
+    # Read-only reusable scan; no secrets or dependency installation.
+    name: Dependency Audit
+    uses: ./.github/workflows/dependency-audit.yml
+
   release-dry-run:
     # Always call on PRs, even when distribution was intentionally skipped.
     # Internal relevance guards then report Gate without compiling or waiting
@@ -248,6 +254,7 @@ jobs:
       distribution,
       release-dry-run,
       check,
+      dependency-audit,
       local-runtime,
       test,
       build,
@@ -307,6 +314,7 @@ jobs:
       distribution,
       release-dry-run,
       check,
+      dependency-audit,
       local-runtime,
       test,
       build,

@@ -5,28 +5,23 @@ name: Dependency Audit
 # *introduces*: an advisory published later against a version already locked
 # on main surfaces here, on the daily schedule.
 #
-# Pull requests run it only when they touch the dependency graph, so a fresh
-# upstream advisory never fails an unrelated PR; a PR that does move the lock
-# is the right place to run `bun audit fix`.
+# CI calls this once on every PR, even without dependency changes, and requires
+# its result in both aggregate gates. Keep the daily scan for new advisories
+# when there are no PRs. No standalone PR trigger: that would duplicate CI.
 on:
+  workflow_call:
   schedule:
     - cron: "23 6 * * *"
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    paths:
-      - bun.lock
-      - "**/package.json"
-      - bunfig.toml
-      - .bun-version
-      - .github/workflows/dependency-audit.yml
 
 permissions:
   contents: read
 
+# Separate caller/event groups so a standalone scan cannot cancel a CI audit.
+# CI owns supersession of PR runs; audits never cancel each other mid-verdict.
 concurrency:
-  group: dependency-audit-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: dependency-audit-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   audit:

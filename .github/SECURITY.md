@@ -62,7 +62,13 @@ Pull requests are checked by these GitHub security workflows before merge:
 
 - **CodeQL** (`.github/workflows/codeql.yml`) runs on pull requests to `main`, pushes to `main`, a weekly schedule, and manual dispatch. It uses CodeQL advanced setup for JavaScript/TypeScript and Rust (on Linux and on Windows, so `cfg(windows)` code is scanned too) with explicit no-build extraction and the `security-extended` query suite. The workflow uploads SARIF with a stable per-language category so alerts are visible in the Security tab and in the PR `Code scanning results / CodeQL` check.
 - **Dependency Review** (`.github/workflows/dependency-review.yml`) runs on pull requests to `main` and blocks newly introduced moderate-or-worse vulnerable dependencies from manifest or lockfile changes. License checks are intentionally disabled.
-- **Dependency Audit** (`.github/workflows/dependency-audit.yml`) audits every package in `bun.lock` for moderate-or-worse advisories on a daily schedule and on pull requests that change a manifest or the lockfile. Unlike Dependency Review, it also flags advisories published after a version was locked.
+- **Dependency Audit** (`.github/workflows/dependency-audit.yml`) audits every package in `bun.lock` for moderate-or-worse advisories on a daily schedule and once through CI on every pull request, even when no dependencies change. Both CI aggregates (`Gate` and `CI Gate`) require success and reject failed, cancelled or skipped audits. Unlike Dependency Review, it also flags advisories published after a version was locked. Fork PRs use the ordinary `pull_request` CI event, read-only permissions and no secrets; the audit does not install dependencies. Existing advisory audit coverage is Bun only; Cargo advisory auditing would require a separate policy decision.
+
+The workflow enforces the audit within CI's aggregate results. Repository rules
+currently require the shared `Gate` context, also emitted by other workflows.
+Requiring the unique `CI Gate` context would remove that naming ambiguity; this
+requires a separately approved ruleset change. Workflow edits do not change
+branch protection, permissions or security settings.
 
 When GitHub posts an Advanced Security setup comment on a PR, use it as a pointer
 to the Security tab, not as the review process itself. Maintainers should review
