@@ -2,6 +2,7 @@
  * Test-only helpers shared across workspace test suites.
  * Keep any third-party imports used by this public test surface declared in this workspace.
  */
+export * from './fixtures';
 export * from './mock-data';
 
 /**

@@ -8,8 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { faker } from '@faker-js/faker';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { fixtures } from '@mangostudio/shared/test-utils';
 import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { fileCheckpointRoutes } from '../../../src/modules/file-checkpoints/http/file-checkpoint-routes';
@@ -37,7 +37,7 @@ beforeEach(async () => {
   outsideDir = mkdtempSync(join(tmpdir(), 'checkpoint-routes-outside-'));
   user = await insertTestUser();
   chat = await insertTestChat(user.id);
-  messageId = faker.string.uuid();
+  messageId = fixtures.uuid();
 
   await getDb()
     .insertInto('messages')

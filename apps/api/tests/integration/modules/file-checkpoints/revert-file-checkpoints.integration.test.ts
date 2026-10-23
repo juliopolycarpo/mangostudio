@@ -8,9 +8,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { faker } from '@faker-js/faker';
 import { RemoteError } from '@mangostudio/protocol';
 import { PathAccessError } from '@mangostudio/shared/runtime-contract';
+import { fixtures } from '@mangostudio/shared/test-utils';
 import { getDb } from '../../../../src/db/database';
 import { deleteChatUseCase } from '../../../../src/modules/chats/application/delete-chat';
 import { listChatFileCheckpointSummaries } from '../../../../src/modules/file-checkpoints/application/list-chat-checkpoints';
@@ -49,7 +49,7 @@ beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-test-'));
   outsideDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-outside-'));
   chat = await insertTestChat(user.id);
-  messageId = faker.string.uuid();
+  messageId = fixtures.uuid();
   await getDb()
     .insertInto('messages')
     .values({
@@ -418,7 +418,7 @@ describe('checkpoint blob retention', () => {
   it('drops a deleted chat’s blobs once its manifest rows are gone', async () => {
     // Blobs are content-addressed and shared across chats, so this snapshot must
     // be unique to the chat under test for the GC to be observable.
-    const path = await seedAndRead('notes.md', `retention ${faker.string.uuid()}\n`);
+    const path = await seedAndRead('notes.md', `retention ${fixtures.uuid()}\n`);
     await executeWriteFile({ path, content: 'rewritten\n' }, turnContext());
 
     const row = await getDb()
