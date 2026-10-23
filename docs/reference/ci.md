@@ -5,30 +5,37 @@ repository rules.
 
 ## Aggregate gates
 
-Each gated workflow ends with an always-reporting job named `Gate`. That job
-`needs` every mandatory lane, runs with `if: always()`, and evaluates dependency
-results through `scripts/ci/evaluate-gate.ts`. Branch protection and Canary
-depend on these stable names instead of tracking internal job names, matrix
-shapes, or path filters.
+Each gated workflow reports a legacy job named `Gate` and an additive job with a unique
+name. Both declare every mandatory lane in `needs`, run with `if: always()` and evaluate
+dependency results through `scripts/ci/evaluate-gate.ts`. Canary still depends on CI's legacy
+job. Workflow names, job IDs, step labels and API check contexts are different identifiers:
 
-| Workflow check name      | Workflow                                | Role                                                                                                                                                                                                                                                 |
-| ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CI / Gate`              | `.github/workflows/ci.yml`              | Always reports; Canary depends on it; accepts distribution/smoke skips for documentation-only paths, Rust coverage for irrelevant paths, QA on dispatch, and the PR-only release dry run on non-PR events                                            |
-| `Cargo Shim / Gate`      | `.github/workflows/cargo-shim.yml`      | Stable legacy check name for the root Rust workspace; runs locked checks and builds at the Rust 1.99.0 minimum on Linux, macOS and Windows, native tests on macOS and Windows, Windows ARM64 checks and runtime tests, and fuzz-workspace resolution |
-| `Protocol CI / Gate`     | `.github/workflows/protocol-ci.yml`     | Always reports; accepts every protocol lane skip when no protocol path changed                                                                                                                                                                       |
-| `Release Dry Run / Gate` | `.github/workflows/release-dry-run.yml` | Called by every PR CI run; accepts irrelevant assertion lanes and the clean runtime producer on the verified same-run PR reuse path                                                                                                                  |
+| Workflow                                                | Legacy job ID / API context on PRs | Additive API context on PRs              | Accepted skips                                                                                                                                                                                                                     |
+| ------------------------------------------------------- | ---------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CI` (`ci.yml`)                                         | `gate` / `Gate`                    | `CI Gate`                                | Distribution, binary smoke and container smoke only when distribution relevance is exactly `false`; Rust coverage only when Rust relevance is exactly `false`; QA on manual dispatch; the PR-only release dry run on non-PR events |
+| `Cargo Shim` (`cargo-shim.yml`)                         | `gate` / `Gate`                    | `Cargo Shim Gate`                        | Each Rust lane only under its own path-relevance proof                                                                                                                                                                             |
+| `Protocol CI` (`protocol-ci.yml`)                       | `gate` / `Gate`                    | `Protocol Gate`                          | Every protocol lane only when no protocol path changed                                                                                                                                                                             |
+| `Release Dry Run` (`release-dry-run.yml`), called by CI | `gate` / `Release Dry Run / Gate`  | `Release Dry Run / Release Dry Run Gate` | Irrelevant assertion lanes and the clean runtime producer on the verified same-run PR reuse path                                                                                                                                   |
 
-Repository rules match required checks by the name `Gate`, and all four workflows
-above retain that compatibility job name. CI calls the reusable release dry run
-on every PR; the other gated workflows start directly on `pull_request` without
-workflow-level path filters. Allowed skips require their relevance proof or the
-explicit PR-reuse/non-PR execution mode. Verify the current hosted producer
-identities before changing required contexts.
+The additive jobs use ID `gate-unique`. In prose, “CI's Gate” identifies a producer; it does
+not mean the API context is `CI / Gate`. The standalone CI, Cargo Shim and Protocol CI
+workflows all emit the bare context `Gate`. Reusable workflow calls prefix the leaf job
+name with the caller's job name, as Release Dry Run does above. Standalone scheduled or
+manual Release Dry Run runs retain the leaf names `Gate` and `Release Dry Run Gate`.
+The [required-check snapshot](#branch-protection--required-checks) records what is actually
+enforced; unique contexts remain a proposed cutover.
 
-Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected
-`needs` from the workflow text: every job except the gate itself and any job
-that already depends on the gate. Adding a mandatory lane without wiring it into
-the gate fails the test.
+Distribution skips use an allowlist in [`scripts/lib/ci-lanes.ts`](../../scripts/lib/ci-lanes.ts),
+not a broad rule that every Markdown change is irrelevant. On PRs, CI's `changes` job
+collects a validated, nonempty diff with both sides of renames and emits
+`distribution=false` only if every path is allowlisted. That proof permits the
+`distribution`, `smoke` (binary) and `smoke-container` jobs to skip. Unknown paths run them;
+pushes and manual dispatches also run them. Rust and protocol relevance are independent.
+The gate rejects missing relevance outputs, failures, cancellations and unexpected skips.
+
+Unit tests in `scripts/tests/ci-gate.unit.test.ts` derive each gate's expected `needs` from
+the workflow text; `gate-compatibility.unit.test.ts` checks both legacy and additive jobs.
+Adding a mandatory lane without wiring it into both gates fails validation.
 
 ## Minimum supported Rust
 
@@ -54,7 +61,7 @@ all-feature checks, and launcher-only commands keep the launcher's own dependenc
 | `launcher-msrv`, 1.96.0  | `cargo check -p mangostudio --all-targets --locked`, `cargo clippy -p mangostudio --all-targets --locked -- -D warnings`, `cargo test -p mangostudio --all-targets --locked`: launcher alone, default features | Linux x64, `ubuntu-latest`                                                                          | Ubuntu `workspace` retains all three commands; launcher checks also run on macOS arm64 and Windows x64    |
 
 Every row uses the same `RUST_WORKSPACE_PATHS` signal in `scripts/lib/rust-lanes.ts` before and
-after the move, and feeds `Cargo Shim / Gate`. `crates/**` selects runtime-only changes, and
+after the move, and feeds Cargo Shim’s `Gate`. `crates/**` selects runtime-only changes, and
 `spec/**` and the other inputs the crates read select protocol changes. Pull requests without a
 matching Rust path skip the Rust jobs under the gate's relevance proof; the gate still reports.
 Pushes selected by the workflow filter and manual dispatches run the Rust jobs. Protocol CI keeps
@@ -64,6 +71,13 @@ This removes five Rust job instances: one `workspace-msrv`, three `target-msrv` 
 one `launcher-msrv`. It retires the old compiler promises while retaining their command, feature
 and platform coverage at the new minimum. No timing or cache-size reduction is claimed here.
 
+The excluded fuzz lock is resolved in Cargo Shim's Ubuntu `workspace` job, in the
+`Resolve excluded fuzz workspace` step: `cargo metadata --manifest-path
+crates/mango-protocol/fuzz/Cargo.toml --locked --all-features --format-version 1`.
+This is a step inside `Workspace (ubuntu-latest)`, not a separate `fuzz-workspace` job or
+required check. A stale lock fails the workspace job and its gates. The command deliberately
+omits `--no-deps` so Cargo actually resolves the graph; `short-job-folds.unit.test.ts` pins it.
+
 Independent validations and their Bun/nextest setup use `!cancelled()` so a failed check does not
 suppress the remaining checks or native tests. Each failure still fails the job and aggregate gate.
 
@@ -71,13 +85,13 @@ The existing checks remain:
 
 | Lane and aggregate gate                        | Command and package/feature scope                                                                                                                 | Runner coverage                                                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `workspace`, `Cargo Shim / Gate`               | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`; `cargo build --workspace --locked` | Native Linux x64, macOS arm64 and Windows x64                                                              |
-| `workspace`, `Cargo Shim / Gate`               | `cargo nextest run --workspace --all-targets --all-features --locked --retries 0`; nextest/libtest inventory parity                               | Native macOS arm64 and Windows x64; inventory parity also runs on Linux x64                                |
-| `rust-coverage`, `CI / Gate`                   | `cargo llvm-cov --no-report --workspace --all-targets --all-features --locked`, instrumented libtest                                              | Native Linux x64, same Rust path signal                                                                    |
-| `workspace`, `Cargo Shim / Gate`               | `cargo test --doc --workspace --all-features --locked`; `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features --locked`      | Linux x64; protocol-specific macOS/Windows doctests and docs remain in Protocol CI                         |
-| `workspace-windows-arm64`, `Cargo Shim / Gate` | `cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0`                                                      | Native Windows ARM64, `windows-11-arm`, same Rust path signal                                              |
-| `musl-clippy`, `Cargo Shim / Gate`             | `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target <t> -- -D warnings`: runtime, default features                      | Linux cross-checks for `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, same Rust path signal |
-| Protocol CI, `Protocol CI / Gate`              | Protocol feature powerset, interop, schema equality, semver and published-package checks                                                          | Existing protocol path signal and Linux/macOS/Windows coverage                                             |
+| `workspace`, Cargo Shim’s `Gate`               | `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`; `cargo build --workspace --locked` | Native Linux x64, macOS arm64 and Windows x64                                                              |
+| `workspace`, Cargo Shim’s `Gate`               | `cargo nextest run --workspace --all-targets --all-features --locked --retries 0`; nextest/libtest inventory parity                               | Native macOS arm64 and Windows x64; inventory parity also runs on Linux x64                                |
+| `rust-coverage`, CI’s `Gate`                   | `cargo llvm-cov --no-report --workspace --all-targets --all-features --locked`, instrumented libtest                                              | Native Linux x64, same Rust path signal                                                                    |
+| `workspace`, Cargo Shim’s `Gate`               | `cargo test --doc --workspace --all-features --locked`; `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features --locked`      | Linux x64; protocol-specific macOS/Windows doctests and docs remain in Protocol CI                         |
+| `workspace-windows-arm64`, Cargo Shim’s `Gate` | `cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0`                                                      | Native Windows ARM64, `windows-11-arm`, same Rust path signal                                              |
+| `musl-clippy`, Cargo Shim’s `Gate`             | `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target <t> -- -D warnings`: runtime, default features                      | Linux cross-checks for `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, same Rust path signal |
+| Protocol CI, Protocol CI’s `Gate`              | Protocol feature powerset, interop, schema equality, semver and published-package checks                                                          | Existing protocol path signal and Linux/macOS/Windows coverage                                             |
 
 Windows ARM64 now compiles the full workspace as well as the launcher alone at 1.99.0. Its native
 test command remains scoped to the runtime; full-workspace compilation does not claim native
@@ -168,8 +182,8 @@ collector or a second privileged reader of PR-produced bytes.
 
 - It runs when `ci.yml`'s `changes` job sees a path in `RUST_WORKSPACE_PATHS`
   (`scripts/lib/rust-lanes.ts`, the manifest Cargo Shim uses), and always on
-  pushes, so every main envelope is a Rust baseline. `CI / Gate` accepts its
-  skip only under that proof, so a Rust test failure is a `CI / Gate` failure.
+  pushes, so every main envelope is a Rust baseline. CI’s `Gate` accepts its
+  skip only under that proof, so a Rust test failure fails CI’s `Gate`.
 - Doctests, the `--ignored` fixture run and real-binary qualification stay in
   Cargo Shim, uninstrumented; macOS and Windows run the plain set there under
   `cargo nextest run --workspace --all-targets --all-features --locked --retries 0`,
@@ -342,26 +356,37 @@ instead of silently auto-installing. `scripts/tests/smoke-dependencies.unit.test
 walks the smoke script entrypoints declared in the workflow and download
 composite and asserts they have no external runtime imports.
 
+Browser smoke deliberately sets `API_HOST=127.0.0.1` for its IPv4 test endpoint. Native
+binary smoke instead clears both `API_HOST` and `MANGOSTUDIO_DEFAULT_API_HOST`, starts with
+only a port argument, and checks that server state records the default `localhost` bind on
+all six native targets. Container images use the process-only
+`MANGOSTUDIO_DEFAULT_API_HOST=0.0.0.0` fallback, below explicit CLI, `API_HOST`, `.env` and
+TOML host configuration. These smoke paths qualify different bind contracts; see
+`tests/browser-smoke/support/smoke-home.ts`, `scripts/release/smoke-binary.sh` and the two Dockerfiles.
+
 ## Branch protection / required checks
 
-Required checks on `main` should be the stable `Gate` checks above, plus the independent
-security / process checks that are not folded into those gates:
+The active [main ruleset](https://github.com/juliopolycarpo/mangostudio/rules/14350640)
+(ID `14350640`) was read on **2026-10-23**. Its exact required contexts are:
 
-- `CI / Gate`
-- `Cargo Shim / Gate`
-- `Release Dry Run / Gate`
-- CodeQL
-- Dependency review
-- Verify classification labels
+| Required API context      | Application ID / slug                | Producer                                                               |
+| ------------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
+| `Gate`                    | `15368` / `github-actions`           | Shared by CI, Cargo Shim and Protocol CI; see the producer table above |
+| `Dependency Review`       | `15368` / `github-actions`           | `dependency-review.yml`, job `dependency-review`                       |
+| `CodeQL`                  | `57789` / `github-advanced-security` | Code scanning results from `codeql.yml`                                |
+| `Apply path-based labels` | `15368` / `github-actions`           | `labeler.yml`, job `label`                                             |
 
-Do **not** require internal job names, reusable-workflow job names, or matrix
-check names (for example `Check`, `Test`, `Build`, or a smoke matrix cell). Those
-rename or reshape as the workflows evolve; the gate unit tests already enforce
-that every mandatory lane feeds a gate.
+`Verify classification labels` is a step in the `Apply path-based labels` job, not the
+required context. `Release Dry Run / Gate` reports on PRs but is not a separately required
+context; CI's gates include the reusable workflow result. Protocol CI contributes to the
+bare `Gate` context even though a workflow-prefixed name is absent from the ruleset.
 
-Updating the repository ruleset itself is a GitHub settings operation, not a
-commit. After changing which checks are required, keep this section in sync.
-Publishing remains restricted to tags and pushes to `main`.
+Unique-name enforcement remains proposed. The [producer receipts and cutover guide](./ci-gates.md)
+record the live settings, observed additive contexts and remaining hosted case matrix.
+This shared-name inventory does not prove how GitHub resolves ambiguous required names.
+Do not substitute internal jobs, matrix cells or a predicted reusable context for a verified
+required context. Ruleset changes are separate GitHub settings operations; publishing
+remains restricted to tags and pushes to `main`.
 
 ### Temporary integration branches
 

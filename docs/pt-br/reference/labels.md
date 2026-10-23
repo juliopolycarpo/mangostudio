@@ -6,9 +6,11 @@ completa por trás dessas regras.
 
 ## O que é aplicado por quem
 
-`.github/labeler.yml` mapeia globs de arquivos alterados para labels, e o gate "Verify
-classification labels" (`.github/workflows/labeler.yml`) falha um PR que termine sem nenhuma
-label `area:` ou `type:`. Esse gate é um check obrigatório em `main` — veja [`ci.md`](./ci.md).
+[`.github/labeler.yml`](../../../.github/labeler.yml) é o mapa canônico de globs de arquivos
+alterados para labels. O workflow `Labeler` executa o job `label`, chamado
+`Apply path-based labels`; seu step `Verify classification labels` falha um PR sem label
+`area:` ou `type:`. O contexto obrigatório da API em `main` é `Apply path-based labels`, não
+o nome do step — veja [`ci.md`](./ci.md#proteção-de-branch--checks-obrigatórios).
 
 A atribuição de PRs é separada: o workflow `auto-assign.yml` atribui o autor e solicita review
 de quem já commitou nos arquivos alterados pelo PR (histórico da branch base), então ele não
@@ -31,7 +33,7 @@ limpeza de labels não gere novas cobranças.
 - `area: frontend` — `apps/frontend/**`
 - `area: api` — `apps/api/**`
 - `area: shared` — `apps/shared/**`
-- `area: runtime` — `apps/shared/src/runtime-contract/**`, `apps/api/src/services/runtime-client/**`
+- `area: runtime` — contratos e implementações de hub/runtime, incluindo a especificação, os SDKs e os scripts do protocolo; [o bloco `area: runtime`](../../../.github/labeler.yml) mantém os globs exatos
 - `area: git` — `apps/api/src/modules/{git,github}/**`, `apps/frontend/src/features/workspace/**`, `apps/shared/src/{git,github}/**`
 - `area: auth` — entrypoints de auth + `apps/shared/src/auth/**` + `tests/browser-smoke/auth-flow.spec.ts`
 - `area: chat` — `apps/api/src/modules/{chats,messages}/**`, `apps/frontend/src/features/chat/**`, `apps/shared/src/chat/**`
