@@ -74,6 +74,7 @@
     "bun": "file:./scripts/bun-host-peer"
   },
   "patchedDependencies": {
-    "@elysia/openapi@2.0.0-beta.6": "patches/@elysia%2Fopenapi@2.0.0-beta.6.patch"
+    "@elysia/openapi@2.0.0-beta.6": "patches/@elysia%2Fopenapi@2.0.0-beta.6.patch",
+    "@xterm/addon-webgl@0.19.0": "patches/@xterm%2Faddon-webgl@0.19.0.patch"
   }
 }
