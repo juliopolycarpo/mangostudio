@@ -164,7 +164,7 @@ function resolveUniqueLanguageIds(languages: readonly string[]): ShikiLanguageId
 function resolveLanguageId(lang: string): ShikiLanguageId | null {
   const language = normalizeLanguage(lang);
   if (isLanguageId(language)) return language;
-  return LANGUAGE_ALIASES[language] ?? null;
+  return Object.hasOwn(LANGUAGE_ALIASES, language) ? (LANGUAGE_ALIASES[language] ?? null) : null;
 }
 
 function normalizeLanguage(lang: string): string {
@@ -172,7 +172,7 @@ function normalizeLanguage(lang: string): string {
 }
 
 function isLanguageId(lang: string | null): lang is ShikiLanguageId {
-  return typeof lang === 'string' && lang in SHIKI_LANGUAGES;
+  return typeof lang === 'string' && Object.hasOwn(SHIKI_LANGUAGES, lang);
 }
 
 function isLanguageLoaded(highlighter: MangoHighlighter, language: ShikiLanguageId): boolean {

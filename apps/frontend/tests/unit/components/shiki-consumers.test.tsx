@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
 import type { GitDiffResponse } from '@mangostudio/shared/git';
-import { initHighlighter, preloadCodeLanguages } from '@/lib/shiki';
+import { CODE_THEMES, initHighlighter, preloadCodeLanguages } from '@/lib/shiki';
 import { stubClipboard } from '../../support/harness/clipboard';
 import { fireEvent, flushAsyncRender, render, screen, waitFor } from '../../support/harness/render';
 
@@ -22,6 +22,16 @@ let restore: (() => void) | undefined;
 beforeAll(async () => {
   await preloadCodeLanguages(['ts']);
   highlighter = await initHighlighter();
+  const realNow = Date.now;
+  try {
+    // These tests isolate consumer behavior; cold cooperative stops have their own matrix.
+    Date.now = unchangedClock;
+    for (const theme of CODE_THEMES) {
+      highlighter.codeToHtml('const value = 42;', { lang: 'typescript', theme });
+    }
+  } finally {
+    Date.now = realNow;
+  }
 });
 
 afterEach(() => {
@@ -50,6 +60,10 @@ function writeClipboard(_text: string): Promise<void> {
   return Promise.resolve();
 }
 
+function unchangedClock(): number {
+  return 0;
+}
+
 class PendingLanguageLoad {
   readonly result = Promise.withResolvers<void>();
   load = () => this.result.promise;
@@ -67,6 +81,21 @@ function showDiff(path: string, source: string) {
 }
 
 describe('actual consumers of checked highlighting', () => {
+  it('keeps valid fences highlighted alongside an inherited-key language fence', async () => {
+    const { container } = render(
+      <MarkdownContentRenderer
+        content={'```constructor\nplain source\n```\n\n```typescript\nconst value = 42;\n```'}
+      />
+    );
+    await waitFor(() =>
+      expect(container.querySelector('pre[data-lang="typescript"]')).toHaveClass('shiki')
+    );
+    expect(container.querySelector('pre[data-lang="constructor"]')?.textContent).toContain(
+      'plain source'
+    );
+    expect(container.querySelector('pre[data-lang="constructor"]')).not.toHaveClass('shiki');
+  });
+
   it('keeps escaped multiline source and its copy control after real tokenization stops', async () => {
     const tokenizer = stopRealTokenizer();
     const source = `<script>alert("café & 漢字")</script> ${'x'.repeat(8192)}\nsecond line <tag>`;
