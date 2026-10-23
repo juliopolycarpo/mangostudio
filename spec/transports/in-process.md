@@ -1,9 +1,12 @@
 # Transport: in-process
 
 Two ports in one process, connected back to back, so an embedded peer speaks the same frames a
-remote one would. This is how MangoStudio's Local runtime is reached: the hub and the runtime
-share a process, and callers still go through the session, the same handlers and the same
-error mapping.
+remote one would. Callers still go through the session, the same handlers and the same error
+mapping.
+
+MangoStudio uses in-process ports in tests. Its Local runtime is a Rust child process launched
+by the hub over [stdio](stdio.md), rather than a peer sharing the hub's process; see the
+[hub/runtime architecture](../../docs/architecture/hub-runtime.md#local-runtime).
 
 ## Framing
 

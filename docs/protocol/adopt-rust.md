@@ -355,7 +355,6 @@ cargo run --example conformance_peer --features testing,websocket,spawn -- --ws 
 ## What is missing, on purpose
 
 Server-side TLS is not here: the runtime's own `serve` sits behind a TLS-terminating proxy, and
-it becomes a feature when a consumer asks for one. `rpc.discover` is deferred too, out of scope
-until a consumer needs it. A `tracing` feature is
+it becomes a feature when a consumer asks for one. A `tracing` feature is
 deferred as well, since no consumer reads a span yet and it would be public surface the docs
 lint and the feature powerset would have to carry for nothing.

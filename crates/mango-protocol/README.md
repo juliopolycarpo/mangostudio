@@ -1,13 +1,13 @@
 # mango-protocol
 
-Wire types and codec for [Mango Protocol](https://github.com/juliopolycarpo/mango-protocol),
+Wire types and codec for [Mango Protocol](https://github.com/juliopolycarpo/mangostudio/tree/main/spec),
 the JSON-Schema contract MangoStudio hubs, runtimes and tools speak over stdio, local
 sockets and WebSocket. The TypeScript SDK `@mangostudio/protocol` reads the same frames.
 
 Building this revision requires Rust 1.99.0 or newer, including the codec-only feature set.
 Published releases retain their declared `rust-version`; releases containing this baseline
 change require the new minimum. See the
-[consumer versioning guide](../../docs/protocol/versioning.md#rust-compiler-support) before
+[consumer versioning guide](https://github.com/juliopolycarpo/mangostudio/blob/main/docs/protocol/versioning.md#rust-compiler-support) before
 upgrading a downstream Rust project.
 
 ```toml
@@ -41,7 +41,8 @@ What the crate covers:
 - behind the `schema` feature, a JSON Schema emission the repository proves equal to the spec;
 - behind the `tokio` feature, a `Session` (request/response multiplexing, cancel, event streams,
   liveness, graceful close) over any `Port`, and a `Contract` builder that validates, serves and
-  calls it — see `cargo run --example session_pair --features tokio` and `docs/adopt-rust.md`;
+  calls it — see `cargo run --example session_pair --features tokio` and the
+  [Rust adoption guide](https://github.com/juliopolycarpo/mangostudio/blob/main/docs/protocol/adopt-rust.md);
 - behind the `testing` feature, a reusable conformance suite every transport here runs against,
   and that a transport crate of your own can run its `Port` against;
 - behind `tokio`, `websocket` and `spawn`, the transports themselves: stdio, a local socket

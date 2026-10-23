@@ -143,10 +143,44 @@ child through `spawnPort` to prove the pipes are wired the way the suite assumes
 
 ### The same suite in Rust
 
-The Rust crate ships the suite behind its `testing` feature, as a `Fixture` trait with the same
-three members: `connect`, `chunked` and `connect_raw`. Its fixtures live in
-`crates/mango-protocol/tests/it/transport_*.rs`, one module per transport — the in-process pair, the
-NDJSON port over a pipe pair, a real local socket, and a real WebSocket at two message ceilings.
+The Rust crate ships the suite behind its `testing` feature, as a `Fixture` trait with
+`connect` and `chunked`, plus **both** `supports_raw` and `connect_raw` for byte-oriented
+transports. `supports_raw()` defaults to `false`: implementing `connect_raw` alone leaves the
+raw-byte cases skipped. Inside a byte transport's `impl Fixture`, opt in explicitly:
+
+```rust
+// Excerpt from NdjsonFixture; see the linked file for RawPipe and connect.
+fn supports_raw(&self) -> bool {
+    true
+}
+
+async fn connect_raw(&self, a: SessionOptions) -> RawPipe {
+    let (ours, theirs) = tokio::io::duplex(PIPE_CAPACITY);
+    let (session, driver) = Session::spawn(port(ours), a);
+    RawPipe {
+        a: session,
+        driver: Some(driver),
+        peer: Some(theirs),
+    }
+}
+```
+
+`run_conformance_suite(&fixture).await` then selects the malformed-hello and unknown-envelope-member
+cases as well as the normal session cases. It asserts that the cases executed match the list
+selected by `chunked()` and `supports_raw()`. TypeScript has no `supportsRaw` member: providing
+its optional `connectRaw` enables those cases directly.
+
+The in-process Rust fixture is in `crates/mango-protocol/tests/it/conformance.rs`; it has no raw-byte
+layer and uses `NoRawConnection`. The byte-transport fixtures are in
+`crates/mango-protocol/tests/it/transport_ndjson.rs`, `transport_ipc.rs` and `transport_ws.rs`:
+the NDJSON port over a pipe pair, a real local socket, and a real WebSocket at two message ceilings.
+For a complete raw fixture, see
+[`NdjsonFixture`](../../crates/mango-protocol/tests/it/transport_ndjson.rs). Run it with:
+
+```sh
+cargo test -p mango-protocol --locked --test it --features testing the_ndjson_port_behaves_like_a_mango_transport
+```
+
 `tests/it/conformance_drift.rs` asserts the Rust case list matches this file's TypeScript `it(...)`
 names verbatim and in order, so a case added to one suite and not the other fails the build.
 
