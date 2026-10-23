@@ -48,6 +48,17 @@ function stopTokenizationOn(call: number): EarlyStopTokenizer {
 }
 
 describe('incomplete highlighting', () => {
+  it('ignores inherited object keys without rejecting valid languages in the same preload', async () => {
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      await expect(preloadCodeLanguages([name])).resolves.toBe(false);
+      expect(highlightCode('value', name, 'one-dark-pro')).toBeNull();
+      expect(highlightLineTokens('value', name, 'one-dark-pro')).toBeNull();
+    }
+    await expect(
+      preloadCodeLanguages(['constructor', '__proto__', 'toString', 'ts'])
+    ).resolves.toBe(true);
+  });
+
   it('preserves common-language initialization, aliases and unsupported-language fallback', async () => {
     expect(highlighter.getLoadedLanguages()).toEqual(
       expect.arrayContaining([
