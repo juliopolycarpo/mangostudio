@@ -548,6 +548,12 @@ V3L,mangostudio,0.1.1,2223120,1570246,8906b428ac27b17b5568915596839c2b6512f01fb5
 <details>
 <summary>Tamanhos completos das seções (CSV)</summary>
 
+Leituras independentes dos dois arquivos ELF com símbolos retornaram tamanhos iguais para
+`.debug_loclists` (1.117.567 bytes), `.debug_rnglists` (52.758), `.debug_macro` (38.458) e
+`.debug_line_str` (7.661). As três primeiras seções têm hashes SHA-256 diferentes entre V3R e V3L;
+`.debug_line_str` tem o mesmo hash. Estes são tamanhos observados das seções e não implicam
+binários iguais.
+
 ```csv
 artifact_id,section,elf_type,symbol_bytes,stripped_bytes,symbol_address,stripped_address
 V3R,.interp,PROGBITS,28,28,736,736
