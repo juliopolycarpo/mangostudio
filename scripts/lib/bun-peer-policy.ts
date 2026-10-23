@@ -6,22 +6,6 @@ export interface BunDependencyLock {
   readonly packages: Readonly<Record<string, readonly [string, ...unknown[]]>>;
 }
 
-const HOST_PEER_KEY = 'bun-plugin-tailwind/bun';
-const HOST_PEER_SOURCE = 'bun@file:./scripts/bun-host-peer';
-
-function isHostPeer(key: string, entry: readonly unknown[]): boolean {
-  const metadata = entry[1];
-  return (
-    key === HOST_PEER_KEY &&
-    entry[0] === HOST_PEER_SOURCE &&
-    entry.length === 2 &&
-    metadata !== null &&
-    typeof metadata === 'object' &&
-    !Array.isArray(metadata) &&
-    Object.keys(metadata).length === 0
-  );
-}
-
 function describeReferences(
   label: string,
   manifest: PackageManifest,
@@ -50,14 +34,12 @@ function describeImporters(lock: BunDependencyLock, key: string, resolution: str
 }
 
 /**
- * Reject dependency copies of Bun, allowing only the private host-toolchain peer metadata.
+ * Reject every dependency copy of the externally installed Bun toolchain.
  * Usage: assertNoRegistryBunPackages(Bun.JSON5.parse(text) as BunDependencyLock);
  */
 export function assertNoRegistryBunPackages(lock: BunDependencyLock): void {
   const violations = Object.entries(lock.packages)
-    .filter(
-      ([key, entry]) => /^(?:bun|@oven\/bun-[^@]+)@/.test(entry[0]) && !isHostPeer(key, entry)
-    )
+    .filter(([, entry]) => /^(?:bun|@oven\/bun-[^@]+)@/.test(entry[0]))
     .map(
       ([key, entry]) =>
         `${key}: ${entry[0]}, required by ${describeImporters(lock, key, entry[0])}; invalid lock entry ${JSON.stringify(entry)}`
@@ -65,6 +47,6 @@ export function assertNoRegistryBunPackages(lock: BunDependencyLock): void {
   if (violations.length === 0) return;
 
   throw new Error(
-    `Unexpected Bun runtime dependencies in bun.lock; expected only ${HOST_PEER_KEY}: ${HOST_PEER_SOURCE} with empty metadata, and the externally installed toolchain:\n${violations.join('\n')}`
+    `Unexpected Bun runtime dependencies in bun.lock; expected the externally installed toolchain with no Bun runtime packages:\n${violations.join('\n')}`
   );
 }

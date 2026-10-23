@@ -1,42 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { assertNoRegistryBunPackages, type BunDependencyLock } from '../lib/bun-peer-policy';
-import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
 
 describe('Bun peer lockfile policy', () => {
   test('the real lockfile contains no registry Bun runtime', () => {
     const lock = Bun.JSON5.parse(readText('bun.lock')) as BunDependencyLock;
     expect(() => assertNoRegistryBunPackages(lock)).not.toThrow();
-  });
-
-  test('pins the host-peer override and its metadata-only package contents', () => {
-    const root = JSON.parse(readText('package.json'));
-    const marker = JSON.parse(readText('scripts/bun-host-peer/package.json'));
-    const lock = Bun.JSON5.parse(readText('bun.lock')) as BunDependencyLock;
-    const config = Bun.TOML.parse(readText('bunfig.toml')) as { install?: { peer?: boolean } };
-
-    expect(root.overrides.bun).toBe('file:./scripts/bun-host-peer');
-    expect(lock.overrides?.bun).toBe(root.overrides.bun);
-    expect(lock.packages['bun-plugin-tailwind/bun']).toEqual([
-      'bun@file:./scripts/bun-host-peer',
-      {},
-    ]);
-    expect(marker).toEqual({
-      name: '@mangostudio/bun-host-peer',
-      version: readText('.bun-version').trim(),
-      private: true,
-      description:
-        'Metadata for the externally installed Bun toolchain, satisfying the Tailwind plugin peer without downloading a registry runtime.',
-      exports: {},
-    });
-    expect(root.packageManager).toBe(`bun@${marker.version}`);
-    expect(config.install?.peer).not.toBe(false);
-    expect(readdirSync(join(ROOT_DIR, 'scripts/bun-host-peer')).sort()).toEqual([
-      'README.md',
-      'package.json',
-    ]);
   });
 
   test('a bun-types override, while one exists, names the pinned Bun', () => {
@@ -66,22 +35,6 @@ describe('Bun peer lockfile policy', () => {
     const hostBun = await import('bun');
     expect(hostBun.version).toBe(Bun.version);
     expect(hostBun.build).toBe(Bun.build);
-  });
-
-  test('accepts a plugin using host Bun and the exact metadata-only local peer', () => {
-    expect(() =>
-      assertNoRegistryBunPackages({
-        packages: {
-          'bun-plugin-tailwind': [
-            'bun-plugin-tailwind@0.1.2',
-            '',
-            { peerDependencies: { bun: '>=1.0.0' } },
-          ],
-          'bun-plugin-tailwind/bun': ['bun@file:./scripts/bun-host-peer', {}],
-          '@types/bun': ['@types/bun@1.4.2', '', {}],
-        },
-      })
-    ).not.toThrow();
   });
 
   test('names the plugin peer that brings back registry Bun', () => {
@@ -133,7 +86,7 @@ describe('Bun peer lockfile policy', () => {
 
   test('detects an orphan runtime and states the permitted shape', () => {
     expect(() => assertNoRegistryBunPackages({ packages: { bun: ['bun@1.4.0', '', {}] } })).toThrow(
-      'expected only bun-plugin-tailwind/bun: bun@file:./scripts/bun-host-peer with empty metadata'
+      'expected the externally installed toolchain with no Bun runtime packages'
     );
     expect(() => assertNoRegistryBunPackages({ packages: { bun: ['bun@1.4.0', '', {}] } })).toThrow(
       'bun: bun@1.4.0, required by no declaring importer in bun.lock'

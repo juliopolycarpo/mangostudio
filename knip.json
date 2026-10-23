@@ -51,7 +51,7 @@
         "tests/support/setup/motion-react-stub.tsx",
         "tests/browser-support/webgl-constructor-fixture.ts"
       ],
-      "project": ["src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}"]
+      "project": ["scripts/**/*.ts", "src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}"]
     },
     "apps/shared": {
       "entry": ["tests/**/*.test.ts"],

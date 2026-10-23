@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { cpSync, existsSync, symlinkSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { createTailwindInputs, readSourceInventory } from '@mangostudio/shared/frontend-build/host';
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 import {
   publishDist,
@@ -277,10 +278,20 @@ describe('writeBuildState', () => {
   test('writes both fields the freshness check compares', async () => {
     const root = await mkdtemp(join(tmpdir(), 'frontend-state-'));
     try {
-      await writeBuildState(root, { apiUrl: 'https://api.example.test', mode: 'production' });
+      const tailwindInputs = createTailwindInputs(
+        readSourceInventory(join(import.meta.dir, '../..')),
+        [],
+        []
+      );
+      await writeBuildState(root, {
+        apiUrl: 'https://api.example.test',
+        mode: 'production',
+        tailwindInputs,
+      });
       expect(JSON.parse(await readFile(join(root, BUILD_STATE_FILE), 'utf8'))).toEqual({
         apiUrl: 'https://api.example.test',
         mode: 'production',
+        tailwindInputs,
       });
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -387,6 +398,58 @@ describe('removeTempPaths', () => {
       expect(await readFile(join(dist, 'index.html'), 'utf8')).toBe('new');
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('compiler failure publication', () => {
+  test('keeps the previous dist and metafile when stylesheet compilation fails', async () => {
+    const repository = join(import.meta.dir, '../../../..');
+    await mkdir(join(repository, '.mango'), { recursive: true });
+    const isolated = await mkdtemp(join(repository, '.mango/tailwind-rollback-'));
+    const frontend = join(isolated, 'apps/frontend');
+    try {
+      cpSync(join(repository, 'apps/frontend'), frontend, {
+        recursive: true,
+        filter: (path) =>
+          !['node_modules', 'dist', 'dist-metafile.json', '.turbo', '.tanstack', 'tests'].includes(
+            basename(path)
+          ),
+      });
+      symlinkSync(
+        join(repository, 'apps/frontend/node_modules'),
+        join(frontend, 'node_modules'),
+        'junction'
+      );
+      await mkdir(join(frontend, 'dist'));
+      await writeFile(join(frontend, 'dist/index.html'), 'previous published bundle');
+      await writeFile(join(frontend, 'dist-metafile.json'), 'previous metafile');
+      await writeFile(
+        join(frontend, 'src/index.css'),
+        '@import "./missing-tailwind-stylesheet.css";'
+      );
+      const child = Bun.spawn([process.execPath, './build.ts', '--dev'], {
+        cwd: frontend,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect({ exitCode, output: stdout + stderr }).toMatchObject({ exitCode: 1 });
+      expect(stderr).toContain('expected resolvable Tailwind stylesheet');
+      expect(stderr).toContain('missing-tailwind-stylesheet.css');
+      expect(await readFile(join(frontend, 'dist/index.html'), 'utf8')).toBe(
+        'previous published bundle'
+      );
+      expect(await readFile(join(frontend, 'dist-metafile.json'), 'utf8')).toBe(
+        'previous metafile'
+      );
+      expect((await readdir(frontend)).filter((name) => name.startsWith('.dist-'))).toEqual([]);
+    } finally {
+      await rm(isolated, { recursive: true, force: true });
     }
   });
 });
