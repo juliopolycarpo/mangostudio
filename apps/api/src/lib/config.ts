@@ -5,7 +5,8 @@
  * 1. process.env           (shell environment — works in both dev and standalone binary)
  * 2. .env next to config.toml (if it exists, overrides matching config.toml keys)
  * 3. config.toml           (~/.mango/config.toml in dev and standalone)
- * 4. Hardcoded defaults
+ * 4. Process-only MANGOSTUDIO_DEFAULT_API_HOST fallback (host only)
+ * 5. Hardcoded defaults
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -184,7 +185,7 @@ export interface MangoConfig {
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
-  server: { host: '0.0.0.0', port: 3001, publicUrl: '', allowedOrigins: [] },
+  server: { host: 'localhost', port: 3001, publicUrl: '', allowedOrigins: [] },
   frontend: { host: 'localhost', port: 5173 },
   database: { path: '' },
   uploads: { dir: '' },
@@ -367,12 +368,15 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
 };
 
 /**
- * Env var names that carry runtime configuration (the keys of ENV_KEY_MAP).
+ * Env var names that carry runtime configuration, including image defaults.
  * Exported so the detached-spawn allowlist can forward exactly these without a
  * hand-maintained copy that drifts when a new key is added here.
  * // Usage: RUNTIME_CONFIG_ENV_KEYS
  */
-export const RUNTIME_CONFIG_ENV_KEYS: readonly string[] = Object.keys(ENV_KEY_MAP);
+export const RUNTIME_CONFIG_ENV_KEYS: readonly string[] = [
+  ...Object.keys(ENV_KEY_MAP),
+  'MANGOSTUDIO_DEFAULT_API_HOST',
+];
 
 /**
  * Returns the user-level MangoStudio directory (~/.mango).
@@ -1002,6 +1006,8 @@ export function loadConfig(overridePath?: string): MangoConfig {
   }
 
   const cfg = cloneDefaults();
+  // Images supply a reachable fallback; explicit TOML and API_HOST still win.
+  cfg.server.host = process.env.MANGOSTUDIO_DEFAULT_API_HOST || cfg.server.host;
   let frontendPortInToml = false;
 
   // 1. Determine and read config.toml

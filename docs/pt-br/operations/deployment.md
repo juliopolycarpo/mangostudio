@@ -113,6 +113,24 @@ como cada alvo é construído e verificado.
 
 ## Configuração
 
+### Aviso de atualização do bind padrão
+
+**Mudança de padrão incompatível:** um hub sem host configurado agora escuta em
+`localhost`, em foreground e detached. Instalações que dependiam de acesso LAN
+implícito devem optar por `mangostudio serve 0.0.0.0` (ou `serve lan`),
+`API_HOST=0.0.0.0` ou `[server] host = "0.0.0.0"` no config.toml. O host da CLI
+prevalece sobre `API_HOST`; o ambiente do processo prevalece sobre o `.env` ao
+lado do config.toml, depois TOML e depois o padrão. Hosts explícitos mantêm seu
+comportamento.
+
+As duas variantes Docker definem `MANGOSTUDIO_DEFAULT_API_HOST=0.0.0.0` para
+manter portas publicadas acessíveis por padrão. Esse padrão exclusivo do processo
+fica abaixo do host explícito da CLI, de `API_HOST` (processo ou `.env` adjacente)
+e do host de um TOML montado.
+Autenticação, terminação TLS e origens permitidas do navegador continuam exigindo
+sua configuração normal. O exemplo em todas as interfaces abaixo é uma opção
+explícita de acesso remoto.
+
 A configuração de produção usa `~/.mango/config.toml` e `~/.mango/.env` para o usuário do processo:
 
 ```toml

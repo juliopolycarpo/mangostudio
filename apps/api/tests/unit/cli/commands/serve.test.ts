@@ -15,6 +15,22 @@ const STATE: ServerState = {
 
 const noop = (): Promise<void> => Promise.resolve();
 
+class FakeDetachedHost {
+  host = '';
+  messages: string[] = [];
+
+  readState = (): Promise<null> => Promise.resolve(null);
+
+  spawnDetached = (port: number, host: string) => {
+    this.host = host;
+    return Promise.resolve({ pid: 7, port, logFile: '/l.log' });
+  };
+
+  log = (message: string): void => {
+    this.messages.push(message);
+  };
+}
+
 beforeEach(() => {
   loadConfigForTest({ auth: { secret: 'test-secret-at-least-32-characters-long', url: '' } });
 });
@@ -92,8 +108,30 @@ describe('runServe (detached)', () => {
     );
 
     expect(spawnedPort).toBe(3000);
-    expect(spawnedHost).toBe('0.0.0.0');
+    expect(spawnedHost).toBe('localhost');
     expect(lines.join('\n')).toContain('PID 7');
+  });
+
+  it.each([
+    { configured: '192.168.1.5', explicit: undefined, expected: '192.168.1.5' },
+    { configured: '192.168.1.5', explicit: '0.0.0.0', expected: '0.0.0.0' },
+  ])('forwards host $expected with configured and CLI precedence', async (entry) => {
+    loadConfigForTest({
+      server: { host: entry.configured, port: 3001, publicUrl: '', allowedOrigins: [] },
+      auth: { secret: 'test-secret-at-least-32-characters-long', url: '' },
+    });
+    const fake = new FakeDetachedHost();
+    await runServe(
+      { host: entry.explicit, port: 3000, detached: true },
+      {
+        readState: fake.readState,
+        controller: new FakeProcessController(),
+        ensureAuthSecret: noop,
+        spawnDetached: fake.spawnDetached,
+        log: fake.log,
+      }
+    );
+    expect(fake.host).toBe(entry.expected);
   });
 
   it('rejects an invalid port before touching state', async () => {

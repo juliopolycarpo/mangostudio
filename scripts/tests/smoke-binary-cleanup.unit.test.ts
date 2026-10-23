@@ -24,7 +24,15 @@ const HELPER_BUDGET_MS = 30_000;
 // Each test passes its own timeout (budget + 5 s): the lane default of 15 s is shorter
 // than the helper's 30 s budget, which a loaded host can legitimately use.
 
-type ServerEvent = { event: string; pid: number; at: number; args?: string[]; executable?: string };
+type ServerEvent = {
+  event: string;
+  pid: number;
+  at: number;
+  args?: string[];
+  executable?: string;
+  apiHost?: string | null;
+  defaultApiHost?: string | null;
+};
 type ServerState = 'running' | 'exited' | 'killed';
 
 const scratchRoots: string[] = [];
@@ -164,11 +172,13 @@ describe('scripts/release/smoke-binary.sh server cleanup', () => {
   test.skipIf(ON_WINDOWS)(
     'the fake server stays running until it is signalled, then exits by itself',
     async () => {
-      const { binary, eventsPath } = stageSmokeRoot();
+      const { root, binary, eventsPath } = stageSmokeRoot();
       const port = await freePort();
       const server = Bun.spawn([binary, 'serve', `127.0.0.1:${port}`], {
         env: {
           ...process.env,
+          HOME: join(root, 'fake-home'),
+          USERPROFILE: join(root, 'fake-home'),
           FAKE_SMOKE_SERVER_EVENTS: eventsPath,
           FAKE_SMOKE_SERVER_VERSION: EXPECTED_VERSION,
         },
@@ -206,6 +216,8 @@ describe('scripts/release/smoke-binary.sh server cleanup', () => {
       const smoke = Bun.spawn(['bash', helper, binary, EXPECTED_VERSION, String(port)], {
         env: {
           ...process.env,
+          API_HOST: '0.0.0.0',
+          MANGOSTUDIO_DEFAULT_API_HOST: '0.0.0.0',
           FAKE_SMOKE_SERVER_EVENTS: eventsPath,
           FAKE_SMOKE_SERVER_VERSION: EXPECTED_VERSION,
         },
@@ -230,7 +242,9 @@ describe('scripts/release/smoke-binary.sh server cleanup', () => {
 
       const startup = startupOf(events);
       spawnedServers.add(startup.pid);
-      expect(startup.args).toEqual(['serve', `127.0.0.1:${port}`]);
+      expect(startup.args).toEqual(['serve', String(port)]);
+      expect(startup.apiHost).toBeNull();
+      expect(startup.defaultApiHost).toBeNull();
       // The smoke boots a staged copy, never the binary it was handed.
       expect(basename(dirname(startup.executable ?? ''))).toBe('staging');
 
@@ -238,6 +252,34 @@ describe('scripts/release/smoke-binary.sh server cleanup', () => {
       expect(state, `expected server state: exited | received: ${state}`).toBe('exited');
       const signals = events.filter((entry) => entry.event === 'sigterm').length;
       expect(signals, `expected SIGTERM count: 1 | received: ${signals}`).toBe(1);
+    },
+    HELPER_BUDGET_MS + 5_000
+  );
+  test.skipIf(ON_WINDOWS)(
+    'rejects a native binary that reports a wildcard default bind',
+    async () => {
+      const { binary, helper, eventsPath } = stageSmokeRoot();
+      const port = await freePort();
+      const smoke = Bun.spawn(['bash', helper, binary, EXPECTED_VERSION, String(port)], {
+        env: {
+          ...process.env,
+          FAKE_SMOKE_SERVER_EVENTS: eventsPath,
+          FAKE_SMOKE_SERVER_VERSION: EXPECTED_VERSION,
+          FAKE_SMOKE_BIND_HOST: '0.0.0.0',
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+        timeout: HELPER_BUDGET_MS,
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(smoke.stdout).text(),
+        new Response(smoke.stderr).text(),
+        smoke.exited,
+      ]);
+      expect(exitCode, stdout + stderr).toBe(1);
+      expect(stderr).toContain('expected default bind: localhost');
+      const events = readEvents(eventsPath);
+      expect(serverState(events, startupOf(events).pid)).toBe('exited');
     },
     HELPER_BUDGET_MS + 5_000
   );

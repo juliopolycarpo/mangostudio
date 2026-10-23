@@ -74,14 +74,15 @@ native_tmp_home="$(to_native_path "$tmp_home")"
 # server outlives the helper.
 (
   cd "$staging_dir"
+  # A fresh home and no host environment overrides exercise the binary's default on every native OS.
+  unset API_HOST MANGOSTUDIO_DEFAULT_API_HOST
   HOME="$native_tmp_home" \
     USERPROFILE="$native_tmp_home" \
     DATABASE_PATH="$(to_native_path "${tmp_home}/smoke.sqlite")" \
-    API_HOST=127.0.0.1 \
     API_PORT="$port" \
     BETTER_AUTH_SECRET="${BETTER_AUTH_SECRET:-smoke-test-secret-at-least-32-characters-long}" \
     GEMINI_API_KEY="${GEMINI_API_KEY:-dummy}" \
-    exec "$staged_binary" serve "127.0.0.1:${port}" >"$server_log" 2>&1
+    exec "$staged_binary" serve "$port" >"$server_log" 2>&1
 ) &
 server_pid="$!"
 
@@ -97,6 +98,21 @@ if [ "$boot_status" -ne 0 ]; then
     echo "MangoStudio did not become healthy on port ${port}." >&2
   fi
   cat "$server_log" >&2 || true
+  exit 1
+fi
+
+# Health can answer just before the asynchronous state-file write completes.
+# Check the recorded bind as well: loopback health alone also passes a wildcard bind.
+state_file="${tmp_home}/.mango/run/server.json"
+for _ in $(seq 1 50); do
+  if [ -f "$state_file" ]; then
+    break
+  fi
+  sleep 0.1
+done
+if ! grep -Eq '"host"[[:space:]]*:[[:space:]]*"localhost"' "$state_file"; then
+  echo "expected default bind: localhost | received server state:" >&2
+  cat "$state_file" >&2 || true
   exit 1
 fi
 

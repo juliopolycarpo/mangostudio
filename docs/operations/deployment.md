@@ -32,6 +32,7 @@ Useful environment variables:
 | -------------------- | ----------------------------------------------------------------------------- |
 | `BETTER_AUTH_SECRET` | Required 32+ character auth secret                                            |
 | `GEMINI_API_KEY`     | Gemini connector key; other provider keys use the same env                    |
+| `API_HOST`           | Explicit bind override; wins over mounted TOML and the image fallback         |
 | `API_PORT`           | Container listen port, default `3001`                                         |
 | `DATABASE_PATH`      | Override SQLite path, default `/data/.mango/database.sqlite`                  |
 | `UPLOADS_DIR`        | Override uploaded file storage path                                           |
@@ -184,6 +185,21 @@ See [releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built) fo
 target is built and checked.
 
 ## Configuration
+
+### Listen-default upgrade notice
+
+**Breaking default:** an unconfigured hub now binds `localhost` in foreground and
+detached mode. Installations that relied on implicit LAN access must opt in with
+`mangostudio serve 0.0.0.0` (or `serve lan`), `API_HOST=0.0.0.0`, or
+`[server] host = "0.0.0.0"` in config.toml. A CLI host wins over `API_HOST`;
+process environment wins over the `.env` beside config.toml, then TOML, then the
+default. Explicit hosts keep their behavior.
+
+Both Docker variants set `MANGOSTUDIO_DEFAULT_API_HOST=0.0.0.0` so published
+ports remain reachable by default. This process-only fallback is below an explicit
+CLI host, `API_HOST` (process or adjacent `.env`), and a mounted TOML host. Authentication, TLS
+termination and allowed browser origins still need their normal configuration.
+The all-interface example below is an explicit remote-access opt-in.
 
 Production configuration uses `~/.mango/config.toml` and `~/.mango/.env` for the process user:
 

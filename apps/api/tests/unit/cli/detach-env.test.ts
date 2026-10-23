@@ -21,6 +21,7 @@ const CONNECTOR_ENV_VARS = [
 const MUTATED_ENV_KEYS = [
   ...CONNECTOR_ENV_VARS,
   'DATABASE_PATH',
+  'MANGOSTUDIO_DEFAULT_API_HOST',
   'BETTER_AUTH_SECRET',
   'FRONTEND_PORT',
   'MANGOSTUDIO_DIAGNOSTIC_LOGS',
@@ -79,12 +80,14 @@ describe('buildDetachedEnv', () => {
 
   it('forwards allowlisted runtime configuration variables when set', () => {
     process.env.DATABASE_PATH = '/custom/sqlite.db';
+    process.env.MANGOSTUDIO_DEFAULT_API_HOST = '0.0.0.0';
     process.env.BETTER_AUTH_SECRET = 'a-valid-secret-at-least-32-characters-long';
     process.env.FRONTEND_PORT = '9999';
 
     const env = buildDetachedEnv('localhost', 3001, '/tmp/server.log');
 
     expect(env.DATABASE_PATH).toBe('/custom/sqlite.db');
+    expect(env.MANGOSTUDIO_DEFAULT_API_HOST).toBe('0.0.0.0');
     expect(env.BETTER_AUTH_SECRET).toBe('a-valid-secret-at-least-32-characters-long');
     expect(env.FRONTEND_PORT).toBe('9999');
   });
