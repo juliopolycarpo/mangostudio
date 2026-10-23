@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -26,7 +27,7 @@ afterEach(() => {
   for (const path of fixtures.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 function fixture() {
-  const repository = mkdtempSync(join(tmpdir(), 'tailwind-inputs-'));
+  const repository = realpathSync(mkdtempSync(join(tmpdir(), 'tailwind-inputs-')));
   fixtures.push(repository);
   const project = join(repository, 'apps/frontend');
   for (const path of [
@@ -103,13 +104,13 @@ describe('frontend build source inventory', () => {
   test('rejects nested repository descendants and source-root ancestors', () => {
     const f = fixture();
     mkdirSync(join(f.project, 'src/nested/.git'), { recursive: true });
-    expect(f.capture).toThrow('nested/.git: expected declared source');
+    expect(f.capture).toThrow(`${join('nested', '.git')}: expected declared source`);
     rmSync(join(f.project, 'src/nested'), { recursive: true });
     mkdirSync(join(f.repository, 'node_modules/vendor/src'), { recursive: true });
     writeFileSync(join(f.repository, 'node_modules/vendor/.git'), 'gitdir: elsewhere');
     f.config.additionalRoots.push({ path: '../../node_modules/vendor/src', kind: 'directory' });
     f.save();
-    expect(f.inventory).toThrow('vendor/.git: expected declared source');
+    expect(f.inventory).toThrow(`${join('vendor', '.git')}: expected declared source`);
   });
   test('tracks symlink identity, rejects outside targets and cycles', () => {
     const f = fixture();
@@ -118,10 +119,11 @@ describe('frontend build source inventory', () => {
     const before = f.capture();
     writeFileSync(join(f.project, 'src/target.tsx'), 'two');
     expect(tailwindInputsAreCurrent(f.repository, before)).toBe(false);
-    symlinkSync('/etc/passwd', join(f.project, 'src/escape'));
+    const outside = fixture();
+    symlinkSync(join(outside.project, 'src/main.tsx'), join(f.project, 'src/escape'), 'file');
     expect(f.capture).toThrow('escape: expected declared source');
     rmSync(join(f.project, 'src/escape'));
-    symlinkSync('.', join(f.project, 'src/cycle'));
+    symlinkSync(join(f.project, 'src'), join(f.project, 'src/cycle'), 'junction');
     expect(f.capture).toThrow('cycle: expected source symlink without a cycle');
   });
 });
@@ -282,7 +284,7 @@ describe('frontend Turbo prelookup policy', () => {
     const f = fixture();
     const before = f.capture();
     expect(tailwindInputsAreCurrent(f.repository, before)).toBe(true);
-    const destinationParent = mkdtempSync(join(tmpdir(), 'tailwind-destination-'));
+    const destinationParent = realpathSync(mkdtempSync(join(tmpdir(), 'tailwind-destination-')));
     fixtures.push(destinationParent);
     const destination = join(destinationParent, 'repo');
     renameSync(f.repository, destination);
@@ -304,7 +306,7 @@ describe('frontend Turbo prelookup policy', () => {
   test('disables lookup for inherited outside controls and detects their creation/deletion', () => {
     const f = fixture();
     turboInputs(f.project);
-    const parent = mkdtempSync(join(tmpdir(), 'tailwind-parent-'));
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'tailwind-parent-')));
     fixtures.push(parent);
     const repository = join(parent, 'repo');
     // Move the fixture below an isolated ancestor so no shared parent control is modified.

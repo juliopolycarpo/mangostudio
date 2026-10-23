@@ -11,7 +11,15 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createTailwindInputs, readSourceInventory } from '@mangostudio/shared/frontend-build/host';
@@ -79,7 +87,7 @@ function holdDirs(root: string): void {
 }
 
 function fixture(parent = tmpdir()): string {
-  const root = mkdtempSync(join(parent, 'dev-frontend-'));
+  const root = realpathSync(mkdtempSync(join(parent, 'dev-frontend-')));
   mkdirSync(join(root, 'src', 'routes'), { recursive: true });
   mkdirSync(join(root, 'public'), { recursive: true });
   mkdirSync(join(root, 'dist', 'assets'), { recursive: true });
@@ -542,7 +550,7 @@ describe('distIsCurrent', () => {
   });
 
   test('rebuilds on every linked-worktree boot and on inherited ignore presence', () => {
-    const parent = mkdtempSync(join(tmpdir(), 'frontend-parent-'));
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'frontend-parent-')));
     const root = fixture(parent);
     const shared = sharedFixture(root);
     const repository = dependencyFixture(root);
@@ -571,7 +579,7 @@ describe('distIsCurrent', () => {
     const original = fixture();
     const shared = sharedFixture(original);
     const repository = dependencyFixture(original);
-    const destinationParent = mkdtempSync(join(tmpdir(), 'frontend-restored-'));
+    const destinationParent = realpathSync(mkdtempSync(join(tmpdir(), 'frontend-restored-')));
     try {
       writeAt(join(original, 'src/main.tsx'), OLD);
       writeAt(join(original, 'dist/index.html'), NEW);

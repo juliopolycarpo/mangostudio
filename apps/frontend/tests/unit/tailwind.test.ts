@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createTailwindPlugin } from '../../scripts/tailwind';
@@ -9,7 +9,7 @@ afterEach(() => {
   for (const root of fixtures.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 function fixture() {
-  const repository = mkdtempSync(join(tmpdir(), 'tailwind-compiler-'));
+  const repository = realpathSync(mkdtempSync(join(tmpdir(), 'tailwind-compiler-')));
   fixtures.push(repository);
   const project = join(repository, 'apps/frontend');
   cpSync(join(import.meta.dir, '../../../../bun.lock'), join(repository, 'bun.lock'));
