@@ -170,7 +170,7 @@ impl SdkConnector {
         }
     }
 
-    /// The client identity and capabilities the TypeScript host declares: form elicitation only.
+    /// The client identity and capabilities this Rust runtime declares: form elicitation only.
     fn handler(
         &self,
         config: &McpConfig,

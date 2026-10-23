@@ -1335,8 +1335,10 @@ turn, **except** for the codes the vendor's own failed result gets (`claude-erro
 inverted on purpose: the runtime stops a turn itself on its hard and idle timeouts, a payload
 overflow and an invalid event (all reported as `adapter-stream`), a broken stream or a process that
 ended without a result is a kill, and a code a later SDK adds is unknown, so everything but the
-allow-list marks the row. The list lives in the shared runtime contract
-(`errors.externalAgentFinishedTurnErrorCodes`), mirrored in Rust, and a runtime test holds it to the
+allow-list marks the row. The list lives at the JSON strings path
+`errors.externalAgentFinishedTurnErrorCodes` in
+`apps/shared/src/runtime-contract/generated/strings.json` (not a TypeScript contract export),
+mirrored in Rust, and a runtime test holds it to the
 codes the SDK's reducer gives a failed result. A refusal at start, before the vendor accepted a
 turn, ran nothing and does not mark.
 
