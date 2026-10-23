@@ -9,7 +9,7 @@ Frontend (GalleryPage, useImageGeneration)
     │
     ▼
 Rotas da API
-    ├─ POST /generate-image        → Geração direta de imagem
+    ├─ POST /api/generate        → Geração direta de imagem
     ├─ GET  /images/:filename      → Servir imagens geradas
     └─ Durante turnos de chat      → Execução da tool generate_image
          │
@@ -51,7 +51,7 @@ Quando a tool `generate_image` é invocada em um turno de chat de texto:
 
 Quando o usuário clica em "Generate Image" diretamente:
 
-1. **Rota** — `POST /api/generate-image` com prompt, qualidade, modelo e imagem de referência opcional.
+1. **Rota** — `POST /api/generate` com `chatId` e `prompt` obrigatórios; `model`, `imageQuality`, `referenceImageUrl`, `systemPrompt` e `promptSettings` opcionais (`GenerateImageBodySchema`).
 2. **Composição do prompt** — System prompt rules são aplicadas via `prompt-composer.ts`.
 3. **Chamada ao provedor** — `provider.generateImage()` lida com a API específica do provedor.
 4. **Persistência do turno** — `persistImageTurn()` cria mensagem do usuário + resposta da IA + artefatos de imagem em uma única transação.
@@ -59,13 +59,9 @@ Quando o usuário clica em "Generate Image" diretamente:
 
 ## Seleção De Modelo
 
-Modelos capazes de gerar imagens são identificados pelo catálogo `ModelInfo`:
+Escolha os modelos de imagem oferecidos pelo catálogo do conector configurado. Uma entrada não prova disponibilidade atual do fornecedor ou geração bem-sucedida: confirme o ciclo de vida e a compatibilidade do adapter. Este guia não recomenda um ID fixo.
 
-- **Gemini** — `gemini-2.0-flash-exp-image-generation`, `imagen-4.0-generate-001`
-- **OpenAI** — `dall-e-3`, `dall-e-3-hd`
-- **OpenAI-compatible** — modelos com flag `imageGeneration: true`
-
-O seletor de modelo de imagem (`feat/tools-image-model-selector`) usa um dropdown alimentado pelo catálogo que mostra apenas modelos capazes de gerar imagem em todos os provedores conectados.
+A classificação usa padrões de ID em [`isImageModelId`](../../../apps/shared/src/utils/model-detection.ts) (prefixos de famílias de imagem e padrões `-image`), não uma flag de capacidade `imageGeneration`. O seletor filtra pelo tipo de modelo resultante. Consulte o helper atual ao adicionar uma família.
 
 ## Storage De Imagens Geradas
 

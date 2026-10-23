@@ -9,7 +9,7 @@ Frontend (GalleryPage, useImageGeneration)
     │
     ▼
 API Routes
-    ├─ POST /generate-image        → Direct image generation
+    ├─ POST /api/generate        → Direct image generation
     ├─ GET  /images/:filename      → Serve generated images
     └─ During chat turns           → generate_image tool execution
          │
@@ -51,7 +51,7 @@ When the `generate_image` tool is invoked during a text chat turn:
 
 When the user clicks "Generate Image" directly:
 
-1. **Route** — `POST /api/generate-image` with prompt, quality, model, and optional reference image.
+1. **Route** — `POST /api/generate` with required `chatId` and `prompt`; optional `model`, `imageQuality`, `referenceImageUrl`, `systemPrompt` and `promptSettings` (`GenerateImageBodySchema`).
 2. **Prompt composition** — System prompt rules are applied via `prompt-composer.ts`.
 3. **Provider call** — `provider.generateImage()` handles the provider-specific API.
 4. **Turn persistence** — `persistImageTurn()` creates user message + AI response + image artifacts in one transaction.
@@ -59,13 +59,9 @@ When the user clicks "Generate Image" directly:
 
 ## Model Selection
 
-Image-capable models are identified via the `ModelInfo` catalog:
+Choose from the image models offered by the configured connector catalog. A catalog entry is not proof of current vendor availability or successful generation: confirm the provider lifecycle and adapter compatibility before relying on a model. No fixed model ID is recommended here.
 
-- **Gemini** — `gemini-2.0-flash-exp-image-generation`, `imagen-4.0-generate-001`
-- **OpenAI** — `dall-e-3`, `dall-e-3-hd`
-- **OpenAI-compatible** — Models with `imageGeneration: true` capability flag
-
-The image model selector (`feat/tools-image-model-selector`) uses a catalog-backed dropdown that shows only image-capable models from all connected providers.
+Image classification uses ID patterns in [`isImageModelId`](../../apps/shared/src/utils/model-detection.ts) (including image-family prefixes and `-image` patterns), not an `imageGeneration` capability flag. The catalog-backed selector filters by the resulting image model type. Consult the current helper when adding a model family.
 
 ## Generated Image Storage
 

@@ -25,12 +25,12 @@ Para automação fora do navegador, use chaves de API com escopo (`x-api-key`). 
 
 ### Endpoints De Auth
 
-| Método | Path                 | Finalidade         |
-| ------ | -------------------- | ------------------ |
-| `POST` | `/api/auth/sign-up`  | Criar conta        |
-| `POST` | `/api/auth/sign-in`  | Fazer login        |
-| `GET`  | `/api/auth/session`  | Obter sessão atual |
-| `POST` | `/api/auth/sign-out` | Fazer logout       |
+| Método | Path                      | Finalidade         |
+| ------ | ------------------------- | ------------------ |
+| `POST` | `/api/auth/sign-up/email` | Criar conta        |
+| `POST` | `/api/auth/sign-in/email` | Fazer login        |
+| `GET`  | `/api/auth/get-session`   | Obter sessão atual |
+| `POST` | `/api/auth/sign-out`      | Fazer logout       |
 
 ## Endpoints De Chat
 
@@ -38,16 +38,17 @@ Para automação fora do navegador, use chaves de API com escopo (`x-api-key`). 
 | -------- | ---------------- | ---- | ------------------------------- |
 | `GET`    | `/api/chats`     | Sim  | Listar chats do usuário         |
 | `POST`   | `/api/chats`     | Sim  | Criar novo chat                 |
-| `GET`    | `/api/chats/:id` | Sim  | Obter detalhes do chat          |
-| `PATCH`  | `/api/chats/:id` | Sim  | Atualizar chat (título, modelo) |
+| `PUT`    | `/api/chats/:id` | Sim  | Atualizar chat (título, modelo) |
 | `DELETE` | `/api/chats/:id` | Sim  | Deletar chat                    |
+
+Não há rota montada `GET /api/chats/:id`. Leia os metadados na lista autenticada de chats; atualize com `PUT /api/chats/:id` e `UpdateChatBodySchema`.
 
 ## Endpoints De Mensagem
 
 | Método | Path                          | Auth | Finalidade               |
 | ------ | ----------------------------- | ---- | ------------------------ |
 | `GET`  | `/api/chats/:chatId/messages` | Sim  | Listar mensagens do chat |
-| `POST` | `/api/chats/:chatId/messages` | Sim  | Criar uma mensagem       |
+| `POST` | `/api/messages`               | Sim  | Criar uma mensagem       |
 
 O `GET` pagina a transcrição (`MessagesPage` de `@mangostudio/shared/chat`). Query: `limit`
 (padrão 50), `cursor` e `order` — `asc` (o padrão) lê a partir da mensagem mais antiga, `desc`
@@ -62,6 +63,8 @@ lido como posição pela outra. Um timestamp numérico puro de uma build antiga 
 (depois de toda mensagem daquele timestamp em `asc`, antes de toda uma delas em `desc`); um
 cursor vazio ou malformado é rejeitado com 400, e um `order` desconhecido com 422, como
 qualquer query que o schema recusa.
+
+Crie mensagens com `POST /api/messages` e `CreateMessageBodySchema`: `id`, `chatId`, `role`, `text` e `timestamp` obrigatórios; consulte o schema compartilhado de chat para campos opcionais.
 
 ## Endpoints De Atividade
 
@@ -85,7 +88,9 @@ dele. A paginação continua avançando por elas.
 | ------ | --------------------- | ---- | ------------------------------- |
 | `POST` | `/api/respond`        | Sim  | Resposta de texto sem streaming |
 | `POST` | `/api/respond/stream` | Sim  | Resposta de texto via SSE       |
-| `POST` | `/api/generate-image` | Sim  | Geração direta de imagem        |
+| `POST` | `/api/generate`       | Sim  | Geração direta de imagem        |
+
+A geração direta usa `GenerateImageBodySchema`: `chatId` e `prompt` obrigatórios; `model`, `systemPrompt`, `promptSettings`, `referenceImageUrl` e `imageQuality` opcionais. Os schemas de geração ficam em `apps/shared/src/generation/schemas.ts`. Selecione `model` no catálogo configurado; o placeholder abaixo não recomenda um modelo de fornecedor.
 
 ### Body Do Request De Streaming
 
@@ -95,8 +100,8 @@ dele. A paginação continua avançando por elas.
   "prompt": "string",
   "thinkingEnabled": true,
   "reasoningEffort": "medium",
-  "toolIntent": false,
-  "modelId": "gemini-2.5-flash",
+  "toolIntent": "image_generation_requested",
+  "model": "<configured-model-id>",
   "attachmentIds": []
 }
 ```
@@ -151,23 +156,28 @@ SSE com `Content-Type: text/event-stream`. Veja [../architecture/streaming.md](.
 
 ### Prompt Rules
 
-| Método | Path                          | Auth | Finalidade                       |
-| ------ | ----------------------------- | ---- | -------------------------------- |
-| `GET`  | `/api/settings/rules`         | Sim  | Listar arquivos de regra         |
-| `GET`  | `/api/settings/rules/preview` | Sim  | Pré-visualizar conteúdo da regra |
+| Método | Path                                | Auth | Finalidade                       |
+| ------ | ----------------------------------- | ---- | -------------------------------- |
+| `GET`  | `/api/settings/rule-files/defaults` | Sim  | Listar arquivos de regra         |
+| `POST` | `/api/settings/rule-files/preview`  | Sim  | Pré-visualizar conteúdo da regra |
+
+O body de preview é `{ "path": "~/.mango/AGENTS.md" }` (`RuleFilePreviewBodySchema`); defaults retorna descritores, não o conteúdo dos arquivos.
 
 ## Endpoints De Machine
 
 A máquina do próprio hub: qual processo está servindo, se uma unidade de serviço
-o mantém vivo, o que o doctor diz e as duas ações que mudam qualquer um dos dois.
+o mantém vivo, resultados do doctor, configuração e ações de atualização.
 
-| Método | Path                   | Auth | Finalidade                                                  |
-| ------ | ---------------------- | ---- | ----------------------------------------------------------- |
-| `GET`  | `/api/machine/status`  | Sim  | Processo do hub, unidade, runtime irmão, slot host e ações  |
-| `GET`  | `/api/machine/doctor`  | Sim  | Linhas do doctor com contagem de avisos e falhas            |
-| `GET`  | `/api/machine/logs`    | Sim  | Fim do arquivo de log da instância em execução              |
-| `POST` | `/api/machine/restart` | Sim  | Reinicia o servidor do jeito que ele foi iniciado (`202`)   |
-| `POST` | `/api/machine/service` | Sim  | `{ "action": "install" \| "uninstall" }` da unidade (`202`) |
+| Método | Path                   | Auth | Finalidade                                                                  |
+| ------ | ---------------------- | ---- | --------------------------------------------------------------------------- |
+| `GET`  | `/api/machine/status`  | Sim  | Processo do hub, unidade, runtime irmão, slot host e ações                  |
+| `GET`  | `/api/machine/update`  | Sim  | Disponibilidade de atualização do hub                                       |
+| `GET`  | `/api/machine/doctor`  | Sim  | Linhas do doctor com contagem de avisos e falhas                            |
+| `GET`  | `/api/machine/logs`    | Sim  | Fim do arquivo de log da instância em execução                              |
+| `POST` | `/api/machine/restart` | Sim  | Reinicia o servidor do jeito que ele foi iniciado (`202`)                   |
+| `POST` | `/api/machine/service` | Sim  | `{ "action": "install" \| "uninstall" }` da unidade (`202`)                 |
+| `POST` | `/api/machine/config`  | Sim  | Habilita installs com `{ "environments": { "installsEnabled": true } }`     |
+| `POST` | `/api/machine/upgrade` | Sim  | Request: `channel`, `version` (stable), `sha` (canary), `restart` opcionais |
 
 `doctor` aceita `?sections=environments,library`; uma seção desconhecida é `422`
 `VALIDATION`. Suas linhas são limitadas à conta autenticada: servidores MCP,
@@ -179,7 +189,7 @@ sufixo limitado do arquivo, não o arquivo inteiro, então um log com linhas
 excepcionalmente longas pode responder com menos linhas do que as pedidas;
 `truncated` diz se o arquivo tem mais.
 
-Os dois POSTs e `GET /api/machine/logs` só respondem em loopback (o log é a saída bruta
+Os POSTs de ação e `GET /api/machine/logs` só respondem em loopback (o log é a saída bruta
 do processo, sem redação): de qualquer outro lugar são `403`
 `PERMISSION_DENIED` com `details.reasons`. "Loopback" é o peer do socket, a menos
 que `trustProxy` esteja ligado: atrás de um reverse proxy o peer é o proxy para
@@ -195,6 +205,8 @@ O corpo do `202` é `{ accepted, outcome, unit? }`. `outcome` é um código —
 unidade do supervisor quando o desfecho fala de uma. Sem prosa: o hub não conhece
 o idioma do navegador que pediu, então a página escreve cada código a partir dos
 dicionários de i18n.
+
+`POST /api/machine/config` retorna `MachineConfigWriteResponse` com HTTP 200. `POST /api/machine/upgrade` transmite progresso via SSE; usa `MachineUpgradeBodySchema` de `apps/shared/src/updates/schemas.ts`, enquanto config usa `MachineConfigWriteBodySchema` de `apps/shared/src/machine/schemas.ts`.
 
 ## Endpoints De Upload
 
@@ -237,7 +249,7 @@ o padrão, então um cliente que não envia nada, envia `*/*` ou
 [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457):
 
 ```http
-GET /api/chats/does-not-exist
+DELETE /api/chats/does-not-exist
 Accept: application/problem+json, application/json;q=0.9
 ```
 
