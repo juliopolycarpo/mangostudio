@@ -170,9 +170,12 @@ cases as well as the normal session cases. It asserts that the cases executed ma
 selected by `chunked()` and `supports_raw()`. TypeScript has no `supportsRaw` member: providing
 its optional `connectRaw` enables those cases directly.
 
-The in-process Rust fixture is in `crates/mango-protocol/tests/it/conformance.rs`; it has no raw-byte
-layer and uses `NoRawConnection`. The byte-transport fixtures are in
-`crates/mango-protocol/tests/it/transport_ndjson.rs`, `transport_ipc.rs` and `transport_ws.rs`:
+The in-process Rust fixture is in
+[`crates/mango-protocol/tests/it/conformance.rs`](../../crates/mango-protocol/tests/it/conformance.rs);
+it has no raw-byte layer and uses `NoRawConnection`. The byte-transport fixtures are in
+[`transport_ndjson.rs`](../../crates/mango-protocol/tests/it/transport_ndjson.rs),
+[`transport_ipc.rs`](../../crates/mango-protocol/tests/it/transport_ipc.rs) and
+[`transport_websocket.rs`](../../crates/mango-protocol/tests/it/transport_websocket.rs):
 the NDJSON port over a pipe pair, a real local socket, and a real WebSocket at two message ceilings.
 For a complete raw fixture, see
 [`NdjsonFixture`](../../crates/mango-protocol/tests/it/transport_ndjson.rs). Run it with:
@@ -181,11 +184,13 @@ For a complete raw fixture, see
 cargo test -p mango-protocol --locked --test it --features testing the_ndjson_port_behaves_like_a_mango_transport
 ```
 
-`tests/it/conformance_drift.rs` asserts the Rust case list matches this file's TypeScript `it(...)`
+[`tests/it/conformance_drift.rs`](../../crates/mango-protocol/tests/it/conformance_drift.rs)
+asserts the Rust case list matches this file's TypeScript `it(...)`
 names verbatim and in order, so a case added to one suite and not the other fails the build.
 
 The Rust launcher cannot run the suite either, for the same reason, and
-`tests/it/transport_spawn.rs` covers what a launcher alone can prove: the pipes carry a session, a
+[`tests/it/transport_spawn.rs`](../../crates/mango-protocol/tests/it/transport_spawn.rs)
+covers what a launcher alone can prove: the pipes carry a session, a
 conforming child leaves on the end of its stdin, and one that ignores that is escalated past it.
 
 ## The interop lane
