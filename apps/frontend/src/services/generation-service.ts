@@ -68,6 +68,7 @@ export async function dismissInterruptedTurn(chatId: string, messageId: string):
  * Calls POST /api/respond/stream and invokes onChunk for each SSE event.
  * Throws if the HTTP request fails or the response has no body; error events
  * carried inside the stream are delivered through onChunk like any other chunk.
+ * Exceptions from onChunk propagate to the caller after releasing the reader.
  *
  * @param request - Text generation request payload sent as the POST body.
  * @param onChunk - Called for every parsed SSE data event.
@@ -169,12 +170,14 @@ async function postStream(
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
+          let chunk: StreamChunk;
           try {
-            const chunk = JSON.parse(line.slice(6)) as StreamChunk;
-            onChunk(chunk);
+            chunk = JSON.parse(line.slice(6)) as StreamChunk;
           } catch {
             // Ignore malformed SSE lines
+            continue;
           }
+          onChunk(chunk);
         }
       }
     }

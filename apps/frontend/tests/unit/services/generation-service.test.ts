@@ -243,6 +243,23 @@ describe('respondTextStream', () => {
     expect(chunks).toEqual([{ type: 'text', text: 'ok', done: false }]);
   });
 
+  it('propagates a consumer failure and releases the stream reader', async () => {
+    const response = streamingResponse([
+      'data: {"type":"text","text":"first","done":false}\n',
+      'data: {"type":"done","done":true}\n',
+    ]);
+    fetchMock.mockResolvedValue(response);
+    const failure = new Error('Reducer failed');
+    const onChunk = jest.fn(() => {
+      throw failure;
+    });
+
+    await expect(respondTextStream(makeRequest(), onChunk)).rejects.toBe(failure);
+
+    expect(onChunk).toHaveBeenCalledTimes(1);
+    expect(response.body?.locked).toBe(false);
+  });
+
   it('throws the server-provided error message when the response is not ok', async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 })
@@ -282,6 +299,20 @@ describe('startExternalReviewStream', () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+  });
+
+  it('propagates a review consumer failure and releases the stream reader', async () => {
+    const response = streamingResponse(['data: {"type":"done","done":true}\n']);
+    fetchMock.mockResolvedValue(response);
+    const failure = new Error('Review reducer failed');
+
+    await expect(
+      startExternalReviewStream('chat-1', { target: { type: 'uncommittedChanges' } }, () => {
+        throw failure;
+      })
+    ).rejects.toBe(failure);
+
+    expect(response.body?.locked).toBe(false);
   });
 
   it('rejects after a terminal setup-error chunk so the review action can toast', async () => {
