@@ -1066,16 +1066,23 @@ unsafe fn reap_adopted_orphans(watchdog: libc::pid_t) {
     let Some(start) = (unsafe { monotonic_now() }) else {
         return;
     };
-    let deadline = start
+    let mut deadline = start;
+    deadline.tv_sec = deadline
         .tv_sec
         .saturating_add(TERMINAL_SESSION_CLEANUP_SECONDS.into());
     for _ in 0..ORPHAN_SWEEP_ROUNDS {
         let mut buffer = [0_u8; 4096];
-        let Some(length) = (unsafe { read_own_children(&mut buffer) }) else {
-            return;
-        };
         let mut adopted = [0 as libc::pid_t; 512];
-        let count = parse_child_pids(&buffer[..length], watchdog, &mut adopted);
+        let count = if let Some(length) = unsafe { read_own_children(&mut buffer) } {
+            parse_child_pids(&buffer[..length], watchdog, &mut adopted)
+        } else {
+            // CONFIG_CHECKPOINT_RESTORE can be disabled even on a current Linux kernel.
+            let Some(count) = (unsafe { find_own_children(watchdog, &mut adopted, &deadline) })
+            else {
+                return;
+            };
+            count
+        };
         if count == 0 {
             return;
         }
@@ -1091,11 +1098,89 @@ unsafe fn reap_adopted_orphans(watchdog: libc::pid_t) {
                 if waited != 0 && !(waited < 0 && unsafe { errno_raw() } == libc::EINTR) {
                     break;
                 }
-                if unsafe { monotonic_now() }.is_none_or(|now| now.tv_sec >= deadline) {
+                if unsafe { monotonic_now() }.is_none_or(|now| now.tv_sec >= deadline.tv_sec) {
                     return;
                 }
                 unsafe { pause_between_group_probes() };
             }
+        }
+    }
+}
+
+/// Finds unreaped children when the kernel does not expose per-task `children` files.
+///
+/// Directory names are candidates only: `waitid(P_PID, WNOWAIT)` must establish this
+/// guardian's ownership before a PID enters the output. The caller repeats that check
+/// immediately before signaling; no unrelated process or watchdog gains signal authority.
+/// Uses the same allocation-free procfs traversal as terminal session cleanup.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn find_own_children(
+    watchdog: libc::pid_t,
+    out: &mut [libc::pid_t],
+    deadline: &libc::timespec,
+) -> Option<usize> {
+    let directory = unsafe {
+        libc::open(
+            c"/proc".as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if directory < 0 {
+        return None;
+    }
+    let mut count = 0;
+    let mut buffer = [0_u8; 8192];
+    loop {
+        if unsafe { monotonic_now() }.is_none_or(|now| now.tv_sec >= deadline.tv_sec) {
+            unsafe { libc::close(directory) };
+            return None;
+        }
+        let size = unsafe {
+            libc::syscall(
+                libc::SYS_getdents64,
+                directory,
+                buffer.as_mut_ptr(),
+                buffer.len(),
+            )
+        };
+        if size == 0 || count == out.len() {
+            unsafe { libc::close(directory) };
+            return Some(count);
+        }
+        if size < 0 {
+            if unsafe { errno_raw() } == libc::EINTR {
+                continue;
+            }
+            unsafe { libc::close(directory) };
+            return None;
+        }
+        let mut offset = 0;
+        while offset < size as usize {
+            if offset + 19 > size as usize {
+                unsafe { libc::close(directory) };
+                return None;
+            }
+            let length = usize::from(u16::from_ne_bytes([
+                buffer[offset + 16],
+                buffer[offset + 17],
+            ]));
+            if length < 20 || offset + length > size as usize {
+                unsafe { libc::close(directory) };
+                return None;
+            }
+            if let Some(pid) = parse_proc_pid(&buffer[offset + 19..offset + length])
+                && pid > 1
+                && pid != watchdog
+                && unsafe { is_own_child(pid) }
+            {
+                out[count] = pid;
+                count += 1;
+                if count == out.len() {
+                    unsafe { libc::close(directory) };
+                    return Some(count);
+                }
+            }
+            offset += length;
         }
     }
 }
@@ -2217,6 +2302,61 @@ mod tests {
         );
         assert_eq!(super::task_children_path(0, &mut out), None);
         assert_eq!(super::task_children_path(4096, &mut [0_u8; 8]), None);
+    }
+
+    /// The fallback is exercised on every Linux runner, including kernels with `children`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn procfs_fallback_lists_only_owned_children_and_excludes_the_watchdog() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("child starts");
+        let pid = child.id() as libc::pid_t;
+        let mut deadline = unsafe { super::monotonic_now() }.expect("monotonic clock");
+        deadline.tv_sec += 5;
+        let mut children = [0; 512];
+        let found = unsafe { super::find_own_children(0, &mut children, &deadline) };
+        let owned = found.map(|count| children[..count].to_vec());
+        let mut excluded = [0; 512];
+        let hidden = unsafe { super::find_own_children(pid, &mut excluded, &deadline) };
+        let only_owned = owned
+            .as_ref()
+            .is_some_and(|pids| pids.iter().all(|pid| unsafe { super::is_own_child(*pid) }));
+        let _ = child.kill();
+        child.wait().expect("child reaped");
+        let owned = owned.expect("procfs traversal succeeds");
+        assert!(
+            owned.contains(&pid),
+            "expected owned child {pid} | received {owned:?}"
+        );
+        assert!(
+            only_owned,
+            "expected every candidate to be this process's child"
+        );
+        let hidden = hidden.expect("filtered traversal succeeds");
+        assert!(
+            !excluded[..hidden].contains(&pid),
+            "expected watchdog {pid} to stay excluded"
+        );
+        assert!(
+            !owned.contains(&unsafe { libc::getpid() }),
+            "the guardian cannot list itself"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn procfs_fallback_refuses_an_expired_cleanup_budget() {
+        let mut out = [0; 8];
+        let expired = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        assert_eq!(
+            unsafe { super::find_own_children(0, &mut out, &expired) },
+            None
+        );
     }
 
     /// `<defunct>` children of `parent`, read from `/proc`.
