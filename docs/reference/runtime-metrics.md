@@ -280,3 +280,62 @@ frontend values, not aggregate workspace coverage.
 - Code volume: the `git diff` above against the current `origin/main`.
 - Hub startup: `bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 15`
   (add `--warm` for a restart) against binaries built with and without the flags.
+
+## Requalifying the current baseline
+
+The figures above describe their recorded revisions. They do not qualify a later dependency graph,
+compiler or artifact. Keep the shipping profile unchanged when measuring a new baseline; there is no
+optimization candidate in the following schedule.
+
+```bash
+# Read-only schedule: no compilation or startup trial.
+bun scripts/bench/rust-costs.ts
+# Run only on an otherwise idle host, from a clean committed checkout.
+bun scripts/bench/rust-costs.ts --execute --out /tmp/rust-cost-receipts \
+  --attribution --startup-hub /path/to/current/compiled/mangostudio
+```
+
+The fixed build workload is three empty-target releases for each of the runtime and launcher,
+followed by ten runtime no-op builds and ten version-restamp builds. No-op and restamp are separate
+workloads, not an optimization comparison. Builds use eight jobs, the locked default-feature graph
+and the explicit `x86_64-unknown-linux-gnu` target. Targets stay inside this worktree on ext4. Registry,
+toolchain and OS page caches remain populated. A fresh receipt directory prevents overwriting failed
+attempts. Disk allocation is checked between attempts against a 40 GiB target/artifact budget, with
+a three-hour batch deadline; keep additional disk headroom for an individual build.
+
+Receipts include the source head and Rust/Cargo input seal, toolchain, all-target dependency tree,
+stable default/all-feature metadata and the excluded fuzz graph. Every accepted build must exit
+successfully with a settled process tree and unchanged inputs. No-op builds require no new compiler
+artifact and an unchanged executable hash. Restamps require one rebuilt compiler unit, the expected
+version and unchanged library hashes. The downloader launcher is never executed for identity: its version comes from the sealed Cargo package metadata, so inspection cannot install a hub or read the user’s runtime state. All attempts and raw logs remain available if a later attempt
+fails. GNU-time elapsed seconds (10 ms print resolution), final user/system CPU and maximum individual-process RSS are separate from the
+sampled process-tree RSS/CPU observations.
+
+`--attribution` builds a separate unstripped host artifact for `cargo bloat`. Symbol attribution is
+qualified only when its `.text` SHA-256 equals the measured stripped artifact's `.text` SHA-256. A
+mismatch stays explicitly unqualified. The host GNU baseline does not attribute a different Zig-built
+distribution binary, even if both came from the same source. Artifact receipts retain file bytes,
+section bytes, ELF metadata and both file/code hashes.
+
+With `--startup-hub`, the driver also runs the existing protocol and HTTP startup scripts under its
+process supervisor: two labeled warmups and twenty measured attempts for runtime hello plus first
+health response, hub with a fresh database, and hub with a retained migrated database. The hub binary
+must have its own current-source build receipt. Standalone commands are also available:
+
+```bash
+bun scripts/bench/runtime-handshake.ts /path/to/runtime --runs 20 --warmups 2 \
+  --resources --json --output runtime-readiness.json
+bun scripts/bench/startup.ts /path/to/hub --runs 20 --warmups 2 \
+  --resources --json --output hub-fresh-readiness.json
+bun scripts/bench/startup.ts /path/to/hub --runs 20 --warmups 2 --warm \
+  --resources --json --output hub-migrated-readiness.json
+```
+
+Startup scripts retain warmups, successes and failures and stop the batch on failure. With `--output`, they sync a start/finish JSONL journal (override with `--journal`) and atomically checkpoint completed attempts, so an outer timeout preserves earlier samples and identifies the interrupted attempt. The driver always enables these paths. Without an output/journal path, standalone JSON appears only on normal completion. They isolate
+`HOME`, `USERPROFILE` and application state; HTTP readiness also requires this child's persisted pid,
+port and fresh start time. `--resources` uses Linux procfs, records the sampling interval, CPU ticks,
+page units and cleanup census, and leaves missing observations unavailable. Resource frames are bounded by the actual readiness timestamp, not the later census completion; a sample with no pre-readiness observations stays unqualified with null metrics. RSS is the largest
+contemporaneous sum of observed processes, counting shared pages once per process. CPU ticks are
+sampled: zero observed ticks does not mean zero actual CPU cost. The recorded checkout is the harness
+checkout; the executable hash must be linked to its separate build receipt. WSL measurements qualify
+that host only; native Windows and macOS remain unperformed until separately measured.

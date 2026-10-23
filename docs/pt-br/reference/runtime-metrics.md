@@ -161,3 +161,57 @@ continuam apontando para as linhas do código original.
 - Volume de código: o `git diff` acima contra o `origin/main` atual.
 - Inicialização do hub: `bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 15`
   (com `--warm` para um reinício) contra binários com e sem as flags.
+
+## Requalificar a linha de base atual
+
+Os números acima pertencem às revisões registradas. Não qualificam uma nova árvore de dependências,
+compilador ou artefato. O roteiro atual mantém o perfil de distribuição, sem candidato de otimização:
+
+```bash
+# Só imprime o roteiro; não compila nem inicia uma medição.
+bun scripts/bench/rust-costs.ts
+# Executar em um host ocioso e checkout limpo, já commitado.
+bun scripts/bench/rust-costs.ts --execute --out /tmp/rust-cost-receipts \
+  --attribution --startup-hub /caminho/do/hub/compilado
+```
+
+São três builds release com target vazio para runtime e launcher, dez builds sem alterações e dez
+com nova versão do runtime. Os dois últimos são cargas diferentes, não uma comparação de otimização.
+O roteiro usa oito jobs, dependências travadas, features padrão e target explícito
+`x86_64-unknown-linux-gnu`. Targets privados ficam no worktree, em ext4. Os caches de registro,
+toolchain e páginas do SO continuam aquecidos. A alocação em disco é verificada entre tentativas com
+orçamento de 40 GiB para targets e artefatos, e limite de três horas para o lote. Reserve espaço extra
+para um build individual. O diretório de recibos deve ser novo; tentativas anteriores não são apagadas.
+
+Os recibos guardam revisão, selo das entradas Rust/Cargo, toolchain, árvore de todos os alvos,
+metadados estáveis com features padrão/completas e árvore fuzz separada. Uma tentativa aceita precisa
+terminar com sucesso, entradas inalteradas e árvore de processos vazia. Builds sem alteração não podem
+recompilar unidades nem mudar o hash do binário. Uma nova versão deve recompilar uma unidade, relatar
+a versão esperada e preservar os hashes das bibliotecas. O launcher downloader nunca é executado para identificar sua versão: ela vem dos metadados Cargo selados, sem instalar um hub ou acessar o estado real do usuário. Tempo decorrido (resolução de 10 ms na saída), CPU final e RSS máximo individual do GNU time
+ficam separados das amostras de RSS/CPU da árvore de processos.
+
+`--attribution` produz outro artefato, com símbolos, para `cargo bloat`. A atribuição só é qualificada
+quando os hashes SHA-256 de `.text` coincidem; divergências permanecem explícitas. Um binário GNU do
+host não atribui custos a outro artefato de distribuição feito com Zig. Os recibos preservam tamanho
+do arquivo e das seções, metadados ELF e hashes do arquivo e do código.
+
+`--startup-hub` executa os scripts existentes sob supervisão: dois aquecimentos identificados e vinte
+amostras por modo (hello e primeira resposta health do runtime, hub com banco novo e hub com banco já
+migrado). O hub precisa de seu próprio recibo de build da revisão atual. Também é possível executar:
+
+```bash
+bun scripts/bench/runtime-handshake.ts /caminho/runtime --runs 20 --warmups 2 \
+  --resources --json --output runtime-readiness.json
+bun scripts/bench/startup.ts /caminho/hub --runs 20 --warmups 2 \
+  --resources --json --output hub-fresh-readiness.json
+bun scripts/bench/startup.ts /caminho/hub --runs 20 --warmups 2 --warm \
+  --resources --json --output hub-migrated-readiness.json
+```
+
+Falhas e aquecimentos ficam no recibo e uma falha interrompe o lote. Com `--output`, cada início e término é sincronizado em JSONL (`--journal` altera o caminho), e as amostras concluídas são salvas por troca atômica. Um timeout externo preserva as anteriores e identifica a tentativa interrompida. O driver sempre habilita isso; sem caminho de saída ou journal, o JSON standalone só aparece no término normal. `HOME`, `USERPROFILE` e estado da
+aplicação são isolados. A prontidão HTTP exige pid, porta e início recente do próprio filho.
+`--resources` usa procfs Linux e registra intervalo, unidades, ausências e censo de limpeza. O limite é o instante real de prontidão, não o fim do censo posterior. Sem observações anteriores ao limite, as métricas permanecem nulas e a amostra não é qualificada. RSS é a
+maior soma simultânea observada; páginas compartilhadas contam em cada processo. Zero ticks de CPU
+observados não significa custo real zero. A revisão registrada pertence ao checkout do harness; o
+hash do executável precisa ser ligado ao seu recibo de build. WSL não qualifica Windows ou macOS
+nativos, que continuam não medidos.
