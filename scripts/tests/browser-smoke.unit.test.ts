@@ -71,13 +71,19 @@ describe('browser smoke setup', () => {
       // Each runner executes one installation branch. Keep the old ten-minute
       // maximum for the smoke command itself, independent of installation time.
       expect(install.if).toBe(installCondition);
-      // Project the two measured phases, leaving job headroom for other setup
-      // and failure uploads. A cold manual Rust build is outside this model.
+      // Project the two measured phases, reserving at least five minutes for
+      // other setup and failure uploads. A cold manual Rust build is outside this model.
       assertSmokeDeadlineBudget(`browser/${cachePath}`, { ...job, steps: [install, smoke] });
       const smokeDeadline = smokeStepTimeout(smoke, {});
-      expect(smokeDeadline).toBeLessThanOrEqual(10);
+      expect(smokeDeadline, `browser/${cachePath} must retain the ten-minute smoke allowance`).toBe(
+        10
+      );
       const installDeadline = smokeStepTimeout(install, {});
       expect(installDeadline).toBeLessThanOrEqual(10);
+      expect(
+        job['timeout-minutes'],
+        `browser/${cachePath} must reserve at least five minutes beyond installation and smoke deadlines`
+      ).toBeGreaterThanOrEqual((installDeadline ?? 0) + (smokeDeadline ?? 0) + 5);
     }
   );
 
