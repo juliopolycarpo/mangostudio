@@ -37,7 +37,9 @@ jobs:
     name: Chromium smoke suite
     # ubuntu-24.04: Playwright 1.60 cannot install Chromium system deps on 26.04 yet.
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Bound installation separately from the existing ten-minute smoke allowance;
+    # leave job headroom for the remaining setup and failure artifacts.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,10 +75,12 @@ jobs:
 
       - name: Install Playwright Chromium
         if: steps.pw-cache.outputs.cache-restored != 'true'
+        timeout-minutes: 10
         run: bun run test:e2e:setup
 
       - name: Install OS deps for Chromium (cache hit path)
         if: steps.pw-cache.outputs.cache-restored == 'true'
+        timeout-minutes: 10
         run: bunx playwright install-deps chromium
 
       - name: Save Playwright browser cache
@@ -99,6 +103,7 @@ jobs:
           artifact: ${{ inputs.runtime_artifact || '' }}
 
       - name: Run browser smoke suite
+        timeout-minutes: 10
         run: |
           set -o pipefail
           bun run test --e2e 2>&1 | tee smoke-run.log
