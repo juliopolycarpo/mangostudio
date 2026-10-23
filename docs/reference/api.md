@@ -28,12 +28,12 @@ examples.
 
 ### Auth Endpoints
 
-| Method | Path                 | Purpose             |
-| ------ | -------------------- | ------------------- |
-| `POST` | `/api/auth/sign-up`  | Create account      |
-| `POST` | `/api/auth/sign-in`  | Log in              |
-| `GET`  | `/api/auth/session`  | Get current session |
-| `POST` | `/api/auth/sign-out` | Log out             |
+| Method | Path                      | Purpose             |
+| ------ | ------------------------- | ------------------- |
+| `POST` | `/api/auth/sign-up/email` | Create account      |
+| `POST` | `/api/auth/sign-in/email` | Log in              |
+| `GET`  | `/api/auth/get-session`   | Get current session |
+| `POST` | `/api/auth/sign-out`      | Log out             |
 
 ## Chat Endpoints
 
@@ -41,8 +41,7 @@ examples.
 | -------- | ---------------------- | ---- | -------------------------- |
 | `GET`    | `/api/chats`           | Yes  | List user's chats          |
 | `POST`   | `/api/chats`           | Yes  | Create new chat            |
-| `GET`    | `/api/chats/:id`       | Yes  | Get chat details           |
-| `PATCH`  | `/api/chats/:id`       | Yes  | Update chat (title, model) |
+| `PUT`    | `/api/chats/:id`       | Yes  | Update chat (title, model) |
 | `DELETE` | `/api/chats/:id`       | Yes  | Delete chat                |
 | `GET`    | `/api/chats/:id/todos` | Yes  | Current todo list state    |
 
@@ -50,12 +49,14 @@ examples.
 `@mangostudio/shared/todos`); `updatedAt` is `null` when the chat has no todo list yet.
 The list is kept live during streaming by the `todo_update` SSE chunk.
 
+There is no mounted `GET /api/chats/:id` route. Read chat metadata from the authenticated chat list; use `PUT /api/chats/:id` with `UpdateChatBodySchema` to update it.
+
 ## Message Endpoints
 
 | Method | Path                          | Auth | Purpose                 |
 | ------ | ----------------------------- | ---- | ----------------------- |
 | `GET`  | `/api/chats/:chatId/messages` | Yes  | List messages in a chat |
-| `POST` | `/api/chats/:chatId/messages` | Yes  | Create a message        |
+| `POST` | `/api/messages`               | Yes  | Create a message        |
 
 `GET` pages the transcript (`MessagesPage` from `@mangostudio/shared/chat`). Query:
 `limit` (default 50), `cursor`, and `order` — `asc` (the default) reads from the oldest
@@ -70,6 +71,8 @@ either order is read as a position by the other. A bare numeric timestamp from a
 build is still accepted (after every message of that timestamp for `asc`, before every one
 of it for `desc`); an empty or malformed cursor is rejected with a 400, and an unknown `order`
 with a 422 like any query the schema refuses.
+
+Create a message with `POST /api/messages` and `CreateMessageBodySchema`: required `id`, `chatId`, `role`, `text`, and `timestamp`; use the shared chat schema for optional fields.
 
 ## Activity Endpoints
 
@@ -93,7 +96,9 @@ them.
 | ------ | --------------------- | ---- | --------------------------- |
 | `POST` | `/api/respond`        | Yes  | Non-streaming text response |
 | `POST` | `/api/respond/stream` | Yes  | SSE streaming text response |
-| `POST` | `/api/generate-image` | Yes  | Direct image generation     |
+| `POST` | `/api/generate`       | Yes  | Direct image generation     |
+
+Direct generation uses `GenerateImageBodySchema`: required `chatId` and `prompt`; optional `model`, `systemPrompt`, `promptSettings`, `referenceImageUrl` and `imageQuality`. Both generation request schemas live in `apps/shared/src/generation/schemas.ts`. Select `model` from the configured catalog; the placeholder below is not a vendor recommendation.
 
 ### Streaming Request Body
 
@@ -103,8 +108,8 @@ them.
   "prompt": "string",
   "thinkingEnabled": true,
   "reasoningEffort": "medium",
-  "toolIntent": false,
-  "modelId": "gemini-2.5-flash",
+  "toolIntent": "image_generation_requested",
+  "model": "<configured-model-id>",
   "attachmentIds": []
 }
 ```
@@ -159,10 +164,12 @@ SSE with `Content-Type: text/event-stream`. See [../architecture/streaming.md](.
 
 ### Prompt Rules
 
-| Method | Path                          | Auth | Purpose                   |
-| ------ | ----------------------------- | ---- | ------------------------- |
-| `GET`  | `/api/settings/rules`         | Yes  | List rule files           |
-| `GET`  | `/api/settings/rules/preview` | Yes  | Preview rule file content |
+| Method | Path                                | Auth | Purpose                   |
+| ------ | ----------------------------------- | ---- | ------------------------- |
+| `GET`  | `/api/settings/rule-files/defaults` | Yes  | List rule files           |
+| `POST` | `/api/settings/rule-files/preview`  | Yes  | Preview rule file content |
+
+The preview body is `{ "path": "~/.mango/AGENTS.md" }` (`RuleFilePreviewBodySchema`); defaults return rule-file descriptors, not file contents.
 
 ## Library Endpoints
 
@@ -224,15 +231,18 @@ purpose" are different answers.
 ## Machine Endpoints
 
 The hub's own host: what process is serving, whether a service unit keeps it
-alive, what doctor says, and the two actions that change either.
+alive, doctor results, configuration, and update actions.
 
-| Method | Path                   | Auth | Purpose                                                        |
-| ------ | ---------------------- | ---- | -------------------------------------------------------------- |
-| `GET`  | `/api/machine/status`  | Yes  | Hub process, service unit, sibling runtime, host slot, actions |
-| `GET`  | `/api/machine/doctor`  | Yes  | Doctor rows with warning and failure counts                    |
-| `GET`  | `/api/machine/logs`    | Yes  | Tail of the log file the running instance writes               |
-| `POST` | `/api/machine/restart` | Yes  | Restart the server the way it was started (`202`)              |
-| `POST` | `/api/machine/service` | Yes  | `{ "action": "install" \| "uninstall" }` the service (`202`)   |
+| Method | Path                   | Auth | Purpose                                                                            |
+| ------ | ---------------------- | ---- | ---------------------------------------------------------------------------------- |
+| `GET`  | `/api/machine/status`  | Yes  | Hub process, service unit, sibling runtime, host slot, actions                     |
+| `GET`  | `/api/machine/update`  | Yes  | Hub update availability                                                            |
+| `GET`  | `/api/machine/doctor`  | Yes  | Doctor rows with warning and failure counts                                        |
+| `GET`  | `/api/machine/logs`    | Yes  | Tail of the log file the running instance writes                                   |
+| `POST` | `/api/machine/restart` | Yes  | Restart the server the way it was started (`202`)                                  |
+| `POST` | `/api/machine/service` | Yes  | `{ "action": "install" \| "uninstall" }` the service (`202`)                       |
+| `POST` | `/api/machine/config`  | Yes  | Enable environment installs with `{ "environments": { "installsEnabled": true } }` |
+| `POST` | `/api/machine/upgrade` | Yes  | Upgrade request: optional `channel`, `version` (stable), `sha` (canary), `restart` |
 
 `doctor` takes `?sections=environments,library` — core checks always run, and
 these two spawn probes, so a caller opts into them. An unknown section is `422`
@@ -244,7 +254,7 @@ reads a bounded suffix of the file rather than the whole of it, so a log whose
 lines are unusually long can answer with fewer lines than were asked for;
 `truncated` says whether the file holds more.
 
-The two POSTs and `GET /api/machine/logs` are loopback-only — the log is the process's
+Machine action POSTs and `GET /api/machine/logs` are loopback-only — the log is the process's
 raw output, unredacted. A request from anywhere else is `403`
 `PERMISSION_DENIED` with `details.reasons` naming which check failed — the same
 guard shape the environment installs use. "Loopback" means the socket peer,
@@ -255,7 +265,7 @@ this hub is running is `409` `UNSUPPORTED` with `details.reason` and
 `details.command`: a foreground server, a Windows task asked to restart itself, a
 unit that is already installed or not installed at all, a platform with no
 user-level supervisor, a supervisor that could not be read, or an auth secret that
-lives only in this process's environment where a unit could not find it. Both
+lives only in this process's environment where a unit could not find it. Restart and service actions
 answer `202` on success; when the work would stop the process serving the request
 it runs after the response has left. `details.command` is the CLI line to run
 instead, which is what the "This machine" page shows when it is refused.
@@ -266,6 +276,8 @@ The `202` body is `{ accepted, outcome, unit? }`. `outcome` is a code —
 the supervisor unit when the outcome is about one. No prose: the hub does not
 know the locale of the browser that asked, so the page words each code from the
 i18n dictionaries.
+
+`POST /api/machine/config` returns `MachineConfigWriteResponse` with HTTP 200. `POST /api/machine/upgrade` streams progress over SSE; it uses `MachineUpgradeBodySchema` from `apps/shared/src/updates/schemas.ts`, while configuration uses `MachineConfigWriteBodySchema` from `apps/shared/src/machine/schemas.ts`.
 
 ## Upload Endpoints
 
@@ -308,7 +320,7 @@ failure as an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem
 document instead:
 
 ```http
-GET /api/chats/does-not-exist
+DELETE /api/chats/does-not-exist
 Accept: application/problem+json, application/json;q=0.9
 ```
 
