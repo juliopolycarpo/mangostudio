@@ -1,4 +1,4 @@
-import type { Model } from '@google/genai';
+import type { Model } from '@google/genai/web';
 import { MOCK_MODELS } from '@mangostudio/shared/test-utils';
 
 /**

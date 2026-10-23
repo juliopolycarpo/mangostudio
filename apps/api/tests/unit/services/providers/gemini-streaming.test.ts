@@ -43,7 +43,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('yields text chunks and a final done:true sentinel', async () => {
-    await mock.module('@google/genai', () => ({
+    await mock.module('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () => Promise.resolve(mockStream()),
@@ -79,7 +79,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('throws when prompt is blocked', async () => {
-    await mock.module('@google/genai', () => ({
+    await mock.module('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
@@ -135,7 +135,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('emits thinking chunks when thinkingEnabled is true', async () => {
-    await mock.module('@google/genai', () => ({
+    await mock.module('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
@@ -186,7 +186,7 @@ describe('GeminiProvider.generateTextStream', () => {
   it('does not add thinkingConfig when thinkingEnabled is false', async () => {
     let capturedConfig: Record<string, unknown> | undefined;
 
-    await mock.module('@google/genai', () => ({
+    await mock.module('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: (opts: { config?: Record<string, unknown> }) => {
@@ -227,7 +227,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('falls back to chunk.text when candidate has no parts', async () => {
-    await mock.module('@google/genai', () => ({
+    await mock.module('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
@@ -271,7 +271,7 @@ describe('GeminiProvider generateTextStream delegation', () => {
   });
 
   it('generateTextStream returns an AsyncIterable', async () => {
-    await mock.module('@google/genai', () => ({
+    await mock.module('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () => Promise.resolve(mockStream()),

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { GoogleGenAI } from '@google/genai/web';
 import {
   getProviderObservabilityMetrics,
   resetProviderObservability,
@@ -23,6 +24,7 @@ describe('createGeminiClient', () => {
     const clientA = createGeminiClient('gemini-cache-key');
     const clientB = createGeminiClient('gemini-cache-key');
 
+    expect(clientA).toBeInstanceOf(GoogleGenAI);
     expect(clientA).toBe(clientB);
     expect(
       getProviderObservabilityMetrics().providers[0]?.caches.find(
@@ -36,5 +38,11 @@ describe('createGeminiClient', () => {
     const clientB = createGeminiClient('gemini-cache-key-b');
 
     expect(clientA).not.toBe(clientB);
+  });
+
+  it('creates a fresh client after resetting the cache', () => {
+    const previous = createGeminiClient('gemini-reset-key');
+    resetGeminiClientCache();
+    expect(createGeminiClient('gemini-reset-key')).not.toBe(previous);
   });
 });
