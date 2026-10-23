@@ -36,6 +36,6 @@
     "./node_modules/@dprint/markdown/plugin.wasm",
     "./node_modules/@dprint/toml/plugin.wasm",
     "./node_modules/@dprint/dockerfile/plugin.wasm",
-    "https://plugins.dprint.dev/g-plane/pretty_yaml-v0.6.0.wasm"
+    "https://plugins.dprint.dev/g-plane/pretty_yaml-v0.6.0.wasm@40a2fdda7040317eb1b23520f3a00769a5571eedb049c4ca9175c1b9eeba01ae"
   ]
 }
