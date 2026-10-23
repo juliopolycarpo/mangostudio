@@ -78,6 +78,3 @@ export function AnimatePresence({ children }: { children?: ReactNode }) {
 export function useReducedMotion(): boolean {
   return true;
 }
-
-// `motion/react-m` exposes individual tags rather than the full proxy.
-export const { div, section } = motion;

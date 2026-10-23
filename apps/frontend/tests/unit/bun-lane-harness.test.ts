@@ -19,6 +19,7 @@ import { describe, expect, it } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { authClient, setTestSession } from '../support/setup/auth-client-stub';
+import * as smallMotionStub from '../support/setup/motion-react-m-stub';
 
 const WORKSPACE_ROOT = resolve(import.meta.dir, '../..');
 
@@ -42,6 +43,13 @@ describe('bun lane resolver aliases', () => {
       'motion',
       'useReducedMotion',
     ]);
+  });
+
+  it('resolves motion/react-m to the same cached DOM component fakes', async () => {
+    const small = (await import('motion/react-m')) as Record<string, unknown>;
+    expect(Object.keys(small).sort()).toEqual(['div', 'section']);
+    expect(small.div).toBe(smallMotionStub.div);
+    expect(small.section).toBe(smallMotionStub.section);
   });
 
   it('resolves @/lib/auth-client to the stub, which reports signed out by default', async () => {
