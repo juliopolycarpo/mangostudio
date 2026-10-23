@@ -14,16 +14,19 @@ Camada de aplicação (tool-settings-service.ts)
                     │
                 DB: user_tool_settings
                     │
+Inicialização (app.ts → registerApplicationServices())
+    │── chama ──→ registerTools() (register-tools.ts)
+    │── chama ──→ register() de cada builtin → Registry (registry.ts)
+    │
 Camada de tools (types.ts + registry.ts)
-    │── registra ──→ Built-ins (generate-image.ts, get-current-datetime.ts)
     │
 Camada do provedor (tool-mapper.ts) ──→ formatos wire específicos
 ```
 
 ## Ciclo De Vida Das Tools
 
-1. **Registro** — Tools se auto-registram em tempo de import via `registerTool()`. Tools built-in fazem isso no load do módulo.
-2. **Resolução de settings** — No momento do chat, `getEnabledToolRuntime()` carrega tool settings do usuário no DB, faz merge com defaults e produz `ToolDefinition[]` habilitadas.
+1. **Registro** — `app.ts` chama `registerApplicationServices()`, que chama `registerTools()`. Esse registrador invoca explicitamente a função `register()` exportada por cada módulo builtin, que chama `registerTool()`. Importar um builtin sozinho não o registra.
+2. **Resolução de capacidades** — No momento do chat, `resolveAgentRuntime()` carrega os tool settings salvos e chama `resolveToolCandidates()` com as tools registradas, perfil do agente e manifesto do runtime selecionado. Settings efetivos combinam defaults com valores salvos, e `effectiveToolDefinitions()` retorna as `ToolDefinition[]` expostas.
 3. **Mapeamento do formato wire** — `tool-mapper.ts` converte `ToolDefinition[]` para o formato específico do provedor, como function tools da OpenAI ou function declarations do Gemini.
 4. **Modelo chama a tool** — O provedor faz streaming de eventos `tool_call_started`, `tool_call_arguments_delta` e `tool_call_completed`.
 5. **Execução** — `executeTool()` faz lookup da tool, verifica se ela está habilitada para o usuário, aplica merge de settings e executa o executor.
@@ -83,14 +86,42 @@ interface ToolSettingsMetadata {
 
 ## Tools Built-in
 
-Chats podem vincular um diretório de trabalho no servidor para turnos em **modo
-agente**. Nesse modo, ferramentas de filesystem usam o diretório vinculado
-quando `path` / `cwd` são omitidos, resolvem argumentos relativos a partir dele,
-e o system prompt do agente anuncia esse caminho. O **modo chat** não injeta o diretório vinculado: `bash`, `glob` e
-shells relacionados voltam ao diretório de trabalho do processo da API quando
-`cwd` é omitido, e ferramentas como `list_directory` e `grep` ainda exigem um
-`path` explícito. Com restrição habilitada no modo agente, a política de
-contenção de caminhos se aplica às tools roteadas.
+As seções abaixo são exemplos selecionados, não uma referência exaustiva de schemas. O
+[registrador da inicialização](../../../apps/api/src/services/tools/register-tools.ts) define os
+registros incluídos; cada [módulo builtin](../../../apps/api/src/services/tools/builtin/) define
+seu schema, settings e executor. Uma função de registro pode registrar várias tools, como em
+`todo.ts`.
+
+| Família                       | Nomes representativos de tools                                                                       | Finalidade                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Imagens e horário             | `generate_image`, `get_current_datetime`                                                             | Gerar imagens ou informar o horário atual                               |
+| Leitura e busca no filesystem | `read_file`, `list_directory`, `glob`, `grep`                                                        | Inspecionar arquivos e buscar caminhos ou texto                         |
+| Alterações no filesystem      | `write_file`, `edit_file`, `replace_range`, `apply_patch`, `create_file`, `delete_file`, `move_file` | Criar, alterar, remover ou mover arquivos                               |
+| Shells                        | `bash`, `zsh`, `powershell`                                                                          | Executar comandos em um shell disponível no runtime                     |
+| Delegação e skills            | `delegate_to_agent`, `skill`                                                                         | Delegar trabalho delimitado ou carregar instruções de skills instaladas |
+| Interação e tarefas           | `ask_user_question`, `todo_write`, `todo_read`                                                       | Apresentar perguntas ou manter a lista de tarefas do chat               |
+
+O registro torna a tool descobrível no registry e nos tool settings; ele não garante que todos
+os turnos do modelo possam chamá-la. Allowlists do agente e settings do usuário filtram a
+exposição. Tools que usam o runtime também declaram `requiredCapabilities` (como `fsRead`, `fsWrite`
+ou `shell`), e o manifesto de capacidades do ambiente selecionado pode retê-las quando essa
+máquina nega consentimento. As definições de shell também exigem o interpretador correspondente
+no manifesto; shells vêm desabilitados nos settings do usuário. A delegação tem sua própria
+verificação de elegibilidade por turno. Consulte a
+[resolução de capacidades](../../../apps/api/src/modules/generation/application/resolve-capability-candidates.ts)
+e a [disponibilidade de delegação](../../../apps/api/src/modules/generation/application/delegate-tool-availability.ts).
+
+Chats podem vincular um diretório de trabalho no ambiente de runtime selecionado. Tools de
+filesystem resolvem argumentos `path` / `cwd` relativos a partir desse diretório, e o system
+prompt do agente anuncia esse caminho. `read_file` exige um `path` explícito; `list_directory` e
+`grep` usam o diretório vinculado quando `path` é omitido. Sem diretório vinculado, forneça um
+caminho absoluto, pois caminhos ausentes ou relativos são rejeitados. `glob` usa o diretório vinculado quando `cwd` é omitido e, sem ele, exige um `cwd`
+absoluto. Shells também usam o diretório vinculado quando `cwd` é omitido; sem ele, deixam o
+`cwd` para o padrão do runtime selecionado. O diretório de trabalho do host da API não é um
+fallback para um ambiente remoto. Com restrição habilitada, a política de contenção de caminhos
+se aplica às tools roteadas. Consulte o
+[resolvedor de caminhos](../../../apps/api/src/services/tools/builtin/_fs-utils.ts) e o
+[resolvedor de cwd do glob](../../../apps/api/src/services/tools/builtin/glob.ts).
 
 **A convenção de caminhos vale nos dois sentidos: um caminho que uma tool
 reporta pode ser passado para outra tool e chegar no mesmo arquivo.** Todo
@@ -158,19 +189,19 @@ Lista arquivos e diretórios em um caminho.
 
 - **Nome da tool:** `list_directory`
 - **Categoria:** `system`
-- **Parâmetros:** `path` (obrigatório, absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat)
+- **Parâmetros:** `path` (opcional, absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat; padrão é o diretório vinculado e, sem ele, exige um caminho absoluto)
 - **Settings:** `allowedPaths`, `deniedPaths`
-- **Execução:** Chama `readdir(path, { withFileTypes: true })` e retorna `{ path, entries: { name, type }[] }`.
+- **Execução:** [`list-directory.ts`](../../../apps/api/src/services/tools/builtin/list-directory.ts) resolve o caminho de destino e chama `runtime.fs.listDirectory()` no runtime selecionado, retornando `{ path, entries: { name, type }[] }`.
 
 ### `glob`
 
-Encontra caminhos do filesystem que correspondem a um padrão glob, avaliados por `Bun.Glob`.
+Encontra caminhos do filesystem que correspondem a um padrão glob no runtime selecionado.
 
 - **Nome da tool:** `glob`
 - **Categoria:** `system`
-- **Parâmetros:** `pattern` (obrigatório, suporta `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (diretório base opcional; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat; padrão é o diretório de trabalho do chat, senão `process.cwd()`)
+- **Parâmetros:** `pattern` (obrigatório, suporta `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (diretório base opcional; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat; padrão é o diretório de trabalho do chat; exige um `cwd` absoluto quando não há diretório vinculado)
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5.000; padrão 200), `includeDotfiles` (padrão `false`), `absolute` (padrão `false`)
-- **Execução:** Itera os matches com `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, para ao atingir o limite e sinaliza `truncated`.
+- **Execução:** [`glob.ts`](../../../apps/api/src/services/tools/builtin/glob.ts) resolve o `cwd` de destino e chama `runtime.fs.glob()` com o limite de resultados e a política de caminhos. O runtime encontra arquivos e diretórios correspondentes e sinaliza `truncated` ao atingir o limite.
 - **Caminhos do resultado:** reancorados do `cwd` para o diretório de trabalho do chat, para que um
   match possa ser passado direto para o `read_file`. `absolute: true` faz opt-out e devolve caminhos
   absolutos.
@@ -181,10 +212,10 @@ Pesquisa nos arquivos por linhas que correspondam a uma expressão regular.
 
 - **Nome da tool:** `grep`
 - **Categoria:** `system`
-- **Parâmetros:** `pattern` (regex obrigatória), `path` (arquivo ou diretório obrigatório; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat), `glob` (filtro opcional para buscas em diretório), `caseInsensitive`
+- **Parâmetros:** `pattern` (regex obrigatória), `path` (arquivo ou diretório opcional; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat; padrão é o diretório vinculado e, sem ele, exige um caminho absoluto), `glob` (filtro opcional para buscas em diretório), `caseInsensitive`
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5.000; padrão 100), `maxMatchesPerFile` (padrão 20), `maxFileSizeBytes` (padrão 1 MB), `includeDotfiles`
-- **Segurança:** Arquivos com byte nulo nos primeiros 8 KiB são tratados como binários e ignorados; arquivos acima de `maxFileSizeBytes` também são pulados. A janela de detecção é compartilhada com o `read_file`, então um arquivo que o grep pesquisa é um arquivo que o `read_file` abre. A regex é compilada com `new RegExp` e rejeitada via `GrepPatternError` quando inválida.
-- **Execução:** Quando `path` é um diretório, percorre-o com `Bun.Glob` (filtrado pelo `glob` opcional); para cada candidato lê com `Bun.file().text()`, divide por linha e registra matches `{ file, line, text }`.
+- **Segurança:** Arquivos com byte nulo nos primeiros 8 KiB são tratados como binários e ignorados; arquivos acima de `maxFileSizeBytes` também são pulados. A janela de detecção é compartilhada com o `read_file`, então um arquivo que o grep pesquisa é um arquivo que o `read_file` abre. O runtime valida a expressão regular JavaScript e reporta padrões inválidos como `GrepPatternError`.
+- **Execução:** [`grep.ts`](../../../apps/api/src/services/tools/builtin/grep.ts) resolve o caminho de destino e chama `runtime.fs.grep()` com o padrão, filtro glob opcional, limites e política de caminhos. O runtime pesquisa o arquivo ou diretório e retorna matches `{ file, line, text }`.
 - **Caminhos do resultado:** `matches[].file` é reancorado da raiz da busca para o diretório de
   trabalho do chat, tanto em buscas por diretório quanto por arquivo único, para que um match possa
   ser passado direto para o `read_file`.
@@ -197,9 +228,9 @@ Executam um comando de shell e retornam `stdout`, `stderr`, código de saída e 
 - **Categoria:** `system`
 - **Parâmetros:** `command` (obrigatório), `cwd` (diretório de trabalho opcional; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat)
 - **Settings:** `timeoutSeconds` (5s–600s, padrão 30s), `maxOutputBytes` (1KB–1MB por stream, padrão 100KB)
-- **Disponibilidade:** Registradas no import apenas quando o interpretador existe — `bash`/`zsh` via `Bun.which`, `powershell` somente no Windows (`pwsh` e depois `powershell`). Shells indisponíveis nunca são oferecidos aos modelos.
-- **Segurança:** Desabilitadas por padrão (`enabledByDefault: false`); exigem ativação explícita. O processo é encerrado com `SIGKILL` após o tempo configurado, e a saída por stream é limitada a `maxOutputBytes` (sinalizado por `truncated`). Abort do pai (cancelamento do usuário ou encerramento do stream) é rastreado separadamente do timeout e não aparece como erro de timeout.
-- **Execução:** `runShellCommand()` inicia o interpretador com `Bun.spawn` (`bash -c` / `zsh -c` / `powershell -NoProfile -NonInteractive -Command`), aplica o timeout com um timer próprio (não o timeout do spawn do Bun), lê ambos os streams dentro do limite de bytes e retorna um `ShellCommandResult` estruturado com o campo `termination` (`exited`, `timed_out`, `aborted` ou `signalled`).
+- **Disponibilidade:** `registerTools()` registra as três definições. A resolução de capacidades do turno expõe apenas shells listados no manifesto do runtime selecionado, exigindo também consentimento para shell e ativação pelo usuário. O `PATH` do host da API não decide a disponibilidade de shells em um ambiente remoto.
+- **Segurança:** Desabilitadas por padrão (`enabledByDefault: false`); exigem ativação explícita. O runtime selecionado aplica o timeout de execução e o limite `maxOutputBytes` por stream (sinalizado por `truncated`). Abort do pai (cancelamento do usuário ou encerramento do stream) é rastreado separadamente do timeout e não aparece como erro de timeout.
+- **Execução:** [`_shell-tool.ts`](../../../apps/api/src/services/tools/builtin/_shell-tool.ts) resolve o cliente do runtime selecionado, diretório de trabalho, toolchain e política de ambiente, e chama `runtime.shell.run()`. O runtime Rust controla o spawn do interpretador, captura de saída e limpeza do processo. O campo retornado `ShellCommandResult.termination.kind` é `exited`, `timed_out`, `aborted` ou `signalled`; o hub transforma resultados de timeout e abort nos erros de tool correspondentes.
 
 ## Settings Policy
 
@@ -304,17 +335,21 @@ turno do modelo a quem entregar um erro corrigível.
 
 1. Crie o arquivo da tool em `apps/api/src/services/tools/builtin/`.
 2. Defina `ToolDefinition`, `ToolSettingsMetadata` e a função `execute`.
-3. Chame `registerTool()` para auto-registro em tempo de import.
-4. Importe a tool em `apps/api/src/services/tools/index.ts` para disparar o registro.
+3. Exporte uma função `register(): void` que chame `registerTool()`; mantenha o registro fora da inicialização do módulo.
+4. Importe essa função em `apps/api/src/services/tools/register-tools.ts` e invoque-a dentro de `registerTools()`. A inicialização já chama o registrador por meio de `registerApplicationServices()`.
 5. Se a tool precisar de comportamento dependente de settings, forneça um callback `buildDefinition`.
 6. Adicione schemas TypeBox de request/response nos contratos compartilhados se a tool tiver sua própria superfície de API.
-7. Escreva testes unitários para o executor da tool e para o merge de settings.
+7. Adicione o nome da tool em `apps/api/tests/support/registration-expectations.ts`. Teste seu executor, merge de settings e registro/descoberta; os testes existentes de registro e strict schema usam essa lista de expectativas.
+8. Para I/O no runtime, declare as capacidades que exigem consentimento e encaminhe as operações pelo cliente do runtime selecionado. O registro não deve contornar consentimento nem políticas de exposição do agente/usuário.
 
 ### Exemplo Mínimo
 
+Crie `apps/api/src/services/tools/builtin/my-tool.ts`:
+
 ```typescript
+import { getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
-import type { RegisteredTool, ToolContext } from '../types';
+import type { RegisteredTool } from '../types';
 
 const MY_TOOL: RegisteredTool = {
   definition: {
@@ -326,6 +361,7 @@ const MY_TOOL: RegisteredTool = {
         input: { type: 'string', description: 'Input value' },
       },
       required: ['input'],
+      additionalProperties: false,
     },
   },
   settings: {
@@ -337,11 +373,32 @@ const MY_TOOL: RegisteredTool = {
     defaultParameters: {},
     parameterDescriptors: [],
   },
-  execute: async (args, context) => {
-    const { input } = args as { input: string };
+  execute: async (args) => {
+    const input = getRequiredString(args.input, 'input');
     return { result: `Processed: ${input}` };
   },
 };
 
-registerTool(MY_TOOL);
+export function register(): void {
+  registerTool(MY_TOOL);
+}
 ```
+
+Depois, conecte-a ao registrador existente (preserve os outros imports e chamadas):
+
+```typescript
+// apps/api/src/services/tools/register-tools.ts
+import { register as registerMyTool } from './builtin/my-tool';
+
+export function registerTools(): void {
+  // ...existing builtin registrations...
+  registerMyTool();
+}
+```
+
+O caminho completo é `app.ts` → `registerApplicationServices()` → `registerTools()` →
+`registerMyTool()` → `registerTool(MY_TOOL)`. Após a inicialização, `getTool('my_tool')` e
+`getToolDescriptors()` a descobrem; `getAllToolDefinitions()` inclui esse exemplo habilitado
+por padrão. A resolução de capacidades por turno continua aplicando as políticas de agente e
+usuário descritas acima. Execute os testes de registro, preload-smoke e strict schema pelos
+[comandos isolados de teste da API](../reference/testing.md); não adicione um import a `tools/index.ts`.

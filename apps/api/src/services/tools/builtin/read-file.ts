@@ -1,6 +1,6 @@
 /**
  * Built-in tool: read_file
- * Reads the contents of a text file from disk with line numbers and windowing.
+ * Reads text with line numbers and windowing, or byte views, through the selected runtime.
  */
 
 import {
