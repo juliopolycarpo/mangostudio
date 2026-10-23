@@ -214,9 +214,10 @@ no `Cargo.lock` raiz. A versão do protocolo no mesmo lockfile continua independ
 ## Canal canary
 
 Todo commit que entra verde em `main` é publicado como **canary**. O job `canary`
-em `.github/workflows/ci.yml` é gated no `CI / Gate` agregado e em um push para
-`main`, então o commit que acabou de ficar verde é a fonte do canary — sem
-trigger separado. Ele chama o reutilizável `.github/workflows/canary.yml`.
+em `.github/workflows/ci.yml` depende do job agregado `gate`, chamado `Gate`
+(contexto da API `Gate`), e de um push para `main`, então o commit que acabou de
+ficar verde é a fonte do canary — sem trigger separado. Ele chama o reutilizável
+`.github/workflows/canary.yml`.
 
 Este repositório tem **releases imutáveis** habilitadas, então o canary não é
 mais uma pre-release rolling: ele corta **uma release por commit verde**,
@@ -307,11 +308,12 @@ Releases são orientadas por tag. A partir de um `main` atualizado:
 Uma tag cujo commit não tenha a seção de changelog ou uma versão em lockstep
 falha no job `prepare` antes de qualquer artefato ser produzido, apontando a
 correção (`bun run release:prepare`). O mesmo job recusa liberar um commit que
-não seja ancestral de `origin/main` ou cujo **`CI / Gate`** agregado não tenha
-concluído com `success`. O gate é resolvido pela própria run de push em `main` do
-`ci.yml` para o commit, e não pelo nome da check run, porque `cargo-shim.yml` e
-`release-dry-run.yml` também expõem um job chamado `Gate`. Push de tag não pode
-pular esse gate de proveniência, e um gate ainda em execução também bloqueia —
+não seja ancestral de `origin/main` ou cujo **job `Gate` agregado do `ci.yml`**
+não tenha concluído com `success`. A verificação resolve a própria run de push em
+`main` do `ci.yml` para o commit e lê seu job `Gate`. O contexto simples da API
+`Gate` também é emitido por Cargo Shim e Protocol CI, então o contexto sozinho não
+identifica o produtor. Push de tag não pode pular esse gate de proveniência, e um gate
+ainda em execução também bloqueia —
 espere o CI ficar verde em `main` antes de empurrar a tag. Só
 **`workflow_dispatch`** pode definir `allow_unverified_source=true` como escape
 deliberado (registrado como aviso no workflow); use quando a run de CI sumiu da

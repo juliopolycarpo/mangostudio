@@ -485,11 +485,12 @@ changelog entries each fold once they exceed five items.
 
 ## Testing the release pipeline
 
-`.github/workflows/release-dry-run.yml` triggers on every PR, but a cheap
+CI calls `.github/workflows/release-dry-run.yml` on every PR, but a cheap
 `changes` job runs the actual dry-run lanes only for PRs that touch release
 workflows, release scripts, install scripts, binary build tooling, CLI packages,
-or Dockerfiles; its always-reporting `Release Dry Run / Gate` check makes the
-workflow safe to require in branch protection (see
+or Dockerfiles. Its `gate` job, named `Gate`, reports the PR API context
+`Release Dry Run / Gate`; both CI gates include the reusable workflow result.
+That context is not separately required by the current main ruleset (see
 [`ci.md`](./ci.md#branch-protection--required-checks)). It also runs weekly as a
 drift check and can be started manually with `workflow_dispatch`. (This is
 read-only and unrelated to the [Canary channel](#canary-channel), which actually
@@ -517,8 +518,9 @@ Those steps stay in `.github/workflows/release.yml`.
 ## Canary channel
 
 Every commit that lands green on `main` is published as a **canary**. The canary
-job in `.github/workflows/ci.yml` is gated on the aggregate `CI / Gate` job — the
-single definition of a green commit, which fails on any mandatory job failure,
+job in `.github/workflows/ci.yml` depends on its aggregate job `gate`, named
+`Gate` (API context `Gate`) — the single definition of a green commit, which fails on any
+mandatory job failure,
 cancellation, or unexpected skip — and on a push to `main`, so the commit that
 just went green is the canary source — there is no separate trigger or SHA
 re-resolution. It calls the reusable
@@ -774,11 +776,12 @@ Releases are tag-driven. From an up-to-date `main`:
 A tag whose commit lacks the changelog section or a lockstep version fails in
 the `prepare` job before any artifact is produced, naming the fix
 (`bun run release:prepare`). The same job refuses to release a commit that is
-not an ancestor of `origin/main` or whose aggregate **`CI / Gate`** check did not
-conclude `success`. It resolves the gate through `ci.yml`'s own main-push run for
-the commit rather than by check-run name, because `cargo-shim.yml` and
-`release-dry-run.yml` also expose a job called `Gate`. A tag push cannot skip that
-provenance gate, and a still-running gate blocks it too — wait for CI on main to
+not an ancestor of `origin/main` or whose aggregate **`Gate` job in `ci.yml`** did
+not conclude `success`. It resolves `ci.yml`'s own main-push run for the commit,
+then reads that run's `Gate` job. The bare API context `Gate` is also emitted by
+Cargo Shim and Protocol CI, so the context alone does not identify the producer.
+A tag push cannot skip that provenance gate, and a still-running gate blocks it too —
+wait for CI on main to
 go green before pushing the tag. **`workflow_dispatch`** may set
 `allow_unverified_source=true` only as a deliberate break-glass path (logged as a
 workflow warning); use it when the CI run has aged out of the API but the commit
@@ -816,7 +819,7 @@ summary, listed here in workflow order:
 
 `workflow_dispatch` accepts an explicit `version` input for a manual run; it is
 validated against the committed version the same way. Optional boolean inputs:
-`allow_unverified_source` (skip main ancestry and `CI / Gate` provenance —
+`allow_unverified_source` (skip main ancestry and `ci.yml` main-push `Gate` provenance —
 break-glass only), `allow_legacy_cargo_token` (legacy crates.io token when OIDC
 mint fails), and `allow_legacy_npm_token` (legacy npm token when Trusted
 Publishing fails). Point the dispatch at a
@@ -999,11 +1002,12 @@ Design notes:
   and install `libstdc++` (`apk add libstdc++`), or compile the launcher with a
   musl toolchain. Stable `v0.1.1` has no installer-script assets.
 - The root Rust CI lane (`.github/workflows/cargo-shim.yml`) triggers on every
-  PR to either protected target, but a cheap `changes` job skips the toolchain
+  PR targeting `main`, but a cheap `changes` job skips the toolchain
   when no Rust path changed. It builds and tests the locked workspace on Linux,
   macOS and Windows at the shared Rust 1.99.0 minimum, checks Windows ARM64, and resolves the
-  excluded fuzz workspace. The `Cargo Shim / Gate` name stays stable for
-  repository rules (see [`ci.md`](./ci.md#branch-protection--required-checks)).
+  excluded fuzz workspace. Its legacy `gate` job, named `Gate`, reports the bare
+  API context `Gate`; its additive job reports `Cargo Shim Gate`. See
+  [`ci.md`](./ci.md#branch-protection--required-checks) for the current required contexts.
 - The `cargo-publish` release job checks crates.io before publishing and
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".

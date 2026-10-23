@@ -108,29 +108,28 @@ gh api repos/juliopolycarpo/mangostudio/actions/runs/38379796623
 After hosted cases verify all four unique producers, the separate cutover replaces only the
 `Gate` entry in `rules[type=required_status_checks].parameters.required_status_checks`.
 
-The list below remains a candidate for the standalone workflow topology. The 2026-10-23
-refresh verifies `Release Dry Run / Release Dry Run Gate` in the current reusable PR topology;
-standalone scheduled and manual runs retain `Release Dry Run Gate`. The current PR candidate
-must use the verified caller-prefixed name. Observing that producer does not complete the
-hosted case matrix or authorize an enforcement change.
+The candidate below uses the current reusable PR topology. The 2026-10-23 refresh verifies
+`Release Dry Run / Release Dry Run Gate` as its PR check context. Standalone scheduled and
+manual runs retain the leaf name `Release Dry Run Gate`; that name is not a PR enforcement
+target. Observing the PR producer does not complete the hosted case matrix or authorize an
+enforcement change.
 
 ```json
 [
   { "context": "CI Gate", "integration_id": 15368 },
   { "context": "Cargo Shim Gate", "integration_id": 15368 },
   { "context": "Protocol Gate", "integration_id": 15368 },
-  { "context": "Release Dry Run Gate", "integration_id": 15368 },
+  { "context": "Release Dry Run / Release Dry Run Gate", "integration_id": 15368 },
   { "context": "Dependency Review", "integration_id": 15368 },
   { "context": "CodeQL", "integration_id": 57789 },
   { "context": "Apply path-based labels", "integration_id": 15368 }
 ]
 ```
 
-For the reusable PR topology, replace the candidate `Release Dry Run Gate` entry with the
-verified PR API context before applying any settings change. All other ruleset parameters,
-conditions, and bypass actors stay as captured. That future change is a proposal only. Keep
-the legacy aliases until the cutover owner verifies the required contexts and moves Canary
-to the verified CI producer.
+Reverify these PR contexts and application IDs before applying any settings change. All
+other ruleset parameters, conditions, and bypass actors stay as captured. That future change
+is a proposal only. Keep the legacy aliases until the cutover owner verifies the required
+contexts and moves Canary to the verified CI producer.
 
 ## Verification boundary
 
