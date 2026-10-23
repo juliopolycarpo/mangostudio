@@ -46,6 +46,7 @@ export interface NativeCommandReceipt {
   readonly exitCode: number | null;
   readonly signal: string | null;
   readonly timedOut: boolean;
+  readonly canceled?: boolean;
   readonly timeoutSeconds: number;
   readonly errors: readonly string[];
   readonly log: string;
@@ -78,6 +79,8 @@ export interface NativeCommandOptions {
   readonly settleMs?: number;
   readonly stream?: NodeJS.WritableStream;
   readonly guardCompilerHelpers?: boolean;
+  /** Cancels only this command’s verified process scope and waits for settlement. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -385,6 +388,8 @@ export async function runNativeCommand(
     throw new Error(
       `Invalid timeout ${options.timeoutSeconds}; expected a positive finite number of seconds`
     );
+  if (options.signal?.aborted)
+    throw options.signal.reason ?? new Error('Native command canceled before launch');
   const started = Date.now();
   const snapshot = options.snapshot ?? snapshotNativeProcesses;
   const pollIntervalMs = options.pollIntervalMs ?? 1_000;
@@ -408,6 +413,8 @@ export async function runNativeCommand(
       snapshotErrors.push(`Compiler-helper baseline census failed: ${String(error)}`);
     }
   }
+  if (options.signal?.aborted)
+    throw options.signal.reason ?? new Error('Native command canceled before launch');
   let unattributedCompilerHelpers: NativeProcess[] = [];
   const log = `logs/${options.label}.log`;
   const combined = createWriteStream(join(options.out, log));
@@ -555,6 +562,16 @@ export async function runNativeCommand(
     await killOwned();
   };
   let timeoutCleanup: Promise<void> | null = null;
+  let canceled = false;
+  const cancel = () => {
+    canceled = true;
+    errors.push('Command canceled by AbortSignal');
+    timeoutCleanup ??= terminate().catch((error) => {
+      errors.push(`Cancellation cleanup failed: ${String(error)}`);
+    });
+  };
+  options.signal?.addEventListener('abort', cancel, { once: true });
+  if (options.signal?.aborted) cancel();
   const timeout = setTimeout(() => {
     if (exited) return;
     timedOut = true;
@@ -588,7 +605,7 @@ export async function runNativeCommand(
     await census();
     if ((!current.length && lastCensusError === null) || Date.now() >= settleUntil) break;
     // A worker that forked after the timeout census is still owned, so it is killed here.
-    if (timedOut)
+    if (timedOut || canceled)
       await killOwned().catch((error) => errors.push(`Timeout cleanup failed: ${String(error)}`));
     await pause(pollIntervalMs);
   } while (Date.now() < settleUntil);
@@ -597,6 +614,8 @@ export async function runNativeCommand(
       (writer) => new Promise<void>((resolve) => writer.end(resolve))
     )
   );
+  options.signal?.removeEventListener('abort', cancel);
+  if (timeoutCleanup) await timeoutCleanup;
   // A failed poll is superseded by the next census; only an unproven terminal census is fatal.
   if (lastCensusError !== null) snapshotErrors.push(lastCensusError);
   const settlement: NativeSettlement = {
@@ -630,6 +649,7 @@ export async function runNativeCommand(
     exitCode,
     signal,
     timedOut,
+    ...(canceled ? { canceled: true } : {}),
     timeoutSeconds: options.timeoutSeconds,
     errors,
     log,

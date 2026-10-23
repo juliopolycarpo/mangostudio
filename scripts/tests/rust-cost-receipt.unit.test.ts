@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   parseArtifactSections,
   parseBuildCpu,
+  qualifiesRustIncremental,
   qualifiesTextAttribution,
   rustCostWorkloads,
   shippingRustProfile,
@@ -9,6 +10,21 @@ import {
 } from '../lib/rust-cost-receipt';
 
 describe('Rust cost receipt contracts', () => {
+  it('rejects a restamp without changed artifact identity and keeps no-op invariants distinct', () => {
+    const before = 'a'.repeat(64),
+      after = 'b'.repeat(64);
+    expect(qualifiesRustIncremental('restamp', before, after, 1)).toBe(true);
+    expect(qualifiesRustIncremental('restamp', before, before, 1)).toBe(false);
+    expect(qualifiesRustIncremental('restamp', before, after, 0)).toBe(false);
+    expect(qualifiesRustIncremental('noop', before, before, 0)).toBe(true);
+    expect(qualifiesRustIncremental('noop', before, after, 0)).toBe(false);
+    expect(qualifiesRustIncremental('noop', before, before, 1)).toBe(false);
+    expect(qualifiesRustIncremental('noop', undefined, after, 0)).toBe(false);
+    expect(() => qualifiesRustIncremental('noop', 'invalid', after, 0)).toThrow(
+      'expected lowercase SHA-256'
+    );
+  });
+
   it('requires and pins the repository shipping profile without changing its tradeoffs', () => {
     const manifest =
       '[profile.release]\nopt-level=3\nlto="fat"\ncodegen-units=1\nstrip=true\npanic="unwind"';
