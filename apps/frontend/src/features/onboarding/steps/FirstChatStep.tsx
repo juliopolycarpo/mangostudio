@@ -11,7 +11,7 @@
  * is sent again.
  */
 
-import { GENERATION_PROMPT_MAX_LENGTH } from '@mangostudio/shared/generation';
+import { GENERATION_PROMPT_MAX_LENGTH } from '@mangostudio/shared/generation/values';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';

@@ -5,7 +5,7 @@ import {
   ExternalApprovalRoutingSchema,
   ExternalPermissionLevelSchema,
   ExternalVendorIdSchema,
-} from '../external-agents/schemas';
+} from '../external-agents/choices';
 
 const InteractionModeSchema = Type.Union([
   Type.Literal('chat'),
@@ -21,7 +21,7 @@ const InteractionModeSchema = Type.Union([
 export {
   type ExternalAgentTargetId,
   ExternalAgentTargetIdSchema,
-} from '../external-agents/schemas';
+} from '../external-agents/choices';
 
 /**
  * Who runs a chat's turns. Deliberately excludes anything the server owns —

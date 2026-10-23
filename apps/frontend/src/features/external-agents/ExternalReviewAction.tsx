@@ -17,7 +17,7 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   EXTERNAL_AGENT_CAPACITY_CODE,
   isExternalAgentKindCode,
-} from '@mangostudio/shared/external-agents';
+} from '@mangostudio/shared/external-agents/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { ScanSearch } from 'lucide-react';
 import { useState } from 'react';

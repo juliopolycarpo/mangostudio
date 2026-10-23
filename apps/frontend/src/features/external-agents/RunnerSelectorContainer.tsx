@@ -12,7 +12,7 @@ import type {
   ExternalAgentDescriptor,
   ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
-import { normalizePermissionLevel } from '@mangostudio/shared/external-agents';
+import { normalizePermissionLevel } from '@mangostudio/shared/external-agents/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useState } from 'react';
 import { RunnerSelector } from '@/components/layout/RunnerSelector';

@@ -14,12 +14,12 @@
  */
 
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
-import {
-  enabledLibraryLocations,
-  type LibraryLocationId,
-  type LibraryLocationStatus,
-  type ResourceKind,
+import type {
+  LibraryLocationId,
+  LibraryLocationStatus,
+  ResourceKind,
 } from '@mangostudio/shared/library';
+import { enabledLibraryLocations } from '@mangostudio/shared/library/values';
 import { useMemo } from 'react';
 import { useLibraryDefaultsDetection } from '@/features/settings/app/use-library-defaults-detection';
 import { propagationCandidateLocationIds } from '../format';

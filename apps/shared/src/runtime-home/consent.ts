@@ -10,6 +10,7 @@
  * hub.
  */
 
+import { RuntimeCapabilityAllowSchema } from './choices';
 import type {
   ResolvedRuntimeCapabilityAllow,
   ResolvedRuntimeSlotConfig,
@@ -20,7 +21,6 @@ import type {
   RuntimeSlot,
   RuntimeSlotConfig,
 } from './schemas';
-import { RuntimeCapabilityAllowSchema } from './schemas';
 
 /**
  * Every capability name, taken from the schema so the two can never disagree.

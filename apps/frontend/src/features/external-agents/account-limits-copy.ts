@@ -14,7 +14,7 @@ import type {
 import {
   EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
   interpretExternalAccountLimits,
-} from '@mangostudio/shared/external-agents';
+} from '@mangostudio/shared/external-agents/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 
 type LimitsLabels = Messages['externalAgents']['limits'];

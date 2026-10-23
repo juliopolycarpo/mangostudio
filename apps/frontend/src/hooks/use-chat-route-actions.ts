@@ -1,5 +1,5 @@
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { useNavigate } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import { useToast } from '@/components/ui/Toast';

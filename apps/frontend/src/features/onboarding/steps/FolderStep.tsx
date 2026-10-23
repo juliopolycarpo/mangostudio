@@ -7,7 +7,7 @@
  * confusion this ordering exists to prevent.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { FolderOpen } from 'lucide-react';
 import { useState } from 'react';

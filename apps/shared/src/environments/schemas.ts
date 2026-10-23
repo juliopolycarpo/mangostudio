@@ -11,19 +11,20 @@ import { RuntimeDiscoverResultSchema } from '../runtime-contract/implementation'
 import { RuntimeCapabilityManifestSchema } from '../runtime-contract/manifest';
 import { RuntimeCapabilityAllowSchema, RuntimeHealthReportSchema } from '../runtime-home/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
+import { RuntimeIdSchema, VersionManagerIdSchema } from './choices';
+import { CONTAINER_MAX_MOUNTS } from './constants';
 import { ToolchainSelectionSchema } from './toolchain-schemas';
 
+export {
+  type RuntimeId,
+  RuntimeIdSchema,
+  type VersionManagerId,
+  VersionManagerIdSchema,
+} from './choices';
+
+export { CONTAINER_MAX_MOUNTS, LOCAL_ENVIRONMENT_ID, LOCAL_ENVIRONMENT_NAME } from './constants';
+
 export * from './toolchain-schemas';
-
-export const LOCAL_ENVIRONMENT_ID = 'local' as const;
-
-/**
- * Name the hub reports for the machine it runs on. Not user copy: it is the
- * environment's name in the API the same way a remote's stored name is, and
- * surfaces that render it inside a translated sentence resolve it from
- * {@link LOCAL_ENVIRONMENT_ID} through i18n instead of printing this.
- */
-export const LOCAL_ENVIRONMENT_NAME = 'Local' as const;
 
 export const EnvironmentIdSchema = Type.String({
   minLength: 1,
@@ -127,15 +128,6 @@ export const ContainerMountSchema = Type.Object(
   },
   { additionalProperties: Type.Never() }
 );
-
-/**
- * How many mounts one environment may declare.
- *
- * A bound rather than a policy: each entry is an argv pair the hub constructs,
- * and an unbounded list is an unbounded command line. Eight is well past what
- * "the project, and maybe its cache" needs.
- */
-export const CONTAINER_MAX_MOUNTS = 8;
 
 /**
  * An image the hub starts a runtime inside, and the limits it starts it with.
@@ -612,22 +604,6 @@ export type EnvironmentConnectionState = Static<typeof EnvironmentConnectionStat
 export type EnvironmentConnectionStatus = Static<typeof EnvironmentConnectionStatusSchema>;
 export type Environment = Static<typeof EnvironmentSchema>;
 
-export const RuntimeIdSchema = Type.Union([
-  Type.Literal('bun'),
-  Type.Literal('node'),
-  Type.Literal('nvm'),
-  /** Second helper-managed Node manager; the only one whose install ships on win32. */
-  Type.Literal('fnm'),
-  /** Probed as a prerequisite for the Windows recipes; never installed by MangoStudio. */
-  Type.Literal('winget'),
-  /** Probed for the setup checklist and offered as a recipe on win32 only. */
-  Type.Literal('git'),
-  Type.Literal('mangostudio'),
-  Type.Literal('claude'),
-  Type.Literal('codex'),
-  Type.Literal('cursor'),
-]);
-
 /**
  * A version floor a runtime has to clear.
  *
@@ -662,12 +638,6 @@ export const RuntimeOriginSchema = Type.Union([
   Type.Literal('well-known'),
   Type.Literal('version-manager'),
   Type.Literal('configured'),
-]);
-
-export const VersionManagerIdSchema = Type.Union([
-  Type.Literal('nvm'),
-  Type.Literal('fnm'),
-  Type.Literal('volta'),
 ]);
 
 export const LtsStatusSchema = Type.Union([
@@ -1047,12 +1017,9 @@ export const InstallStreamEventSchema = Type.Union([
   InstallExitEventSchema,
   SSEErrorEventSchema,
 ]);
-
-export type RuntimeId = Static<typeof RuntimeIdSchema>;
 export type PathSource = Static<typeof PathSourceSchema>;
 export type InstallUnrunnableReason = Static<typeof InstallUnrunnableReasonSchema>;
 export type RuntimeOrigin = Static<typeof RuntimeOriginSchema>;
-export type VersionManagerId = Static<typeof VersionManagerIdSchema>;
 export type LtsStatus = Static<typeof LtsStatusSchema>;
 export type RuntimeHealth = Static<typeof RuntimeHealthSchema>;
 export type RuntimeFindingCode = Static<typeof RuntimeFindingCodeSchema>;

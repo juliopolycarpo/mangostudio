@@ -31,10 +31,8 @@
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
-import {
-  type ExternalAgentCommand,
-  externalAgentVendor,
-} from '@mangostudio/shared/external-agents';
+import type { ExternalAgentCommand } from '@mangostudio/shared/external-agents';
+import { externalAgentVendor } from '@mangostudio/shared/external-agents/values';
 import type { LibraryResource } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';

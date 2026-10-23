@@ -7,7 +7,7 @@
  * instead, hooks with settings, as the page's back link already treats them.
  */
 
-import { parseResourceKey } from '@mangostudio/shared/library';
+import { parseResourceKey } from '@mangostudio/shared/library/values';
 import { useParams } from '@tanstack/react-router';
 import { TabNav } from '@/components/ui/TabNav';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';

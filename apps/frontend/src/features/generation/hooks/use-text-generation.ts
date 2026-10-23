@@ -18,7 +18,7 @@ import type {
 import {
   EXTERNAL_AGENT_UNAVAILABLE_REASONS,
   isExternalAgentKindCode,
-} from '@mangostudio/shared/external-agents';
+} from '@mangostudio/shared/external-agents/values';
 import type {
   ExternalTurnRequest,
   ModelUnavailableDetails,

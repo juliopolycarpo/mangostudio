@@ -1,5 +1,5 @@
 import type { Message } from '@mangostudio/shared/chat';
-import { mergeMessageParts } from '@mangostudio/shared/generation';
+import { mergeMessageParts } from '@mangostudio/shared/generation/values';
 import type { MessagePart } from '@mangostudio/shared/types';
 
 /**

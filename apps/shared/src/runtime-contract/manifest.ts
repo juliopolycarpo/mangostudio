@@ -17,12 +17,9 @@ import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '../library/hash';
 import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
 import { RuntimeImplementationSchema } from './implementation';
 
-export const RuntimeShellKindSchema = Type.Union([
-  Type.Literal('bash'),
-  Type.Literal('zsh'),
-  Type.Literal('powershell'),
-]);
-export type RuntimeShellKind = Static<typeof RuntimeShellKindSchema>;
+import { RuntimeShellKindSchema } from './shell-kinds';
+
+export { type RuntimeShellKind, RuntimeShellKindSchema } from './shell-kinds';
 
 /**
  * Capability announcement in `hello`. Manifest objects tolerate unknown keys
