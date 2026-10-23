@@ -4,6 +4,10 @@ import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type {} from '../../apps/frontend/tests/browser-support/terminal-renderer-fixture';
 
+// Headless hosts use an explicit software renderer for functional coverage.
+// The attached host receipt keeps this separate from native GPU qualification.
+test.use({ launchOptions: { args: ['--enable-unsafe-swiftshader'] } });
+
 let bundle: string;
 const css = readFileSync(resolve('apps/frontend/node_modules/@xterm/xterm/css/xterm.css'), 'utf8');
 
