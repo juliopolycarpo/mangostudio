@@ -93,7 +93,11 @@ function allocatedBytes(path: string): number {
   return Number(syncText(['du', '-s', '-B1', path]).split(/\s/)[0]);
 }
 
-function successful(command: NativeCommandReceipt): boolean {
+/**
+ * Admit study commands only when every census succeeded, even if generic settlement recovered.
+ * @example if (!qualifiesRustStudyCommand(receipt)) throw new Error('Unqualified study command');
+ */
+export function qualifiesRustStudyCommand(command: NativeCommandReceipt): boolean {
   return (
     command.exitCode === 0 &&
     !command.timedOut &&
@@ -260,9 +264,9 @@ async function main(): Promise<void> {
       stream: new DiscardedInspectionOutput(),
     });
     await Bun.write(join(out, `${name}.json`), JSON.stringify(result, null, 2));
-    if (!successful(result))
+    if (!qualifiesRustStudyCommand(result))
       throw new Error(
-        `${label}: expected successful settled command | received: ${JSON.stringify(result)}`
+        `${label}: expected successful command, empty terminal scope and no historical census failures | received: ${JSON.stringify(result)}`
       );
     return readFile(join(out, `logs/${name}.stdout.log`), 'utf8');
   };
@@ -411,7 +415,7 @@ async function main(): Promise<void> {
           omitRootFromMetrics: true,
         }) ?? null;
       let valid =
-        successful(result) &&
+        qualifiesRustStudyCommand(result) &&
         resources !== null &&
         resources.sampleCount > 0 &&
         resources.remainingIdentities.length === 0 &&
@@ -426,7 +430,11 @@ async function main(): Promise<void> {
         valid: false,
         durationMs: result.durationMs,
         workload,
-        status: result.canceled ? 'canceled' : successful(result) ? 'completed' : 'failed',
+        status: result.canceled
+          ? 'canceled'
+          : qualifiesRustStudyCommand(result)
+            ? 'completed'
+            : 'failed',
         command: result,
         resources,
         resourceIntervalMs: POLL_MS,
@@ -440,7 +448,7 @@ async function main(): Promise<void> {
       await save(null); // Keep terminal raw command even if inspection fails.
       if (!valid)
         throw new Error(
-          `${workload.label}: expected successful, sampled, settled and source-sealed build`
+          `${workload.label}: expected successful, sampled, source-sealed build with empty terminal scope and no historical census failures`
         );
       const cpu = parseBuildCpu(await readFile(cpuPath, 'utf8'));
       attempt.cpu = cpu;
