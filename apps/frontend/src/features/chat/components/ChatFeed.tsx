@@ -1,7 +1,8 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, Sparkles } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import * as motion from 'motion/react-m';
 import {
   type UIEvent,
   useCallback,

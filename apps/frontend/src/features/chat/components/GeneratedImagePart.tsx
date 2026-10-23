@@ -1,6 +1,7 @@
 import type { GeneratedImagePart as GeneratedImagePartType } from '@mangostudio/shared/types';
 import { Download, Image, ImageOff, Timer } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import * as motion from 'motion/react-m';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';

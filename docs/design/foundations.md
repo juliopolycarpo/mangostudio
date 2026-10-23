@@ -371,7 +371,14 @@ written `duration-(--duration-base)` in a class or `var(--duration-base)` in CSS
 `--default-transition-timing-function` at `--duration-quick` and `ease-standard`, which
 retunes every bare `transition-colors` at once.
 
-JavaScript animation (`motion/react`) reads the same values from
+The app root loads `domAnimation` synchronously through strict `LazyMotion`.
+Components import their small DOM components from `motion/react-m`; `motion/react`
+provides `AnimatePresence` and the root feature bundle. This covers animations,
+variants, exit, focus, hover and tap. Drag and layout projection require a separate
+feature decision and bundle measurement. `ComposerPopover` accepts native panel
+attributes and owns its preset, so callers cannot request unsupported features.
+
+JavaScript animation reads the same values from
 `lib/motion/tokens.ts`, which `tests/unit/lib/motion/tokens.test.ts` keeps equal to the
 stylesheet. Components take a preset from `useMotionPresets()` instead of writing a
 transition (`lib/motion/variants.ts` defines them): menus, Select and `ChipSelect`

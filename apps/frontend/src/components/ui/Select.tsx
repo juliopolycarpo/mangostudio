@@ -22,7 +22,8 @@
  */
 
 import { Check, ChevronDown } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import * as motion from 'motion/react-m';
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAnchoredPosition } from '@/hooks/use-anchored-position';
