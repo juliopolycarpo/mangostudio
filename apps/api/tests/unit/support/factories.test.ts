@@ -1,4 +1,4 @@
-import { describe, expect, it, spyOn } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { fixtures } from '@mangostudio/shared/test-utils';
 import { getDb } from '../../../src/db/database';
 import {
@@ -7,12 +7,6 @@ import {
   insertTestUser,
   makeTestIdentity,
 } from '../../support/factories';
-
-const COLLIDING_EMAIL = 'duplicate@mangostudio.test';
-
-function collidingEmail(): string {
-  return COLLIDING_EMAIL;
-}
 
 describe('test factories', () => {
   it('keeps named identities unique across fixture sequence resets', () => {
@@ -58,22 +52,14 @@ describe('test factories', () => {
     });
   });
 
-  it('derives default user emails from ids when the fixture email generator repeats an email', async () => {
-    const email = spyOn(fixtures, 'email').mockImplementation(collidingEmail);
-    try {
-      const first = await insertTestUser(makeTestIdentity('fixture-email', 'First'));
-      const second = await insertTestUser(makeTestIdentity('fixture-email', 'Second'));
-      const explicit = await insertTestUser({
-        ...makeTestIdentity('fixture-email', 'Explicit'),
-        email: 'explicit@mangostudio.test',
-      });
+  it('derives default user emails from generated ids and preserves an explicit email', async () => {
+    const first = await insertTestUser();
+    const second = await insertTestUser();
+    const explicit = await insertTestUser({ email: 'explicit@mangostudio.test' });
 
-      expect(first.email).toBe(`${first.id}@mangostudio.test`);
-      expect(second.email).toBe(`${second.id}@mangostudio.test`);
-      expect(first.email).not.toBe(second.email);
-      expect(explicit.email).toBe('explicit@mangostudio.test');
-    } finally {
-      email.mockRestore();
-    }
+    expect(first.email).toBe(`${first.id}@mangostudio.test`);
+    expect(second.email).toBe(`${second.id}@mangostudio.test`);
+    expect(first.email).not.toBe(second.email);
+    expect(explicit.email).toBe('explicit@mangostudio.test');
   });
 });
