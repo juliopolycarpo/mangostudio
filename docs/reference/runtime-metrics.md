@@ -353,3 +353,238 @@ The first admission attempt at `5e267450` produced valid Cargo metadata with 329
 successfully. The batch stopped before any build, warmup or readiness attempt. No timing or resource
 sample was accepted, and all later workloads remained unperformed. The failed admission is retained;
 a subsequent study uses a new label and must pass its own source, correctness and cleanup gates.
+
+## Controlled Rust baseline, 2026-10-23
+
+Measured source is `6cf4602a1a98c32536b5a8b83e6a40361198f657`, with executable-input seal
+`b72a43ad1883b85b9d6074f3cebc4f78fe9c4861718aa2abfee58650fe2451ae`.
+This results publication and its policy test are later changes; they do not relabel the measured source.
+The exclusive Linux study ran on 2026-10-23 under WSL2, kernel
+`6.18.54.1-microsoft-standard-WSL2-polycarpo`, Intel Xeon E5-2699 v3 2.30 GHz,
+28 logical CPUs and 49,326,686,208 visible memory bytes. Cgroup CPU/memory limits were unavailable,
+not reported as zero or unlimited. Native Windows/macOS performance and hosted CI cost remain unmeasured.
+
+Rust/Cargo were 1.99.0 (`b940084d7` / `5f94df478`), LLVM 23.1.1, Bun 1.4.3 and cargo-bloat 0.12.1.
+The GNU cohort used `x86_64-unknown-linux-gnu`, eight jobs, default features and the unchanged
+opt-level 3 / fat LTO / one codegen unit / stripped / unwind release profile, with
+`CARGO_INCREMENTAL=0`. The locked inventories contained 329 default packages, 331 all-feature
+packages and 101 excluded-fuzz packages. Registry/toolchain caches were prefetched and retained;
+Cargo ran offline. Each clean trial had a private empty ext4 target. Runtime target 3 was retained
+for alternating no-op/restamp attempts. OS page cache stayed uncontrolled and warm; fresh target,
+process or database does not establish machine-cold behavior.
+
+| Locked input             | SHA-256                                                            |
+| ------------------------ | ------------------------------------------------------------------ |
+| Root Cargo.lock          | `3dfa76f2a871b523de34fc7875198e0dd16279b7d511cdeab4905c1b70f9bd59` |
+| Excluded fuzz Cargo.lock | `f64f889d768cf0e0c1b6e394bb1491cbd7f331a9423834ab5f3c93a70354293e` |
+| bun.lock                 | `acf1b4fdd7e3e268050bc0c465cf3cab736a723685ebccf109379b69d5f5bb77` |
+
+The compiled Bun hub H was built and passed the official compiled smoke at
+`d9becbeec8963097ba9a485ce101f92c43a4abef`. Its packaged sidecar Z is the separately built
+Zig/glibc-2.17 runtime (Rust inputs unchanged since `911c476c`). Application, Rust, locks and production
+build inputs were verified equal at the measured source; benchmark/capture helpers intentionally
+changed after hub setup. H+Z startup is separate from the GNU build/runtime cohort. The hub can start runtime
+children before health; sampled descendants are included. The Rust downloader
+launcher L0 was built three times and never executed. Its version was sealed from Cargo metadata.
+
+### Build and readiness observations
+
+The order was three runtime clean builds, three launcher clean builds, then ten alternating
+runtime no-op/restamp pairs. All 26 passed. Every no-op rebuilt zero units and preserved the
+executable hash; every restamp rebuilt one unit, changed the executable hash, kept nonempty library
+hashes identical and returned the exact `0.1.1-bench.1` through `.10` version. No optimization candidate
+exists, so these distinct workloads establish no savings delta.
+
+| Workload                 |  n |   Min s | Median s |   p95 s |   Max s | Spread s | Median final CPU user/system s | Median sampled tree RSS MiB |
+| ------------------------ | -: | ------: | -------: | ------: | ------: | -------: | -----------------------------: | --------------------------: |
+| Runtime, empty target    |  3 | 471.520 |  471.980 |       — | 473.020 |    1.500 |               854.690 / 36.470 |                    4405.098 |
+| Launcher, empty target   |  3 |  44.350 |   44.610 |       — |  44.740 |    0.390 |                 70.170 / 5.390 |                    1254.852 |
+| Runtime, no-op           | 10 |   0.360 |    0.390 |   0.430 |   0.430 |    0.070 |                  0.235 / 0.110 |                      75.512 |
+| Runtime, version restamp | 10 | 233.110 |  234.510 | 238.750 | 238.750 |    5.640 |                230.640 / 4.085 |                    2150.988 |
+
+After an unscored attribution build, runtime hello/health, fresh-DB hub health and migrated-DB hub
+health each ran two retained warmups followed by twenty measured attempts. All 66 attempts succeeded;
+the six warmups are excluded from summaries and retained below. Runtime negotiated hello had
+min/median/p95/max/spread 174.824 / 193.737 / 213.288 / 214.148 / 39.324 ms (n=20).
+
+| Useful endpoint                |  n |  Min ms | Median ms |  p95 ms |  Max ms | Spread ms | Median sampled CPU user/system ms | Median sampled tree RSS MiB |
+| ------------------------------ | -: | ------: | --------: | ------: | ------: | --------: | --------------------------------: | --------------------------: |
+| GNU runtime hello + health     | 20 | 305.877 |   325.993 | 345.907 | 352.488 |    46.612 |                          150 / 85 |                      67.033 |
+| Hub + Zig runtime, fresh DB    | 20 | 360.742 |   419.285 | 439.980 | 446.751 |    86.008 |                         635 / 150 |                     111.791 |
+| Hub + Zig runtime, migrated DB | 20 | 286.377 |   349.174 | 358.860 | 365.151 |    78.774 |                         540 / 130 |                     109.400 |
+
+Each table column is summarized independently. Percentiles use nearest rank (rank 10 of 10 or
+19 of 20); three clean builds provide no stable tail estimate, so their p95 is omitted.
+GNU-time build elapsed/final CPU has 10 ms print resolution. Its maximum individual-process RSS
+is separately retained in KiB below. Tree RSS is the maximum contemporaneous observed sum, sampled
+every 20 ms for builds and 10 ms for startup. Procfs used 4096-byte pages and 100 CPU ticks/s
+(10 ms CPU resolution). Shared pages count in each process; these sums are not unique physical RAM.
+Sampled CPU can miss exited work; zero observed ticks is not zero actual CPU. Missing values stay
+blank in CSV, distinct from zero. Every startup sample had at least 28 pre-readiness observations.
+The exporter independently recomputed all startup RSS/CPU/count summaries from those frames.
+
+The study additionally requires zero historical census failures, even when a later successful census
+lets the generic command runner report terminal settlement with `errors=[]` and an empty scope.
+This stricter admission policy was already active in the measured source; its new named predicate
+and regression make that distinction explicit. Generic runner recovery remains unchanged.
+A census completed after readiness stays excluded from readiness resource totals; backdating its
+values would include post-event work. With no completed pre-readiness census, costs stay null and the
+attempt is unqualified even when raw journals retain hello/health timestamps. Latency-only qualification
+is not part of this study.
+
+### Artifacts and retained dispositions
+
+The GNU runtime used for readiness is R12, version `0.1.1-bench.10`. R0/R1/R2 are the three clean
+runtime artifacts; subsequent runtime IDs follow restamp order. All launcher builds produced L0.
+H+Z denotes the compiled hub with its Zig sidecar. Empty text fields for H/Z mean uncollected section
+identity, not zero bytes. S is the separately built unstripped GNU symbol artifact.
+
+<details>
+<summary>Artifact identities (CSV)</summary>
+
+```csv
+artifact_id,kind,version,file_bytes,text_bytes,file_sha256,text_sha256
+R0,runtime,0.1.1,26433712,19822405,7777e6fe212ce80a49bca899543cff4b4f9437e470a13276939169afdab58838,2723a7a7e12151a70d21dddf4bb79a4617d6dc20554502b8e0a5184a6bdeca61
+R1,runtime,0.1.1,26433712,19822405,c640a23c6e70a77594d22be72204d680f81e9d5d759239100be3a293a2f70d2e,beb616b9831494f9152417116eaa4306b5d7a4869a411a49649c2a670aeeadb3
+R2,runtime,0.1.1,26433712,19822405,8df45395cb6af753ccac9b2679893da070c7d442f54d502eeddf3e8a50a4b71c,94891509d06980b8ef9d23d03f9e250ed520082e103120d6808242afbf8a8043
+L0,launcher,0.1.1,2223128,1570246,afd2a4fa9bd6e9305aa05409c4eaa483bbe2d03b5169ce501a17f282bab6f1d7,2b32b9c9405a8f80edae61b875030b3d43464b3538b395543f67e03d364420be
+R3,runtime,0.1.1-bench.1,26433776,19822469,3c9d97c4ec2ed7fb8180cdf02247e7f34ac1a2c36877d701bdcd6728d77d6b1e,19c1d158b6fcd0b77c168914ba5e65a2ae6d29d4843d78679e290f9e1b581cd5
+R4,runtime,0.1.1-bench.2,26433776,19822469,213f469e7f4fd96d2311e93acde57b206f847af123270709f1b7741fe89a8966,3a64ceee9f2bedeebb73802c6caac1ffcb4e23be67373c14123aa42e99da792b
+R5,runtime,0.1.1-bench.3,26433776,19822469,84031a18fc7085991403b3530a64dfed645c02c01c080438213c3b4fd48347d8,9299be76f6778f263408483b897e8aca43cdd9a4192ecbe59e7fc7f160a19b18
+R6,runtime,0.1.1-bench.4,26433776,19822469,79c4a51976fcb5b849a76cd02cfe2359178c755d6615b0cca62a76d88ad5d7b1,6d8a71a50c7cdf87ca16fe24b040c2868cb33b71f0caa6ae8cda92b94a4b2ef7
+R7,runtime,0.1.1-bench.5,26433776,19822469,6ec6653befa8b86ed82c0128b74181c9cd1578165f659776a567fbe444a4a31d,612530561d854012e9fe1ffa7e962dc6fb1628b19b6f9a0d16955d4215c21c17
+R8,runtime,0.1.1-bench.6,26433776,19822469,a7de7be80f0d9e565be3aa580aa2aa30b927da9c830b3d25b273685d67b030ff,5f34df99b04df8334b4e713232075134cde1c35b4b7ceb9c9d17db52de67bea9
+R9,runtime,0.1.1-bench.7,26433776,19822469,c01174c0ee87177accf1dae17078246e9be0ceeb0a15be727a94b0f712dc9630,301ce577d91022548e516690a1326d1df9ed5a46bf2359545b22a9377571c555
+R10,runtime,0.1.1-bench.8,26433776,19822469,70a9d3c507bac3ded8e979d45fcd173f9a0e533953fccc3a5a767f837979549e,f625d7922986b8ea7f1120202478eb2850c288f40f886d4274efd83656467e47
+R11,runtime,0.1.1-bench.9,26433776,19822469,40f8054a56d8eeb03bf74aa0ed7d6749b7c2dce0f1564b1ec6ac02858c780a8c,ac1cecf491d802ba331f2159188f3a35589ecc42607c31236b9782372211cf9d
+R12,runtime,0.1.1-bench.10,26433776,19822469,86d79b93e822d09912ae07dcd3785ab4825296aaa0cc56280f065fcaba47eaba,395139e727727e3a51303eb3aac411e24c3baf602e677a2176a12276e2f74d9e
+H,compiled-hub,0.1.1,127743968,,1b82f44b99a6dc4c48a692819cfa54aa299dcaab6558f8912701fbcdd38ded1d,
+Z,zig-runtime,0.1.1,26182344,,ce2c17835cf6736468aef01d185e74613fec91f43835a267b68a12892fb52bc3,
+S,unstripped-gnu-runtime,0.1.1-bench.10,36120128,19820101,24ead16b32f7b246564818aac43473594838093dd9272c670bd8902bb87f3083,e8770368558c0159c7a80945d64283ab99fea66db62004c4aaade7f6165488fd
+```
+
+</details>
+
+Attribution S was retained unqualified: its `.text` SHA-256
+`e8770368558c0159c7a80945d64283ab99fea66db62004c4aaade7f6165488fd` differs from R12's
+`395139e727727e3a51303eb3aac411e24c3baf602e677a2176a12276e2f74d9e`.
+No dependency breakdown is accepted for R12 or Z. No retry replaced this outcome.
+
+The earlier v1 admission at `5e267450` retained its 1,691,503-byte, 329-package metadata payload and
+its text-limit rejection; zero build/startup samples ran, and all 26 builds, attribution and 66
+startup attempts remained unperformed in that batch. V2 uses its own label and includes all 92 build/
+startup attempts without retry, plus the unqualified attribution row. No failed sample was relabeled.
+Functional setup and fixture tests are unscored. Native Windows/macOS remain unperformed.
+
+The three-hour reservation used TERM at 10,755 s, 30 s escalation and 15 s settlement reserve.
+The 40 GiB allocation gate ran between attempts, not as a hard mid-build quota. The largest recorded
+build boundary was 2,280,787,968 bytes; setup separately used 564,727,808 bytes. Every command ended
+without error or historical poll failure and with an empty scope: 138 command receipts, 2,470 observed
+owned process identities and zero final survivors. Final source/input/tool/H/Z seals matched.
+
+<details>
+<summary>All attempts and raw numeric samples (CSV)</summary>
+
+Times are milliseconds; bytes and KiB are named explicitly. `phase=warmup` rows are retained,
+`valid=false` rows have no accepted performance values, and empty numeric fields are unavailable.
+Runtime `hello_ms` and `ready_ms` share the launch origin; hub `ready_ms` ends at HTTP health.
+
+```csv
+attempt,scenario,phase,status,valid,build_elapsed_ms,final_user_cpu_ms,final_system_cpu_ms,max_individual_rss_kib,spawn_ms,hello_ms,ready_ms,peak_sampled_tree_rss_bytes,sampled_user_cpu_ms,sampled_system_cpu_ms,observed_process_count,resource_sample_count,artifact_id,failure_code,disposition
+v1-metadata-default,admission,unscored,rejected,false,,,,,,,,,,,,,,TEXT_LINE_LIMIT,zero_build_or_startup_trials
+runtime-empty-1,runtime-empty,measured,completed,true,471520,853360.00,38340.00,2133896,,,,4619079680,849510,33340,537,20045,R0,,
+runtime-empty-2,runtime-empty,measured,completed,true,473020,854950.00,36470.00,2133488,,,,4626513920,850870,31080,546,20001,R1,,
+runtime-empty-3,runtime-empty,measured,completed,true,471980,854690.00,35950.00,2132668,,,,4614483968,850930,30630,558,19963,R2,,
+launcher-empty-1,launcher-empty,measured,completed,true,44610,69590.00,5390.00,426524,,,,1315807232,68270,4160,161,1913,L0,,
+launcher-empty-2,launcher-empty,measured,completed,true,44350,70170.00,5480.00,426548,,,,1294999552,68900,4120,160,1911,L0,,
+launcher-empty-3,launcher-empty,measured,completed,true,44740,70260.00,5210.00,426792,,,,1315934208,69000,3950,161,1920,L0,,
+runtime-noop-1,runtime-noop,measured,completed,true,380,220.00,130.00,77512,,,,79372288,210,120,1,16,R2,,
+runtime-restamp-1,runtime-restamp,measured,completed,true,234360,230430.00,3900.0,2132840,,,,2254336000,230420,3870,5,10198,R3,,
+runtime-noop-2,runtime-noop,measured,completed,true,430,280.00,100.0,77316,,,,79171584,270,100,1,18,R3,,
+runtime-restamp-2,runtime-restamp,measured,completed,true,236540,232560.00,3930.00,2131820,,,,2261032960,232540,3880,5,10283,R4,,
+runtime-noop-3,runtime-noop,measured,completed,true,410,280.00,100.0,77332,,,,79187968,280,90,1,18,R4,,
+runtime-restamp-3,runtime-restamp,measured,completed,true,235870,231780.00,4110.00,2133908,,,,2248216576,231760,4050,5,10324,R5,,
+runtime-noop-4,runtime-noop,measured,completed,true,360,210.00,110.00,77360,,,,78954496,210,100,1,15,R5,,
+runtime-restamp-4,runtime-restamp,measured,completed,true,233110,228850.00,4250.00,2133592,,,,2255548416,228820,4170,5,10172,R6,,
+runtime-noop-5,runtime-noop,measured,completed,true,390,260.00,110.00,77512,,,,79110144,260,110,1,17,R6,,
+runtime-restamp-5,runtime-restamp,measured,completed,true,233730,229680.00,4060.00,2132800,,,,2250551296,229660,4020,5,10183,R7,,
+runtime-noop-6,runtime-noop,measured,completed,true,400,250.00,110.00,77212,,,,78798848,250,100,1,18,R7,,
+runtime-restamp-6,runtime-restamp,measured,completed,true,233990,229780.00,4180.00,2133436,,,,2263916544,229750,4140,5,10178,R8,,
+runtime-noop-7,runtime-noop,measured,completed,true,380,230.00,120.00,77464,,,,79323136,230,110,1,17,R8,,
+runtime-restamp-7,runtime-restamp,measured,completed,true,233540,229650.00,3900.0,2133600,,,,2250235904,229650,3850,5,10144,R9,,
+runtime-noop-8,runtime-noop,measured,completed,true,380,240.00,110.00,77556,,,,79417344,240,100,1,17,R9,,
+runtime-restamp-8,runtime-restamp,measured,completed,true,237260,232920.00,4340.00,2133936,,,,2255400960,232920,4300,5,10292,R10,,
+runtime-noop-9,runtime-noop,measured,completed,true,390,200.0,150.00,77852,,,,79458304,200,140,1,17,R10,,
+runtime-restamp-9,runtime-restamp,measured,completed,true,238750,234640.00,4140.00,2133600,,,,2259374080,234610,4110,5,10343,R11,,
+runtime-noop-10,runtime-noop,measured,completed,true,400,210.00,150.00,77180,,,,79032320,210,140,1,18,R11,,
+runtime-restamp-10,runtime-restamp,measured,completed,true,234660,230850.00,3830.00,2134132,,,,2264276992,230800,3800,5,10208,R12,,
+v2-attribution,attribution,unscored,completed,false,,,,,,,,,,,,,S,TEXT_HASH_MISMATCH,no_accepted_dependency_breakdown
+runtime-readiness-warmup-1,runtime-readiness,warmup,success,true,,,,,6.2366009999999505,200.79503499999998,318.54725499999995,70750208,150,90,6,30,R12,,excluded_warmup
+runtime-readiness-warmup-2,runtime-readiness,warmup,success,true,,,,,1.1906999999999925,185.158632,314.75105399999995,71258112,150,90,7,31,R12,,excluded_warmup
+runtime-readiness-measured-1,runtime-readiness,measured,success,true,,,,,1.1337999999998374,193.77573299999995,327.4780559999999,70168576,170,80,7,32,R12,,accepted
+runtime-readiness-measured-2,runtime-readiness,measured,success,true,,,,,1.026700000000119,214.14763700000003,352.48836099999994,70737920,160,100,8,35,R12,,accepted
+runtime-readiness-measured-3,runtime-readiness,measured,success,true,,,,,1.0259000000000924,176.49273100000005,308.44715299999984,68075520,150,60,7,30,R12,,accepted
+runtime-readiness-measured-4,runtime-readiness,measured,success,true,,,,,1.1632010000002992,196.5708340000001,330.07255699999996,69898240,150,100,7,32,R12,,accepted
+runtime-readiness-measured-5,runtime-readiness,measured,success,true,,,,,0.8355999999998858,197.90753399999994,328.36795699999993,71102464,140,100,7,32,R12,,accepted
+runtime-readiness-measured-6,runtime-readiness,measured,success,true,,,,,1.1205999999997402,193.6984339999999,324.5070559999999,71266304,160,90,8,32,R12,,accepted
+runtime-readiness-measured-7,runtime-readiness,measured,success,true,,,,,1.540599999999813,186.84803199999988,320.8847549999996,71442432,150,80,4,31,R12,,accepted
+runtime-readiness-measured-8,runtime-readiness,measured,success,true,,,,,1.0502999999998792,184.89793199999986,315.7131549999999,69210112,160,80,6,31,R12,,accepted
+runtime-readiness-measured-9,runtime-readiness,measured,success,true,,,,,1.284099999999853,174.82352999999966,305.87655299999915,70942720,150,70,7,30,R12,,accepted
+runtime-readiness-measured-10,runtime-readiness,measured,success,true,,,,,2.488199999999779,198.91473399999995,336.64595800000006,63619072,160,90,7,32,R12,,accepted
+runtime-readiness-measured-11,runtime-readiness,measured,success,true,,,,,1.4564999999993233,179.80213099999946,306.63135299999976,69263360,140,70,7,30,R12,,accepted
+runtime-readiness-measured-12,runtime-readiness,measured,success,true,,,,,1.1925010000004477,201.9923349999999,327.7353570000005,70496256,170,80,7,32,R12,,accepted
+runtime-readiness-measured-13,runtime-readiness,measured,success,true,,,,,13.566102000000683,185.28713200000038,328.6586560000005,70410240,150,70,7,29,R12,,accepted
+runtime-readiness-measured-14,runtime-readiness,measured,success,true,,,,,1.0830009999999675,213.28773699999965,345.90736000000015,71081984,170,100,7,34,R12,,accepted
+runtime-readiness-measured-15,runtime-readiness,measured,success,true,,,,,1.453799999999319,183.55233099999987,315.6487539999998,68579328,130,110,7,31,R12,,accepted
+runtime-readiness-measured-16,runtime-readiness,measured,success,true,,,,,1.2429000000001906,176.73141399999986,317.30101100000047,68849664,100,100,7,31,R12,,accepted
+runtime-readiness-measured-17,runtime-readiness,measured,success,true,,,,,1.0574010000000271,193.95833399999992,320.76262099999985,71598080,120,120,7,32,R12,,accepted
+runtime-readiness-measured-18,runtime-readiness,measured,success,true,,,,,7.150104999999712,202.9333399999996,333.9677299999994,70479872,170,60,6,32,R12,,accepted
+runtime-readiness-measured-19,runtime-readiness,measured,success,true,,,,,1.4121010000008027,185.46872800000074,316.31451800000013,69980160,140,110,7,31,R12,,accepted
+runtime-readiness-measured-20,runtime-readiness,measured,success,true,,,,,1.0802010000006703,210.88544600000023,339.8766340000002,67747840,170,70,7,34,R12,,accepted
+hub-fresh-readiness-warmup-1,hub-fresh-readiness,warmup,success,true,,,,,,,435.044626,126464000,690,120,2,42,H+Z,,excluded_warmup
+hub-fresh-readiness-warmup-2,hub-fresh-readiness,warmup,success,true,,,,,,,421.3866260000002,115372032,660,130,2,41,H+Z,,excluded_warmup
+hub-fresh-readiness-measured-1,hub-fresh-readiness,measured,success,true,,,,,,,446.75072699999987,120004608,650,180,2,44,H+Z,,accepted
+hub-fresh-readiness-measured-2,hub-fresh-readiness,measured,success,true,,,,,,,413.75042600000006,109154304,590,160,2,39,H+Z,,accepted
+hub-fresh-readiness-measured-3,hub-fresh-readiness,measured,success,true,,,,,,,399.51852400000007,114720768,650,120,2,39,H+Z,,accepted
+hub-fresh-readiness-measured-4,hub-fresh-readiness,measured,success,true,,,,,,,430.3694220000002,119001088,650,150,2,42,H+Z,,accepted
+hub-fresh-readiness-measured-5,hub-fresh-readiness,measured,success,true,,,,,,,425.92542199999934,121442304,670,150,2,41,H+Z,,accepted
+hub-fresh-readiness-measured-6,hub-fresh-readiness,measured,success,true,,,,,,,380.52631999999994,112607232,600,160,2,36,H+Z,,accepted
+hub-fresh-readiness-measured-7,hub-fresh-readiness,measured,success,true,,,,,,,360.7423180000005,119189504,600,150,2,36,H+Z,,accepted
+hub-fresh-readiness-measured-8,hub-fresh-readiness,measured,success,true,,,,,,,430.78462300000047,117604352,600,190,2,42,H+Z,,accepted
+hub-fresh-readiness-measured-9,hub-fresh-readiness,measured,success,true,,,,,,,414.63482100000056,123932672,630,170,2,41,H+Z,,accepted
+hub-fresh-readiness-measured-10,hub-fresh-readiness,measured,success,true,,,,,,,408.3656209999999,121106432,640,130,2,40,H+Z,,accepted
+hub-fresh-readiness-measured-11,hub-fresh-readiness,measured,success,true,,,,,,,369.334519,111173632,600,130,2,36,H+Z,,accepted
+hub-fresh-readiness-measured-12,hub-fresh-readiness,measured,success,true,,,,,,,420.8633209999989,121188352,670,150,2,41,H+Z,,accepted
+hub-fresh-readiness-measured-13,hub-fresh-readiness,measured,success,true,,,,,,,404.7155210000001,116912128,610,150,2,40,H+Z,,accepted
+hub-fresh-readiness-measured-14,hub-fresh-readiness,measured,success,true,,,,,,,406.7143209999995,124825600,680,130,2,40,H+Z,,accepted
+hub-fresh-readiness-measured-15,hub-fresh-readiness,measured,success,true,,,,,,,422.18132199999854,117268480,690,100,2,42,H+Z,,accepted
+hub-fresh-readiness-measured-16,hub-fresh-readiness,measured,success,true,,,,,,,417.7075190000014,117174272,630,170,2,41,H+Z,,accepted
+hub-fresh-readiness-measured-17,hub-fresh-readiness,measured,success,true,,,,,,,437.6990189999997,113909760,570,220,2,43,H+Z,,accepted
+hub-fresh-readiness-measured-18,hub-fresh-readiness,measured,success,true,,,,,,,439.97991999999977,109154304,660,160,2,43,H+Z,,accepted
+hub-fresh-readiness-measured-19,hub-fresh-readiness,measured,success,true,,,,,,,433.507520000001,116256768,660,130,2,40,H+Z,,accepted
+hub-fresh-readiness-measured-20,hub-fresh-readiness,measured,success,true,,,,,,,423.4568199999994,107888640,620,170,1,41,H+Z,,accepted
+hub-migrated-readiness-warmup-1,hub-migrated-readiness,warmup,success,true,,,,,,,426.2574390000001,117972992,620,170,2,41,H+Z,,excluded_warmup
+hub-migrated-readiness-warmup-2,hub-migrated-readiness,warmup,success,true,,,,,,,304.897156,108498944,520,90,2,30,H+Z,,excluded_warmup
+hub-migrated-readiness-measured-1,hub-migrated-readiness,measured,success,true,,,,,,,358.86004800000023,119259136,530,170,2,35,H+Z,,accepted
+hub-migrated-readiness-measured-2,hub-migrated-readiness,measured,success,true,,,,,,,357.6220489999996,116494336,540,120,2,35,H+Z,,accepted
+hub-migrated-readiness-measured-3,hub-migrated-readiness,measured,success,true,,,,,,,319.77615400000013,116420608,540,110,2,32,H+Z,,accepted
+hub-migrated-readiness-measured-4,hub-migrated-readiness,measured,success,true,,,,,,,348.2525780000001,107347968,530,120,2,34,H+Z,,accepted
+hub-migrated-readiness-measured-5,hub-migrated-readiness,measured,success,true,,,,,,,358.03189199999997,109060096,520,130,2,35,H+Z,,accepted
+hub-migrated-readiness-measured-6,hub-migrated-readiness,measured,success,true,,,,,,,353.610592,115113984,540,150,2,34,H+Z,,accepted
+hub-migrated-readiness-measured-7,hub-migrated-readiness,measured,success,true,,,,,,,324.50789299999997,105222144,510,120,1,31,H+Z,,accepted
+hub-migrated-readiness-measured-8,hub-migrated-readiness,measured,success,true,,,,,,,347.38549200000034,121212928,560,120,2,34,H+Z,,accepted
+hub-migrated-readiness-measured-9,hub-migrated-readiness,measured,success,true,,,,,,,347.14569200000005,112766976,540,130,2,34,H+Z,,accepted
+hub-migrated-readiness-measured-10,hub-migrated-readiness,measured,success,true,,,,,,,352.5651909999997,116948992,570,130,2,35,H+Z,,accepted
+hub-migrated-readiness-measured-11,hub-migrated-readiness,measured,success,true,,,,,,,330.24599300000045,107978752,550,130,1,32,H+Z,,accepted
+hub-migrated-readiness-measured-12,hub-migrated-readiness,measured,success,true,,,,,,,343.52159199999915,117764096,490,190,2,34,H+Z,,accepted
+hub-migrated-readiness-measured-13,hub-migrated-readiness,measured,success,true,,,,,,,329.71019200000046,109215744,500,170,1,32,H+Z,,accepted
+hub-migrated-readiness-measured-14,hub-migrated-readiness,measured,success,true,,,,,,,286.3768940000009,109752320,440,170,2,28,H+Z,,accepted
+hub-migrated-readiness-measured-15,hub-migrated-readiness,measured,success,true,,,,,,,341.63469199999963,114315264,480,160,2,34,H+Z,,accepted
+hub-migrated-readiness-measured-16,hub-migrated-readiness,measured,success,true,,,,,,,365.15099100000043,119648256,590,120,2,36,H+Z,,accepted
+hub-migrated-readiness-measured-17,hub-migrated-readiness,measured,success,true,,,,,,,350.3084920000001,115691520,560,100,2,34,H+Z,,accepted
+hub-migrated-readiness-measured-18,hub-migrated-readiness,measured,success,true,,,,,,,350.09461199999896,113946624,540,140,2,34,H+Z,,accepted
+hub-migrated-readiness-measured-19,hub-migrated-readiness,measured,success,true,,,,,,,356.09021199999916,115187712,560,120,2,35,H+Z,,accepted
+hub-migrated-readiness-measured-20,hub-migrated-readiness,measured,success,true,,,,,,,353.25731199999973,111321088,470,170,2,35,H+Z,,accepted
+```
+
+</details>
