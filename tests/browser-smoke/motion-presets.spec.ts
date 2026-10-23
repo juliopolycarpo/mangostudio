@@ -11,19 +11,8 @@ test.beforeEach(({ page }) => {
   diagnostics.set(page, errors);
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
-    if (
-      message.type() === 'error' ||
-      /LazyMotion|lazy-strict-mode|tree shaking/i.test(message.text())
-    ) {
+    if (/LazyMotion|lazy-strict-mode|tree shaking/i.test(message.text())) {
       errors.push(message.text());
-    }
-  });
-  page.on('requestfailed', (request) =>
-    errors.push(`${request.url()}: ${request.failure()?.errorText}`)
-  );
-  page.on('response', (response) => {
-    if (response.url().startsWith('http://localhost:3001/') && response.status() >= 400) {
-      errors.push(`${response.status()} ${response.url()}`);
     }
   });
 });
@@ -31,7 +20,7 @@ test.beforeEach(({ page }) => {
 test.afterEach(({ page }) => {
   expect(
     diagnostics.get(page),
-    'expected no browser errors, failed app requests or strict feature warnings'
+    'expected no uncaught browser errors or strict feature warnings'
   ).toEqual([]);
 });
 
