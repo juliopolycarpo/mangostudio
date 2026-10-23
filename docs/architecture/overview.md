@@ -67,7 +67,7 @@ modules/<domain>/
 | `messages`          | A/D/H/I | Message persistence, gallery queries                            |
 | `generation`        | A/D/H/I | Streaming text turns, image generation, model resolution        |
 | `connectors`        | A/D/H/I | API key management, model enable/disable, secret persistence    |
-| `app-settings`      | A/H/I   | Global user settings (theme, language, generation defaults)     |
+| `app-settings`      | A/H/I   | Global user settings (generation defaults, prompts, context)    |
 | `provider-settings` | A/H/I   | Per-provider runtime configuration (caching, reasoning, tokens) |
 | `tool-settings`     | A/H/I   | Per-tool enable/disable and parameter overrides                 |
 | `prompt-rules`      | A/H     | System prompt composition, rule file resolution                 |

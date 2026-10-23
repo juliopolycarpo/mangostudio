@@ -4,26 +4,28 @@ O MangoStudio tem três camadas independentes de settings, cada uma com sua pró
 
 ## Taxonomia De Settings
 
-| Camada                | O que controla                                                      | Tabela de persistência   | Escopo                       |
-| --------------------- | ------------------------------------------------------------------- | ------------------------ | ---------------------------- |
-| **App Settings**      | Tema, idioma, defaults de geração, configuração de prompt, contexto | `user_app_settings`      | Um blob por usuário          |
-| **Provider Settings** | Configuração de runtime por provedor                                | `user_provider_settings` | Um blob por usuário+provedor |
-| **Tool Settings**     | Enable/disable de tools e overrides de parâmetros                   | `user_tool_settings`     | Uma linha por usuário+tool   |
+| Camada                | O que controla                                        | Tabela de persistência   | Escopo                       |
+| --------------------- | ----------------------------------------------------- | ------------------------ | ---------------------------- |
+| **App Settings**      | Defaults de geração, configuração de prompt, contexto | `user_app_settings`      | Um blob por usuário          |
+| **Provider Settings** | Configuração de runtime por provedor                  | `user_provider_settings` | Um blob por usuário+provedor |
+| **Tool Settings**     | Enable/disable de tools e overrides de parâmetros     | `user_tool_settings`     | Uma linha por usuário+tool   |
 
 ## App Settings
 
 Controlam preferências globais que valem para todos os provedores e tools.
 
-**Campos armazenados:**
+**Seleção de campos armazenados** (contrato completo em [`AppSettingsSchema`](../../../apps/shared/src/app-settings/schemas.ts), com [defaults](../../../apps/shared/src/app-settings/defaults.ts)):
 
 | Campo                | Tipo                              | Padrão                    |
 | -------------------- | --------------------------------- | ------------------------- |
 | `promptSettings`     | `PromptSettings`                  | Prompts padrão do sistema |
 | `globalImageQuality` | `'512px' \| '1K' \| '2K' \| '4K'` | `'1K'`                    |
-| `thinkingEnabled`    | `boolean`                         | `true`                    |
+| `thinkingEnabled`    | `boolean`                         | `false`                   |
 | `reasoningEffort`    | `ReasoningEffort`                 | `'medium'`                |
 | `maxToolIterations`  | `number` (1–1000)                 | `1000`                    |
 | `contextSettings`    | `ContextSettings`                 | Defaults de compactação   |
+
+Tema e idioma são preferências do frontend em `localStorage`, controladas por `apps/frontend/src/hooks/use-theme.tsx` e `use-i18n.tsx`. Não fazem parte de `AppSettings`. Outros grupos persistidos incluem multiagente, título de chat, workspace, Git, exibição de chat, API externa, agentes externos e perfis; consulte seus formatos no schema.
 
 **API:**
 
@@ -46,8 +48,8 @@ então sua resposta nunca é provisória e uma escrita nunca grava o placeholder
 servidor sobrepõe o que chega ao registro que já tem e depois normaliza. Duas
 consequências, e ambas são o objetivo: um cliente sobrevive a todo campo que o
 schema ganhar depois, em vez de ser recusado por omitir um que nunca conheceu, e
-duas telas editando configurações diferentes param de sobrescrever uma à outra
-porque nenhuma carrega o campo da outra.
+clientes evitam enviar campos não relacionados. Esse formato não garante
+atomicidade de operações concorrentes de leitura/mesclagem/escrita.
 
 A regra, por inteiro:
 
@@ -85,9 +87,7 @@ Controlam prompts de sistema e configuração de arquivos de regra:
 
 Controlam o comportamento da janela de contexto:
 
-- `compactionEnabled` / `summarizationEnabled` — habilitam ou desabilitam recursos de compactação
-- `compactionThreshold` — percentual a partir do qual a compactação é oferecida; o padrão é 85
-- `compactionSummaryModelId` — modelo usado para sumarização
+Consulte [Configurações de contexto](../architecture/context-compaction.md#configurações-de-contexto-configuráveis-pelo-usuário) para os campos e defaults atuais.
 
 ## Provider Settings
 
@@ -105,27 +105,23 @@ PUT  /api/settings/providers/:provider    → Atualiza provider settings
 
 Cada tipo de provedor tem uma policy hardcoded em `provider-settings-policy.ts`:
 
-| Provedor          | Thinking | Prompt caching | Tools           | Structured output |
-| ----------------- | -------- | -------------- | --------------- | ----------------- |
-| Gemini            | Sim      | Não            | Sim             | Limitado          |
-| OpenAI            | Sim      | Não            | Sim             | Sim               |
-| OpenAI-compatible | Depende  | Depende        | Sim             | Depende           |
-| Anthropic         | Sim      | Sim            | Sim             | Não               |
-| DeepSeek          | Sim      | Sim            | Sim (apenas v4) | Não               |
+As flags descrevem suporte configurável no MangoStudio, não todo o comportamento do fornecedor. Cursor está descontinuado e mantido apenas para settings existentes; execução e nova configuração estão bloqueadas.
+
+| Provedor               | Toggle de thinking | Prompt caching | Tools | Structured output |
+| ---------------------- | ------------------ | -------------- | ----- | ----------------- |
+| Gemini                 | Sim                | Sim            | Sim   | Sim               |
+| OpenAI                 | Sim                | Sim            | Sim   | Sim               |
+| OpenAI-compatible      | Não                | Não            | Sim   | Sim               |
+| Anthropic              | Sim                | Sim            | Sim   | Não               |
+| DeepSeek               | Sim                | Não            | Sim   | Não               |
+| Cursor (descontinuado) | Sim                | Não            | Sim   | Não               |
+| ChatGPT                | Sim                | Não            | Sim   | Não               |
 
 Os settings são normalizados contra a policy do provedor em toda leitura e escrita. Por exemplo, Anthropic sempre retorna `structuredOutputSupported: false` independentemente do dado salvo.
 
 ### Shape Das Runtime Settings
 
-```typescript
-interface ProviderRuntimeSettings {
-  thinkingEnabled?: boolean;
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  maxOutputTokens?: number;
-  maxToolIterations?: number;
-  promptCachePreference?: 'auto' | 'enabled' | 'disabled';
-}
-```
+Use `ProviderRuntimeSettings`, derivado do schema em `@mangostudio/shared/provider-settings`; o [schema canônico](../../../apps/shared/src/provider-settings/schemas.ts) inclui `provider` obrigatório e `thinkingEnabled`, `reasoningEffort`, `maxOutputTokens`, `maxToolIterations`, `providerCompactionEnabled`, `promptCachePreference` (`auto` / `stable-prefix` / `off`) e `parallelToolCallsEnabled` opcionais.
 
 ## Tool Settings
 

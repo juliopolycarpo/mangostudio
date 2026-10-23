@@ -47,7 +47,7 @@ modules/<domain>/
 | `messages`          | A/D/H/I | Persistência de mensagens, consultas da galeria                                    |
 | `generation`        | A/D/H/I | Streaming de turnos de texto, geração de imagem, resolução de modelo               |
 | `connectors`        | A/D/H/I | Gerenciamento de chaves de API, enable/disable de modelos, persistência de secrets |
-| `app-settings`      | A/H/I   | Configurações globais do usuário (tema, idioma, defaults de geração)               |
+| `app-settings`      | A/H/I   | Configurações globais do usuário (defaults de geração, prompts, contexto)          |
 | `provider-settings` | A/H/I   | Configuração de runtime por provedor (cache, reasoning, tokens)                    |
 | `tool-settings`     | A/H/I   | Enable/disable de tools e overrides de parâmetros                                  |
 | `prompt-rules`      | A/H     | Composição de prompts de sistema e resolução de arquivos de regra                  |
