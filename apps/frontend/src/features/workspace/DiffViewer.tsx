@@ -70,9 +70,14 @@ export function DiffViewer({
     let active = true;
     setHighlightReady(false);
     if (!language) return;
-    void preloadCodeLanguages([language]).then(() => {
-      if (active) setHighlightReady(true);
-    });
+    void preloadCodeLanguages([language]).then(
+      () => {
+        if (active) setHighlightReady(true);
+      },
+      () => {
+        // Plain source and line chrome remain usable after a failed language load.
+      }
+    );
     return () => {
       active = false;
     };
