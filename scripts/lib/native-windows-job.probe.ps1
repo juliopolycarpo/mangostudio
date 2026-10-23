@@ -4,7 +4,7 @@ Exercises native Job ownership and failure evidence on a disposable Windows host
 .EXAMPLE
 pwsh -NoProfile -File scripts/lib/native-windows-job.probe.ps1 -OutDirectory C:\evidence\native-probes -BunPath C:\tools\bun.exe
 #>
-param([Parameter(Mandatory=$true)][string]$OutDirectory, [Parameter(Mandatory=$true)][string]$BunPath)
+param([Parameter(Mandatory=$true)][string]$OutDirectory, [Parameter(Mandatory=$true)][string]$BunPath, [switch]$ProcessListOnly)
 
 $ErrorActionPreference = 'Stop'
 $OutDirectory = [IO.Path]::GetFullPath($OutDirectory)
@@ -31,6 +31,7 @@ Persists each bounded probe outcome without hiding later tests behind an earlier
 Invoke-NativeProbe 'late orphan is owned' { Assert-NativeProbe $true 'owned' }
 #>
 function Invoke-NativeProbe([string]$Name, [scriptblock]$Body) {
+    if ($ProcessListOnly -and -not $Name.StartsWith('process list ', [StringComparison]::Ordinal)) { return }
     $result = [ordered]@{ name = $Name; passed = $false; at = [DateTime]::UtcNow.ToString('o'); evidence = $null; error = $null }
     try { $result.evidence = & $Body; $result.passed = $true } catch { $result.error = $_.Exception.ToString() }
     $results.Add([pscustomobject]$result)
@@ -389,7 +390,61 @@ namespace Mango.NativeImageCallerFakes {
         private Member Attest(IntPtr token,uint pid,string expected,ImageQueryBudget budget,string image=null) { return Processes[token].Resolve(budget,Diagnostics,expected,image); }
         public Snapshot Run() { Win32.Fixture=this; return Query(); }
 '@
-    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $fakeCode + "`n" + $callerCode + $queryMethod + "`n    }`n}" + "`n" + $imageCallerCode + $imageMethods + "`n    }`n}")
+    $processListStart = $script:NativeWindowsJobCode.IndexOf('        private uint[] ProcessList(', [StringComparison]::Ordinal)
+    $processListEnd = $script:NativeWindowsJobCode.IndexOf('        private void ReleaseExited(', $processListStart, [StringComparison]::Ordinal)
+    if ($processListStart -lt 0 -or $processListEnd -le $processListStart) { throw 'Invalid process-list source boundaries; expected exact production ProcessList method for named native API fakes' }
+    $processListMethod = $script:NativeWindowsJobCode.Substring($processListStart, $processListEnd - $processListStart)
+    $processListCallerCode = @'
+namespace Mango.NativeProcessListFakes {
+    using System;
+    using System.Collections.Generic;
+    using System.ComponentModel;
+    using System.Runtime.InteropServices;
+    using System.Threading;
+    using Mango.NativeJobProbe;
+    public sealed class NativeListResponse {
+        public bool Success=true, InvalidPid;
+        public int Error;
+        public uint Assigned,Count,Returned=8;
+    }
+    internal sealed class HeldProcess { internal IntPtr Handle; internal Member Member; }
+    internal static class Win32 {
+        internal const uint QueryProcess=0x1000,Synchronize=0x100000;
+        internal struct Accounting { internal uint Active,Total; }
+        internal static QueryFixture Fixture;
+        [DllImport("kernel32.dll",SetLastError=true)] private static extern void SetLastError(uint error);
+        internal static bool QueryInformationJobObject(IntPtr job,int kind,IntPtr data,uint bytes,out uint returned) {
+            if(Fixture.Responses.Count==0) throw new InvalidOperationException("Unexpected named native query; expected one configured header response");
+            NativeListResponse row=Fixture.Responses.Dequeue(); Fixture.Events.Add("native-list:"+((bytes-8)/IntPtr.Size));
+            Marshal.WriteInt32(data,0,unchecked((int)row.Assigned)); Marshal.WriteInt32(data,4,unchecked((int)row.Count));
+            for(int i=0;i<Math.Min(row.Count,(bytes-8)/IntPtr.Size);i++) Marshal.WriteIntPtr(data,8+i*IntPtr.Size,row.InvalidPid?IntPtr.Zero:new IntPtr(42+i));
+            returned=row.Returned; SetLastError(unchecked((uint)row.Error)); return row.Success;
+        }
+        internal static IntPtr OpenProcess(uint access,bool inherit,uint pid) { throw new InvalidOperationException("Unexpected named fake member open "+pid+"; expected only a final complete empty list"); }
+        internal static void Close(ref IntPtr handle) { handle=IntPtr.Zero; }
+    }
+    public sealed class QueryFixture {
+        private IntPtr job=new IntPtr(1);
+        private readonly Dictionary<string,HeldProcess> held=new Dictionary<string,HeldProcess>();
+        public readonly Queue<NativeListResponse> Responses=new Queue<NativeListResponse>();
+        public readonly Queue<uint> Counts=new Queue<uint>();
+        public readonly List<string> Events=new List<string>();
+        public NativeQueryTrace LastTrace;
+        private ImageQueryBudget NewImageBudget() { var budget=new ImageQueryBudget(2000,()=>0); LastTrace=budget.Trace; return budget; }
+        private bool Alive(IntPtr handle,ImageQueryBudget budget=null) { throw new InvalidOperationException("Unexpected named fake handle read; expected no retained members"); }
+        private void ReleaseExited(ImageQueryBudget budget=null) { Events.Add("release-exited"); }
+        private Win32.Accounting Accounting(ImageQueryBudget budget=null) { Events.Add("complete-accounting"); return new Win32.Accounting {Active=Counts.Count>0?Counts.Dequeue():0,Total=5586}; }
+        private static uint[] DecodeProcessList(IntPtr data,int bytes,uint returned) { return JobProcess.DecodeProcessList(data,bytes,returned); }
+        private Member ReadState(IntPtr handle,uint pid,string identity,ImageQueryBudget budget=null) { throw new InvalidOperationException("Unexpected named fake state read; expected no accepted partial PID list"); }
+        private Member Attest(IntPtr handle,uint pid,string identity,ImageQueryBudget budget,string image=null) { throw new InvalidOperationException("Unexpected named fake attestation; expected no accepted partial PID list"); }
+        /// <summary>Execute the exact production outer query against configured native headers.</summary>
+        /// <example>Snapshot snapshot=fixture.Run();</example>
+        public Snapshot Run() { Win32.Fixture=this; return Query(); }
+        /// <summary>Execute exact production buffer acquisition without accepting a membership snapshot.</summary>
+        /// <example>uint[] pids=fixture.RunList();</example>
+        public uint[] RunList() { Win32.Fixture=this; int bytes; return ProcessList(out bytes,NewImageBudget()); }
+'@
+    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $fakeCode + "`n" + $callerCode + $queryMethod + "`n    }`n}" + "`n" + $imageCallerCode + $imageMethods + "`n    }`n}" + "`n" + $processListCallerCode + $processListMethod + $queryMethod + "`n    }`n}")
 }
 
 try {
@@ -882,6 +937,51 @@ $startedChild.Dispose()
         }
         return @{ cases = @($cases); exactProductionQueryExtracted = $true; nativeAPIInvocations = 0 }
     }
+    Invoke-NativeProbe 'process list churn refreshes complete accounting without fictitious buffer pressure' {
+        $fixture = [Mango.NativeProcessListFakes.QueryFixture]::new()
+        foreach ($attempt in 1..9) {
+            $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Success=$true; Assigned=29; Count=28; Returned=240 })
+            $fixture.Counts.Enqueue(29)
+        }
+        $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Assigned=0; Count=0; Returned=8 })
+        $fixture.Counts.Enqueue(0); $fixture.Counts.Enqueue(0)
+        $snapshot=$null; $failure=$null
+        try { $snapshot=$fixture.Run() } catch { $failure=$_.Exception.ToString() }
+        Assert-NativeProbe (-not $failure -and $snapshot.Empty -and $snapshot.Stable -and $snapshot.Assigned -eq 0 -and $snapshot.ActiveBefore -eq 0 -and $snapshot.ActiveAfter -eq 0 -and $snapshot.Races -eq 9) "Invalid repeated native 29/28 churn: $failure; expected fresh complete empty accounting after 9 bounded outer refreshes"
+        $rows=@($fixture.LastTrace.ProcessListAttempts)
+        Assert-NativeProbe ($rows.Count -eq 10 -and @($rows | Where-Object { $_.Capacity -ne 32 }).Count -eq 0 -and @($fixture.Events | Where-Object { $_ -eq 'release-exited' }).Count -eq 10 -and @($fixture.Events | Where-Object { $_ -eq 'complete-accounting' }).Count -eq 11) 'within-capacity churn must release exited handles and refresh accounting; no partial list or needless buffer growth is accepted'
+        return @{ snapshot=$snapshot; headers=$rows; events=@($fixture.Events); exactProductionMethods=$true; nativeProcessListAPIInvocations=0 }
+    }
+    Invoke-NativeProbe 'process list true shortage grows while successful last-error is ignored' {
+        $fixture=[Mango.NativeProcessListFakes.QueryFixture]::new()
+        $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Success=$false; Error=234; Assigned=41; Count=32; Returned=336 })
+        $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Success=$true; Error=234; Assigned=41; Count=41; Returned=336 })
+        $pids=$fixture.RunList(); $rows=@($fixture.LastTrace.ProcessListAttempts)
+        Assert-NativeProbe ($pids.Count -eq 41 -and $rows.Count -eq 2 -and $rows[0].Capacity -eq 32 -and $rows[0].NativeError -eq 234 -and $rows[1].Capacity -eq 64 -and $rows[1].NativeError -eq 0 -and $rows[1].Success) 'actual 41-ID shortage needs 64 slots; stale last-error 234 cannot turn a successful complete call into growth'
+        return @{ count=$pids.Count; headers=$rows; exactProductionMethods=$true; nativeProcessListAPIInvocations=0 }
+    }
+    Invoke-NativeProbe 'process list permanent churn and invalid native results never qualify empty' {
+        $results=[Collections.Generic.List[object]]::new()
+        foreach($case in @('persistent-churn','over-capacity','short-header','short-buffer','invalid-pid','native-error')) {
+            $fixture=[Mango.NativeProcessListFakes.QueryFixture]::new()
+            switch($case) {
+                'persistent-churn' { foreach($attempt in 1..12) { $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Assigned=29; Count=28; Returned=240 }) }; $expected='Unstable member identity after12 refreshes' }
+                'over-capacity' { $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Success=$false; Error=234; Assigned=8193; Count=32; Returned=65552 }); $expected='Invalid job PID capacity 8193' }
+                'short-header' { $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Assigned=0; Count=0; Returned=0 }); $expected='Invalid process list length' }
+                'short-buffer' { $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Assigned=29; Count=28; Returned=8 }); $expected='Invalid incomplete process list' }
+                'invalid-pid' { $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Assigned=1; Count=1; Returned=16; InvalidPid=$true }); $expected='Invalid job PID 0' }
+                'native-error' { $fixture.Responses.Enqueue([Mango.NativeProcessListFakes.NativeListResponse]@{ Success=$false; Error=5 }); $expected='QueryInformationJobObject' }
+            }
+            $snapshot=$null; $failure=$null
+            try { $snapshot=$fixture.Run() } catch { $failure=$_.Exception.ToString() }
+            Assert-NativeProbe (-not $snapshot -and $failure.Contains($expected)) "Invalid $case result: $failure; expected refusal naming $expected without an empty snapshot"
+            Assert-NativeProbe (@($fixture.LastTrace.ProcessListAttempts).Count -gt 0) 'native headers must remain in diagnostics even on refusal'
+            if($case -eq 'native-error' -or $case -eq 'short-header') { Assert-NativeProbe ($null -eq $fixture.LastTrace.ProcessListAttempts[0].Assigned -and $null -eq $fixture.LastTrace.ProcessListAttempts[0].Count) 'unavailable native headers must remain null instead of reading uninitialized memory' }
+            $results.Add(@{ name=$case; error=$failure; headers=@($fixture.LastTrace.ProcessListAttempts) })
+        }
+        return @{ cases=@($results); exactProductionMethods=$true; nativeProcessListAPIInvocations=0 }
+    }
+
     Invoke-NativeProbe 'native query error and short process lists never report empty' {
         $child = [Mango.NativeJobProbe.JobProcess]::new($BunPath, [string[]]@('bun', '-e', 'await Bun.sleep(60000)'), $OutDirectory, $environment, (Join-Path $OutDirectory 'query-error-logs'))
         $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal(32)
