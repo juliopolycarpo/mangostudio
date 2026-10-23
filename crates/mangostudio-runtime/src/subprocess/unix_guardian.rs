@@ -1119,6 +1119,21 @@ unsafe fn find_own_children(
     out: &mut [libc::pid_t],
     deadline: &libc::timespec,
 ) -> Option<usize> {
+    // The progress-aware budget seam makes expiry after a confirmed batch deterministic in
+    // tests. Static dispatch keeps the post-fork production path allocation-free.
+    unsafe {
+        find_own_children_with_budget(watchdog, out, |_| {
+            monotonic_now().is_none_or(|now| now.tv_sec >= deadline.tv_sec)
+        })
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+unsafe fn find_own_children_with_budget(
+    watchdog: libc::pid_t,
+    out: &mut [libc::pid_t],
+    mut expired: impl FnMut(usize) -> bool,
+) -> Option<usize> {
     let directory = unsafe {
         libc::open(
             c"/proc".as_ptr(),
@@ -1131,9 +1146,11 @@ unsafe fn find_own_children(
     let mut count = 0;
     let mut buffer = [0_u8; 8192];
     loop {
-        if unsafe { monotonic_now() }.is_none_or(|now| now.tv_sec >= deadline.tv_sec) {
+        if expired(count) {
             unsafe { libc::close(directory) };
-            return None;
+            // Stop scanning, but retain authority already confirmed in this batch. The
+            // caller signals these children before its separately budgeted reap loop.
+            return (count > 0).then_some(count);
         }
         let size = unsafe {
             libc::syscall(
@@ -2343,6 +2360,37 @@ mod tests {
         assert!(
             !owned.contains(&unsafe { libc::getpid() }),
             "the guardian cannot list itself"
+        );
+    }
+
+    /// Models a deadline that expires after the scanner has confirmed one batch of children.
+    #[cfg(target_os = "linux")]
+    struct ExpireAfterProgress;
+
+    #[cfg(target_os = "linux")]
+    impl ExpireAfterProgress {
+        fn expired(&self, confirmed: usize) -> bool {
+            confirmed > 0
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn procfs_fallback_keeps_confirmed_children_when_its_budget_expires() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("child starts");
+        let mut out = [0; 512];
+        let budget = ExpireAfterProgress;
+        let found = unsafe {
+            super::find_own_children_with_budget(0, &mut out, |count| budget.expired(count))
+        };
+        let _ = child.kill();
+        child.wait().expect("child reaped");
+        assert!(
+            found.is_some_and(|count| count > 0),
+            "expected confirmed children to survive budget expiry | received {found:?}"
         );
     }
 
