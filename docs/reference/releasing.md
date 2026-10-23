@@ -147,13 +147,16 @@ the two questions — *how is this release labelled* and *what does
 Install a pre-release explicitly:
 
 ```bash
-# The binary installer resolves /releases/latest only when no version is given.
-curl -fsSL https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh \
-  | bash -s -- --version 0.2.0-rc.1
 npm install -g mangostudio@next
 docker pull ghcr.io/juliopolycarpo/mangostudio:0.2.0-rc.1
 cargo install mangostudio --version 0.2.0-rc.1
 ```
+
+For a standalone install, download the selected published pre-release's platform
+archive and `SHA256SUMS`, then follow the
+[manual deployment guide](../operations/deployment.md#manual-binary-deploy) with
+that version and platform. Do not fetch its installer from `/releases/latest`:
+the latest stable `v0.1.1` has no installer-script assets (checked 2026-10-22).
 
 `brew` and `scoop` have no pre-release form, by the same constraint that skips
 their jobs above.
@@ -398,12 +401,15 @@ installing from the **frozen rolling tag**, where the asset behind a name is
 whatever the last run put there. A per-commit release cannot move, so that check
 does not run for one.
 
-Install scripts are release assets on both channels, copied verbatim into
-`release-assets/` and listed in `SHA256SUMS` alongside the archives they
-install. The canonical URLs are
-`https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh`
-and `.../install.ps1`; both download the platform archives above and verify
-them against `SHA256SUMS`. The hub binary also embeds the same bytes
+Current release automation copies installer scripts into `release-assets/` and lists
+them in `SHA256SUMS` alongside the archives. This is a workflow contract, not proof
+that an older release contains them: on 2026-10-22, latest stable `v0.1.1` has no
+`install.sh` or `install.ps1`, so its `releases/latest/download/install.*` URLs fail.
+Use the verified package channel or manual archives in the README until a release
+actually publishes a compatible script/archive pairing. Website mirrors need that
+functional qualification too; HTTP success alone is insufficient.
+
+The hub binary also embeds the same bytes
 (`apps/api/src/modules/updates/infrastructure/embedded-installers.ts`) and runs
 them locally for `--use`, `--prune`, and `--uninstall`.
 
@@ -664,13 +670,9 @@ Caveats:
   Docker users who need between-tag builds should switch to the npm canary
   (`npm install -g mangostudio@canary`) or download the GitHub pre-release
   archives. Tagged releases still publish the full Docker image set.
-- The workflow no longer publishes crates.io canaries. The currently published
-  `<root>-canary` launcher keeps working because it points at the frozen
-  `v<root>-canary` pre-release published before 2026-09-16 — immutable releases
-  mean those assets can never be replaced, so the launcher's URL keeps
-  resolving even though the release itself never publishes again. A future
-  root-version bump will not get a new `<root>-canary` crate unless Cargo
-  canary publishing is intentionally reintroduced.
+- The workflow no longer publishes crates.io canaries. See the
+  [historical Cargo canary receipt](#historical-cargo-canary-receipt); it does not
+  establish current latest-canary resolution.
 - Canary-like `v<version>-canary.<sha7>` tags remain excluded from the tag release
   trigger (`!v*-canary*`) as a guard for legacy or manual per-SHA tags.
 
@@ -969,7 +971,8 @@ One-time setup (already done; documented for future projects):
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
 GitHub release archive matching the crate version and target. binstall extracts
 only the `mangostudio` binary, so a binstall install has no execution host
-beside it and cannot start stdio environments; use the shell installer or
+beside it and cannot start stdio environments; extract the entire archive
+[manually](../operations/deployment.md#manual-binary-deploy) or use
 `cargo install` (below) for a complete install.
 
 The binstall binary does not use the launcher
@@ -989,10 +992,12 @@ Design notes:
   (`linux-x64`, `darwin-arm64`, `windows-x64`, and so on). The archives have a
   flat root, identical on every platform: `mangostudio` (or `mangostudio.exe`),
   `mangostudio-runtime`, and `README.md`. binstall installs only the first of
-  those, which is why `cargo install`/the shell installer remain the paths that
-  deliver a complete install.
+  those; manual extraction of the entire archive and `cargo install` deliver
+  both binaries.
 - musl is detected at compile time (`target_env = "musl"`); Alpine users should
-  prefer the shell installer, which detects musl at runtime.
+  manually extract the matching `linux-x64-musl` or `linux-arm64-musl` archive
+  and install `libstdc++` (`apk add libstdc++`), or compile the launcher with a
+  musl toolchain. Stable `v0.1.1` has no installer-script assets.
 - The root Rust CI lane (`.github/workflows/cargo-shim.yml`) triggers on every
   PR to either protected target, but a cheap `changes` job skips the toolchain
   when no Rust path changed. It builds and tests the locked workspace on Linux,
@@ -1003,11 +1008,18 @@ Design notes:
   re-checks between retries, so workflow re-runs converge instead of failing on
   "version already exists".
 - The [Canary channel](#canary-channel) no longer publishes crates.io canaries.
-  Existing installs of the current `<root>-canary` launcher continue to track
-  the frozen `v<root>-canary` GitHub pre-release published before 2026-09-16 —
-  immutable releases mean that release's assets can never be replaced, so the
-  launcher keeps resolving under the same names even though nothing
-  republishes it.
+  See the [historical Cargo canary receipt](#historical-cargo-canary-receipt).
+
+### Historical Cargo canary receipt
+
+The pre-2026-09-16 publication record named a manually published `<root>-canary`
+launcher and a frozen `v<root>-canary` GitHub pre-release. This is historical
+evidence of that versioned pairing, not a promise that a current root version
+has a canary crate or that a launcher resolves the newest canary. The launcher
+constructs a release URL from its own exact crate version and makes three total
+download attempts (two retries); `*-canary` launchers refresh that versioned
+install on every run. Recheck the registry and matching assets before using an
+old pairing today.
 
 ## Prerequisites
 

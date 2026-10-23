@@ -17,17 +17,21 @@ verifies it against the release `SHA256SUMS`, and unpacks it into
 Every later run execs the real binary directly with your arguments and
 environment untouched, except for two markers — `MANGOSTUDIO_LAUNCHER` and
 `MANGOSTUDIO_LAUNCHER_PATH` — that let the binary tell a cargo install apart
-from any other. Canary launcher versions (`*-canary`) re-download and re-verify
-that versioned install on every run. `canary.yml` publishes no crate, so the
-only `*-canary` launcher on crates.io is the one published by hand; it resolves
-the frozen `v<root>-canary` GitHub pre-release from before 2026-09-16, whose
-assets are immutable, so the per-run refresh finds the same bytes every time.
+from any other. Canary launcher versions (`*-canary`) re-download and re-verify that versioned
+install on every run. This resolves the launcher’s exact version, not the newest
+canary release. See the [historical Cargo canary receipt](../../docs/reference/releasing.md#historical-cargo-canary-receipt)
+for the pre-2026-09-16 publication record.
 
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
 matching GitHub release archive instead of building the launcher. The installed
 binary is pinned to that crate version and does not use the launcher cache, but
 it reports the same `mangostudio --version`. Installing a prebuilt archive does not need a local
 Rust compiler. If binstall falls back to compiling the launcher, it requires Rust 1.99.0 or newer.
+
+For current two-binary releases, binstall extracts only the hub and omits
+`mangostudio-runtime`, so stdio environments cannot start. Use `cargo install`
+or [extract the entire archive manually](../../docs/operations/deployment.md#manual-binary-deploy)
+to install both binaries together.
 
 ## Environment overrides
 
@@ -38,10 +42,13 @@ Rust compiler. If binstall falls back to compiling the launcher, it requires Rus
 
 ## Notes
 
-- Downloads retry 3 times with backoff and never run an archive that fails checksum verification.
+- Downloads make three total attempts (two retries) with backoff and never run an archive that fails checksum verification.
 - musl is detected at **compile** time (`target_env = "musl"`). A glibc-built launcher on Alpine
-  picks the glibc archive; Alpine users should prefer the shell installer (runtime musl detection)
-  or build this crate with a musl toolchain.
+  picks the glibc archive. On Alpine, manually extract the matching `linux-x64-musl` or
+  `linux-arm64-musl` release archive and install `libstdc++` (`apk add libstdc++`), or build
+  this crate with a musl toolchain. See the
+  [manual deployment guide](../../docs/operations/deployment.md#manual-binary-deploy);
+  stable `v0.1.1` has no installer-script assets.
 - `cargo binstall` uses the release archive for the matching platform and
   extracts `mangostudio` (or `mangostudio.exe`) directly. If no matching release
   archive exists, binstall can still fall back to compiling this launcher.

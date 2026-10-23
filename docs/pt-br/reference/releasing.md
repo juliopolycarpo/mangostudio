@@ -127,20 +127,22 @@ renomeie sem atualizar todos os templates e instaladores na mesma release.
 | `mangostudio-<version>-frontend-dist.tar.gz` | Bundle do frontend apenas          |
 | `SHA256SUMS`                                 | Checksums de todos os assets acima |
 
-Cada arquivo de plataforma tem **raiz plana**: `mangostudio` (ou
-`mangostudio.exe`) e `README.md` — sem diretório de plataforma aninhado. O
-binário embarca a UI do frontend; nenhum diretório de assets vizinho é
-necessário em tempo de execução.
+Cada arquivo de plataforma atual tem **raiz plana**: `mangostudio` (ou
+`mangostudio.exe`), `mangostudio-runtime` (ou `mangostudio-runtime.exe`) e
+`README.md` — sem diretório de plataforma aninhado. Mantenha os dois binários
+juntos para que o hub possa iniciar ambientes stdio. O binário do hub embarca a
+UI do frontend; nenhum diretório de assets vizinho é necessário em tempo de execução.
 
-Os scripts de instalação são assets de release nos dois canais, copiados sem
-alteração de `scripts/install/` para `release-assets/` e listados em
-`SHA256SUMS` ao lado dos arquivos que instalam. As URLs canônicas são
-`https://github.com/juliopolycarpo/mangostudio/releases/latest/download/install.sh`
-e `.../install.ps1`; ambos baixam os arquivos de plataforma acima e os verificam
-contra `SHA256SUMS`. O binário do hub embute os mesmos bytes e os executa
-localmente em `mangostudio upgrade` (`--local`, `--use`, `--prune`,
-`--uninstall`); o dry-run compara `mangostudio __installer sh` com o arquivo do
-repositório para que os dois não divirjam.
+A automação atual copia os scripts de instalação de `scripts/install/` para
+`release-assets/` e os lista em `SHA256SUMS` ao lado dos arquivos que instalam.
+Isso não prova sua presença em releases antigas: em 2026-10-22, a estável mais
+recente `v0.1.1` não contém `install.sh` nem `install.ps1`. Use os pacotes ou
+arquivos manuais do README; veja a
+[disponibilidade dos scripts instaladores](#disponibilidade-dos-scripts-instaladores).
+O código atual do hub embute os mesmos bytes e os executa localmente em
+`mangostudio upgrade` (`--local`, `--use`, `--prune`, `--uninstall`); o dry-run
+compara `mangostudio __installer sh` com o arquivo do repositório para que os
+dois não divirjam.
 
 ### Como o binário do runtime é construído
 
@@ -268,14 +270,9 @@ Ressalvas:
   atualizados. As tags GHCR canary existentes permanecem no registry até serem
   limpas manualmente. Releases por tag ainda publicam o conjunto completo de
   imagens Docker.
-- O workflow não publica mais canaries no crates.io. O launcher `<root>-canary`
-  atualmente publicado continua funcionando porque aponta para a pre-release
-  `v<root>-canary` congelada — releases imutáveis significam que os assets
-  dela nunca podem ser substituídos, então a URL do launcher continua
-  resolvendo mesmo que essa release nunca mais seja republicada. Nenhum crate
-  canary novo é publicado, e um bump futuro de versão raiz não ganha um
-  `<root>-canary` a menos que o publish canary no crates.io seja
-  reintroduzido de propósito.
+- O workflow não publica mais canaries no crates.io. Veja o
+  [registro histórico de canary Cargo](#registro-histórico-de-canary-cargo); ele
+  não prova resolução do canary mais recente hoje.
 - Tags `v<version>-canary.<sha7>` continuam excluídas do trigger de release
   (`!v*-canary*`) como guarda para tags antigas ou manuais.
 
@@ -335,3 +332,23 @@ O workflow executa 14 jobs: `prepare`, `build`, `verify-build`, `github-release`
 `release-summary`. Veja a
 [versão em inglês](../../reference/releasing.md#cutting-a-release) para a tabela
 completa de jobs e detalhes por canal (npm, Docker, Homebrew, Scoop, crates.io).
+
+### Registro histórico de canary Cargo
+
+O registro de publicação anterior a 2026-09-16 descrevia um launcher
+`<root>-canary` publicado manualmente e uma pre-release GitHub `v<root>-canary`
+congelada. É evidência histórica desse par versionado, não uma promessa de que
+uma versão raiz atual tem crate canary ou de que o launcher resolve o canary mais
+recente. O launcher constrói a URL da release a partir da própria versão exata
+do crate e faz três tentativas totais de download (duas repetições); launchers
+`*-canary` atualizam essa instalação versionada em toda execução. Verifique o
+registro e os assets correspondentes antes de usar um par antigo hoje.
+
+### Disponibilidade dos scripts instaladores
+
+A automação atual prepara `install.sh` e `install.ps1` em `release-assets/` e os
+inclui em `SHA256SUMS`; isso não prova sua presença em releases antigas.
+Em 2026-10-22, a estável mais recente `v0.1.1` não tem esses scripts, então as URLs
+`releases/latest/download/install.*` falham. Use os pacotes ou arquivos manuais do
+README até existir um par script/arquivo publicado e compatível. Espelhos do site
+exigem a mesma verificação funcional; HTTP bem-sucedido é insuficiente.

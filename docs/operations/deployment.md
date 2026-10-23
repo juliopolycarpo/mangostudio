@@ -95,12 +95,14 @@ curl -LO "https://github.com/juliopolycarpo/mangostudio/releases/download/v${VER
 grep "mangostudio-${VERSION}-${PLATFORM}.tar.gz" SHA256SUMS | sha256sum -c -
 
 # macOS — verify checksum
-grep "mangostudio-${VERSION}-darwin-arm64.tar.gz" SHA256SUMS | shasum -a 256 -c -
+grep "mangostudio-${VERSION}-${PLATFORM}.tar.gz" SHA256SUMS | shasum -a 256 -c -
 
 # Or use the project helper (from a clone)
 bun ./scripts/release/verify-checksum.ts SHA256SUMS "mangostudio-${VERSION}-${PLATFORM}.tar.gz"
 
-tar -xzf "mangostudio-${VERSION}-${PLATFORM}.tar.gz" -C /opt/mangostudio
+# Create the destination before tar -C (sudo is needed for /opt).
+sudo install -d -m 0755 /opt/mangostudio
+sudo tar -xzf "mangostudio-${VERSION}-${PLATFORM}.tar.gz" -C /opt/mangostudio
 ```
 
 Windows archives use `.zip` instead of `.tar.gz` (`windows-x64`, `windows-arm64`).
@@ -163,8 +165,9 @@ The runtime is a native Rust binary with no interpreter or shared runtime to ins
 - **Linux glibc** (`linux-x64`, `linux-arm64`): glibc 2.17 or newer, the same floor as the hub.
 - **Linux musl** (`*-musl`): the runtime is statically linked and needs no extra packages. The
   hub is a Bun-compiled binary that links `libstdc++` dynamically, so a bare Alpine needs
-  `apk add libstdc++` (plus `bash` and `curl`, which the installer uses) before `install.sh`. Without it the installer's version check fails; it
-  prints the loader's own message and that `apk` hint.
+  `apk add libstdc++` before running the hub from a matching `*-musl` archive.
+  Use [manual extraction](#manual-binary-deploy); latest stable `v0.1.1` has no
+  installer-script assets (checked 2026-10-22).
 - **Windows**: the MSVC C runtime is linked statically, so no Visual C++ Redistributable is
   needed.
 - **macOS**: one binary per architecture (`darwin-x64`, `darwin-arm64`).

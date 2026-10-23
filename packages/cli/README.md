@@ -12,7 +12,12 @@ npm install -g mangostudio
 
 This pulls the prebuilt standalone binary for your platform (via a
 platform-specific optional dependency) and puts `mangostudio` on your PATH.
-No Node.js or Bun runtime is required to run it.
+The standalone executable itself needs neither Node.js nor Bun. The installed command
+is `bin/mangostudio.js`, a JavaScript wrapper with `#!/usr/bin/env node` and
+`engines.node >=18`; it needs Node.js 18+ on PATH, even when installed with Bun.
+To run the wrapper with Bun explicitly, use
+`bun /path/to/mangostudio/bin/mangostudio.js <command>` (replace the path with the
+installed package path). Installing with Bun alone does not change the shebang.
 
 ## Usage
 
