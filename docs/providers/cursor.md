@@ -72,7 +72,7 @@ can see what is left to clean up.
 ## Deprecation telemetry
 
 The execution guard increments a per-provider counter that rides the existing local observability
-snapshot — nothing leaves the machine, and no reporting channel was added. `GET /api/observability/metrics`
+snapshot — nothing leaves the machine, and no reporting channel was added. `GET /api/settings/metrics`
 reports it as `deprecatedAttempts` on the `cursor` provider entry:
 
 ```json
