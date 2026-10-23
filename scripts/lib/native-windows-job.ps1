@@ -121,8 +121,9 @@ namespace Mango.NativeJobProbe {
         public long Calls, TotalTicks, MaximumTicks;
     }
     public sealed class ProcessListHeldState {
-        public string Identity;
-        public bool Alive;
+        public string Identity, Error;
+        public bool? Alive;
+        public int? NativeError;
     }
     public sealed class ProcessListAttempt {
         public int Attempt, Capacity, BufferBytes, NativeError;
@@ -583,7 +584,12 @@ namespace Mango.NativeJobProbe {
                         var row=new ProcessListAttempt {Attempt=attempt,Capacity=capacity,BufferBytes=bytes,Success=success,NativeError=success?0:error,ReturnedBytes=returned,Assigned=headerAvailable?(uint?)assigned:null,Count=headerAvailable?(uint?)count:null};
                         budget.Trace.ProcessListAttempts.Add(row);
                         var states=new List<ProcessListHeldState>();
-                        foreach(var pair in held) states.Add(new ProcessListHeldState {Identity=pair.Key,Alive=Alive(pair.Value.Handle,budget)});
+                        foreach(var pair in held) {
+                            var state=new ProcessListHeldState {Identity=pair.Key};
+                            try { state.Alive=Alive(pair.Value.Handle,budget); }
+                            catch(Win32Exception diagnosticError) { state.NativeError=diagnosticError.NativeErrorCode; state.Error=diagnosticError.Message; }
+                            states.Add(state);
+                        }
                         row.HeldStates=states.ToArray();
                     }
                     if(!success && error!=234) throw new Win32Exception(error,"QueryInformationJobObject(ProcessIdList)");
