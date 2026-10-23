@@ -13,7 +13,7 @@ test.beforeEach(({ page }) => {
   page.on('console', (message) => {
     if (
       message.type() === 'error' ||
-      /strict.*LazyMotion|LazyMotion.*strict/i.test(message.text())
+      /LazyMotion|lazy-strict-mode|tree shaking/i.test(message.text())
     ) {
       errors.push(message.text());
     }
