@@ -343,3 +343,13 @@ that host only; native Windows and macOS remain unperformed until separately mea
 The build driver handles SIGINT/SIGTERM by canceling the active supervised command, settling its
 verified process scope, journaling the interrupted attempt and stopping the batch. External hard
 timeouts still need an outer process supervisor: SIGKILL cannot run cleanup inside the killed process.
+
+The locked metadata commands use an explicit machine-stdout limit of 8 MiB per UTF-8 line, with a
+16 MiB hard ceiling. This preserves complete compact Cargo JSON without changing the default text
+reporter or stderr bounds. Exceeding the selected bound remains a command error; raw stdout is retained.
+
+The first admission attempt at `5e267450` produced valid Cargo metadata with 329 packages and
+1,691,503 raw bytes, but the generic 1 MiB text-reporting guard rejected that line after Cargo exited
+successfully. The batch stopped before any build, warmup or readiness attempt. No timing or resource
+sample was accepted, and all later workloads remained unperformed. The failed admission is retained;
+a subsequent study uses a new label and must pass its own source, correctness and cleanup gates.
