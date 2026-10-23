@@ -1,7 +1,17 @@
 /** Bun integration around Tailwind's public compiler and source-aware scanner. */
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+  sep,
+  win32,
+} from 'node:path';
 import {
   assertDeclaredSources,
   assertTailwindInputsUnchanged,
@@ -70,6 +80,24 @@ function lockedResolutions(repositoryRoot: string): ReadonlySet<string> {
       )
       .map((entry) => entry[0])
   );
+}
+
+/** Resolve Bun metafile inputs in the invoking directory, including Windows volumes. @example resolveMetafileInputPath('../../../C:/repo/icon.svg', 'D:/build/app', 'win32'); */
+export function resolveMetafileInputPath(
+  path: string,
+  cwd = process.cwd(),
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform !== 'win32') return posix.resolve(cwd, path);
+  if (win32.isAbsolute(path)) return win32.resolve(cwd, path);
+  if (!/(?:^|[\\/])[a-z]:/i.test(path)) return win32.resolve(cwd, path);
+  // Bun 1.4.3 encodes cross-volume inputs with POSIX relative paths, including
+  // the target drive as a path component. Reverse that exact coordinate frame.
+  const base = posix.resolve('/', cwd.replaceAll('\\', '/'));
+  const absolute = posix.resolve(base, path);
+  if (!/^\/[a-z]:\/[^:]*$/i.test(absolute) || posix.relative(base, absolute) !== path)
+    throw new Error(`${path}: expected Bun metafile path with an unambiguous Windows volume`);
+  return win32.normalize(absolute.slice(1));
 }
 
 /**
@@ -156,7 +184,7 @@ export function createTailwindPlugin({
         input.format === 'css'
           ? input.imports
               .filter((dependency) => dependency.kind === 'url-token' && !dependency.external)
-              .map((dependency) => resolve(dependency.path))
+              .map((dependency) => resolveMetafileInputPath(dependency.path))
           : []
       );
       // Bun reports graph paths relative to its invocation directory. Scanning still uses projectRoot.
