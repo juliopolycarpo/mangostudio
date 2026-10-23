@@ -57,11 +57,18 @@ function expectedCommands(name: string, source: string, original: Record<string,
     ];
     expected = Object.fromEntries(Object.entries(expected).filter(([job]) => job !== 'transports'));
   }
+  if (name === 'protocol-ci') {
+    // Advisories moved to the unconditional CI audit; retain every other policy.
+    expected.deny = ['cargo deny check bans licenses sources'];
+  }
   return expected;
 }
 
 function expectedGate(name: string, source: string, original: { needs: string[]; skips: string }) {
   const expected = structuredClone(original);
+  if (name === 'ci') {
+    expected.needs.splice(expected.needs.indexOf('check') + 1, 0, 'dependency-audit');
+  }
   if (name === 'cargo-shim' && !extractJobBlock(source, 'fuzz-workspace')) {
     expected.needs = expected.needs.filter((job) => job !== 'fuzz-workspace');
     expected.skips = expected.skips.replace(' fuzz-workspace', '');
