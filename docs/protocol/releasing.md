@@ -36,10 +36,14 @@ deliberately not one of the manifests below.
    ```
 
 3. Review the diff and merge the release preparation through a pull request. After it lands,
-   tag the commit on `main`. The workflow verifies that the exact tag exists and its commit is
-   reachable from `origin/main`; a commit from the preparation branch that was rewritten by a
-   squash merge will be refused. The release procedure uses a signed tag, but the workflow does
-   not verify the tag signature.
+   tag the commit on `main`. The workflow verifies that the exact annotated tag exists, names
+   the expected release, points to the checked-out commit and is reachable from `origin/main`;
+   a commit from the preparation branch that was rewritten by a squash merge will be refused.
+   It also verifies the tag's SSH signature against `.github/release-allowed-signers`. Both that
+   policy and `scripts/release/verify-release-tag.ts` are loaded from protected `origin/main`,
+   so the tagged tree cannot substitute its own signer policy or verifier. Sign with an SSH key
+   trusted by that policy. Reachability establishes that the commit reached `main`, not that a
+   human approved it; it does not recheck historical commits against today's branch rules.
 
    ```sh
    git switch main

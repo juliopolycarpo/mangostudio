@@ -30,7 +30,9 @@ console.log(remote.peer.name, remote.effectiveMinor);
 
 Both peers send `hello` as soon as the transport opens; there is no client and no server at
 this layer. `ready` rejects with a `RemoteError` of code `PROTOCOL_MISMATCH` when the majors
-differ, and with `TIMEOUT` when the peer never says hello (15 seconds by default).
+differ, and with `UNAVAILABLE` when the peer never says hello (15 seconds by default). The
+handshake timeout closes the transport with code `4400` and reason `handshake timeout`;
+`TIMEOUT` is the code for a local request deadline, not this handshake failure.
 
 A limit below the floor §11 sets is a `RangeError` from the call that sets it — the
 constructor, or the transport's own options — not a `hello` the peer's schema refuses. The

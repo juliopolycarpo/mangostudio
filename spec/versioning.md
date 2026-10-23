@@ -1,6 +1,7 @@
 # Versioning
 
-Three numbers live in this repository and they move for different reasons.
+The protocol's wire and package versions move for different reasons. The MangoStudio
+application in this monorepo has its own version and release train.
 
 ## Wire version
 
@@ -33,20 +34,21 @@ session runs at the lower. There is nothing to turn on.
 ## Package version
 
 `@mangostudio/protocol` on npm and `mango-protocol` on crates.io share one semantic version,
-released together from one git tag `v<version>`. The package version says which SDK build you
+released together from one git tag `protocol-v<version>`. The package version says which SDK build you
 have; it is independent of the wire version it speaks, except that a package's changelog
 states the highest wire minor it implements.
 
 - `0.x`: the wire may still change in a minor package release; the changelog says so.
 - `1.0.0`: the wire is frozen at major 1 and package majors follow SemVer for the SDK API.
 
-`bun run release:prepare <version>` moves both manifests in lockstep; CI refuses a tag whose
-manifests disagree.
+`bun run protocol:release:prepare <version>` moves the protocol manifests and lockfiles in
+lockstep; CI refuses a tag whose version sites disagree. The application's root `package.json`
+version and bare `v*` tags are independent; see the [protocol release guide](../docs/protocol/releasing.md).
 
 ## Schema files
 
 `spec/schema/<major>/protocol.json` and `catalog.json` carry a `$id` under
-`https://mangostudio.dev/protocol/schema/<major>/` and are attached to every GitHub release.
+`https://mangostudio.dev/protocol/schema/<major>/` and are attached to every protocol GitHub release.
 Their content changes only with a wire change, so a schema file is versioned by the wire major
 it describes and by the release that published it. An editorial fix to a schema (a description,
 a tightened pattern that no valid frame violated) ships in a package release without a wire bump.

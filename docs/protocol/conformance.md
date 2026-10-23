@@ -7,7 +7,8 @@ over each transport. All three live in this repository and all three run in CI.
 
 ## The fixture corpus
 
-`spec/fixtures/1/` holds seven JSON files. Each case has a `name`, a `verdict` and the input;
+`spec/fixtures/1/` holds seven fixture corpora plus `catalog-example.json`. Each corpus case
+has a `name`, a `verdict` and the input;
 `accept` cases also carry `expected`, the decoded value as a recursive subset (every member of
 `expected` must equal the decoded member; extra members are allowed, because envelopes are
 open).
@@ -37,7 +38,10 @@ JSON Test Suite convention.
 
 `chunks.json` and `ssh-argv.json` are generated — by `scripts/protocol/fixtures/generate-chunks.ts` from
 the reference chunker, and by `scripts/protocol/fixtures/generate-ssh-argv.ts` from the reference argv
-builder; `bun run protocol:check` fails when either file is stale. Edit the generator, never the file.
+builder. `catalog-example.json` is a catalog document rather than a verdict corpus; it is generated
+by `scripts/protocol/fixtures/generate-catalog-example.ts` from the example contract and consumed
+by both SDKs. `bun run protocol:check` fails when any of these generated files is stale.
+Edit the generator, never the file.
 
 `negotiation.json` also carries a `handshake` object beside its `cases`: the 15-second budget of
 the wire spec's §5.2, the close code, and the exact reason a peer that never greeted is closed
@@ -57,7 +61,9 @@ capture them from: rewriting them by hand would turn "this build answers an old 
 
 ### Running the corpus elsewhere
 
-Any implementation can load the files: they are plain JSON, published with every GitHub release.
+Any implementation can load the files: they are plain JSON in the tagged source tree under
+`spec/fixtures/1/`. Check out the desired `protocol-v*` tag or download its source archive;
+the protocol release's attached assets contain the schema files, not the fixture corpus.
 Load each case, feed the input to your decoder, and compare against the verdict. The TypeScript
 tests under `packages/protocol/tests/fixtures-*.test.ts` and the Rust test
 `crates/mango-protocol/tests/it/fixtures.rs` are the two reference harnesses.
@@ -143,15 +149,54 @@ child through `spawnPort` to prove the pipes are wired the way the suite assumes
 
 ### The same suite in Rust
 
-The Rust crate ships the suite behind its `testing` feature, as a `Fixture` trait with the same
-three members: `connect`, `chunked` and `connect_raw`. Its fixtures live in
-`crates/mango-protocol/tests/it/transport_*.rs`, one module per transport — the in-process pair, the
-NDJSON port over a pipe pair, a real local socket, and a real WebSocket at two message ceilings.
-`tests/it/conformance_drift.rs` asserts the Rust case list matches this file's TypeScript `it(...)`
+The Rust crate ships the suite behind its `testing` feature, as a `Fixture` trait with
+`connect` and `chunked`, plus **both** `supports_raw` and `connect_raw` for byte-oriented
+transports. `supports_raw()` defaults to `false`: implementing `connect_raw` alone leaves the
+raw-byte cases skipped. Inside a byte transport's `impl Fixture`, opt in explicitly:
+
+```rust
+// Excerpt from NdjsonFixture; see the linked file for RawPipe and connect.
+fn supports_raw(&self) -> bool {
+    true
+}
+
+async fn connect_raw(&self, a: SessionOptions) -> RawPipe {
+    let (ours, theirs) = tokio::io::duplex(PIPE_CAPACITY);
+    let (session, driver) = Session::spawn(port(ours), a);
+    RawPipe {
+        a: session,
+        driver: Some(driver),
+        peer: Some(theirs),
+    }
+}
+```
+
+`run_conformance_suite(&fixture).await` then selects the malformed-hello and unknown-envelope-member
+cases as well as the normal session cases. It asserts that the cases executed match the list
+selected by `chunked()` and `supports_raw()`. TypeScript has no `supportsRaw` member: providing
+its optional `connectRaw` enables those cases directly.
+
+The in-process Rust fixture is in
+[`crates/mango-protocol/tests/it/conformance.rs`](../../crates/mango-protocol/tests/it/conformance.rs);
+it has no raw-byte layer and uses `NoRawConnection`. The byte-transport fixtures are in
+[`transport_ndjson.rs`](../../crates/mango-protocol/tests/it/transport_ndjson.rs),
+[`transport_ipc.rs`](../../crates/mango-protocol/tests/it/transport_ipc.rs) and
+[`transport_websocket.rs`](../../crates/mango-protocol/tests/it/transport_websocket.rs):
+the NDJSON port over a pipe pair, a real local socket, and a real WebSocket at two message ceilings.
+For a complete raw fixture, see
+[`NdjsonFixture`](../../crates/mango-protocol/tests/it/transport_ndjson.rs). Run it with:
+
+```sh
+cargo test -p mango-protocol --locked --test it --features testing the_ndjson_port_behaves_like_a_mango_transport
+```
+
+[`tests/it/conformance_drift.rs`](../../crates/mango-protocol/tests/it/conformance_drift.rs)
+asserts the Rust case list matches this file's TypeScript `it(...)`
 names verbatim and in order, so a case added to one suite and not the other fails the build.
 
 The Rust launcher cannot run the suite either, for the same reason, and
-`tests/it/transport_spawn.rs` covers what a launcher alone can prove: the pipes carry a session, a
+[`tests/it/transport_spawn.rs`](../../crates/mango-protocol/tests/it/transport_spawn.rs)
+covers what a launcher alone can prove: the pipes carry a session, a
 conforming child leaves on the end of its stdin, and one that ignores that is escalated past it.
 
 ## The interop lane
@@ -236,19 +281,21 @@ peer that hung up — rather than depending on a wall-clock timeout.
 
 `crates/mango-protocol/fuzz/` is a cargo-fuzz crate, which needs nightly and libFuzzer; it carries its own `[workspace]`
 table and the root `Cargo.toml` excludes it, so it is never pulled into the stable build this
-repository otherwise targets. Run it with the nightly toolchain explicitly, from `crates/mango-protocol/fuzz/`:
+repository otherwise targets. Starting from the repository root, enter the fuzz workspace and
+run it with the nightly toolchain explicitly:
 
 ```console
 rustup toolchain install nightly
 cargo install cargo-fuzz
-cd fuzz
+cd crates/mango-protocol/fuzz
 cargo +nightly fuzz run decode_line -- -max_total_time=60
 # session_frames needs the tokio feature:
 cargo +nightly fuzz run --features tokio session_frames -- -max_total_time=60
 ```
 
-A nightly `fuzz.yml` workflow runs all six targets for five minutes each and uploads their
-corpus and any crashing input as build artifacts; trigger it manually from the Actions tab
+A nightly [`protocol-fuzz.yml`](../../.github/workflows/protocol-fuzz.yml) workflow runs all six
+targets for five minutes each and uploads their corpus and any crashing input as build artifacts;
+trigger it manually from the Actions tab
 (`workflow_dispatch`) to check a change before waiting for the schedule. It is deliberately not
 part of `ci.yml`'s `gate` job: a fuzz run's pass/fail is about coverage found that run, not a
 merge gate.
