@@ -127,10 +127,11 @@ renomeie sem atualizar todos os templates e instaladores na mesma release.
 | `mangostudio-<version>-frontend-dist.tar.gz` | Bundle do frontend apenas          |
 | `SHA256SUMS`                                 | Checksums de todos os assets acima |
 
-Cada arquivo de plataforma tem **raiz plana**: `mangostudio` (ou
-`mangostudio.exe`) e `README.md` — sem diretório de plataforma aninhado. O
-binário embarca a UI do frontend; nenhum diretório de assets vizinho é
-necessário em tempo de execução.
+Cada arquivo de plataforma atual tem **raiz plana**: `mangostudio` (ou
+`mangostudio.exe`), `mangostudio-runtime` (ou `mangostudio-runtime.exe`) e
+`README.md` — sem diretório de plataforma aninhado. Mantenha os dois binários
+juntos para que o hub possa iniciar ambientes stdio. O binário do hub embarca a
+UI do frontend; nenhum diretório de assets vizinho é necessário em tempo de execução.
 
 A automação atual copia os scripts de instalação de `scripts/install/` para
 `release-assets/` e os lista em `SHA256SUMS` ao lado dos arquivos que instalam.

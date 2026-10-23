@@ -28,6 +28,11 @@ binary is pinned to that crate version and does not use the launcher cache, but
 it reports the same `mangostudio --version`. Installing a prebuilt archive does not need a local
 Rust compiler. If binstall falls back to compiling the launcher, it requires Rust 1.99.0 or newer.
 
+For current two-binary releases, binstall extracts only the hub and omits
+`mangostudio-runtime`, so stdio environments cannot start. Use `cargo install`
+or [extract the entire archive manually](../../docs/operations/deployment.md#manual-binary-deploy)
+to install both binaries together.
+
 ## Environment overrides
 
 | Variable                  | Effect                                                                                        |
