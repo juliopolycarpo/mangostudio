@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createTailwindPlugin } from '../../scripts/tailwind';
+import { createTailwindPlugin, resolveMetafileInputPath } from '../../scripts/tailwind';
 
 const fixtures: string[] = [];
 afterEach(() => {
@@ -79,6 +79,48 @@ function fixture() {
   }
   return { repository, project, input, write, build };
 }
+
+describe('Bun metafile input paths', () => {
+  test('decodes Bun 1.4.3 cross-volume Windows paths before scope validation', () => {
+    const raw = '../../../C:/Users/runner/Temp/styles/pixel.svg';
+    expect(
+      resolveMetafileInputPath(raw, 'D:\\agents\\frontend', 'win32'),
+      `${raw}: expected the imported asset on C:, not a D:\\C: path`
+    ).toBe('C:\\Users\\runner\\Temp\\styles\\pixel.svg');
+  });
+  test('rejects malformed or ambiguous drive components and preserves POSIX colons', () => {
+    for (const path of [
+      '../../C:/assets/pixel.svg',
+      '../../../../C:/assets/pixel.svg',
+      '../../../D:/assets/pixel.svg',
+      '../../../C:/assets/D:/pixel.svg',
+      'C:assets/pixel.svg',
+    ])
+      expect(() => resolveMetafileInputPath(path, 'D:\\agents\\frontend', 'win32')).toThrow(
+        `${path}: expected Bun metafile path with an unambiguous Windows volume`
+      );
+    expect(resolveMetafileInputPath('../../C:/pixel.svg', '/repo/app/styles', 'linux')).toBe(
+      '/repo/C:/pixel.svg'
+    );
+    expect(resolveMetafileInputPath('images/icon:dark.svg', '/repo/app', 'linux')).toBe(
+      '/repo/app/images/icon:dark.svg'
+    );
+  });
+  test('retains same-volume, native absolute, UNC and POSIX input paths', () => {
+    expect(resolveMetafileInputPath('src/pixel.svg', 'D:\\agents\\app', 'win32')).toBe(
+      'D:\\agents\\app\\src\\pixel.svg'
+    );
+    expect(resolveMetafileInputPath('C:\\repo\\pixel.svg', 'D:\\app', 'win32')).toBe(
+      'C:\\repo\\pixel.svg'
+    );
+    expect(resolveMetafileInputPath('images/pixel.svg', '\\\\server\\share\\app', 'win32')).toBe(
+      '\\\\server\\share\\app\\images\\pixel.svg'
+    );
+    expect(resolveMetafileInputPath('../images/pixel.svg', '/repo/app', 'linux')).toBe(
+      '/repo/images/pixel.svg'
+    );
+  });
+});
 
 describe('owned Tailwind Bun loader', () => {
   test('preserves default, explicit, negative and inline sources, variants and theme tokens', async () => {
