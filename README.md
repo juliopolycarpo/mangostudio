@@ -424,6 +424,10 @@ Configured in `dprint.json` with the following scope and settings:
 | Excludes           | `node_modules`, `dist`, `coverage`, `build`, `test-results`, `playwright-report`, `.jscpd-out`, `.qa-gate`, `.mango/artifacts`, `.mango/out`, `routeTree.gen.ts`, `CHANGELOG.md`, `bun.lock` |
 | Plugins            | markdown (WASM), toml (WASM), dockerfile (WASM), pretty_yaml                                                                                                                                 |
 
+The remote Pretty YAML plugin pins its version and SHA-256 together in `dprint.json`. When updating
+it, compare the downloaded WASM hash with the upstream GitHub release asset digest, then update both
+the version and checksum. Run `bun run check` to verify the new plugin.
+
 ### Circular Dependencies
 
 Biome checks imports as part of `bun run check`, including value, type-only and self-import cycles. Each workspace scans TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including top-level helpers, generated files and gitignored build output, through `biome.cycles.json`. JavaScript files are checked both as dependencies of TypeScript files and as independent roots. The cycle scan excludes `node_modules`, `.git`, and the repository-root `.mango/artifacts` and `.mango/out` directories. Both Biome configurations prevent discovery and indexing of metadata inside those two root cache directories. Normal formatting and lint still follow `biome.json`.
