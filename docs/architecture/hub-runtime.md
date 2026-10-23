@@ -109,7 +109,7 @@ filesystem no checkpoint describes and no retry can resume from.
 So the useful cancellation points are the ones with nothing to undo — on entry, inside the
 path lock before the first write, and inside the loops that only read: walking a directory in
 `fs.glob` and `fs.grep`, hashing the expected set in `snapshot.revert`. Once bytes start
-moving, the call finishes and reports what it did. `services/cancellation.ts` holds the one
+moving, the call finishes and reports what it did. `apps/shared/src/runtime-contract/cancellation.ts` holds the one
 refusal every service raises; it carries the `AbortError` name the SDK session maps to
 `CANCELLED`, so a cancelled call is never reported as a failed one. The mapping reads that
 thrown name, not the signal being aborted: a mutation that failed after it had already begun
@@ -138,7 +138,7 @@ independent of the protocol version, and neither has to move for an additive met
   the generated file, and never by changing a handler and leaving the schema behind.
   `bun run check` fails on a stale or hand-edited artifact, and validates the catalog against
   [`catalog.json`](https://mangostudio.dev/protocol/schema/1/catalog.json) on the way past.
-  The five files beside it describe everything else two processes share: the slot's files,
+  The generated companion artifacts describe the other shared contracts: the slot's files,
   the manifest, the health report, the install stream, and the strings nothing derives.
 - **New schemas are open; no bound goes in that is not already enforced.** A shape written
   for a contract method does not set `additionalProperties: false`, because a newer hub
@@ -226,7 +226,7 @@ in, the environment reads `disconnected` rather than failed
 (`apps/api/tests/integration/routes/runtime-socket.integration.test.ts`); spawned, the child
 is terminated with the launch it failed
 (`apps/api/tests/integration/services/spawn-runtime-child.integration.test.ts`). Both run
-against the frozen bytes in `legacy-hello-1-0-1.ts`. `4426` is in the old binary's own fatal
+against the frozen bytes in `apps/api/tests/fixtures/legacy-hello-1-0-1.ts`. `4426` is in the old binary's own fatal
 set, so it stops rather than redialling and prints the message that names updating it.
 
 The other direction has no such handshake, and is worth stating plainly: a `1.0.1` hub
@@ -238,15 +238,15 @@ the hub is the fix.
 
 ## Transports
 
-| Transport                 | Status  | Direction        | Framing                                                                                                                                                                                                                                                                                                                          |
-| ------------------------- | ------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Embedded in-process ports | Tests   | —                | [In-process](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/in-process.md): a real port pair, round-tripped through the byte codec (`validateInProcessFrames`). No longer a production transport: only the hub's fake runtime host (`apps/api/tests/support/fake-runtime-host.ts`) still builds one. |
-| Local runtime process     | Current | Hub spawns       | [Spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md) over [stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md): NDJSON on the child's own pipes. Used by Local and by `stdio` environments.                                                      |
-| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.                                                                                                                                                                                                                                           |
-| Paired WebSocket          | Current | Runtime dials in | [WebSocket](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/websocket.md): chunked binary messages under `mango.v1`, to `/api/runtime`, authenticated by a pairing token.                                                                                                                             |
-| Direct URL                | Current | Hub dials out    | The same WebSocket transport; the runtime listens and the hub presents a serve token.                                                                                                                                                                                                                                            |
-| SSH                       | Current | Hub spawns       | A launcher over stdio: the SDK's hardened `ssh` preset, with the runtime on the far end of its pipe.                                                                                                                                                                                                                             |
-| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.                                                                                                                                                                                                                                      |
+| Transport                 | Status  | Direction        | Framing                                                                                                                                                                                                                                                                     |
+| ------------------------- | ------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Embedded in-process ports | Tests   | —                | [In-process](../../spec/transports/in-process.md): a real port pair, round-tripped through the byte codec (`validateInProcessFrames`). No longer a production transport: only the hub's fake runtime host (`apps/api/tests/support/fake-runtime-host.ts`) still builds one. |
+| Local runtime process     | Current | Hub spawns       | [Spawn](../../spec/transports/spawn.md) over [stdio](../../spec/transports/stdio.md): NDJSON on the child's own pipes. Used by Local and by `stdio` environments.                                                                                                           |
+| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.                                                                                                                                                                                      |
+| Paired WebSocket          | Current | Runtime dials in | [WebSocket](../../spec/transports/websocket.md): chunked binary messages under `mango.v1`, to `/api/runtime`, authenticated by a pairing token.                                                                                                                             |
+| Direct URL                | Current | Hub dials out    | The same WebSocket transport; the runtime listens and the hub presents a serve token.                                                                                                                                                                                       |
+| SSH                       | Current | Hub spawns       | A launcher over stdio: the SDK's hardened `ssh` preset, with the runtime on the far end of its pipe.                                                                                                                                                                        |
+| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.                                                                                                                                                                                 |
 
 Which one to reach for:
 
@@ -575,7 +575,7 @@ one that is absent.
 `mangostudio-runtime` is a second binary, the cargo build of `crates/mangostudio-runtime`,
 shipped in every distribution channel beside the hub binary. `mangostudio-runtime --stdio` serves the
 protocol over the child's own pipes, one NDJSON frame per line
-([stdio](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/stdio.md)).
+([stdio](../../spec/transports/stdio.md)).
 
 **stdout is the protocol stream.** Nothing else may write to it, which is why the stdio mode
 routes the stdout console methods to stderr. The hub keeps a bounded tail of the child's
@@ -592,7 +592,7 @@ do not reach it.
 launcher that reaches its target through a wrapper — a WSL distro, an SSH host — supplies its
 own argv and reuses the spawn, handshake, and teardown path unchanged. The launcher under it
 is the SDK's `spawnPort`
-([spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md)),
+([spawn](../../spec/transports/spawn.md)),
 which observes and reports — the exit status, a bounded stderr tail, the
 stdin/`SIGTERM`/`SIGKILL` termination sequence — and never guesses why a child failed.
 Turning what it observed into a sentence somebody can act on is `spawn-runtime-child.ts`'s
@@ -871,7 +871,7 @@ Nothing derives it from a request header: that is a value the caller controls.
 ### Framing
 
 The framing is the SDK's
-([WebSocket](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/websocket.md)):
+([WebSocket](../../spec/transports/websocket.md)):
 frames are **chunked** across messages that fit under a 16 KiB ceiling, each chunk carrying a
 nine-byte header, with
 reassembly bounded by the frame limit and by the number of messages one frame can need. That
@@ -1035,7 +1035,7 @@ of its own for that machine.
 ### Argv
 
 The option list is the SDK's hardened `ssh` preset
-([spawn](https://github.com/juliopolycarpo/mango-protocol/blob/main/spec/transports/spawn.md),
+([spawn](../../spec/transports/spawn.md),
 *SSH preset*) rather than one this repository maintains: `BatchMode=yes`, so a connection
 that would prompt fails rather than hanging until the handshake times out; a bounded
 `ConnectTimeout` and server keepalives;

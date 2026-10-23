@@ -175,7 +175,7 @@ SDK so a timed-out request is actually cancelled.
 Failures degrade instead of aborting the turn: a server tool error, an unreachable server, or a
 timeout is recorded as a typed error tool result and the turn continues. Oversized results are
 capped at 64 KiB with a truncation marker, runtime-side
-(`apps/shared/src/mcp/content-mapping.ts`) so the cap applies before the wire.
+(`crates/mangostudio-runtime/src/mcp/content.rs`) so the cap applies before the wire.
 
 Two deadlines compose. The runtime applies the server's `timeoutMs` to the MCP request; the hub
 applies a slightly later deadline to the protocol request carrying it. The runtime's always
@@ -197,7 +197,7 @@ trade-off is intentional; see [#540](https://github.com/juliopolycarpo/mangostud
 ## Form elicitation
 
 MangoStudio declares the MCP client `elicitation.form` capability
-(`apps/api/src/services/mcp/client-factory.ts`). When a server sends `elicitation/create` during
+(`crates/mangostudio-runtime/src/mcp/sdk.rs`, via `SdkConnector::handler`). When a server sends `elicitation/create` during
 an in-flight tool call, the API parks the request
 (`apps/api/src/services/mcp/elicitation-registry.ts`), streams an `mcp_elicitation_request` SSE
 chunk into the open chat turn, and renders a form card. The user accepts (with field values),
@@ -276,4 +276,4 @@ command runs there, with that machine's access, and any stored credentials are d
 - **A tool call returns a timeout error.** Raise the server's `timeoutMs`, or check whether the
   server hangs; the turn still completes with the error result recorded.
 - **A long tool result looks cut off.** Results over 64 KiB are truncated with a marker by
-  design, to protect the context window.
+  `crates/mangostudio-runtime/src/mcp/content.rs`, to protect the context window.

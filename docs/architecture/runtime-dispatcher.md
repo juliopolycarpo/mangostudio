@@ -8,19 +8,18 @@ isolation.
 
 The crate builds on `mango_protocol::contract::Contract`, `ContractHandlers`, `Guard`, and
 `ServeOptions` directly. It does not implement a second dispatcher; everything below is either a
-thin wrapper around that pipeline or a seam this crate defines for a later change to fill in with
-real implementations.
+thin wrapper around that pipeline or a port supplied by the production host.
 
 ## Known-unimplemented vs. unknown: one wire error, not two
 
 `mango_protocol::session::dispatch`'s own no-handler branch already answers `METHOD_UNSUPPORTED`
 for any method nobody registered a `Handler` for, before any schema validation runs. This crate's
 `registry::Registry` relies on exactly that: it registers a `mango_protocol::contract::Handler`
-only for a method a later change has actually implemented. A method the embedded catalog declares
+only for a method implemented by this build. A method the embedded catalog declares
 but this registry has not implemented is simply never registered — so it falls into the same
 no-handler branch as a method no catalog anywhere has ever heard of, and answers a byte-identical
 `METHOD_UNSUPPORTED`. `Registry::classify` tells the two apart, but only for this crate's own
-diagnostics (a future `runtime.health` report, logging); no wire behaviour depends on the
+diagnostics; no wire behaviour depends on the
 distinction, and this crate never invents a second code for it.
 
 ## Result validation runs inside the audit wrapper, not through `ServeOptions`
@@ -169,19 +168,24 @@ methods. Snapshot and library methods also require filesystem consent, but their
 gates belong to `checkpoints` and `library`. They do not suppress working filesystem tools.
 Other features require every catalog method carrying their capability.
 
-The production registry implements health, workspace, probing, the eleven filesystem
-methods, `snapshot.capture`, `snapshot.hash`, `snapshot.revert`, and the four command methods
-`shell.run`, `git.exec`, `gh.exec`, and `gh.mutate`. The shell feature remains false until the
-terminal and install methods sharing its capability are implemented. An empty registry still advertises no
-capability-backed features, regardless of consent.
-The five library reads (`library.locations`, `library.settings-sources`, `library.scan`,
-`library.read`, `library.read-tree`) are implemented too. `features.library` stays false until
-the five write and backup methods sharing the capability land, because the Hub gates every
-library surface on that one flag.
-Only the schema fact `toolchain` remains true. The hello capabilities also announce the
-embedded catalog name and version in `contracts`, as the TypeScript runtime did.
+The production registry is assembled in
+[`transport::build_host_with_restart`](../../crates/mangostudio-runtime/src/transport/mod.rs).
+It registers health, workspace, probing, filesystem/snapshots, commands (`shell.run`,
+`git.exec`, `gh.exec`, `gh.mutate`), terminal, install, library reads/mutations/backups,
+MCP sessions/tools/resources/prompts/elicitation, external-agent sessions/turns/discovery,
+runtime update, and runtime surface discovery. The test
+`build_host_implements_exactly_the_current_method_families` pins the concrete method list.
 
-## Where the TypeScript contract/dispatch tests live in Rust
+These delivered families participate in implementation gating; a shell feature is no longer
+held false waiting for terminal/install ports. Features still require the corresponding consent:
+implemented does not mean granted. An empty registry advertises no capability-backed features;
+only the schema fact `toolchain` remains true. Hello capabilities also announce the embedded
+catalog name and version in `contracts`.
+
+The porting comparisons below preserve historical design and fixture evidence from the
+TypeScript-to-Rust migration, not a list of methods still waiting to be implemented.
+
+## Historical porting evidence: TypeScript contract/dispatch tests in Rust
 
 ### Filesystem behavior
 
