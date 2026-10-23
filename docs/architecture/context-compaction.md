@@ -11,8 +11,8 @@ interface ContextSnapshot {
   estimatedInputTokens: number;
   contextLimit: number; // Model's max input tokens
   estimatedUsageRatio: number; // 0–1 fraction of context consumed
-  providerReportedTokens?: number;
-  severity: ContextSeverity;
+  providerReportedInputTokens?: number;
+  mode: ContinuationDisplayMode;
 }
 ```
 
@@ -24,7 +24,7 @@ interface ContextSnapshot {
 
 ### Persistence
 
-The snapshot is serialized to `chats.lastContextState` as a JSON blob after each turn. The frontend reads it to display the context ring and warnings.
+The computed `ContextSnapshot` above belongs to `context-policy.ts`. `buildPersistedContextSnapshot` adds `severity` and `lastUpdatedAt` before serializing to `chats.lastContextState`. The public `context_info` SSE event carries estimated tokens, limit, ratio, mode, severity and `done: false`; it omits `providerReportedInputTokens` and `lastUpdatedAt`. See [`SSEContextEventSchema`](../../apps/shared/src/streaming/schemas.ts).
 
 ## Severity Thresholds
 
@@ -36,7 +36,7 @@ The snapshot is serialized to `chats.lastContextState` as a JSON blob after each
 | 92–96% | `danger`   | Orange ring + compaction callout        |
 | 97%+   | `critical` | Red ring + immediate compaction callout |
 
-Thresholds are defined in `context-policy.ts`.
+Display thresholds are defined in [`chat/context-severity.ts`](../../apps/shared/src/chat/context-severity.ts) and re-exported by `context-policy.ts`. They are separate from configurable compaction thresholds.
 
 ## Context Ring
 
@@ -84,13 +84,13 @@ Provider-side compaction is enabled by default and can be disabled per-request v
 
 `context-policy.ts` provides:
 
-| Function                              | Purpose                                                             |
-| ------------------------------------- | ------------------------------------------------------------------- |
-| `getModelContextLimit(modelName)`     | Returns the model's max input tokens (curated table of 120+ models) |
-| `computeContextSnapshot(...)`         | Estimates token usage and severity                                  |
-| `getContextSeverity(ratio)`           | Maps ratio to severity band                                         |
-| `recommendContextAction(ratio, mode)` | Suggests compaction action                                          |
-| `estimateTokenCount(text)`            | Rough char-to-token conversion                                      |
+| Function                           | Purpose                                                             |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `getModelContextLimit(modelName)`  | Returns the model's max input tokens (curated table of 120+ models) |
+| `computeContextSnapshot(...)`      | Estimates token usage and continuation mode                         |
+| `getContextSeverity(ratio)`        | Maps ratio to severity band                                         |
+| `recommendContextAction(snapshot)` | Suggests compaction action                                          |
+| `estimateTokenCount(text)`         | Rough char-to-token conversion                                      |
 
 ### Model Context Limits
 
@@ -98,16 +98,20 @@ A curated table covers 120+ model variants. Lookup priority:
 
 1. Exact model name match.
 2. Longest prefix match.
-3. Legacy heuristic (e.g., `gpt-4` → 128k, `gemini-1.5` → 1M).
+3. Legacy family heuristics after exact/prefix matches.
 4. Fallback: 128,000 tokens.
 
 ## Context Settings (User-Configurable)
 
 Users can configure compaction behavior in Settings → Context:
 
-| Setting                     | Default            | Purpose                                     |
-| --------------------------- | ------------------ | ------------------------------------------- |
-| `compactionEnabled`         | `true`             | Enable/disable the compaction callout       |
-| `compactionThreshold`       | 85                 | Severity ratio at which the callout appears |
-| `compactionSummaryModelId`  | (provider default) | Model used for summarization                |
-| `providerCompactionEnabled` | `true`             | Enable server-side compaction               |
+| Setting                     | Default         | Purpose                                                                     |
+| --------------------------- | --------------- | --------------------------------------------------------------------------- |
+| `compactionBehavior`        | `ask`           | `ask`, `auto_compact_current_chat`, `continue_with_summary_new_chat`, `off` |
+| `warningThreshold`          | `0.85`          | Warning ratio                                                               |
+| `dangerThreshold`           | `0.92`          | Danger ratio                                                                |
+| `hardStopThreshold`         | `0.97`          | Hard-stop ratio                                                             |
+| `preferredSummaryModel`     | `current_model` | Summary model selection                                                     |
+| `providerCompactionEnabled` | `true`          | Provider compaction preference                                              |
+
+Canonical fields: `ContextSettingsSchema` in `apps/shared/src/chat/schemas.ts`; defaults: `DEFAULT_CONTEXT_SETTINGS` in `apps/shared/src/app-settings/defaults.ts`. `recommendContextAction(snapshot)` uses fixed 0.92/0.97 policy boundaries, not this settings object.

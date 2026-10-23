@@ -6,7 +6,7 @@ MangoStudio has three independent settings layers, each with its own persistence
 
 | Layer                 | What it controls                                                       | Persistence table        | Scope                      |
 | --------------------- | ---------------------------------------------------------------------- | ------------------------ | -------------------------- |
-| **App Settings**      | Theme, language, generation defaults, prompt config, context behavior  | `user_app_settings`      | One blob per user          |
+| **App Settings**      | Generation defaults, prompt config, context behavior                   | `user_app_settings`      | One blob per user          |
 | **Provider Settings** | Per-provider runtime config (reasoning effort, caching, output tokens) | `user_provider_settings` | One blob per user+provider |
 | **Tool Settings**     | Per-tool enable/disable and parameter overrides                        | `user_tool_settings`     | One row per user+tool      |
 
@@ -14,16 +14,18 @@ MangoStudio has three independent settings layers, each with its own persistence
 
 Controls global preferences that apply across all providers and tools.
 
-**Stored fields:**
+**Selected stored fields** (the complete contract is [`AppSettingsSchema`](../../apps/shared/src/app-settings/schemas.ts), with [defaults](../../apps/shared/src/app-settings/defaults.ts)):
 
 | Field                | Type                              | Default                |
 | -------------------- | --------------------------------- | ---------------------- |
 | `promptSettings`     | `PromptSettings`                  | Default system prompts |
 | `globalImageQuality` | `'512px' \| '1K' \| '2K' \| '4K'` | `'1K'`                 |
-| `thinkingEnabled`    | `boolean`                         | `true`                 |
+| `thinkingEnabled`    | `boolean`                         | `false`                |
 | `reasoningEffort`    | `ReasoningEffort`                 | `'medium'`             |
 | `maxToolIterations`  | `number` (1–1000)                 | `1000`                 |
 | `contextSettings`    | `ContextSettings`                 | Compaction defaults    |
+
+Theme and language are frontend preferences stored in browser `localStorage`, owned by `apps/frontend/src/hooks/use-theme.tsx` and `use-i18n.tsx`. They are outside `AppSettings`. Other stored groups include multi-agent, chat-title, workspace, Git, chat-display, external API, external-agent and profile settings; use the schema for their shapes.
 
 **API:**
 
@@ -47,9 +49,8 @@ Settings are stored as a single JSON blob in the `settingsJson` column. On read,
 **The PUT body is a patch, not a snapshot.** Every field is optional; the server
 overlays what arrives on the row it already holds, then normalizes. Two things
 follow, and both are the point: a client survives every field the schema grows
-later instead of being rejected for omitting one it has never heard of, and two
-surfaces editing different settings stop overwriting each other because neither
-carries the other's field at all.
+later instead of being rejected for omitting one it has never heard of, and clients avoid sending unrelated fields. This patch shape does not guarantee
+atomic concurrent read/merge/write operations.
 
 The rule, in full:
 
@@ -89,9 +90,7 @@ Controls system prompts and rule file configuration:
 
 Controls context window behavior:
 
-- `compactionEnabled` / `summarizationEnabled` — Toggle compaction features.
-- `compactionThreshold` — Percentage at which compaction is offered (default: 85).
-- `compactionSummaryModelId` — Model used for summarization.
+See [Context Settings](../architecture/context-compaction.md#context-settings-user-configurable) for the current fields and defaults.
 
 ## Provider Settings
 
@@ -109,27 +108,23 @@ PUT  /api/settings/providers/:provider    → Update provider settings
 
 Each provider type has a hardcoded policy in `provider-settings-policy.ts`:
 
-| Provider          | Thinking | Prompt Caching | Tools         | Structured Output |
-| ----------------- | -------- | -------------- | ------------- | ----------------- |
-| Gemini            | Yes      | No             | Yes           | Limited           |
-| OpenAI            | Yes      | No             | Yes           | Yes               |
-| OpenAI-compatible | Depends  | Depends        | Yes           | Depends           |
-| Anthropic         | Yes      | Yes            | Yes           | No                |
-| DeepSeek          | Yes      | Yes            | Yes (v4 only) | No                |
+These flags describe MangoStudio configuration support, not all vendor-side behavior. Cursor is deprecated and retained only for existing settings; execution and new setup are closed.
+
+| Provider            | Thinking toggle | Prompt caching | Tools | Structured output |
+| ------------------- | --------------- | -------------- | ----- | ----------------- |
+| Gemini              | Yes             | Yes            | Yes   | Yes               |
+| OpenAI              | Yes             | Yes            | Yes   | Yes               |
+| OpenAI-compatible   | No              | No             | Yes   | Yes               |
+| Anthropic           | Yes             | Yes            | Yes   | No                |
+| DeepSeek            | Yes             | No             | Yes   | No                |
+| Cursor (deprecated) | Yes             | No             | Yes   | No                |
+| ChatGPT             | Yes             | No             | Yes   | No                |
 
 Settings are normalized against the provider policy on every read and write. For example, Anthropic will always return `structuredOutputSupported: false` regardless of saved data.
 
 ### Runtime Settings Shape
 
-```typescript
-interface ProviderRuntimeSettings {
-  thinkingEnabled?: boolean;
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  maxOutputTokens?: number;
-  maxToolIterations?: number;
-  promptCachePreference?: 'auto' | 'enabled' | 'disabled';
-}
-```
+Use the schema-derived `ProviderRuntimeSettings` from `@mangostudio/shared/provider-settings`; the canonical [schema](../../apps/shared/src/provider-settings/schemas.ts) includes required `provider` and optional `thinkingEnabled`, `reasoningEffort`, `maxOutputTokens`, `maxToolIterations`, `providerCompactionEnabled`, `promptCachePreference` (`auto` / `stable-prefix` / `off`) and `parallelToolCallsEnabled`.
 
 ## Tool Settings
 
