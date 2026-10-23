@@ -13,6 +13,7 @@ import { benchmarkCancellation } from '../lib/benchmark-cancellation';
 import { appendBenchmarkJournal, writeBenchmarkProgress } from '../lib/benchmark-journal';
 import {
   type NativeCommandReceipt,
+  type NativeProcessCommandOptions,
   runNativeCommand,
 } from '../lib/native-bun-qualification-process';
 import { linuxProcessResourceUnits, readLinuxProcessResources } from '../lib/process-resource-host';
@@ -44,6 +45,7 @@ const JOBS = 8;
 const BUDGET_BYTES = 40 * 2 ** 30;
 const BATCH_SECONDS = 3 * 60 * 60;
 const POLL_MS = 20;
+const METADATA_STDOUT_LINE_BYTES = 8 * 2 ** 20;
 class DiscardedInspectionOutput extends Writable {
   override _write(_chunk: Buffer, _encoding: BufferEncoding, done: () => void): void {
     done();
@@ -124,6 +126,7 @@ async function main(): Promise<void> {
     budgetBytes: BUDGET_BYTES,
     batchTimeoutSeconds: BATCH_SECONDS,
     pollIntervalMs: POLL_MS,
+    metadataStdoutLineBytes: METADATA_STDOUT_LINE_BYTES,
     workloads,
     startup: {
       warmups: 2,
@@ -241,11 +244,13 @@ async function main(): Promise<void> {
   const capture = async (
     label: string,
     command: readonly string[],
-    env: NodeJS.ProcessEnv = process.env
+    env: NodeJS.ProcessEnv = process.env,
+    machineStdout?: NativeProcessCommandOptions['machineStdout']
   ): Promise<string> => {
     const name = `${++commandIndex}-${label}`;
     const result = await runNativeCommand({
       label: name,
+      machineStdout,
       signal: cancellation.signal,
       command,
       root: ROOT,
@@ -316,11 +321,15 @@ async function main(): Promise<void> {
           '--locked',
         ],
       ],
-    ] as const)
+    ] as const) {
+      const machineStdout = label.startsWith('metadata-')
+        ? { maxLineBytes: METADATA_STDOUT_LINE_BYTES }
+        : undefined;
       await Bun.write(
         join(out, `${label}.${label.startsWith('tree') ? 'txt' : 'json'}`),
-        await capture(label, command)
+        await capture(label, command, process.env, machineStdout)
       );
+    }
     for (const workload of workloads) {
       if (cancellation.signal.aborted) throw cancellation.signal.reason;
       await checkBudget();
