@@ -1,4 +1,4 @@
-import { copyFile, mkdir, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sha256File } from '../release/verify-checksum';
 import { parseArtifactSections, qualifiesTextAttribution } from './rust-cost-receipt';
@@ -148,4 +148,14 @@ export async function identifyRustArtifactVersion(
     source: 'runtime --version under isolated home',
     executed: true,
   };
+}
+
+/** Seals every produced Rust library while ignoring unrelated compiler metadata. Example: await rustLibraryHashes('target/release/deps'). */
+export async function rustLibraryHashes(directory: string): Promise<Record<string, string>> {
+  const names = (await readdir(directory)).filter((name) => name.endsWith('.rlib')).sort();
+  if (!names.length)
+    throw new Error(
+      `Rust library directory: expected at least one .rlib | received: ${directory} contains none`
+    );
+  return Object.fromEntries(names.map((name) => [name, sha256File(join(directory, name))]));
 }

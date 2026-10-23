@@ -10,6 +10,8 @@ import {
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
 
+import { FakeBenchmarkCancelBarrier } from './support/benchmark-cancel-barrier';
+
 const ROOT = resolve(import.meta.dir, '../..');
 const scratch: string[] = [];
 const escapedFixtures: NativeProcess[] = [];
@@ -47,7 +49,7 @@ const home = process.env.HOME;
 const counterPath = join(home, 'startup-counter');
 const count = Number(await Bun.file(counterPath).text().catch(() => '0')) + 1;
 await Bun.write(counterPath, String(count));
-if (count === 3 && ${this.stall}) { await Bun.write(${JSON.stringify(join(this.directory, 'stall-reached'))}, 'later startup attempt'); console.error('Intentional fixture startup cancellation'); setInterval(() => {}, 1000); process.kill(process.ppid, 'SIGTERM'); await new Promise(() => {}); }
+if (count === 3 && ${this.stall}) { await Bun.write(${JSON.stringify(join(this.directory, 'stall-reached'))}, 'later startup attempt'); console.error('Intentional fixture startup cancellation'); setInterval(() => {}, 1000); while (!(await Bun.file(${JSON.stringify(join(this.directory, 'cancel-now'))}).exists())) await Bun.sleep(5); process.kill(process.ppid, 'SIGTERM'); await new Promise(() => {}); }
 if (count === 3) {
   console.error('Intentional fixture startup failure after one measured success');
   process.exit(3);
@@ -72,7 +74,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
     const binary = await new FakeStartupBinary(directory, true).create();
     const output = join(directory, 'receipt.json');
     const journal = `${output}.jsonl`;
-    const result = await runNativeCommand({
+    const pending = runNativeCommand({
       label: 'startup-cancel',
       command: [
         process.execPath,
@@ -88,10 +90,14 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       root: ROOT,
       out: directory,
       env: { ...process.env },
-      timeoutSeconds: 10,
+      timeoutSeconds: 20,
       pollIntervalMs: 20,
       stream: new DiscardedBenchmarkOutput(),
     });
+    const barrier = new FakeBenchmarkCancelBarrier(directory);
+    escapedFixtures.push(...(await barrier.observe(binary, pending)));
+    await barrier.release();
+    const result = await pending;
     escapedFixtures.push(...result.settlement.survivors);
     expect(await Bun.file(join(directory, 'stall-reached')).exists()).toBe(true);
     expect(result.timedOut).toBe(false);
@@ -118,7 +124,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
     };
     expect(progress.complete).toBe(false);
     expect(progress.attempts).toHaveLength(3);
-  });
+  }, 30_000);
 
   it('retains warmup, successful and failed attempts when a later startup fails', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mango-startup-receipt-test-'));

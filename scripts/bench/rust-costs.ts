@@ -4,11 +4,13 @@
  * Defaults to printing the frozen schedule. Execution needs a clean tree and an exclusive host.
  * Example: bun scripts/bench/rust-costs.ts --execute --out /tmp/rust-cost-receipts
  */
-import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { arch, cpus, homedir, platform, release, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
+import { benchmarkCancellation } from '../lib/benchmark-cancellation';
+import { appendBenchmarkJournal, writeBenchmarkProgress } from '../lib/benchmark-journal';
 import {
   type NativeCommandReceipt,
   runNativeCommand,
@@ -24,9 +26,11 @@ import {
   inspectRustArtifact,
   preserveRustArtifact,
   type RustArtifactReceipt,
+  rustLibraryHashes,
 } from '../lib/rust-artifact-receipt';
 import {
   parseBuildCpu,
+  qualifiesRustIncremental,
   rustCostWorkloads,
   shippingRustProfile,
   summarizeRustCosts,
@@ -83,14 +87,6 @@ async function sourceSeal(): Promise<string> {
   return hasher.digest('hex');
 }
 
-async function rlibSeal(target: string): Promise<Record<string, string>> {
-  const directory = join(target, TARGET, 'release/deps');
-  const names = (await readdir(directory)).filter((name) => name.endsWith('.rlib')).sort();
-  return Object.fromEntries(
-    await Promise.all(names.map(async (name) => [name, await sha256File(join(directory, name))]))
-  );
-}
-
 function allocatedBytes(path: string): number {
   return Number(syncText(['du', '-s', '-B1', path]).split(/\s/)[0]);
 }
@@ -99,6 +95,7 @@ function successful(command: NativeCommandReceipt): boolean {
   return (
     command.exitCode === 0 &&
     !command.timedOut &&
+    !command.canceled &&
     command.signal === null &&
     command.errors.length === 0 &&
     command.settlement.empty &&
@@ -223,11 +220,23 @@ async function main(): Promise<void> {
     diskBudgetEnforcement:
       'allocated bytes checked between attempts; excludes Cargo registry/toolchain caches',
   };
-  const save = async (failure: string | null, complete = false) =>
-    Bun.write(
-      join(out, 'receipt.json'),
-      `${JSON.stringify({ schedule, environment, complete, completeScope: 'requested workloads only', unperformed: [...(!flags['--attribution'] ? ['symbol-attribution'] : []), ...(!values['--startup-hub'] ? schedule.startup.modes : []), 'native Windows', 'native macOS'], failure, attempts, summariesMs: summarizeRustCosts(attempts) }, null, 2)}\n`
-    );
+  const save = (failure: string | null, complete = false) =>
+    writeBenchmarkProgress(join(out, 'receipt.json'), {
+      schedule,
+      environment,
+      complete,
+      completeScope: 'requested workloads only',
+      unperformed: [
+        ...(!flags['--attribution'] ? ['symbol-attribution'] : []),
+        ...(!values['--startup-hub'] ? schedule.startup.modes : []),
+        'native Windows',
+        'native macOS',
+      ],
+      failure,
+      attempts,
+      summariesMs: summarizeRustCosts(attempts),
+    });
+  const cancellation = benchmarkCancellation();
   let commandIndex = 0;
   const capture = async (
     label: string,
@@ -237,6 +246,7 @@ async function main(): Promise<void> {
     const name = `${++commandIndex}-${label}`;
     const result = await runNativeCommand({
       label: name,
+      signal: cancellation.signal,
       command,
       root: ROOT,
       out,
@@ -312,6 +322,7 @@ async function main(): Promise<void> {
         await capture(label, command)
       );
     for (const workload of workloads) {
+      if (cancellation.signal.aborted) throw cancellation.signal.reason;
       await checkBudget();
       if ((await sourceSeal()) !== seal)
         throw new Error('Rust study source: expected unchanged Rust/Cargo seal before attempt');
@@ -322,7 +333,9 @@ async function main(): Promise<void> {
         throw new Error(`Empty build: expected unused target | received: ${targetDir}`);
       await mkdir(targetDir, { recursive: true });
       await Bun.write(join(targetDir, '.started'), workload.label);
-      const beforeLibraries = workload.emptyTarget ? null : await rlibSeal(targetDir);
+      const beforeLibraries = workload.emptyTarget
+        ? null
+        : await rustLibraryHashes(join(targetDir, TARGET, 'release/deps'));
       const cpuPath = join(attemptOut, 'gnu-time.txt');
       const env = {
         ...process.env,
@@ -332,8 +345,15 @@ async function main(): Promise<void> {
       };
       const resourceState: { tracker?: ProcessResourceTracker } = {};
       const clock = performance.now();
+      await appendBenchmarkJournal(join(out, 'attempts.jsonl'), {
+        kind: 'started',
+        workload,
+        sourceSeal: seal,
+        at: new Date().toISOString(),
+      });
       const result = await runNativeCommand({
         label: workload.label,
+        signal: cancellation.signal,
         command: [
           '/usr/bin/time',
           '-f',
@@ -397,11 +417,17 @@ async function main(): Promise<void> {
         valid: false,
         durationMs: result.durationMs,
         workload,
+        status: result.canceled ? 'canceled' : successful(result) ? 'completed' : 'failed',
         command: result,
         resources,
         resourceIntervalMs: POLL_MS,
       };
       attempts.push(attempt);
+      await appendBenchmarkJournal(join(out, 'attempts.jsonl'), {
+        kind: 'finished',
+        ...attempt,
+        at: new Date().toISOString(),
+      });
       await save(null); // Keep terminal raw command even if inspection fails.
       if (!valid)
         throw new Error(
@@ -447,7 +473,7 @@ async function main(): Promise<void> {
       );
       attempt.version = versionReceipt;
       valid &&= versionReceipt.valid;
-      const libraries = await rlibSeal(targetDir);
+      const libraries = await rustLibraryHashes(join(targetDir, TARGET, 'release/deps'));
       attempt.libraryHashes = libraries;
       attempt.diskBeforeCleanup = await checkBudget();
       if (beforeLibraries) valid &&= JSON.stringify(beforeLibraries) === JSON.stringify(libraries);
@@ -462,8 +488,14 @@ async function main(): Promise<void> {
       );
       attempt.compiledUnits = compiled;
       if (workload.label.startsWith('runtime-noop'))
-        valid &&= kept.sha256 === priorRuntimeHash && compiled.length === 0;
-      if (workload.label.startsWith('runtime-restamp')) valid &&= compiled.length === 1;
+        valid &&= qualifiesRustIncremental('noop', priorRuntimeHash, kept.sha256, compiled.length);
+      if (workload.label.startsWith('runtime-restamp'))
+        valid &&= qualifiesRustIncremental(
+          'restamp',
+          priorRuntimeHash,
+          kept.sha256,
+          compiled.length
+        );
       if (workload.package === 'mangostudio-runtime') priorRuntimeHash = kept.sha256;
       attempt.valid = valid;
       measured.set(workload.package, artifact);
@@ -615,6 +647,8 @@ async function main(): Promise<void> {
     await save(String(error));
     process.exitCode = 1;
     console.error(String(error));
+  } finally {
+    cancellation.dispose();
   }
 }
 

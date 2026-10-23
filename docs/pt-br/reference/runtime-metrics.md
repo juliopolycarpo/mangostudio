@@ -187,7 +187,7 @@ Os recibos guardam revisão, selo das entradas Rust/Cargo, toolchain, árvore de
 metadados estáveis com features padrão/completas e árvore fuzz separada. Uma tentativa aceita precisa
 terminar com sucesso, entradas inalteradas e árvore de processos vazia. Builds sem alteração não podem
 recompilar unidades nem mudar o hash do binário. Uma nova versão deve recompilar uma unidade, relatar
-a versão esperada e preservar os hashes das bibliotecas. O launcher downloader nunca é executado para identificar sua versão: ela vem dos metadados Cargo selados, sem instalar um hub ou acessar o estado real do usuário. Tempo decorrido (resolução de 10 ms na saída), CPU final e RSS máximo individual do GNU time
+a versão esperada, mudar o hash do executável e preservar os hashes das bibliotecas. Só o runtime tem carga de nova versão, pelo input de compilação existente `MANGOSTUDIO_RELEASE_VERSION`; o launcher usa metadados Cargo e não é restampado. O launcher downloader nunca é executado para identificar sua versão: ela vem dos metadados Cargo selados, sem instalar um hub ou acessar o estado real do usuário. Tempo decorrido (resolução de 10 ms na saída), CPU final e RSS máximo individual do GNU time
 ficam separados das amostras de RSS/CPU da árvore de processos.
 
 `--attribution` produz outro artefato, com símbolos, para `cargo bloat`. A atribuição só é qualificada
@@ -215,3 +215,7 @@ maior soma simultânea observada; páginas compartilhadas contam em cada process
 observados não significa custo real zero. A revisão registrada pertence ao checkout do harness; o
 hash do executável precisa ser ligado ao seu recibo de build. WSL não qualifica Windows ou macOS
 nativos, que continuam não medidos.
+
+O driver trata SIGINT/SIGTERM cancelando o comando supervisionado ativo, encerrando sua árvore
+verificada, registrando a tentativa interrompida e parando o lote. Timeouts externos com SIGKILL
+exigem um supervisor externo: o processo morto não consegue executar sua própria limpeza.
