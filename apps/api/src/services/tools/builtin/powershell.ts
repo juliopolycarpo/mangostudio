@@ -1,6 +1,6 @@
 /**
  * Built-in tool: powershell
- * Runs commands through PowerShell. Registered only on Windows where it exists.
+ * Runs commands through PowerShell; per-turn runtime capabilities control exposure.
  */
 
 import { registerTool } from '../registry';

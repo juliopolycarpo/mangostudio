@@ -14,16 +14,19 @@ Application Layer (tool-settings-service.ts)
                     │
                 DB: user_tool_settings
                     │
+Startup (app.ts → registerApplicationServices())
+    │── calls ──→ registerTools() (register-tools.ts)
+    │── calls ──→ each builtin register() → Registry (registry.ts)
+    │
 Tools Layer (types.ts + registry.ts)
-    │── registers ──→ Builtins (generate-image.ts, get-current-datetime.ts)
     │
 Provider Layer (tool-mapper.ts) ──→ Provider-specific wire formats
 ```
 
 ## Tool Lifecycle
 
-1. **Registration** — Tools self-register at import time via `registerTool()`. Built-in tools call this at module load.
-2. **Settings resolution** — At chat time, `getEnabledToolRuntime()` loads user tool settings from DB, merges with defaults, and produces enabled `ToolDefinition[]`.
+1. **Registration** — `app.ts` calls `registerApplicationServices()`, which calls `registerTools()`. That registrar explicitly invokes each builtin module’s exported `register()` function, which calls `registerTool()`. Importing a builtin alone does not register it.
+2. **Capability resolution** — At chat time, `resolveAgentRuntime()` loads saved tool settings and calls `resolveToolCandidates()` with the registered tools, agent profile, and selected runtime manifest. Effective settings merge defaults with saved values, and `effectiveToolDefinitions()` returns the exposed `ToolDefinition[]`.
 3. **Wire format mapping** — `tool-mapper.ts` converts `ToolDefinition[]` to provider-specific format (OpenAI function tools, Gemini function declarations, etc.).
 4. **Model calls tool** — The provider streams `tool_call_started` / `tool_call_arguments_delta` / `tool_call_completed` events.
 5. **Execution** — `executeTool()` looks up the tool, checks it is enabled for the user, merges settings, and runs the executor.
@@ -69,13 +72,40 @@ interface ToolSettingsMetadata {
 
 ## Built-in Tools
 
-Chats bind a server-side working directory. Filesystem tools resolve relative
-`path` / `cwd` arguments against the bound directory, and the agent system
-prompt announces it. Tools that take a `cwd` default it to the bound
-directory; a chat with no bound directory falls back to the API process
-working directory. Tools such as `read_file`, `list_directory`, and `grep`
-still require an explicit `path`. When restriction is enabled, path
-containment policy applies to routed tools.
+The sections below are selected examples, not an exhaustive schema reference. The
+[startup registrar](../../apps/api/src/services/tools/register-tools.ts) owns the bundled
+registrations; each [builtin module](../../apps/api/src/services/tools/builtin/) owns its schema,
+settings, and executor. A registration function can register several tools, as `todo.ts` does.
+
+| Family                      | Representative tool names                                                                            | Purpose                                                    |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Images and time             | `generate_image`, `get_current_datetime`                                                             | Generate images or report the current time                 |
+| Filesystem reads and search | `read_file`, `list_directory`, `glob`, `grep`                                                        | Inspect files and find paths or text                       |
+| Filesystem mutations        | `write_file`, `edit_file`, `replace_range`, `apply_patch`, `create_file`, `delete_file`, `move_file` | Create, change, remove, or move files                      |
+| Shells                      | `bash`, `zsh`, `powershell`                                                                          | Run commands through an available runtime shell            |
+| Delegation and skills       | `delegate_to_agent`, `skill`                                                                         | Delegate bounded work or load installed skill instructions |
+| User interaction and tasks  | `ask_user_question`, `todo_write`, `todo_read`                                                       | Present questions or maintain the chat’s task list         |
+
+Registration makes a tool discoverable in the registry and tool settings; it does not promise
+that every model turn can call it. Agent tool allowlists and user settings filter exposure.
+Runtime-backed tools also declare `requiredCapabilities` (such as `fsRead`, `fsWrite`, or `shell`),
+and the selected environment’s capability manifest can withhold them when that machine denies
+consent. Shell definitions additionally require the corresponding interpreter in the manifest;
+shells are disabled in user settings by default. Delegation has its own turn eligibility check.
+See [capability resolution](../../apps/api/src/modules/generation/application/resolve-capability-candidates.ts)
+and [delegation availability](../../apps/api/src/modules/generation/application/delegate-tool-availability.ts).
+
+Chats can bind a working directory on the selected runtime environment. Filesystem tools
+resolve relative `path` / `cwd` arguments against that directory, and the agent system prompt
+announces it. `read_file` requires an explicit `path`; `list_directory` and `grep` default an
+omitted `path` to the bound directory. Without a bound working directory, provide an absolute
+path because missing or relative paths are rejected. `glob` uses
+the bound directory when `cwd` is omitted; when none is bound, it requires an absolute `cwd`. Shells also
+use the bound directory when `cwd` is omitted; without one, they leave `cwd` to the selected
+runtime’s default. The API host’s working directory is not a fallback for a remote environment.
+When restriction is enabled, path containment policy applies to routed tools. See the
+[path resolver](../../apps/api/src/services/tools/builtin/_fs-utils.ts) and
+[glob cwd resolver](../../apps/api/src/services/tools/builtin/glob.ts).
 
 **The path convention runs both ways: a path a tool reports can be passed back
 into another tool and reach the same file.** Every path in a result list —
@@ -142,19 +172,19 @@ Lists files and directories at a path.
 
 - **Tool name:** `list_directory`
 - **Category:** `system`
-- **Parameters:** `path` (required, absolute, `~`-prefixed, or relative to the chat working directory)
+- **Parameters:** `path` (optional, absolute, `~`-prefixed, or relative to the chat working directory; defaults to the bound directory, otherwise requires an absolute path)
 - **Settings:** `allowedPaths`, `deniedPaths`
-- **Execution:** Calls `readdir(path, { withFileTypes: true })` and returns `{ path, entries: { name, type }[] }`.
+- **Execution:** [`list-directory.ts`](../../apps/api/src/services/tools/builtin/list-directory.ts) resolves the target path and calls `runtime.fs.listDirectory()` on the selected runtime, returning `{ path, entries: { name, type }[] }`.
 
 ### `glob`
 
-Finds filesystem paths matching a glob pattern, evaluated by `Bun.Glob`.
+Finds filesystem paths matching a glob pattern on the selected runtime.
 
 - **Tool name:** `glob`
 - **Category:** `system`
-- **Parameters:** `pattern` (required, supports `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (optional base directory; absolute, `~`-prefixed, or relative to the chat working directory; defaults to the chat working directory, otherwise `process.cwd()`)
+- **Parameters:** `pattern` (required, supports `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (optional base directory; absolute, `~`-prefixed, or relative to the chat working directory; defaults to the chat working directory; requires an absolute `cwd` when none is bound)
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 200), `includeDotfiles` (default `false`), `absolute` (default `false`)
-- **Execution:** Streams matches with `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, stops at the cap, and reports `truncated`.
+- **Execution:** [`glob.ts`](../../apps/api/src/services/tools/builtin/glob.ts) resolves the target `cwd` and calls `runtime.fs.glob()` with the result cap and path policy. The runtime finds matching files and directories and reports `truncated` when capped.
 - **Result paths:** re-anchored from `cwd` to the chat working directory, so a match can be passed
   straight into `read_file`. `absolute: true` opts out and returns absolute paths.
 
@@ -164,10 +194,10 @@ Searches files for lines matching a regular expression.
 
 - **Tool name:** `grep`
 - **Category:** `system`
-- **Parameters:** `pattern` (required regex), `path` (required file or directory; absolute, `~`-prefixed, or relative to the chat working directory), `glob` (optional file filter for directory searches), `caseInsensitive`
+- **Parameters:** `pattern` (required regex), `path` (optional file or directory; absolute, `~`-prefixed, or relative to the chat working directory; defaults to the bound directory, otherwise requires an absolute path), `glob` (optional file filter for directory searches), `caseInsensitive`
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 100), `maxMatchesPerFile` (default 20), `maxFileSizeBytes` (default 1 MB), `includeDotfiles`
-- **Safety:** Files containing a null byte in the first 8 KiB are treated as binary and skipped; files above `maxFileSizeBytes` are skipped. The probe window is shared with `read_file`, so a file grep will search is a file `read_file` will open. The regex is compiled with `new RegExp` and rejected via `GrepPatternError` if invalid.
-- **Execution:** When `path` is a directory, walks it with `Bun.Glob` (filtered by the optional `glob`); for each candidate, reads with `Bun.file().text()`, splits by newline, and records `{ file, line, text }` matches.
+- **Safety:** Files containing a null byte in the first 8 KiB are treated as binary and skipped; files above `maxFileSizeBytes` are skipped. The probe window is shared with `read_file`, so a file grep will search is a file `read_file` will open. The runtime validates the JavaScript regular expression and reports invalid patterns as `GrepPatternError`.
+- **Execution:** [`grep.ts`](../../apps/api/src/services/tools/builtin/grep.ts) resolves the target path and calls `runtime.fs.grep()` with the pattern, optional glob filter, limits, and path policy. The runtime searches the file or directory and returns `{ file, line, text }` matches.
 - **Result paths:** `matches[].file` is re-anchored from the search root to the chat working
   directory, for both directory and single-file searches, so a match can be passed straight into
   `read_file`.
@@ -180,9 +210,9 @@ Run a shell command and return its captured `stdout`, `stderr`, exit code, and t
 - **Category:** `system`
 - **Parameters:** `command` (required), `cwd` (optional working directory; absolute, `~`-prefixed, or relative to the chat working directory)
 - **Settings:** `timeoutSeconds` (5s–600s, default 30s), `maxOutputBytes` (1KB–1MB per stream, default 100KB)
-- **Availability:** Registered at import time only when the interpreter exists — `bash`/`zsh` via `Bun.which`, `powershell` only on Windows (`pwsh` then `powershell`). Unavailable shells are never offered to models.
-- **Safety:** Disabled by default (`enabledByDefault: false`); requires explicit opt-in. The process is killed with `SIGKILL` after the configured timeout, and per-stream output is capped at `maxOutputBytes` (flagged via `truncated`). Parent abort (user cancel or stream teardown) is tracked separately from timeout and does not surface as a timeout error.
-- **Execution:** `runShellCommand()` spawns the interpreter with `Bun.spawn` (`bash -c` / `zsh -c` / `powershell -NoProfile -NonInteractive -Command`), enforces the timeout with an owned timer (not Bun's spawn timeout), reads both streams under the byte cap, and returns a structured `ShellCommandResult` with a `termination` field (`exited`, `timed_out`, `aborted`, or `signalled`).
+- **Availability:** `registerTools()` registers all three definitions. Turn capability resolution exposes only shells listed by the selected runtime’s capability manifest, with shell consent and user enablement also required. The API host’s `PATH` does not decide a remote environment’s shell availability.
+- **Safety:** Disabled by default (`enabledByDefault: false`); requires explicit opt-in. The selected runtime enforces the execution timeout and per-stream `maxOutputBytes` cap (flagged via `truncated`). Parent abort (user cancel or stream teardown) is tracked separately from timeout and does not surface as a timeout error.
+- **Execution:** [`_shell-tool.ts`](../../apps/api/src/services/tools/builtin/_shell-tool.ts) resolves the selected runtime client, working directory, toolchain, and environment policy, then calls `runtime.shell.run()`. The Rust runtime owns interpreter spawning, output capture, and process cleanup. The returned `ShellCommandResult.termination.kind` is `exited`, `timed_out`, `aborted`, or `signalled`; the hub turns timeout and abort results into the corresponding tool errors.
 
 ## Settings Policy
 
@@ -285,17 +315,21 @@ correctable error to.
 
 1. Create the tool file in `apps/api/src/services/tools/builtin/`.
 2. Define `ToolDefinition`, `ToolSettingsMetadata`, and the `execute` function.
-3. Call `registerTool()` to self-register at import time.
-4. Import the tool in `apps/api/src/services/tools/index.ts` to trigger registration.
+3. Export a `register(): void` function that calls `registerTool()`; keep registration out of module initialization.
+4. Import that function in `apps/api/src/services/tools/register-tools.ts` and invoke it inside `registerTools()`. Startup already calls the registrar through `registerApplicationServices()`.
 5. If the tool needs settings-aware behavior, provide a `buildDefinition` callback.
 6. Add TypeBox schemas for request/response in shared contracts if the tool has its own API surface.
-7. Write unit tests for the tool executor and the settings merge behavior.
+7. Add the tool name to `apps/api/tests/support/registration-expectations.ts`. Test its executor, settings merge, and registration/discovery; the existing registration and strict-schema tests use that expectation list.
+8. For runtime I/O, declare the required consent capabilities and route operations through the selected runtime client. Registration must not bypass runtime consent or agent/user exposure policy.
 
 ### Minimal Example
 
+Create `apps/api/src/services/tools/builtin/my-tool.ts`:
+
 ```typescript
+import { getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
-import type { RegisteredTool, ToolContext } from '../types';
+import type { RegisteredTool } from '../types';
 
 const MY_TOOL: RegisteredTool = {
   definition: {
@@ -307,6 +341,7 @@ const MY_TOOL: RegisteredTool = {
         input: { type: 'string', description: 'Input value' },
       },
       required: ['input'],
+      additionalProperties: false,
     },
   },
   settings: {
@@ -318,11 +353,32 @@ const MY_TOOL: RegisteredTool = {
     defaultParameters: {},
     parameterDescriptors: [],
   },
-  execute: async (args, context) => {
-    const { input } = args as { input: string };
+  execute: async (args) => {
+    const input = getRequiredString(args.input, 'input');
     return { result: `Processed: ${input}` };
   },
 };
 
-registerTool(MY_TOOL);
+export function register(): void {
+  registerTool(MY_TOOL);
+}
 ```
+
+Then wire it into the existing registrar (keep the other imports and calls):
+
+```typescript
+// apps/api/src/services/tools/register-tools.ts
+import { register as registerMyTool } from './builtin/my-tool';
+
+export function registerTools(): void {
+  // ...existing builtin registrations...
+  registerMyTool();
+}
+```
+
+The complete path is `app.ts` → `registerApplicationServices()` → `registerTools()` →
+`registerMyTool()` → `registerTool(MY_TOOL)`. After startup, `getTool('my_tool')` and
+`getToolDescriptors()` discover it; `getAllToolDefinitions()` includes this default-enabled
+example. Per-turn capability resolution still applies the agent and user policies described
+above. Run the registration, preload-smoke, and strict-schema tests through the isolated
+[API test commands](../reference/testing.md); do not add an import to `tools/index.ts`.

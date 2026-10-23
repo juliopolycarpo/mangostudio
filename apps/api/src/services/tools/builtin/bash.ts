@@ -1,6 +1,6 @@
 /**
  * Built-in tool: bash
- * Runs commands through the Bash shell. Registered only when bash is on PATH.
+ * Runs commands through Bash; per-turn runtime capabilities control exposure.
  */
 
 import { registerTool } from '../registry';

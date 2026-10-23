@@ -1,6 +1,6 @@
 /**
  * Provider-agnostic tool registry.
- * Tools self-register at import time via registerTool().
+ * Builtin register() functions populate it through the explicit startup registrar.
  */
 
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
@@ -21,7 +21,7 @@ export {
 
 const registry = new Map<string, RegisteredTool>();
 
-/** Registers a tool. Called by each builtin at import time. */
+/** Registers a tool. Called by builtin register() functions during startup. */
 export function registerTool(tool: RegisteredTool): void {
   registry.set(tool.definition.name, tool);
 }

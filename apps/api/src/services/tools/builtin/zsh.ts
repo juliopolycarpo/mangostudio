@@ -1,6 +1,6 @@
 /**
  * Built-in tool: zsh
- * Runs commands through the Zsh shell. Registered only when zsh is on PATH.
+ * Runs commands through Zsh; per-turn runtime capabilities control exposure.
  */
 
 import { registerTool } from '../registry';
