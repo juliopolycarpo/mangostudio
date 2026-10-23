@@ -13,9 +13,10 @@ name: Release
 # tagged commit must already carry the release's CHANGELOG.md section (staged
 # by `bun run release:prepare`); the preparation job's lockstep check gates on
 # it. The same job also requires the tagged commit to be an ancestor of
-# origin/main whose ci.yml main-push run finished with a successful `Gate` job
-# (the check shown as "CI / Gate"). Tag
-# pushes cannot skip that provenance gate; workflow_dispatch may set
+# origin/main whose CI workflow (ci.yml) main-push run finished with a
+# successful job named `Gate`. The API job name is `Gate`; the run lookup
+# establishes the workflow identity. Tag pushes cannot skip that provenance
+# gate; workflow_dispatch may set
 # allow_unverified_source=true as a recorded break-glass bypass only.
 #
 # A tag carrying a semver pre-release identifier (v0.2.0-rc.1) publishes the
@@ -191,12 +192,10 @@ jobs:
             exit 1
           fi
 
-          # ci.yml, cargo-shim.yml and release-dry-run.yml each expose a job
-          # named "Gate", and the commit check-runs API carries no workflow
-          # prefix — matching on the bare name could read the wrong gate (the
-          # release-prep commit bumps crates/mangostudio-launcher, so "Cargo Shim /
-          # Gate" is always present too). Resolve ci.yml's own main-push run for
-          # this commit, then read that run's "Gate" job.
+          # CI, Cargo Shim and Protocol CI share the bare check context "Gate".
+          # Matching only that context could read another workflow's result.
+          # Resolve ci.yml's own main-push run for this commit, then read that
+          # run's job named "Gate" through the jobs API.
           run_id="$(gh api \
             "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SOURCE_SHA}&event=push&per_page=100" \
             --jq '.workflow_runs | sort_by(.run_number) | last | .id // empty')"
@@ -210,10 +209,10 @@ jobs:
             --jq '[.jobs[] | select(.name == "Gate")] | last
                   | "\(.status // "missing"):\(.conclusion // "none")"')"
           if [ "$gate" != "completed:success" ]; then
-            echo "Refusing to release ${SOURCE_SHA}: CI / Gate (run ${run_id}) is '${gate}', not 'completed:success'." >&2
+            echo "Refusing to release ${SOURCE_SHA}: CI workflow Gate job (run ${run_id}) is '${gate}', not 'completed:success'." >&2
             exit 1
           fi
-          echo "Source verified: ${SOURCE_SHA} is on main and CI / Gate passed (run ${run_id})."
+          echo "Source verified: ${SOURCE_SHA} is on main and the CI workflow Gate job passed (run ${run_id})."
 
   build:
     name: Build immutable release distribution
