@@ -588,3 +588,408 @@ hub-migrated-readiness-measured-20,hub-migrated-readiness,measured,success,true,
 ```
 
 </details>
+
+## Matching-symbol attribution cohort, 2026-10-23
+
+A separate **unscored** GNU artifact cohort closes the current dependency-attribution gap. It uses
+source `805d2b536e5d5ad7e959bb0c1b5d3a6290878005`, input seal
+`6a36c1e4ddf08df28ea196c8655d11607eda77660f2f736b67349dbb9c9ecdcd`, version `0.1.1`, default features,
+eight jobs and target `x86_64-unknown-linux-gnu`. Rust/Cargo 1.99.0 (b940084d7 / 5f94df478), LLVM
+23.1.1 and Bun 1.4.3 are unchanged. The two packages were built once each in a new private ext4
+Cargo target, runtime then launcher, with populated registry/toolchain caches and Cargo offline.
+The workspace release codegen remains opt-level 3 / fat LTO / one codegen unit / unwind; only
+stripping is disabled to retain symbols. V3L uses this workspace audit profile; these values
+do not qualify arbitrary launcher installations built with a cargo-install profile.
+
+Pinned cargo-bloat 0.12.1 has SHA-256
+`28c5f0f8070dc6fe3023066a56f1dcf35e80347fcdeebfe3532e9a732dbb0954`.
+Its GNU build path injects `CARGO_PROFILE_RELEASE_STRIP=false`; its forced debug setting applies only
+to MSVC. The frozen child environment had `RUSTFLAGS` and `CARGO_ENCODED_RUSTFLAGS` unset. Captured
+verbose binary invocations had exactly these `-C` values:
+
+| Binary   | Codegen values                                                                                               |
+| -------- | ------------------------------------------------------------------------------------------------------------ |
+| Runtime  | `opt-level=3`, `lto=fat`, `codegen-units=1`, `metadata=e2d8f00e67dcf235`, `extra-filename=-1752e5e7b56dac33` |
+| Launcher | `opt-level=3`, `lto=fat`, `codegen-units=1`, `metadata=2346ad337e441315`, `extra-filename=-0ba43966a803d021` |
+
+Neither invocation added `link-dead-code`, `debuginfo`, `strip` or `panic=abort`; the profile/target
+retains unwind and the no-strip default. Retained debug sections are listed below rather than
+inferred absent from the compiler flags. These actual flags and artifact hashes define the cohort;
+matching three profile fields alone does not establish equivalence to a different artifact.
+
+V3R and V3L are new post-link stripped copies of their own preserved symbol-bearing builds.
+GNU strip 2.46, SHA-256 `4d2ca6ba80677c3b2975e328306a779cd7bd6590a87948b5ebea9c1b41a049c8`,
+applied `--strip-all` to each copy. Cargo documents `strip=true` as `strip="symbols"`, and GNU
+`--strip-all` removes symbols; this reproduces that stripping policy without claiming byte identity
+to an earlier Cargo-linked file. See the [Cargo profile documentation](https://doc.rust-lang.org/cargo/reference/profiles.html#strip)
+and [GNU strip manual](https://sourceware.org/binutils/docs/binutils/strip.html).
+
+Both pairs have exactly equal pre/post `.text` bytes and SHA-256, unchanged original/symbol copies,
+removed static symbol/debug sections and preserved `.text`, `.rodata`, `.eh_frame` and
+`.gcc_except_table` sizes/addresses. Runtime `--version` returned `0.1.1` under an isolated home;
+the launcher was never executed and its version came from sealed Cargo metadata. Their stripped
+file sizes are **26,430,696 bytes** (V3R) and **2,223,120 bytes** (V3L). Attribution is accepted only
+for these new copies. Old R12/Z attribution remains rejected, and every v2 timing/startup sample,
+warmup, failed admission and unqualified symbol result above remains unchanged.
+
+### Current code attribution and coverage
+
+`--crates --split-std -n 0` retained all 130 runtime and 38 launcher rows, without a filter or top-N
+truncation. Named crates, unknown symbols and residual bytes sum exactly to each `.text` section:
+
+| Artifact | Crate rows | Text bytes | Named-crate bytes | Unknown-symbol bytes | Residual text bytes |
+| -------- | ---------: | ---------: | ----------------: | -------------------: | ------------------: |
+| V3R      |        130 |   19820037 |          18737863 |               912729 |              169445 |
+| V3L      |         38 |    1570246 |           1482460 |                71253 |               16533 |
+
+Fat-LTO crate attribution remains heuristic, including inlined/shared code. `[Unknown]` contains
+symbols the tool could not assign; `[Residual]` is `.text` outside its summed symbol rows, including
+unassigned bytes or padding. It is kept separately instead of assigning it to a dependency.
+The rows include the application and split standard-library crates. Packages without an attributed
+symbol do not appear; their absence does not prove zero contribution. These are `.text` attributions,
+not shares of the entire file or runtime memory. The full crate rows and complete ELF section sizes
+are retained below; `NOBITS` describes memory size, not bytes stored in the file. Empty stripped
+section fields mean the section was removed.
+
+<details>
+<summary>New matching artifact identities (CSV)</summary>
+
+```csv
+artifact_id,package,version,file_bytes,text_bytes,file_sha256,text_sha256
+V3R-symbols,mangostudio-runtime,0.1.1,36120064,19820037,ccb8f44ef8d3e78b1f6bb84bef1a6f9e6bad9211ecfd2c34efcc8eb4279fc915,a936d68748eacfcfe86889279ef4c30d4835d371fee273d30715f5a1ebb10ed3
+V3R,mangostudio-runtime,0.1.1,26430696,19820037,7a8e792aec2f42144b0b3fd487fac0bbd44ff917acb44df511d413f732bf870e,a936d68748eacfcfe86889279ef4c30d4835d371fee273d30715f5a1ebb10ed3
+V3L-symbols,mangostudio,0.1.1,6575560,1570246,7d83415f7c9129257407bc7778ce98f4a723fb380b9fb0c1d6cce3ee3bb03d94,4f7feed6909387a51e2a8ce0eb57e3c5f034563273b87f5153564dc5ba1a9e2d
+V3L,mangostudio,0.1.1,2223120,1570246,8906b428ac27b17b5568915596839c2b6512f01fb5836636859bba70892e358b,4f7feed6909387a51e2a8ce0eb57e3c5f034563273b87f5153564dc5ba1a9e2d
+```
+
+</details>
+
+<details>
+<summary>Complete section sizes (CSV)</summary>
+
+```csv
+artifact_id,section,elf_type,symbol_bytes,stripped_bytes,symbol_address,stripped_address
+V3R,.interp,PROGBITS,28,28,736,736
+V3R,.note.ABI-tag,NOTE,32,32,764,764
+V3R,.note.gnu.build-id,NOTE,36,36,796,796
+V3R,.dynsym,DYNSYM,5568,5568,832,832
+V3R,.gnu.version,VERSYM,464,464,6400,6400
+V3R,.gnu.version_r,VERNEED,528,528,6864,6864
+V3R,.gnu.hash,GNU_HASH,28,28,7392,7392
+V3R,.dynstr,STRTAB,3006,3006,7420,7420
+V3R,.rela.dyn,RELA,632712,632712,10432,10432
+V3R,.rela.plt,RELA,1680,1680,643144,643144
+V3R,.gcc_except_table,PROGBITS,1037452,1037452,644824,644824
+V3R,.rodata,PROGBITS,2777792,2777792,1683456,1683456
+V3R,.eh_frame_hdr,PROGBITS,181292,181292,4461248,4461248
+V3R,.eh_frame,PROGBITS,1498328,1498328,4642544,4642544
+V3R,.text,PROGBITS,19820037,19820037,6145024,6145024
+V3R,.init,PROGBITS,27,27,25965064,25965064
+V3R,.fini,PROGBITS,13,13,25965092,25965092
+V3R,.plt,PROGBITS,1136,1136,25965120,25965120
+V3R,.tdata,PROGBITS,249,249,25970352,25970352
+V3R,.tbss,NOBITS,168,168,25970608,25970608
+V3R,.fini_array,FINI_ARRAY,8,8,25970608,25970608
+V3R,.init_array,INIT_ARRAY,16,16,25970616,25970616
+V3R,.data.rel.ro,PROGBITS,454400,454400,25970656,25970656
+V3R,.dynamic,DYNAMIC,464,464,26425056,26425056
+V3R,.got,PROGBITS,2464,2464,26425520,26425520
+V3R,.got.plt,PROGBITS,584,584,26427984,26427984
+V3R,.relro_padding,NOBITS,2920,2920,26428568,26428568
+V3R,.tm_clone_table,PROGBITS,0,0,26432664,26432664
+V3R,.data,PROGBITS,7704,7704,26432672,26432672
+V3R,.bss,NOBITS,536,536,26440384,26440384
+V3R,.comment,PROGBITS,177,177,0,0
+V3R,.debug_abbrev,PROGBITS,15239,,0,
+V3R,.debug_info,PROGBITS,1042037,,0,
+V3R,.debug_aranges,PROGBITS,14656,,0,
+V3R,.debug_ranges,PROGBITS,283024,,0,
+V3R,.debug_str,PROGBITS,1444143,,0,
+V3R,.debug_line,PROGBITS,510268,,0,
+V3R,.debug_loclists,PROGBITS,1117567,,0,
+V3R,.debug_rnglists,PROGBITS,52758,,0,
+V3R,.debug_macro,PROGBITS,38458,,0,
+V3R,.debug_line_str,PROGBITS,7661,,0,
+V3R,.symtab,SYMTAB,868848,,0,
+V3R,.shstrtab,STRTAB,478,318,0,0
+V3R,.strtab,STRTAB,4293767,,0,
+V3L,.interp,PROGBITS,28,28,736,736
+V3L,.note.ABI-tag,NOTE,32,32,764,764
+V3L,.note.gnu.build-id,NOTE,36,36,796,796
+V3L,.dynsym,DYNSYM,3096,3096,832,832
+V3L,.gnu.version,VERSYM,258,258,3928,3928
+V3L,.gnu.version_r,VERNEED,336,336,4188,4188
+V3L,.gnu.hash,GNU_HASH,28,28,4528,4528
+V3L,.dynstr,STRTAB,1689,1689,4556,4556
+V3L,.rela.dyn,RELA,60240,60240,6248,6248
+V3L,.rela.plt,RELA,96,96,66488,66488
+V3L,.gcc_except_table,PROGBITS,37248,37248,66584,66584
+V3L,.rodata,PROGBITS,357029,357029,106496,106496
+V3L,.eh_frame_hdr,PROGBITS,17876,17876,463528,463528
+V3L,.eh_frame,PROGBITS,119836,119836,481408,481408
+V3L,.text,PROGBITS,1570246,1570246,605376,605376
+V3L,.init,PROGBITS,27,27,2175624,2175624
+V3L,.fini,PROGBITS,13,13,2175652,2175652
+V3L,.plt,PROGBITS,80,80,2175680,2175680
+V3L,.tdata,PROGBITS,49,49,2179856,2179856
+V3L,.tbss,NOBITS,72,72,2179912,2179912
+V3L,.fini_array,FINI_ARRAY,8,8,2179912,2179912
+V3L,.init_array,INIT_ARRAY,16,16,2179920,2179920
+V3L,.data.rel.ro,PROGBITS,43872,43872,2179936,2179936
+V3L,.dynamic,DYNAMIC,448,448,2223808,2223808
+V3L,.got,PROGBITS,1696,1696,2224256,2224256
+V3L,.got.plt,PROGBITS,56,56,2225952,2225952
+V3L,.relro_padding,NOBITS,2216,2216,2226008,2226008
+V3L,.tm_clone_table,PROGBITS,0,0,2230104,2230104
+V3L,.data,PROGBITS,2696,2696,2230104,2230104
+V3L,.bss,NOBITS,280,280,2232800,2232800
+V3L,.comment,PROGBITS,177,177,0,0
+V3L,.debug_abbrev,PROGBITS,11257,,0,
+V3L,.debug_info,PROGBITS,872900,,0,
+V3L,.debug_aranges,PROGBITS,10848,,0,
+V3L,.debug_ranges,PROGBITS,213120,,0,
+V3L,.debug_str,PROGBITS,1255976,,0,
+V3L,.debug_line,PROGBITS,424444,,0,
+V3L,.debug_loclists,PROGBITS,1117567,,0,
+V3L,.debug_rnglists,PROGBITS,52758,,0,
+V3L,.debug_macro,PROGBITS,38458,,0,
+V3L,.debug_line_str,PROGBITS,7661,,0,
+V3L,.symtab,SYMTAB,76128,,0,
+V3L,.shstrtab,STRTAB,478,318,0,0
+V3L,.strtab,STRTAB,270389,,0,
+```
+
+</details>
+
+<details>
+<summary>All crate rows and residuals (CSV)</summary>
+
+```csv
+artifact_id,crate,text_bytes
+V3R,mangostudio_runtime,3171895
+V3R,jsonschema,2640131
+V3R,core,2055993
+V3R,tokio,1467702
+V3R,serde_core,923855
+V3R,[Unknown],912729
+V3R,rmcp,812748
+V3R,mango_external_agents,770040
+V3R,mango_protocol,719961
+V3R,serde_json,677577
+V3R,mango_agent_codex,662288
+V3R,mango_agent_acp,539017
+V3R,rustls,389951
+V3R,ring,283533
+V3R,regex_automata,282110
+V3R,alloc,245193
+V3R,mango_agent_claude,243968
+V3R,std,229725
+V3R,regex_syntax,180723
+V3R,fancy_regex,165461
+V3R,referencing,158515
+V3R,agent_client_protocol_schema,143232
+V3R,aho_corasick,138887
+V3R,reqwest,131153
+V3R,rquickjs_sys,101939
+V3R,serde_with,101496
+V3R,serde,95891
+V3R,hyper_util,81731
+V3R,tungstenite,70362
+V3R,http,67143
+V3R,webpki,63975
+V3R,icu_collator,60777
+V3R,futures_util,58873
+V3R,hyper,58114
+V3R,url,51096
+V3R,num_bigint,48725
+V3R,indexmap,47557
+V3R,hashbrown,42824
+V3R,toml,40107
+V3R,toml_parser,35367
+V3R,gimli,35344
+V3R,tokio_util,33732
+V3R,data_encoding,27882
+V3R,tokio_tungstenite,25092
+V3R,darling_core,24026
+V3R,idna,23736
+V3R,cc,23086
+V3R,fluent_uri,22473
+V3R,cap_primitives,22360
+V3R,rustc_demangle,21251
+V3R,jsonschema_regex,20832
+V3R,memchr,19808
+V3R,proc_macro2,16674
+V3R,icu_normalizer,16474
+V3R,mangostudio_runtime_contract,16392
+V3R,tokio_rustls,16188
+V3R,heck,15540
+V3R,hyper_rustls,13708
+V3R,rustls_pki_types,12187
+V3R,jsonschema_value,12056
+V3R,addr2line,11631
+V3R,smallvec,11416
+V3R,sha2,11316
+V3R,tracing,10417
+V3R,miniz_oxide,9875
+V3R,base64,9437
+V3R,http_body_util,8538
+V3R,rustls_native_certs,8486
+V3R,regex,8465
+V3R,fraction,8430
+V3R,icu_locale_core,7451
+V3R,bytes,7215
+V3R,rquickjs_core,6860
+V3R,parking_lot,6592
+V3R,autocfg,6462
+V3R,httparse,6381
+V3R,icu_locale_fallback,6349
+V3R,rustls_platform_verifier,6163
+V3R,toml_datetime,5941
+V3R,globset,5917
+V3R,compiler_builtins,5642
+V3R,tower,5599
+V3R,getrandom,5566
+V3R,ahash,5427
+V3R,sha1,5376
+V3R,ipnet,5169
+V3R,chrono,4539
+V3R,icu_provider,4478
+V3R,sse_stream,4364
+V3R,email_address,4050
+V3R,syn,3851
+V3R,rustix,3587
+V3R,num_rational,3549
+V3R,semver,3018
+V3R,find_msvc_tools,2827
+V3R,futures_channel,2458
+V3R,zmij,2396
+V3R,rand,1909
+V3R,parking_lot_core,1864
+V3R,std_detect,1727
+V3R,uuid,1493
+V3R,zerotrie,1336
+V3R,icu_collections,1326
+V3R,uuid_simd,1207
+V3R,chacha20,1117
+V3R,signal_hook_registry,1109
+V3R,foldhash,1105
+V3R,version_check,1028
+V3R,tower_http,1015
+V3R,digest,1014
+V3R,shlex,874
+V3R,itoa,846
+V3R,percent_encoding,832
+V3R,bit_set,683
+V3R,bytecount,645
+V3R,convert_case,523
+V3R,futures_task,362
+V3R,mio,353
+V3R,__rustc,341
+V3R,want,338
+V3R,zerovec,297
+V3R,utf8_iter,296
+V3R,panic_abort,219
+V3R,openssl_probe,87
+V3R,strsim,49
+V3R,untrusted,44
+V3R,unicode_segmentation,36
+V3R,nix,26
+V3R,http_body,26
+V3R,panic_unwind,22
+V3R,[Residual],169445
+V3L,rustls,379896
+V3L,ring,283487
+V3L,core,191650
+V3L,ureq,135177
+V3L,std,116872
+V3L,[Unknown],71253
+V3L,tar,50247
+V3L,webpki,44343
+V3L,mangostudio,42132
+V3L,gimli,37393
+V3L,alloc,34748
+V3L,http,29374
+V3L,miniz_oxide,22281
+V3L,ureq_proto,20738
+V3L,rustc_demangle,20659
+V3L,addr2line,12836
+V3L,sha2,11316
+V3L,flate2,8822
+V3L,rustls_pki_types,6542
+V3L,cc,6078
+V3L,bytes,5427
+V3L,crc32fast,4717
+V3L,httparse,3489
+V3L,find_msvc_tools,3096
+V3L,hashbrown,2269
+V3L,base64,1844
+V3L,std_detect,1727
+V3L,filetime,969
+V3L,simd_adler32,856
+V3L,memchr,840
+V3L,rustix,708
+V3L,getrandom,682
+V3L,shlex,548
+V3L,__rustc,329
+V3L,panic_abort,219
+V3L,compiler_builtins,83
+V3L,untrusted,44
+V3L,panic_unwind,22
+V3L,[Residual],16533
+```
+
+</details>
+
+### Reproduction and limits
+
+The exact source, tools, profile and default feature selection above are required. Use a fresh
+output/target, clear unrelated compiler/profile overrides and inspect all returned rows. These commands
+show the same build/copy/strip/section workflow; the executed supervised cohort also required unchanged
+source/tool/old-evidence seals, exact bloat file/text counts, unique nonempty crate rows, bounded
+allocation and empty terminal process scopes.
+
+```bash
+# From the recorded source, with cargo-bloat 0.12.1 and GNU binutils 2.46.
+mkdir -p target
+cohort_target=$(mktemp -d "$PWD/target/attribution-v3.XXXXXX")
+cohort_out=$(mktemp -d)
+cat > "$cohort_out/profile.toml" <<'PROFILE'
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "none"
+panic = "unwind"
+PROFILE
+for cohort_package in mangostudio-runtime mangostudio; do
+  env -i HOME="$HOME" USERPROFILE="$HOME" PATH="$PATH" \
+    CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" \
+    LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+    CARGO_INCREMENTAL=0 CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=8 \
+    MANGOSTUDIO_RELEASE_VERSION=0.1.1 CARGO_PROFILE_RELEASE_STRIP=none \
+    cargo bloat --config "$cohort_out/profile.toml" --release --locked -j 8 \
+      --target x86_64-unknown-linux-gnu --target-dir "$cohort_target" \
+      -p "$cohort_package" --bin "$cohort_package" --crates --split-std -n 0 \
+      --message-format json -v > "$cohort_out/$cohort_package.bloat.json"
+  cp "$cohort_target/x86_64-unknown-linux-gnu/release/$cohort_package" \
+    "$cohort_out/$cohort_package.symbols"
+  cp "$cohort_out/$cohort_package.symbols" "$cohort_out/$cohort_package.stripped"
+  strip --strip-all -- "$cohort_out/$cohort_package.stripped"
+  for cohort_kind in symbols stripped; do
+    size -A -d "$cohort_out/$cohort_package.$cohort_kind"
+    readelf -h -S -W "$cohort_out/$cohort_package.$cohort_kind"
+    objcopy --dump-section ".text=$cohort_out/$cohort_package.$cohort_kind.text" \
+      "$cohort_out/$cohort_package.$cohort_kind" "$cohort_out/inspection-copy"
+  done
+  cmp "$cohort_out/$cohort_package.symbols.text" "$cohort_out/$cohort_package.stripped.text"
+  sha256sum "$cohort_out/$cohort_package."{symbols,stripped}{,.text}
+done
+```
+
+Both cases qualified without retry. All 17 supervised commands exited successfully with no historical
+census error and empty scopes; 231 owned identities were observed and zero remained. The final
+allocation check recorded 1,165,455,360 bytes for the private Cargo target and
+121,614,336 bytes for artifact/receipt output (1,287,069,696 combined). The reservation was 30 minutes with an 8 GiB boundary gate,
+not a hard mid-build quota. No source/dependency/feature/profile file changed. Native Windows/macOS
+attribution remains unperformed. This cohort supplies artifact sizes and a matching-symbol baseline;
+command durations are unscored and add no build/startup timing, optimization or savings claim.
