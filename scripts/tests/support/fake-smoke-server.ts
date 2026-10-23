@@ -89,7 +89,13 @@ const stateDir = join(process.env.HOME as string, '.mango', 'run');
 mkdirSync(stateDir, { recursive: true });
 writeFileSync(
   join(stateDir, 'server.json'),
-  JSON.stringify({ host: process.env.FAKE_SMOKE_BIND_HOST ?? process.env.API_HOST ?? 'localhost' })
+  JSON.stringify({
+    host:
+      process.env.FAKE_SMOKE_BIND_HOST ??
+      process.env.API_HOST ??
+      process.env.MANGOSTUDIO_DEFAULT_API_HOST ??
+      'localhost',
+  })
 );
 
 let stopping = false;
@@ -116,4 +122,5 @@ record('startup', {
   cwd: process.cwd(),
   executable: process.argv[1],
   apiHost: process.env.API_HOST ?? null,
+  defaultApiHost: process.env.MANGOSTUDIO_DEFAULT_API_HOST ?? null,
 });

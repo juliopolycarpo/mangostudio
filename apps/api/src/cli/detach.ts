@@ -175,12 +175,12 @@ export const WINDOWS_SYSTEM_ENV_KEYS: readonly string[] = [
 /**
  * Runtime env keys forwarded to detached child processes.
  * Connector secrets and other injectable credentials are excluded; only the
- * runtime configuration (mirrors config.ts `ENV_KEY_MAP`) plus the system and
+ * runtime configuration (config.ts `RUNTIME_CONFIG_ENV_KEYS`) plus the system and
  * networking variables the server actually needs to run are forwarded.
  */
 export const DETACH_ENV_ALLOWLIST = new Set<string>([
-  // Runtime configuration — sourced from config.ts so a new ENV_KEY_MAP key
-  // reaches detached children without editing two lists.
+  // Runtime configuration, including image defaults, comes from config.ts so
+  // new keys reach detached children without editing two lists.
   ...RUNTIME_CONFIG_ENV_KEYS,
   // Runtime vars read directly from process.env (not part of ENV_KEY_MAP).
   'MANGO_LOG_FILE',

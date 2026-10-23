@@ -74,8 +74,8 @@ native_tmp_home="$(to_native_path "$tmp_home")"
 # server outlives the helper.
 (
   cd "$staging_dir"
-  # A fresh home and no API_HOST exercise the binary's default on every native OS.
-  unset API_HOST
+  # A fresh home and no host environment overrides exercise the binary's default on every native OS.
+  unset API_HOST MANGOSTUDIO_DEFAULT_API_HOST
   HOME="$native_tmp_home" \
     USERPROFILE="$native_tmp_home" \
     DATABASE_PATH="$(to_native_path "${tmp_home}/smoke.sqlite")" \

@@ -33,7 +33,7 @@ COPY --chmod=0755 docker-ctx/bookworm/${TARGETARCH}/mangostudio /usr/local/bin/m
 COPY --chmod=0755 docker-ctx/bookworm/${TARGETARCH}/mangostudio-runtime /usr/local/bin/mangostudio-runtime
 
 ENV HOME=/data
-ENV API_HOST=0.0.0.0
+ENV MANGOSTUDIO_DEFAULT_API_HOST=0.0.0.0
 ENV TMPDIR=/tmp
 
 USER mango

@@ -195,9 +195,9 @@ detached mode. Installations that relied on implicit LAN access must opt in with
 process environment wins over the `.env` beside config.toml, then TOML, then the
 default. Explicit hosts keep their behavior.
 
-Both Docker variants set `API_HOST=0.0.0.0` in the image so published ports remain
-reachable. An environment setting in the image also overrides a mounted TOML host;
-set `API_HOST` explicitly when overriding the image's bind. Authentication, TLS
+Both Docker variants set `MANGOSTUDIO_DEFAULT_API_HOST=0.0.0.0` so published
+ports remain reachable by default. This process-only fallback is below an explicit
+CLI host, `API_HOST` (process or adjacent `.env`), and a mounted TOML host. Authentication, TLS
 termination and allowed browser origins still need their normal configuration.
 The all-interface example below is an explicit remote-access opt-in.
 

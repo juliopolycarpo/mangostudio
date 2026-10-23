@@ -359,6 +359,15 @@ describe('release workflow binary gate', () => {
     expect(readText('.github/workflows/canary.yml')).not.toContain('environment: release');
   });
 
+  test.each(['Dockerfile', 'Dockerfile.alpine'])(
+    '%s keeps explicit host configuration above its default',
+    (file) => {
+      const dockerfile = readText(file);
+      expect(dockerfile).toContain('ENV MANGOSTUDIO_DEFAULT_API_HOST=0.0.0.0');
+      expect(dockerfile).not.toMatch(/^ENV API_HOST=/m);
+    }
+  );
+
   test('pre-merge binary smoke covers native host platforms and Docker variants', () => {
     const workflow = readText('.github/workflows/smoke-binary.yml');
     const platformExpression = '$' + '{{ matrix.platform }}';
@@ -1304,7 +1313,7 @@ describe('release workflow binary gate', () => {
     const bashSource = '$' + '{BASH_SOURCE[0]}';
 
     expect(helper).toContain('"$binary_path" --version');
-    expect(helper).toContain('unset API_HOST');
+    expect(helper).toContain('unset API_HOST MANGOSTUDIO_DEFAULT_API_HOST');
     expect(helper).toContain('expected default bind: localhost');
     // The server boots from a staged copy of the binary with a doctored stale
     // public/ sidecar beside it, proving the embedded frontend wins.

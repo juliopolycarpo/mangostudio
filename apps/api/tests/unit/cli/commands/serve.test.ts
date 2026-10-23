@@ -15,6 +15,22 @@ const STATE: ServerState = {
 
 const noop = (): Promise<void> => Promise.resolve();
 
+class FakeDetachedHost {
+  host = '';
+  messages: string[] = [];
+
+  readState = (): Promise<null> => Promise.resolve(null);
+
+  spawnDetached = (port: number, host: string) => {
+    this.host = host;
+    return Promise.resolve({ pid: 7, port, logFile: '/l.log' });
+  };
+
+  log = (message: string): void => {
+    this.messages.push(message);
+  };
+}
+
 beforeEach(() => {
   loadConfigForTest({ auth: { secret: 'test-secret-at-least-32-characters-long', url: '' } });
 });
@@ -104,21 +120,18 @@ describe('runServe (detached)', () => {
       server: { host: entry.configured, port: 3001, publicUrl: '', allowedOrigins: [] },
       auth: { secret: 'test-secret-at-least-32-characters-long', url: '' },
     });
-    let spawnedHost = '';
+    const fake = new FakeDetachedHost();
     await runServe(
       { host: entry.explicit, port: 3000, detached: true },
       {
-        readState: () => Promise.resolve(null),
+        readState: fake.readState,
         controller: new FakeProcessController(),
         ensureAuthSecret: noop,
-        spawnDetached: (port, host) => {
-          spawnedHost = host;
-          return Promise.resolve({ pid: 7, port, logFile: '/l.log' });
-        },
-        log: () => undefined,
+        spawnDetached: fake.spawnDetached,
+        log: fake.log,
       }
     );
-    expect(spawnedHost).toBe(entry.expected);
+    expect(fake.host).toBe(entry.expected);
   });
 
   it('rejects an invalid port before touching state', async () => {

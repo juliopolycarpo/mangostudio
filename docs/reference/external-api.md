@@ -79,7 +79,8 @@ means to, while `general` has to absorb a browser's per-page fan-out.
 - The API binds `localhost` by default. Remote access requires an explicit
   host (`mangostudio serve 0.0.0.0`, `API_HOST=0.0.0.0`, or `server.host` in
   config.toml). CLI host overrides environment, which overrides TOML. Both Docker
-  images explicitly set `API_HOST=0.0.0.0` for published ports. For remote use, terminate TLS at a
+  images set `MANGOSTUDIO_DEFAULT_API_HOST=0.0.0.0` as a fallback for published
+  ports, below explicit CLI, `API_HOST` (process or adjacent `.env`), and TOML hosts. For remote use, terminate TLS at a
   reverse proxy and set `TRUST_PROXY=true` only when the proxy overwrites
   client IP headers (see `docs/operations/deployment.md`).
 - API keys are stored hashed server-side; only the prefix hint is kept for list

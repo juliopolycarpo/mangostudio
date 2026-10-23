@@ -31,6 +31,7 @@ type ServerEvent = {
   args?: string[];
   executable?: string;
   apiHost?: string | null;
+  defaultApiHost?: string | null;
 };
 type ServerState = 'running' | 'exited' | 'killed';
 
@@ -216,6 +217,7 @@ describe('scripts/release/smoke-binary.sh server cleanup', () => {
         env: {
           ...process.env,
           API_HOST: '0.0.0.0',
+          MANGOSTUDIO_DEFAULT_API_HOST: '0.0.0.0',
           FAKE_SMOKE_SERVER_EVENTS: eventsPath,
           FAKE_SMOKE_SERVER_VERSION: EXPECTED_VERSION,
         },
@@ -242,6 +244,7 @@ describe('scripts/release/smoke-binary.sh server cleanup', () => {
       spawnedServers.add(startup.pid);
       expect(startup.args).toEqual(['serve', String(port)]);
       expect(startup.apiHost).toBeNull();
+      expect(startup.defaultApiHost).toBeNull();
       // The smoke boots a staged copy, never the binary it was handed.
       expect(basename(dirname(startup.executable ?? ''))).toBe('staging');
 

@@ -36,6 +36,7 @@ function serverEnv(home: string, port: number): Record<string, string> {
     USERPROFILE: home,
     API_PORT: String(port),
     API_HOST: '127.0.0.1',
+    MANGOSTUDIO_DEFAULT_API_HOST: '',
     DATABASE_PATH: ':memory:',
     MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
   };

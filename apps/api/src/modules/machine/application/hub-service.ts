@@ -50,8 +50,8 @@ const SERVICE_ENV_SECRETS = new Set(['BETTER_AUTH_SECRET']);
  * they do for a detached start.
  */
 const SERVICE_ENV_ALLOWLIST: readonly string[] = [
-  // Runtime configuration, sourced from config.ts so a new ENV_KEY_MAP key
-  // reaches a unit the way it already reaches a detached child (see
+  // Runtime configuration, including image defaults, comes from config.ts so
+  // new keys reach a unit the way they reach a detached child (see
   // `DETACH_ENV_ALLOWLIST`). Dropping these silently reconfigured the hub on
   // handover: an operator who exports `DATABASE_PATH` and runs `serve` would
   // install a unit that starts on defaults, and watch their chats disappear

@@ -123,9 +123,10 @@ prevalece sobre `API_HOST`; o ambiente do processo prevalece sobre o `.env` ao
 lado do config.toml, depois TOML e depois o padrão. Hosts explícitos mantêm seu
 comportamento.
 
-As duas variantes Docker definem `API_HOST=0.0.0.0` na imagem para manter portas
-publicadas acessíveis. Essa variável também prevalece sobre o host de um TOML
-montado; defina `API_HOST` explicitamente ao alterar o bind da imagem.
+As duas variantes Docker definem `MANGOSTUDIO_DEFAULT_API_HOST=0.0.0.0` para
+manter portas publicadas acessíveis por padrão. Esse padrão exclusivo do processo
+fica abaixo do host explícito da CLI, de `API_HOST` (processo ou `.env` adjacente)
+e do host de um TOML montado.
 Autenticação, terminação TLS e origens permitidas do navegador continuam exigindo
 sua configuração normal. O exemplo em todas as interfaces abaixo é uma opção
 explícita de acesso remoto.
