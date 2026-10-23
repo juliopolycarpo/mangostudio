@@ -307,7 +307,7 @@ Receipts include the source head and Rust/Cargo input seal, toolchain, all-targe
 stable default/all-feature metadata and the excluded fuzz graph. Every accepted build must exit
 successfully with a settled process tree and unchanged inputs. No-op builds require no new compiler
 artifact and an unchanged executable hash. Restamps require one rebuilt compiler unit, the expected
-version and unchanged library hashes. The downloader launcher is never executed for identity: its version comes from the sealed Cargo package metadata, so inspection cannot install a hub or read the user’s runtime state. All attempts and raw logs remain available if a later attempt
+version, a changed executable hash and unchanged library hashes. Only the runtime has a restamp workload: its existing `MANGOSTUDIO_RELEASE_VERSION` compile-time input changes the embedded version. The launcher uses Cargo package metadata and has no restamp workload. The downloader launcher is never executed for identity: its version comes from the sealed Cargo package metadata, so inspection cannot install a hub or read the user’s runtime state. All attempts and raw logs remain available if a later attempt
 fails. GNU-time elapsed seconds (10 ms print resolution), final user/system CPU and maximum individual-process RSS are separate from the
 sampled process-tree RSS/CPU observations.
 
@@ -339,3 +339,7 @@ contemporaneous sum of observed processes, counting shared pages once per proces
 sampled: zero observed ticks does not mean zero actual CPU cost. The recorded checkout is the harness
 checkout; the executable hash must be linked to its separate build receipt. WSL measurements qualify
 that host only; native Windows and macOS remain unperformed until separately measured.
+
+The build driver handles SIGINT/SIGTERM by canceling the active supervised command, settling its
+verified process scope, journaling the interrupted attempt and stopping the batch. External hard
+timeouts still need an outer process supervisor: SIGKILL cannot run cleanup inside the killed process.

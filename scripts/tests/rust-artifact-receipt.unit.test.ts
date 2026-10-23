@@ -9,6 +9,7 @@ import {
   inspectRustArtifact,
   preserveRustArtifact,
   type RustArtifactReceipt,
+  rustLibraryHashes,
 } from '../lib/rust-artifact-receipt';
 
 const scratch: string[] = [];
@@ -42,6 +43,23 @@ class FakeArtifactVersionCapture {
   };
 }
 describe('Rust artifact identity', () => {
+  it('seals library contents and names while excluding compiler metadata', async () => {
+    const { root } = await fixture();
+    await Bun.write(join(root, 'libone.rlib'), 'one');
+    await Bun.write(join(root, 'libtwo.rlib'), 'two');
+    await Bun.write(join(root, 'metadata.rmeta'), 'ignored');
+    const before = await rustLibraryHashes(root);
+    expect(Object.keys(before)).toEqual(['libone.rlib', 'libtwo.rlib']);
+    await Bun.write(join(root, 'metadata.rmeta'), 'changed metadata');
+    expect(await rustLibraryHashes(root)).toEqual(before);
+    await Bun.write(join(root, 'libone.rlib'), 'changed library');
+    expect((await rustLibraryHashes(root))['libone.rlib']).not.toBe(before['libone.rlib']);
+  });
+  it('rejects an empty library seal instead of treating it as unchanged', async () => {
+    const { root } = await fixture();
+    await expect(rustLibraryHashes(root)).rejects.toThrow('expected at least one .rlib');
+  });
+
   it('identifies the downloader from sealed metadata without executing or downloading anything', async () => {
     const fake = new FakeArtifactVersionCapture('unrelated downloaded hub');
     const identity = await identifyRustArtifactVersion(

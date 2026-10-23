@@ -9,6 +9,8 @@ import {
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
 
+import { FakeBenchmarkCancelBarrier } from './support/benchmark-cancel-barrier';
+
 const ROOT = resolve(import.meta.dir, '../..');
 const scratch: string[] = [];
 const escapedFixtures: NativeProcess[] = [];
@@ -45,7 +47,7 @@ if (process.env.HOME !== process.env.MANGO_HOME || process.env.USERPROFILE !== p
 const counterPath = ${JSON.stringify(join(this.root, 'counter'))};
 const count = Number(await Bun.file(counterPath).text().catch(() => '0')) + 1;
 await Bun.write(counterPath, String(count));
-if (count > ${this.successfulBeforeFailure} && ${this.stall}) { await Bun.write(${JSON.stringify(join(this.root, 'stall-reached'))}, 'later handshake attempt'); console.error('Intentional fixture handshake cancellation'); setInterval(() => {}, 1000); process.kill(process.ppid, 'SIGTERM'); await new Promise(() => {}); }
+if (count > ${this.successfulBeforeFailure} && ${this.stall}) { await Bun.write(${JSON.stringify(join(this.root, 'stall-reached'))}, 'later handshake attempt'); console.error('Intentional fixture handshake cancellation'); setInterval(() => {}, 1000); while (!(await Bun.file(${JSON.stringify(join(this.root, 'cancel-now'))}).exists())) await Bun.sleep(5); process.kill(process.ppid, 'SIGTERM'); await new Promise(() => {}); }
 if (count > ${this.successfulBeforeFailure}) {
   console.error('Intentional fixture handshake refusal');
   process.exit(3);
@@ -63,7 +65,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
     scratch.push(root);
     const binary = await new FakeRuntimeRefusingHandshake(root, 3, true).create();
     const output = join(root, 'receipt.json');
-    const result = await runNativeCommand({
+    const pending = runNativeCommand({
       label: 'handshake-cancel',
       command: [
         process.execPath,
@@ -80,10 +82,14 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
       root: ROOT,
       out: root,
       env: { ...process.env },
-      timeoutSeconds: 10,
+      timeoutSeconds: 20,
       pollIntervalMs: 20,
       stream: new DiscardedHandshakeOutput(),
     });
+    const barrier = new FakeBenchmarkCancelBarrier(root);
+    escapedFixtures.push(...(await barrier.observe(binary, pending)));
+    await barrier.release();
+    const result = await pending;
     escapedFixtures.push(...result.settlement.survivors);
     expect(await Bun.file(join(root, 'stall-reached')).exists()).toBe(true);
     expect(result.timedOut).toBe(false);
@@ -111,7 +117,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
     };
     expect(progress.complete).toBe(false);
     expect(progress.attempts).toHaveLength(4);
-  });
+  }, 30_000);
 
   it('retains protocol warmups and a successful request before a later failure', async () => {
     const root = await mkdtemp(join(tmpdir(), 'runtime-handshake-batch-test-'));
