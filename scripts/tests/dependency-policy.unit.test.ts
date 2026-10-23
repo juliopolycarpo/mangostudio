@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
+  assertTailwindCohort,
   COHORT_DEPENDENCIES,
   DISALLOWED_WORKSPACE_DEPENDENCIES,
   findCohortVersionConflicts,
@@ -107,6 +108,49 @@ describe('dependency policy', () => {
     expect(violations).toEqual([{ ...rule, section: 'devDependencies' }]);
     expect(formatDependencyPolicyViolation(violations[0])).toContain(
       'apps/api/package.json devDependencies.@ai-sdk/openai-compatible'
+    );
+  });
+});
+
+describe('Tailwind compiler cohort', () => {
+  const declarations = {
+    tailwindcss: '4.3.3',
+    '@tailwindcss/node': '4.3.3',
+    '@tailwindcss/oxide': '4.3.3',
+  };
+  const packages = Object.fromEntries(
+    Object.entries(declarations).map(([name, version]) => [name, [`${name}@${version}`] as const])
+  );
+  test('accepts one exact stylesheet/compiler/scanner release', () => {
+    expect(() => assertTailwindCohort({ devDependencies: declarations }, packages)).not.toThrow();
+  });
+  test('rejects ranges, declaration drift, missing and duplicate resolved compiler versions', () => {
+    expect(() =>
+      assertTailwindCohort(
+        { devDependencies: { ...declarations, tailwindcss: '^4.3.3' } },
+        packages
+      )
+    ).toThrow('expected exact compiler cohort version');
+    expect(() =>
+      assertTailwindCohort(
+        { devDependencies: { ...declarations, '@tailwindcss/node': '4.1.14' } },
+        packages
+      )
+    ).toThrow('@tailwindcss/node: expected exact compiler cohort 4.3.3');
+    expect(() =>
+      assertTailwindCohort(
+        { devDependencies: declarations },
+        { ...packages, '@tailwindcss/oxide': ['@tailwindcss/oxide@4.1.14'] }
+      )
+    ).toThrow('@tailwindcss/oxide: expected resolved compiler cohort 4.3.3');
+    expect(() =>
+      assertTailwindCohort(
+        { devDependencies: declarations },
+        { ...packages, 'other/tailwindcss': ['tailwindcss@4.1.14'] }
+      )
+    ).toThrow('tailwindcss: expected resolved compiler cohort 4.3.3');
+    expect(() => assertTailwindCohort({ devDependencies: declarations }, {})).toThrow(
+      'received: []'
     );
   });
 });

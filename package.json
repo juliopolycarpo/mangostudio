@@ -21,7 +21,7 @@
     "build": "bun ./scripts/build.ts",
     "build:binary": "bun ./scripts/build.ts --binary",
     "build:runtime": "bun ./scripts/build-runtime.ts",
-    "build:turbo": "turbo run build",
+    "build:turbo": "bun ./scripts/build-turbo.ts",
     "check": "bun ./scripts/check.ts",
     "check:versions": "bun ./scripts/check-versions.ts",
     "protocol:check": "bun ./scripts/protocol/check.ts",
@@ -69,9 +69,6 @@
     "turbo": "2.11.9",
     "typebox": "1.4.2",
     "typescript": "7.0.2"
-  },
-  "overrides": {
-    "bun": "file:./scripts/bun-host-peer"
   },
   "patchedDependencies": {
     "@elysia/openapi@2.0.0-beta.6": "patches/@elysia%2Fopenapi@2.0.0-beta.6.patch"

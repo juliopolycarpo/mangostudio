@@ -63,6 +63,28 @@ describe('build script', () => {
     ]);
   });
 
+  test('passes a prelookup cache decision into filtered workspace builds', () => {
+    expect(createTurboBuildCommand(['frontend'], ['--cache=local:,remote:'])).toEqual([
+      'turbo',
+      'run',
+      'build',
+      '--filter=@mangostudio/frontend',
+      '--cache=local:,remote:',
+    ]);
+  });
+
+  test('forwards general Turbo arguments and retains protocol workspace selection', () => {
+    const child = Bun.spawnSync(
+      [process.execPath, 'run', 'build:turbo', '--dry=json', '--filter=@mangostudio/protocol'],
+      { cwd: ROOT_DIR, stdout: 'pipe', stderr: 'pipe' }
+    );
+    expect(child.exitCode, new TextDecoder().decode(child.stderr)).toBe(0);
+    const result = JSON.parse(new TextDecoder().decode(child.stdout)) as {
+      tasks: { taskId: string }[];
+    };
+    expect(result.tasks.map((task) => task.taskId)).toEqual(['@mangostudio/protocol#build']);
+  });
+
   test('exposes explicit root build scripts for turbo and binary packaging', () => {
     const manifest = JSON.parse(readText('package.json')) as {
       scripts?: Record<string, string>;
@@ -70,7 +92,7 @@ describe('build script', () => {
 
     expect(manifest.scripts?.build).toBe('bun ./scripts/build.ts');
     expect(manifest.scripts?.['build:binary']).toBe('bun ./scripts/build.ts --binary');
-    expect(manifest.scripts?.['build:turbo']).toBe('turbo run build');
+    expect(manifest.scripts?.['build:turbo']).toBe('bun ./scripts/build-turbo.ts');
   });
 
   test('declares package-local Turbo outputs for build caching', () => {
@@ -93,7 +115,7 @@ describe('build script', () => {
     const buildScript = readText('scripts/build.ts');
 
     expect(buildScript).toContain('createTurboBuildCommand');
-    expect(buildScript).toContain("runCommand('build'");
+    expect(buildScript).toMatch(/runCommand\(\s*'build'/);
     expect(buildScript).not.toContain('runParallel(');
   });
 

@@ -80,7 +80,7 @@ serving path to drift.
 Mtimes cannot see the one input that is not a file. Every build — dev and production alike —
 stamps `dist/.build-state.json` with the `MANGO_API_URL` it compiled in and the mode it ran
 in, and the freshness check rebuilds when that URL differs from the running server's, or when
-the stamp is missing or unreadable. The mode is not part of the comparison: a production
+the stamp is missing or unreadable. Tailwind inputs additionally use the content manifest described below. The mode is not part of the comparison: a production
 bundle answers `bun run dev` perfectly well. It is only reported, because a dev rebuild
 replaces a production bundle with an unminified one and that should not happen quietly.
 
@@ -159,11 +159,61 @@ resolves `tsr.config.json`, route paths and temporary files from the frontend ro
 builds always regenerate. Dev builds skip when the generated tree is newer than the route
 files, their directories, the config and `scripts/routes.ts`. The API's dev startup also
 includes that helper when deciding whether to reuse `dist/`; a missing helper invalidates
-both checks. Other scripts and their directory mtime are ignored, so test and artifact churn
+both checks. The Tailwind helper and source declaration are also exact required inputs. Other scripts and their directory mtime are ignored, so test and artifact churn
 keeps a clean build current. After an unchanged dev generation, the helper updates the
 output's mtime so the next build can skip. Directory mtimes also catch route deletions and
 renames. The route-generation test compares a temporary generated tree byte for byte with the
 checked-in file and reports the first differing line.
+
+### Tailwind compiler and source inputs
+
+The owned `scripts/tailwind.ts` loader uses the public `@tailwindcss/node` compiler and
+`@tailwindcss/oxide` scanner. Both and `tailwindcss` are pinned to the same exact release;
+update all three together and regenerate `bun.lock`. The dependency policy rejects declaration
+or resolved-version drift. Bun performs the final CSS optimization and asset resolution. Plain
+CSS, including the eagerly imported xterm stylesheet, stays on Bun's normal loader.
+
+`tailwind-inputs.json` declares candidate sources. The defaults are `src/**/*` and `index.html`,
+including generated route content and excluding tests, scripts, logs and build output. An imported
+module outside those defaults that produces utility classes needs all three declarations:
+
+1. A CSS `@source` or `source(...)` directive.
+2. A matching file or directory in `additionalRoots`, relative to the frontend workspace.
+3. Matching explicit build inputs in `apps/frontend/turbo.json`.
+
+Additional roots permit sibling workspaces and package sources inside this repository. Absolute
+paths, repository escapes and nested repository markers are rejected. Authored imported CSS and
+its local image/font assets also need declared source-root coverage, even when they produce no
+utility candidates. An exact additional file root is enough for one imported stylesheet; declare
+its local assets as well, or use their containing directory. Installed package CSS/assets may use
+the resolved registry graph when the owning package name/version has integrity in `bun.lock`.
+This assumes installed dependencies remain immutable between installs, as Bun's JavaScript cache
+inputs do; editing installed package bytes requires reinstalling or an explicit source declaration. Negative and inline sources
+retain Tailwind's semantics. The loader uses a fresh compiler/scanner for each build, so removing a
+source also removes its otherwise unused utilities.
+
+The private build stamp also records a versioned content manifest of declared trees, imported
+stylesheets, the source declaration, exact helpers and ignore controls. Ignored and untracked
+source bytes count; optional ignore files have missing sentinels. Changed bytes invalidate reuse
+even with an unchanged mtime. Identical generated-route bytes remain reusable after generation
+updates their mtime. Discovery precedes the compile snapshot, and inputs are checked again before
+publication; changing an input during the build preserves the previous bundle rather than stamping
+new metadata onto stale output.
+
+Use `bun run build` or `bun run build:turbo` for cached builds. Both run the source/input coverage
+guard before Turbo lookup; `build:turbo` retains Turbo's original complete workspace selection and
+forwards its arguments. Explicit inputs cover ignored/untracked sources and repository ignore
+controls. A normal checkout with hashable controls remains cacheable. A linked-worktree `.git`
+pointer, absent repository marker or present inherited ignore control outside the repository
+disables both cache providers for the invocation and marks the stamp non-reusable. Such a dev
+checkout rebuilds on every API boot. Outside-control absence is recorded, so creating one also
+invalidates a previously reusable stamp. Raw Turbo build commands are supported only in a fully
+declared checkout with hashable controls.
+
+The Native Bun qualification workflow builds the complete frontend on its Linux, macOS and Windows
+candidate hosts after the full native suite. Its artifact records the tested SHA, build log and
+native oxide/Lightning CSS module hashes. A Linux cross-compiled application binary does not
+qualify executing the compiler on Windows, macOS, ARM64 or musl hosts.
 
 Chunking is Bun's automatic splitting; there is no `manualChunks` equivalent and none is
 reintroduced. What decides eager versus lazy is the import graph, and the route files are
