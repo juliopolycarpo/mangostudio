@@ -1,6 +1,12 @@
 import { describe, expect, it, spyOn } from 'bun:test';
-import { faker } from '@faker-js/faker';
-import { insertTestUser } from '../../support/factories';
+import { fixtures } from '@mangostudio/shared/test-utils';
+import { getDb } from '../../../src/db/database';
+import {
+  insertTestChat,
+  insertTestConnector,
+  insertTestUser,
+  makeTestIdentity,
+} from '../../support/factories';
 
 const COLLIDING_EMAIL = 'duplicate@mangostudio.test';
 
@@ -9,12 +15,58 @@ function collidingEmail(): string {
 }
 
 describe('test factories', () => {
-  it('derives default user emails from ids when faker repeats an email', async () => {
-    const email = spyOn(faker.internet, 'email').mockImplementation(collidingEmail);
+  it('keeps named identities unique across fixture sequence resets', () => {
+    fixtures.seed(42);
+    const first = makeTestIdentity('fixture-reset', 'First');
+    fixtures.seed(42);
+    const second = makeTestIdentity('fixture-reset', 'Second');
+    expect(first.id).not.toBe(second.id);
+    expect(first.email).toBe(`${first.id}@mangostudio.test`);
+    expect(second.email).toBe(`${second.id}@mangostudio.test`);
+  });
+
+  it('persists related rows while preserving Unicode and long overrides', async () => {
+    const text = '雪 café 🥭\n../folder\\name '.repeat(200);
+    const user = await insertTestUser(makeTestIdentity('fixture-persistence', text));
+    const chat = await insertTestChat(user.id, { title: text });
+    const connector = await insertTestConnector(user.id, {
+      name: text,
+      enabledModels: ['fixture-model'],
+    });
+    const storedUser = await getDb()
+      .selectFrom('user')
+      .selectAll()
+      .where('id', '=', user.id)
+      .executeTakeFirstOrThrow();
+    const storedChat = await getDb()
+      .selectFrom('chats')
+      .selectAll()
+      .where('id', '=', chat.id)
+      .executeTakeFirstOrThrow();
+    const storedConnector = await getDb()
+      .selectFrom('secret_metadata')
+      .selectAll()
+      .where('id', '=', connector.id)
+      .executeTakeFirstOrThrow();
+    expect(storedUser.name).toBe(text);
+    expect(storedChat).toMatchObject({ userId: user.id, title: text });
+    expect(storedChat.updatedAt).toBeGreaterThanOrEqual(storedChat.createdAt);
+    expect(storedConnector).toMatchObject({
+      userId: user.id,
+      name: text,
+      enabledModels: '["fixture-model"]',
+    });
+  });
+
+  it('derives default user emails from ids when the fixture email generator repeats an email', async () => {
+    const email = spyOn(fixtures, 'email').mockImplementation(collidingEmail);
     try {
-      const first = await insertTestUser();
-      const second = await insertTestUser();
-      const explicit = await insertTestUser({ email: 'explicit@mangostudio.test' });
+      const first = await insertTestUser(makeTestIdentity('fixture-email', 'First'));
+      const second = await insertTestUser(makeTestIdentity('fixture-email', 'Second'));
+      const explicit = await insertTestUser({
+        ...makeTestIdentity('fixture-email', 'Explicit'),
+        email: 'explicit@mangostudio.test',
+      });
 
       expect(first.email).toBe(`${first.id}@mangostudio.test`);
       expect(second.email).toBe(`${second.id}@mangostudio.test`);

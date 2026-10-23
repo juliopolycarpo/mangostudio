@@ -13,9 +13,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { faker } from '@faker-js/faker';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { isShellAvailable } from '@mangostudio/shared/process/host';
+import { fixtures } from '@mangostudio/shared/test-utils';
 import { getDb } from '../../../../src/db/database';
 import { listChatFileCheckpointSummaries } from '../../../../src/modules/file-checkpoints/application/list-chat-checkpoints';
 import { revertMessageFileCheckpoints } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
@@ -52,7 +52,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'uncheckpointed-sources-test-'));
   chat = await insertTestChat(user.id);
-  messageId = faker.string.uuid();
+  messageId = fixtures.uuid();
   await insertMessage(
     {
       id: messageId,

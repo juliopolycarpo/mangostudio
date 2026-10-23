@@ -15,12 +15,12 @@ function readSharedManifest(): Promise<SharedPackageManifest> {
   return Bun.file(new URL('../../../package.json', import.meta.url)).json();
 }
 
-function assertFakerDependencyPlacement(manifest: SharedPackageManifest): void {
+function assertFixtureDependencies(manifest: SharedPackageManifest): void {
   const runtime = manifest.dependencies?.['@faker-js/faker'];
   const development = manifest.devDependencies?.['@faker-js/faker'];
-  if (runtime?.trim() && development === undefined) return;
+  if (runtime === undefined && development === undefined) return;
   throw new Error(
-    `Invalid @faker-js/faker placement: dependencies=${JSON.stringify(runtime)}, devDependencies=${JSON.stringify(development)}; expected a non-empty version in dependencies only for the public @mangostudio/shared/test-utils export`
+    `Invalid fixture dependency: dependencies=${JSON.stringify(runtime)}, devDependencies=${JSON.stringify(development)}; expected no @faker-js/faker declaration for the owned public test-utils export`
   );
 }
 
@@ -83,16 +83,32 @@ describe('shared package manifest', () => {
     expect(manifest.exports?.['./utils/dist-files']).toBe('./src/utils/dist-files.ts');
   });
 
-  it('declares faker as a runtime dependency for the exported test-utils entrypoint', async () => {
+  it('uses the public owned fixture export without Faker declarations', async () => {
     const manifest = await readSharedManifest();
 
-    // Public test-utils imports Faker at runtime. Consumers of that export need it
-    // installed even when they omit shared's development dependencies.
-    assertFakerDependencyPlacement(manifest);
+    assertFixtureDependencies(manifest);
+    const { fixtures, createMockUser } = await import('@mangostudio/shared/test-utils');
+    expect(fixtures.uuid()).toMatch(/^[0-9a-f-]{36}$/);
+    expect(createMockUser().email).toEndWith('@mangostudio.test');
+  });
+
+  it('bundles the public test-utils entry for a browser without the retired dependency', async () => {
+    const result = await Bun.build({
+      entrypoints: [resolve(SHARED_DIR, 'src/test-utils/index.ts')],
+      target: 'browser',
+      metafile: true,
+    });
+    expect(result.success).toBe(true);
+    if (!result.metafile) {
+      throw new Error('test-utils browser build: expected a metafile object | received: undefined');
+    }
+    expect(Object.keys(result.metafile.inputs).some((path) => path.includes('@faker-js'))).toBe(
+      false
+    );
   });
 
   it.each([
-    ['missing', {}],
+    ['runtime dependency', { dependencies: { '@faker-js/faker': '^10.6.0' } }],
     ['moved to development', { devDependencies: { '@faker-js/faker': '^10.6.0' } }],
     ['empty version', { dependencies: { '@faker-js/faker': '' } }],
     [
@@ -102,9 +118,9 @@ describe('shared package manifest', () => {
         devDependencies: { '@faker-js/faker': '^10.6.0' },
       },
     ],
-  ] as const)('names dependencies as the expected section when Faker is %s', (_, manifest) => {
-    expect(() => assertFakerDependencyPlacement(manifest)).toThrow(
-      'expected a non-empty version in dependencies only for the public @mangostudio/shared/test-utils export'
+  ] as const)('rejects the retired fixture dependency when it is %s', (_, manifest) => {
+    expect(() => assertFixtureDependencies(manifest)).toThrow(
+      'expected no @faker-js/faker declaration for the owned public test-utils export'
     );
   });
 });

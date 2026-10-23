@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import Value from 'typebox/value';
+import { MessageSchema } from '../../../src/chat/message';
+import { ChatSchema, GeneratedImageArtifactSchema } from '../../../src/chat/schemas';
 import {
   createMockChat,
   createMockGalleryItem,
@@ -12,6 +15,38 @@ import {
 } from '../../../src/test-utils/mock-data';
 
 describe('mock-data test utils', () => {
+  it('keeps default factory values valid against their shared schemas', () => {
+    expect(Value.Check(ChatSchema, createMockChat())).toBe(true);
+    expect(Value.Check(MessageSchema, createMockMessage())).toBe(true);
+    expect(Value.Check(GeneratedImageArtifactSchema, createMockGeneratedImageArtifact())).toBe(
+      true
+    );
+  });
+
+  it('preserves Unicode, long text and unusual paths through related overrides', () => {
+    const text = '雪 café 🥭\n../folder\\name '.repeat(200);
+    const user = createMockUser({ name: text, email: 'café+fixture@mangostudio.test' });
+    const chat = createMockChat({ title: text });
+    const message = createMockMessage({ chatId: chat.id, text });
+    const imageUrl = '/images/雪 folder/../literal%20name.png';
+    const image = createMockGeneratedImageArtifact({
+      chatId: chat.id,
+      messageId: message.id,
+      imageUrl,
+      prompt: text,
+    });
+    const connector = createMockSecretMetadataRow({ name: text, maskedSuffix: '雪 🥭' });
+
+    expect(user.name).toBe(text);
+    expect(user.email).toBe('café+fixture@mangostudio.test');
+    expect(chat.title).toBe(text);
+    expect(message.text).toBe(text);
+    expect(image).toMatchObject({ chatId: chat.id, messageId: message.id, imageUrl, prompt: text });
+    expect(connector).toMatchObject({ name: text, maskedSuffix: '雪 🥭' });
+    expect(chat.updatedAt).toBeGreaterThanOrEqual(chat.createdAt);
+    expect(connector.updatedAt).toBeGreaterThan(connector.lastValidatedAt ?? 0);
+  });
+
   it('createMockChat produces a valid chat shape with defaults', () => {
     const chat = createMockChat();
 

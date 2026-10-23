@@ -9,11 +9,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { faker } from '@faker-js/faker';
 import type {
   RuntimeMutationResult,
   RuntimeMutationSnapshot,
 } from '@mangostudio/shared/runtime-contract';
+import { fixtures } from '@mangostudio/shared/test-utils';
 import { getDb } from '../../../../src/db/database';
 import { revertMessageFileCheckpoints } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
 import { hashCheckpointBytes } from '../../../../src/modules/file-checkpoints/infrastructure/checkpoint-blob-store';
@@ -45,7 +45,7 @@ beforeEach(async () => {
   // keys it by chat and path and keeps it as long as its process lives.
   tempDir = mkdtempSync(join(tmpdir(), 'checkpoint-durability-test-'));
   chat = await insertTestChat(user.id);
-  messageId = faker.string.uuid();
+  messageId = fixtures.uuid();
   await getDb()
     .insertInto('messages')
     .values({
