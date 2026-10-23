@@ -11,6 +11,42 @@ The CI compatibility job does not repeat the legacy job's report-only cache API 
 needs only `contents: read`. Canary continues to depend on the legacy gate. Repository
 enforcement and the security/label producers remain unchanged during this phase.
 
+## Read-only refresh, 2026-10-23
+
+The active main ruleset `14350640` still requires the four contexts listed in the historical
+snapshot below: `Gate`, `Dependency Review` and `Apply path-based labels` from application
+`15368` (`github-actions`), plus `CodeQL` from application `57789`
+(`github-advanced-security`). Its strict-status policy remains `false`, and
+`do_not_enforce_on_create` remains `false`. No enforcement cutover has occurred.
+
+The check-runs API for PR head `b9e31a681b60b4c0c6650636d6ca8920e6f62243` confirms the
+current reusable PR topology. Each receipt below reports success from application `15368`;
+the Actions run API identifies CI, Cargo Shim and Protocol CI as the direct workflow producers.
+Release Dry Run now runs inside CI. The earlier standalone receipts remain dated history.
+
+| Workflow / job ID                                           | Legacy API context and receipt                                                                                                    | Additive API context and receipt                                                                                                                  |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci.yml` / `gate`, `gate-unique`                            | [`Gate`, 120158081874](https://github.com/juliopolycarpo/mangostudio/actions/runs/39874189457/job/120158081874)                   | [`CI Gate`, 120158081850](https://github.com/juliopolycarpo/mangostudio/actions/runs/39874189457/job/120158081850)                                |
+| `cargo-shim.yml` / `gate`, `gate-unique`                    | [`Gate`, 120155707521](https://github.com/juliopolycarpo/mangostudio/actions/runs/39874189264/job/120155707521)                   | [`Cargo Shim Gate`, 120155707463](https://github.com/juliopolycarpo/mangostudio/actions/runs/39874189264/job/120155707463)                        |
+| `protocol-ci.yml` / `gate`, `gate-unique`                   | [`Gate`, 120155712857](https://github.com/juliopolycarpo/mangostudio/actions/runs/39874189236/job/120155712857)                   | [`Protocol Gate`, 120155712981](https://github.com/juliopolycarpo/mangostudio/actions/runs/39874189236/job/120155712981)                          |
+| `release-dry-run.yml` / `gate`, `gate-unique`, called by CI | [`Release Dry Run / Gate`, 120155787314](https://github.com/juliopolycarpo/mangostudio/actions/runs/39874189457/job/120155787314) | [`Release Dry Run / Release Dry Run Gate`, 120155787367](https://github.com/juliopolycarpo/mangostudio/actions/runs/39874189457/job/120155787367) |
+
+The same head reports successful `Dependency Review` (check `120155650636`, app `15368`),
+`CodeQL` (`120156510046`, app `57789`) and `Apply path-based labels` (`120155641692`, app
+`15368`). `Verify classification labels` is a step of that last job. These receipts verify
+producer names at one head, not the remaining hosted cutover case matrix or GitHub's
+handling of ambiguous required names.
+
+Reproduce this refresh with read-only API requests:
+
+```bash
+gh api repos/juliopolycarpo/mangostudio/rulesets/14350640
+gh api 'repos/juliopolycarpo/mangostudio/commits/b9e31a681b60b4c0c6650636d6ca8920e6f62243/check-runs?per_page=100' --paginate
+gh api repos/juliopolycarpo/mangostudio/actions/runs/39874189457
+gh api repos/juliopolycarpo/mangostudio/actions/runs/39874189264
+gh api repos/juliopolycarpo/mangostudio/actions/runs/39874189236
+```
+
 ## Read-only snapshot, 2026-10-13
 
 The live [main ruleset](https://github.com/juliopolycarpo/mangostudio/rules/14350640), ID
@@ -72,30 +108,28 @@ gh api repos/juliopolycarpo/mangostudio/actions/runs/38379796623
 After hosted cases verify all four unique producers, the separate cutover replaces only the
 `Gate` entry in `rules[type=required_status_checks].parameters.required_status_checks`.
 
-The list below is a candidate for the standalone workflow topology. The final Release Dry
-Run context depends on the topology used for PR validation. After CI calls Release Dry Run
-as a reusable workflow, the expected PR API context is
-`Release Dry Run / Release Dry Run Gate`; standalone scheduled and manual runs retain
-`Release Dry Run Gate`. The caller-prefixed name is a prediction until the final topology's
-check-runs API confirms it. Neither name is a verified final enforcement target here.
+The candidate below uses the current reusable PR topology. The 2026-10-23 refresh verifies
+`Release Dry Run / Release Dry Run Gate` as its PR check context. Standalone scheduled and
+manual runs retain the leaf name `Release Dry Run Gate`; that name is not a PR enforcement
+target. Observing the PR producer does not complete the hosted case matrix or authorize an
+enforcement change.
 
 ```json
 [
   { "context": "CI Gate", "integration_id": 15368 },
   { "context": "Cargo Shim Gate", "integration_id": 15368 },
   { "context": "Protocol Gate", "integration_id": 15368 },
-  { "context": "Release Dry Run Gate", "integration_id": 15368 },
+  { "context": "Release Dry Run / Release Dry Run Gate", "integration_id": 15368 },
   { "context": "Dependency Review", "integration_id": 15368 },
   { "context": "CodeQL", "integration_id": 57789 },
   { "context": "Apply path-based labels", "integration_id": 15368 }
 ]
 ```
 
-For the reusable PR topology, replace the candidate `Release Dry Run Gate` entry with the
-verified PR API context before applying any settings change. All other ruleset parameters,
-conditions, and bypass actors stay as captured. That future change is a proposal only. Keep
-the legacy aliases until the cutover owner verifies the required contexts and moves Canary
-to the verified CI producer.
+Reverify these PR contexts and application IDs before applying any settings change. All
+other ruleset parameters, conditions, and bypass actors stay as captured. That future change
+is a proposal only. Keep the legacy aliases until the cutover owner verifies the required
+contexts and moves Canary to the verified CI producer.
 
 ## Verification boundary
 

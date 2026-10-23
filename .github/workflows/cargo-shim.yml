@@ -1,8 +1,8 @@
 name: Cargo Shim
 
-# The workflow name stays stable because repository rules require its Gate
-# check. The implementation now owns the complete root Cargo workspace: all
-# workspace members build and test on the three supported runner OSes, and the
+# The Gate job keeps its name because repository rules require the shared
+# bare "Gate" API context. This workflow owns the complete root Cargo
+# workspace: all members build and test on the three supported runner OSes, and the
 # minimum supported Rust matches the development pin for every stable crate.
 # Native jobs retain the default-feature and all-feature workspace checks,
 # isolated launcher checks and Windows ARM64 compilation formerly split across
@@ -195,8 +195,8 @@ jobs:
       # called from ci.yml: same flags, same libtest runner, same test set,
       # instrumented so the QA report can show per-crate coverage. It lives in
       # the CI run because that is where the QA collector reads artifacts, and
-      # CI / Gate requires it there. macOS and Windows run the plain set here,
-      # under nextest: same targets and features as `cargo test --workspace
+      # the CI workflow's Gate job requires it there. macOS and Windows run the
+      # plain set here under nextest: same targets and features as `cargo test --workspace
       # --all-targets --all-features --locked`. `--retries 0` keeps a flaky
       # test a failure instead of a second attempt that passes.
       - name: Run tests
@@ -443,7 +443,7 @@ jobs:
         run: bun ./scripts/ci/rust-lanes.ts qualify --suite unit
 
   gate:
-    # Stable required check ("Cargo Shim / Gate"): each Rust lane may skip only
+    # Stable Gate job (bare API context "Gate"): each Rust lane may skip only
     # after the changes job proves its relevance predicate false for this run.
     name: Gate
     needs: [

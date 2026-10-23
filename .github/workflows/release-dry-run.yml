@@ -558,9 +558,10 @@ jobs:
       - run: cargo publish --dry-run --locked --manifest-path crates/mangostudio-launcher/Cargo.toml
 
   gate:
-    # Always-reporting aggregate ("Release Dry Run / Gate"): each dry-run lane
-    # is accepted as skipped only when `changes` proved it irrelevant. The
-    # clean runtime producer is also skipped on the verified PR reuse path.
+    # Always-reporting Gate aggregate: standalone API context "Gate", or
+    # "Release Dry Run / Gate" when called by CI. Each dry-run lane is accepted
+    # as skipped only when `changes` proved it irrelevant. The clean runtime
+    # producer is also skipped on the verified PR reuse path.
     name: Gate
     needs: [changes, runtime, dry-run-linux, dry-run-windows, dry-run-cargo]
     if: ${{ always() }}

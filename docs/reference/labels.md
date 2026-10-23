@@ -6,9 +6,11 @@ those rules.
 
 ## What enforces what
 
-`.github/labeler.yml` maps changed-file globs to labels, and the "Verify classification labels"
-gate (`.github/workflows/labeler.yml`) fails a PR that ends up with no `area:` or `type:` label.
-That gate is a required check on `main` — see [`ci.md`](./ci.md).
+[`.github/labeler.yml`](../../.github/labeler.yml) is the canonical map from changed-file
+globs to labels. The `Labeler` workflow runs job `label`, named `Apply path-based labels`;
+its `Verify classification labels` step fails a PR with no `area:` or `type:` label. The
+required API check context on `main` is `Apply path-based labels`, not the step's name —
+see [`ci.md`](./ci.md#branch-protection--required-checks).
 
 PR ownership is separate: the `auto-assign.yml` workflow assigns the author and requests reviews
 from prior committers of the PR's changed files (base-branch history), so it needs no per-label
@@ -30,7 +32,7 @@ zero or multiple `type:` labels. Closed issues are left alone so label cleanup d
 - `area: frontend` — `apps/frontend/**`
 - `area: api` — `apps/api/**`
 - `area: shared` — `apps/shared/**`
-- `area: runtime` — `apps/shared/src/runtime-contract/**`, `apps/api/src/services/runtime-client/**`, `crates/mangostudio-runtime-contract/**`, `crates/mangostudio-runtime/**`
+- `area: runtime` — hub/runtime contracts and implementations, including the protocol specification, SDKs and scripts; [the `area: runtime` block](../../.github/labeler.yml) owns the exact globs
 - `area: git` — `apps/api/src/modules/{git,github}/**`, `apps/frontend/src/features/workspace/**`, `apps/shared/src/{git,github}/**`
 - `area: auth` — auth entry points + `apps/shared/src/auth/**` + `tests/browser-smoke/auth-flow.spec.ts`
 - `area: chat` — `apps/api/src/modules/{chats,messages}/**`, `apps/frontend/src/features/chat/**`, `apps/shared/src/chat/**`

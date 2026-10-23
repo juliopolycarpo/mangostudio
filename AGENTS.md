@@ -75,8 +75,9 @@ Useful docs:
   with its own lockfile. It never reads the root one, so it goes stale when
   `crates/mango-protocol/Cargo.toml` changes (a new dependency or a changed requirement) or the
   protocol version moves (`protocol:release:prepare` refreshes it). Then run
-  `cargo update -w --manifest-path crates/mango-protocol/fuzz/Cargo.toml`; the `fuzz-workspace`
-  gate fails on a stale fuzz lock.
+  `cargo update -w --manifest-path crates/mango-protocol/fuzz/Cargo.toml`; Cargo Shim’s Ubuntu
+  `workspace` job runs the `Resolve excluded fuzz workspace` step with locked metadata resolution
+  and fails on a stale fuzz lock.
 - `[workspace.package].rust-version` owns the Rust 1.99.0 minimum for every stable member,
   including the published `mangostudio` launcher. `rust-toolchain.toml` pins the same development
   toolchain; policy tests enforce equality. The launcher keeps the application version, while
