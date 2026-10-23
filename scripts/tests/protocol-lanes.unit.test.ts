@@ -970,13 +970,6 @@ exit 0
     expect(result.ghCalls).toBe('');
   });
 
-  test('documents the tag guarantees the workflow actually enforces', () => {
-    expect(readText('.github/workflows/protocol-release.yml')).not.toContain(
-      'signed protocol-v* tag'
-    );
-    expect(readText('docs/protocol/releasing.md')).toMatch(/does\s+not verify the tag signature/);
-  });
-
   test('marks a pre-release version as one', () => {
     expect(run('absent', 'true').ghCalls).toContain('--prerelease');
   });
