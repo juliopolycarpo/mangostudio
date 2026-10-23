@@ -32,7 +32,7 @@ against `SHA256SUMS` where applicable.
 | npm / bun              | `npm i -g mangostudio` / `bun add -g mangostudio`                                                                        |
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                            |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` then `scoop install mangostudio`        |
-| Cargo                  | `cargo install mangostudio` (full app) or `cargo binstall mangostudio` (prebuilt)                                        |
+| Cargo                  | `cargo install mangostudio` (full app; see [launcher details](crates/mangostudio-launcher/README.md))                    |
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                         |
 | Manual                 | Download from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest), verify with `SHA256SUMS` |
 
