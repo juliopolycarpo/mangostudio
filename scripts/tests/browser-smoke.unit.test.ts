@@ -5,6 +5,11 @@ import {
   BROWSER_SMOKE_TEST_COMMAND,
 } from '../lib/browser-smoke';
 import { readText } from './support/read-text';
+import {
+  assertSmokeDeadlineBudget,
+  parseSmokeWorkflow,
+  smokeStepTimeout,
+} from './support/smoke-workflows';
 
 describe('browser smoke setup', () => {
   test('installs only Chromium with Playwright system dependencies through Bun', () => {
@@ -41,6 +46,40 @@ describe('browser smoke setup', () => {
     expect(workflow).toContain('bunx playwright install-deps chromium');
     expect(workflow).not.toContain('npx playwright');
   });
+
+  test.each([
+    ['cache miss', 'bun run test:e2e:setup', "steps.pw-cache.outputs.cache-restored != 'true'"],
+    [
+      'cache hit',
+      'bunx playwright install-deps chromium',
+      "steps.pw-cache.outputs.cache-restored == 'true'",
+    ],
+  ])(
+    'browser %s leaves room for installation, the smoke deadline and diagnostics',
+    (cachePath, installCommand, installCondition) => {
+      const workflow = parseSmokeWorkflow(readText('.github/workflows/browser-smoke.yml'));
+      const job = workflow.jobs['browser-smoke'];
+      if (!job) throw new Error('expected browser-smoke job | received: missing');
+      const install = job.steps?.find((step) => step.run === installCommand);
+      const smoke = job.steps?.find((step) => step.run?.includes('bun run test --e2e'));
+      if (!install || !smoke) {
+        throw new Error(
+          `expected ${cachePath} installation and smoke commands | received: missing`
+        );
+      }
+
+      // Each runner executes one installation branch. Keep the old ten-minute
+      // maximum for the smoke command itself, independent of installation time.
+      expect(install.if).toBe(installCondition);
+      // Project the two measured phases, leaving job headroom for other setup
+      // and failure uploads. A cold manual Rust build is outside this model.
+      assertSmokeDeadlineBudget(`browser/${cachePath}`, { ...job, steps: [install, smoke] });
+      const smokeDeadline = smokeStepTimeout(smoke, {});
+      expect(smokeDeadline).toBeLessThanOrEqual(10);
+      const installDeadline = smokeStepTimeout(install, {});
+      expect(installDeadline).toBeLessThanOrEqual(10);
+    }
+  );
 
   test('testing docs show the setup command without npx fallbacks', () => {
     const docs = [
