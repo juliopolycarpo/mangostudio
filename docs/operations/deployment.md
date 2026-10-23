@@ -32,7 +32,7 @@ Useful environment variables:
 | -------------------- | ----------------------------------------------------------------------------- |
 | `BETTER_AUTH_SECRET` | Required 32+ character auth secret                                            |
 | `GEMINI_API_KEY`     | Gemini connector key; other provider keys use the same env                    |
-| `API_HOST`           | Image default `0.0.0.0`; override explicitly for a different bind             |
+| `API_HOST`           | Explicit bind override; wins over mounted TOML and the image fallback         |
 | `API_PORT`           | Container listen port, default `3001`                                         |
 | `DATABASE_PATH`      | Override SQLite path, default `/data/.mango/database.sqlite`                  |
 | `UPLOADS_DIR`        | Override uploaded file storage path                                           |
