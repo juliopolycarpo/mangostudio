@@ -19,8 +19,10 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createInstallRunner } from '../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
+import { isProcessAbsent, type ProcessLivenessProbe } from './process-liveness';
 import { waitUntil } from './wait-until';
 
+export type { ProcessLivenessProbe } from './process-liveness';
 export { waitUntil };
 
 export interface FakeInstaller {
@@ -240,19 +242,20 @@ export async function expectAppliedOnce(
 }
 
 /**
- * Whether the process `pid` has exited, polling for up to `timeoutMs`.
+ * Whether `pid` is absent, polling for up to `timeoutMs`. Only ESRCH proves absence;
+ * permission and unknown probe failures reject with context instead of certifying cleanup.
  *
  * @example
  * expect(await processGone(pid)).toBe(true);
  */
-export async function processGone(pid: number, timeoutMs = 5_000): Promise<boolean> {
+export async function processGone(
+  pid: number,
+  timeoutMs = 5_000,
+  probe: ProcessLivenessProbe = process.kill
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
+    if (isProcessAbsent(pid, probe)) return true;
     if (Date.now() >= deadline) return false;
     await Bun.sleep(20);
   }

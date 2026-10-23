@@ -3,6 +3,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { $ } from 'bun';
+import { isProcessAbsent, type ProcessLivenessProbe } from '../process-liveness';
 import { createReleaseDiagnostics, readRootIdentity } from './managed-process-diagnostics';
 
 const DEFAULT_DIAGNOSTIC_LIMIT_BYTES = 32 * 1024;
@@ -217,11 +218,20 @@ export async function createManagedProcessFixture(options: {
   return fixture;
 }
 
-/** Waits for a process owned by another library (for example the MCP SDK) to exit. */
-export async function waitForProcessExit(pid: number, timeoutMs = DEFAULT_EXIT_TIMEOUT_MS) {
+/**
+ * Waits for a library-owned PID to be proven absent; unknown probe errors reject immediately.
+ *
+ * @example
+ * await waitForProcessExit(serverPid);
+ */
+export async function waitForProcessExit(
+  pid: number,
+  timeoutMs = DEFAULT_EXIT_TIMEOUT_MS,
+  probe: ProcessLivenessProbe = process.kill
+) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) return;
+    if (isProcessAbsent(pid, probe)) return;
     await Bun.sleep(25);
   }
   throw new Error(`Process ${pid} did not exit within ${timeoutMs}ms.`);
@@ -236,15 +246,6 @@ export async function waitForProcessExit(pid: number, timeoutMs = DEFAULT_EXIT_T
  */
 function isRunning(child: Bun.Subprocess): boolean {
   return child.exitCode === null && child.signalCode === null;
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function assertPortAvailable(port: number): Promise<void> {
