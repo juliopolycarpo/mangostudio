@@ -230,10 +230,11 @@ jobs:
       target_artifacts: ${{ needs.distribution.outputs.target_artifacts }}
 
   gate:
-    # Single stable check ("CI / Gate") aggregating every mandatory job, so
-    # branch protection and Canary depend on one name instead of tracking
-    # internal job names and matrix shapes. Every job except this one and jobs
-    # that already need this gate, and the compatibility check, must be in
+    # The stable Gate job aggregates every mandatory job and reports the bare
+    # API context "Gate". Branch protection retains this shared context and
+    # Canary depends on this workflow's job instead of internal matrix shapes.
+    # Every job except this one and jobs that already need this gate, and the
+    # compatibility check, must be in
     # `needs`; the ci-gate unit tests derive that set dynamically so a new
     # mandatory lane cannot bypass it.
     # qa-metrics only runs for PRs and main pushes, so its skip is accepted

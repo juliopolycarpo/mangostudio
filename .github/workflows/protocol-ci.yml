@@ -6,9 +6,9 @@ name: Protocol CI
 # for every Rust path, the protocol crate's included. The heavy Rust matrix only
 # runs when a protocol path changes — but the workflow itself triggers on every
 # pull request, because path detection happens in the cheap `changes` job so the
-# "Protocol CI / Gate" check below always reports and is safe to require in
-# branch protection (a path-filtered workflow that never starts leaves a
-# required check pending forever). Pushes to main keep the path filter;
+# workflow's Gate job (bare API context "Gate") below always reports. A
+# path-filtered workflow that never starts leaves a required check pending
+# forever. Pushes to main keep the path filter;
 # required checks only apply to pull requests.
 
 on:
@@ -283,10 +283,10 @@ jobs:
         run: bun ./scripts/protocol/verify-roundtrip.ts
 
   gate:
-    # Single stable check ("Protocol CI / Gate") aggregating every mandatory
-    # job, so branch protection depends on one name instead of tracking job
-    # names and matrix shapes. Every lane skip is accepted only when the
-    # `changes` job proved no protocol path changed.
+    # The stable Gate job reports the shared bare API context "Gate" and
+    # aggregates every mandatory job, so branch protection retains one context
+    # instead of tracking job names and matrix shapes. Every lane skip is
+    # accepted only when the `changes` job proved no protocol path changed.
     name: Gate
     needs: [
       changes,
