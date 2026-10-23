@@ -19,15 +19,17 @@ Apenas o commit mais recente da branch `main` recebe correções de segurança. 
 - **Better Auth** com estratégia de email e senha.
 - Autenticação baseada em sessão com cookies HTTP-only.
 - Sessões são validadas em toda request protegida da API por `requireAuth`.
-- Senhas dos usuários são hashadas com bcrypt, configurado via Better Auth.
+- Senhas dos usuários usam o hash scrypt padrão do Better Auth. A versão 1.7.10 fixada no lockfile delega ao `@better-auth/utils` 0.5.0; `apps/api/src/auth.ts` não configura overrides de hash ou verificação de senha.
 
 ### Armazenamento De Chaves De API
 
-Chaves de API para Gemini, OpenAI, Anthropic e DeepSeek suportam três métodos de persistência, em ordem de prioridade:
+Cada conector persiste o backend de secrets selecionado no metadado `source`. A resolução lê esse backend; não há uma prioridade global ambiente → TOML → armazenamento do SO.
 
-1. **Variáveis de ambiente** em `~/.mango/.env` — prioridade mais alta, nunca versionadas.
-2. **config.toml** em `~/.mango/config.toml` — arquivo flat, nunca versionado.
-3. **OS secret store** via `Bun.secrets` — armazenamento nativo seguro do sistema operacional, recomendado para máxima segurança.
+- **`environment`** — Lê primeiro a variável específica do conector (por exemplo, `OPENAI_API_KEY_WORK` para um conector chamado `work`) e depois a variável genérica do provedor (`OPENAI_API_KEY`). A UI grava no arquivo `.env` ao lado do arquivo de configuração selecionado (por padrão, `~/.mango/.env`). Esse fallback de nome de variável se aplica apenas a este backend.
+- **`config-file`** — Lê a entrada com o nome do conector na seção do provedor no `config.toml` selecionado (por padrão, `~/.mango/config.toml`).
+- **`bun-secrets`** — Lê a chave do conector no armazenamento de secrets do SO via `Bun.secrets`, usando o provedor e o ID do conector.
+
+Proteja `.env`, `config.toml` e o diretório de dados com permissões do sistema de arquivos; mantenha arquivos preenchidos fora do controle de versão. A disponibilidade do armazenamento do SO depende do host. Fontes: `apps/api/src/services/providers/core/secret-service.ts` e `apps/api/src/modules/connectors/infrastructure/secret-persistence.ts`.
 
 As chaves nunca são expostas ao frontend. A API resolve os secrets server-side e nunca os inclui nas responses.
 
@@ -58,7 +60,7 @@ headers; caso contrário o limiter usa o IP do socket.
 
 ### Segurança Do Build
 
-- `bun build --compile` produz binários standalone sem expor o código-fonte.
+- `bun build --compile` empacota o hub como executável standalone; compilação não é uma fronteira de confidencialidade. JavaScript empacotado e corpos de funções podem continuar inspecionáveis. Não embuta secrets nem dependa do empacotamento para manter o código privado. As flags de distribuição em `scripts/lib/build.ts` incluem bytecode, ESM e source maps externos, além de minificação em produção.
 - Assets do frontend são minificados e tree-shaken.
 - Variáveis de ambiente não são embutidas no binário.
 
