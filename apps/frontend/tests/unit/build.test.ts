@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { cpSync, existsSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -403,27 +403,61 @@ describe('removeTempPaths', () => {
 });
 
 describe('compiler failure publication', () => {
-  test('keeps the previous dist and metafile when stylesheet compilation fails', async () => {
+  async function isolatedBuildFixture(): Promise<{ isolated: string; frontend: string }> {
     const repository = join(import.meta.dir, '../../../..');
     await mkdir(join(repository, '.mango'), { recursive: true });
     const isolated = await mkdtemp(join(repository, '.mango/tailwind-rollback-'));
     const frontend = join(isolated, 'apps/frontend');
+    cpSync(join(repository, 'apps/frontend'), frontend, {
+      recursive: true,
+      filter: (path) =>
+        !['node_modules', 'dist', 'dist-metafile.json', '.turbo', '.tanstack', 'tests'].includes(
+          basename(path)
+        ),
+    });
+    const modules = join(frontend, 'node_modules');
+    await mkdir(modules);
+    const installed = join(repository, 'apps/frontend/node_modules');
+    for (const entry of await readdir(installed)) {
+      if (entry.startsWith('.')) continue;
+      if (!entry.startsWith('@')) {
+        const source = realpathSync(join(installed, entry));
+        if (entry === 'tailwindcss') cpSync(source, join(modules, entry), { recursive: true });
+        else symlinkSync(source, join(modules, entry), 'junction');
+        continue;
+      }
+      await mkdir(join(modules, entry));
+      for (const child of await readdir(join(installed, entry))) {
+        const source = realpathSync(join(installed, entry, child));
+        if (entry === '@xterm' && child === 'xterm')
+          cpSync(source, join(modules, entry, child), { recursive: true });
+        else symlinkSync(source, join(modules, entry, child), 'junction');
+      }
+    }
+    await mkdir(join(isolated, '.git'));
+    await mkdir(join(isolated, 'apps/shared/src/frontend-build'), { recursive: true });
+    cpSync(
+      join(repository, 'apps/shared/src/frontend-build/host.ts'),
+      join(isolated, 'apps/shared/src/frontend-build/host.ts')
+    );
+    cpSync(join(repository, 'bun.lock'), join(isolated, 'bun.lock'));
+    await mkdir(join(frontend, 'dist'));
+    await writeFile(join(frontend, 'dist/index.html'), 'previous published bundle');
+    await writeFile(join(frontend, 'dist-metafile.json'), 'previous metafile');
+    return { isolated, frontend };
+  }
+
+  async function assertPreviousOutput(frontend: string): Promise<void> {
+    expect(await readFile(join(frontend, 'dist/index.html'), 'utf8')).toBe(
+      'previous published bundle'
+    );
+    expect(await readFile(join(frontend, 'dist-metafile.json'), 'utf8')).toBe('previous metafile');
+    expect((await readdir(frontend)).filter((name) => name.startsWith('.dist-'))).toEqual([]);
+  }
+
+  test('keeps the previous dist and metafile when stylesheet compilation fails', async () => {
+    const { isolated, frontend } = await isolatedBuildFixture();
     try {
-      cpSync(join(repository, 'apps/frontend'), frontend, {
-        recursive: true,
-        filter: (path) =>
-          !['node_modules', 'dist', 'dist-metafile.json', '.turbo', '.tanstack', 'tests'].includes(
-            basename(path)
-          ),
-      });
-      symlinkSync(
-        join(repository, 'apps/frontend/node_modules'),
-        join(frontend, 'node_modules'),
-        'junction'
-      );
-      await mkdir(join(frontend, 'dist'));
-      await writeFile(join(frontend, 'dist/index.html'), 'previous published bundle');
-      await writeFile(join(frontend, 'dist-metafile.json'), 'previous metafile');
       await writeFile(
         join(frontend, 'src/index.css'),
         '@import "./missing-tailwind-stylesheet.css";'
@@ -441,13 +475,52 @@ describe('compiler failure publication', () => {
       expect({ exitCode, output: stdout + stderr }).toMatchObject({ exitCode: 1 });
       expect(stderr).toContain('expected resolvable Tailwind stylesheet');
       expect(stderr).toContain('missing-tailwind-stylesheet.css');
-      expect(await readFile(join(frontend, 'dist/index.html'), 'utf8')).toBe(
-        'previous published bundle'
+      await assertPreviousOutput(frontend);
+    } finally {
+      await rm(isolated, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a source mutation during final compilation and cleans staged output', async () => {
+    const { isolated, frontend } = await isolatedBuildFixture();
+    try {
+      const preload = join(frontend, 'scripts/mutate-after-discovery.ts');
+      await writeFile(
+        preload,
+        `
+        import { mock } from 'bun:test';
+        import { writeFileSync } from 'node:fs';
+        import * as original from '@tailwindcss/node';
+        const realCompile = original.compile;
+        let entryCompiles = 0;
+        async function fakeCompileMutatesSourceAfterDiscovery(source, options) {
+          const result = await realCompile(source, options);
+          if (options.from === ${JSON.stringify(join(frontend, 'src/index.css'))} && ++entryCompiles === 2) {
+            writeFileSync(${JSON.stringify(join(frontend, 'src/capture-race.tsx'))}, 'export const utility = "z-[671234]";');
+            console.error('compiler mutation applied after discovery');
+          }
+          return result;
+        }
+        function fakeTailwindModule() { return { ...original, compile: fakeCompileMutatesSourceAfterDiscovery }; }
+        mock.module('@tailwindcss/node', fakeTailwindModule);
+      `
       );
-      expect(await readFile(join(frontend, 'dist-metafile.json'), 'utf8')).toBe(
-        'previous metafile'
+      const child = Bun.spawn([process.execPath, '--preload', preload, './build.ts', '--dev'], {
+        cwd: frontend,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stderr).text(),
+        new Response(child.stdout).text(),
+      ]);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('compiler mutation applied after discovery');
+      expect(stderr).toContain(
+        'expected unchanged Tailwind inputs between dependency discovery and publication'
       );
-      expect((await readdir(frontend)).filter((name) => name.startsWith('.dist-'))).toEqual([]);
+      await assertPreviousOutput(frontend);
     } finally {
       await rm(isolated, { recursive: true, force: true });
     }

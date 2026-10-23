@@ -207,7 +207,8 @@ controls. A normal checkout with hashable controls remains cacheable. A linked-w
 pointer, absent repository marker or present inherited ignore control outside the repository
 disables both cache providers for the invocation and marks the stamp non-reusable. Such a dev
 checkout rebuilds on every API boot. Outside-control absence is recorded, so creating one also
-invalidates a previously reusable stamp. Raw Turbo build commands are supported only in a fully
+invalidates a previously reusable stamp. A restored stamp with a different ancestor-control inventory
+is stale in its destination checkout, even if every source byte is identical. Raw Turbo build commands are supported only in a fully
 declared checkout with hashable controls.
 
 The Native Bun qualification workflow builds the complete frontend on its Linux, macOS and Windows

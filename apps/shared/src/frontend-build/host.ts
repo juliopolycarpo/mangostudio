@@ -186,7 +186,9 @@ export function assertDeclaredSources(
   }
 }
 
-function controlPaths(inventory: SourceInventory): InputControl[] {
+function controlPaths(
+  inventory: Pick<SourceInventory, 'repositoryRoot' | 'roots'>
+): InputControl[] {
   const { repositoryRoot } = inventory;
   const marker = kind(join(repositoryRoot, '.git'));
   const controls: InputControl[] = [
@@ -386,6 +388,11 @@ export function tailwindInputsAreCurrent(
   manifest: TailwindInputs
 ): boolean {
   if (!parseTailwindInputs(manifest) || manifest.reuse !== 'checked') return false;
+  if (
+    JSON.stringify(manifest.controls) !==
+    JSON.stringify(controlPaths({ repositoryRoot, roots: manifest.roots }))
+  )
+    return false;
   const { digest, ...input } = manifest;
   return digest === snapshot(repositoryRoot, input);
 }
@@ -395,6 +402,11 @@ export function assertTailwindInputsUnchanged(
   manifest: TailwindInputs
 ): void {
   const { digest, ...input } = manifest;
+  if (
+    JSON.stringify(manifest.controls) !==
+    JSON.stringify(controlPaths({ repositoryRoot, roots: manifest.roots }))
+  )
+    fail(repositoryRoot, 'current repository ancestor controls from the precompile snapshot');
   if (digest !== snapshot(repositoryRoot, input))
     fail(repositoryRoot, 'unchanged Tailwind inputs between dependency discovery and publication');
 }
