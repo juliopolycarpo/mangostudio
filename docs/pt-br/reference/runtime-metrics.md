@@ -219,3 +219,14 @@ nativos, que continuam não medidos.
 O driver trata SIGINT/SIGTERM cancelando o comando supervisionado ativo, encerrando sua árvore
 verificada, registrando a tentativa interrompida e parando o lote. Timeouts externos com SIGKILL
 exigem um supervisor externo: o processo morto não consegue executar sua própria limpeza.
+
+Os comandos de metadados travados usam limite explícito de stdout de máquina: 8 MiB por linha UTF-8,
+com teto de 16 MiB. Isso preserva o JSON compacto completo do Cargo sem alterar os limites padrão do
+relator de texto ou do stderr. Ultrapassar o limite continua sendo erro; o stdout bruto é preservado.
+
+A primeira tentativa de admissão, em `5e267450`, gerou metadados válidos com 329 pacotes e 1.691.503
+bytes, mas a proteção genérica de texto de 1 MiB rejeitou a linha depois que o Cargo saiu com sucesso.
+O lote parou antes de qualquer build, aquecimento ou tentativa de prontidão. Nenhuma amostra de tempo
+ou recurso foi aceita; todas as cargas posteriores ficaram não executadas. A admissão falha permanece
+registrada, e um estudo posterior recebe outro identificador e seus próprios gates de revisão,
+correção e limpeza.

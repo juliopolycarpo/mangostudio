@@ -3,6 +3,11 @@ import { createWriteStream } from 'node:fs';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import {
+  assertMachineStdoutLimit,
+  createMachineStdoutCapture,
+  type MachineStdoutCapture,
+} from './native-command-output';
 
 export interface NativeProcess {
   readonly pid: number;
@@ -48,6 +53,7 @@ export interface NativeCommandReceipt {
   readonly signal: string | null;
   readonly timedOut: boolean;
   readonly canceled?: boolean;
+  readonly machineStdoutMaxLineBytes?: number;
   readonly timeoutSeconds: number;
   readonly errors: readonly string[];
   readonly log: string;
@@ -82,6 +88,12 @@ export interface NativeCommandOptions {
   readonly guardCompilerHelpers?: boolean;
   /** Cancels only this command’s verified process scope and waits for settlement. */
   readonly signal?: AbortSignal;
+}
+
+/** Extra capture policy for runNativeCommand; separate Windows Job tooling keeps its own output contract. */
+export interface NativeProcessCommandOptions extends NativeCommandOptions {
+  /** Opt in only for known machine stdout; stderr keeps the default text reporting bound. */
+  readonly machineStdout?: { readonly maxLineBytes: number };
 }
 
 /**
@@ -379,7 +391,7 @@ function pause(ms: number): Promise<void> {
  * @example await runNativeCommand({ label: 'test', command: ['bun', 'run', 'test'], root, out, env, timeoutSeconds: 900 });
  */
 export async function runNativeCommand(
-  options: NativeCommandOptions
+  options: NativeProcessCommandOptions
 ): Promise<NativeCommandReceipt> {
   const command = options.command[0];
   if (!command)
@@ -388,6 +400,8 @@ export async function runNativeCommand(
     throw new Error(
       `Invalid timeout ${options.timeoutSeconds}; expected a positive finite number of seconds`
     );
+  if (options.machineStdout) assertMachineStdoutLimit(options.machineStdout.maxLineBytes);
+  const machineStdoutLimit = options.machineStdout?.maxLineBytes;
   if (options.signal?.aborted)
     throw options.signal.reason ?? new Error('Native command canceled before launch');
   const started = Date.now();
@@ -429,12 +443,20 @@ export async function runNativeCommand(
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const tee = (source: NodeJS.ReadableStream, writer: NodeJS.WritableStream): void => {
+  const tee = (
+    source: NodeJS.ReadableStream,
+    writer: NodeJS.WritableStream,
+    machine?: MachineStdoutCapture
+  ): void => {
     const decoder = new StringDecoder('utf8');
     let pending = '';
     source.on('data', (chunk: Buffer) => {
       writer.write(chunk);
       stream.write(chunk);
+      if (machine) {
+        machine.write(chunk);
+        return;
+      }
       pending += decoder.write(chunk);
       let newline = pending.indexOf('\n');
       while (newline !== -1) {
@@ -449,11 +471,27 @@ export async function runNativeCommand(
       }
     });
     source.on('end', () => {
+      if (machine) {
+        machine.end();
+        return;
+      }
       pending += decoder.end();
       if (pending) combined.write(`${pending}\n`);
     });
   };
-  tee(child.stdout, rawOut);
+  const machineStdout =
+    machineStdoutLimit !== undefined
+      ? createMachineStdoutCapture(
+          machineStdoutLimit,
+          (text) => {
+            combined.write(text);
+          },
+          (message) => {
+            errors.push(message);
+          }
+        )
+      : undefined;
+  tee(child.stdout, rawOut, machineStdout);
   tee(child.stderr, rawError);
   let exited = false;
   let timedOut = false;
@@ -650,6 +688,7 @@ export async function runNativeCommand(
     signal,
     timedOut,
     ...(canceled ? { canceled: true } : {}),
+    ...(machineStdoutLimit !== undefined ? { machineStdoutMaxLineBytes: machineStdoutLimit } : {}),
     timeoutSeconds: options.timeoutSeconds,
     errors,
     log,

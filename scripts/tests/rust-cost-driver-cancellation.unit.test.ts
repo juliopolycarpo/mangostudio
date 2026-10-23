@@ -20,6 +20,13 @@ afterEach(async () => {
   for (const fixture of owned.splice(0))
     if (current.some((row) => row.pid === fixture.pid && row.identity === fixture.identity))
       process.kill(fixture.pid, 'SIGKILL');
+  for (const owner of scratch) {
+    const receiptFile = Bun.file(join(owner, 'study/receipt.json'));
+    if (!(await receiptFile.exists())) continue;
+    const receipt = await receiptFile.json();
+    if (targets.some((target) => target.path === receipt.environment.targetRoot)) continue;
+    targets.push({ path: receipt.environment.targetRoot, owner: join(owner, 'study') });
+  }
   for (const target of targets.splice(0)) {
     if (
       !target.path.startsWith(join(ROOT, 'target/rust-cost-baseline-')) ||
@@ -58,7 +65,7 @@ class FakeRustCostCommands {
 const args = process.argv.slice(2);
 if (args.includes('--worker')) { setInterval(() => {}, 1000); await new Promise(() => {}); }
 else if (args[0] === '-V') console.log('cargo fixture');
-else if (args[0] === 'metadata') console.log(JSON.stringify({ packages: [], resolve: { nodes: [] } }));
+else if (args[0] === 'metadata') console.log(JSON.stringify({ packages: [{ name: 'fixture', description: 'x'.repeat(2 * 2 ** 20) }], workspace_members: [], resolve: { nodes: [] } }));
 else if (args[0] === 'tree') console.log('fixture locked dependency graph');
 else if (args[0] === 'build') {
   const worker = Bun.spawn([process.execPath, import.meta.path, '--worker'], { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -152,6 +159,12 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
         }>;
       };
       targets.push({ path: receipt.environment.targetRoot, owner: out });
+      const metadata = JSON.parse(await readFile(join(out, 'metadata-default.json'), 'utf8'));
+      expect(metadata.packages[0].description).toHaveLength(2 * 2 ** 20);
+      const metadataCommand = JSON.parse(
+        await readFile(join(out, '1-metadata-default.json'), 'utf8')
+      );
+      expect(metadataCommand.machineStdoutMaxLineBytes).toBe(8 * 2 ** 20);
       expect(result.timedOut).toBe(false);
       expect(result.exitCode).toBe(1);
       expect(result.settlement.empty).toBe(true);
