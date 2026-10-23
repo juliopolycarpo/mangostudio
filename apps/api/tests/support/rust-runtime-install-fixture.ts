@@ -5,8 +5,8 @@
  *
  * Each fake installer's only effect is appending one line to a marker file
  * inside a scratch directory, so a test can prove the effect happened exactly
- * once. Paths are written into the script text rather than passed through the
- * environment, because the runtime forwards only its install allowlist.
+ * once. Paths use UTF-8 data, POSIX quoting or CMD script-relative names,
+ * because the runtime forwards only its install allowlist rather than fixture env data.
  *
  * On Windows the fake installer is a PowerShell `-File` script by default,
  * because every Windows recipe runs `powershell`; a `cmd.exe` batch file is
@@ -17,6 +17,7 @@ import { expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { shellQuote } from '@mangostudio/shared/environments';
 import { createInstallRunner } from '../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 import { waitUntil } from './wait-until';
@@ -48,10 +49,15 @@ export type FakeInstallerMode = 'waits' | 'sleeps' | 'grandchild';
 /** The Windows interpreter; recipes use `powershell`, `cmd` is an extra control case. */
 export type WindowsInterpreter = 'powershell' | 'cmd';
 
-const isWindows = process.platform === 'win32';
+/** Carries path data through ASCII source without PowerShell quote interpretation. Example: powerShellUtf8Data('café') decodes UTF-8 base64 with .NET. */
+function powerShellUtf8Data(value: string): string {
+  const encoded = Buffer.from(value, 'utf8').toString('base64');
+  return `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}'))`;
+}
 
 /**
- * Writes one fake installer into `directory`.
+ * Writes one fake installer into `directory`, preserving valid apostrophe/Unicode paths.
+ * `platform` can select a dialect for source-only tests; execution uses the host by default.
  *
  * @example
  * const installer = await writeFakeInstaller(scratch, 'waits', 'run-1');
@@ -60,13 +66,14 @@ export async function writeFakeInstaller(
   directory: string,
   mode: FakeInstallerMode,
   name: string,
-  interpreter: WindowsInterpreter = 'powershell'
+  interpreter: WindowsInterpreter = 'powershell',
+  platform: NodeJS.Platform = process.platform
 ): Promise<FakeInstaller> {
   const marker = join(directory, `${name}.marker`);
   const release = join(directory, `${name}.release`);
   const pidFile = join(directory, `${name}.pid`);
   const logPath = join(directory, `${name}.log`);
-  if (isWindows && interpreter === 'powershell') {
+  if (platform === 'win32' && interpreter === 'powershell') {
     if (mode === 'grandchild') throw new Error('The grandchild installer is POSIX-only.');
     const script = join(directory, `${name}.ps1`);
     // .NET calls only, no cmdlets. A cmdlet makes Windows PowerShell load and analyse its
@@ -74,18 +81,22 @@ export async function writeFakeInstaller(
     // windows-latest against 0.26 s for this script: longer than the tests wait for a line.
     const wait =
       mode === 'waits'
-        ? `while (-not [IO.File]::Exists('${release}')) { [Threading.Thread]::Sleep(50) }`
+        ? 'while (-not [IO.File]::Exists($releasePath)) { [Threading.Thread]::Sleep(50) }'
         : '[Threading.Thread]::Sleep(1000)';
     await writeFile(
       script,
-      [
-        "[Console]::Out.WriteLine('waiting')",
-        "[Console]::Error.WriteLine('warn')",
-        wait,
-        `[IO.File]::AppendAllText('${marker}', "run\`r\`n")`,
-        "[Console]::Out.WriteLine('done')",
-        '',
-      ].join('\r\n')
+      // Declare UTF-8 for Windows PowerShell 5.1; encoded path payloads keep the body ASCII.
+      '\uFEFF' +
+        [
+          `$releasePath = ${powerShellUtf8Data(release)}`,
+          `$markerPath = ${powerShellUtf8Data(marker)}`,
+          "[Console]::Out.WriteLine('waiting')",
+          "[Console]::Error.WriteLine('warn')",
+          wait,
+          `[IO.File]::AppendAllText($markerPath, "run\`r\`n")`,
+          "[Console]::Out.WriteLine('done')",
+          '',
+        ].join('\r\n')
     );
     // The recipes' own POWERSHELL_ARGV_PREFIX shape, ending in `-File`.
     return {
@@ -104,23 +115,30 @@ export async function writeFakeInstaller(
       pidFile,
     };
   }
-  if (isWindows) {
+  if (platform === 'win32') {
     if (mode === 'grandchild') throw new Error('The grandchild installer is POSIX-only.');
     const script = join(directory, `${name}.cmd`);
     // `ping -n 2` to loopback is cmd's portable one-second sleep; `timeout.exe`
     // refuses to run without console input.
     const wait =
       mode === 'waits'
-        ? [':wait', `if exist "${release}" goto go`, 'ping -n 2 127.0.0.1 >nul', 'goto wait', ':go']
+        ? [
+            ':wait',
+            'if exist "%~dpn0.release" goto go',
+            'ping -n 2 127.0.0.1 >nul',
+            'goto wait',
+            ':go',
+          ]
         : ['ping -n 2 127.0.0.1 >nul'];
     await writeFile(
       script,
       [
         '@echo off',
+        'setlocal DisableDelayedExpansion',
         'echo waiting',
         '1>&2 echo warn',
         ...wait,
-        `echo run>>"${marker}"`,
+        'echo run>>"%~dpn0.marker"',
         'echo done',
         'exit /b 0',
         '',
@@ -130,9 +148,9 @@ export async function writeFakeInstaller(
   }
   const script = join(directory, `${name}.sh`);
   const body: Record<FakeInstallerMode, string> = {
-    waits: `while [ ! -e '${release}' ]; do sleep 0.05; done; echo run >> '${marker}'; echo done`,
-    sleeps: `sleep 1; echo run >> '${marker}'; echo done`,
-    grandchild: `sleep 30 & echo $! > '${pidFile}'; wait`,
+    waits: `while [ ! -e ${shellQuote(release)} ]; do sleep 0.05; done; echo run >> ${shellQuote(marker)}; echo done`,
+    sleeps: `sleep 1; echo run >> ${shellQuote(marker)}; echo done`,
+    grandchild: `sleep 30 & echo $! > ${shellQuote(pidFile)}; wait`,
   };
   await writeFile(script, `echo waiting\necho warn >&2\n${body[mode]}\n`);
   return { argv: ['sh', script], marker, release, logPath, pidFile };
