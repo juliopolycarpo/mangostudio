@@ -21,6 +21,7 @@ import { createInstallRunner } from '../../src/modules/environments/infrastructu
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 import { waitUntil } from './wait-until';
 
+export { processGone } from './process-liveness';
 export { waitUntil };
 
 export interface FakeInstaller {
@@ -237,23 +238,4 @@ export async function expectAppliedOnce(
     () => [run?.describe(), `last marker read: ${lastRead}`].filter(Boolean).join('; ')
   );
   expect(lines).toEqual(['run']);
-}
-
-/**
- * Whether the process `pid` has exited, polling for up to `timeoutMs`.
- *
- * @example
- * expect(await processGone(pid)).toBe(true);
- */
-export async function processGone(pid: number, timeoutMs = 5_000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    if (Date.now() >= deadline) return false;
-    await Bun.sleep(20);
-  }
 }
