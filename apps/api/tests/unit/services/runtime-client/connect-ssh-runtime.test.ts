@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
 import { CLOSE_CODES } from '@mangostudio/protocol';
 import { createInProcessPortPair } from '@mangostudio/protocol/in-process';
 import type { LaunchedPeer, SpawnOptions } from '@mangostudio/protocol/spawn';
@@ -131,7 +131,11 @@ describe('connectSshRuntime', () => {
       ).catch((caught) => caught);
 
       expect(launcher.launches).toHaveLength(1);
-      expect(launcher.launches[0]?.argv).toContain(join(directory, 'id_ed25519'));
+      const argv = launcher.launches[0]?.argv ?? [];
+      expect(argv).toContain('-i');
+      const identityArg = argv[argv.indexOf('-i') + 1];
+      expect(identityArg).toBeString();
+      expect(normalize(identityArg ?? '')).toBe(join(directory, 'id_ed25519'));
       expect({ code: error.code, message: error.message, details: error.details }).toEqual({
         code: 'UNAVAILABLE',
         message: expect.stringContaining('ssh-target.invalid'),
