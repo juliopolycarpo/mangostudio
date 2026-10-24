@@ -172,6 +172,11 @@ function injectCases(root: string, workspace: string, cases: readonly CycleCase[
   for (const { dir, files } of cases) injectCycle(root, join(workspace, dir), files);
 }
 
+/** Keep separately captured streams from merging a rule name with the next summary. */
+function joinOutputStreams(stdout: string, stderr: string): string {
+  return `${stdout}\n${stderr}`;
+}
+
 function runCheck(root: string, workspace: string): CheckRun {
   const protocolTask = protocolCheckTasks(['--ts-only'], { cargo: false, cargoHack: false })[0];
   const command = workspace.startsWith('apps/')
@@ -183,7 +188,10 @@ function runCheck(root: string, workspace: string): CheckRun {
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  return { exitCode: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
+  return {
+    exitCode: result.exitCode,
+    output: joinOutputStreams(result.stdout.toString(), result.stderr.toString()),
+  };
 }
 
 /**
@@ -199,7 +207,7 @@ async function scanCycles(
   const outputs: string[] = [];
   const circularDeps = await countCircularDeps(roots, async (cmd) => {
     const result = await runCapture(cmd, { cwd: root });
-    outputs.push(result.stdout + result.stderr);
+    outputs.push(joinOutputStreams(result.stdout, result.stderr));
     return result;
   });
   return { circularDeps, output: outputs.join('\n') };
@@ -235,6 +243,19 @@ function diagnosticHeaders(output: string): Array<{ file: string; rule: string }
     rule,
   }));
 }
+
+test('keeps a diagnostic header separate from the other output stream', () => {
+  const diagnostic = 'apps/frontend/dist/self-js/a.js:1:1 lint/nursery/noSelfImport';
+  const summary = 'Checked 18 files in 7ms. No fixes applied.';
+  for (const [stdout, stderr] of [
+    [diagnostic, summary],
+    [summary, diagnostic],
+  ]) {
+    expect(diagnosticHeaders(joinOutputStreams(stdout, stderr))).toEqual([
+      { file: 'apps/frontend/dist/self-js/a.js', rule: NO_SELF_IMPORT },
+    ]);
+  }
+});
 
 /**
  * Assert Biome flagged this case with its rule and named every one of its files.
@@ -530,7 +551,10 @@ beforeAll(() => {
     stderr: 'pipe',
   });
   expectCheck(
-    { exitCode: warm.exitCode, output: warm.stdout.toString() + warm.stderr.toString() },
+    {
+      exitCode: warm.exitCode,
+      output: joinOutputStreams(warm.stdout.toString(), warm.stderr.toString()),
+    },
     'pass',
     'dprint cache warmup'
   );
@@ -649,7 +673,7 @@ describe('Biome import cycle checks', () => {
             '.',
           ];
     const clean = Bun.spawnSync(command, { cwd: root, stdout: 'pipe', stderr: 'pipe' });
-    const output = clean.stdout.toString() + clean.stderr.toString();
+    const output = joinOutputStreams(clean.stdout.toString(), clean.stderr.toString());
     expectCheck(
       { exitCode: clean.exitCode, output },
       'pass',

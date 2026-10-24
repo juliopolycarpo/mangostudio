@@ -30,7 +30,11 @@ import {
 } from '../../modules/environments/domain/ssh-failure';
 import { resolveRemoteHandshakeTimeoutMs } from './handshake-budget';
 import { RuntimeClient } from './runtime-client';
-import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
+import {
+  type RuntimeLaunchFailure,
+  type SpawnRuntimeChildDeps,
+  spawnRuntimeChild,
+} from './spawn-runtime-child';
 
 /** How long `ssh` may spend reaching the host before it gives up. */
 const CONNECT_TIMEOUT_SECONDS = 10;
@@ -63,14 +67,19 @@ export interface SshConnectContext {
 
 /**
  * Starts a runtime on an SSH host through `ssh` and handshakes with it.
+ * The optional launcher dependency lets tests supply an observed SSH failure
+ * without contacting a host; omitted dependencies use the real launcher.
  *
  * @example
  * const connection = await connectSshRuntime(definition, markUnavailable, { signal });
+ * // Deterministic launcher fixture:
+ * await connectSshRuntime(definition, markUnavailable, {}, { spawnPort: fake.spawnPort });
  */
 export async function connectSshRuntime(
   definition: SshRuntimeDefinition,
   onUnavailable: () => void,
-  context: SshConnectContext = {}
+  context: SshConnectContext = {},
+  deps: SpawnRuntimeChildDeps = {}
 ): Promise<SshRuntimeConnection> {
   const config = environmentConfigFor('ssh', definition.config);
   // OpenSSH expands `~/…` for `-i`; `existsSync` does not. Resolve the same
@@ -98,29 +107,32 @@ export async function connectSshRuntime(
   let failureReason: SshFailureReason = 'unknown';
 
   try {
-    const connection = await spawnRuntimeChild({
-      environmentId: definition.id,
-      workspaceBinding: { userId: definition.userId, environmentId: definition.id },
-      launch: sshLaunch(launchConfig),
-      hubVersion: getVersion(),
-      handshakeTimeoutMs: resolveRemoteHandshakeTimeoutMs('ssh'),
-      requireMatchingRelease: false,
-      describeFailure: (failure: RuntimeLaunchFailure) => {
-        failureReason = classifySshFailure({
-          stderr: failure.stderr,
-          exitCode: failure.exitCode,
-          spawnErrorCode: failure.spawnErrorCode,
-        });
-        // An unrecognised failure keeps the generic message, which already
-        // carries the stderr tail: a protocol mismatch reported by a runtime
-        // that did answer is described better there than by anything ssh said.
-        return failureReason === 'unknown'
-          ? undefined
-          : describeSshFailure(failureReason, config, failure.stderr);
+    const connection = await spawnRuntimeChild(
+      {
+        environmentId: definition.id,
+        workspaceBinding: { userId: definition.userId, environmentId: definition.id },
+        launch: sshLaunch(launchConfig),
+        hubVersion: getVersion(),
+        handshakeTimeoutMs: resolveRemoteHandshakeTimeoutMs('ssh'),
+        requireMatchingRelease: false,
+        describeFailure: (failure: RuntimeLaunchFailure) => {
+          failureReason = classifySshFailure({
+            stderr: failure.stderr,
+            exitCode: failure.exitCode,
+            spawnErrorCode: failure.spawnErrorCode,
+          });
+          // An unrecognised failure keeps the generic message, which already
+          // carries the stderr tail: a protocol mismatch reported by a runtime
+          // that did answer is described better there than by anything ssh said.
+          return failureReason === 'unknown'
+            ? undefined
+            : describeSshFailure(failureReason, config, failure.stderr);
+        },
+        onClosed: onUnavailable,
+        ...(context.signal ? { signal: context.signal } : {}),
       },
-      onClosed: onUnavailable,
-      ...(context.signal ? { signal: context.signal } : {}),
-    });
+      deps
+    );
 
     return {
       client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
