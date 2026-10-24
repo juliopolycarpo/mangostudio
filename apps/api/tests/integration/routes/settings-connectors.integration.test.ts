@@ -340,7 +340,7 @@ describe('Gemini aliases API', () => {
   // from following the process into the next file), which would leave a
   // `beforeAll` fake installed for the first test only.
   beforeEach(async () => {
-    await mock.module('@google/genai', () => {
+    await mock.module('@google/genai/web', () => {
       return {
         GoogleGenAI: class {
           models = {

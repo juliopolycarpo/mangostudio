@@ -3,7 +3,7 @@
  * Uses the generateContent / generateContentStream APIs via stateless context replay.
  */
 
-import type { Content, Part } from '@google/genai';
+import type { Content, Part } from '@google/genai/web';
 import {
   attachmentToBase64,
   getAttachmentSupportKind,

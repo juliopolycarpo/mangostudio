@@ -3,7 +3,7 @@
  * Integrated with multi-connector metadata for model filtering.
  */
 
-import type { Model } from '@google/genai';
+import type { Model } from '@google/genai/web';
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import { parseStringArray } from '../../../utils/json';
 import { GEMINI_PROVIDER, listSecretMetadata } from '../../secret-store/metadata';
