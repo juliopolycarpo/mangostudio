@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { waitForProcessExit } from '../../support/fixtures/managed-process';
-import { type ProcessLivenessProbe, processGone } from '../../support/rust-runtime-install-fixture';
+import { type ProcessLivenessProbe, processGone } from '../../support/process-liveness';
 
 /** A named zero-signal probe with an explicit sequence, rejecting accidental extra calls. */
 class FakeProcessLivenessProbe {

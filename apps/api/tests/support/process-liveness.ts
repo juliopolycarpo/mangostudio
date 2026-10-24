@@ -21,3 +21,23 @@ export function isProcessAbsent(pid: number, probe: ProcessLivenessProbe = proce
     );
   }
 }
+
+/**
+ * Whether `pid` is absent, polling for up to `timeoutMs`. Only ESRCH proves absence;
+ * permission and unknown probe failures reject with context instead of certifying cleanup.
+ *
+ * @example
+ * expect(await processGone(pid)).toBe(true);
+ */
+export async function processGone(
+  pid: number,
+  timeoutMs = 5_000,
+  probe: ProcessLivenessProbe = process.kill
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (isProcessAbsent(pid, probe)) return true;
+    if (Date.now() >= deadline) return false;
+    await Bun.sleep(20);
+  }
+}
