@@ -1,9 +1,11 @@
+import type {
+  ExternalAgentRemedy,
+  ExternalAgentUnavailableReason,
+} from '@mangostudio/shared/external-agents';
 import {
   EXTERNAL_AGENT_CAPACITY_CODE,
-  type ExternalAgentRemedy,
-  type ExternalAgentUnavailableReason,
   isExternalAgentKindCode,
-} from '@mangostudio/shared/external-agents';
+} from '@mangostudio/shared/external-agents/values';
 import { Callout } from '@/components/ui/Callout';
 import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';

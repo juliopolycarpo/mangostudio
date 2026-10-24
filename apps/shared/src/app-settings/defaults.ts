@@ -20,14 +20,14 @@ import {
   type ExternalWorkspaceTrust,
   isExternalAgentTargetId,
   vendorSelection,
-} from '../external-agents';
+} from '../external-agents/values';
 import {
   COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
   COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
   DEFAULT_COMMIT_MESSAGE_PROMPT,
 } from '../git/commit-message';
-import { LIBRARY_SCOPES } from '../library';
+import { LIBRARY_SCOPES } from '../library/choices';
 import {
   DEFAULT_ONBOARDING_STATE,
   normalizeOnboardingState,

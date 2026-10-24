@@ -49,7 +49,7 @@
  */
 
 import type { ChatRunnerModelSelection } from '@mangostudio/shared/chat';
-import { vendorSelection } from '@mangostudio/shared/external-agents';
+import { vendorSelection } from '@mangostudio/shared/external-agents/values';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 

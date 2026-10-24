@@ -243,6 +243,19 @@ shared/src/
 
 Imports entre workspaces usam nomes de pacote (`@mangostudio/shared`), nunca caminhos relativos.
 
+O código do browser importa constantes de UI e helpers puros pelos subpaths `environments/values`,
+`external-agents/values`, `library/values`, `runtime-home/values` e `generation/values`.
+Os limites de logs usam `machine/limits`. Por exemplo:
+
+```ts
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
+```
+
+Os entrypoints originais de cada contexto continuam exportando os schemas completos do contrato.
+Os pequenos schemas de escolhas são compartilhados entre esses contratos e os valores leves;
+os validadores mantêm suas verificações TypeBox. `apps/shared/tests/unit/browser-values.test.ts`
+verifica os exports de compatibilidade e as escolhas derivadas dos schemas.
+
 ## Banco De Dados
 
 SQLite via Kysely com 18 migrações cobrindo:

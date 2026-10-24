@@ -4,7 +4,7 @@
  */
 
 import type { Environment, HttpEnvironmentConfig } from '@mangostudio/shared/environments';
-import { shouldWarnPlaintextHttpRuntime } from '@mangostudio/shared/environments';
+import { shouldWarnPlaintextHttpRuntime } from '@mangostudio/shared/environments/values';
 import { KeyRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';

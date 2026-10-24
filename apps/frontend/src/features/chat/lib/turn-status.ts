@@ -1,4 +1,4 @@
-import { lastContentIndex } from '@mangostudio/shared/external-agents';
+import { lastContentIndex } from '@mangostudio/shared/external-agents/values';
 import type { MessagePart } from '@mangostudio/shared/types';
 
 /**

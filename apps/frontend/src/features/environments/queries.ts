@@ -23,7 +23,7 @@ import type {
   VersionManagerStatusList,
   WslDetection,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { ENVIRONMENTS_TOPIC } from '@mangostudio/shared/realtime';
 import {
   type QueryClient,

@@ -9,11 +9,8 @@
  * Browser-safe: no Node builtins.
  */
 
-import {
-  EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
-  type ExternalAccountLimits,
-  type ExternalRateLimitWindow,
-} from './schemas';
+import { EXTERNAL_ACCOUNT_LIMITS_STALE_MS } from './limits';
+import type { ExternalAccountLimits, ExternalRateLimitWindow } from './schemas';
 
 export type ExternalAccountLimitsFreshness = 'fresh' | 'stale' | 'unknown';
 

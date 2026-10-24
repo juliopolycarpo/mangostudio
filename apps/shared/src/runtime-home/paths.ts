@@ -21,7 +21,7 @@
  * import did.
  */
 
-import { RUNTIME_SLOTS, type RuntimeSlot } from './schemas';
+import { RUNTIME_SLOTS, type RuntimeSlot } from './choices';
 
 export const MANGO_HOME_DIR_NAME = '.mango';
 export const RUNTIME_HOME_DIR_NAME = 'runtime';

@@ -11,7 +11,7 @@
  */
 
 import type { InstallPreparation, InstallRecipePreview } from '@mangostudio/shared/environments';
-import { renderShellCommand } from '@mangostudio/shared/environments';
+import { renderShellCommand } from '@mangostudio/shared/environments/values';
 import { Download, FolderPen, Globe, TerminalSquare, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';

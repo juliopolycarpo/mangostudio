@@ -9,7 +9,7 @@
  * previous matrix as if it described the new one.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type {
   ConceptComparison,
   LibraryLocationId,

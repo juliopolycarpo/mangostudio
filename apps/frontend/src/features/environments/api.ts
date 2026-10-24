@@ -23,7 +23,7 @@ import type {
   VersionManagerId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import type { MachineConfigWriteResponse } from '@mangostudio/shared/machine';
 import { client } from '@/lib/api-client';

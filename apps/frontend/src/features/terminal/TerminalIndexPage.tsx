@@ -1,4 +1,4 @@
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Plus, TerminalSquare, X } from 'lucide-react';
 import { Suspense, useState } from 'react';

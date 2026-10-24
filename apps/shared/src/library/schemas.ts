@@ -1,25 +1,29 @@
 import Type, { type Static } from 'typebox';
 import { ProfileIdSchema } from '../profiles';
 import type { SkillSource } from '../skills';
+import {
+  LIBRARY_RESOURCE_SLUG_MAX_LENGTH,
+  LIBRARY_RESOURCE_SLUG_PATTERN,
+  type LibraryLocationId,
+  LibraryLocationIdSchema,
+  LibraryScopeSchema,
+  LibraryTargetIdSchema,
+  ResourceKindSchema,
+} from './choices';
 
-export const ResourceKindSchema = Type.Union([
-  Type.Literal('skill'),
-  Type.Literal('subagent'),
-  Type.Literal('command'),
-  Type.Literal('instruction'),
-  Type.Literal('setting'),
-  Type.Literal('hook'),
-]);
-
-export const LibraryTargetIdSchema = Type.Union([
-  Type.Literal('mangostudio'),
-  Type.Literal('claude'),
-  Type.Literal('codex'),
-  Type.Literal('cursor'),
-]);
-
-/** Stable id of one code-defined library location. */
-export const LibraryLocationIdSchema = Type.String({ minLength: 1, maxLength: 64 });
+export {
+  LIBRARY_RESOURCE_SLUG_MAX_LENGTH,
+  LIBRARY_RESOURCE_SLUG_PATTERN,
+  LIBRARY_SCOPES,
+  type LibraryLocationId,
+  LibraryLocationIdSchema,
+  type LibraryScope,
+  LibraryScopeSchema,
+  type LibraryTargetId,
+  LibraryTargetIdSchema,
+  type ResourceKind,
+  ResourceKindSchema,
+} from './choices';
 
 /**
  * Which machine a library instance, destination, or backup set lives on.
@@ -35,28 +39,6 @@ export const LibraryEnvironmentIdSchema = Type.String({
   maxLength: 63,
   pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
 });
-
-/**
- * Where a location is rooted. `home` resolves under the user's home directory.
- * `workspace` resolves under a repository root and is **reserved**: v1 defines
- * no workspace-scoped location, so nothing resolves under it yet.
- *
- * Scope is a field rather than a fork of the id space on purpose. The same
- * logical location exists at both scopes — `.claude/skills` under `~` and under
- * a repository are one concept read from two roots — so ids stay scope-free and
- * every map keyed on them stays one map.
- *
- * If no workspace location exists when this stops earning its keep, delete the
- * seam rather than leaving it as decoration.
- */
-export const LibraryScopeSchema = Type.Union([Type.Literal('home'), Type.Literal('workspace')]);
-
-/**
- * Runtime companion to `LibraryScopeSchema`. Iterating scopes is a normal need
- * — nesting settings, building per-scope caches — and re-deriving the list from
- * the schema at every call site is how one of them ends up out of date.
- */
-export const LIBRARY_SCOPES = ['home', 'workspace'] as const;
 
 export const LocationAccessSchema = Type.Union([
   Type.Literal('read-write'),
@@ -85,16 +67,6 @@ export const LibraryInvalidReasonSchema = Type.Union([
   /** A directory manifest entry whose relative path carries a `\n` or `\0` byte. */
   Type.Literal('unsafe-name'),
 ]);
-
-export const LIBRARY_RESOURCE_SLUG_MAX_LENGTH = 128;
-
-/**
- * Path-safe shape a library resource slug must satisfy: dot-separated groups of
- * `[A-Za-z0-9_-]`. Rejects separators, `..`, leading/trailing dots, drive/stream
- * colons, whitespace and control characters, so a slug is always safe to use as
- * a single directory name or file stem.
- */
-export const LIBRARY_RESOURCE_SLUG_PATTERN = '^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$';
 
 export const LibraryResourceRefSchema = Type.Object({
   kind: ResourceKindSchema,
@@ -1150,11 +1122,6 @@ export const RemovalApplySchema = Type.Object({
   kept: Type.Array(RemovalKeptSchema),
   failed: Type.Array(RemovalFailureSchema),
 });
-
-export type ResourceKind = Static<typeof ResourceKindSchema>;
-export type LibraryTargetId = Static<typeof LibraryTargetIdSchema>;
-export type LibraryLocationId = Static<typeof LibraryLocationIdSchema>;
-export type LibraryScope = Static<typeof LibraryScopeSchema>;
 export type LocationAccess = Static<typeof LocationAccessSchema>;
 export type ResourceFormat = Static<typeof ResourceFormatSchema>;
 export type LibraryInvalidReason = Static<typeof LibraryInvalidReasonSchema>;

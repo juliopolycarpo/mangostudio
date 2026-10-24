@@ -13,10 +13,8 @@
  * accidental confirmation is a conversation already sent.
  */
 
-import {
-  type ExternalAgentTargetId,
-  isExternalAgentTargetId,
-} from '@mangostudio/shared/external-agents';
+import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents/values';
 import { ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { SettingsPage } from '@/components/settings/SettingsPage';

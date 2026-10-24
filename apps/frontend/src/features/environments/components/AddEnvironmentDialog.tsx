@@ -14,7 +14,7 @@ import {
   DEFAULT_SSH_RUNTIME_PATH,
   shouldWarnPlaintextHttpRuntime,
   sshPreflightCommands,
-} from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/environments/values';
 import { Cable, Container, Globe, KeyRound, Laptop, SquareTerminal } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useState } from 'react';
 import { PickOneRow } from '@/components/settings/PickOneRow';

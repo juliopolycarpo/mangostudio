@@ -13,7 +13,8 @@
  * // Usage: const facts = useOnboardingFacts(state);
  */
 
-import { LOCAL_ENVIRONMENT_ID, type RuntimeStatus } from '@mangostudio/shared/environments';
+import type { RuntimeStatus } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type {
   OnboardingFact,
   OnboardingMachineFacts,

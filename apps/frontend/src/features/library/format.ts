@@ -21,7 +21,7 @@ import type {
   ResourceKind,
   ValidLibraryInstance,
 } from '@mangostudio/shared/library';
-import { parseResourceKey } from '@mangostudio/shared/library';
+import { parseResourceKey } from '@mangostudio/shared/library/values';
 import { formatMessage } from '@/lib/i18n-format';
 
 /**

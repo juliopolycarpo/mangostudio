@@ -8,8 +8,8 @@
 
 import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
-import { RuntimeIdSchema, VersionManagerIdSchema } from '../environments';
-import { LibraryTargetIdSchema } from '../library';
+import { RuntimeIdSchema, VersionManagerIdSchema } from '../environments/choices';
+import { LibraryTargetIdSchema } from '../library/choices';
 import { SubjectKeySchema, type ToolIdentityKind } from './schemas';
 
 /** Kinds whose ids come from a closed union and can be validated offline. */

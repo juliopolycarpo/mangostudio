@@ -13,7 +13,7 @@
  * user to run by hand.
  */
 
-import { mangoHomeDir, runtimeSlotCurrentBinaryPath } from '../runtime-home';
+import { mangoHomeDir, runtimeSlotCurrentBinaryPath } from '../runtime-home/paths';
 import type { SshEnvironmentConfig } from './schemas';
 
 /**

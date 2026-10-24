@@ -13,7 +13,7 @@
  * deleted or an agent signed out after the fact reopens at that step.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { OnboardingStepId } from '@mangostudio/shared/onboarding';
 import {
   ONBOARDING_STEP_IDS,
