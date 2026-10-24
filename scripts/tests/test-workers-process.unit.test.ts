@@ -29,6 +29,12 @@ import {
 } from '../lib/test-workers';
 import { fixtureChildEnvironment } from './support/child-supervision';
 import { FAKE_BUN_TEST, FAKE_CASES_PER_FILE } from './support/fake-bun-test';
+import {
+  isAlive,
+  type ProcessStateTable,
+  type ProcessStatReader,
+  readProcessState,
+} from './support/process-liveness';
 import { fakeLane } from './support/test-worker-fakes';
 
 const TEST_DIR = 'tests/unit';
@@ -105,14 +111,148 @@ async function runLane(
   return { ...result, lines, mergedPath, scratch };
 }
 
-const isAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+type ProcessSignal = (pid: number, signal: NodeJS.Signals) => void;
+
+function cleanupPids(
+  pids: readonly number[],
+  table: ProcessStateTable = readProcessState,
+  signal: ProcessSignal = process.kill
+): void {
+  for (const pid of pids) {
+    try {
+      if (isAlive(pid, table)) signal(pid, 'SIGKILL');
+    } catch {
+      // Cleanup preserves the assertion failure and still tries every owned PID.
+    }
   }
-};
+}
+
+class FakeSuccessfulProcessStat {
+  constructor(
+    readonly comm: string,
+    readonly state: string
+  ) {}
+
+  readonly read: ProcessStatReader = () => `4242 (${this.comm}) ${this.state} 1 4242 0`;
+}
+
+class FakeCleanupHost {
+  readonly checked: number[] = [];
+  readonly signalled: { pid: number; signal: NodeJS.Signals }[] = [];
+
+  readonly table: ProcessStateTable = (pid) => {
+    this.checked.push(pid);
+    if (pid === 4100) throw new Error('process stat: EACCES');
+    return pid === 4400 ? 'Z' : 'S';
+  };
+
+  readonly signal: ProcessSignal = (pid, signal) => {
+    this.signalled.push({ pid, signal });
+    if (pid === 4200) throw new Error('signal: ESRCH');
+  };
+}
+
+class FakeZombieTable {
+  readonly state: ProcessStateTable = () => 'Z';
+}
+
+class FakeLiveTable {
+  readonly state: ProcessStateTable = () => 'S';
+}
+
+class FakeMissingTable {
+  readonly state: ProcessStateTable = () => undefined;
+}
+
+class FakeUnreadableTable {
+  readonly state: ProcessStateTable = () => {
+    throw new Error('process table permission denied');
+  };
+}
+
+class FakeInvalidTable {
+  readonly state: ProcessStateTable = () => '?';
+}
+
+class FakeFailingProcessStat {
+  constructor(readonly code: string) {}
+
+  readonly read: ProcessStatReader = () => {
+    throw Object.assign(new Error(`process stat: ${this.code}`), { code: this.code });
+  };
+}
+
+describe('worker liveness assertions', () => {
+  it.skipIf(process.platform !== 'linux')(
+    'reads zombie and live states after command names containing spaces and parentheses',
+    () => {
+      for (const comm of ['cat fish', 'cat (fish) worker']) {
+        for (const state of ['Z', 'S']) {
+          const stat = new FakeSuccessfulProcessStat(comm, state);
+          const table: ProcessStateTable = (pid) => readProcessState(pid, stat.read);
+          expect(readProcessState(4242, stat.read)).toBe(state);
+          expect(isAlive(4242, table)).toBe(state !== 'Z');
+        }
+      }
+    }
+  );
+
+  it('continues cleanup after a PID probe or signal fails', () => {
+    const host = new FakeCleanupHost();
+    expect(() => cleanupPids([4100, 4200, 4300, 4400], host.table, host.signal)).not.toThrow();
+    expect(host.checked).toEqual([4100, 4200, 4300, 4400]);
+    expect(host.signalled).toEqual([
+      { pid: 4200, signal: 'SIGKILL' },
+      { pid: 4300, signal: 'SIGKILL' },
+    ]);
+  });
+
+  it('preserves the original assertion failure when cleanup cannot read a PID', () => {
+    const host = new FakeCleanupHost();
+    expect(() => {
+      try {
+        throw new Error('original cancellation assertion');
+      } finally {
+        cleanupPids([4100, 4300], host.table, host.signal);
+      }
+    }).toThrow('original cancellation assertion');
+    expect(host.signalled).toEqual([{ pid: 4300, signal: 'SIGKILL' }]);
+  });
+
+  it.skipIf(process.platform !== 'linux')(
+    'accepts a process that exits during its stat read and rejects permission failures',
+    () => {
+      for (const code of ['ENOENT', 'ESRCH']) {
+        expect(
+          readProcessState(process.pid, new FakeFailingProcessStat(code).read)
+        ).toBeUndefined();
+      }
+      expect(() =>
+        readProcessState(process.pid, new FakeFailingProcessStat('EACCES').read)
+      ).toThrow('process stat: EACCES');
+    }
+  );
+
+  it('ignores an absent PID but refuses unreadable or invalid state', () => {
+    expect(isAlive(process.pid, new FakeMissingTable().state)).toBe(false);
+    expect(() => isAlive(process.pid, new FakeUnreadableTable().state)).toThrow(
+      'process table permission denied'
+    );
+    expect(() => isAlive(process.pid, new FakeInvalidTable().state)).toThrow(
+      `process ${process.pid}: expected a process state letter | received: "?"`
+    );
+  });
+
+  it('ignores an unreaped zombie even when signal zero can still find its PID', () => {
+    const zombie = new FakeZombieTable();
+    expect(isAlive(process.pid, zombie.state), 'expected zombie state Z to be stopped').toBe(false);
+  });
+
+  it('still rejects a live descendant instead of weakening cancellation cleanup', () => {
+    const live = new FakeLiveTable();
+    expect(isAlive(process.pid, live.state), 'expected sleeping state S to remain live').toBe(true);
+  });
+});
 
 describe('four real worker processes', () => {
   it('discards an ambient runtime home before starting workers', async () => {
@@ -204,12 +344,13 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
       const { verdict } = await running;
       expect(verdict.failures).toHaveLength(2);
       expect(verdict.failures.every((failure) => failure.includes('was cancelled'))).toBe(true);
-      expect(pids.filter(isAlive), 'expected no live descendants after cancellation').toEqual([]);
+      expect(
+        pids.filter((pid) => isAlive(pid)),
+        'expected no live descendants after cancellation'
+      ).toEqual([]);
     } finally {
       controller.abort();
-      for (const pid of pids) {
-        if (isAlive(pid)) process.kill(pid, 'SIGKILL');
-      }
+      cleanupPids(pids);
     }
   });
 
@@ -241,7 +382,7 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
         `expected the lane to kill the leaked process ${leaked} | received: still running`
       ).toBe(true);
     } finally {
-      if (isAlive(leaked)) process.kill(leaked, 'SIGKILL');
+      cleanupPids([leaked]);
     }
   });
 
@@ -261,7 +402,7 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
           `expected the lane to kill detached child ${leaked} before test cleanup | received: still running`
         ).toBe(true);
       } finally {
-        if (isAlive(leaked)) process.kill(leaked, 'SIGKILL');
+        cleanupPids([leaked]);
       }
     }
   );
@@ -272,7 +413,7 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
     try {
       expect(verdict.failures).toEqual([]);
     } finally {
-      if (isAlive(leaked)) process.kill(leaked, 'SIGKILL');
+      cleanupPids([leaked]);
     }
   });
 });
@@ -357,7 +498,7 @@ describe('cancelling real worker processes', () => {
 
     expect(verdict.failures.filter((failure) => failure.includes('was cancelled'))).toHaveLength(3);
     expect(verdict.failures[0]).toContain('api-unit worker 1/3 was cancelled');
-    const alive = pids.filter(isAlive);
+    const alive = pids.filter((pid) => isAlive(pid));
     expect(alive, `expected live workers: 0 | received: ${alive.length} (pids ${alive})`).toEqual(
       []
     );
