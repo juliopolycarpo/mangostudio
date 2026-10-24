@@ -66,13 +66,13 @@ describe('check script', () => {
     ).toBe(true);
   });
 
-  test('audits the whole lockfile without failing unrelated pull requests', () => {
+  test('audits the whole lockfile on schedule and through CI', () => {
     const workflow = readText('.github/workflows/dependency-audit.yml');
 
     // A schedule catches advisories published against versions already on main.
     expect(workflow).toMatch(/^ {2}schedule:\n {4}- cron: /m);
-    // Pull requests run it only when the dependency graph moves.
-    expect(workflow).toMatch(/^ {4}paths:\n(?: {6}- .+\n)*? {6}- bun\.lock\n/m);
+    expect(workflow).toContain('workflow_call:');
+    expect(workflow).not.toContain('pull_request:');
     expect(workflow).toContain('run: bun audit --audit-level=moderate');
     // bun audit reads bun.lock directly; an install would run dependency code.
     expect(workflow).not.toContain('bun install');

@@ -30,7 +30,6 @@ const INTEGRATION_PR_WORKFLOWS = [
   '.github/workflows/cargo-shim.yml',
   '.github/workflows/codeql.yml',
   '.github/workflows/dependency-review.yml',
-  '.github/workflows/dependency-audit.yml',
   '.github/workflows/protocol-ci.yml',
 ] as const;
 
