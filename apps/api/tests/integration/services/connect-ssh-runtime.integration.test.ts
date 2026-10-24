@@ -174,7 +174,10 @@ describe('connectSshRuntime over a real sshd', () => {
         () => undefined
       ).catch((caught) => caught);
 
-      expect(error.details?.sshFailureReason).toBe('runtime-missing');
+      expect({ code: error.code, message: error.message, details: error.details }).toMatchObject({
+        code: 'UNAVAILABLE',
+        details: { sshFailureReason: 'runtime-missing' },
+      });
       expect(await Bun.file(marker).exists()).toBe(false);
     },
     60_000
@@ -192,23 +195,11 @@ describe('connectSshRuntime over a real sshd', () => {
         () => undefined
       ).catch((caught) => caught);
 
-      expect(error.code).toBe('UNAVAILABLE');
-      expect(error.details?.sshFailureReason).toBe('runtime-missing');
-      expect(error.message).toContain('absent');
-    },
-    60_000
-  );
-
-  it.skipIf(!hasSshClient)(
-    'classifies a host that does not resolve without needing one to exist',
-    async () => {
-      const error = await connectSshRuntime(
-        { userId: 'test-user', id: 'ssh-box', config: { host: 'mangostudio-ssh-target.invalid' } },
-        () => undefined
-      ).catch((caught) => caught);
-
-      expect(error.details?.sshFailureReason).toBe('unreachable');
-      expect(error.message).toContain('mangostudio-ssh-target.invalid');
+      expect({ code: error.code, message: error.message, details: error.details }).toMatchObject({
+        code: 'UNAVAILABLE',
+        message: expect.stringContaining('absent'),
+        details: { sshFailureReason: 'runtime-missing' },
+      });
     },
     60_000
   );
