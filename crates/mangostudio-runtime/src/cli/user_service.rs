@@ -1159,6 +1159,24 @@ mod windows_tests {
             report["count"], 12,
             "expected twelve fixture groups | received: {report}"
         );
+        assert_eq!(
+            report["cases"],
+            json!([
+                "gone",
+                "original-alive",
+                "original-with-different-image",
+                "reused-pid",
+                "reused-pid-same-image",
+                "single-leaf",
+                "multiple-leaves",
+                "query-error-is-not-gone",
+                "mismatched-query-pid",
+                "duplicate-query-rows",
+                "unknown-query-identity",
+                "invalid-capture",
+            ]),
+            "expected all twelve named fixture groups in order | received: {report}"
+        );
         assert_eq!(report["native"], false, "received: {report}");
         let single_gone = report["singleGoneReceiptJson"].as_str().unwrap_or_else(|| {
             panic!("expected serialized one-PID gone receipt | received: {report}")
