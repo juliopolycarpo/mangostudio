@@ -29,6 +29,12 @@ import {
 } from '../lib/test-workers';
 import { fixtureChildEnvironment } from './support/child-supervision';
 import { FAKE_BUN_TEST, FAKE_CASES_PER_FILE } from './support/fake-bun-test';
+import {
+  isAlive,
+  type ProcessStateTable,
+  type ProcessStatReader,
+  readProcessState,
+} from './support/process-liveness';
 import { fakeLane } from './support/test-worker-fakes';
 
 const TEST_DIR = 'tests/unit';
@@ -104,59 +110,6 @@ async function runLane(
   });
   return { ...result, lines, mergedPath, scratch };
 }
-
-type ProcessStateTable = (pid: number) => string | undefined;
-
-type ProcessStatReader = (path: string, encoding: 'utf8') => string;
-
-function readProcessState(
-  pid: number,
-  readStat: ProcessStatReader = readFileSync
-): string | undefined {
-  if (process.platform === 'win32') {
-    try {
-      process.kill(pid, 0);
-      return 'R';
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return undefined;
-      throw error;
-    }
-  }
-  if (process.platform === 'linux') {
-    try {
-      const stat = readStat(`/proc/${pid}/stat`, 'utf8');
-      return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'ESRCH') return undefined;
-      throw error;
-    }
-  }
-  const result = Bun.spawnSync(['ps', '-o', 'stat=', '-p', String(pid)], {
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const output = result.stdout.toString().trim();
-  const error = result.stderr.toString().trim();
-  if (result.exitCode === 1 && output === '' && error === '') return undefined;
-  if (result.exitCode !== 0 || !/^\S+$/.test(output)) {
-    throw new Error(
-      `process ${pid}: expected readable process state | received: exit ${result.exitCode}, ${JSON.stringify(output)}, ${JSON.stringify(error)}`
-    );
-  }
-  return output.slice(0, 1);
-}
-
-const isAlive = (pid: number, table: ProcessStateTable = readProcessState): boolean => {
-  const state = table(pid);
-  if (state === undefined) return false;
-  if (!/^[RSDZTWXIKPUt]$/.test(state)) {
-    throw new Error(
-      `process ${pid}: expected a process state letter | received: ${JSON.stringify(state)}`
-    );
-  }
-  return state !== 'Z';
-};
 
 type ProcessSignal = (pid: number, signal: NodeJS.Signals) => void;
 

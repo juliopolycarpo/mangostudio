@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import { FAKE_LANE_MAIN } from './support/fake-lane-main';
 import { FAKE_ROOT_RUNNER } from './support/fake-root-runner';
+import { isAlive } from './support/process-liveness';
 
 const API_DIR = join(ROOT_DIR, 'apps', 'api');
 const dirs: string[] = [];
@@ -28,15 +29,6 @@ afterEach(() => {
   }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-
-const isAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 async function until(ready: () => boolean, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
@@ -118,7 +110,7 @@ describe.skipIf(process.platform === 'win32')('cancelling the integration lane m
         `expected 3 workers and 3 children running | received files: ${lane.pidFiles()}`
       ).toBe(true);
       expect(
-        pids.filter(isAlive),
+        pids.filter((pid) => isAlive(pid)),
         'expected every worker and child alive before the cancel'
       ).toHaveLength(6);
 
@@ -129,7 +121,7 @@ describe.skipIf(process.platform === 'win32')('cancelling the integration lane m
       expect(exitCode, `expected the root runner to exit 128 + ${signal}: ${expected}`).toBe(
         expected
       );
-      const survivors = pids.filter(isAlive);
+      const survivors = pids.filter((pid) => isAlive(pid));
       expect(
         survivors,
         `expected live descendants: 0 | received: ${survivors.length} (pids ${survivors})`
@@ -151,7 +143,7 @@ describe.skipIf(process.platform === 'win32')('cancelling the integration lane m
     const exitCode = await lane.child.exited;
 
     expect(exitCode).toBe(143);
-    const survivors = pids.filter(isAlive);
+    const survivors = pids.filter((pid) => isAlive(pid));
     expect(
       survivors,
       `expected live descendants: 0 | received: ${survivors.length} (pids ${survivors})`
@@ -172,7 +164,7 @@ describe.skipIf(process.platform !== 'linux')(
       pidsToReap.push(...pids);
       expect(up, 'expected 3 resistant workers and 3 detached children ready').toBe(true);
       expect(
-        pids.filter(isAlive),
+        pids.filter((pid) => isAlive(pid)),
         'expected every worker and detached child live before cancellation'
       ).toHaveLength(6);
       const began = performance.now();
@@ -181,7 +173,7 @@ describe.skipIf(process.platform !== 'linux')(
         await beforeTeardownDeadline(lane.child.exited, 'worker lane did not settle'),
         'expected root cancellation exit 143'
       ).toBe(143);
-      const survivors = pids.filter(isAlive);
+      const survivors = pids.filter((pid) => isAlive(pid));
       expect(
         survivors,
         `expected live descendants: 0 | received: ${survivors.length} (pids ${survivors})`
