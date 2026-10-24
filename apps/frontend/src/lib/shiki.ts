@@ -1,6 +1,7 @@
 import { createBundledHighlighter, type HighlighterGeneric } from '@shikijs/core';
 import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
 import { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
+import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
 export { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
 
@@ -77,6 +78,7 @@ const createMangoHighlighter = createBundledHighlighter({
 
 let highlighterPromise: Promise<MangoHighlighter> | null = null;
 let highlighterInstance: MangoHighlighter | null = null;
+let checkedRenderers: ReturnType<typeof createCheckedRenderers> | null = null;
 const languageLoadPromises = new Map<ShikiLanguageId, Promise<void>>();
 
 /** Initializes the shared Shiki highlighter with the common chat languages. */
@@ -86,6 +88,7 @@ export function initHighlighter(): Promise<MangoHighlighter> {
     themes: [...CODE_THEMES],
     langs: [...COMMON_LANGUAGES],
   }).then((highlighter) => {
+    checkedRenderers = createCheckedRenderers(highlighter);
     highlighterInstance = highlighter;
     return highlighter;
   });
@@ -112,7 +115,9 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
   if (!isLanguageLoaded(highlighterInstance, language)) return null;
 
   try {
-    return highlighterInstance.codeToHtml(code, { lang: language, theme });
+    return (
+      checkedRenderers?.codeToHtml(code, { lang: language, theme, tokenizeTimeLimit: 500 }) ?? null
+    );
   } catch {
     return null;
   }
@@ -128,6 +133,7 @@ export interface HighlightToken {
  * Returns safe token data for a SINGLE line, for code surfaces that render
  * their own line chrome. Only the first line of `line` is tokenized, so callers
  * must split multi-line input themselves.
+ * Example: highlightLineTokens('const value = 1;', 'ts', 'one-dark-pro').
  */
 export function highlightLineTokens(
   line: string,
@@ -139,7 +145,13 @@ export function highlightLineTokens(
   if (!isLanguageLoaded(highlighterInstance, language)) return null;
 
   try {
-    return highlighterInstance.codeToTokensBase(line, { lang: language, theme })[0] ?? [];
+    return (
+      checkedRenderers?.codeToTokensBase(line, {
+        lang: language,
+        theme,
+        tokenizeTimeLimit: 500,
+      })[0] ?? []
+    );
   } catch {
     return null;
   }
@@ -152,7 +164,7 @@ function resolveUniqueLanguageIds(languages: readonly string[]): ShikiLanguageId
 function resolveLanguageId(lang: string): ShikiLanguageId | null {
   const language = normalizeLanguage(lang);
   if (isLanguageId(language)) return language;
-  return LANGUAGE_ALIASES[language] ?? null;
+  return Object.hasOwn(LANGUAGE_ALIASES, language) ? (LANGUAGE_ALIASES[language] ?? null) : null;
 }
 
 function normalizeLanguage(lang: string): string {
@@ -160,7 +172,7 @@ function normalizeLanguage(lang: string): string {
 }
 
 function isLanguageId(lang: string | null): lang is ShikiLanguageId {
-  return typeof lang === 'string' && lang in SHIKI_LANGUAGES;
+  return typeof lang === 'string' && Object.hasOwn(SHIKI_LANGUAGES, lang);
 }
 
 function isLanguageLoaded(highlighter: MangoHighlighter, language: ShikiLanguageId): boolean {

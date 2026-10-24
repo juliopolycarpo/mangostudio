@@ -16,6 +16,22 @@ import { describe, expect, it } from 'bun:test';
 function loadShiki(): Promise<typeof import('@/lib/shiki')> {
   return import('@/lib/shiki');
 }
+
+function completeRender(render: () => string | null): string | null {
+  const realNow = Date.now;
+  try {
+    // These cases test readiness and aliases; cold deadlines have a separate qualification matrix.
+    Date.now = unchangedClock;
+    return render();
+  } finally {
+    Date.now = realNow;
+  }
+}
+
+function unchangedClock(): number {
+  return 0;
+}
+
 describe('shiki highlighter', () => {
   it('does not highlight before the async highlighter is initialized', async () => {
     const shiki = await loadShiki();
@@ -27,7 +43,7 @@ describe('shiki highlighter', () => {
     const shiki = await loadShiki();
 
     await shiki.preloadCodeLanguages(['ts']);
-    const html = shiki.highlightCode('const x = 1;', 'ts', 'one-dark-pro');
+    const html = completeRender(() => shiki.highlightCode('const x = 1;', 'ts', 'one-dark-pro'));
 
     expect(html).toContain('shiki');
     expect(html).toContain('const');
@@ -37,7 +53,7 @@ describe('shiki highlighter', () => {
     const shiki = await loadShiki();
 
     await shiki.preloadCodeLanguages(['rust']);
-    const html = shiki.highlightCode('fn main() {}', 'rust', 'one-dark-pro');
+    const html = completeRender(() => shiki.highlightCode('fn main() {}', 'rust', 'one-dark-pro'));
 
     expect(html).toContain('shiki');
     expect(html).toContain('main');

@@ -78,11 +78,16 @@ function useCodeHighlighter(
     if (languages.length === 0) return;
 
     let cancelled = false;
-    void loadCodeHighlighter(languages).then((highlighter) => {
-      if (cancelled) return;
-      setHighlighter(highlighter);
-      setHighlightVersion((version) => version + 1);
-    });
+    void loadCodeHighlighter(languages).then(
+      (highlighter) => {
+        if (cancelled) return;
+        setHighlighter(highlighter);
+        setHighlightVersion((version) => version + 1);
+      },
+      () => {
+        // Keep escaped plain code when initialization or a language download fails.
+      }
+    );
 
     return () => {
       cancelled = true;
