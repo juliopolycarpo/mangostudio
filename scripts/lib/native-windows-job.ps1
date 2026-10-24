@@ -120,6 +120,18 @@ namespace Mango.NativeJobProbe {
         public string Operation, SlowestIdentity;
         public long Calls, TotalTicks, MaximumTicks;
     }
+    public sealed class ProcessListHeldState {
+        public string Identity, Error;
+        public bool? Alive;
+        public int? NativeError;
+    }
+    public sealed class ProcessListAttempt {
+        public int Attempt, Capacity, BufferBytes, NativeError;
+        public uint ReturnedBytes;
+        public uint? Assigned, Count;
+        public bool Success;
+        public ProcessListHeldState[] HeldStates;
+    }
     /// <summary>Retain aggregate native call timing even when a complete query fails.</summary>
     /// <example>using(trace.Measure("QueryFullProcessImageNameW",identity)) { QueryImage(); }</example>
     public sealed class NativeQueryTrace {
@@ -130,6 +142,7 @@ namespace Mango.NativeJobProbe {
         public long ElapsedMilliseconds;
         public int Refreshes,Races,Assigned,Attested;
         public bool Complete;
+        public readonly List<ProcessListAttempt> ProcessListAttempts=new List<ProcessListAttempt>();
         public NativeOperationTiming[] Operations { get { var result=new NativeOperationTiming[operations.Count]; operations.Values.CopyTo(result,0); return result; } }
         private sealed class Measurement : IDisposable {
             private readonly NativeOperationTiming operation;
@@ -193,6 +206,11 @@ namespace Mango.NativeJobProbe {
         /// <summary>Reject exhausted shared time instead of multiplying waits by members or list refreshes.</summary>
         /// <example>budget.Require("QueryFullProcessImageNameW");</example>
         public void Require(string operation) { if(ElapsedMilliseconds>=Milliseconds) throw new InvalidOperationException("Image query budget exhausted after " + ElapsedMilliseconds + "ms at " + operation + "; expected complete attestation within " + Milliseconds + "ms"); }
+    }
+    /// <summary>Discard a changing within-capacity PID list and require fresh complete accounting.</summary>
+    /// <example>catch(ProcessListChangedException) { continue; }</example>
+    public sealed class ProcessListChangedException : InvalidOperationException {
+        public ProcessListChangedException(uint assigned,uint count,int capacity) : base("Incomplete process list " + assigned + "/" + count + " within capacity " + capacity + "; expected fresh complete native membership") {}
     }
     /// <summary>Signal a confirmed exit of the same owned object; callers must obtain a new complete kernel snapshot.</summary>
     /// <example>catch(MemberExitedException) { refreshCompleteList=true; }</example>
@@ -560,8 +578,29 @@ namespace Mango.NativeJobProbe {
                 try {
                     uint returned; bool success; int error;
                     using(budget==null?null:budget.Trace.Measure("QueryInformationJobObject(ProcessIdList)",null)) { success=Win32.QueryInformationJobObject(job,3,data,(uint)bytes,out returned); error=Marshal.GetLastWin32Error(); }
+                    bool headerAvailable=(success || error==234) && returned>=8;
+                    uint assigned=headerAvailable?unchecked((uint)Marshal.ReadInt32(data,0)):0, count=headerAvailable?unchecked((uint)Marshal.ReadInt32(data,4)):0;
+                    if(budget!=null) {
+                        var row=new ProcessListAttempt {Attempt=attempt,Capacity=capacity,BufferBytes=bytes,Success=success,NativeError=success?0:error,ReturnedBytes=returned,Assigned=headerAvailable?(uint?)assigned:null,Count=headerAvailable?(uint?)count:null};
+                        budget.Trace.ProcessListAttempts.Add(row);
+                        var states=new List<ProcessListHeldState>();
+                        foreach(var pair in held) {
+                            var state=new ProcessListHeldState {Identity=pair.Key};
+                            try { state.Alive=Alive(pair.Value.Handle,budget); }
+                            catch(Win32Exception diagnosticError) { state.NativeError=diagnosticError.NativeErrorCode; state.Error=diagnosticError.Message; }
+                            states.Add(state);
+                        }
+                        row.HeldStates=states.ToArray();
+                    }
                     if(!success && error!=234) throw new Win32Exception(error,"QueryInformationJobObject(ProcessIdList)");
-                    uint assigned=unchecked((uint)Marshal.ReadInt32(data,0)), count=unchecked((uint)Marshal.ReadInt32(data,4));
+                    if(success && !headerAvailable) throw new InvalidOperationException("Invalid process list length " + returned + "/" + bytes + "; expected complete header within buffer");
+                    // A successful short list within the existing capacity reflects changing membership,
+                    // not missing slots. Discard it and let the outer query release exited handles and
+                    // obtain fresh accounting instead of exhausting the buffer bound by doubling.
+                    if(success && count<assigned && assigned<=(uint)capacity) {
+                        if(returned<8 || returned>(uint)bytes || 8L+count*IntPtr.Size>returned) throw new InvalidOperationException("Invalid incomplete process list " + assigned + "/" + count + "/" + returned + "; expected native PID bytes within buffer");
+                        throw new ProcessListChangedException(assigned,count,capacity);
+                    }
                     if(!success || count<assigned) {
                         long next=Math.Max(capacity*2L,assigned);
                         if(next>8192 || next<=capacity) throw new InvalidOperationException("Invalid job PID capacity " + next + "; expected bounded complete process list");
@@ -589,7 +628,14 @@ namespace Mango.NativeJobProbe {
             for(int attempt=0;attempt<12;attempt++) {
                 budget.Trace.Refreshes=attempt;
                 budget.Require("complete job list refresh" + attempt);
-                ReleaseExited(budget); Win32.Accounting before=Accounting(budget); int bytes; uint[] pids=ProcessList(out bytes,budget); var members=new List<Member>(); bool retry=false;
+                ReleaseExited(budget); Win32.Accounting before=Accounting(budget); int bytes; uint[] pids;
+                try { pids=ProcessList(out bytes,budget); }
+                catch(ProcessListChangedException) {
+                    budget.Trace.Races++;
+                    using(budget.Trace.Measure("process-list-refresh-backoff",null)) { Thread.Sleep(10); }
+                    continue;
+                }
+                var members=new List<Member>(); bool retry=false;
                 budget.Trace.Assigned=pids.Length; budget.Trace.Attested=0;
                 foreach(uint pid in pids) {
                     IntPtr handle; int error;
