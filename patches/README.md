@@ -51,3 +51,20 @@ request is validated; they can no longer be published.
 `publishes no framework-internal schema markers` assertion in
 `apps/api/tests/integration/routes/app-plugin-contract.integration.test.ts`
 covers this and will keep passing once upstream does the conversion.
+
+## `@xterm/addon-webgl@0.19.0`
+
+A failing `WebglRenderer` constructor can leave canvases, observers, listeners
+and cursor blink resources behind before `WebglAddon` receives the renderer.
+Disposing the addon cannot release resources from partial construction.
+
+The patch registers cleanup before construction can fail, disposes partial
+state and preserves the original error. It maintains the TypeScript source,
+ESM and CommonJS bundles, and both source maps. See
+[#1627](https://github.com/juliopolycarpo/mangostudio/issues/1627) and
+[#1641](https://github.com/juliopolycarpo/mangostudio/pull/1641).
+
+**Drop when:** a verified upstream addon release owns cleanup after partial
+`WebglRenderer` construction and the existing
+[constructor failure regressions](../tests/browser-smoke/webgl-constructor.spec.ts)
+pass without this patch in both ESM and CommonJS bundles.
