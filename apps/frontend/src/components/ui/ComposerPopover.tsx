@@ -1,9 +1,15 @@
-import { type HTMLMotionProps, motion } from 'motion/react';
-import { type RefObject, useLayoutEffect, useRef, useState } from 'react';
+import * as motion from 'motion/react-m';
+import { type HTMLAttributes, type RefObject, useLayoutEffect, useRef, useState } from 'react';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 
-interface ComposerPopoverProps extends Omit<HTMLMotionProps<'div'>, 'ref'> {
+// Motion reserves these DOM handler names for its own animation/gesture API.
+// Callers get native panel attributes; the wrapper owns its animation preset.
+interface ComposerPopoverProps
+  extends Omit<
+    HTMLAttributes<HTMLDivElement>,
+    'onAnimationStart' | 'onDrag' | 'onDragStart' | 'onDragEnd'
+  > {
   /**
    * The control that opened the panel. The panel keeps its left edge level with
    * it (clamped so it never overhangs the composer) and nothing else: the

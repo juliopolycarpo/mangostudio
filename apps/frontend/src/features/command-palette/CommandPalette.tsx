@@ -18,7 +18,7 @@
  */
 
 import { ArrowRightToLine, ArrowUpDown, Search, SearchX } from 'lucide-react';
-import { motion } from 'motion/react';
+import * as motion from 'motion/react-m';
 import {
   memo,
   type ReactNode,

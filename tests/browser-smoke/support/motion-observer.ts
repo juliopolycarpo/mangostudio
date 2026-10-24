@@ -1,10 +1,11 @@
 import type { Page } from '@playwright/test';
 
-type MotionSurface = 'route' | 'card' | 'dialog';
+type MotionSurface = 'route' | 'card' | 'dialog' | 'disclosure';
 
 interface MotionSample {
   readonly elapsedMs: number;
   readonly opacity: number;
+  readonly height: number;
   readonly translateY: number;
   readonly scaleX: number;
   readonly animationDurationsMs: readonly number[];
@@ -64,13 +65,15 @@ export function observeMotionNodes(selectors: Partial<Record<MotionSurface, stri
       observation.samples.push({
         elapsedMs,
         opacity: Number(style.opacity),
+        height: element.getBoundingClientRect().height,
         translateY: transform.m42,
         scaleX: transform.m11,
         animationDurationsMs: durations.filter(
           (duration): duration is number => typeof duration === 'number'
         ),
       });
-      if (surface === 'dialog' || elapsedMs < 800) requestAnimationFrame(sample);
+      if (surface === 'dialog' || surface === 'disclosure' || elapsedMs < 800)
+        requestAnimationFrame(sample);
     };
     sample();
   };

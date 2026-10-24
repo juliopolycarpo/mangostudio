@@ -30,7 +30,8 @@
  */
 
 import { Check, ChevronDown } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import * as motion from 'motion/react-m';
 import { type ReactNode, useId, useRef } from 'react';
 import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
