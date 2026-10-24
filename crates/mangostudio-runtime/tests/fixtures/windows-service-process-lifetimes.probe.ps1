@@ -36,6 +36,7 @@ function Invoke-ServiceTestIdentityProbe {
   $script:ServiceTestFakeQueryError = $false
   $passed = @()
   $nativeReceipt = $null
+  $singleGoneReceiptJson = $null
   foreach ($case in @('gone', 'original-alive', 'original-with-different-image', 'reused-pid', 'reused-pid-same-image', 'single-leaf', 'multiple-leaves')) {
     $script:ServiceTestFakeQueries = @()
     $rows = if ($case -eq 'multiple-leaves') { @($root, $leaf, $otherLeaf) } elseif ($case -eq 'single-leaf') { @($root, $leaf) } else { @($root) }
@@ -59,6 +60,7 @@ function Invoke-ServiceTestIdentityProbe {
     }
     $captured = @(Capture-ServiceTestIdentities $rows)
     $report = Get-ServiceTestReceipt $captured ${function:Invoke-FakeServiceTestCimQuery}
+    if ($case -eq 'gone') { $singleGoneReceiptJson = $report | ConvertTo-Json -Compress -Depth 5 }
     $wanted = switch ($case) { 'original-alive' { 1 } 'original-with-different-image' { 1 } 'multiple-leaves' { 2 } default { 0 } }
     Assert-ServiceTestProbe ($report.survivors.Count -eq $wanted) "$case expected $wanted original-lifetime survivors | received: $($report.survivors | ConvertTo-Json -Compress)"
     Assert-ServiceTestProbe ($report.captured.Count -eq $rows.Count) "$case expected $($rows.Count) captured rows | received: $($report.captured.Count)"
@@ -131,5 +133,5 @@ function Invoke-ServiceTestIdentityProbe {
       if ($null -ne $nativeReceipt) { $nativeReceipt.disposed = $true }
     }
   }
-  [pscustomobject]@{ cases = @($passed); count = $passed.Count; native = [bool]$Native; nativeReceipt = $nativeReceipt }
+  [pscustomobject]@{ cases = @($passed); count = $passed.Count; native = [bool]$Native; nativeReceipt = $nativeReceipt; singleGoneReceiptJson = $singleGoneReceiptJson }
 }

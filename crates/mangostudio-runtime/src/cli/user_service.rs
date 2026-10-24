@@ -1160,6 +1160,12 @@ mod windows_tests {
             "expected twelve fixture groups | received: {report}"
         );
         assert_eq!(report["native"], false, "received: {report}");
+        let single_gone = report["singleGoneReceiptJson"].as_str().unwrap_or_else(|| {
+            panic!("expected serialized one-PID gone receipt | received: {report}")
+        });
+        ensure_stopped(single_gone).unwrap_or_else(|error| {
+            panic!("expected native one-PID gone receipt accepted | received: {error}")
+        });
     }
 
     /// What `Stop-ScheduledTask` leaves behind, rebuilt without Task Scheduler: a
