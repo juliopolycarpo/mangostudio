@@ -15,146 +15,15 @@
 
 import { expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { shellQuote } from '@mangostudio/shared/environments';
 import { createInstallRunner } from '../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
+import type { FakeInstaller } from './controlled-installer';
 import { waitUntil } from './wait-until';
 
+export type { FakeInstaller } from './controlled-installer';
+export { writeFakeInstaller } from './controlled-installer';
 export { processGone } from './process-liveness';
 export { waitUntil };
-
-export interface FakeInstaller {
-  /** The hub-built argv the runtime launches. */
-  readonly argv: readonly string[];
-  /** Appended once when the fake installer applies its effect. */
-  readonly marker: string;
-  /** Created by the test to let a `waits` installer finish. */
-  readonly release: string;
-  /** Where the runtime writes this run's raw log (absolute, so never the real home). */
-  readonly logPath: string;
-  /** Written by a `grandchild` installer with the pid of its backgrounded child. */
-  readonly pidFile: string;
-}
-
-/**
- * What the fake installer does after printing `waiting` (stdout) and `warn` (stderr):
- * - `waits`: blocks until the release file exists, then applies its effect;
- * - `sleeps`: applies its effect after one second, needing no further input;
- * - `grandchild`: backgrounds a long sleep, records its pid, and never finishes (POSIX only).
- */
-export type FakeInstallerMode = 'waits' | 'sleeps' | 'grandchild';
-
-/** The Windows interpreter; recipes use `powershell`, `cmd` is an extra control case. */
-export type WindowsInterpreter = 'powershell' | 'cmd';
-
-/** Carries path data through ASCII source without PowerShell quote interpretation. Example: powerShellUtf8Data('café') decodes UTF-8 base64 with .NET. */
-function powerShellUtf8Data(value: string): string {
-  const encoded = Buffer.from(value, 'utf8').toString('base64');
-  return `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}'))`;
-}
-
-/**
- * Writes one fake installer into `directory`, preserving valid apostrophe/Unicode paths.
- * `platform` can select a dialect for source-only tests; execution uses the host by default.
- *
- * @example
- * const installer = await writeFakeInstaller(scratch, 'waits', 'run-1');
- */
-export async function writeFakeInstaller(
-  directory: string,
-  mode: FakeInstallerMode,
-  name: string,
-  interpreter: WindowsInterpreter = 'powershell',
-  platform: NodeJS.Platform = process.platform
-): Promise<FakeInstaller> {
-  const marker = join(directory, `${name}.marker`);
-  const release = join(directory, `${name}.release`);
-  const pidFile = join(directory, `${name}.pid`);
-  const logPath = join(directory, `${name}.log`);
-  if (platform === 'win32' && interpreter === 'powershell') {
-    if (mode === 'grandchild') throw new Error('The grandchild installer is POSIX-only.');
-    const script = join(directory, `${name}.ps1`);
-    // .NET calls only, no cmdlets. A cmdlet makes Windows PowerShell load and analyse its
-    // modules, and under the launcher's allowlisted environment that took 18-33 s on
-    // windows-latest against 0.26 s for this script: longer than the tests wait for a line.
-    const wait =
-      mode === 'waits'
-        ? 'while (-not [IO.File]::Exists($releasePath)) { [Threading.Thread]::Sleep(50) }'
-        : '[Threading.Thread]::Sleep(1000)';
-    await writeFile(
-      script,
-      // Declare UTF-8 for Windows PowerShell 5.1; encoded path payloads keep the body ASCII.
-      '\uFEFF' +
-        [
-          `$releasePath = ${powerShellUtf8Data(release)}`,
-          `$markerPath = ${powerShellUtf8Data(marker)}`,
-          "[Console]::Out.WriteLine('waiting')",
-          "[Console]::Error.WriteLine('warn')",
-          wait,
-          `[IO.File]::AppendAllText($markerPath, "run\`r\`n")`,
-          "[Console]::Out.WriteLine('done')",
-          '',
-        ].join('\r\n')
-    );
-    // The recipes' own POWERSHELL_ARGV_PREFIX shape, ending in `-File`.
-    return {
-      argv: [
-        'powershell',
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        script,
-      ],
-      marker,
-      release,
-      logPath,
-      pidFile,
-    };
-  }
-  if (platform === 'win32') {
-    if (mode === 'grandchild') throw new Error('The grandchild installer is POSIX-only.');
-    const script = join(directory, `${name}.cmd`);
-    // `ping -n 2` to loopback is cmd's portable one-second sleep; `timeout.exe`
-    // refuses to run without console input.
-    const wait =
-      mode === 'waits'
-        ? [
-            ':wait',
-            'if exist "%~dpn0.release" goto go',
-            'ping -n 2 127.0.0.1 >nul',
-            'goto wait',
-            ':go',
-          ]
-        : ['ping -n 2 127.0.0.1 >nul'];
-    await writeFile(
-      script,
-      [
-        '@echo off',
-        'setlocal DisableDelayedExpansion',
-        'echo waiting',
-        '1>&2 echo warn',
-        ...wait,
-        'echo run>>"%~dpn0.marker"',
-        'echo done',
-        'exit /b 0',
-        '',
-      ].join('\r\n')
-    );
-    return { argv: ['cmd.exe', '/d', '/c', script], marker, release, logPath, pidFile };
-  }
-  const script = join(directory, `${name}.sh`);
-  const body: Record<FakeInstallerMode, string> = {
-    waits: `while [ ! -e ${shellQuote(release)} ]; do sleep 0.05; done; echo run >> ${shellQuote(marker)}; echo done`,
-    sleeps: `sleep 1; echo run >> ${shellQuote(marker)}; echo done`,
-    grandchild: `sleep 30 & echo $! > ${shellQuote(pidFile)}; wait`,
-  };
-  await writeFile(script, `echo waiting\necho warn >&2\n${body[mode]}\n`);
-  return { argv: ['sh', script], marker, release, logPath, pidFile };
-}
 
 /** One run's relayed output, as the Hub's install service receives it. */
 export interface RelayedInstall {

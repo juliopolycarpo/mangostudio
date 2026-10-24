@@ -2,10 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  type WindowsInterpreter,
-  writeFakeInstaller,
-} from '../../support/rust-runtime-install-fixture';
+import { type WindowsInterpreter, writeFakeInstaller } from '../../support/controlled-installer';
 
 const scratch: string[] = [];
 const children: Bun.Subprocess<'ignore', 'pipe', 'pipe'>[] = [];
