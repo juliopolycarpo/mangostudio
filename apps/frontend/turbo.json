@@ -4,7 +4,28 @@
   "tasks": {
     "build": {
       "outputs": ["dist/**", "dist-metafile.json"],
-      "env": ["MANGO_API_URL", "VITE_*"]
+      "env": ["MANGO_API_URL", "VITE_*"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "src/**",
+        "index.html",
+        "tailwind-inputs.json",
+        "scripts/routes.ts",
+        "scripts/tailwind.ts",
+        "$TURBO_ROOT$/apps/shared/src/frontend-build/host.ts",
+        "$TURBO_ROOT$/apps/frontend/src/**",
+        "$TURBO_ROOT$/apps/frontend/index.html",
+        "$TURBO_ROOT$/.git",
+        "$TURBO_ROOT$/.git/info/exclude",
+        "$TURBO_ROOT$/.ignore",
+        "$TURBO_ROOT$/.gitignore",
+        "$TURBO_ROOT$/apps/.ignore",
+        "$TURBO_ROOT$/apps/.gitignore",
+        "$TURBO_ROOT$/apps/frontend/.ignore",
+        "$TURBO_ROOT$/apps/frontend/.gitignore",
+        "$TURBO_ROOT$/apps/frontend/src/.ignore",
+        "$TURBO_ROOT$/apps/frontend/src/.gitignore"
+      ]
     }
   }
 }

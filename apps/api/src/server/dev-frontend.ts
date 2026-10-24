@@ -24,6 +24,11 @@
 
 import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  parseTailwindInputs,
+  type TailwindInputs,
+  tailwindInputsAreCurrent,
+} from '@mangostudio/shared/frontend-build/host';
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 import { setDevFrontendDir } from './dev-frontend-dir';
@@ -183,8 +188,8 @@ export function newestSourceMtime(directory: string): number {
   const sourceMtime = newestMtime(directory, isBuildInput, true);
   if (sourceMtime === 0) return 0;
   try {
-    const routeHelperMtime = statSync(join(directory, 'scripts', 'routes.ts')).mtimeMs;
-    return Math.max(sourceMtime, routeHelperMtime);
+    const helpers = ['scripts/routes.ts', 'scripts/tailwind.ts', 'tailwind-inputs.json'];
+    return Math.max(sourceMtime, ...helpers.map((path) => statSync(join(directory, path)).mtimeMs));
   } catch {
     return 0;
   }
@@ -205,6 +210,7 @@ function newestDependencyMtime(directory: string): number {
 interface BuildState {
   readonly apiUrl: string;
   readonly mode: 'dev' | 'production';
+  readonly tailwindInputs: TailwindInputs;
 }
 
 /** The API base URL a bundle must have been built with to be reusable as-is. */
@@ -229,10 +235,11 @@ export function readBuildState(distDirectory: string): BuildState | null {
     return null;
   }
   if (typeof parsed !== 'object' || parsed === null) return null;
-  const { apiUrl, mode } = parsed as Partial<BuildState>;
+  const { apiUrl, mode, tailwindInputs } = parsed as Partial<BuildState>;
   if (typeof apiUrl !== 'string') return null;
   if (mode !== 'dev' && mode !== 'production') return null;
-  return { apiUrl, mode };
+  const inputs = parseTailwindInputs(tailwindInputs);
+  return inputs ? { apiUrl, mode, tailwindInputs: inputs } : null;
 }
 
 /**
@@ -262,6 +269,11 @@ export function distIsCurrent(
 
   const state = readBuildState(distDirectory);
   if (!state || state.apiUrl !== effectiveApiUrl()) return false;
+  try {
+    if (!tailwindInputsAreCurrent(repositoryDirectory, state.tailwindInputs)) return false;
+  } catch {
+    return false;
+  }
 
   const built = newestMtime(distDirectory, () => true, false);
   if (built === 0) return false;

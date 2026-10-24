@@ -50,7 +50,7 @@
         "tests/**/*.test.{ts,tsx}",
         "tests/support/setup/motion-react-stub.tsx"
       ],
-      "project": ["src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}"]
+      "project": ["scripts/**/*.ts", "src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}"]
     },
     "apps/shared": {
       "entry": ["tests/**/*.test.ts"],

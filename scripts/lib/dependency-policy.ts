@@ -291,6 +291,11 @@ export const readAllManifests = async (): Promise<ManifestEntry[]> => {
  */
 export const assertDependencyCohort = async (): Promise<void> => {
   const entries = await readAllManifests();
+  const frontend = entries.find((entry) => entry.workspacePath === 'apps/frontend');
+  const lock = Bun.JSON5.parse(await Bun.file(join(ROOT_DIR, 'bun.lock')).text()) as {
+    packages: Parameters<typeof assertTailwindCohort>[1];
+  };
+  assertTailwindCohort(frontend?.manifest ?? {}, lock.packages);
   const problems: string[] = [];
 
   for (const violation of findRetiredDependencies(entries)) {
@@ -310,3 +315,28 @@ export const assertDependencyCohort = async (): Promise<void> => {
 
   throw new Error(`Dependency cohort violations found:\n${problems.join('\n')}`);
 };
+
+/** Keep the stylesheet, public compiler and native scanner on one exact release. @example assertTailwindCohort(frontendManifest, lock.packages); */
+export function assertTailwindCohort(
+  manifest: PackageManifest,
+  packages: Readonly<Record<string, readonly [string, ...unknown[]]>>
+): void {
+  const cohort = ['tailwindcss', '@tailwindcss/node', '@tailwindcss/oxide'];
+  const version = manifest.devDependencies?.tailwindcss;
+  if (!version || !/^\d+\.\d+\.\d+$/.test(version))
+    throw new Error(`tailwindcss: expected exact compiler cohort version | received: ${version}`);
+  for (const name of cohort) {
+    const declared = manifest.devDependencies?.[name];
+    if (declared !== version)
+      throw new Error(
+        `${name}: expected exact compiler cohort ${version} | received declaration: ${declared}`
+      );
+    const resolved = Object.values(packages)
+      .map((entry) => entry[0])
+      .filter((value) => value.startsWith(`${name}@`));
+    if (resolved.length === 0 || resolved.some((value) => value !== `${name}@${version}`))
+      throw new Error(
+        `${name}: expected resolved compiler cohort ${version} | received: ${JSON.stringify(resolved)}`
+      );
+  }
+}

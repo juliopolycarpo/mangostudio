@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { Message } from '@mangostudio/shared/chat';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { fireEvent, screen } from '@testing-library/react';
-import { flushAsyncRender, render } from '../../support/harness/render';
+import { flushAsyncRender, render, waitFor } from '../../support/harness/render';
 
 // The virtualizer depends on DOM layout measurements not available in happy-dom.
 // We mock it so every item in the messages array is rendered directly.
@@ -208,10 +208,14 @@ describe('ChatFeed — MessageParts interleaved rendering', () => {
     // pulsing — with its own caret — for the rest of the turn.
     expect(screen.queryByText('Thinking…')).not.toBeInTheDocument();
     expect(screen.getByText('Thought')).toBeInTheDocument();
-    expect(container.querySelectorAll('.markdown-content--streaming')).toHaveLength(1);
-    expect(container.querySelector('.markdown-content--streaming')).toHaveTextContent(
-      'Here is the answer.'
-    );
+    // The lazy markdown renderer can still be showing plain text after one
+    // event-loop turn. Wait until its streaming block contains the answer.
+    await waitFor(() => {
+      expect(container.querySelectorAll('.markdown-content--streaming')).toHaveLength(1);
+      expect(container.querySelector('.markdown-content--streaming')).toHaveTextContent(
+        'Here is the answer.'
+      );
+    });
     // The trailing prose is what the turn is streaming into, so the working row
     // stays suppressed even though the turn is running.
     expect(screen.queryByText('Working')).toBeNull();

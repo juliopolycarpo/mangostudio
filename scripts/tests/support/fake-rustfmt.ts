@@ -10,7 +10,7 @@
  * @example
  * MANGO_TEST_RUSTFMT_MARKER=/tmp/started.json MANGO_TEST_RUSTFMT_HANG=1 rustfmt src/lib.rs
  */
-import { writeFileSync } from 'node:fs';
+import { publishFixtureJson } from './atomic-fixture-json';
 import {
   GRANDCHILD_ENV,
   grandchildMarker,
@@ -28,15 +28,12 @@ if (!marker) {
 }
 const hang = process.env[HANG_ENV] === '1';
 
-writeFileSync(
-  marker,
-  JSON.stringify({
-    args: process.argv.slice(2),
-    cwd: process.cwd(),
-    pid: process.pid,
-    startedAt: performance.timeOrigin + performance.now(),
-  })
-);
+publishFixtureJson(marker, {
+  args: process.argv.slice(2),
+  cwd: process.cwd(),
+  pid: process.pid,
+  startedAt: performance.timeOrigin + performance.now(),
+});
 
 if (hang && process.env[GRANDCHILD_ENV] !== '1') {
   Bun.spawn([process.execPath, ...process.argv.slice(2)], {
@@ -51,10 +48,10 @@ if (hang) {
   let beat = 0;
   setInterval(
     () =>
-      writeFileSync(
-        heartbeatPath(marker),
-        JSON.stringify({ beat: ++beat, at: performance.timeOrigin + performance.now() })
-      ),
+      publishFixtureJson(heartbeatPath(marker), {
+        beat: ++beat,
+        at: performance.timeOrigin + performance.now(),
+      }),
     HEARTBEAT_MS
   );
 }
