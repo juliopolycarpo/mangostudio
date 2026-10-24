@@ -81,7 +81,6 @@
     "typescript": "7.0.2"
   },
   "dependencies": {
-    "@faker-js/faker": "^10.6.0",
     "@mangostudio/protocol": "workspace:*",
     "typebox": "1.4.2"
   }

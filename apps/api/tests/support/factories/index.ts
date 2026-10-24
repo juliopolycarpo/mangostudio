@@ -1,4 +1,4 @@
-import { faker } from '@faker-js/faker';
+import { fixtures } from '@mangostudio/shared/test-utils';
 import type { SecretSource } from '@mangostudio/shared/types';
 import { getDb } from '../../../src/db/database';
 
@@ -48,15 +48,16 @@ export function makeTestIdentity(prefix: string, name: string): UserFixture {
 }
 
 /**
- * Creates a user row in the test database with a realistic name and an email
+ * Creates a user row in the test database with a generated name and an email
  * tied uniquely to its id. Returns the inserted user so it can be passed to
  * createAuthenticatedApiTestApp.
+ * // Usage: const user = await insertTestUser({ name: 'Test User' });
  */
 export async function insertTestUser(overrides: Partial<UserFixture> = {}): Promise<UserFixture> {
-  const id = overrides.id ?? faker.string.uuid();
+  const id = overrides.id ?? fixtures.uuid();
   const user: UserFixture = {
     id,
-    name: faker.person.fullName(),
+    name: fixtures.name(),
     email: `${id}@mangostudio.test`,
     ...overrides,
   };
@@ -108,16 +109,17 @@ export async function ensureTestUsers(...users: readonly UserFixture[]): Promise
 }
 
 /**
- * Creates a chat row in the test database with realistic faker-generated data.
+ * Creates a chat row in the test database with generated fixture data.
  * Returns the inserted chat so tests can reference its id in request bodies.
+ * // Usage: const chat = await insertTestChat(user.id);
  */
 export async function insertTestChat(
   userId: string,
   overrides: Partial<ChatFixture> = {}
 ): Promise<ChatFixture> {
   const chat: ChatFixture = {
-    id: faker.string.uuid(),
-    title: faker.lorem.words(3),
+    id: fixtures.uuid(),
+    title: fixtures.words(3),
     userId,
     ...overrides,
   };
@@ -143,14 +145,15 @@ export async function insertTestChat(
  * Creates a configured connector row so provider routing resolves the given
  * models for the user. Tests that register a fake provider need this row;
  * without it the streaming routes reject the model as unavailable.
+ * // Usage: await insertTestConnector(user.id, { enabledModels: ['test-model'] });
  */
 export async function insertTestConnector(
   userId: string,
   overrides: Partial<ConnectorFixture> = {}
 ): Promise<ConnectorFixture> {
   const connector: ConnectorFixture = {
-    id: faker.string.uuid(),
-    name: faker.company.name(),
+    id: fixtures.uuid(),
+    name: fixtures.companyName(),
     provider: 'openai-compatible',
     enabledModels: [],
     userId,
