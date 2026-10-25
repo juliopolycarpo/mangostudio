@@ -1,6 +1,7 @@
 /* global document */
 
 import { RouterProvider } from '@tanstack/react-router';
+import { domAnimation, LazyMotion } from 'motion/react';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { StartupSpinner } from './components/layout/StartupSpinner';
@@ -48,6 +49,8 @@ const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Root element #root not found');
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <LazyMotion strict features={domAnimation}>
+      <App />
+    </LazyMotion>
   </StrictMode>
 );

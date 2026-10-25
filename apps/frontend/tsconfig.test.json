@@ -4,6 +4,7 @@
     "paths": {
       "@/*": ["./src/*"],
       "@/lib/auth-client": ["./tests/support/setup/auth-client-stub.ts"],
+      "motion/react-m": ["./tests/support/setup/motion-react-m-stub.tsx"],
       "motion/react": ["./tests/support/setup/motion-react-stub.tsx"]
     }
   }

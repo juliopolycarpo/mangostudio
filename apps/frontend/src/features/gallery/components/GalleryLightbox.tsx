@@ -1,6 +1,7 @@
 import type { GalleryItem } from '@mangostudio/shared/types';
 import { Download, X } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence } from 'motion/react';
+import * as motion from 'motion/react-m';
 import { useCallback, useRef } from 'react';
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
