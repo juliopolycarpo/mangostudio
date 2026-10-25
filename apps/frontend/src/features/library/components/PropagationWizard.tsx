@@ -15,7 +15,7 @@
  * left out, which would read as not having it at all.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { LibraryLocationId, PropagationPreviewRequest } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';

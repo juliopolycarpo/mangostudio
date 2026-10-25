@@ -4,7 +4,7 @@ import type {
   ChatRunnerPermissions,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/chat';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatWithContext } from '@/features/chat/queries';

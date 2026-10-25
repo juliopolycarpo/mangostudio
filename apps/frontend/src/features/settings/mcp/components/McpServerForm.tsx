@@ -4,7 +4,7 @@
  * the source of truth — API validation errors surface through the caller.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { McpServer, McpTransport } from '@mangostudio/shared/mcp';
 import { type FormEvent, useState } from 'react';
 import { SettingsField } from '@/components/settings/SettingsField';

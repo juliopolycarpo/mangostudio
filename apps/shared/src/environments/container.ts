@@ -15,8 +15,8 @@
  * copy of the flag list would drift the moment one of them changed.
  */
 
+import { CONTAINER_MAX_MOUNTS } from './constants';
 import type { ContainerEngine, ContainerEnvironmentConfig, ContainerMount } from './schemas';
-import { CONTAINER_MAX_MOUNTS } from './schemas';
 
 export interface ContainerCommand {
   readonly command: string;

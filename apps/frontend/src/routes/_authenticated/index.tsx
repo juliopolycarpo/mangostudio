@@ -1,9 +1,9 @@
 import type { ModelOption } from '@mangostudio/shared/catalog';
+import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import {
-  type ExternalAgentTargetId,
   normalizeApprovalRouting,
   normalizePermissionLevel,
-} from '@mangostudio/shared/external-agents';
+} from '@mangostudio/shared/external-agents/values';
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import { ChatPage } from '@/features/chat/ChatPage';

@@ -11,7 +11,7 @@ import type {
   PathSource,
   RuntimeStatus,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';

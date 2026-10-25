@@ -8,7 +8,7 @@
  */
 
 import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents';
-import { interpretExternalAccountLimits } from '@mangostudio/shared/external-agents';
+import { interpretExternalAccountLimits } from '@mangostudio/shared/external-agents/values';
 import { RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';

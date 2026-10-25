@@ -12,7 +12,7 @@ import {
   externalActivityStatusForTerminal,
   externalNoticePart,
   lastContentIndex,
-} from '@mangostudio/shared/external-agents';
+} from '@mangostudio/shared/external-agents/values';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type {
   ExternalActivityPart,

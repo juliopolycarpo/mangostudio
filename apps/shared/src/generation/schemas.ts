@@ -2,26 +2,39 @@ import Type, { type Static } from 'typebox';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 import { AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
-import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from '../external-agents/schemas';
+import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from '../external-agents/choices';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
 import { ProviderTypeSchema, ReasoningEffortSchema } from '../provider-settings/schemas';
 import { ResumeInterruptedTurnSchema } from '../turn-recovery/schemas';
+import {
+  GENERATION_ATTACHMENT_ID_MAX_LENGTH,
+  GENERATION_ATTACHMENT_IDS_MAX_ITEMS,
+  GENERATION_CHAT_ID_MAX_LENGTH,
+  GENERATION_IMAGE_QUALITY_MAX_LENGTH,
+  GENERATION_MODEL_ID_MAX_LENGTH,
+  GENERATION_PROMPT_MAX_LENGTH,
+  GENERATION_REFERENCE_IMAGE_URL_MAX_LENGTH,
+  GENERATION_SYSTEM_PROMPT_MAX_LENGTH,
+  GENERATION_THINKING_VISIBILITY_MAX_LENGTH,
+} from './limits';
+
+export {
+  GENERATION_ATTACHMENT_ID_MAX_LENGTH,
+  GENERATION_ATTACHMENT_IDS_MAX_ITEMS,
+  GENERATION_CHAT_ID_MAX_LENGTH,
+  GENERATION_IMAGE_QUALITY_MAX_LENGTH,
+  GENERATION_MODEL_ID_MAX_LENGTH,
+  GENERATION_PROMPT_MAX_LENGTH,
+  GENERATION_REFERENCE_IMAGE_URL_MAX_LENGTH,
+  GENERATION_SYSTEM_PROMPT_MAX_LENGTH,
+  GENERATION_THINKING_VISIBILITY_MAX_LENGTH,
+} from './limits';
 
 export const ToolIntentSchema = Type.Optional(
   Type.Union([Type.Literal('image_generation_requested')])
 );
 
 export type ToolIntent = Static<typeof ToolIntentSchema>;
-
-export const GENERATION_CHAT_ID_MAX_LENGTH = 256;
-export const GENERATION_PROMPT_MAX_LENGTH = 200_000;
-export const GENERATION_SYSTEM_PROMPT_MAX_LENGTH = 50_000;
-export const GENERATION_MODEL_ID_MAX_LENGTH = 256;
-export const GENERATION_ATTACHMENT_IDS_MAX_ITEMS = 20;
-export const GENERATION_ATTACHMENT_ID_MAX_LENGTH = 256;
-export const GENERATION_REFERENCE_IMAGE_URL_MAX_LENGTH = 4_096;
-export const GENERATION_IMAGE_QUALITY_MAX_LENGTH = 64;
-export const GENERATION_THINKING_VISIBILITY_MAX_LENGTH = 32;
 
 const ChatIdSchema = Type.String({ maxLength: GENERATION_CHAT_ID_MAX_LENGTH });
 const PromptSchema = Type.String({ maxLength: GENERATION_PROMPT_MAX_LENGTH });

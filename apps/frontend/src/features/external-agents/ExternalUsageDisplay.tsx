@@ -11,7 +11,10 @@
  */
 
 import type { ExternalThreadUsage, ExternalUsage } from '@mangostudio/shared/external-agents';
-import { externalContextUsage, externalReportedTokens } from '@mangostudio/shared/external-agents';
+import {
+  externalContextUsage,
+  externalReportedTokens,
+} from '@mangostudio/shared/external-agents/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ContextUsageLine } from '@/components/ui/ContextUsageChip';
 import { ContextUsageChip } from '@/components/ui/ContextUsageChip';

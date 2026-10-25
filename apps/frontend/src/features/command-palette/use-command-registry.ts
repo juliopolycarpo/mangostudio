@@ -8,7 +8,7 @@
  * authenticated route's loader, which is why sessions never show a skeleton.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useNavigate } from '@tanstack/react-router';
 import { useMemo, useRef, useState } from 'react';
 import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';

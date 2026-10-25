@@ -11,7 +11,7 @@ import type {
   MachineServiceAction,
   MachineStatus,
 } from '@mangostudio/shared/machine';
-import { MACHINE_LOG_TAIL_DEFAULT } from '@mangostudio/shared/machine';
+import { MACHINE_LOG_TAIL_DEFAULT } from '@mangostudio/shared/machine/limits';
 import {
   type QueryClient,
   queryOptions,

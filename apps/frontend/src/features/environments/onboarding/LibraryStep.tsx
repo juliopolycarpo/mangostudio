@@ -8,7 +8,7 @@
  */
 
 import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
-import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home/values';
 import { Link } from '@tanstack/react-router';
 import { LibraryBig } from 'lucide-react';
 import { buttonClassName } from '@/components/ui/Button';

@@ -21,8 +21,8 @@
 
 import Type, { type Static } from 'typebox';
 import { ReadonlyArraySchema } from '../schema-helpers';
+import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from './choices';
 import type { ExternalAgentCapabilities, ExternalAgentTargetId } from './schemas';
-import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from './schemas';
 
 /**
  * Bump when the disclosure text changes materially.

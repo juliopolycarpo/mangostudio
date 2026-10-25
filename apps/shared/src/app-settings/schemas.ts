@@ -14,7 +14,7 @@ import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
 } from '../git/commit-message';
-import { LibraryLocationIdSchema, LibraryScopeSchema } from '../library';
+import { LibraryLocationIdSchema, LibraryScopeSchema } from '../library/choices';
 import { OnboardingStateSchema } from '../onboarding/schemas';
 import { ProfileIdSchema } from '../profiles';
 import { PromptSettingsSchema } from '../prompt-rules';
