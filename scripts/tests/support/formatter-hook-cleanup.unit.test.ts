@@ -14,7 +14,6 @@ class FailedCancellation {
     ['formatter', 201],
     ['grandchild', 301],
   ]);
-  readonly markerReads: string[] = [];
   readonly heartbeatReads: string[] = [];
   readonly stopRequests: string[] = [];
   readonly publishedStops = new Set<string>();
@@ -53,13 +52,6 @@ class FailedCancellation {
     this.live.delete(101);
     this.resolveExit();
   }
-
-  readonly readMarker = (marker: string): Promise<{ pid: number }> => {
-    this.markerReads.push(marker);
-    const pid = this.pids.get(marker);
-    if (pid === undefined) throw new Error(`expected an owned marker | received: ${marker}`);
-    return Promise.resolve({ pid });
-  };
 
   readonly stillBeating = (marker: string): Promise<boolean> => {
     this.heartbeatReads.push(marker);
@@ -115,7 +107,6 @@ describe('formatter hook failure cleanup', () => {
       ).toEqual([]);
       expect(scope.signals).toEqual([[101, 'SIGTERM']]);
       expect(scope.stopRequests).toEqual(['formatter', 'grandchild']);
-      expect(scope.markerReads).toEqual([]);
     }
   );
 
@@ -183,7 +174,6 @@ describe('formatter hook failure cleanup', () => {
     ).rejects.toBe(scope.failure);
     expect(scope.lateStartPrevented).toBe(true);
     expect(scope.stopRequests).toEqual(['formatter', 'grandchild']);
-    expect(scope.markerReads).toEqual([]);
     expect([...scope.live]).toEqual([]);
   });
 
@@ -205,7 +195,6 @@ describe('formatter hook failure cleanup', () => {
     );
     expect([...scope.live]).toEqual([201]);
     expect(scope.heartbeatReads.filter((marker) => marker === 'formatter')).toHaveLength(4);
-    expect(scope.markerReads).toEqual([]);
   });
 
   it('fails a successful assertion when an owned formatter survives cleanup', async () => {
@@ -216,7 +205,6 @@ describe('formatter hook failure cleanup', () => {
     ).rejects.toThrow('formatter fixture cleanup failed');
     expect([...scope.live]).toEqual([201]);
     expect(scope.heartbeatReads.filter((marker) => marker === 'formatter')).toHaveLength(4);
-    expect(scope.markerReads).toEqual([]);
   });
 
   it('still stops the hook and requests its sibling when one stop publication fails', async () => {
