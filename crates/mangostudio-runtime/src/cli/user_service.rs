@@ -937,6 +937,8 @@ mod windows_tests {
         include_str!("../../tests/fixtures/windows-service-process-lifetimes.ps1");
     const PROCESS_LIFETIME_PROBE: &str =
         include_str!("../../tests/fixtures/windows-service-process-lifetimes.probe.ps1");
+    const PROCESS_CHILD_DISCOVERY_PROBE: &str =
+        include_str!("../../tests/fixtures/windows-service-child-discovery.probe.ps1");
 
     struct FakeTaskExec {
         calls: Mutex<Vec<String>>,
@@ -1189,6 +1191,63 @@ mod windows_tests {
         });
     }
 
+    #[test]
+    fn fixture_child_capture_excludes_lifetimes_older_than_each_parent() {
+        use super::windows::ProcessExec;
+
+        let fixture = scratch_dir("win-service-child-discovery-fixtures");
+        let helpers = fixture.join("lifetimes.ps1");
+        let assertions = fixture.join("lifetimes.probe.ps1");
+        let probe = fixture.join("children.probe.ps1");
+        std::fs::write(&helpers, PROCESS_LIFETIME_HELPERS)
+            .expect("write the lifetime helper fixture");
+        std::fs::write(&assertions, PROCESS_LIFETIME_PROBE)
+            .expect("write the existing fixture assertions");
+        std::fs::write(&probe, PROCESS_CHILD_DISCOVERY_PROBE)
+            .expect("write the named child discovery fixtures");
+        let script = format!(
+            ". {}\n. {}\n. {}\nInvoke-ServiceChildDiscoveryProbe | ConvertTo-Json -Compress -Depth 5",
+            super::scheduled_task::ps_quote(&helpers.to_string_lossy()),
+            super::scheduled_task::ps_quote(&assertions.to_string_lossy()),
+            super::scheduled_task::ps_quote(&probe.to_string_lossy()),
+        );
+        let (ok, output) = ProcessExec
+            .run(&script, Duration::from_secs(30))
+            .expect("PowerShell runs the named child-query fakes");
+        assert!(
+            ok,
+            "expected lifetime-aware fixture child discovery | received: {output}"
+        );
+        let report: Value = serde_json::from_str(&output).unwrap_or_else(|error| {
+            panic!("expected a child discovery JSON report | received: {output:?}: {error}")
+        });
+        assert_eq!(
+            report["cases"],
+            json!([
+                "stale-parent-pid-is-not-ready",
+                "shell-edge-excludes-older-lifetime",
+                "leaf-edge-keeps-all-eligible-images",
+                "equal-creation-is-eligible",
+                "empty-snapshot-is-not-ready",
+                "query-error-is-not-empty",
+                "invalid-parent-fails-before-query",
+                "unknown-child-lifetime-is-not-ignored",
+                "wrong-parent-query-row-fails",
+                "invalid-parent-reference-shape-fails",
+                "duplicate-query-rows-fail",
+                "self-parent-query-row-fails",
+            ]),
+            "expected all named child discovery cases | received: {report}"
+        );
+        assert_eq!(report["count"], 12, "received: {report}");
+        assert_eq!(report["native"], false, "received: {report}");
+        assert_eq!(
+            report["capturedProcessIds"],
+            json!([100, 200, 400, 500]),
+            "expected every eligible synthetic lifetime and no stale parent-PID row | received: {report}"
+        );
+    }
+
     /// What `Stop-ScheduledTask` leaves behind, rebuilt without Task Scheduler: a
     /// `powershell.exe` runner whose `cmd.exe` child runs a long-lived process,
     /// with the runner itself terminated. The verbs' tree walk must end both
@@ -1215,9 +1274,9 @@ mod windows_tests {
             format!("$runners = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop)"),
             format!("if ($runners.Count -ne 1) {{ throw ('expected one owned runner CIM row for PID {pid} | received: ' + $runners.Count) }}"),
             "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
-            "$shell = $null; $leaf = $null".to_owned(),
-            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $shell = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid} AND Name = 'cmd.exe'\" -ErrorAction Stop; if ($null -ne $shell) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = $($shell.ProcessId)\" -ErrorAction Stop }}; Start-Sleep -Milliseconds 100 }}"),
-            "if ($null -eq $leaf) { throw 'the stand-in runner never started cmd.exe and its child' }".to_owned(),
+            "$shell = @(); $leaf = @(); $ready = $false".to_owned(),
+            "while ((-not $ready) -and ((Get-Date) -lt $deadline)) { $shell = @(Find-ServiceTestChildren $runners[0]); $leaf = @($shell | ForEach-Object { Find-ServiceTestChildren $_ }); $cmdIds = @($shell | Where-Object { $_.Name -eq 'cmd.exe' } | ForEach-Object { $_.ProcessId }); $ready = @($leaf | Where-Object { ($_.Name -eq 'PING.EXE') -and ($cmdIds -contains $_.ParentProcessId) }).Count -gt 0; Start-Sleep -Milliseconds 100 }".to_owned(),
+            "if (-not $ready) { throw 'the stand-in runner never started cmd.exe and its child' }".to_owned(),
             "$serviceTestCaptured = @(Capture-ServiceTestIdentities (@($runners) + @($shell) + @($leaf)))".to_owned(),
             format!("Stop-Process -Id {pid} -Force"),
             "Start-Sleep -Milliseconds 300".to_owned(),
@@ -1279,9 +1338,11 @@ mod windows_tests {
             PROCESS_LIFETIME_HELPERS.to_owned(),
             "$runners = @()".to_owned(),
             "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
-            "$leaf = $null".to_owned(),
-            format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid}\" -ErrorAction Stop; Start-Sleep -Milliseconds 100 }}"),
-            "if ($null -eq $leaf) { throw 'the hand-started shim never started its child' }".to_owned(),
+            format!("$ownedRoot = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop)"),
+            format!("if ($ownedRoot.Count -ne 1) {{ throw ('expected one owned shim CIM row for PID {pid} | received: ' + $ownedRoot.Count) }}"),
+            "$leaf = @(); $ready = $false".to_owned(),
+            "while ((-not $ready) -and ((Get-Date) -lt $deadline)) { $leaf = @(Find-ServiceTestChildren $ownedRoot[0]); $ready = @($leaf | Where-Object { $_.Name -eq 'PING.EXE' }).Count -gt 0; Start-Sleep -Milliseconds 100 }".to_owned(),
+            "if (-not $ready) { throw 'the hand-started shim never started its child' }".to_owned(),
             capture_slot_orphans(&slot),
             format!("if (@($orphans | Where-Object {{ $_.ProcessId -eq {pid} }}).Count -ne 1) {{ throw ('expected the shim cmd.exe {pid} among the orphans | received: ' + (($orphans | ForEach-Object {{ $_.ProcessId }}) -join ',')) }}"),
             "$serviceTestCaptured = @(Capture-ServiceTestIdentities (@($orphans) + @($leaf)))".to_owned(),
@@ -1325,9 +1386,9 @@ mod windows_tests {
                 PROCESS_LIFETIME_HELPERS.to_owned(),
                 format!("$root = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop)"),
                 "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
-                "$shell = $null; $leaf = $null".to_owned(),
-                format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $shell = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid} AND Name = 'cmd.exe'\" -ErrorAction Stop; if ($null -ne $shell) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = $($shell.ProcessId)\" -ErrorAction Stop }}; Start-Sleep -Milliseconds 100 }}"),
-                "if ($null -eq $leaf) { throw 'expected owned control root, shell and leaf ready' }".to_owned(),
+                "$shell = @(); $leaf = @(); $ready = $false".to_owned(),
+                "while ((-not $ready) -and ((Get-Date) -lt $deadline)) { $shell = @(Find-ServiceTestChildren $root[0]); $leaf = @($shell | ForEach-Object { Find-ServiceTestChildren $_ }); $cmdIds = @($shell | Where-Object { $_.Name -eq 'cmd.exe' } | ForEach-Object { $_.ProcessId }); $ready = @($leaf | Where-Object { ($_.Name -eq 'PING.EXE') -and ($cmdIds -contains $_.ParentProcessId) }).Count -gt 0; Start-Sleep -Milliseconds 100 }".to_owned(),
+                "if (-not $ready) { throw 'expected owned control root, shell and leaf ready' }".to_owned(),
                 "$captured = @(Capture-ServiceTestIdentities (@($root) + @($shell) + @($leaf)))".to_owned(),
                 "Get-ServiceTestReceipt $captured | ConvertTo-Json -Compress -Depth 5".to_owned(),
             ].join("\n");

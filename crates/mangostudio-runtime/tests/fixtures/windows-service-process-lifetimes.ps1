@@ -27,6 +27,50 @@ function ConvertTo-ServiceTestIdentity {
   }
 }
 
+# Queries candidate children; caller validates their lifetime relationship before capture.
+# Usage: @(Read-ServiceTestCimChildren 748)
+function Read-ServiceTestCimChildren {
+  param([uint32]$ParentProcessId)
+  Get-CimInstance Win32_Process -Filter "ParentProcessId = $ParentProcessId" -ErrorAction Stop
+}
+
+# Retains every valid child born within this captured parent's lifetime, regardless of image.
+# Usage: $children = @(Find-ServiceTestChildren $root ${function:Invoke-FakeServiceChildQuery})
+function Find-ServiceTestChildren {
+  param(
+    [AllowNull()][object]$Parent,
+    [scriptblock]$Query = ${function:Read-ServiceTestCimChildren}
+  )
+  $ErrorActionPreference = 'Stop'
+  $parentIdentity = ConvertTo-ServiceTestIdentity $Parent
+  try {
+    $rows = @(& $Query $parentIdentity.processId)
+  } catch {
+    throw "expected CIM children of captured PID $($parentIdentity.processId) created $($parentIdentity.creationTimeUtcTicks) | received: $($_.Exception.Message)"
+  }
+  $seen = @{}
+  foreach ($row in $rows) {
+    $identity = ConvertTo-ServiceTestIdentity $row
+    $parentId = $row.ParentProcessId
+    if (($parentId -isnot [int]) -and ($parentId -isnot [uint32])) {
+      $shape = if ($null -eq $parentId) { 'null' } else { $parentId.GetType().FullName }
+      throw "expected CIM ParentProcessId Int32 or UInt32 for candidate PID $($identity.processId) | received: $shape ($parentId)"
+    }
+    if ($parentId -ne $parentIdentity.processId) {
+      throw "expected ParentProcessId $($parentIdentity.processId) for candidate PID $($identity.processId) | received: $parentId"
+    }
+    if ($identity.processId -eq $parentIdentity.processId) {
+      throw "expected child PID distinct from parent $($parentIdentity.processId) | received: $($identity.processId)"
+    }
+    if ($seen.ContainsKey($identity.processId)) {
+      throw "expected one candidate lifetime per PID | received duplicate: $($identity.processId)"
+    }
+    $seen[$identity.processId] = $true
+    if ([long]$identity.creationTimeUtcTicks -lt [long]$parentIdentity.creationTimeUtcTicks) { continue }
+    $row
+  }
+}
+
 # Preserves every captured root/leaf and refuses missing or duplicate identities.
 # Usage: $captured = @(Capture-ServiceTestIdentities @($root, $leaf))
 function Capture-ServiceTestIdentities {
