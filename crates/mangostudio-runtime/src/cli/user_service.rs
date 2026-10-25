@@ -926,6 +926,9 @@ mod windows_tests {
     use super::process_lifetime_test_receipt::ensure_stopped;
     use super::windows::{Exec, operate};
     use super::*;
+    use crate::subprocess::{
+        ProcessRequest, fixture_cleanup::inspect_then_cleanup, windows_fixture::WindowsFixture,
+    };
     use crate::test_support::scratch_dir;
     use std::sync::Mutex;
 
@@ -1194,18 +1197,16 @@ mod windows_tests {
     fn the_runner_tree_is_terminated_after_the_runner_itself_is_gone() {
         use super::windows::ProcessExec;
 
-        let mut runner = Command::new("powershell.exe")
-            .args([
+        let request = ProcessRequest::new(
+            "powershell.exe",
+            [
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
                 "& cmd.exe /d /c 'ping -n 120 127.0.0.1 >nul'",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("the stand-in runner starts");
+            ],
+        );
+        let mut runner = WindowsFixture::spawn(&request).expect("the owned stand-in runner starts");
         let pid = runner.id();
         // One literal per line: `spawn_boundary`'s brace scanner reads line by line.
         let script = [
@@ -1224,15 +1225,17 @@ mod windows_tests {
             "Get-ServiceTestReceipt $serviceTestCaptured | ConvertTo-Json -Compress -Depth 5".to_owned(),
         ]
         .join("\n");
-        let result = ProcessExec.run(&script, Duration::from_secs(60));
-        let _ = runner.kill();
-        let _ = runner.wait();
-        let (ok, output) = result.expect("PowerShell runs the tree walk");
-        assert!(
-            ok,
-            "expected the runner tree terminated | received: {output}"
-        );
-        ensure_stopped(&output).unwrap_or_else(|error| {
+        inspect_then_cleanup(&mut runner, |runner| {
+            runner.start()?;
+            let (ok, output) = ProcessExec.run(&script, Duration::from_secs(60))?;
+            if !ok {
+                return Err(io::Error::other(format!(
+                    "expected runner tree cleanup | received: {output}"
+                )));
+            }
+            ensure_stopped(&output).map_err(io::Error::other)
+        })
+        .unwrap_or_else(|error| {
             panic!("expected runner {pid} and all captured descendants stopped | received: {error}")
         });
     }
@@ -1242,23 +1245,27 @@ mod windows_tests {
     /// the shim's `cmd.exe` by its command line and end it with its child.
     #[test]
     fn the_slot_fallback_ends_a_shim_run_that_no_task_started() {
-        use std::os::windows::process::CommandExt as _;
-
         use super::scheduled_task::{SlotProcesses, capture_slot_orphans, terminate_runner_tree};
         use super::windows::ProcessExec;
 
-        let home = scratch_dir("win-service-slot-orphan");
+        let home = scratch_dir("win-service-slot-orphan with O'Brien spaces");
         let slot_dir = home.join("runtime").join("remote");
         std::fs::create_dir_all(&slot_dir).unwrap();
         let shim = slot_dir.join("mangostudio-runtime.cmd");
         std::fs::write(&shim, "@ping -n 120 127.0.0.1 >nul\r\n").unwrap();
-        let mut orphan = Command::new("cmd.exe")
-            .raw_arg(format!("/d /c \"\"{}\" serve\"", shim.display()))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("the hand-started shim runs");
+        // Keep `serve` bare for the production orphan matcher; `call` preserves the
+        // separately quoted shim path without embedding cmd syntax in an argv value.
+        let request = ProcessRequest::new(
+            "cmd.exe",
+            [
+                std::ffi::OsString::from("/d"),
+                "/c".into(),
+                "call".into(),
+                shim.as_os_str().into(),
+                "serve".into(),
+            ],
+        );
+        let mut orphan = WindowsFixture::spawn(&request).expect("the owned hand-started shim runs");
         let pid = orphan.id();
         let slot_dir_text = slot_dir.to_string_lossy();
         let shim_text = shim.to_string_lossy();
@@ -1282,17 +1289,104 @@ mod windows_tests {
             "Get-ServiceTestReceipt $serviceTestCaptured | ConvertTo-Json -Compress -Depth 5".to_owned(),
         ]
         .join("\n");
-        let result = ProcessExec.run(&script, Duration::from_secs(60));
-        let _ = orphan.kill();
-        let _ = orphan.wait();
-        let (ok, output) = result.expect("PowerShell runs the fallback");
-        assert!(
-            ok,
-            "expected the hand-started shim tree terminated | received: {output}"
-        );
-        ensure_stopped(&output).unwrap_or_else(|error| {
+        inspect_then_cleanup(&mut orphan, |orphan| {
+            orphan.start()?;
+            let (ok, output) = ProcessExec.run(&script, Duration::from_secs(60))?;
+            if !ok {
+                return Err(io::Error::other(format!(
+                    "expected hand-started shim cleanup | received: {output}"
+                )));
+            }
+            ensure_stopped(&output).map_err(io::Error::other)
+        })
+        .unwrap_or_else(|error| {
             panic!("expected shim {pid} and all captured descendants stopped | received: {error}")
         });
+    }
+
+    #[test]
+    fn owned_fixture_fallback_preserves_failure_and_independently_ends_captured_lifetimes() {
+        use super::windows::ProcessExec;
+
+        for early_failure in [true, false] {
+            let request = ProcessRequest::new(
+                "powershell.exe",
+                [
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "& cmd.exe /d /c 'ping -n 120 127.0.0.1 >nul'",
+                ],
+            );
+            let mut fixture = WindowsFixture::spawn(&request).expect("owned control starts");
+            let pid = fixture.id();
+            let script = [
+                "$ErrorActionPreference = 'Stop'".to_owned(),
+                PROCESS_LIFETIME_HELPERS.to_owned(),
+                format!("$root = @(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\" -ErrorAction Stop)"),
+                "$deadline = (Get-Date).AddSeconds(20)".to_owned(),
+                "$shell = $null; $leaf = $null".to_owned(),
+                format!("while (($null -eq $leaf) -and ((Get-Date) -lt $deadline)) {{ $shell = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid} AND Name = 'cmd.exe'\" -ErrorAction Stop; if ($null -ne $shell) {{ $leaf = Get-CimInstance Win32_Process -Filter \"ParentProcessId = $($shell.ProcessId)\" -ErrorAction Stop }}; Start-Sleep -Milliseconds 100 }}"),
+                "if ($null -eq $leaf) { throw 'expected owned control root, shell and leaf ready' }".to_owned(),
+                "$captured = @(Capture-ServiceTestIdentities (@($root) + @($shell) + @($leaf)))".to_owned(),
+                "Get-ServiceTestReceipt $captured | ConvertTo-Json -Compress -Depth 5".to_owned(),
+            ].join("\n");
+            let mut original = String::new();
+            let result = inspect_then_cleanup(&mut fixture, |fixture| {
+                fixture.start()?;
+                let (ok, output) = ProcessExec.run(&script, Duration::from_secs(30))?;
+                if !ok {
+                    return Err(io::Error::other(format!(
+                        "expected control capture | received: {output}"
+                    )));
+                }
+                // Keep exact pre-fallback evidence. The fallback cannot rewrite this verdict.
+                original = output;
+                if early_failure {
+                    return Err(io::Error::other(
+                        "named early CIM failure before production cleanup",
+                    ));
+                }
+                ensure_stopped(&original).map_err(io::Error::other)
+            });
+            let error = result.expect_err("expected the pre-fallback operation to fail");
+            assert!(
+                !error.to_string().contains("cleanup also failed"),
+                "received: {error}"
+            );
+            if early_failure {
+                assert_eq!(
+                    error.to_string(),
+                    "named early CIM failure before production cleanup"
+                );
+            }
+            let refusal = ensure_stopped(&original).expect_err("expected live receipt refused");
+            assert!(
+                refusal.contains("received same-lifetime survivors:"),
+                "expected a survivor refusal | received: {refusal}"
+            );
+            if !early_failure {
+                assert_eq!(error.to_string(), refusal);
+            }
+            let report: Value =
+                serde_json::from_str(&original).expect("control captured native identities");
+            assert_eq!(
+                report["captured"].as_array().map(Vec::len),
+                Some(3),
+                "received: {report}"
+            );
+            let captured = super::scheduled_task::ps_quote(&report["captured"].to_string());
+            let verify = format!(
+                "$ErrorActionPreference = 'Stop'\n{PROCESS_LIFETIME_HELPERS}\n$captured = {captured} | ConvertFrom-Json\nGet-ServiceTestReceipt $captured | ConvertTo-Json -Compress -Depth 5"
+            );
+            let (ok, output) = ProcessExec
+                .run(&verify, Duration::from_secs(30))
+                .expect("independent CIM post-fallback query");
+            assert!(ok, "expected independent native query | received: {output}");
+            ensure_stopped(&output).unwrap_or_else(|error| {
+                panic!("expected captured native lifetimes gone after fallback | received: {error}")
+            });
+        }
     }
 
     #[test]
