@@ -16,14 +16,18 @@ import { FakeTerminalSocket } from './fake-terminal-socket';
 /** Counts activations without needing a GPU: `activate` is all xterm calls. */
 class FakeWebglAddon {
   static activations = 0;
+  static disposals = 0;
+  static failActivation = false;
   onContextLoss(_listener: () => void): void {
     // The real addon returns a disposable; nothing under test reads it.
   }
   activate(): void {
     FakeWebglAddon.activations += 1;
+    if (FakeWebglAddon.failActivation)
+      throw new Error('Synthetic partial WebGL activation failure');
   }
   dispose(): void {
-    // Loaded addons are disposed with the terminal; nothing to release here.
+    FakeWebglAddon.disposals += 1;
   }
 }
 
@@ -39,6 +43,8 @@ const realGetContext = HTMLCanvasElement.prototype.getContext;
 beforeEach(() => {
   FakeTerminalSocket.instances = [];
   FakeWebglAddon.activations = 0;
+  FakeWebglAddon.disposals = 0;
+  FakeWebglAddon.failActivation = false;
   HTMLCanvasElement.prototype.getContext = function patched(
     this: HTMLCanvasElement,
     contextId: string,
@@ -66,6 +72,19 @@ function renderView() {
 }
 
 describe('TerminalView WebGL renderer', () => {
+  it('disposes a partially activated addon immediately while keeping the terminal and socket', async () => {
+    FakeWebglAddon.failActivation = true;
+    const { container } = renderView();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(FakeWebglAddon.activations).toBe(1);
+    expect(FakeWebglAddon.disposals).toBe(1);
+    expect(container.querySelector('.xterm')).not.toBeNull();
+    expect(FakeTerminalSocket.instances).toHaveLength(1);
+  });
+
   it('loads the addon when the terminal is still mounted', async () => {
     renderView();
 
