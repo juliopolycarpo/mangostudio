@@ -579,6 +579,42 @@ const MANGLED_REQUIRED_OUTPUT =
   'Checked 18 files in 7ms. No fixes applied.\n' +
   'SelfImport ━━━━━\n';
 
+const CONTROLLED_PRESENTATIONS = [
+  {
+    name: 'interleaved JSX rule',
+    cycle: CONTROLLED_SELF_IMPORT,
+    requiredOutput: MANGLED_REQUIRED_OUTPUT,
+    directOutput: DIRECT_SELF_IMPORT,
+  },
+  {
+    name: 'missing MTS header',
+    cycle: {
+      name: 'controlled MTS self import',
+      dir: 'dist/self-mts',
+      files: { 'a.mts': "import { a } from './a.mts';\nexport { a };\n" },
+      rule: NO_SELF_IMPORT,
+    },
+    requiredOutput: `apps/frontend/dist/self-js/a.js:1:1 ${NO_SELF_IMPORT} ━━━━━\nChecked 18 files in 7ms. No fixes applied.\n`,
+    directOutput: `apps/frontend/dist/self-mts/a.mts:1:1 ${NO_SELF_IMPORT} ━━━━━\n`,
+  },
+  {
+    name: 'MJS rule joined to summary',
+    cycle: {
+      name: 'controlled MJS self import',
+      dir: 'dist/self-mjs',
+      files: { 'a.mjs': "import { a } from './a.mjs';\nexport { a };\n" },
+      rule: NO_SELF_IMPORT,
+    },
+    requiredOutput: `apps/frontend/dist/self-mjs/a.mjs:1:1 ${NO_SELF_IMPORT}Checked 18 files in 7ms. No fixes applied.\n`,
+    directOutput: `apps/frontend/dist/self-mjs/a.mjs:1:1 ${NO_SELF_IMPORT} ━━━━━\n`,
+  },
+] satisfies ReadonlyArray<{
+  name: string;
+  cycle: CycleCase;
+  requiredOutput: string;
+  directOutput: string;
+}>;
+
 /** Named command fake retaining the required verdict and separately captured scanner output. */
 class FakeCycleCommands {
   readonly calls: Array<{ root: string; roots: readonly string[]; kind: string }> = [];
@@ -588,13 +624,14 @@ class FakeCycleCommands {
     readonly output = DIRECT_SELF_IMPORT,
     readonly circularDeps = 1,
     readonly requiredFailure?: Error,
-    readonly scanFailure?: Error
+    readonly scanFailure?: Error,
+    readonly requiredOutput = MANGLED_REQUIRED_OUTPUT
   ) {}
 
   readonly runCheck = (root: string, workspace: string): CheckRun => {
     this.calls.push({ root, roots: [workspace], kind: 'required' });
     if (this.requiredFailure) throw this.requiredFailure;
-    return { exitCode: this.exitCode, output: MANGLED_REQUIRED_OUTPUT };
+    return { exitCode: this.exitCode, output: this.requiredOutput };
   };
 
   readonly scanCycles = (root: string, roots: readonly string[]) => {
@@ -605,19 +642,44 @@ class FakeCycleCommands {
 }
 
 describe('checked cycle evidence', () => {
-  test('keeps exact direct diagnostics when required presentation is interleaved', async () => {
-    const commands = new FakeCycleCommands();
-    const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
+  test.each(CONTROLLED_PRESENTATIONS)(
+    'keeps exact direct diagnostics with $name',
+    async ({ cycle, requiredOutput, directOutput }) => {
+      const commands = new FakeCycleCommands(
+        1,
+        directOutput,
+        1,
+        undefined,
+        undefined,
+        requiredOutput
+      );
+      const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
 
-    expectCheck(scan.required, 'fail', 'controlled required check');
-    expectCaseReported(scan.output, CONTROLLED_SELF_IMPORT, scan.required.output);
-    expectCycleCount(scan.circularDeps, 1, 'controlled direct count', scan.required.output);
-    expect(scan.required.output).toBe(MANGLED_REQUIRED_OUTPUT);
-    expect(commands.calls).toEqual([
-      { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'required' },
-      { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'direct' },
-    ]);
-  });
+      expectCheck(scan.required, 'fail', 'controlled required check');
+      expectCaseReported(scan.output, cycle, scan.required.output);
+      expectCycleCount(scan.circularDeps, 1, 'controlled direct count', scan.required.output);
+      expect(scan.required.output).toBe(requiredOutput);
+      expect(commands.calls).toEqual([
+        { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'required' },
+        { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'direct' },
+      ]);
+    }
+  );
+
+  test.each(CONTROLLED_PRESENTATIONS)(
+    'rejects missing direct evidence with $name',
+    async ({ cycle, requiredOutput }) => {
+      const commands = new FakeCycleCommands(1, '', 1, undefined, undefined, requiredOutput);
+      const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
+      const file = `${cycle.dir}/${Object.keys(cycle.files)[0]}`;
+
+      expectCheck(scan.required, 'fail', 'controlled required check');
+      expectCycleCount(scan.circularDeps, 1, 'retained direct count', scan.required.output);
+      const assertCase = () => expectCaseReported(scan.output, cycle, scan.required.output);
+      expect(assertCase).toThrow(`expected ${NO_SELF_IMPORT} reported on one of ${file}`);
+      expect(assertCase).toThrow(`Required check output:\n${requiredOutput}`);
+    }
+  );
 
   test('still rejects required success and retains its raw failure context', async () => {
     const commands = new FakeCycleCommands(0);
