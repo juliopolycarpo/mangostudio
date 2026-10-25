@@ -1160,11 +1160,27 @@ bun run test:e2e:setup
 bun run test --e2e
 ```
 
+`bun run test:e2e:production` builds the production frontend (including React Compiler), then
+runs the terminal prerequisite plus `grid-late-card-state.spec.ts` and
+`motion-presets.spec.ts`. `playwright.production.config.ts` reuses the default config's
+temporary home, shared authentication, terminal-first dependency and execution policy; it
+starts the static hub with `bun apps/api/src/index.ts serve` from the repository root so
+frontend discovery finds the built bundle. Both phases use the maintained command supervisor:
+a build failure stops before Playwright, and cancellation settles the owned process tree.
+Build and Playwright share the hosted ten-minute smoke step. This is narrow production rendering coverage; the default command still tests
+the development stack.
+
+The hosted browser workflow runs independent development and production legs with
+`fail-fast: false`. Either failure fails the existing browser aggregate and both CI gates.
+Production diagnostics use `playwright-results-production` and `playwright-report-production`,
+while development keeps its existing artifact names. Both legs keep the same browser cache,
+installation and runtime-artifact policies.
+
 Run `bun run test:e2e:setup` once on a new machine or whenever Playwright reports a missing Chromium binary. It wraps `bunx playwright install --with-deps chromium`, so it installs only the browser used by this suite and avoids `npx` commands.
 
 The CI browser-smoke job runs on `ubuntu-24.04` because Playwright 1.60 cannot install Chromium dependencies on Ubuntu 26.04 yet. If you are on Ubuntu 26.04 locally, use an Ubuntu 24.04/22.04 container or VM for the e2e lane until upstream support lands.
 
-`playwright.config.ts` at the repo root starts both servers via `webServer` before running tests. In CI it enforces `workers: 1` and uploads traces/screenshots on failure.
+`playwright.config.ts` at the repo root starts the hub via `webServer` before running tests. In CI it enforces `workers: 1` and uploads traces/screenshots on failure.
 
 The suite is hermetic. `playwright.config.ts` creates a fresh `<tmpdir>/mangostudio-smoke-<random>` directory per run and starts the hub with `HOME` (and `USERPROFILE`) pointing at it, so the database, uploads, checkpoints, `run/`, `logs/`, and the `config.toml` and `.env` the hub reads all live under `<tmpdir>/mangostudio-smoke-<random>/.mango` — nothing is read from or written to your real `~/.mango`. `MANGO_HOME` alone would not do this, because it moves only the runtime home. The hub's storage variables (`DATABASE_PATH`, `UPLOADS_DIR`, `MANGO_HOME`, and the rest) are pinned to the temporary home as well, so one exported in your shell cannot redirect the suite back to real data, and connector tokens go to a file secret store inside it instead of the OS keychain. The hub explicitly binds `127.0.0.1` (`API_HOST`) so the open-signup suite always uses IPv4 loopback, independently of config files and the normal `localhost` default. `CARGO_HOME` and `RUSTUP_HOME` keep their real values so the dev server's `cargo build` still finds your toolchain. The directory is removed when the run ends.
 

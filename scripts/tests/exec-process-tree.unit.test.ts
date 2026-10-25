@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 import { runCommand, runParallel } from '../lib/exec';
 import { fixtureChildEnvironment } from './support/child-supervision';
@@ -101,6 +101,32 @@ function startRunner(
   return runner;
 }
 
+/** Launch the real production CLI/default executor, replacing only external Bun commands. */
+function startProductionRunner(heldPhase: string): RunnerProcess {
+  const bin = join(dir, "production bin's");
+  mkdirSync(bin);
+  for (const [name, phase] of [
+    ['bun', 'build'],
+    ['bunx', 'browser'],
+  ] as const) {
+    const command = fixtureCommand('production-command', dir, phase, heldPhase)
+      .map((part) => `'${part.replaceAll("'", "'\\''")}'`)
+      .join(' ');
+    writeFileSync(join(bin, name), `#!/bin/sh\nexec ${command} "$@"\n`, { mode: 0o755 });
+  }
+  const runner = Bun.spawn(
+    [process.execPath, join(import.meta.dir, '..', 'browser-production.ts')],
+    {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: fakeEnv({ PATH: `${bin}${delimiter}${process.env.PATH ?? ''}` }),
+    }
+  );
+  spawned.push(runner);
+  return runner;
+}
+
 /** A runner whose stdin, stdout and stderr are the terminal it leads. */
 interface TerminalRunner {
   readonly proc: RunnerProcess;
@@ -189,6 +215,25 @@ function signalDeliveries(): string {
 }
 
 describe('cancelling a runner', () => {
+  test.skipIf(IS_WINDOWS).each(['build', 'browser'])(
+    'production %s cancellation settles owned descendants and never admits a later phase',
+    async (phase) => {
+      const runner = startProductionRunner(phase);
+      const pids = await readyPids();
+
+      runner.kill('SIGTERM');
+      await runner.exited;
+
+      await expectNothingLeft(pids);
+      const admitted = readFileSync(join(dir, 'production-phases.log'), 'utf8').trim().split('\n');
+      expectValue(
+        'production admitted phases',
+        phase === 'build' ? 'production:build' : 'production:build,production:browser',
+        admitted.join(',')
+      );
+    }
+  );
+
   test('SIGTERM to the runner stops its child and the grandchild', async () => {
     const runner = startRunner();
     const pids = await readyPids();

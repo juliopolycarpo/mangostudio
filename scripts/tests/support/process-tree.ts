@@ -162,6 +162,14 @@ export function forceKillGroup(pid: number): void {
   }
 }
 
+/** Hold one actual production CLI phase behind named Bun/bunx command fakes. */
+async function runFakeProductionCommand(dir: string, phase: string, held: string): Promise<number> {
+  appendFileSync(join(dir, 'production-phases.log'), `production:${phase}\n`);
+  if (phase !== held) return 0;
+  await runFakeChild(dir, 'linger:0', 'linger:0');
+  return 0;
+}
+
 async function runFakeRunner(dir: string, childRole: string, extra: string[]): Promise<number> {
   const interactive = childRole === 'interactive';
   const role = interactive ? 'child' : childRole;
@@ -252,6 +260,9 @@ if (import.meta.main) {
   const [role, dir = '', ...rest] = process.argv.slice(2);
   const numbers = rest.map(Number);
   if (role === 'runner') process.exit(await runFakeRunner(dir, rest[0] ?? 'child', rest.slice(1)));
+  if (role === 'production-command') {
+    process.exit(await runFakeProductionCommand(dir, rest[0] ?? '', rest[1] ?? ''));
+  }
   if (role === 'child') await runFakeChild(dir, stopBehaviour(rest[0]), stopBehaviour(rest[1]));
   if (role === 'grandchild') {
     recordSignals('grandchild', dir, stopBehaviour(rest[0]));

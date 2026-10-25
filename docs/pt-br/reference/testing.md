@@ -95,6 +95,23 @@ bun run test:e2e:setup
 bun run test --e2e
 ```
 
+`bun run test:e2e:production` compila o frontend de produção (incluindo React Compiler) e
+executa o pré-requisito de terminal mais `grid-late-card-state.spec.ts` e
+`motion-presets.spec.ts`. `playwright.production.config.ts` reutiliza o home temporário,
+autenticação compartilhada, dependência do terminal e políticas do config padrão. O hub
+estático inicia com `bun apps/api/src/index.ts serve` na raiz do repositório para localizar
+o bundle compilado. As duas fases usam o supervisor de comandos mantido: uma falha no build
+impede o Playwright, e o cancelamento aguarda a limpeza da árvore de processos sob sua posse.
+Build e Playwright compartilham o passo de smoke de dez minutos em CI.
+A cobertura é restrita a essas regressões de renderização; o comando padrão continua usando
+a stack de desenvolvimento.
+
+O workflow hospedado executa legs independentes de desenvolvimento e produção, com
+`fail-fast: false`. Uma falha em qualquer leg reprova o agregado de browser e os dois gates
+de CI. Produção usa os artefatos `playwright-results-production` e
+`playwright-report-production`; desenvolvimento mantém os nomes existentes. As políticas de
+cache do navegador, instalação e artefato do runtime permanecem iguais nas duas legs.
+
 Rode `bun run test:e2e:setup` uma vez em uma máquina nova ou quando o Playwright avisar que o binário do Chromium está ausente. O script encapsula `bunx playwright install --with-deps chromium`, então instala apenas o navegador usado por esta suíte e evita comandos `npx`.
 
 O job de browser-smoke em CI roda em `ubuntu-24.04` porque o Playwright 1.60 ainda não consegue instalar dependências do Chromium no Ubuntu 26.04. Se você usa Ubuntu 26.04 localmente, rode a lane e2e em um container ou VM Ubuntu 24.04/22.04 até o suporte upstream chegar.
