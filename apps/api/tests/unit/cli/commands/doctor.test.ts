@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_DOCTOR_ARGS } from '../../../../src/cli/args';
 import { runDoctor } from '../../../../src/cli/commands/doctor';
 import type { FsProbe } from '../../../../src/cli/doctor-checks';
+import type { SshClientProbe } from '../../../../src/cli/ssh-client-probe';
 import type { BuildInfo } from '../../../../src/lib/build-info';
 import type { MangoConfig } from '../../../../src/lib/config';
 import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
@@ -81,6 +82,16 @@ function makeConfig(): MangoConfig {
   };
 }
 
+/** The doctor checklist fixture never probes the host's installed SSH client. */
+function healthySshClientProbe(): Promise<SshClientProbe> {
+  return Promise.resolve({ path: '/fixture/ssh', version: 'OpenSSH_fixture', error: null });
+}
+
+/** Supplies missing-executable discovery for the host-isolation regression. */
+function noExecutablesOnHost(): null {
+  return null;
+}
+
 function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
   return {
     loadConfig: makeConfig,
@@ -100,6 +111,7 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
         version: '0.1.1',
         error: null,
       }),
+    probeSshClient: healthySshClientProbe,
     listChatGptConnectors: () => [],
     collectChatGptChecks: () =>
       Promise.resolve([
@@ -126,6 +138,24 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
 }
 
 describe('runDoctor', () => {
+  it('uses the fixture SSH client when SSH is unavailable on the host', async () => {
+    const lookup = spyOn(Bun, 'which').mockImplementation(noExecutablesOnHost);
+    onTestFinished(() => {
+      lookup.mockRestore();
+    });
+    const lines: string[] = [];
+    function recordDoctorLine(message: string): void {
+      lines.push(message);
+    }
+
+    await runDoctor({ ...DEFAULT_DOCTOR_ARGS }, { ...makeDoctorDeps(), log: recordDoctorLine });
+
+    const text = lines.join('\n');
+    expect(text).toContain('OpenSSH_fixture');
+    expect(text).toContain('0 warning(s), 0 failure(s).');
+    expect(lookup.mock.calls.filter(([name]) => name === 'ssh')).toEqual([]);
+  });
+
   it('prints a checklist and does not exit when healthy', async () => {
     const lines: string[] = [];
     let exited = -1;
