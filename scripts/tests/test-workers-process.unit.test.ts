@@ -36,6 +36,7 @@ import {
   readProcessState,
 } from './support/process-liveness';
 import { fakeLane } from './support/test-worker-fakes';
+import { withWorkerLaneCleanup } from './support/worker-lane-cleanup';
 
 const TEST_DIR = 'tests/unit';
 const FILES = fakeLane(8, 1);
@@ -336,22 +337,24 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
         pidDir,
       }
     );
-    const up = await until(() => readdirSync(pidDir).length === 4, 10_000);
-    const pids = readdirSync(pidDir).map((name) => readPid(pidDir, name));
-    try {
-      expect(up, 'expected two workers and two children running before cancellation').toBe(true);
-      controller.abort();
-      const { verdict } = await running;
-      expect(verdict.failures).toHaveLength(2);
-      expect(verdict.failures.every((failure) => failure.includes('was cancelled'))).toBe(true);
-      expect(
-        pids.filter((pid) => isAlive(pid)),
-        'expected no live descendants after cancellation'
-      ).toEqual([]);
-    } finally {
-      controller.abort();
-      cleanupPids(pids);
-    }
+    await withWorkerLaneCleanup(controller, running, async () => {
+      const up = await until(() => readdirSync(pidDir).length === 4, 10_000);
+      const pids = readdirSync(pidDir).map((name) => readPid(pidDir, name));
+      try {
+        expect(up, 'expected two workers and two children running before cancellation').toBe(true);
+        controller.abort();
+        const { verdict } = await running;
+        expect(verdict.failures).toHaveLength(2);
+        expect(verdict.failures.every((failure) => failure.includes('was cancelled'))).toBe(true);
+        expect(
+          pids.filter((pid) => isAlive(pid)),
+          'expected no live descendants after cancellation'
+        ).toEqual([]);
+      } finally {
+        controller.abort();
+        cleanupPids(pids);
+      }
+    });
   });
 
   it('pass, in a group of their own, when nothing outlives them', async () => {
@@ -482,26 +485,29 @@ describe('cancelling real worker processes', () => {
       { signal: controller.signal, pidDir }
     );
 
-    // Cancel only once every worker is up, or a late one would never be signalled.
-    const deadline = Date.now() + 20_000;
-    while (readdirSync(pidDir).length < 3 && Date.now() < deadline) await Bun.sleep(25);
-    expect(readdirSync(pidDir).sort(), 'expected all 3 workers running before cancelling').toEqual([
-      'worker-1.pid',
-      'worker-2.pid',
-      'worker-3.pid',
-    ]);
-    const pids = readdirSync(pidDir).map((name) =>
-      Number(readFileSync(join(pidDir, name), 'utf8'))
-    );
-    controller.abort();
-    const { verdict } = await running;
+    await withWorkerLaneCleanup(controller, running, async () => {
+      // Cancel only once every worker is up, or a late one would never be signalled.
+      const deadline = Date.now() + 20_000;
+      while (readdirSync(pidDir).length < 3 && Date.now() < deadline) await Bun.sleep(25);
+      expect(
+        readdirSync(pidDir).sort(),
+        'expected all 3 workers running before cancelling'
+      ).toEqual(['worker-1.pid', 'worker-2.pid', 'worker-3.pid']);
+      const pids = readdirSync(pidDir).map((name) =>
+        Number(readFileSync(join(pidDir, name), 'utf8'))
+      );
+      controller.abort();
+      const { verdict } = await running;
 
-    expect(verdict.failures.filter((failure) => failure.includes('was cancelled'))).toHaveLength(3);
-    expect(verdict.failures[0]).toContain('api-unit worker 1/3 was cancelled');
-    const alive = pids.filter((pid) => isAlive(pid));
-    expect(alive, `expected live workers: 0 | received: ${alive.length} (pids ${alive})`).toEqual(
-      []
-    );
+      expect(verdict.failures.filter((failure) => failure.includes('was cancelled'))).toHaveLength(
+        3
+      );
+      expect(verdict.failures[0]).toContain('api-unit worker 1/3 was cancelled');
+      const alive = pids.filter((pid) => isAlive(pid));
+      expect(alive, `expected live workers: 0 | received: ${alive.length} (pids ${alive})`).toEqual(
+        []
+      );
+    });
   });
 });
 
