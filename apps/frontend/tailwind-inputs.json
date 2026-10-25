@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "defaultSources": [
+    { "base": ".", "pattern": "src/**/*", "negated": false },
+    { "base": ".", "pattern": "index.html", "negated": false }
+  ],
+  "additionalRoots": []
+}

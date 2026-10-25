@@ -2,6 +2,7 @@
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { basename, isAbsolute, join } from 'node:path';
+import { frontendBuildCacheArguments } from '@mangostudio/shared/frontend-build/host';
 
 import {
   binaryCompileDefines,
@@ -100,9 +101,13 @@ async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
     return;
   }
 
-  const result = await runCommand('build:frontend', createTurboBuildCommand(['frontend']), {
-    cwd: ROOT_DIR,
-  });
+  const result = await runCommand(
+    'build:frontend',
+    createTurboBuildCommand(['frontend'], frontendBuildCacheArguments(ROOT_DIR)),
+    {
+      cwd: ROOT_DIR,
+    }
+  );
   if (result.exitCode !== 0) {
     fatal('Frontend build failed during standalone binary packaging.');
   }
@@ -836,9 +841,13 @@ if (buildTargets.length === 0) {
 
 header('Build');
 
-const result = await runCommand('build', createTurboBuildCommand(buildTargets), {
-  cwd: ROOT_DIR,
-});
+const result = await runCommand(
+  'build',
+  createTurboBuildCommand(buildTargets, frontendBuildCacheArguments(ROOT_DIR)),
+  {
+    cwd: ROOT_DIR,
+  }
+);
 
 if (result.exitCode === 0 && buildTargets.includes('frontend')) {
   const buildTime = new Date().toISOString();

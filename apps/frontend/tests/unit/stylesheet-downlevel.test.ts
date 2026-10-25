@@ -18,7 +18,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
-import tailwind from 'bun-plugin-tailwind';
+import { createTailwindPlugin } from '../../scripts/tailwind';
 
 const STYLESHEET = join(import.meta.dir, '../../src/index.css');
 const STYLESHEETS = [STYLESHEET, join(import.meta.dir, '../../src/styles/markdown-content.css')];
@@ -42,7 +42,7 @@ describe('stylesheets stay free of color-mix', () => {
   it('still compiles through the bundler with the theme intact', async () => {
     const built = await Bun.build({
       entrypoints: [STYLESHEET],
-      plugins: [tailwind],
+      plugins: [createTailwindPlugin({ projectRoot: join(import.meta.dir, '../..') })],
       // The font files are served from the public dir, not bundled — the real
       // build marks them external for the same reason.
       external: ['/fonts/*'],

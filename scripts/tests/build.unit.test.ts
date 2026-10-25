@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, sep } from 'node:path';
+import { delimiter, dirname, join, relative, sep } from 'node:path';
 import {
   binaryCompileDefines,
   binaryCompileFlags,
@@ -63,6 +63,75 @@ describe('build script', () => {
     ]);
   });
 
+  test('passes a prelookup cache decision into filtered workspace builds', () => {
+    expect(createTurboBuildCommand(['frontend'], ['--cache=local:,remote:'])).toEqual([
+      'turbo',
+      'run',
+      'build',
+      '--filter=@mangostudio/frontend',
+      '--cache=local:,remote:',
+    ]);
+  });
+
+  test('forwards general Turbo arguments and retains protocol workspace selection', () => {
+    const child = Bun.spawnSync(
+      [process.execPath, 'run', 'build:turbo', '--dry=json', '--filter=@mangostudio/protocol'],
+      { cwd: ROOT_DIR, stdout: 'pipe', stderr: 'pipe' }
+    );
+    expect(child.exitCode, new TextDecoder().decode(child.stderr)).toBe(0);
+    const result = JSON.parse(new TextDecoder().decode(child.stdout)) as {
+      tasks: { taskId: string }[];
+    };
+    expect(result.tasks.map((task) => task.taskId)).toEqual(['@mangostudio/protocol#build']);
+  });
+
+  test('keeps owned Turbo cache flags before a forwarded task separator', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'turbo-cache-arguments-'));
+    try {
+      const preload = join(directory, 'force-uncacheable.ts');
+      writeFileSync(
+        preload,
+        `
+        import { mock } from 'bun:test';
+        function fakeUncacheableFrontendInputs() { return ['--cache=local:,remote:']; }
+        function fakeFrontendBuildHost() { return { frontendBuildCacheArguments: fakeUncacheableFrontendInputs }; }
+        mock.module('@mangostudio/shared/frontend-build/host', fakeFrontendBuildHost);
+      `
+      );
+      const child = Bun.spawnSync(
+        [
+          process.execPath,
+          '--preload',
+          preload,
+          join(ROOT_DIR, 'scripts/build-turbo.ts'),
+          '--dry=json',
+          '--filter=@mangostudio/protocol',
+          '--',
+          '--tailwind-cache-probe',
+        ],
+        {
+          cwd: ROOT_DIR,
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: {
+            ...process.env,
+            PATH: `${join(ROOT_DIR, 'node_modules/.bin')}${delimiter}${process.env.PATH ?? ''}`,
+          },
+        }
+      );
+      expect(child.exitCode, new TextDecoder().decode(child.stderr)).toBe(0);
+      const result = JSON.parse(new TextDecoder().decode(child.stdout)) as {
+        tasks: { cliArguments: string[] }[];
+      };
+      expect(
+        result.tasks[0].cliArguments,
+        'owned cache flags must configure Turbo, not the task'
+      ).toEqual(['--tailwind-cache-probe']);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   test('exposes explicit root build scripts for turbo and binary packaging', () => {
     const manifest = JSON.parse(readText('package.json')) as {
       scripts?: Record<string, string>;
@@ -70,7 +139,7 @@ describe('build script', () => {
 
     expect(manifest.scripts?.build).toBe('bun ./scripts/build.ts');
     expect(manifest.scripts?.['build:binary']).toBe('bun ./scripts/build.ts --binary');
-    expect(manifest.scripts?.['build:turbo']).toBe('turbo run build');
+    expect(manifest.scripts?.['build:turbo']).toBe('bun ./scripts/build-turbo.ts');
   });
 
   test('declares package-local Turbo outputs for build caching', () => {
@@ -93,7 +162,7 @@ describe('build script', () => {
     const buildScript = readText('scripts/build.ts');
 
     expect(buildScript).toContain('createTurboBuildCommand');
-    expect(buildScript).toContain("runCommand('build'");
+    expect(buildScript).toMatch(/runCommand\(\s*'build'/);
     expect(buildScript).not.toContain('runParallel(');
   });
 

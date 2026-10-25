@@ -76,9 +76,12 @@ export function selectBuildWorkspaces(workspaces: WorkspaceName[]): BuildSelecti
 }
 
 /** Build a filtered Turbo build command. // Usage: createTurboBuildCommand(['frontend']); */
-export function createTurboBuildCommand(workspaces: WorkspaceName[]): string[] {
+export function createTurboBuildCommand(
+  workspaces: WorkspaceName[],
+  cacheArguments: readonly string[] = []
+): string[] {
   const filters = workspaces.map((workspace) => `--filter=${WORKSPACES[workspace].packageName}`);
-  return ['turbo', 'run', 'build', ...filters];
+  return ['turbo', 'run', 'build', ...filters, ...cacheArguments];
 }
 
 function isBuildWorkspace(workspace: WorkspaceName): boolean {

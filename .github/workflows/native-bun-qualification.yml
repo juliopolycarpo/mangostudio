@@ -131,6 +131,28 @@ jobs:
           QUALIFICATION_SOURCE_SHA: ${{ matrix.source.sha }}
         run: bun tooling/scripts/ci/native-bun-qualification.ts --root source --out evidence --sha "$QUALIFICATION_SOURCE_SHA"
 
+      - name: Build the complete frontend with the native compiler
+        if: ${{ !matrix.source.baseline }}
+        working-directory: source
+        env:
+          QUALIFICATION_SOURCE_SHA: ${{ matrix.source.sha }}
+        run: |
+          bun run --filter @mangostudio/frontend build > ../evidence/frontend-build.log 2>&1
+          bun -e '
+            const { dirname, join } = await import("node:path");
+            const base = join(process.cwd(), "apps/frontend");
+            const compiler = Bun.resolveSync("@tailwindcss/node", base);
+            const scanner = Bun.resolveSync("@tailwindcss/oxide", base);
+            const lightning = Bun.resolveSync("lightningcss", dirname(compiler));
+            const suffix = process.platform === "linux" ? "-gnu" : process.platform === "win32" ? "-msvc" : "";
+            const native = [
+              Bun.resolveSync("@tailwindcss/oxide-" + process.platform + "-" + process.arch + suffix, dirname(scanner)),
+              Bun.resolveSync("lightningcss-" + process.platform + "-" + process.arch + suffix, dirname(lightning)),
+            ];
+            const artifacts = await Promise.all(native.map(async path => ({ path, sha256: Bun.CryptoHasher.hash("sha256", await Bun.file(path).arrayBuffer(), "hex") })));
+            console.log(JSON.stringify({ sha: process.env.QUALIFICATION_SOURCE_SHA, bun: Bun.version, platform: process.platform, arch: process.arch, compiler, scanner, lightning, artifacts }, null, 2));
+          ' > ../evidence/frontend-native-modules.json
+
       - name: Upload source, setup, check, test and terminal receipts
         if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

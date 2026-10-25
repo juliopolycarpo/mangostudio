@@ -15,9 +15,10 @@ import { existsSync, renameSync, rmSync, statSync } from 'node:fs';
 import { chmod, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { TailwindInputs } from '@mangostudio/shared/frontend-build/host';
 import { BUILD_STATE_FILE, listDistFiles } from '@mangostudio/shared/utils/dist-files';
-import tailwind from 'bun-plugin-tailwind';
 import { updateRouteTree } from './scripts/routes';
+import { createTailwindPlugin } from './scripts/tailwind';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DIST = join(ROOT, 'dist');
@@ -46,6 +47,7 @@ export interface BuildState {
   /** The `MANGO_API_URL` compiled into the bundle, empty when unset. */
   readonly apiUrl: string;
   readonly mode: 'dev' | 'production';
+  readonly tailwindInputs: TailwindInputs;
 }
 
 /**
@@ -239,6 +241,11 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
   // Only the dev loop skips: a production build must be byte-identical to one
   // from a clean checkout, whatever the mtimes say.
   await updateRouteTree({ force: production });
+  const tailwind = createTailwindPlugin({ projectRoot: ROOT });
+  await tailwind.prepare([
+    join(ROOT, 'src/index.css'),
+    Bun.resolveSync('@xterm/xterm/css/xterm.css', ROOT),
+  ]);
   // Build beside dist/, then publish only after every output and post-build
   // assertion succeeds. A failed dev rebuild therefore leaves the bundle the
   // API is already serving intact.
@@ -305,6 +312,7 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
     await writeBuildState(stagedDist, {
       apiUrl: apiUrlOverride,
       mode: production ? 'production' : 'dev',
+      tailwindInputs: tailwind.verify(result.metafile),
     });
 
     // Next to dist/, not inside it: the binary build embeds every file dist/
@@ -327,6 +335,7 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
     if (stagedMetafilePath) {
       await writeFile(stagedMetafilePath, JSON.stringify(result.metafile));
     }
+    tailwind.verify(result.metafile);
     await publishDist(stagedDist, DIST, async () => {
       if (stagedMetafilePath) {
         await publishMetafile(stagedMetafilePath, metafilePath);
