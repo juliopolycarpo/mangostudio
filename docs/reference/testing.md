@@ -447,7 +447,7 @@ cannot even receive `$MANGOSTUDIO_BUN_TEST_ARGS`.
 > accumulation across workers, so serial `--isolate` concentrates rather than
 > avoids it.
 
-CI runs three shards, the frontend job, and one merge job
+CI runs two numbered shards, the separate frontend job, and one merge job
 (`.github/workflows/test.yml`). Where the sharded run's time went when the
 split was designed, measured on run 32331139863 (four-core runner, Turbo
 running the lanes concurrently, the frontend then still on Vitest at 189.4s):
@@ -462,7 +462,7 @@ running the lanes concurrently, the frontend then still on Vitest at 189.4s):
 The shard boundary is a slice of *every* sharded lane rather than one job per
 workspace: a per-workspace split leaves `apps/api` alone at 278s.
 
-The count before the current one came from five first-attempt hosted CI runs
+The earlier four-shard configuration came from five first-attempt hosted CI runs
 each at 4, 6 and 8 shards on 2026-10-11/12 UTC. The runs were interleaved sequentially on
 frozen source [`683f69a`](https://github.com/juliopolycarpo/mangostudio/commit/683f69a57b798ea85f4fa93184e17acf3de3ce41),
 with Bun 1.4.3 and the shipping native runtime profile. The variants changed
@@ -515,9 +515,9 @@ main. The chosen configuration is validated on updated source separately;
 these timings do not compare the new workload across counts. Re-measure after
 a runtime profile or CI concurrency/topology change.
 
-The current configuration uses three shards with the api unit lane at
+The previous configuration used three shards with the api unit lane at
 `--parallel=4`. The comparison above ran that lane at one worker per shard, so
-it does not rank three. The initial three-shard estimate used per-lane times
+it did not rank three. The initial three-shard estimate used per-lane times
 from one four-shard run on main
 ([38202725009](https://github.com/juliopolycarpo/mangostudio/actions/runs/38202725009)),
 where the api lane runs unit then integration back to back and root scripts
@@ -554,25 +554,34 @@ near 90s. A shard drawing both slow integration files and a long root slice
 could exceed 110s. These runs are on different source revisions and do not
 establish a paired speedup or a distribution for three shards.
 
-One fewer shard removes a runner job and its roughly 30s of fixed setup.
-Total runner time and Test completion still need a hosted three-versus-four
-comparison with the same source, worker width and timing baseline. Four shards
-already waited a median 8s in aggregate in the earlier cohort; that queue
-figure is historical, not a saving predicted for this configuration. Reject
-three shards if any shard test step reaches 147s or Test completion is clearly
-worse than four shards over several first-attempt runs. Keep the 240s watchdog
-bound while collecting that evidence.
+The current two-shard configuration adopts the completed
+[2026-10-25 topology experiment](https://github.com/juliopolycarpo/mangostudio/blob/59db10fb13434f3e6ecf1da8dc9fc31a074d08a4/docs/reports/2026-10-25-test-topologies/report.md),
+on fixed source `87442739` with Bun 1.4.4. All three two-shard runs passed with
+the same inventory as three shards: 15,516 passed and 92 skipped. Median Test
+latency was 238s versus 237s (+0.4%); aggregate Test runner time was 510s versus
+604s (-15.6%). Including the common runtime build, median pipeline latency
+was 314s versus 311s and aggregate runner time was 582s versus 675s.
 
-Two shards remains a later candidate. The newer totals project to about 133s
-of unit plus integration per shard before imbalance, close to the 147s
-rejection limit. Integration parallelism would need separate qualification;
-the lane stays unisolated while oven-sh/bun#39709 remains open. The unit
-lane's hosted soak does not change that gate. Root scripts could then become
-the bound, so widening integration alone would not establish a two-shard win.
+The owner explicitly chose adoption despite the report's conservative
+recommendation to retain three shards: one two-shard sample reached 155s,
+exceeding the experiment's preventive 147s criterion. That criterion is not
+a production gate. The real numbered-shard watchdog stays at 240s per attempt,
+with the existing timeout retry and 10-minute job limit. Frontend remains a
+separate whole lane with its existing 210s watchdog. Internal parallelism,
+seeds, assertions, coverage floors and cache/security policies are unchanged.
+
+These are three hosted samples, not a stable tail-latency estimate or proof
+of a universal optimum. Median block CPU was 772.9s at two versus 663.8s at
+three, with overlapping variation and no strong causal conclusion. Lower
+runner time does not establish lower CPU use or monetary savings. The report
+preserves failed attempts and remote evidence; its shell ZIP/log download
+failures and incomplete consolidated ZIP limit exact line-hit comparisons.
+The adoption PR's ordinary full CI validates the production topology; it is
+not a new benchmark round and does not relax any correctness or coverage gate.
 
 Changing the count requires three matching edits: `SHARD_COUNT`, the matrix
 list, and the shard job's `name`. `env` is unavailable in `jobs.<id>.name`, so
-the `/3` there cannot interpolate the value.
+the `/2` there cannot interpolate the value.
 
 #### Root scripts workers
 

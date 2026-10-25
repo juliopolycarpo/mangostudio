@@ -210,7 +210,8 @@ describe('mergeTestShards', () => {
       },
     ]);
 
-    const summary = await mergeTestShards(shards, output);
+    // Two numbered shards plus the separate frontend are the complete job set.
+    const summary = await mergeTestShards(shards, output, 3);
     expect(summary).toMatchObject({ shards: 3, exitCode: 0, durationSeconds: 66 });
     expect(summary.coverageErrors).toBeUndefined();
 

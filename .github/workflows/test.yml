@@ -14,12 +14,11 @@ on:
 permissions:
   contents: read
 
-# Three shards with the api unit lane at `--parallel=4`. The hosted 4/6/8
-# comparison picked four at one unit worker per shard. One shard fewer removes
-# a job's fixed setup, but its wall-clock cost still needs a hosted comparison:
-# the first four-worker run projects to about 90s at three shards, with root
-# scripts bounding two of its four shards. See docs/reference/testing.md for
-# the measurements, projection, rejection criteria and their limits.
+# Two numbered shards with the api unit lane at `--parallel=4`, plus the
+# separate frontend lane. The pinned 3/2/1 comparison found similar Test
+# latency and lower aggregate runner time at two; adoption retains the 240s
+# watchdog despite one sample exceeding the experiment's preventive 147s
+# criterion. See docs/reference/testing.md for evidence and limits.
 # Changing it is a three-line change: this value, the matrix list, and the shard
 # job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
 # so that last one cannot interpolate this value.
@@ -34,7 +33,7 @@ permissions:
 # partition. What has to stay stable is the file all shards of one run read, and
 # that is what resolve-timings pins.
 env:
-  SHARD_COUNT: 3
+  SHARD_COUNT: 2
   # Names every child a run spawns, and every one that never exits, in the shard
   # log. The failure this exists for (#922) reproduces only in CI, and Bun's own
   # `killed N dangling process` says nothing about which child it killed.
@@ -103,7 +102,7 @@ jobs:
     # failed jobs reuses resolve-timings' output and therefore the exact file
     # partition that hung; "re-run all jobs" re-resolves the baseline, which
     # is why it has looked more reliable.
-    name: Tests (shard ${{ matrix.shard }}/3)
+    name: Tests (shard ${{ matrix.shard }}/2)
     needs: [resolve-timings]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -112,7 +111,7 @@ jobs:
       # for the QA report instead of a run that stopped mid-fan-out.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2]
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
       # Bounds the snapshot this job restores and saves back. Each save carries
@@ -207,9 +206,9 @@ jobs:
       # baseline put back first. The bound is twice the slowest healthy test
       # step measured at four shards with the unit lane on one worker (120s;
       # see docs/reference/testing.md), so a loaded runner that doubles the
-      # step is not read as a hung one. Three shards at four unit workers
-      # project to a shorter step than that, so the bound is kept. Both
-      # attempts have to fit this job's
+      # step is not read as a hung one. The two-shard adoption keeps this
+      # production bound; the experiment's 147s criterion is not a timeout.
+      # Both attempts have to fit this job's
       # `timeout-minutes` or the retry is cut short: 2 x 240s leaves 120s for
       # the other steps, which took at most 45s in those runs.
       - name: Run tests with coverage
