@@ -23,6 +23,7 @@ function createTerminal() {
   term.loadAddon(search);
   term.loadAddon(new ClipboardAddon());
   term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = '11';
   term.loadAddon(new WebLinksAddon());
   term.open(container);
   return {

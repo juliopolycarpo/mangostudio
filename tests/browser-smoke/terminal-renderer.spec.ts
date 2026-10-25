@@ -258,6 +258,11 @@ for (const dpr of [1, 2]) {
       expect(initial.combining).toBe('é');
       expect(initial.combiningWidth).toBe(1);
       expect(initial.cjkWidth).toBe(2);
+      expect(
+        initial.unicodeVersion,
+        'renderer fixture must use production Unicode version 11'
+      ).toBe('11');
+      expect(initial.emojiWidth, 'expected 🙂 to occupy two terminal cells').toBe(2);
       expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('WEBGL-CLIPBOARD');
 
       const screen = page.locator('.xterm-screen');
