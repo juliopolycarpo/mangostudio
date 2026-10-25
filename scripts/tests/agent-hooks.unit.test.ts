@@ -28,7 +28,9 @@ import {
   HEARTBEAT_MS,
   heartbeatPath,
   MARKER_ENV,
+  stopPath,
 } from './support/fake-rustfmt-markers';
+import { requestFormatterStop, withFormatterHookCleanup } from './support/formatter-hook-cleanup';
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
@@ -252,47 +254,40 @@ describe('agent auto-fix hooks', () => {
       // Allow hook startup and Windows tree termination around the 5-second formatter deadline.
       timeout: 15_000,
     });
-    proc.stdin.write(JSON.stringify({ path: filePath }));
-    proc.stdin.end();
-
-    const exitCode = await proc.exited;
     const fakes = [
       [marker, 'fake rustfmt'],
       [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
     ] as const;
     const leaked: number[] = [];
-    try {
-      expect(exitCode).toBe(0);
-      expect(proc.signalCode).toBeNull();
-      for (const [fakeMarker, who] of fakes) {
-        const started = await readMarker(fakeMarker, who);
-        expect(started.args).toEqual([filePath]);
-        expect(started.cwd).toBe(repoRoot);
-        if (await stillBeating(fakeMarker)) leaked.push(started.pid);
-        const lastBeat = JSON.parse(await readFile(heartbeatPath(fakeMarker), 'utf8')) as {
-          at: number;
-        };
-        // Measure the formatter's live interval, excluding cold hook startup. A longer
-        // formatter deadline still fails this bound; both descendants must also stop.
-        expect(
-          lastBeat.at - started.startedAt,
-          `${who}: expected less than 7000ms alive`
-        ).toBeLessThan(7000);
-      }
-      expect(leaked).toEqual([]);
-      expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
-    } finally {
-      // An earlier assertion must not bypass discovery of either descendant.
-      for (const [fakeMarker, who] of fakes) {
-        const started = await readMarker(fakeMarker, who).catch(() => null);
-        if (!started || !(await stillBeating(fakeMarker))) continue;
-        try {
-          process.kill(started.pid, 'SIGKILL');
-        } catch {
-          // Stopped between the heartbeat check and here.
+    await withFormatterHookCleanup(
+      proc,
+      fakes,
+      async () => {
+        proc.stdin.write(JSON.stringify({ path: filePath }));
+        proc.stdin.end();
+        const exitCode = await proc.exited;
+        expect(exitCode).toBe(0);
+        expect(proc.signalCode).toBeNull();
+        for (const [fakeMarker, who] of fakes) {
+          const started = await readMarker(fakeMarker, who);
+          expect(started.args).toEqual([filePath]);
+          expect(started.cwd).toBe(repoRoot);
+          if (await stillBeating(fakeMarker)) leaked.push(started.pid);
+          const lastBeat = JSON.parse(await readFile(heartbeatPath(fakeMarker), 'utf8')) as {
+            at: number;
+          };
+          // Measure the formatter's live interval, excluding cold hook startup. A longer
+          // formatter deadline still fails this bound; both descendants must also stop.
+          expect(
+            lastBeat.at - started.startedAt,
+            `${who}: expected less than 7000ms alive`
+          ).toBeLessThan(7000);
         }
-      }
-    }
+        expect(leaked).toEqual([]);
+        expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
+      },
+      { requestStop: requestFormatterStop, stillBeating }
+    );
   }, 20_000);
 
   // Windows has no group signal to forward; Bun's job object ends the hook's children there.
@@ -313,33 +308,82 @@ describe('agent auto-fix hooks', () => {
         stderr: 'ignore',
         timeout: 8000,
       });
-      proc.stdin.write(JSON.stringify({ path: filePath }));
-      proc.stdin.end();
-
       const fakes = [
         [marker, 'fake rustfmt'],
         [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
       ] as const;
       const leaked: number[] = [];
-      try {
-        for (const [fakeMarker, who] of fakes) await firstHeartbeat(fakeMarker, who);
-        process.kill(-proc.pid, 'SIGTERM');
-        await proc.exited;
-        for (const [fakeMarker, who] of fakes) {
-          const started = await readMarker(fakeMarker, who);
-          if (await stillBeating(fakeMarker)) leaked.push(started.pid);
-        }
-        expect(leaked).toEqual([]);
-        expect(proc.exitCode).toBe(143);
-      } finally {
-        for (const pid of leaked) {
-          try {
-            process.kill(pid, 'SIGKILL');
-          } catch {
-            // Stopped between the heartbeat check and here.
+      await withFormatterHookCleanup(
+        proc,
+        fakes,
+        async () => {
+          proc.stdin.write(JSON.stringify({ path: filePath }));
+          proc.stdin.end();
+          for (const [fakeMarker, who] of fakes) await firstHeartbeat(fakeMarker, who);
+          process.kill(-proc.pid, 'SIGTERM');
+          await proc.exited;
+          for (const [fakeMarker, who] of fakes) {
+            const started = await readMarker(fakeMarker, who);
+            if (await stillBeating(fakeMarker)) leaked.push(started.pid);
           }
-        }
+          expect(leaked).toEqual([]);
+          expect(proc.exitCode).toBe(143);
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
+    },
+    10000
+  );
+
+  it.each(['running tree', 'late grandchild'] as const)(
+    'cooperatively stops a %s',
+    async (state) => {
+      const dir = await makeTempDir();
+      const marker = join(dir, 'started.json');
+      const fakes = [
+        [marker, 'fake rustfmt'],
+        [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
+      ] as const;
+      if (state === 'late grandchild') {
+        await Promise.all(fakes.map(([fakeMarker]) => requestFormatterStop(fakeMarker)));
       }
+      const executable = join(
+        fakeRustfmtBin,
+        process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt'
+      );
+      const launchMarker = state === 'late grandchild' ? grandchildMarker(marker) : marker;
+      const proc = Bun.spawn([executable], {
+        env: {
+          ...formatterEnvironment(launchMarker, '1'),
+          [GRANDCHILD_ENV]: state === 'late grandchild' ? '1' : '0',
+        },
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'ignore',
+        timeout: 8000,
+      });
+      await withFormatterHookCleanup(
+        proc,
+        fakes,
+        async () => {
+          if (state === 'running tree') {
+            for (const [fakeMarker, who] of fakes) await firstHeartbeat(fakeMarker, who);
+            for (const [fakeMarker] of fakes) expect(await stillBeating(fakeMarker)).toBe(true);
+            await Promise.all(fakes.map(([fakeMarker]) => requestFormatterStop(fakeMarker)));
+          }
+          expect(await proc.exited).toBe(0);
+          expect(proc.signalCode).toBeNull();
+          for (const [fakeMarker] of fakes) {
+            expect(await Bun.file(stopPath(fakeMarker)).exists()).toBe(true);
+            expect(await stillBeating(fakeMarker)).toBe(false);
+            if (state === 'late grandchild') {
+              expect(await Bun.file(fakeMarker).exists()).toBe(false);
+              expect(await Bun.file(heartbeatPath(fakeMarker)).exists()).toBe(false);
+            }
+          }
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
     },
     10000
   );

@@ -23,6 +23,15 @@ export function heartbeatPath(marker: string): string {
 }
 
 /**
+ * A stop request addressed to this fake's unique marker rather than its pid.
+ * @example
+ * stopPath('/tmp/started.json'); // '/tmp/started.json.stop'
+ */
+export function stopPath(marker: string): string {
+  return `${marker}.stop`;
+}
+
+/**
  * The marker of the copy a hanging fake starts.
  *
  * @example
