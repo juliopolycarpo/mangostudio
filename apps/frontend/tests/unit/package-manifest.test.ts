@@ -5,7 +5,7 @@ interface PackageManifest {
   devDependencies?: Record<string, string>;
 }
 
-const BUN_TYPES_RANGE = '^1.4.3';
+const BUN_TYPES_RANGE = '^1.4.4';
 const FRONTEND_MANIFEST = new URL('../../package.json', import.meta.url);
 
 function readManifest(url: URL): Promise<PackageManifest> {
