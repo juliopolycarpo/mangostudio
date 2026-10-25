@@ -15,7 +15,7 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
   `rust-toolchain.toml` pins the version
 - Git with commit signing configured (see [Commit Guidelines](#commit-guidelines))
 
-The repo pins Bun 1.4.3. The pin moved to the 1.4.x line at 1.4.0, the release that made the post-rewrite runtime generally available; it tracked the `canary` channel until then. `.bun-version` is what CI installs, and `packageManager` must name the same version — see [`docs/reference/tooling.md`](../docs/reference/tooling.md#bun).
+The repo pins Bun 1.4.4. The pin moved to the 1.4.x line at 1.4.0, the release that made the post-rewrite runtime generally available; it tracked the `canary` channel until then. `.bun-version` is what CI installs, and `packageManager` must name the same version — see [`docs/reference/tooling.md`](../docs/reference/tooling.md#bun).
 
 ## Environment Setup
 

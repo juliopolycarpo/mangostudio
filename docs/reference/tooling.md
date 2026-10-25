@@ -2,7 +2,7 @@
 
 ## Bun
 
-The repo pins Bun **1.4.3**. The pin entered the 1.4.x line at 1.4.0, the release
+The repo pins Bun **1.4.4**. The pin entered the 1.4.x line at 1.4.0, the release
 that made the Rust runtime rewrite generally available; before that it tracked
 the `canary` channel for the three months 1.3.14 spent as the newest stable. That
 is over, and nothing here floats any more.
@@ -15,8 +15,8 @@ installer or `bun upgrade` selects the newest stable release, which may differ f
 
 | File                            | Value       | Read by                                                    |
 | ------------------------------- | ----------- | ---------------------------------------------------------- |
-| `.bun-version`                  | `1.4.3`     | `oven-sh/setup-bun` — the build CI actually installs       |
-| `package.json` `packageManager` | `bun@1.4.3` | Turborepo only — a floor marker, never what gets installed |
+| `.bun-version`                  | `1.4.4`     | `oven-sh/setup-bun` — the build CI actually installs       |
+| `package.json` `packageManager` | `bun@1.4.4` | Turborepo only — a floor marker, never what gets installed |
 
 Two consumers, one answer, and they must now agree —
 `scripts/tests/bun-toolchain.unit.test.ts` fails if one is bumped without the
@@ -40,12 +40,12 @@ guaranteed to be permanent:
 
 - **Install-cache keys use `bun --revision`, not `bun --version`.** `--version`
   is unique per release and would work today; `--revision` appends the commit
-  (`1.4.3+c6da4a4d3`) and stays correct for a rebuilt tag or a channel too. A key
+  (`1.4.4+38afee6c8`) and stays correct for a rebuilt tag or a channel too. A key
   on `--version` was what handed one canary build's extracted packages to a
   different one.
 - **The distribution manifest records `bunRevision` alongside `bunVersion`.**
-  `Bun.version` reports `1.4.3`; `Bun.revision` names the commit that built it.
-  Note the two spellings differ — `bun --revision` prints `1.4.3+c6da4a4d3` while
+  `Bun.version` reports `1.4.4`; `Bun.revision` names the commit that built it.
+  Note the two spellings differ — `bun --revision` prints `1.4.4+38afee6c8` while
   the JS `Bun.revision` returns the full 40-character sha, and they do not
   compare equal.
 
@@ -56,7 +56,7 @@ foreign-platform binary by downloading a prebuilt Bun and resolving it from
 non-host target failed. The module fetched the channel asset per target and
 passed it to `--compile-executable-path`. Against a released pin
 `bunCrossCompileChannel()` returns null, `--compile` resolves
-`bun-v1.4.3` itself, and none of that runs. Moving `.bun-version` back to a
+`bun-v1.4.4` itself, and none of that runs. Moving `.bun-version` back to a
 channel is the whole switch.
 
 Because it is dormant, the two lanes that verified it are gone — `cross-runtimes`

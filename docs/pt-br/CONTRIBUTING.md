@@ -13,7 +13,7 @@ Obrigado pelo seu interesse em contribuir com o MangoStudio!
   `rust-toolchain.toml` fixa a versão
 - Git com assinatura de commits configurada (veja [Diretrizes de Commit](#diretrizes-de-commit))
 
-O repositório fixa o Bun 1.4.3. O pin passou para a linha 1.4.x na 1.4.0, a release que tornou o runtime pós-reescrita disponível de forma geral; até então ele seguia o canal `canary`. O `.bun-version` é o que a CI instala, e o `packageManager` precisa indicar a mesma versão — veja [`docs/reference/tooling.md`](../reference/tooling.md#bun).
+O repositório fixa o Bun 1.4.4. O pin passou para a linha 1.4.x na 1.4.0, a release que tornou o runtime pós-reescrita disponível de forma geral; até então ele seguia o canal `canary`. O `.bun-version` é o que a CI instala, e o `packageManager` precisa indicar a mesma versão — veja [`docs/reference/tooling.md`](../reference/tooling.md#bun).
 
 ## Configuração do Ambiente
 
