@@ -23,10 +23,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { faker } from '@faker-js/faker';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { isShellAvailable } from '@mangostudio/shared/process/host';
+import { fixtures } from '@mangostudio/shared/test-utils';
 import { getDb } from '../../../../src/db/database';
 import {
   getAgentProfile,
@@ -175,7 +175,7 @@ beforeEach(async () => {
   // `resolveModel` needs a connector row enabling MODEL_ID, or the turn rejects
   // the model as unavailable before any tool runs.
   await insertTestConnector(user.id, { enabledModels: [MODEL_ID] });
-  parentMessageId = faker.string.uuid();
+  parentMessageId = fixtures.uuid();
   await insertMessage(
     {
       id: parentMessageId,

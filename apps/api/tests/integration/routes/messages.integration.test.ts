@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
-import { faker } from '@faker-js/faker';
+import { fixtures } from '@mangostudio/shared/test-utils';
 import { getDb } from '../../../src/db/database';
 import { verifyChatOwnership } from '../../../src/modules/chats/infrastructure/chat-repository';
 import { messageRoutes } from '../../../src/modules/messages/http/message-routes';
@@ -45,8 +45,8 @@ describe('POST /messages', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: faker.string.uuid(),
-          chatId: faker.string.uuid(),
+          id: fixtures.uuid(),
+          chatId: fixtures.uuid(),
           role: 'user',
           text: 'Hello',
           timestamp: Date.now(),
@@ -65,7 +65,7 @@ describe('POST /messages', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: faker.string.uuid(),
+          id: fixtures.uuid(),
           chatId: TEST_CHAT.id,
           role: 'admin', // invalid role
           text: 'Hello',
@@ -115,7 +115,7 @@ describe('POST /messages', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: faker.string.uuid(),
+          id: fixtures.uuid(),
           chatId: TEST_CHAT.id,
           role: 'ai',
           text: 'Hello from AI',
@@ -140,7 +140,7 @@ describe('POST /messages', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: faker.string.uuid(),
+          id: fixtures.uuid(),
           chatId: 'nonexistent-chat',
           role: 'user',
           text: 'Hello',

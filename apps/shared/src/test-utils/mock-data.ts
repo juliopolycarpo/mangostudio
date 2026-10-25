@@ -1,4 +1,3 @@
-import { faker } from '@faker-js/faker';
 import type { AuthUser } from '../auth/contracts';
 import type {
   Chat,
@@ -7,6 +6,7 @@ import type {
   Message,
   SecretMetadataRow,
 } from '../types';
+import { fixtures } from './fixtures';
 
 /**
  * Standard mock models for consistent testing across API and Frontend.
@@ -26,26 +26,28 @@ export const MOCK_MODELS = {
   },
 };
 
-/** Call once at the top of a test file for deterministic faker output. */
+/** Restarts the shared fixture sequence for compatibility. Example: seedFaker(42). */
 export function seedFaker(seed: number): void {
-  faker.seed(seed);
+  fixtures.seed(seed);
 }
 
+/** Creates a user fixture. Example: createMockUser({ name: 'Test User' }). */
 export function createMockUser(overrides: Partial<AuthUser> = {}): AuthUser {
   return {
-    id: faker.string.uuid(),
-    name: faker.person.fullName(),
-    email: faker.internet.email({ provider: 'mangostudio.test' }),
+    id: fixtures.uuid(),
+    name: fixtures.name(),
+    email: fixtures.email(),
     emailVerified: false,
     ...overrides,
   };
 }
 
+/** Creates a chat fixture with ordered timestamps. Example: createMockChat({ title: 'Test' }). */
 export function createMockChat(overrides: Partial<Chat> = {}): Chat {
   const now = Date.now();
   return {
-    id: faker.string.uuid(),
-    title: faker.lorem.words(3),
+    id: fixtures.uuid(),
+    title: fixtures.words(3),
     createdAt: now - 1000,
     updatedAt: now,
     model: null,
@@ -61,12 +63,13 @@ export function createMockChat(overrides: Partial<Chat> = {}): Chat {
   };
 }
 
+/** Creates a message fixture. Example: createMockMessage({ chatId: chat.id }). */
 export function createMockMessage(overrides: Partial<Message> = {}): Message {
   return {
-    id: faker.string.uuid(),
-    chatId: faker.string.uuid(),
+    id: fixtures.uuid(),
+    chatId: fixtures.uuid(),
     role: 'user',
-    text: faker.lorem.sentence(),
+    text: fixtures.sentence(),
     interactionMode: 'chat',
     timestamp: Date.now(),
     ...overrides,
@@ -82,35 +85,38 @@ export const toApiResponse = {
   message: (msg: Message) => ({ ...msg }),
 };
 
+/** Creates an image fixture. Example: createMockGeneratedImageArtifact({ messageId: message.id }). */
 export function createMockGeneratedImageArtifact(
   overrides: Partial<GeneratedImageArtifact> = {}
 ): GeneratedImageArtifact {
   return {
-    id: faker.string.uuid(),
-    chatId: faker.string.uuid(),
-    messageId: faker.string.uuid(),
-    prompt: faker.lorem.sentence(),
-    imageUrl: `/images/${faker.system.fileName({ extensionCount: 0 })}.png`,
+    id: fixtures.uuid(),
+    chatId: fixtures.uuid(),
+    messageId: fixtures.uuid(),
+    prompt: fixtures.sentence(),
+    imageUrl: `/images/${fixtures.fileName()}.png`,
     createdAt: Date.now(),
     ...overrides,
   };
 }
 
+/** Creates a gallery fixture. Example: createMockGalleryItem({ prompt: 'Mangoes' }). */
 export function createMockGalleryItem(overrides: Partial<GalleryItem> = {}): GalleryItem {
   return createMockGeneratedImageArtifact(overrides);
 }
 
+/** Creates connector metadata. Example: createMockSecretMetadataRow({ provider: 'gemini' }). */
 export function createMockSecretMetadataRow(
   overrides: Partial<SecretMetadataRow> = {}
 ): SecretMetadataRow {
   const now = Date.now();
   return {
-    id: faker.string.uuid(),
-    name: faker.company.name(),
+    id: fixtures.uuid(),
+    name: fixtures.companyName(),
     provider: 'gemini',
     configured: 1,
     source: 'bun-secrets',
-    maskedSuffix: faker.string.alphanumeric(4),
+    maskedSuffix: fixtures.suffix(),
     updatedAt: now,
     lastValidatedAt: now - 60_000,
     lastValidationError: null,
