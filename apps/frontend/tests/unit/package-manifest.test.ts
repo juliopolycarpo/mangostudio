@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 interface PackageManifest {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
 }
 
-const BUN_TYPES_RANGE = '^1.4.4';
 const FRONTEND_MANIFEST = new URL('../../package.json', import.meta.url);
+const BUN_TYPES_RANGE = `^${readFileSync(new URL('../../.bun-version', FRONTEND_MANIFEST), 'utf8').trim()}`;
 
 function readManifest(url: URL): Promise<PackageManifest> {
   return Bun.file(url).json();
