@@ -326,6 +326,13 @@ test('a real transcript disclosure expands to auto height and finishes its exit'
       .toBeGreaterThan(0);
     await toggle.click();
     await expect(panel).toHaveCount(0);
+    await expect
+      .poll(
+        async () =>
+          (await readMotionObservations(page)).find((entry) => entry.surface === 'disclosure')
+            ?.removedAtMs
+      )
+      .toBeDefined();
     const collapsed = (await readMotionObservations(page)).find(
       (entry) => entry.surface === 'disclosure'
     );
