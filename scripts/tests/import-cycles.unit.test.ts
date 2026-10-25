@@ -825,6 +825,65 @@ describe('import cycle checks', () => {
     expectCycleCount(rejected.circularDeps, 1, 'new ignored type cycle', rejected.required.output);
   });
 
+  test.each(['clean', 'cyclic'] as const)(
+    'checks %s imports after a large expression',
+    async (state) => {
+      const root = createFixture();
+      const directory = 'dist/large-expression';
+      // Traverse a large syntax tree before the imports below. The scanner
+      // must retain later pair and self-import edges without type inference.
+      const heavy = `export const values = {\n${Array.from(
+        { length: 120_000 },
+        (_, index) => `p${index}: { n: ${index} },\n`
+      ).join('')}};\n`;
+      const files = {
+        'heavy.ts':
+          heavy +
+          (state === 'cyclic'
+            ? "import { b } from './b';\nexport const a = () => b();\n" +
+              "import { values as self } from './heavy';\nexport { self };\n"
+            : ''),
+        ...(state === 'cyclic'
+          ? { 'b.ts': "import { a } from './heavy';\nexport const b = () => a();\n" }
+          : {}),
+      };
+      injectCycle(root, `apps/api/${directory}`, files);
+      const scan = await scanCheckedCycles(root, 'apps/api');
+      expectCheck(
+        scan.required,
+        state === 'clean' ? 'pass' : 'fail',
+        `${state} large-expression fixture`
+      );
+      expectCycleCount(
+        scan.circularDeps,
+        state === 'clean' ? 0 : 2,
+        `${state} large-expression fixture`,
+        scan.required.output
+      );
+      if (state === 'clean') return;
+      expectCaseReported(
+        scan.output,
+        {
+          name: 'pair after a large expression',
+          dir: directory,
+          files,
+          rule: NO_IMPORT_CYCLES,
+        },
+        scan.required.output
+      );
+      expectCaseReported(
+        scan.output,
+        {
+          name: 'self import after a large expression',
+          dir: directory,
+          files: { 'heavy.ts': files['heavy.ts'] },
+          rule: NO_SELF_IMPORT,
+        },
+        scan.required.output
+      );
+    }
+  );
+
   test('counts the same cycle through a directory alias and the workspace gate', async () => {
     const root = createFixture();
     injectCycle(root, 'apps/api/dist/aliased-cycle', TYPE_CYCLE);
