@@ -118,7 +118,8 @@ curl_download() {
 
 resolve_latest_version() {
   local effective_url tag
-  effective_url="$(curl --retry 3 --retry-delay 2 -fsSLI -o /dev/null -w '%{url_effective}' "${GITHUB_BASE}/releases/latest")"
+  effective_url="$(curl --retry 3 --retry-delay 2 -fsSLI -o /dev/null -w '%{url_effective}' "${GITHUB_BASE}/releases/latest")" \
+    || fail "failed to fetch latest release from ${GITHUB_BASE}/releases/latest"
   tag="${effective_url##*/}"
   normalize_version "$tag"
 }
