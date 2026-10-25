@@ -137,3 +137,70 @@ for (const format of ['esm', 'cjs']) {
     expect(result.childrenAfterTerminalDispose).toBe(0);
   });
 }
+
+for (const format of ['esm', 'cjs']) {
+  for (const failure of [
+    { kind: 'shader', at: 1 },
+    { kind: 'shader', at: 2 },
+    { kind: 'compile', at: 1 },
+    { kind: 'link', at: 1 },
+    { kind: 'uniform', at: 2 },
+    { kind: 'buffer', at: 1 },
+    { kind: 'buffer', at: 2 },
+    { kind: 'buffer', at: 3 },
+    { kind: 'buffer', at: 4 },
+    { kind: 'buffer', at: 5 },
+    { kind: 'vertexarray', at: 1 },
+    { kind: 'vertexarray', at: 2 },
+    { kind: 'texture', at: 2 },
+    { kind: 'limits', at: 2 },
+    { kind: 'sentinel', at: 2, cleanupThrows: true },
+    { kind: 'sentinel', at: 2, cleanupThrows: true, reportingThrows: true },
+    { kind: 'none', at: 0 },
+  ]) {
+    test(`${format}: resource ownership ${failure.kind}/${failure.at}${'reportingThrows' in failure ? ' reporter-fault' : ''}`, async ({
+      page,
+    }, info) => {
+      await page.setContent(`<style>${css}</style>`);
+      await page.addScriptTag({ content: bundles.get(format) });
+      const result = await page.evaluate(`window.webglResourceProbe(${JSON.stringify(failure)})`);
+      await info.attach('native-api-ownership', {
+        body: JSON.stringify(
+          { ...result, browserVersion: page.context().browser()?.version() },
+          null,
+          2
+        ),
+        contentType: 'application/json',
+      });
+      expect(result.host.supported).toBe(true);
+      expect(result.host.renderer).toContain('SwiftShader');
+      if (failure.kind === 'none') expect(result.error).toBeNull();
+      else expect(result.error).not.toBeNull();
+      if (failure.kind === 'sentinel') {
+        expect(result.primaryIdentity).toBe(true);
+        expect(result.cleanupFaults).toBe(1);
+      }
+      if (failure.kind === 'limits')
+        expect(
+          result.healthy.unitsQueries,
+          'healthy renderer must reinitialize both capability limits'
+        ).toBe(1);
+      expect(result.failed.created, 'expected real native GL allocations').toBeGreaterThan(0);
+      expect(
+        result.failed.live,
+        'expected every owned GL object to receive native deletion without optional context loss'
+      ).toEqual([]);
+      expect(result.failed.duplicates).toEqual([]);
+      expect(result.fallback.canvases).toBe(0);
+      expect(result.fallback.text).toContain('DOM-RESOURCE-FALLBACK');
+      expect(result.fallback.sameElement).toBe(true);
+      expect(result.healthyError).toBeNull();
+      expect(result.healthyCanvases).toBeGreaterThan(0);
+      expect(result.painted, 'healthy real renderer must draw pixels').toBe(true);
+      expect(result.glError).toBe(0);
+      expect(result.healthy.live).toEqual([]);
+      expect(result.healthy.duplicates).toEqual([]);
+      expect(result.cleanupErrors).toEqual([]);
+    });
+  }
+}

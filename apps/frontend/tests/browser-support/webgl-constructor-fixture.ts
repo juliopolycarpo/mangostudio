@@ -1,3 +1,4 @@
+import './webgl-resource-fixture';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 
