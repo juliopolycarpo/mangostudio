@@ -158,6 +158,7 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
     term.loadAddon(new WebLinksAddon());
     term.loadAddon(new SearchAddon());
     term.loadAddon(new Unicode11Addon());
+    term.unicode.activeVersion = '11';
     term.loadAddon(new ClipboardAddon());
 
     term.open(container);
