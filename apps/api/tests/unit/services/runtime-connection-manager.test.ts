@@ -1815,8 +1815,7 @@ describe('RuntimeConnectionManager', () => {
     const stuckOutcome = stuck.catch((error: unknown) => error);
     await outlastChainDeadline();
     const second = connector(localDefinition('user-2'), () => undefined, connectContext());
-    await flushMicrotasks();
-    opens.call(1).succeed();
+    (await opens.waitForCall(1)).succeed();
     const secondConnection = await second;
 
     let lateCloseSettled = false;
@@ -1851,8 +1850,7 @@ describe('RuntimeConnectionManager', () => {
     const stuckOutcome = stuck.catch((error: unknown) => error);
     await outlastChainDeadline();
     const second = connector(localDefinition('user-2'), () => undefined, connectContext());
-    await flushMicrotasks();
-    opens.call(1).succeed();
+    (await opens.waitForCall(1)).succeed();
     const secondConnection = await second;
     opens.call(0).succeed(() => Promise.reject(new Error('late close failed')));
 
@@ -1876,15 +1874,14 @@ describe('RuntimeConnectionManager', () => {
     const olderOutcome = older.catch((error: unknown) => error);
     await outlastChainDeadline();
     const newer = connector(localDefinition('user-1'), () => undefined, connectContext());
-    await flushMicrotasks();
+    await opens.waitForCall(1);
     // The older attempt settling must release only its own generation. Were
     // claims keyed by user, this would free user-1's newer, still-open claim.
     opens.call(0).fail(new Error('older handshake failed'));
     expect(await olderOutcome).toMatchObject({ message: 'older handshake failed' });
     await outlastChainDeadline();
     const other = connector(localDefinition('user-2'), () => undefined, connectContext());
-    await flushMicrotasks();
-    opens.call(2).succeed();
+    (await opens.waitForCall(2)).succeed();
     const otherConnection = await other;
 
     try {
@@ -1907,8 +1904,7 @@ describe('RuntimeConnectionManager', () => {
     const older = connector(localDefinition('user-1'), () => undefined, connectContext());
     await outlastChainDeadline();
     const newer = connector(localDefinition('user-1'), () => undefined, connectContext());
-    await flushMicrotasks();
-    opens.call(1).succeed();
+    (await opens.waitForCall(1)).succeed();
     const newerConnection = await newer;
     opens.call(0).succeed();
     const olderConnection = await older;
@@ -1938,8 +1934,7 @@ describe('RuntimeConnectionManager', () => {
     opens.call(0).fail(new Error('handshake failed after the deadline'));
     expect(await failedOutcome).toMatchObject({ message: 'handshake failed after the deadline' });
     const next = connector(localDefinition('user-2'), () => undefined, connectContext());
-    await flushMicrotasks();
-    opens.call(1).succeed();
+    (await opens.waitForCall(1)).succeed();
     const nextConnection = await next;
 
     try {
