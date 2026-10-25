@@ -273,6 +273,15 @@ fn activate_slot_current_with_sync(
     version: &str,
     sync: impl FnOnce(&Path) -> io::Result<()>,
 ) -> io::Result<Option<String>> {
+    activate_slot_current_with_read(slot_dir, version, sync, read_slot_current)
+}
+
+fn activate_slot_current_with_read(
+    slot_dir: &Path,
+    version: &str,
+    sync: impl FnOnce(&Path) -> io::Result<()>,
+    read_previous: impl FnOnce(&Path) -> io::Result<Option<String>>,
+) -> io::Result<Option<String>> {
     validate_slot_version(version)?;
     let version_dir = slot_dir.join(version);
     require_directory(&version_dir)?;
@@ -286,7 +295,7 @@ fn activate_slot_current_with_sync(
             ),
         ));
     }
-    let previous = read_slot_current(slot_dir)?;
+    let previous = read_previous(slot_dir)?;
     if let Err(error) = write_pointer_with_sync(slot_dir, version, sync) {
         if let Err(restore_error) = restore_slot_current(slot_dir, previous.as_deref()) {
             return Err(io::Error::other(format!(
@@ -627,13 +636,21 @@ fn unique_stage_path(dir: &Path, name: &str) -> PathBuf {
 }
 
 #[cfg(windows)]
-fn retry_windows_sharing<T>(mut operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+fn retry_windows_sharing<T>(operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    retry_windows_sharing_with_sleep(operation, std::thread::sleep)
+}
+
+#[cfg(windows)]
+fn retry_windows_sharing_with_sleep<T>(
+    mut operation: impl FnMut() -> io::Result<T>,
+    mut sleep: impl FnMut(std::time::Duration),
+) -> io::Result<T> {
     let policy = RenameRetryPolicy::default();
     for attempt in 1..=policy.attempts {
         match operation() {
             Ok(value) => return Ok(value),
             Err(error) if attempt < policy.attempts && error.raw_os_error() == Some(32) => {
-                std::thread::sleep(policy.backoff);
+                sleep(policy.backoff);
             }
             Err(error) => return Err(error),
         }
@@ -1000,6 +1017,23 @@ mod windows_tests {
         assert_eq!(calls, 1);
     }
 
+    // A named backoff fake owns the real lock; filesystem reads remain real.
+    // Releasing synchronously after OS32 makes readiness independent of threads.
+    struct ShimLockBackoff {
+        lock: Option<File>,
+        delays: Vec<std::time::Duration>,
+        release_on_backoff: bool,
+    }
+
+    impl ShimLockBackoff {
+        fn wait(&mut self, delay: std::time::Duration) {
+            self.delays.push(delay);
+            if self.release_on_backoff {
+                self.lock.take();
+            }
+        }
+    }
+
     #[test]
     fn activation_waits_for_a_transient_shim_file_lock() {
         let dir = slot();
@@ -1011,21 +1045,85 @@ mod windows_tests {
         activate_slot_current(&dir, "1.0.0").unwrap();
 
         let shim = dir.join(WINDOWS_SHIM_NAME);
-        let locked_shim = OpenOptions::new()
-            .read(true)
-            .share_mode(0)
-            .open(&shim)
-            .unwrap();
-        let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(35));
-            drop(locked_shim);
-        });
+        let mut backoff = ShimLockBackoff {
+            lock: Some(
+                OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(&shim)
+                    .unwrap(),
+            ),
+            delays: Vec::new(),
+            release_on_backoff: true,
+        };
+        let mut reads = 0;
+        let mut failures = Vec::new();
+        let previous = activate_slot_current_with_read(&dir, "2.0.0", sync_slot_dir, |slot| {
+            retry_windows_sharing_with_sleep(
+                || {
+                    reads += 1;
+                    let result = read_windows_shim_once(slot);
+                    if let Err(error) = &result {
+                        failures.push(error.raw_os_error());
+                    }
+                    result
+                },
+                |delay| backoff.wait(delay),
+            )
+        })
+        .unwrap();
         assert_eq!(
-            activate_slot_current(&dir, "2.0.0").unwrap().as_deref(),
-            Some("1.0.0")
+            failures,
+            [Some(32)],
+            "expected a real sharing violation before release"
         );
-        release.join().unwrap();
+        assert_eq!(reads, 2);
+        assert_eq!(backoff.delays, [std::time::Duration::from_millis(20)]);
+        assert!(backoff.lock.is_none());
+        assert_eq!(previous.as_deref(), Some("1.0.0"));
         assert_eq!(read_slot_current(&dir).unwrap().as_deref(), Some("2.0.0"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn activation_refuses_a_shim_lock_held_through_the_retry_budget() {
+        let dir = slot();
+        let source = dir.join("source.exe");
+        fs::write(&source, b"binary").unwrap();
+        for version in ["1.0.0", "2.0.0"] {
+            publish_slot_binary(&dir, version, &source).unwrap();
+        }
+        activate_slot_current(&dir, "1.0.0").unwrap();
+        let mut backoff = ShimLockBackoff {
+            lock: Some(
+                OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(dir.join(WINDOWS_SHIM_NAME))
+                    .unwrap(),
+            ),
+            delays: Vec::new(),
+            release_on_backoff: false,
+        };
+        let mut reads = 0;
+        let result = activate_slot_current_with_read(&dir, "2.0.0", sync_slot_dir, |slot| {
+            retry_windows_sharing_with_sleep(
+                || {
+                    reads += 1;
+                    read_windows_shim_once(slot)
+                },
+                |delay| backoff.wait(delay),
+            )
+        });
+        // Always close the fixture handle before asserting the refusal or readback.
+        backoff.lock.take();
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(32));
+        assert_eq!(reads, 5);
+        assert_eq!(
+            backoff.delays,
+            vec![std::time::Duration::from_millis(20); 4]
+        );
+        assert_eq!(read_slot_current(&dir).unwrap().as_deref(), Some("1.0.0"));
         fs::remove_dir_all(dir).unwrap();
     }
 
