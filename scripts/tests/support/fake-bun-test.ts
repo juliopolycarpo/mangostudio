@@ -28,6 +28,7 @@ import { join } from 'node:path';
 import { discoverTestFiles } from '../../lib/test-workers';
 import { fixtureChildEnvironment } from './child-supervision';
 import { reportOf, shardOf } from './test-worker-fakes';
+import { startDrainPipeHolder } from './worker-drain-fixture';
 
 /** Where the fake lives, for the launcher in `WorkerLaneSpec`. */
 export const FAKE_BUN_TEST = import.meta.path;
@@ -48,7 +49,7 @@ type Mode =
   | 'hang-tree'
   | 'hang-session-pipes';
 
-function main(argv: readonly string[]): void {
+async function main(argv: readonly string[]): Promise<void> {
   const flag = (name: string): string | undefined =>
     argv.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
   const outfile = flag('--reporter-outfile');
@@ -116,16 +117,13 @@ function main(argv: readonly string[]): void {
   }
   if (mode === 'grandchild') {
     // A leaked test process: it inherits this worker's pipes and outlives it.
-    const leaked = Bun.spawn({
-      cmd: [process.execPath, '-e', 'setInterval(() => undefined, 1000)'],
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
+    const leaked = await startDrainPipeHolder();
+    // The root owns its private connection before metadata I/O can fail.
+    leaked.unref();
     writeFileSync(
       join(process.env.MANGOSTUDIO_FAKE_PID_DIR as string, `grandchild-${index}.pid`),
       `${leaked.pid}`
     );
-    leaked.unref();
   }
   if (mode === 'leak' || mode === 'leak-session' || mode === 'tidy') {
     const lifetime =
@@ -151,4 +149,4 @@ function main(argv: readonly string[]): void {
   process.exit(mode === 'exit1' ? 1 : 0);
 }
 
-if (import.meta.main) main(process.argv.slice(2));
+if (import.meta.main) await main(process.argv.slice(2));

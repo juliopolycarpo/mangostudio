@@ -37,6 +37,11 @@ import {
 } from './support/process-liveness';
 import { fakeLane } from './support/test-worker-fakes';
 import {
+  assertDrainPipeHolder,
+  createDrainFixture,
+  withOwnedDrainFixture,
+} from './support/worker-drain-fixture';
+import {
   settleWorkerLanesBeforeRemoval,
   trackWorkerHandle,
   trackWorkerStream,
@@ -509,44 +514,49 @@ describe('cancellation fixture readiness', () => {
 
 describe('a worker that leaks a process holding its pipes', () => {
   it('does not hold the lane open past the drain grace, and still passes', async () => {
-    const pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
-    workspaces.push(pidDir);
-    const began = Date.now();
-
-    const { verdict } = await runLane(
-      2,
-      { 1: 'grandchild' },
-      {
-        pidDir,
-        drainGraceMs: 300,
-        env: fixtureChildEnvironment(),
-      }
-    );
-    const elapsed = Date.now() - began;
-
-    const leaked = Number(readFileSync(join(pidDir, 'grandchild-1.pid'), 'utf8'));
+    const owner = await createDrainFixture();
+    const storageStart = workspaces.length;
+    let pidDir = '';
     try {
-      expect(verdict.failures).toEqual([]);
-      if (process.platform !== 'win32') {
-        expect(isAlive(leaked), 'expected the named orphan fixture to keep the pipes open').toBe(
-          true
-        );
-        expect(
-          elapsed,
-          'expected the inherited pipes to require the drain grace'
-        ).toBeGreaterThanOrEqual(300);
-      }
-      expect(
-        elapsed,
-        `expected the lane to end soon after the drain grace | received ${elapsed} ms with a leaked process holding the pipes`
-      ).toBeLessThan(10_000);
+      await withOwnedDrainFixture(owner, {
+        async start() {
+          pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
+          workspaces.push(pidDir);
+          const began = Date.now();
+          const result = await runLane(
+            2,
+            { 1: 'grandchild' },
+            {
+              pidDir,
+              drainGraceMs: 300,
+              env: fixtureChildEnvironment({ ...process.env, ...owner.env }),
+            }
+          );
+          return { ...result, elapsed: Date.now() - began };
+        },
+        readPid: () => Number(readFileSync(join(pidDir, 'grandchild-1.pid'), 'utf8')),
+        async check({ verdict, elapsed }, observedPid) {
+          expect(verdict.failures).toEqual([]);
+          if (process.platform !== 'win32') {
+            expect(await owner.ready()).toBe(observedPid);
+            assertDrainPipeHolder(observedPid, owner.holdingPipes, isAlive);
+            expect(
+              elapsed,
+              'expected the inherited pipes to require the drain grace'
+            ).toBeGreaterThanOrEqual(300);
+          }
+          expect(
+            elapsed,
+            `expected the lane to end soon after the drain grace | received ${elapsed} ms with a leaked process holding the pipes`
+          ).toBeLessThan(10_000);
+        },
+      });
+      expect(owner.settled, 'expected the retained drain connection and listener to close').toBe(
+        true
+      );
     } finally {
-      // Best effort: Windows ends a worker's children with the worker, leaving nothing to kill.
-      try {
-        process.kill(leaked, 'SIGKILL');
-      } catch {
-        // already gone
-      }
+      // Unknown settlement must not remove storage while the fixture may still use it.
+      if (!owner.settled) workspaces.splice(storageStart);
     }
   });
 });
