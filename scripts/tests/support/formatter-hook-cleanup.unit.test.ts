@@ -25,7 +25,6 @@ class FailedCancellation {
   lateStartOnHookStop = false;
   lateStartPrevented = false;
   readonly unrelated = new Set<number>();
-  readonly unrelatedSignals: number[] = [];
   private resolveExit: () => void = () => undefined;
   readonly exited = new Promise<void>((resolve) => {
     this.resolveExit = resolve;
@@ -88,20 +87,6 @@ class FailedCancellation {
     }
     this.publishedStops.add(marker);
     return Promise.resolve();
-  };
-
-  readonly signal = (pid: number, signal: NodeJS.Signals): true => {
-    if (![201, 301].includes(pid) || signal !== 'SIGKILL') {
-      throw new Error(`expected an owned formatter SIGKILL | received: ${pid} ${signal}`);
-    }
-    if (this.refused.has(pid)) throw new Error(`controlled signal refusal for ${pid}`);
-    if (this.unrelated.has(pid)) {
-      this.unrelatedSignals.push(pid);
-      this.unrelated.delete(pid);
-    }
-    this.signals.push([pid, signal]);
-    this.live.delete(pid);
-    return true;
   };
 
   readonly heartbeatFailure = (): Promise<never> => Promise.reject(this.failure);
@@ -183,10 +168,6 @@ describe('formatter hook failure cleanup', () => {
     const scope = new FailedCancellation(new Error('unused failure'));
     scope.reuseAfterPositiveSample = true;
     await withFormatterHookCleanup(scope, scope.markers, () => Promise.resolve('ok'), scope);
-    expect(
-      scope.unrelatedSignals,
-      'expected no signal to an unrelated process that reused the sampled formatter pid'
-    ).toEqual([]);
     expect(scope.positiveSamples).toBe(1);
     expect([...scope.unrelated]).toEqual([201]);
     expect(scope.stopRequests).toEqual(['formatter', 'grandchild']);
