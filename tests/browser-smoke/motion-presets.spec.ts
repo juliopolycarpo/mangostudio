@@ -3,6 +3,7 @@ import type { MessagesPage } from '@mangostudio/shared/chat';
 import type { GithubInboxResponse } from '@mangostudio/shared/github';
 import { expect, type Page, test } from '@playwright/test';
 import { observeMotionNodes, readMotionObservations } from './support/motion-observer';
+import { installMotionReadModels } from './support/motion-read-models';
 
 const diagnostics = new WeakMap<Page, string[]>();
 
@@ -49,6 +50,7 @@ for (const preference of ['no-preference', 'reduce'] as const) {
     });
 
     test('route, card grid and dialog settle with the requested motion', async ({ page }) => {
+      await installMotionReadModels(page, { emptyChatList: true });
       await page.addInitScript(observeMotionNodes, SELECTORS);
       await page.goto('/home');
       await expect(page.getByTestId('home-dashboard')).toBeVisible();
@@ -167,6 +169,7 @@ const LATE_INBOX: GithubInboxResponse = {
 };
 
 test('a card arriving after the grid entrance finishes its own entrance', async ({ page }) => {
+  await installMotionReadModels(page, { emptyChatList: true });
   let releaseInbox: () => void = () => undefined;
   const inboxReady = new Promise<void>((resolve) => {
     releaseInbox = resolve;
@@ -234,6 +237,7 @@ test('a card arriving after the grid entrance finishes its own entrance', async 
 test('live reduced motion and restored motion reach the real dialog and preserve focus', async ({
   page,
 }) => {
+  await installMotionReadModels(page, { emptyChatList: true });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.addInitScript(observeMotionNodes, { dialog: SELECTORS.dialog });
   await page.goto('/home');
@@ -273,6 +277,7 @@ test('live reduced motion and restored motion reach the real dialog and preserve
 test('a real transcript disclosure expands to auto height and finishes its exit', async ({
   page,
 }) => {
+  await installMotionReadModels(page);
   const title = `Motion disclosure ${Date.now()}`;
   const created = await page.request.post('/api/chats', { data: { title } });
   expect(created.ok()).toBe(true);
