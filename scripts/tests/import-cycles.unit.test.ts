@@ -213,14 +213,48 @@ async function scanCycles(
   return { circularDeps, output: outputs.join('\n') };
 }
 
+/**
+ * Keep the required verdict and its raw logs beside the direct scanner evidence.
+ * Turbo can interleave stdout/stderr chunks inside a diagnostic's rule name.
+ * @example
+ * const scan = await scanCheckedCycles(root, 'apps/api');
+ * expectCheck(scan.required, 'fail', 'API cycle fixture');
+ */
+async function scanCheckedCycles(
+  root: string,
+  workspace: string,
+  commands: { runCheck: typeof runCheck; scanCycles: typeof scanCycles } = {
+    runCheck,
+    scanCycles,
+  }
+) {
+  const required = commands.runCheck(root, workspace);
+  try {
+    const counted = await commands.scanCycles(root, [workspace]);
+    return { required, circularDeps: counted.circularDeps, output: counted.output };
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `${workspace}: expected a complete direct Biome scan | received: ${detail}\nRequired check exit: ${required.exitCode}\nRequired check output:\n${required.output}`,
+      { cause }
+    );
+  }
+}
+
 async function countCycles(root: string, roots: readonly string[]): Promise<number> {
   return (await scanCycles(root, roots)).circularDeps;
 }
 
-function expectCycleCount(actual: number, expected: number, context: string): void {
+function expectCycleCount(
+  actual: number,
+  expected: number,
+  context: string,
+  requiredOutput = ''
+): void {
+  const details = requiredOutput ? `\nRequired check output:\n${requiredOutput}` : '';
   expect(
     actual,
-    `${context}: expected ${expected} circular dependencies | received ${actual}`
+    `${context}: expected ${expected} circular dependencies | received ${actual}${details}`
   ).toBe(expected);
 }
 
@@ -258,25 +292,30 @@ test('keeps a diagnostic header separate from the other output stream', () => {
 });
 
 /**
- * Assert Biome flagged this case with its rule and named every one of its files.
+ * Assert direct Biome output flagged this case and named every one of its files.
  * Scoped to the case's own files so another case's diagnostics cannot satisfy it.
  * @example
- * expectCaseReported(run.output, IGNORED_CASES['apps/api'][0]);
+ * expectCaseReported(scan.output, IGNORED_CASES['apps/api'][0], scan.required.output);
  */
-function expectCaseReported(output: string, { name, dir, files, rule }: CycleCase): void {
+function expectCaseReported(
+  output: string,
+  { name, dir, files, rule }: CycleCase,
+  requiredOutput = ''
+): void {
   const caseFiles = Object.keys(files).map((file) => `${dir}/${file}`);
   const headers = diagnosticHeaders(output);
   const reported = headers.filter((header) => caseFiles.some((file) => isFile(header.file, file)));
   const received = JSON.stringify(headers.map((header) => `${header.file} ${header.rule}`));
+  const context = requiredOutput ? `\nRequired check output:\n${requiredOutput}` : '';
   expect(
     reported.map((header) => header.rule),
-    `${name}: expected ${rule} reported on one of ${caseFiles.join(', ')} | received ${received}`
+    `${name}: expected ${rule} reported on one of ${caseFiles.join(', ')} | received ${received}${context}`
   ).toContain(rule);
   const mentioned = posix(output).split(/[\s:'",]+/);
   for (const file of caseFiles) {
     expect(
       mentioned.some((token) => isFile(token, file)),
-      `${name}: expected the output to name ${file} | received ${received}`
+      `${name}: expected the output to name ${file} | received ${received}${context}`
     ).toBe(true);
   }
 }
@@ -287,9 +326,9 @@ function expectCaseReported(output: string, { name, dir, files, rule }: CycleCas
  * can say (exit code, cycle count). The scan is read-only after the hook, so the
  * tests are order-insensitive.
  * @example
- * defineBatch('apps/api rejects', cases, () => scanVisible('apps/api', cases), assertFails);
+ * defineBatch('apps/api rejects', cases, () => scanWorkspaceCases('apps/api', cases), assertFails);
  */
-function defineBatch<Scan extends { readonly output: string }>(
+function defineBatch<Scan extends { readonly output: string; readonly required?: CheckRun }>(
   title: string,
   cases: readonly CycleCase[],
   scan: () => Scan | Promise<Scan>,
@@ -303,7 +342,7 @@ function defineBatch<Scan extends { readonly output: string }>(
     test(`rejects all ${cases.length} cases together`, () => assertWhole(result));
     for (const batchCase of cases) {
       test(`rejects the ${batchCase.name} and names its files`, () => {
-        expectCaseReported(result.output, batchCase);
+        expectCaseReported(result.output, batchCase, result.required?.output);
       });
     }
   });
@@ -508,29 +547,18 @@ async function scanExtensionCases(cases: readonly CycleCase[]) {
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const required = runCheck(root, 'apps/frontend');
-  const counted = await scanCycles(root, ['apps/frontend']);
+  const scan = await scanCheckedCycles(root, 'apps/frontend');
   return {
     typecheck: { exitCode: typecheck.exitCode, output: typecheck.stderr.toString() },
-    required,
-    circularDeps: counted.circularDeps,
-    output: required.output,
+    ...scan,
   };
 }
 
 /** Count and run the required check over a workspace holding every case. */
-async function scanIgnored(workspace: string, cases: readonly CycleCase[]) {
+function scanWorkspaceCases(workspace: string, cases: readonly CycleCase[]) {
   const root = createFixture();
   injectCases(root, workspace, cases);
-  const counted = await scanCycles(root, [workspace]);
-  const run = runCheck(root, workspace);
-  return { ...run, circularDeps: counted.circularDeps };
-}
-
-function scanVisible(workspace: string, cases: readonly CycleCase[]): CheckRun {
-  const root = createFixture();
-  injectCases(root, workspace, cases);
-  return runCheck(root, workspace);
+  return scanCheckedCycles(root, workspace);
 }
 
 function scanKinds(cases: readonly CycleCase[]) {
@@ -538,6 +566,186 @@ function scanKinds(cases: readonly CycleCase[]) {
   injectCases(root, 'apps/api', cases);
   return scanCycles(root, ['apps/api']);
 }
+
+const CONTROLLED_SELF_IMPORT: CycleCase = {
+  name: 'controlled JSX self import',
+  dir: 'dist/self-jsx',
+  files: { 'a.jsx': "import { a } from './a.jsx';\nexport { a };\n" },
+  rule: NO_SELF_IMPORT,
+};
+const DIRECT_SELF_IMPORT = `apps/frontend/dist/self-jsx/a.jsx:1:1 ${NO_SELF_IMPORT} ━━━━━\n`;
+const MANGLED_REQUIRED_OUTPUT =
+  'apps/frontend/dist/self-jsx/a.jsx:1:1 lint/nursery/no' +
+  'Checked 18 files in 7ms. No fixes applied.\n' +
+  'SelfImport ━━━━━\n';
+
+const CONTROLLED_PRESENTATIONS = [
+  {
+    name: 'interleaved JSX rule',
+    cycle: CONTROLLED_SELF_IMPORT,
+    requiredOutput: MANGLED_REQUIRED_OUTPUT,
+    directOutput: DIRECT_SELF_IMPORT,
+  },
+  {
+    name: 'missing MTS header',
+    cycle: {
+      name: 'controlled MTS self import',
+      dir: 'dist/self-mts',
+      files: { 'a.mts': "import { a } from './a.mts';\nexport { a };\n" },
+      rule: NO_SELF_IMPORT,
+    },
+    requiredOutput: `apps/frontend/dist/self-js/a.js:1:1 ${NO_SELF_IMPORT} ━━━━━\nChecked 18 files in 7ms. No fixes applied.\n`,
+    directOutput: `apps/frontend/dist/self-mts/a.mts:1:1 ${NO_SELF_IMPORT} ━━━━━\n`,
+  },
+  {
+    name: 'MJS rule joined to summary',
+    cycle: {
+      name: 'controlled MJS self import',
+      dir: 'dist/self-mjs',
+      files: { 'a.mjs': "import { a } from './a.mjs';\nexport { a };\n" },
+      rule: NO_SELF_IMPORT,
+    },
+    requiredOutput: `apps/frontend/dist/self-mjs/a.mjs:1:1 ${NO_SELF_IMPORT}Checked 18 files in 7ms. No fixes applied.\n`,
+    directOutput: `apps/frontend/dist/self-mjs/a.mjs:1:1 ${NO_SELF_IMPORT} ━━━━━\n`,
+  },
+] satisfies ReadonlyArray<{
+  name: string;
+  cycle: CycleCase;
+  requiredOutput: string;
+  directOutput: string;
+}>;
+
+/** Named command fake retaining the required verdict and separately captured scanner output. */
+class FakeCycleCommands {
+  readonly calls: Array<{ root: string; roots: readonly string[]; kind: string }> = [];
+
+  constructor(
+    readonly exitCode = 1,
+    readonly output = DIRECT_SELF_IMPORT,
+    readonly circularDeps = 1,
+    readonly requiredFailure?: Error,
+    readonly scanFailure?: Error,
+    readonly requiredOutput = MANGLED_REQUIRED_OUTPUT
+  ) {}
+
+  readonly runCheck = (root: string, workspace: string): CheckRun => {
+    this.calls.push({ root, roots: [workspace], kind: 'required' });
+    if (this.requiredFailure) throw this.requiredFailure;
+    return { exitCode: this.exitCode, output: this.requiredOutput };
+  };
+
+  readonly scanCycles = (root: string, roots: readonly string[]) => {
+    this.calls.push({ root, roots, kind: 'direct' });
+    if (this.scanFailure) return Promise.reject(this.scanFailure);
+    return Promise.resolve({ circularDeps: this.circularDeps, output: this.output });
+  };
+}
+
+describe('checked cycle evidence', () => {
+  test.each(CONTROLLED_PRESENTATIONS)(
+    'keeps exact direct diagnostics with $name',
+    async ({ cycle, requiredOutput, directOutput }) => {
+      const commands = new FakeCycleCommands(
+        1,
+        directOutput,
+        1,
+        undefined,
+        undefined,
+        requiredOutput
+      );
+      const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
+
+      expectCheck(scan.required, 'fail', 'controlled required check');
+      expectCaseReported(scan.output, cycle, scan.required.output);
+      expectCycleCount(scan.circularDeps, 1, 'controlled direct count', scan.required.output);
+      expect(scan.required.output).toBe(requiredOutput);
+      expect(commands.calls).toEqual([
+        { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'required' },
+        { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'direct' },
+      ]);
+    }
+  );
+
+  test.each(CONTROLLED_PRESENTATIONS)(
+    'rejects missing direct evidence with $name',
+    async ({ cycle, requiredOutput }) => {
+      const commands = new FakeCycleCommands(1, '', 1, undefined, undefined, requiredOutput);
+      const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
+      const file = `${cycle.dir}/${Object.keys(cycle.files)[0]}`;
+
+      expectCheck(scan.required, 'fail', 'controlled required check');
+      expectCycleCount(scan.circularDeps, 1, 'retained direct count', scan.required.output);
+      const assertCase = () => expectCaseReported(scan.output, cycle, scan.required.output);
+      expect(assertCase).toThrow(`expected ${NO_SELF_IMPORT} reported on one of ${file}`);
+      expect(assertCase).toThrow(`Required check output:\n${requiredOutput}`);
+    }
+  );
+
+  test('still rejects required success and retains its raw failure context', async () => {
+    const commands = new FakeCycleCommands(0);
+    const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
+
+    expect(() => expectCheck(scan.required, 'fail', 'controlled required check')).toThrow(
+      `expected the check to fail | received exit 0\n${MANGLED_REQUIRED_OUTPUT}`
+    );
+  });
+
+  test('does not substitute a direct scan when the required command cannot run', async () => {
+    const failure = new Error('controlled required command unavailable');
+    const commands = new FakeCycleCommands(1, DIRECT_SELF_IMPORT, 1, failure);
+
+    await expect(scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands)).rejects.toBe(
+      failure
+    );
+    expect(commands.calls).toEqual([
+      { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'required' },
+    ]);
+  });
+
+  test('retains required exit and output when the direct scan rejects', async () => {
+    const failure = new Error('Biome output {"diagnostics":[]} expected at least one checked file');
+    const commands = new FakeCycleCommands(1, DIRECT_SELF_IMPORT, 1, undefined, failure);
+    const error = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands).catch(
+      (caught) => caught
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('Required check exit: 1');
+    expect(error.message).toContain(`Required check output:\n${MANGLED_REQUIRED_OUTPUT}`);
+    expect(error.message).toContain(failure.message);
+    expect(error.cause).toBe(failure);
+    expect(commands.calls).toEqual([
+      { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'required' },
+      { root: '/controlled-fixture', roots: ['apps/frontend'], kind: 'direct' },
+    ]);
+  });
+
+  test.each([
+    ['missing rule', ''],
+    ['wrong rule', DIRECT_SELF_IMPORT.replace(NO_SELF_IMPORT, NO_IMPORT_CYCLES)],
+    ['wrong path', DIRECT_SELF_IMPORT.replace('dist/self-jsx', 'dist/unrelated')],
+  ])('still rejects %s in direct diagnostics', async (_name, output) => {
+    const commands = new FakeCycleCommands(1, output);
+    const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
+
+    expect(() =>
+      expectCaseReported(scan.output, CONTROLLED_SELF_IMPORT, scan.required.output)
+    ).toThrow(`expected ${NO_SELF_IMPORT} reported on one of dist/self-jsx/a.jsx`);
+    expect(() =>
+      expectCaseReported(scan.output, CONTROLLED_SELF_IMPORT, scan.required.output)
+    ).toThrow(`Required check output:\n${MANGLED_REQUIRED_OUTPUT}`);
+  });
+
+  test('still rejects a wrong direct cycle count', async () => {
+    const commands = new FakeCycleCommands(1, DIRECT_SELF_IMPORT, 0);
+    const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
+
+    const assertCount = () =>
+      expectCycleCount(scan.circularDeps, 1, 'controlled direct count', scan.required.output);
+    expect(assertCount).toThrow('expected 1 circular dependencies | received 0');
+    expect(assertCount).toThrow(`Required check output:\n${MANGLED_REQUIRED_OUTPUT}`);
+  });
+});
 
 beforeAll(() => {
   // Own the cache instead of relying on the host's platform-specific cache
@@ -581,7 +789,7 @@ describe('Biome import cycle checks', () => {
           required: scan.required.exitCode,
           circularDeps: scan.circularDeps,
         },
-        `expected typecheck 0, required check 1 and ${EXTENSION_CASES.length} cycles (${names}) | tsc stderr and check output:\n${scan.typecheck.output}${scan.output}`
+        `expected typecheck 0, required check 1 and ${EXTENSION_CASES.length} cycles (${names}) | tsc stderr, required check and direct scanner output:\n${scan.typecheck.output}\n${scan.required.output}\n${scan.output}`
       ).toEqual({ typecheck: 0, required: 1, circularDeps: EXTENSION_CASES.length });
     }
   );
@@ -590,10 +798,15 @@ describe('Biome import cycle checks', () => {
     defineBatch(
       `${workspace} cycles under paths ignored by the actual config`,
       cases,
-      () => scanIgnored(workspace, cases),
+      () => scanWorkspaceCases(workspace, cases),
       (scan) => {
-        expectCheck(scan, 'fail', `${workspace} with ${cases.length} ignored cycles`);
-        expectCycleCount(scan.circularDeps, cases.length, `${workspace} ignored cycles`);
+        expectCheck(scan.required, 'fail', `${workspace} with ${cases.length} ignored cycles`);
+        expectCycleCount(
+          scan.circularDeps,
+          cases.length,
+          `${workspace} ignored cycles`,
+          scan.required.output
+        );
       }
     );
   }
@@ -602,8 +815,9 @@ describe('Biome import cycle checks', () => {
     defineBatch(
       `${workspace} cycles outside src and tests`,
       VISIBLE_CASES,
-      () => scanVisible(workspace, VISIBLE_CASES),
-      (scan) => expectCheck(scan, 'fail', `${workspace} with ${VISIBLE_CASES.length} cycles`)
+      () => scanWorkspaceCases(workspace, VISIBLE_CASES),
+      (scan) =>
+        expectCheck(scan.required, 'fail', `${workspace} with ${VISIBLE_CASES.length} cycles`)
     );
   }
 
@@ -614,13 +828,19 @@ describe('Biome import cycle checks', () => {
     (scan) => expectCycleCount(scan.circularDeps, KIND_CASES.length, 'apps/api cycle kinds')
   );
 
-  test('rejects an ignored cycle introduced after a clean required workspace check', () => {
+  test('rejects an ignored cycle introduced after a clean required workspace check', async () => {
     const root = createFixture();
     expectCheck(runCheck(root, 'apps/api'), 'pass', 'apps/api before injecting a cycle');
     injectCycle(root, 'apps/api/dist', TYPE_CYCLE);
-    const rejected = runCheck(root, 'apps/api');
-    expectCheck(rejected, 'fail', 'apps/api after injecting dist/a.ts and dist/b.ts');
+    const rejected = await scanCheckedCycles(root, 'apps/api');
+    expectCheck(rejected.required, 'fail', 'apps/api after injecting dist/a.ts and dist/b.ts');
     expect(rejected.output).toContain(NO_IMPORT_CYCLES);
+    expectCaseReported(
+      rejected.output,
+      { name: 'new ignored type cycle', dir: 'dist', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES },
+      rejected.required.output
+    );
+    expectCycleCount(rejected.circularDeps, 1, 'new ignored type cycle', rejected.required.output);
   });
 
   test('rejects workspace formatting drift with the actual dprint check', () => {
