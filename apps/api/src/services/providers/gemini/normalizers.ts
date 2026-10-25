@@ -4,7 +4,7 @@
  * Accepts streaming events from the Interactions API and provides
  * well-typed accessors so the provider file stays free of unsafe casts.
  */
-import type { Interactions } from '@google/genai';
+import type { Interactions } from '@google/genai/web';
 
 type StepStart = Interactions.StepStart;
 type StepDelta = Interactions.StepDelta;

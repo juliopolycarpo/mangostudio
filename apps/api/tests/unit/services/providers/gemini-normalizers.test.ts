@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Interactions } from '@google/genai';
+import type { Interactions } from '@google/genai/web';
 import {
   describeAbandonedInteraction,
   extractGeminiUsage,

@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI } from '@google/genai/web';
 import type { createGeminiClient } from '../../../src/services/providers/gemini/client';
 import { streamGeminiAgentTurn } from '../../../src/services/providers/gemini/interactions-stream';
 import type { AgentEvent, AgentTurnRequest } from '../../../src/services/providers/types';
@@ -169,6 +169,19 @@ function baseRequest(overrides: Partial<AgentTurnRequest> = {}): AgentTurnReques
 }
 
 describe('Gemini Interactions wire contract', () => {
+  it('does not dispatch an application turn whose signal already aborted', async () => {
+    const server = startServer();
+    const controller = new AbortController();
+    controller.abort();
+
+    const events = await collectAgentEvents(
+      streamGeminiAgentTurn(baseRequest({ signal: controller.signal }), server.client)
+    );
+
+    expect(events).toEqual([{ type: 'turn_error', error: expect.stringMatching(/abort/i) }]);
+    expect(server.requestBodies).toHaveLength(0);
+  });
+
   it('encodes a replayed turn as v2 steps the SDK accepts', async () => {
     const server = startServer();
     const req = baseRequest({
