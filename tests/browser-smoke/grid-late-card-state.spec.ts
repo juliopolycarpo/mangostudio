@@ -2,6 +2,7 @@ import type { GithubInboxResponse } from '@mangostudio/shared/github';
 import { expect, test } from '@playwright/test';
 
 import { observeMotionNodes, readMotionObservations } from './support/motion-observer';
+import { installMotionReadModels } from './support/motion-read-models';
 
 const SELECTORS = { card: '[data-testid="home-dashboard"] section' };
 const LATE_INBOX: GithubInboxResponse = {
@@ -23,6 +24,7 @@ const LATE_INBOX: GithubInboxResponse = {
 };
 
 test('a card arriving after the grid entrance mounts already settled', async ({ page }) => {
+  await installMotionReadModels(page, { emptyChatList: true });
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   let releaseInbox: () => void = () => undefined;
