@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
+import type { getDb } from '../../../src/db/database';
+import {
+  ACTIVITY_RETENTION_MS,
+  createActivityRepository,
+} from '../../../src/modules/activity/infrastructure/activity-repository';
 import {
   buildRespondStreamRequest,
   createSubagentDelegationError,
@@ -8,6 +13,26 @@ import {
 } from './_respond-stream-helpers';
 
 describe('respond stream test helpers', () => {
+  it('refuses retention deletion from unrelated tables', () => {
+    const db = mockPassThroughDb('user-1')().getDb();
+    const deleteFrom = db.deleteFrom as (table: string) => unknown;
+
+    expect(() => deleteFrom('messages')).toThrow(
+      'stream database: expected activity_events deletion | received: messages'
+    );
+  });
+
+  it('supports activity retention without returning a chat as an activity row', async () => {
+    const db = mockPassThroughDb('user-1')().getDb();
+    const repository = createActivityRepository(db as unknown as ReturnType<typeof getDb>);
+
+    await repository.prune('user-1', ACTIVITY_RETENTION_MS + 1);
+    const selectFrom = db.selectFrom as (table: string) => {
+      executeTakeFirst: () => Promise<unknown>;
+    };
+    expect(await selectFrom('activity_events').executeTakeFirst()).toBeUndefined();
+  });
+
   it('builds JSON POST requests for the streaming endpoint', async () => {
     const request = buildRespondStreamRequest({ chatId: 'chat-1', prompt: 'Hello' });
 

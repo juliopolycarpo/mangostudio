@@ -265,10 +265,12 @@ export function mockPassThroughDb(userId: string): () => { getDb: () => Record<s
  */
 function defaultSelectFrom(userId: string): (table: string) => Record<string, unknown> {
   return (table) =>
-    table === 'environment_toolchains' ? makeChain(undefined) : makeChain(ownedChatRow(userId));
+    table === 'environment_toolchains' || table === 'activity_events'
+      ? makeChain(undefined)
+      : makeChain(ownedChatRow(userId));
 }
 
-/** Builds a transactional stream DB mock that applies assistant-row updates. */
+/** Builds a stream DB with empty activity and assistant-row capture. Example: createTestStreamDb({ userId: 'u1' }). */
 export function createTestStreamDb(options: TestStreamDbOptions): Record<string, unknown> {
   const insertedMessages = options.insertedMessages ?? [];
   const chatSetCalls = options.chatSetCalls ?? [];
@@ -276,6 +278,12 @@ export function createTestStreamDb(options: TestStreamDbOptions): Record<string,
     selectFrom: options.selectFrom ?? defaultSelectFrom(options.userId),
     insertInto: (table: string) => createInsertCapture(table, insertedMessages, options.onInsert),
     updateTable: (table: string) => createUpdateCapture(table, insertedMessages, chatSetCalls),
+    deleteFrom(table: string) {
+      if (table !== 'activity_events') {
+        throw new Error(`stream database: expected activity_events deletion | received: ${table}`);
+      }
+      return makeChain({ numDeletedRows: 0n });
+    },
   };
   db.transaction = () => ({
     execute: (callback: (trx: Record<string, unknown>) => unknown) => callback(db),

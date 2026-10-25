@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 
+import type { getDb } from '../../../../src/db/database';
+import {
+  ACTIVITY_RETENTION_MS,
+  createActivityRepository,
+} from '../../../../src/modules/activity/infrastructure/activity-repository';
 import { respondStreamRoutes } from '../../../../src/modules/generation/http/respond-stream-routes';
 import { createAuthenticatedApiTestApp } from '../../../support/harness/create-api-test-app';
 
@@ -50,9 +55,16 @@ const OWNED_CHAT_ROW = {
 
 function makeDb(): Record<string, unknown> {
   const db: Record<string, unknown> = {
-    selectFrom: () => makeChain(OWNED_CHAT_ROW),
+    selectFrom: (table: string) =>
+      makeChain(table === 'activity_events' ? undefined : OWNED_CHAT_ROW),
     insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
     updateTable: () => makeChain({ numUpdatedRows: 1n }),
+    deleteFrom(table: string) {
+      if (table !== 'activity_events') {
+        throw new Error(`stream database: expected activity_events deletion | received: ${table}`);
+      }
+      return makeChain({ numDeletedRows: 0n });
+    },
   };
   db.transaction = () => ({
     execute: (callback: (trx: Record<string, unknown>) => unknown) => callback(db),
@@ -61,6 +73,26 @@ function makeDb(): Record<string, unknown> {
 }
 
 describe('respond-stream abort signal', () => {
+  it('refuses retention deletion from unrelated tables', () => {
+    const db = makeDb();
+    const deleteFrom = db.deleteFrom as (table: string) => unknown;
+
+    expect(() => deleteFrom('messages')).toThrow(
+      'stream database: expected activity_events deletion | received: messages'
+    );
+  });
+
+  it('supports activity retention without returning a chat as an activity row', async () => {
+    const db = makeDb();
+    const repository = createActivityRepository(db as unknown as ReturnType<typeof getDb>);
+
+    await repository.prune(TEST_USER.id, ACTIVITY_RETENTION_MS + 1);
+    const selectFrom = db.selectFrom as (table: string) => {
+      executeTakeFirst: () => Promise<unknown>;
+    };
+    expect(await selectFrom('activity_events').executeTakeFirst()).toBeUndefined();
+  });
+
   it('provider receives the signal and it is not aborted during normal generation', async () => {
     let receivedSignal: AbortSignal | undefined;
     let signalAbortedDuringStream = false;
