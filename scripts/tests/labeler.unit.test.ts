@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
+import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 /** Labels applied by hand or by an issue template, so they carry no glob in the labeler config. */
 const MANUAL_ONLY_LABELS = [
@@ -200,6 +201,7 @@ describe('labeler coverage', () => {
     ]);
     for (const block of ecosystemBlocks) {
       expect(block).toContain('"type: dependencies"');
+      if (block.trimStart().startsWith('cargo')) expect(block).toContain('"area: runtime"');
     }
   });
 
@@ -210,6 +212,23 @@ describe('labeler coverage', () => {
     expect(workflow).toContain("name.startsWith('area: ')");
     expect(workflow).toContain("name.startsWith('type: ')");
     expect(workflow).toContain('No area: or type: label was applied');
+  });
+
+  test('syncs path labels while preserving Dependabot ecosystem classifications', () => {
+    const workflow = readText('.github/workflows/labeler.yml');
+    const labeler = extractStepBlocks(extractJobBlock(workflow, 'label')).find((step) =>
+      /uses: actions\/labeler@/.test(step)
+    );
+
+    expect(labeler, 'expected the pinned labeler action in job label').toBeDefined();
+    const syncInput = labeler
+      ?.split('\n')
+      .find((line) => /^ {10}sync-labels:/.test(line))
+      ?.trim();
+    expect(
+      syncInput,
+      'expected sync-labels for non-Dependabot authors so reverted paths lose stale labels without removing ecosystem labels'
+    ).toBe('sync-labels: $' + "{{ github.event.pull_request.user.login != 'dependabot[bot]' }}");
   });
 
   test('reads applied labels from the labeler output, not a second API call', () => {
