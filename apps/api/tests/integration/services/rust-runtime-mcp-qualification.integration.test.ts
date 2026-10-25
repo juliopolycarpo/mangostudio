@@ -35,6 +35,7 @@ import { setRuntimeTokenStoreForTests } from '../../../src/services/runtime-clie
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { insertTestUser } from '../../support/factories';
 import { startQualificationHttpServer } from '../../support/fixtures/mcp/qualification-mcp-server';
+import { startMcpServeFixture } from '../../support/mcp-serve-fixture';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';
 import {
   cleanupMangoHome,
@@ -42,7 +43,6 @@ import {
   rustRuntimeVersion,
   scratchMangoHome,
 } from '../../support/rust-runtime-binary';
-import { connectUntilListening, reserveEphemeralPort } from '../../support/rust-serve-dial';
 
 const binary = resolveRustRuntimeBinary();
 const FIXTURE = fileURLToPath(
@@ -301,21 +301,15 @@ describe('Real Rust runtime MCP qualification', () => {
     };
     const ENVIRONMENT = 'rust-mcp-serve-box';
 
-    let mangoHome: string | undefined;
-    let child: ReturnType<typeof Bun.spawn> | undefined;
+    let fixture: Awaited<ReturnType<typeof startMcpServeFixture>> | undefined;
     const stops: (() => Promise<void>)[] = [];
 
     afterEach(async () => {
       for (const stop of stops.splice(0)) await stop();
-      if (child) {
-        child.kill();
-        await child.exited;
-        child = undefined;
-      }
+      await fixture?.close();
+      fixture = undefined;
       setRuntimeConnectionManagerForTests(undefined);
       setRuntimeTokenStoreForTests(undefined);
-      if (mangoHome) await cleanupMangoHome(mangoHome);
-      mangoHome = undefined;
       await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
       await getDb().deleteFrom('user').where('id', '=', TEST_USER.id).execute();
     });
@@ -326,29 +320,42 @@ describe('Real Rust runtime MCP qualification', () => {
       const store = new InMemorySecretStore();
       setRuntimeTokenStoreForTests(store);
       const token = 'rust-mcp-qualification-token';
-      mangoHome = await scratchMangoHome('mcp-serve');
-      const port = reserveEphemeralPort();
-      child = Bun.spawn({
-        cmd: [binary.path, 'serve', '--listen', `127.0.0.1:${port}`, '--token', 'env'],
-        env: { ...process.env, MANGO_HOME: mangoHome, MANGOSTUDIO_RUNTIME_SERVE_TOKEN: token },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const repository = createEnvironmentRepository(getDb());
-      const manager = new RuntimeConnectionManager({
-        resolveEnvironment: async (userId, environmentId) => repository.find(userId, environmentId),
-        connectors: { http: connectHttpRuntime },
-      });
-      setRuntimeConnectionManagerForTests(manager);
-      const service = createEnvironmentService(repository, manager, () => undefined, store);
-      await service.create(TEST_USER.id, {
-        id: ENVIRONMENT,
-        name: 'Rust MCP serve box',
-        transportKind: 'http',
-        config: { baseUrl: `http://127.0.0.1:${port}` },
+      let manager: RuntimeConnectionManager | undefined;
+      fixture = await startMcpServeFixture(binary.path, {
+        label: 'mcp-serve',
         token,
+        connect: async (runtime, signal) => {
+          const repository = createEnvironmentRepository(getDb());
+          manager = new RuntimeConnectionManager({
+            resolveEnvironment: async (userId, environmentId) =>
+              repository.find(userId, environmentId),
+            connectors: {
+              http: (definition, onUnavailable, context) =>
+                connectHttpRuntime(definition, onUnavailable, {
+                  signal: context.signal ? AbortSignal.any([context.signal, signal]) : signal,
+                }),
+            },
+          });
+          setRuntimeConnectionManagerForTests(manager);
+          const service = createEnvironmentService(repository, manager, () => undefined, store);
+          await service.create(TEST_USER.id, {
+            id: ENVIRONMENT,
+            name: 'Rust MCP serve box',
+            transportKind: 'http',
+            config: { baseUrl: runtime.baseUrl },
+            token,
+          });
+          await service.connect(TEST_USER.id, ENVIRONMENT);
+        },
+        disconnect: async () => {
+          try {
+            await manager?.shutdown();
+          } finally {
+            setRuntimeConnectionManagerForTests(undefined);
+            setRuntimeTokenStoreForTests(undefined);
+          }
+        },
       });
-      await connectUntilListening(() => service.connect(TEST_USER.id, ENVIRONMENT));
     }
 
     function httpConfig(id: string, url: string) {
