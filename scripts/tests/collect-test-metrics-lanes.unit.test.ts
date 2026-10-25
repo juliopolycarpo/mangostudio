@@ -13,7 +13,7 @@ import type { TestMetricsFragment } from '../qa-gate/model/fragment';
 import { junitXml, passingCases, receiptJson } from '../qa-gate/testing/junit-fixture';
 
 const script = join(import.meta.dir, '..', 'qa-gate', 'collect-test-metrics.ts');
-const SHARDS = 3;
+const SHARDS = 2;
 const COLLECT_TIMEOUT = 30_000;
 
 const temps: string[] = [];
@@ -55,7 +55,7 @@ const collect = async (dir: string, shardCount?: number): Promise<TestMetricsFra
   await Bun.write(
     summary,
     JSON.stringify({
-      shards: SHARDS,
+      shards: SHARDS + TEST_LANES.filter((lane) => !lane.sharded).length,
       exitCode: 0,
       durationSeconds: 12,
       unhandledErrors: { errors: 0, headlines: [] },
@@ -84,7 +84,9 @@ describe('collect-test-metrics per-lane results', () => {
       const fragment = await collect(dir, SHARDS);
 
       for (const lane of TEST_LANES) {
-        expect(stateOf(fragment, lane.id), `lane ${lane.id} of a complete run`).toBe('measured');
+        const result = fragment.lanes?.[lane.id];
+        expect(result?.state, `lane ${lane.id} of a complete run`).toBe('measured');
+        expect(result && 'value' in result && result.value.passed).toBe(lane.sharded ? 10 : 5);
       }
       expect(fragment.tests.state).toBe('measured');
     },
