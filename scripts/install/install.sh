@@ -208,7 +208,8 @@ parse_manifest_field() {
 
 resolve_canary_tag() {
   local releases_json tag
-  releases_json="$(curl --retry 3 --retry-delay 2 -fsSL "${GITHUB_API}/releases?per_page=30")"
+  releases_json="$(curl --retry 3 --retry-delay 2 -fsSL "${GITHUB_API}/releases?per_page=30")" \
+    || fail "failed to fetch canary releases from ${GITHUB_API}/releases?per_page=30"
   tag="$(extract_canary_tag "$releases_json")"
   [ -n "$tag" ] || fail 'no canary release found'
   printf '%s\n' "$tag"
