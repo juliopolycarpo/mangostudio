@@ -19,6 +19,7 @@ import {
   HEARTBEAT_MS,
   heartbeatPath,
   MARKER_ENV,
+  QUIET_ENV,
   stopPath,
 } from './fake-rustfmt-markers';
 
@@ -29,6 +30,7 @@ if (!marker) {
   );
 }
 const hang = process.env[HANG_ENV] === '1';
+const quiet = process.env[QUIET_ENV] === '1';
 const stopRequested = () => existsSync(stopPath(marker));
 if (stopRequested()) process.exit(0);
 
@@ -53,6 +55,7 @@ if (hang) {
   let beat = 0;
   setInterval(() => {
     if (stopRequested()) process.exit(0);
+    if (quiet) return;
     publishFixtureJson(heartbeatPath(marker), {
       beat: ++beat,
       at: performance.timeOrigin + performance.now(),
