@@ -75,7 +75,7 @@
     "prepack": "bun ./build.ts"
   },
   "dependencies": {
-    "typebox": "1.4.2"
+    "typebox": "1.4.3"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
