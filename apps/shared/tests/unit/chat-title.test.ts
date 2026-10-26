@@ -10,11 +10,36 @@ import {
 
 describe('createTimestampChatTitle', () => {
   it('formats a new chat title with a readable local timestamp', () => {
-    const date = new Date(2026, 4, 9, 7, 5);
+    const enteredAt = performance.now();
+    const initialProcessCpu = process.cpuUsage();
+    let dateConstructedMs: number | null = null;
+    let titleCreatedMs: number | null = null;
+    let assertionCompletedMs: number | null = null;
 
-    const title = createTimestampChatTitle(date);
+    try {
+      const date = new Date(2026, 4, 9, 7, 5);
+      dateConstructedMs = performance.now() - enteredAt;
 
-    expect(title).toBe('New Chat [2026-05-09 07:05]');
+      const title = createTimestampChatTitle(date);
+      titleCreatedMs = performance.now() - enteredAt;
+
+      expect(title).toBe('New Chat [2026-05-09 07:05]');
+      assertionCompletedMs = performance.now() - enteredAt;
+    } finally {
+      const callbackWallMs = performance.now() - enteredAt;
+      const wholeProcessCpuMicros = process.cpuUsage(initialProcessCpu);
+      // eslint-disable-next-line no-console -- Retain phases when the runner times out after callback return.
+      console.info(
+        '[timestamp-title-case]',
+        JSON.stringify({
+          pid: process.pid,
+          entryMonotonicMs: enteredAt,
+          phaseElapsedMs: { dateConstructedMs, titleCreatedMs, assertionCompletedMs },
+          callbackWallMs,
+          wholeProcessCpuMicros,
+        })
+      );
+    }
   });
 });
 
