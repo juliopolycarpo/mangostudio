@@ -923,7 +923,9 @@ mod windows {
 
 #[cfg(all(test, windows))]
 mod windows_tests {
-    use super::process_lifetime_test_receipt::ensure_stopped;
+    use super::process_lifetime_test_receipt::{
+        ensure_capture_unchanged, ensure_live_control, ensure_stopped,
+    };
     use super::windows::{Exec, operate};
     use super::*;
     use crate::subprocess::{
@@ -1431,11 +1433,9 @@ mod windows_tests {
             }
             let report: Value =
                 serde_json::from_str(&original).expect("control captured native identities");
-            assert_eq!(
-                report["captured"].as_array().map(Vec::len),
-                Some(3),
-                "received: {report}"
-            );
+            ensure_live_control(&original, pid).unwrap_or_else(|error| {
+                panic!("expected complete live fallback control | received: {error}")
+            });
             let captured = super::scheduled_task::ps_quote(&report["captured"].to_string());
             let verify = format!(
                 "$ErrorActionPreference = 'Stop'\n{PROCESS_LIFETIME_HELPERS}\n$captured = {captured} | ConvertFrom-Json\nGet-ServiceTestReceipt $captured | ConvertTo-Json -Compress -Depth 5"
@@ -1444,8 +1444,10 @@ mod windows_tests {
                 .run(&verify, Duration::from_secs(30))
                 .expect("independent CIM post-fallback query");
             assert!(ok, "expected independent native query | received: {output}");
-            ensure_stopped(&output).unwrap_or_else(|error| {
-                panic!("expected captured native lifetimes gone after fallback | received: {error}")
+            ensure_capture_unchanged(&original, &output).unwrap_or_else(|error| {
+                panic!(
+                    "expected all original native lifetimes gone after fallback | received: {error}"
+                )
             });
         }
     }
