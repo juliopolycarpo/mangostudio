@@ -62,7 +62,7 @@ importing the specific module in new code:
 | `npm-pack.ts`          | npm distribution manifest builders                                                                       |
 | `release-version.ts`   | Canonical release version resolver + lockstep consistency check                                          |
 | `prepare-release.ts`   | Two-phase lockstep version bump for release preparation                                                  |
-| `bun-cross-runtime.ts` | Per-target Bun runtime for `--compile` when `.bun-version` names a channel (dormant on a released pin)   |
+| `bun-cross-runtime.ts` | Per-target Bun runtime for `--compile` when `.bun-version` names a channel                               |
 | `runtime-build.ts`     | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
 | `executable-header.ts` | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
 | `test-workers.ts`      | Test-lane worker plan, strict verdict, JUnit merge (+ test-worker-process.ts)                            |

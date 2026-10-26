@@ -7,7 +7,10 @@ interface PackageManifest {
 }
 
 const FRONTEND_MANIFEST = new URL('../../package.json', import.meta.url);
-const BUN_TYPES_RANGE = `^${readFileSync(new URL('../../.bun-version', FRONTEND_MANIFEST), 'utf8').trim()}`;
+const { packageManager } = JSON.parse(
+  readFileSync(new URL('../../package.json', FRONTEND_MANIFEST), 'utf8')
+) as { packageManager: string };
+const BUN_TYPES_RANGE = `^${packageManager.replace(/^bun@/, '')}`;
 
 function readManifest(url: URL): Promise<PackageManifest> {
   return Bun.file(url).json();

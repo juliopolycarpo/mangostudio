@@ -129,6 +129,20 @@ jobs:
       runtime_profile: ${{ github.event_name == 'pull_request' && 'light' || 'shipping' }}
       cache: true
 
+  cross-runtimes:
+    name: Cross-runtime download
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Resolve every target runtime from a cold cache
+        run: bun ./scripts/ci/verify-cross-runtimes.ts
+
   check:
     name: Check
     uses: ./.github/workflows/lint.yml
@@ -252,6 +266,7 @@ jobs:
       distribution-identity,
       changes,
       distribution,
+      cross-runtimes,
       release-dry-run,
       check,
       dependency-audit,
@@ -312,6 +327,7 @@ jobs:
       distribution-identity,
       changes,
       distribution,
+      cross-runtimes,
       release-dry-run,
       check,
       dependency-audit,

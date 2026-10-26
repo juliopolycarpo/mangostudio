@@ -128,7 +128,7 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 
 ## Pré-requisitos (desenvolvimento)
 
-- [Bun](https://bun.sh/) na versão exata de [`.bun-version`](../../.bun-version) —
+- [Bun](https://bun.sh/) no canal indicado em [`.bun-version`](../../.bun-version) —
   selecione a [release oficial correspondente](https://github.com/oven-sh/bun/releases)
 - Rust 1.99.0 ou mais recente via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). O hub inicia o
   Local como o `mangostudio-runtime` construído com cargo, e o `rust-toolchain.toml` fixa a

@@ -203,15 +203,12 @@ describe('CI / Gate aggregate', () => {
     }
   });
 
-  test('no lane fetches a cross-compile runtime while .bun-version is pinned', () => {
-    // The `cross-runtimes` lane and `cross-runtime-nightly.yml` verified a
-    // download path that only exists on a channel. Against a released pin
-    // `verify-cross-runtimes.ts` prints "nothing to verify" and exits 0, so
-    // both lanes were spending a runner to assert nothing. Restoring them is
-    // part of moving `.bun-version` back to a channel, not a standalone change.
-    expect(extractJobBlocks(workflow).map(({ job }) => job)).not.toContain('cross-runtimes');
-    expect(workflow).not.toContain('verify-cross-runtimes.ts');
-    expect(workflow).not.toContain('cross_runtime');
+  test('the canary cross-runtime download is bounded and gates CI', () => {
+    const job = extractJobBlock(workflow, 'cross-runtimes');
+    expect(job).toContain('timeout-minutes: 5');
+    expect(job).toContain('bun ./scripts/ci/verify-cross-runtimes.ts');
+    expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('cross-runtimes');
+    expect(parseNeedsList(extractJobBlock(workflow, 'gate-unique'))).toContain('cross-runtimes');
   });
 
   test('non-pull_request events treat every lane as relevant', () => {
