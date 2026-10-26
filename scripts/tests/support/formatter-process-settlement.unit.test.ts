@@ -60,6 +60,39 @@ class NativeSettlementClock implements FormatterSettlementHost {
 
 const owned = [{ who: 'controlled formatter', native }];
 
+/** A timed native transcript that refuses queries admitted after its deadline. */
+class TimedNativeSettlementTranscript extends NativeSettlementClock {
+  readonly admissions: Array<{ at: number; budget: number }> = [];
+  pauseOverrun = 0;
+  readonly pauseDurations: number[] = [];
+  readDuration = 0;
+  failureDuration = 0;
+  nowReadAdvance = 0;
+  rejectFrom = Number.POSITIVE_INFINITY;
+  readonly queryFailure = new Error('controlled native observation refusal');
+  readonly failuresByPid = new Map<number, Error>();
+  override now = (): number => {
+    const current = this.time;
+    this.time += this.nowReadAdvance;
+    return current;
+  };
+  override pause = (ms: number): Promise<void> => {
+    this.time += this.pauseDurations.shift() ?? ms + this.pauseOverrun;
+    return Promise.resolve();
+  };
+  override read = (pid: number, budget: number): Promise<NativeFormatterProcess | undefined> => {
+    const admittedAt = this.time;
+    this.admissions.push({ at: admittedAt, budget });
+    this.reads.push([pid, budget]);
+    this.time += this.readDuration;
+    if (admittedAt >= 300 || admittedAt >= this.rejectFrom) {
+      this.time += this.failureDuration;
+      return Promise.reject(this.failuresByPid.get(pid) ?? this.queryFailure);
+    }
+    return Promise.resolve(this.current.get(pid));
+  };
+}
+
 describe('native formatter identity queries', () => {
   it('captures Linux birth/state/lineage from one native document', async () => {
     const queries = new NativeQueryTranscript('linux');
@@ -168,5 +201,111 @@ describe('native formatter settlement', () => {
     await expect(waitForFormatterSettlement(owned, clock)).rejects.toThrow(
       'native observation failed'
     );
+  });
+  it.each([0, 7])(
+    'does not admit another native read after a pause overruns by %s ms',
+    async (overrun) => {
+      const clock = new TimedNativeSettlementTranscript();
+      clock.pauseOverrun = overrun;
+      await expect(waitForFormatterSettlement(owned, clock)).rejects.toThrow(
+        'expected live owned processes: 0 within 300ms'
+      );
+      expect(clock.admissions.length).toBeGreaterThan(0);
+      expect(clock.admissions.every(({ at }) => at < 300)).toBe(true);
+      expect(clock.time).toBeGreaterThanOrEqual(300);
+    }
+  );
+  it.each(['absent', 'zombie', 'replaced birth'] as const)(
+    'refuses a late %s observation as proof of in-budget settlement',
+    async (mode) => {
+      const clock = new TimedNativeSettlementTranscript();
+      clock.readDuration = 301;
+      clock.current.set(
+        1234,
+        mode === 'absent'
+          ? undefined
+          : {
+              ...native,
+              state: mode === 'zombie' ? 'Z' : 'S',
+              identity: mode === 'replaced birth' ? '1234:new-birth' : native.identity,
+            }
+      );
+      await expect(waitForFormatterSettlement(owned, clock)).rejects.toThrow(
+        'expected native observation completion within 300ms'
+      );
+      expect(clock.admissions).toEqual([{ at: 0, budget: 300 }]);
+    }
+  );
+  it('accepts native absence observed exactly at the deadline', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.readDuration = 300;
+    clock.current.set(1234, undefined);
+    await waitForFormatterSettlement(owned, clock);
+    expect(clock.time).toBe(300);
+    expect(clock.admissions).toEqual([{ at: 0, budget: 300 }]);
+  });
+  it('preserves a short final native query failure with its PID, budget and cause', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.rejectFrom = 290;
+    clock.failureDuration = 10;
+    const error = await waitForFormatterSettlement(owned, clock).then(
+      () => undefined,
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    const aggregate = error as AggregateError;
+    expect(aggregate.errors).toEqual([clock.queryFailure]);
+    expect(aggregate.cause).toBe(clock.queryFailure);
+    expect(aggregate.message).toContain('native observation failed');
+    expect(aggregate.message).toContain('1234');
+    expect(aggregate.message).toContain('"budgetMs":10');
+    expect(aggregate.message).toContain('"elapsedMs":300');
+    expect(aggregate.message).toContain(clock.queryFailure.message);
+    expect(clock.admissions.at(-1)).toEqual({ at: 290, budget: 10 });
+  });
+  it('uses the fractional remainder without rounding up a new query budget', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.pauseDurations.push(299.5);
+    await expect(waitForFormatterSettlement(owned, clock)).rejects.toThrow(
+      'expected live owned processes: 0 within 300ms'
+    );
+    expect(clock.admissions).toEqual([{ at: 0, budget: 300 }]);
+    expect(clock.time).toBe(300);
+  });
+  it('does not report a live verdict when no native query fits before the deadline', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.nowReadAdvance = 300;
+    await expect(waitForFormatterSettlement(owned, clock)).rejects.toThrow(
+      'expected native observation before the 300ms deadline'
+    );
+    expect(clock.admissions).toEqual([]);
+  });
+  it('retains every failed owned query and its original error', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.rejectFrom = 0;
+    const secondFailure = new TypeError('second controlled native observation refusal');
+    clock.failuresByPid.set(5678, secondFailure);
+    const second = { who: 'second formatter', native: { ...native, pid: 5678 } };
+    const error = await waitForFormatterSettlement([...owned, second], clock).then(
+      () => undefined,
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    const aggregate = error as AggregateError;
+    expect(aggregate.errors).toHaveLength(2);
+    expect(aggregate.errors[0]).toBe(clock.queryFailure);
+    expect(aggregate.errors[1]).toBe(secondFailure);
+    expect(aggregate.message).toContain('"pid":1234');
+    expect(aggregate.message).toContain('"pid":5678');
+    expect(clock.reads).toEqual([
+      [1234, 300],
+      [5678, 300],
+    ]);
+  });
+  it('accepts an empty ownership set without making native queries', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.rejectFrom = 0;
+    await waitForFormatterSettlement([], clock);
+    expect(clock.admissions).toEqual([]);
   });
 });
