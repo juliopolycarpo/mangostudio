@@ -164,6 +164,11 @@ export async function waitForFormatterSettlement(
   const deadline = started + budget;
   let lastLive: Array<{ who: string; current: NativeFormatterProcess }> = [];
   let lastObservedMs: number | undefined;
+  const rejectLastObservation = (): never => {
+    throw new Error(
+      `formatter cancellation: expected live owned processes: 0 within ${budget}ms | received last native observation: ${JSON.stringify({ elapsedMs: lastObservedMs, live: lastLive })}`
+    );
+  };
   while (true) {
     const admittedAt = host.now();
     if (admittedAt >= deadline) {
@@ -171,9 +176,7 @@ export async function waitForFormatterSettlement(
         throw new Error(
           `formatter cancellation: expected native observation before the ${budget}ms deadline | received: no in-budget observation`
         );
-      throw new Error(
-        `formatter cancellation: expected live owned processes: 0 within ${budget}ms | received last native observation: ${JSON.stringify({ elapsedMs: lastObservedMs, live: lastLive })}`
-      );
+      rejectLastObservation();
     }
     if (Math.floor(deadline - admittedAt) < 1) {
       await host.pause(deadline - admittedAt);
@@ -215,6 +218,7 @@ export async function waitForFormatterSettlement(
       );
     }
     if (completedAt > deadline) {
+      if (lastObservedMs !== undefined) rejectLastObservation();
       throw new Error(
         `formatter cancellation: expected native observation completion within ${budget}ms | received: ${completedAt - started}ms for PIDs ${owned.map(({ native }) => native.pid).join(', ')}`
       );

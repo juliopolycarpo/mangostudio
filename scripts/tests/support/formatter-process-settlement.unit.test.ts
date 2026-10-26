@@ -94,6 +94,19 @@ class TimedNativeSettlementTranscript extends NativeSettlementClock {
   };
 }
 
+/** A valid live sample followed by a successful native read delivered after expiry. */
+class LateNativeFulfillmentTranscript extends NativeSettlementClock {
+  constructor(readonly lateResult: NativeFormatterProcess | undefined) {
+    super();
+  }
+  override read = (pid: number, budget: number): Promise<NativeFormatterProcess | undefined> => {
+    this.reads.push([pid, budget]);
+    if (this.reads.length === 1) return Promise.resolve(this.current.get(pid));
+    this.time += 300;
+    return Promise.resolve(this.lateResult);
+  };
+}
+
 describe('native formatter identity queries', () => {
   it('captures Linux birth/state/lineage from one native document', async () => {
     const queries = new NativeQueryTranscript('linux');
@@ -245,6 +258,37 @@ describe('native formatter settlement', () => {
     expect(clock.time).toBe(300);
     expect(clock.admissions).toEqual([{ at: 0, budget: 300 }]);
   });
+  it.each(['absent', 'zombie', 'replaced birth', 'live'] as const)(
+    'discards late %s and retains only the previous in-budget live witness',
+    async (mode) => {
+      const lateResult =
+        mode === 'absent'
+          ? undefined
+          : {
+              ...native,
+              state: mode === 'zombie' ? 'Z' : 'S',
+              identity: mode === 'replaced birth' ? '1234:late-birth' : native.identity,
+            };
+      const clock = new LateNativeFulfillmentTranscript(lateResult);
+      const error = await waitForFormatterSettlement(owned, clock).then(
+        () => undefined,
+        (failure: unknown) => failure
+      );
+      expect(error).toBeInstanceOf(Error);
+      const message = (error as Error).message;
+      expect(message).toContain('expected live owned processes: 0 within 300ms');
+      const snapshot = JSON.parse(message.split('received last native observation: ')[1] ?? 'null');
+      expect(snapshot).toEqual({
+        elapsedMs: 0,
+        live: [{ who: 'controlled formatter', current: native }],
+      });
+      expect(clock.reads).toEqual([
+        [1234, 300],
+        [1234, 290],
+      ]);
+      expect(clock.time).toBe(310);
+    }
+  );
   it('preserves a short final native query failure with its PID, budget and cause', async () => {
     const clock = new TimedNativeSettlementTranscript();
     clock.rejectFrom = 290;
@@ -272,6 +316,22 @@ describe('native formatter settlement', () => {
     );
     expect(clock.admissions).toEqual([{ at: 0, budget: 300 }]);
     expect(clock.time).toBe(300);
+  });
+  it('preserves a late rejected query instead of substituting a prior live witness', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.rejectFrom = 290;
+    clock.failureDuration = 20;
+    const error = await waitForFormatterSettlement(owned, clock).then(
+      () => undefined,
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    const aggregate = error as AggregateError;
+    expect(aggregate.errors).toHaveLength(1);
+    expect(aggregate.errors[0]).toBe(clock.queryFailure);
+    expect(aggregate.cause).toBe(clock.queryFailure);
+    expect(aggregate.message).toContain('native observation failed');
+    expect(aggregate.message).toContain('"elapsedMs":310');
   });
   it('does not report a live verdict when no native query fits before the deadline', async () => {
     const clock = new TimedNativeSettlementTranscript();
