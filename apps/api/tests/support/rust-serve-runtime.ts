@@ -12,6 +12,7 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sanitizedEnv } from '@mangostudio/protocol/spawn';
+import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
 import { cleanupMangoHome, scratchMangoHome } from './rust-runtime-binary';
 import { reserveEphemeralPort } from './rust-serve-dial';
 
@@ -33,6 +34,8 @@ export interface StartRustServeOptions {
   /** Runs against the scratch `MANGO_HOME` before `serve` starts, e.g. to grant consent. */
   readonly prepare?: (mangoHome: string) => Promise<void>;
   readonly readyTimeoutMs?: number;
+  /** Shares a caller-owned startup deadline with later connection phases. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -80,11 +83,23 @@ export async function startRustServe(
   };
 
   const baseUrl = `http://127.0.0.1:${port}`;
+  const timeoutMs = options.readyTimeoutMs ?? 10_000;
+  const deadline = options.signal
+    ? {
+        signal: options.signal,
+        clear: () => {
+          /* Caller owns this deadline. */
+        },
+      }
+    : dialDeadline(timeoutMs, `Serve health deadline exceeded ${timeoutMs}ms`);
+  const signal = deadline.signal;
   try {
-    await waitForHealth(baseUrl, child, stderr, options.readyTimeoutMs ?? 10_000);
+    await waitForHealth(baseUrl, child, stderr, timeoutMs, signal);
   } catch (error) {
     await close();
     throw error;
+  } finally {
+    deadline.clear();
   }
   return { port, baseUrl, wsUrl: `ws://127.0.0.1:${port}`, mangoHome, close };
 }
@@ -93,21 +108,24 @@ async function waitForHealth(
   baseUrl: string,
   child: { readonly exitCode: number | null },
   stderr: Promise<string>,
-  timeoutMs: number
+  timeoutMs: number,
+  signal: AbortSignal
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   let last = 'no answer yet';
   while (Date.now() < deadline) {
+    signal.throwIfAborted();
     if (child.exitCode !== null) {
       throw new Error(
         `expected "serve" to keep listening on ${baseUrl} | received: exit ${child.exitCode}: ${await stderr}`
       );
     }
     try {
-      const response = await fetch(`${baseUrl}/health`);
+      const response = await fetch(`${baseUrl}/health`, { signal });
       if (response.ok) return;
       last = `HTTP ${response.status}`;
     } catch (error) {
+      signal.throwIfAborted();
       last = error instanceof Error ? error.message : String(error);
     }
     await Bun.sleep(50);
