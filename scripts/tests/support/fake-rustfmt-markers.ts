@@ -8,6 +8,8 @@
 
 export const MARKER_ENV = 'MANGO_TEST_RUSTFMT_MARKER';
 export const HANG_ENV = 'MANGO_TEST_RUSTFMT_HANG';
+export const QUIET_ENV = 'MANGO_TEST_RUSTFMT_QUIET';
+export const CONTROL_ENV = 'MANGO_TEST_RUSTFMT_CONTROL';
 /** Set on the copy a hanging fake starts; the copy hangs without starting another. */
 export const GRANDCHILD_ENV = 'MANGO_TEST_RUSTFMT_GRANDCHILD';
 export const HEARTBEAT_MS = 50;
@@ -23,6 +25,15 @@ export function heartbeatPath(marker: string): string {
 }
 
 /**
+ * A stop request addressed to this fake's unique marker rather than its pid.
+ * @example
+ * stopPath('/tmp/started.json'); // '/tmp/started.json.stop'
+ */
+export function stopPath(marker: string): string {
+  return `${marker}.stop`;
+}
+
+/**
  * The marker of the copy a hanging fake starts.
  *
  * @example
@@ -30,4 +41,9 @@ export function heartbeatPath(marker: string): string {
  */
 export function grandchildMarker(marker: string): string {
   return `${marker}.grandchild`;
+}
+
+/** Address one event in the controlled formatter lifecycle. @example formatterControlPath(marker, 'spawn-release'); */
+export function formatterControlPath(marker: string, event: string): string {
+  return `${marker}.${event}`;
 }

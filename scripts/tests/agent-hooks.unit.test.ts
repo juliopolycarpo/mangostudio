@@ -19,16 +19,28 @@ import {
   runAutoFixHook,
   shouldSkipFile,
 } from '../../.codex/hooks/auto-fix.mjs';
+import { publishFixtureJson } from './support/atomic-fixture-json';
 import { fixtureChildEnvironment } from './support/child-supervision';
 import { FormatterClock, HangingFormatter } from './support/fake-formatter-deadline';
 import {
+  CONTROL_ENV,
+  formatterControlPath,
   GRANDCHILD_ENV,
   grandchildMarker,
   HANG_ENV,
   HEARTBEAT_MS,
   heartbeatPath,
   MARKER_ENV,
+  QUIET_ENV,
+  stopPath,
 } from './support/fake-rustfmt-markers';
+import { FORMATTER_CANCEL_CONTROL } from './support/formatter-cancel-control';
+import { requestFormatterStop, withFormatterHookCleanup } from './support/formatter-hook-cleanup';
+import {
+  type OwnedFormatterProcess,
+  readNativeFormatterProcess,
+  waitForFormatterSettlement,
+} from './support/formatter-process-settlement';
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
@@ -60,12 +72,13 @@ async function readMarker(marker: string, who: string) {
 }
 
 /**
- * True when the fake behind `marker` still beats. A stopped process cannot, so unlike a pid
- * probe this never mistakes an unrelated process that reused the pid for the fake.
+ * Observe publication changes, not native liveness: silence can hide a live process and
+ * one final publication may become visible after exit. POSIX verdicts use native identities.
  */
-async function stillBeating(marker: string) {
+async function stillBeating(marker: string, afterBaseline?: () => void | Promise<void>) {
   const read = () => readFile(heartbeatPath(marker), 'utf8').catch(() => '');
   const before = await read();
+  if (afterBaseline) await afterBaseline();
   await Bun.sleep(HEARTBEAT_MS * 6);
   return (await read()) !== before;
 }
@@ -85,6 +98,54 @@ async function firstHeartbeat(marker: string, who: string, timeoutMs = 5000) {
   throw new Error(
     `${who} never beat | expected: ${heartbeatPath(marker)} within ${timeoutMs}ms | received: none`
   );
+}
+
+/** Return an explicit owned-hook exit if a required control event never arrives. */
+async function fixtureEvent(
+  path: string,
+  hook: Pick<ReturnType<typeof Bun.spawn>, 'exited'>
+): Promise<boolean> {
+  let exited = false;
+  void hook.exited.then(() => {
+    exited = true;
+  });
+  const deadline = performance.now() + 5000;
+  while (!(await Bun.file(path).exists())) {
+    if (exited) return false;
+    if (performance.now() >= deadline)
+      throw new Error(`expected fixture event ${path} within 5000ms`);
+    await Bun.sleep(10);
+  }
+  return true;
+}
+
+/** Bind native births while the hook and its two controlled descendants are still live. */
+async function captureOwnedFormatters(
+  hook: Pick<ReturnType<typeof Bun.spawn>, 'pid' | 'exitCode' | 'signalCode'>,
+  fakes: readonly (readonly [marker: string, who: string])[],
+  ownGroup = false
+): Promise<OwnedFormatterProcess[]> {
+  for (const [marker, who] of fakes) await firstHeartbeat(marker, who);
+  expect(hook.exitCode, 'expected a live owned hook before cancellation/deadline').toBeNull();
+  expect(hook.signalCode).toBeNull();
+  const hookNative = await readNativeFormatterProcess(hook.pid);
+  expect(hookNative).toBeDefined();
+  expect(hookNative?.state).not.toBe('Z');
+  if (ownGroup) expect(hookNative?.group).toBe(hook.pid);
+  const owned: OwnedFormatterProcess[] = [];
+  for (const [marker, who] of fakes) {
+    const started = await readMarker(marker, who);
+    const native = await readNativeFormatterProcess(started.pid);
+    if (!native)
+      throw new Error(`${who}: expected a live native birth identity | received: absent`);
+    expect(native.state).not.toBe('Z');
+    owned.push({ who, native });
+  }
+  expect(owned[0]?.native.parentPid).toBe(hook.pid);
+  expect(owned[0]?.native.group).toBe(owned[0]?.native.pid);
+  expect(owned[1]?.native.parentPid).toBe(owned[0]?.native.pid);
+  expect(owned[1]?.native.group).toBe(owned[0]?.native.group);
+  return owned;
 }
 
 afterEach(async () => {
@@ -138,6 +199,8 @@ describe('agent auto-fix hooks', () => {
       [MARKER_ENV]: marker,
       [HANG_ENV]: hang,
       [GRANDCHILD_ENV]: '0',
+      [QUIET_ENV]: '0',
+      [CONTROL_ENV]: '',
     };
   };
 
@@ -252,94 +315,304 @@ describe('agent auto-fix hooks', () => {
       // Allow hook startup and Windows tree termination around the 5-second formatter deadline.
       timeout: 15_000,
     });
-    proc.stdin.write(JSON.stringify({ path: filePath }));
-    proc.stdin.end();
-
-    const exitCode = await proc.exited;
     const fakes = [
       [marker, 'fake rustfmt'],
       [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
     ] as const;
     const leaked: number[] = [];
-    try {
-      expect(exitCode).toBe(0);
-      expect(proc.signalCode).toBeNull();
-      for (const [fakeMarker, who] of fakes) {
-        const started = await readMarker(fakeMarker, who);
-        expect(started.args).toEqual([filePath]);
-        expect(started.cwd).toBe(repoRoot);
-        if (await stillBeating(fakeMarker)) leaked.push(started.pid);
-        const lastBeat = JSON.parse(await readFile(heartbeatPath(fakeMarker), 'utf8')) as {
-          at: number;
-        };
-        // Measure the formatter's live interval, excluding cold hook startup. A longer
-        // formatter deadline still fails this bound; both descendants must also stop.
-        expect(
-          lastBeat.at - started.startedAt,
-          `${who}: expected less than 7000ms alive`
-        ).toBeLessThan(7000);
-      }
-      expect(leaked).toEqual([]);
-      expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
-    } finally {
-      // An earlier assertion must not bypass discovery of either descendant.
-      for (const [fakeMarker, who] of fakes) {
-        const started = await readMarker(fakeMarker, who).catch(() => null);
-        if (!started || !(await stillBeating(fakeMarker))) continue;
-        try {
-          process.kill(started.pid, 'SIGKILL');
-        } catch {
-          // Stopped between the heartbeat check and here.
+    await withFormatterHookCleanup(
+      proc,
+      fakes,
+      async () => {
+        proc.stdin.write(JSON.stringify({ path: filePath }));
+        proc.stdin.end();
+        const nativeOwned =
+          process.platform === 'win32' ? undefined : await captureOwnedFormatters(proc, fakes);
+        const exitCode = await proc.exited;
+        expect(exitCode).toBe(0);
+        expect(proc.signalCode).toBeNull();
+        if (nativeOwned) await waitForFormatterSettlement(nativeOwned);
+        for (const [fakeMarker, who] of fakes) {
+          const started = await readMarker(fakeMarker, who);
+          expect(started.args).toEqual([filePath]);
+          expect(started.cwd).toBe(repoRoot);
+          if (!nativeOwned && (await stillBeating(fakeMarker))) leaked.push(started.pid);
+          const lastBeat = JSON.parse(await readFile(heartbeatPath(fakeMarker), 'utf8')) as {
+            at: number;
+          };
+          // Measure the formatter's live interval, excluding cold hook startup. A longer
+          // formatter deadline still fails this bound; both descendants must also stop.
+          expect(
+            lastBeat.at - started.startedAt,
+            `${who}: expected less than 7000ms alive`
+          ).toBeLessThan(7000);
         }
-      }
-    }
+        expect(leaked).toEqual([]);
+        expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
+      },
+      { requestStop: requestFormatterStop, stillBeating }
+    );
   }, 20_000);
 
-  // Windows has no group signal to forward; Bun's job object ends the hook's children there.
-  it.skipIf(process.platform === 'win32')(
-    'stops the formatter tree when the agent cancels the hook before the deadline',
-    async () => {
+  // Keep the existing POSIX coverage; Windows has no hook group signal to forward.
+  it
+    .skipIf(process.platform === 'win32')
+    .each(['normal', 'spawn-gap', 'exit-settlement', 'deadline-first'] as const)(
+    'settles the native formatter tree on cancellation: %s',
+    async (mode) => {
       const dir = await makeTempDir();
       const marker = join(dir, 'started.json');
-      const filePath = join(repoRoot, '.mango', `formatter-cancel-${process.pid}.rs`);
+      const filePath = join(repoRoot, '.mango', `formatter-cancel-${mode}-${process.pid}.rs`);
       tempDirs.push(filePath);
       await writeFile(filePath, 'fn main() {}\n');
-      // An agent cancels a hook by signalling the group it started the hook in.
-      const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
-        env: formatterEnvironment(marker, '1'),
+      const command =
+        mode === 'normal'
+          ? [process.execPath]
+          : [process.execPath, '--preload', FORMATTER_CANCEL_CONTROL];
+      const proc = Bun.spawn([...command, hookEntrypoints[0][1]], {
+        env: { ...formatterEnvironment(marker, '1'), [CONTROL_ENV]: mode === 'normal' ? '' : mode },
         detached: true,
         stdin: 'pipe',
         stdout: 'ignore',
         stderr: 'ignore',
         timeout: 8000,
       });
-      proc.stdin.write(JSON.stringify({ path: filePath }));
-      proc.stdin.end();
-
       const fakes = [
         [marker, 'fake rustfmt'],
         [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
       ] as const;
-      const leaked: number[] = [];
-      try {
-        for (const [fakeMarker, who] of fakes) await firstHeartbeat(fakeMarker, who);
-        process.kill(-proc.pid, 'SIGTERM');
-        await proc.exited;
-        for (const [fakeMarker, who] of fakes) {
-          const started = await readMarker(fakeMarker, who);
-          if (await stillBeating(fakeMarker)) leaked.push(started.pid);
-        }
-        expect(leaked).toEqual([]);
-        expect(proc.exitCode).toBe(143);
-      } finally {
-        for (const pid of leaked) {
+      await withFormatterHookCleanup(
+        proc,
+        fakes,
+        async () => {
           try {
-            process.kill(pid, 'SIGKILL');
-          } catch {
-            // Stopped between the heartbeat check and here.
+            proc.stdin.write(JSON.stringify({ path: filePath }));
+            proc.stdin.end();
+            const owned = await captureOwnedFormatters(proc, fakes, true);
+            if (mode === 'deadline-first') {
+              await writeFile(formatterControlPath(marker, 'fire-deadline'), '');
+            } else {
+              // This is the retained, still-live hook's group, not a marker PID.
+              process.kill(-proc.pid, mode === 'exit-settlement' ? 'SIGINT' : 'SIGTERM');
+            }
+            if (mode === 'spawn-gap') {
+              await Bun.sleep(HEARTBEAT_MS);
+              await writeFile(formatterControlPath(marker, 'spawn-release'), '');
+            }
+            if (mode === 'exit-settlement' || mode === 'deadline-first') {
+              const observed = await fixtureEvent(
+                formatterControlPath(marker, 'exit-observed'),
+                proc
+              );
+              expect(
+                observed,
+                'expected owned formatter exit receipt before hook cancellation exit'
+              ).toBe(true);
+              expect(
+                proc.exitCode,
+                'hook must retain its pending formatter exit promise'
+              ).toBeNull();
+              expect(proc.signalCode).toBeNull();
+              const receipt = JSON.parse(
+                await readFile(formatterControlPath(marker, 'exit-observed'), 'utf8')
+              );
+              expect(receipt.groupStops).toBe(1);
+              expect(receipt.handleStops).toBe(1);
+              expect(receipt.timers).toBe(0);
+              expect(receipt.listeners).toEqual({ SIGINT: 1, SIGTERM: 1, SIGHUP: 1 });
+              await writeFile(formatterControlPath(marker, 'exit-release'), '');
+            }
+            const exit = await proc.exited;
+            await waitForFormatterSettlement(owned);
+            expect(exit).toBe(mode === 'normal' || mode === 'spawn-gap' ? 143 : 130);
+            expect(proc.exitCode).toBe(exit);
+          } finally {
+            await Promise.all(
+              ['spawn-release', 'exit-release'].map((event) =>
+                writeFile(formatterControlPath(marker, event), '')
+              )
+            );
           }
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
+    },
+    10000
+  );
+
+  it.skipIf(process.platform === 'win32').each(['signal-before-return', 'spawn-throw'] as const)(
+    'settles formatter transfer or spawn refusal: %s',
+    async (mode) => {
+      const dir = await makeTempDir();
+      const marker = join(dir, 'started.json');
+      const filePath = join(repoRoot, '.mango', `formatter-transfer-${mode}-${process.pid}.rs`);
+      tempDirs.push(filePath);
+      await writeFile(filePath, 'fn main() {}\n');
+      const proc = Bun.spawn(
+        [process.execPath, '--preload', FORMATTER_CANCEL_CONTROL, hookEntrypoints[0][1]],
+        {
+          env: { ...formatterEnvironment(marker, '1'), [CONTROL_ENV]: mode },
+          stdin: 'pipe',
+          stdout: 'ignore',
+          stderr: 'ignore',
+          timeout: 8000,
         }
+      );
+      const fakes = [
+        [marker, 'formatter'],
+        [grandchildMarker(marker), 'grandchild'],
+      ] as const;
+      await withFormatterHookCleanup(
+        proc,
+        fakes,
+        async () => {
+          proc.stdin.write(JSON.stringify({ path: filePath }));
+          proc.stdin.end();
+          expect(await proc.exited).toBe(mode === 'spawn-throw' ? 0 : 130);
+          const receipt = JSON.parse(
+            await readFile(formatterControlPath(marker, 'control-exit'), 'utf8')
+          );
+          expect(receipt.listeners).toEqual({ SIGINT: 0, SIGTERM: 0, SIGHUP: 0 });
+          expect(receipt.timers).toBe(0);
+          expect(receipt.groupStops).toBe(mode === 'spawn-throw' ? 0 : 1);
+          if (mode === 'signal-before-return') expect(receipt.nativeSettled).toBe(true);
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
+    },
+    10000
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects a quiet live formatter without relying on heartbeat changes',
+    async () => {
+      const dir = await makeTempDir();
+      const marker = join(dir, 'quiet.json');
+      const proc = Bun.spawn([join(fakeRustfmtBin, 'rustfmt')], {
+        env: { ...formatterEnvironment(marker, '1'), [GRANDCHILD_ENV]: '1', [QUIET_ENV]: '1' },
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'ignore',
+        timeout: 8000,
+      });
+      await withFormatterHookCleanup(
+        proc,
+        [[marker, 'quiet formatter']],
+        async () => {
+          expect(await fixtureEvent(marker, proc)).toBe(true);
+          const native = await readNativeFormatterProcess(proc.pid);
+          if (!native)
+            throw new Error(
+              'formatter fixture: expected a live native identity | received: absent'
+            );
+          expect(native.state).not.toBe('Z');
+          expect(await Bun.file(heartbeatPath(marker)).exists()).toBe(false);
+          await expect(
+            waitForFormatterSettlement([{ who: 'quiet formatter', native }])
+          ).rejects.toThrow('expected live owned processes: 0');
+          await requestFormatterStop(marker);
+          expect(await proc.exited).toBe(0);
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
+    },
+    10000
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'accepts native exit despite a final heartbeat publication becoming visible',
+    async () => {
+      const dir = await makeTempDir();
+      const marker = join(dir, 'final.json');
+      const proc = Bun.spawn([join(fakeRustfmtBin, 'rustfmt')], {
+        env: { ...formatterEnvironment(marker, '1'), [GRANDCHILD_ENV]: '1' },
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'ignore',
+        timeout: 8000,
+      });
+      await withFormatterHookCleanup(
+        proc,
+        [[marker, 'final formatter']],
+        async () => {
+          await firstHeartbeat(marker, 'final formatter');
+          const native = await readNativeFormatterProcess(proc.pid);
+          if (!native)
+            throw new Error(
+              'formatter fixture: expected a live native identity | received: absent'
+            );
+          expect(native.state).not.toBe('Z');
+          await requestFormatterStop(marker);
+          expect(await proc.exited).toBe(0);
+          await waitForFormatterSettlement([{ who: 'final formatter', native }]);
+          const previous = JSON.parse(await readFile(heartbeatPath(marker), 'utf8')) as {
+            beat: number;
+            at: number;
+          };
+          function publishFinalHeartbeat(): void {
+            publishFixtureJson(heartbeatPath(marker), {
+              beat: previous.beat + 1,
+              at: previous.at + HEARTBEAT_MS,
+            });
+          }
+          expect(await stillBeating(marker, publishFinalHeartbeat)).toBe(true);
+          await waitForFormatterSettlement([{ who: 'final formatter', native }]);
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
+    },
+    10000
+  );
+
+  it.each(['running tree', 'late grandchild'] as const)(
+    'cooperatively stops a %s',
+    async (state) => {
+      const dir = await makeTempDir();
+      const marker = join(dir, 'started.json');
+      const fakes = [
+        [marker, 'fake rustfmt'],
+        [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
+      ] as const;
+      if (state === 'late grandchild') {
+        await Promise.all(fakes.map(([fakeMarker]) => requestFormatterStop(fakeMarker)));
       }
+      const executable = join(
+        fakeRustfmtBin,
+        process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt'
+      );
+      const launchMarker = state === 'late grandchild' ? grandchildMarker(marker) : marker;
+      const proc = Bun.spawn([executable], {
+        env: {
+          ...formatterEnvironment(launchMarker, '1'),
+          [GRANDCHILD_ENV]: state === 'late grandchild' ? '1' : '0',
+        },
+        stdin: 'ignore',
+        stdout: 'ignore',
+        stderr: 'ignore',
+        timeout: 8000,
+      });
+      await withFormatterHookCleanup(
+        proc,
+        fakes,
+        async () => {
+          if (state === 'running tree') {
+            for (const [fakeMarker, who] of fakes) await firstHeartbeat(fakeMarker, who);
+            for (const [fakeMarker] of fakes) expect(await stillBeating(fakeMarker)).toBe(true);
+            await Promise.all(fakes.map(([fakeMarker]) => requestFormatterStop(fakeMarker)));
+          }
+          expect(await proc.exited).toBe(0);
+          expect(proc.signalCode).toBeNull();
+          for (const [fakeMarker] of fakes) {
+            expect(await Bun.file(stopPath(fakeMarker)).exists()).toBe(true);
+            expect(await stillBeating(fakeMarker)).toBe(false);
+            if (state === 'late grandchild') {
+              expect(await Bun.file(fakeMarker).exists()).toBe(false);
+              expect(await Bun.file(heartbeatPath(fakeMarker)).exists()).toBe(false);
+            }
+          }
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
     },
     10000
   );

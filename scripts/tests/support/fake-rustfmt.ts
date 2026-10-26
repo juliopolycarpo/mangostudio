@@ -10,6 +10,7 @@
  * @example
  * MANGO_TEST_RUSTFMT_MARKER=/tmp/started.json MANGO_TEST_RUSTFMT_HANG=1 rustfmt src/lib.rs
  */
+import { existsSync } from 'node:fs';
 import { publishFixtureJson } from './atomic-fixture-json';
 import {
   GRANDCHILD_ENV,
@@ -18,6 +19,8 @@ import {
   HEARTBEAT_MS,
   heartbeatPath,
   MARKER_ENV,
+  QUIET_ENV,
+  stopPath,
 } from './fake-rustfmt-markers';
 
 const marker = process.env[MARKER_ENV];
@@ -27,6 +30,9 @@ if (!marker) {
   );
 }
 const hang = process.env[HANG_ENV] === '1';
+const quiet = process.env[QUIET_ENV] === '1';
+const stopRequested = () => existsSync(stopPath(marker));
+if (stopRequested()) process.exit(0);
 
 publishFixtureJson(marker, {
   args: process.argv.slice(2),
@@ -35,7 +41,7 @@ publishFixtureJson(marker, {
   startedAt: performance.timeOrigin + performance.now(),
 });
 
-if (hang && process.env[GRANDCHILD_ENV] !== '1') {
+if (hang && process.env[GRANDCHILD_ENV] !== '1' && !stopRequested()) {
   Bun.spawn([process.execPath, ...process.argv.slice(2)], {
     env: { ...process.env, [MARKER_ENV]: grandchildMarker(marker), [GRANDCHILD_ENV]: '1' },
     stdin: 'ignore',
@@ -45,13 +51,14 @@ if (hang && process.env[GRANDCHILD_ENV] !== '1') {
 }
 
 if (hang) {
+  if (stopRequested()) process.exit(0);
   let beat = 0;
-  setInterval(
-    () =>
-      publishFixtureJson(heartbeatPath(marker), {
-        beat: ++beat,
-        at: performance.timeOrigin + performance.now(),
-      }),
-    HEARTBEAT_MS
-  );
+  setInterval(() => {
+    if (stopRequested()) process.exit(0);
+    if (quiet) return;
+    publishFixtureJson(heartbeatPath(marker), {
+      beat: ++beat,
+      at: performance.timeOrigin + performance.now(),
+    });
+  }, HEARTBEAT_MS);
 }

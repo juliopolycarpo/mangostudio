@@ -222,30 +222,47 @@ const cancelSignals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 // longer receives the signal an agent sends to cancel the hook, so the hook forwards it.
 async function runFormatter(command) {
   let formatter;
-  try {
-    formatter = Bun.spawn(command, {
-      cwd: repoRoot,
-      stderr: 'ignore',
-      stdout: 'ignore',
-      detached: process.platform !== 'win32',
-    });
-  } catch {
-    // Hook formatting should never block the agent workflow.
-    return;
-  }
-
-  const deadline = setTimeout(() => stopFormatterTree(formatter), formatterTimeoutMs);
-  const onCancel = (signal) => {
+  let deadline;
+  let cancellationSignal;
+  let stopRequested = false;
+  const requestStop = () => {
+    if (!formatter || stopRequested) return;
+    stopRequested = true;
     stopFormatterTree(formatter);
-    process.exit(128 + constants.signals[signal]);
   };
+  const onCancel = (signal) => {
+    if (cancellationSignal) return;
+    cancellationSignal = signal;
+    if (deadline !== undefined) clearTimeout(deadline);
+    requestStop();
+  };
+  // Own cancellation before the child can run, including a signal received
+  // while spawn is still transferring the native handle back to this hook.
   const forwarded = process.platform === 'win32' ? [] : cancelSignals;
-  for (const signal of forwarded) process.once(signal, onCancel);
+  const listeners = forwarded.map((signal) => {
+    const listener = () => onCancel(signal);
+    process.on(signal, listener);
+    return { signal, listener };
+  });
   try {
+    try {
+      formatter = Bun.spawn(command, {
+        cwd: repoRoot,
+        stderr: 'ignore',
+        stdout: 'ignore',
+        detached: process.platform !== 'win32',
+      });
+    } catch {
+      // Hook formatting should never block the agent workflow.
+      return;
+    }
+    if (cancellationSignal) requestStop();
+    else deadline = setTimeout(requestStop, formatterTimeoutMs);
     await formatter.exited;
   } finally {
-    clearTimeout(deadline);
-    for (const signal of forwarded) process.off(signal, onCancel);
+    if (deadline !== undefined) clearTimeout(deadline);
+    for (const { signal, listener } of listeners) process.off(signal, listener);
+    if (cancellationSignal) process.exit(128 + constants.signals[cancellationSignal]);
   }
 }
 
