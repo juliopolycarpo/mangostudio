@@ -55,7 +55,7 @@
       "name": "@mangostudio/frontend",
       "version": "0.1.1",
       "dependencies": {
-        "@elysia/eden": "2.0.0-beta.6",
+        "@elysia/eden": "2.0.0-rc.0",
         "@mangostudio/shared": "workspace:*",
         "@shikijs/core": "4.5.0",
         "@shikijs/engine-javascript": "4.5.0",
@@ -255,7 +255,7 @@
 
     "@elysia/cors": ["@elysia/cors@2.0.0-rc.0", "", { "peerDependencies": { "elysia": ">= 2.0.0-rc.0" } }, "sha512-mlkOv7lHhT3HCCIIwawZBYXzQ6Ok1B//IQvIKaNww0o9xE2JLH6S74xVFZfobsH12eOVKWQVITr9iM/7Z/Zcdw=="],
 
-    "@elysia/eden": ["@elysia/eden@2.0.0-beta.6", "", { "peerDependencies": { "elysia": ">= 2.0.0-beta.2" } }, "sha512-UYtYUiJ/OPwlkFZCe8QJ4Xc4VwXz7BykYruBDc4VQRMItWWGypsjMqwJUhQPG3D7A82GAU7q1goVwMcLyC6pYg=="],
+    "@elysia/eden": ["@elysia/eden@2.0.0-rc.0", "", { "peerDependencies": { "elysia": ">= 2.0.0-rc.0" } }, "sha512-Hw2YUjGBzeu+Wr1bflrbQLoFGAHK4sQlKHoKFSWNlfgW39yV5VJqf2G8g8VI5lzVgHFWqu0ldAPVWyhB1aFSRg=="],
 
     "@elysia/openapi": ["@elysia/openapi@2.0.0-rc.0", "", { "peerDependencies": { "elysia": ">= 2.0.0-rc.0" } }, "sha512-IkRdigbDxqZpQzZ9Dg/HpJT2S4SUdRboVZ5umT0uYrUffJTRnb11seetF/gt96xqxbrWSZSlG8pxKtuabJ6NGg=="],
 
