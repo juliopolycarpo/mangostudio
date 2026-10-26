@@ -14,9 +14,9 @@ To edit one: `bun patch <package>`, change the files under
 > remove that cache directory to force a re-apply. Verify the result by reading
 > the file in `node_modules`, not by trusting the install output.
 
-## `@elysia/openapi@2.0.0-beta.6`
+## `@elysia/openapi@2.0.0-rc.0`
 
-One defect still present in beta.6, in `dist/` only — no source change is
+One defect still present in RC.0, in `dist/` only — no source change is
 possible from here. (Through `2.0.0-beta.1` this patch also rewrote leaked
 `../node_modules/typebox/...` import paths in `dist/gen/*` and dropped the
 barrel's eager `./gen` import; `2.0.0-beta.4` imports `typebox/type` and

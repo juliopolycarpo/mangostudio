@@ -4,20 +4,19 @@
 
 Revisado com base nas [notas da versão RC](https://next.elysiajs.com/blog/elysia-20-rc/),
 na [base da versão beta](https://next.elysiajs.com/blog/elysia-20), na documentação oficial
-atual e nos pacotes publicados em 21 de outubro de 2026.
+atual e nos pacotes publicados em 21 de outubro de 2026. As versões dos plugins e o
+patch do OpenAPI foram atualizados para RC.0 em 26 de outubro de 2026.
 
 ## Versões e compatibilidade
 
-| Pacote            | Versão anterior | Tag escolhida | Versão fixada                  |
-| ----------------- | --------------- | ------------- | ------------------------------ |
-| `elysia`          | `2.0.0-beta.29` | `rc`          | `2.0.0-rc.0`                   |
-| `@elysia/cors`    | `2.0.0-beta.1`  | `next`        | `2.0.0-beta.2`                 |
-| `@elysia/openapi` | `2.0.0-beta.4`  | `next`        | `2.0.0-beta.6`                 |
-| `@elysia/eden`    | `2.0.0-beta.6`  | `next`        | `2.0.0-beta.6` (já atualizada) |
+| Pacote            | Versão anterior | Tag escolhida | Versão fixada |
+| ----------------- | --------------- | ------------- | ------------- |
+| `elysia`          | `2.0.0-beta.29` | `rc`          | `2.0.0-rc.0`  |
+| `@elysia/cors`    | `2.0.0-beta.2`  | `rc`          | `2.0.0-rc.0`  |
+| `@elysia/openapi` | `2.0.0-beta.6`  | `rc`          | `2.0.0-rc.0`  |
+| `@elysia/eden`    | `2.0.0-beta.6`  | `rc`          | `2.0.0-rc.0`  |
 
-As tags `next` dos plugins ainda apontam para versões beta. Cada plugin também tem uma
-tag RC; esta migração segue o canal `next` solicitado, que o
-[guia de instalação do OpenAPI](https://next.elysiajs.com/plugins/openapi/) ainda documenta.
+Os plugins agora usam suas versões RC junto com a RC do núcleo.
 As versões ficam fixadas nos manifestos, em vez de usar tags cujo destino pode mudar.
 Metadados do registro: [core](https://registry.npmjs.org/elysia),
 [CORS](https://registry.npmjs.org/@elysia%2fcors),
@@ -29,7 +28,7 @@ Ao renomeá-los, preserve a ordem dos hooks, os escopos e os handlers de erro es
 por classe. `mapResponse` e `derive` mantêm seus nomes na API da RC publicada.
 As opções declaradas diretamente nas rotas, como `error`, também mantêm seus nomes.
 
-O patch do OpenAPI passa para a beta.6. Sem ele, a suíte de contratos da aplicação falha
+O patch do OpenAPI passa para a RC.0. Sem ele, a suíte de contratos da aplicação falha
 tanto na documentação de strings binárias em multipart quanto na asserção de que os
 marcadores internos dos schemas nunca aparecem no documento. Os testes existentes de
 inventário de rotas, schemas de erro, IDs de operação, política de CORS e limites de
