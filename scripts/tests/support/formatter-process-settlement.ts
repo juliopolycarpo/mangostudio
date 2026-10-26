@@ -157,18 +157,67 @@ export async function waitForFormatterSettlement(
   owned: readonly OwnedFormatterProcess[],
   host: FormatterSettlementHost = SETTLEMENT_HOST
 ): Promise<void> {
+  if (!owned.length) return;
   const budget = HEARTBEAT_MS * 6;
-  const deadline = host.now() + budget;
+  const started = host.now();
+  const deadline = started + budget;
+  let lastLive: Array<{ who: string; current: NativeFormatterProcess }> = [];
+  let lastObservedMs: number | undefined;
   while (true) {
-    const remaining = Math.max(1, Math.ceil(deadline - host.now()));
+    const admittedAt = host.now();
+    if (admittedAt >= deadline) {
+      if (lastObservedMs === undefined)
+        throw new Error(
+          `formatter cancellation: expected native observation before the ${budget}ms deadline | received: no in-budget observation`
+        );
+      throw new Error(
+        `formatter cancellation: expected live owned processes: 0 within ${budget}ms | received last native observation: ${JSON.stringify({ elapsedMs: lastObservedMs, live: lastLive })}`
+      );
+    }
+    if (Math.floor(deadline - admittedAt) < 1) {
+      await host.pause(deadline - admittedAt);
+      continue;
+    }
+    const attempts: Array<{ pid: number; budgetMs: number }> = [];
     const reads = await Promise.allSettled(
-      owned.map(async (expected) => ({
-        expected,
-        current: await host.read(expected.native.pid, remaining),
-      }))
+      owned.map(async (expected, index) => {
+        const budgetMs = Math.max(0, Math.floor(deadline - host.now()));
+        attempts[index] = { pid: expected.native.pid, budgetMs };
+        if (budgetMs < 1)
+          throw new Error(
+            `formatter ${expected.native.pid}: expected query admission before the ${budget}ms deadline`
+          );
+        return { expected, current: await host.read(expected.native.pid, budgetMs) };
+      })
     );
+    const completedAt = host.now();
     const failures = reads.flatMap((read) => (read.status === 'rejected' ? [read.reason] : []));
-    if (failures.length) throw new AggregateError(failures, 'formatter native observation failed');
+    if (failures.length) {
+      const details = reads.flatMap((read, index) =>
+        read.status === 'rejected'
+          ? [
+              {
+                ...attempts[index],
+                elapsedMs: completedAt - started,
+                reason:
+                  read.reason instanceof Error
+                    ? { name: read.reason.name, message: read.reason.message }
+                    : { name: typeof read.reason, message: String(read.reason) },
+              },
+            ]
+          : []
+      );
+      throw new AggregateError(
+        failures,
+        `formatter native observation failed | received: ${JSON.stringify(details)}`,
+        { cause: failures[0] }
+      );
+    }
+    if (completedAt > deadline) {
+      throw new Error(
+        `formatter cancellation: expected native observation completion within ${budget}ms | received: ${completedAt - started}ms for PIDs ${owned.map(({ native }) => native.pid).join(', ')}`
+      );
+    }
     const live = reads.flatMap((read) => {
       if (read.status !== 'fulfilled') return [];
       const { expected, current } = read.value;
@@ -181,11 +230,8 @@ export async function waitForFormatterSettlement(
         : [];
     });
     if (!live.length) return;
-    if (host.now() >= deadline) {
-      throw new Error(
-        `formatter cancellation: expected live owned processes: 0 within ${budget}ms | received: ${JSON.stringify(live)}`
-      );
-    }
+    lastLive = live;
+    lastObservedMs = completedAt - started;
     await host.pause(Math.min(10, Math.max(0, deadline - host.now())));
   }
 }
