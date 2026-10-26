@@ -16,6 +16,8 @@ interface NativeQueryResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
+  readonly signalCode?: NodeJS.Signals | number | null;
+  readonly killed?: boolean;
 }
 
 /** Native query seams; tests supply named query fakes without signaling PIDs. */
@@ -54,7 +56,7 @@ const NATIVE_QUERIES: FormatterNativeQueries = {
       new Response(proc.stderr).text(),
       proc.exited,
     ]);
-    return { stdout, stderr, exitCode };
+    return { stdout, stderr, exitCode, signalCode: proc.signalCode, killed: proc.killed };
   },
 };
 
@@ -110,12 +112,13 @@ export async function readNativeFormatterProcess(
     return checkedNativeFormatter(identity, state);
   }
 
+  const queryStartedAt = performance.now();
   const result = await queries.query(pid, timeoutMs);
   if (result.exitCode === 1 && !result.stdout.trim() && !result.stderr.trim()) return undefined;
   const match = /^(\s*\d+\s+\d+\s+\d+)\s+(\S+)\s+(.+)$/.exec(result.stdout.trim());
   if (result.exitCode !== 0 || !match) {
     throw new Error(
-      `formatter ${pid}: expected native PID/parent/group/state/birth | received: ${JSON.stringify(result)}`
+      `formatter ${pid}: expected native PID/parent/group/state/birth | received: ${JSON.stringify({ ...result, timeoutMs, elapsedMs: performance.now() - queryStartedAt })}`
     );
   }
   const identity = parseNativeProcesses(`${match[1]} ${match[3]}`, queries.platform)[0];
@@ -213,7 +216,7 @@ export async function waitForFormatterSettlement(
       );
       throw new AggregateError(
         failures,
-        `formatter native observation failed | received: ${JSON.stringify(details)}`,
+        `formatter native observation failed | received: ${JSON.stringify({ attempts: details, previousCompleteObservation: lastObservedMs === undefined ? null : { elapsedMs: lastObservedMs, live: lastLive } })}`,
         { cause: failures[0] }
       );
     }

@@ -8,11 +8,17 @@ import {
   waitForFormatterSettlement,
 } from './formatter-process-settlement';
 
+type NativeQueryReply = Awaited<ReturnType<FormatterNativeQueries['query']>>;
+
 /** A native query transcript with no process signaling capability. */
 class NativeQueryTranscript implements FormatterNativeQueries {
   readonly calls: Array<[string, number, number]> = [];
   stat: string | undefined;
-  result = { exitCode: 0, stdout: '', stderr: '' };
+  result: { -readonly [Field in keyof NativeQueryReply]: NativeQueryReply[Field] } = {
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+  };
   failure: Error | undefined;
   constructor(readonly platform: NodeJS.Platform) {}
   readStat(pid: number, timeout: number): Promise<string | undefined> {
@@ -164,6 +170,27 @@ describe('native formatter identity queries', () => {
     queries.result.exitCode = 1;
     expect(await readNativeFormatterProcess(1234, 300, queries)).toBeUndefined();
   });
+  it('retains termination metadata without treating a signaled query as absence', async () => {
+    const queries = new NativeQueryTranscript('darwin');
+    queries.result = {
+      exitCode: 143,
+      stdout: '',
+      stderr: '',
+      signalCode: 'SIGTERM',
+      killed: true,
+    };
+    const failure = await readNativeFormatterProcess(1234, 1, queries).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain('expected native PID/parent/group/state/birth');
+    const details = JSON.parse(message.split(' | received: ')[1] ?? 'null');
+    expect(details).toMatchObject({ ...queries.result, timeoutMs: 1 });
+    expect(details.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(queries.calls).toEqual([['ps', 1234, 1]]);
+  });
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid PID %s', async (pid) => {
     await expect(readNativeFormatterProcess(pid)).rejects.toThrow('positive safe integer');
   });
@@ -306,7 +333,24 @@ describe('native formatter settlement', () => {
     expect(aggregate.message).toContain('"budgetMs":10');
     expect(aggregate.message).toContain('"elapsedMs":300');
     expect(aggregate.message).toContain(clock.queryFailure.message);
+    expect(aggregate.message).toContain(
+      `"previousCompleteObservation":${JSON.stringify({ elapsedMs: 280, live: [{ who: owned[0].who, current: native }] })}`
+    );
     expect(clock.admissions.at(-1)).toEqual({ at: 290, budget: 10 });
+  });
+  it('reports no previous complete census when the first native query fails', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.rejectFrom = 0;
+    const failure = await waitForFormatterSettlement(owned, clock).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    expect(failure).toBeInstanceOf(AggregateError);
+    const aggregate = failure as AggregateError;
+    expect(aggregate.message).toContain('"previousCompleteObservation":null');
+    expect(aggregate.errors).toEqual([clock.queryFailure]);
+    expect(aggregate.cause).toBe(clock.queryFailure);
+    expect(clock.admissions).toEqual([{ at: 0, budget: 300 }]);
   });
   it('uses the fractional remainder without rounding up a new query budget', async () => {
     const clock = new TimedNativeSettlementTranscript();
