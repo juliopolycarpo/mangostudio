@@ -42,6 +42,7 @@ import {
   readNativeFormatterProcess,
   waitForFormatterSettlement,
 } from './support/formatter-process-settlement';
+import { discoverRealRustfmt, realRustfmtEnvironment } from './support/real-rustfmt';
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
@@ -49,14 +50,8 @@ const hookEntrypoints = [
   ['Codex', join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')],
   ['Claude', join(repoRoot, '.claude', 'hooks', 'auto-fix.mjs')],
 ] as const;
-// A rustup proxy on PATH does not mean the pinned formatter is installed.
-const installedRustfmt = Bun.which('rustup')
-  ? Bun.spawnSync(['rustup', 'which', 'rustfmt'], {
-      stdout: 'pipe',
-      stderr: 'ignore',
-      timeout: 5000,
-    }).exitCode === 0
-  : Boolean(Bun.which('rustfmt'));
+// Pin the successful fixture to the executable whose installation was checked.
+const installedRustfmt = discoverRealRustfmt();
 
 async function makeTempDir() {
   const path = await mkdtemp(join(tmpdir(), 'mango-agent-hooks-'));
@@ -246,16 +241,63 @@ describe('agent auto-fix hooks', () => {
     expect(chooseFormatter('assets/logo.png')).toBeUndefined();
   });
 
-  it.skipIf(!installedRustfmt)('formats a touched Rust file with rustfmt', async () => {
+  it.skipIf(!installedRustfmt.path)('formats a touched Rust file with rustfmt', async () => {
     const dir = join(repoRoot, '.mango', `agent-hooks-${process.pid}-${Date.now()}`);
     tempDirs.push(dir);
     await mkdir(dir, { recursive: true });
     const filePath = join(dir, 'sample.rs');
-    await writeFile(filePath, 'fn  main( ){let x=1;}\n', 'utf8');
+    const original = 'fn  main( ){let x=1;}\n';
+    await writeFile(filePath, original, 'utf8');
 
-    await runAutoFixHook(JSON.stringify({ tool_input: { file_path: filePath } }));
-
-    expect(await readFile(filePath, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
+    if (!installedRustfmt.path) throw new Error('expected an installed real rustfmt');
+    const shadowMarker = join(dir, 'ambient-formatter.json');
+    const ambient = realRustfmtEnvironment(
+      join(fakeRustfmtBin, process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt'),
+      { ...process.env, [MARKER_ENV]: shadowMarker, [HANG_ENV]: '0' }
+    );
+    const started = performance.now();
+    const hook = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
+      cwd: repoRoot,
+      env: realRustfmtEnvironment(installedRustfmt.path, ambient),
+      stdin: 'pipe',
+      stdout: 'ignore',
+      stderr: 'pipe',
+      timeout: 8000,
+    });
+    const stderr = new Response(hook.stderr).text();
+    try {
+      await withFormatterHookCleanup(
+        hook,
+        [],
+        async () => {
+          hook.stdin.write(JSON.stringify({ tool_input: { file_path: filePath } }));
+          hook.stdin.end();
+          const exitCode = await hook.exited;
+          const received = await readFile(filePath, 'utf8');
+          const shadowSelected = await Bun.file(shadowMarker).exists();
+          const diagnostic = JSON.stringify({
+            formatter: installedRustfmt,
+            hook: {
+              pid: hook.pid,
+              exitCode,
+              signalCode: hook.signalCode,
+              elapsedMs: performance.now() - started,
+              stderr: await stderr,
+            },
+            original,
+            received,
+            shadowSelected,
+          });
+          expect(exitCode, diagnostic).toBe(0);
+          expect(hook.signalCode, diagnostic).toBeNull();
+          expect(received, diagnostic).toBe('fn main() {\n    let x = 1;\n}\n');
+          expect(shadowSelected, diagnostic).toBe(false);
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
+    } finally {
+      await stderr;
+    }
   });
 
   it('starts the five-second formatter deadline after cold hook startup', async () => {
