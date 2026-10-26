@@ -2,21 +2,20 @@
 
 Reviewed against the [RC release notes](https://next.elysiajs.com/blog/elysia-20-rc/),
 [beta foundation](https://next.elysiajs.com/blog/elysia-20), current official documentation,
-and published packages on October 21, 2026.
+and published packages on October 21, 2026. Plugin pins and the OpenAPI patch
+were updated to RC.0 on October 26, 2026.
 
 ## Versions and compatibility
 
-| Package           | Previous        | Selected tag | Pinned version                   |
-| ----------------- | --------------- | ------------ | -------------------------------- |
-| `elysia`          | `2.0.0-beta.29` | `rc`         | `2.0.0-rc.0`                     |
-| `@elysia/cors`    | `2.0.0-beta.1`  | `next`       | `2.0.0-beta.2`                   |
-| `@elysia/openapi` | `2.0.0-beta.4`  | `next`       | `2.0.0-beta.6`                   |
-| `@elysia/eden`    | `2.0.0-beta.6`  | `next`       | `2.0.0-beta.6` (already current) |
+| Package           | Previous        | Selected tag | Pinned version |
+| ----------------- | --------------- | ------------ | -------------- |
+| `elysia`          | `2.0.0-beta.29` | `rc`         | `2.0.0-rc.0`   |
+| `@elysia/cors`    | `2.0.0-beta.2`  | `rc`         | `2.0.0-rc.0`   |
+| `@elysia/openapi` | `2.0.0-beta.6`  | `rc`         | `2.0.0-rc.0`   |
+| `@elysia/eden`    | `2.0.0-beta.6`  | `rc`         | `2.0.0-rc.0`   |
 
-The plugin `next` tags still identify beta releases. Each plugin also has an RC tag;
-this migration follows the requested `next` channel, which the
-[OpenAPI installation guide](https://next.elysiajs.com/plugins/openapi/) still documents.
-Versions are pinned rather than leaving moving tags in manifests. Registry metadata:
+The plugins now use their RC releases alongside the core RC. Versions are pinned
+rather than leaving moving tags in manifests. Registry metadata:
 [core](https://registry.npmjs.org/elysia), [CORS](https://registry.npmjs.org/@elysia%2fcors),
 [OpenAPI](https://registry.npmjs.org/@elysia%2fopenapi),
 [Eden](https://registry.npmjs.org/@elysia%2feden).
@@ -26,7 +25,7 @@ hook order, scopes, and class-specific error handlers when renaming them. `mapRe
 and `derive` retain their names in the published RC API. Inline route options such as
 `error` also retain their names.
 
-The OpenAPI patch moves to beta.6. Without it, the application contract suite fails
+The OpenAPI patch moves to RC.0. Without it, the application contract suite fails
 both multipart binary-string documentation and the assertion that internal schema
 markers never appear in the document. The existing route inventory, error schemas,
 operation IDs, CORS policy, and listening WebSocket payload-cap tests cover the
