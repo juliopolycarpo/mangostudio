@@ -191,4 +191,48 @@ describe('browser realtime probe', () => {
       expect(message.length).toBeLessThan(1_000);
     }
   });
+  it('classifies invalid frames without exposing frame content', async () => {
+    const page = new FakePage();
+    const probe = watchRealtime(page.asPage(), { clock: new FakeClock(), timeoutMs: 100 });
+    const socket = new FakeSocket('ws://private-host/api/ws?token=secret-url');
+    page.open(socket);
+    socket.receive('bad-json-secret');
+    socket.receive('Validation error on message');
+    socket.receive('42');
+    socket.receive(
+      JSON.stringify({
+        type: 'subscribed',
+        topics: ['activity'],
+        topic: 'secret-topic',
+        scopes: ['secret-scope'],
+        error: 'secret-error',
+        code: 'secret-code',
+        secretKey: 'secret-value',
+      })
+    );
+    socket.receive(JSON.stringify({ type: 'validation', error: 'secret-error' }));
+    socket.send(
+      JSON.stringify({
+        type: 'unknown-secret-type',
+        topics: ['activity'],
+        secretKey: 'secret-value',
+      })
+    );
+    const diagnostic = await probe.subscribed('tab').catch((error: unknown) => String(error));
+    expect(diagnostic).toContain('receive:invalid:parse');
+    expect(diagnostic).toContain('receive:invalid:validation-fallback');
+    expect(diagnostic).toContain('receive:invalid:nonobject');
+    expect(diagnostic).toContain(
+      'receive:invalid:object:type=subscribed:topicsArray=true:activity=true:extra=true'
+    );
+    expect(diagnostic).toContain('topic=true:scopes=true:error=true:code=true');
+    expect(diagnostic).toContain(
+      'receive:invalid:object:type=validation:topicsArray=false:activity=false:extra=true'
+    );
+    expect(diagnostic).toContain(
+      'send:invalid:object:type=other:topicsArray=true:activity=true:extra=true'
+    );
+    expect(diagnostic).not.toContain('secret');
+    expect(diagnostic).not.toContain('private-host');
+  });
 });

@@ -10,6 +10,42 @@ const SUBSCRIBE_TIMEOUT_MS = 20_000;
 const POLL_MS = 100;
 const MAX_EVENTS = 24;
 
+const MESSAGE_TYPES = new Set([
+  'subscribe',
+  'unsubscribe',
+  'ping',
+  'ready',
+  'subscribed',
+  'pong',
+  'invalidate',
+  'error',
+  'validation',
+]);
+
+/** Summarize an invalid parsed frame without retaining any frame values.
+ * @example const summary = invalidObjectSummary({ type: 'subscribed', topics: [] });
+ */
+function invalidObjectSummary(value: unknown): string {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'nonobject';
+  const frame = value as Record<string, unknown>;
+  const type =
+    typeof frame.type === 'string' && MESSAGE_TYPES.has(frame.type) ? frame.type : 'other';
+  const allowed =
+    type === 'subscribe' || type === 'unsubscribe' || type === 'subscribed'
+      ? ['type', 'topics']
+      : type === 'invalidate'
+        ? ['type', 'topic', 'scopes']
+        : type === 'error'
+          ? ['type', 'error', 'code']
+          : type === 'other'
+            ? ['type', 'topics', 'topic', 'scopes', 'error', 'code']
+            : ['type'];
+  const topicsArray = Array.isArray(frame.topics);
+  const activity = topicsArray && (frame.topics as unknown[]).includes(ACTIVITY_TOPIC);
+  const extra = Object.keys(frame).some((key) => !allowed.includes(key));
+  return `object:type=${type}:topicsArray=${topicsArray}:activity=${activity}:extra=${extra}:topic=${Object.hasOwn(frame, 'topic')}:scopes=${Object.hasOwn(frame, 'scopes')}:error=${Object.hasOwn(frame, 'error')}:code=${Object.hasOwn(frame, 'code')}`;
+}
+
 interface ProbeClock {
   now(): number;
   sleep(ms: number): Promise<void>;
@@ -62,10 +98,14 @@ export function watchRealtime(
     socket.on('socketerror', () => record(current === connection ? 'error:current' : 'error:old'));
     const frame = (direction: 'send' | 'receive', payload: string | Buffer) => {
       let value: unknown;
+      const text = typeof payload === 'string' ? payload : payload.toString('utf8');
       try {
-        value = JSON.parse(typeof payload === 'string' ? payload : payload.toString('utf8'));
+        value = JSON.parse(text);
       } catch {
-        record(`${direction}:invalid`);
+        // Elysia's pinned WebSocket implementation sends this exact fallback for
+        // a response validation error; its other issue text is not safe to retain.
+        const category = text === 'Validation error on message' ? 'validation-fallback' : 'parse';
+        record(`${direction}:invalid:${category}`);
         return;
       }
       const live = current === connection && !socket.isClosed();
@@ -88,7 +128,7 @@ export function watchRealtime(
         if (value.type === 'invalidate') received += 1;
         return;
       }
-      record(`${direction}:invalid`);
+      record(`${direction}:invalid:${invalidObjectSummary(value)}`);
     };
     socket.on('framesent', ({ payload }) => frame('send', payload));
     socket.on('framereceived', ({ payload }) => frame('receive', payload));
