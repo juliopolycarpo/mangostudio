@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  spyOn,
+} from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative, resolve } from 'node:path';
@@ -42,21 +51,153 @@ import {
   readNativeFormatterProcess,
   waitForFormatterSettlement,
 } from './support/formatter-process-settlement';
+import { discoverRealRustfmt, realRustfmtEnvironment } from './support/real-rustfmt';
 
 const repoRoot = join(import.meta.dir, '..', '..');
 const tempDirs: string[] = [];
+const activeFormatterCleanups = new Set<() => Promise<void>>();
 const hookEntrypoints = [
   ['Codex', join(repoRoot, '.codex', 'hooks', 'auto-fix.mjs')],
   ['Claude', join(repoRoot, '.claude', 'hooks', 'auto-fix.mjs')],
 ] as const;
-// A rustup proxy on PATH does not mean the pinned formatter is installed.
-const installedRustfmt = Bun.which('rustup')
-  ? Bun.spawnSync(['rustup', 'which', 'rustfmt'], {
-      stdout: 'pipe',
-      stderr: 'ignore',
-      timeout: 5000,
-    }).exitCode === 0
-  : Boolean(Bun.which('rustfmt'));
+// Pin the successful fixture to the executable whose installation was checked.
+const installedRustfmt = discoverRealRustfmt();
+if (!installedRustfmt.path) {
+  console.warn(`real rustfmt fixture skipped: ${installedRustfmt.unavailable}`);
+}
+
+/**
+ * Stop an owned formatter and always settle its hook before restoring the delegate.
+ * @example const owner = createFormatterCleanup(stop, settle, restore); await owner.cleanup();
+ */
+function createFormatterCleanup(
+  stop: () => void,
+  settle: () => Promise<void>,
+  restore: () => void
+) {
+  let stopping = false;
+  let stopError: Error | undefined;
+  let settled: Promise<void> | undefined;
+  const requestStop = () => {
+    try {
+      stop();
+    } catch (error) {
+      stopError ??= error instanceof Error ? error : new Error(String(error), { cause: error });
+    }
+  };
+  const cleanup = () => {
+    if (settled) return settled;
+    stopping = true;
+    settled = (async () => {
+      requestStop();
+      let settlementError: Error | undefined;
+      try {
+        await settle();
+      } catch (error) {
+        settlementError =
+          error instanceof Error ? error : new Error(String(error), { cause: error });
+      } finally {
+        restore();
+      }
+      if (stopError && settlementError) throw new AggregateError([stopError, settlementError]);
+      if (stopError) throw stopError;
+      if (settlementError) throw settlementError;
+    })();
+    return settled;
+  };
+  return {
+    cleanup,
+    stopIfStopping: () => {
+      if (stopping) requestStop();
+    },
+  };
+}
+
+/**
+ * Own the formatter spawned by an in-process hook until it and the hook settle.
+ * @example const hook = ownRealFormatterHook(payload, environment); await hook.running;
+ */
+function ownRealFormatterHook(input: string, environment: NodeJS.ProcessEnv) {
+  const nativeSpawn = Bun.spawn.bind(Bun);
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  const delegate = spyOn(Bun, 'spawn').mockImplementation(((command, options) => {
+    if (!Array.isArray(command) || command[0] !== 'rustfmt') {
+      throw new Error(`expected rustfmt spawn | received: ${JSON.stringify(command)}`);
+    }
+    child = nativeSpawn(command, { ...options, env: environment });
+    owner.stopIfStopping();
+    return child;
+  }) as typeof Bun.spawn);
+  const owner = createFormatterCleanup(
+    () => {
+      if (child?.exitCode === null && child.signalCode === null) child.kill();
+    },
+    async () => {
+      try {
+        await running;
+      } finally {
+        if (child) await child.exited;
+      }
+    },
+    () => delegate.mockRestore()
+  );
+  const cleanup = () => {
+    const settled = owner.cleanup();
+    void settled.then(
+      () => activeFormatterCleanups.delete(cleanup),
+      () => {}
+    );
+    return settled;
+  };
+  activeFormatterCleanups.add(cleanup);
+  onTestFinished(cleanup);
+  const running: Promise<void> = runAutoFixHook(input);
+  // Attach a rejection observer immediately; callers still receive the original promise.
+  void running.catch(() => {});
+  return { running, cleanup, child: () => child };
+}
+
+/** Run a fixture body and retain both its failure and any cleanup failure.
+ * @example await withOwnedFormatterCleanup(runFixture, cleanup);
+ */
+async function withOwnedFormatterCleanup(body: () => Promise<void>, cleanup: () => Promise<void>) {
+  let bodyError: unknown;
+  let bodyFailed = false;
+  try {
+    await body();
+  } catch (error) {
+    bodyFailed = true;
+    bodyError = error;
+  }
+  try {
+    await cleanup();
+  } catch (error) {
+    if (bodyFailed)
+      throw new AggregateError([bodyError, error], 'fixture and formatter cleanup failed');
+    throw error instanceof Error ? error : new Error(String(error), { cause: error });
+  }
+  if (bodyFailed)
+    throw bodyError instanceof Error
+      ? bodyError
+      : new Error(String(bodyError), { cause: bodyError });
+}
+
+/** Bound a hook operation and clear the deadline when either outcome settles.
+ * @example await withinHookDeadline(hook.running, 8000);
+ */
+async function withinHookDeadline(running: Promise<void>, timeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      running,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`hook exceeded ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 async function makeTempDir() {
   const path = await mkdtemp(join(tmpdir(), 'mango-agent-hooks-'));
@@ -149,8 +290,29 @@ async function captureOwnedFormatters(
   return owned;
 }
 
+/** Settle fixture owners before removing their storage.
+ * @example await settleBeforeRemoving([cleanup], removeFixtures);
+ */
+async function settleBeforeRemoving(
+  cleanups: readonly (() => Promise<void>)[],
+  remove: () => Promise<void>
+) {
+  const results = await Promise.allSettled(cleanups.map((cleanup) => cleanup()));
+  const failures = results.filter(
+    (result): result is PromiseRejectedResult => result.status === 'rejected'
+  );
+  if (failures.length)
+    throw new AggregateError(
+      failures.map((failure) => failure.reason),
+      'formatter cleanup failed; retaining fixture storage'
+    );
+  await remove();
+}
+
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await settleBeforeRemoving([...activeFormatterCleanups], async () => {
+    await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  });
 });
 
 describe('agent auto-fix hooks', () => {
@@ -246,16 +408,194 @@ describe('agent auto-fix hooks', () => {
     expect(chooseFormatter('assets/logo.png')).toBeUndefined();
   });
 
-  it.skipIf(!installedRustfmt)('formats a touched Rust file with rustfmt', async () => {
+  it.skipIf(!installedRustfmt.path)('formats a touched Rust file with rustfmt', async () => {
     const dir = join(repoRoot, '.mango', `agent-hooks-${process.pid}-${Date.now()}`);
     tempDirs.push(dir);
     await mkdir(dir, { recursive: true });
     const filePath = join(dir, 'sample.rs');
-    await writeFile(filePath, 'fn  main( ){let x=1;}\n', 'utf8');
+    const original = 'fn  main( ){let x=1;}\n';
+    await writeFile(filePath, original, 'utf8');
 
-    await runAutoFixHook(JSON.stringify({ tool_input: { file_path: filePath } }));
+    if (!installedRustfmt.path) throw new Error('expected an installed real rustfmt');
+    const shadowMarker = join(dir, 'ambient-formatter.json');
+    const ambient = realRustfmtEnvironment(
+      join(fakeRustfmtBin, process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt'),
+      { ...process.env, [MARKER_ENV]: shadowMarker, [HANG_ENV]: '0' }
+    );
+    const started = performance.now();
+    const hook = ownRealFormatterHook(
+      JSON.stringify({ tool_input: { file_path: filePath } }),
+      realRustfmtEnvironment(installedRustfmt.path, ambient)
+    );
+    await withOwnedFormatterCleanup(async () => {
+      await withinHookDeadline(hook.running, 8000);
+      const received = await readFile(filePath, 'utf8');
+      const shadowSelected = await Bun.file(shadowMarker).exists();
+      const diagnostic = JSON.stringify({
+        formatter: installedRustfmt,
+        elapsedMs: performance.now() - started,
+        pid: hook.child()?.pid,
+        exitCode: hook.child()?.exitCode,
+        signalCode: hook.child()?.signalCode,
+        original,
+        received,
+        shadowSelected,
+      });
+      expect(hook.child(), diagnostic).toBeDefined();
+      expect(hook.child()?.exitCode, diagnostic).toBe(0);
+      expect(received, diagnostic).toBe('fn main() {\n    let x = 1;\n}\n');
+      expect(shadowSelected, diagnostic).toBe(false);
+    }, hook.cleanup);
+  });
 
-    expect(await readFile(filePath, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
+  it('preserves the fixture failure when formatter cleanup also fails', async () => {
+    const primary = new Error('named fixture failure');
+    const cleanupFailure = new Error('named cleanup failure');
+    const failingFixture = () => Promise.reject(primary);
+    const failingCleanup = () => Promise.reject(cleanupFailure);
+    const failure = await withOwnedFormatterCleanup(failingFixture, failingCleanup).catch(
+      (error: unknown) => error
+    );
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([primary, cleanupFailure]);
+  });
+
+  it('retains fixture storage until owned formatter cleanup settles', async () => {
+    const events: string[] = [];
+    let finish = () => {};
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const heldCleanup = async () => {
+      events.push('cleanup');
+      await held;
+    };
+    const removeStorage = () => {
+      events.push('remove');
+      return Promise.resolve();
+    };
+    const removal = settleBeforeRemoving([heldCleanup], removeStorage);
+    expect(events).toEqual(['cleanup']);
+    finish();
+    await removal;
+    expect(events).toEqual(['cleanup', 'remove']);
+    const failedCleanup = () => Promise.reject(new Error('named cleanup failure'));
+    await expect(settleBeforeRemoving([failedCleanup], removeStorage)).rejects.toThrow(
+      'retaining fixture storage'
+    );
+    expect(events).toEqual(['cleanup', 'remove']);
+  });
+
+  it('settles and restores the delegate when the owned formatter kill throws', async () => {
+    const failure = new Error('named throwing-kill fake');
+    const events: string[] = [];
+    let finishSettlement = () => {};
+    const settlement = new Promise<void>((resolve) => {
+      finishSettlement = resolve;
+    });
+    const throwingKill = () => {
+      events.push('kill');
+      throw failure;
+    };
+    const settleHeldFormatter = async () => {
+      events.push('settle');
+      await settlement;
+    };
+    const restoreDelegate = () => {
+      events.push('restore');
+    };
+    const owner = createFormatterCleanup(throwingKill, settleHeldFormatter, restoreDelegate);
+    const cleanup = owner.cleanup();
+    expect(events).toEqual(['kill', 'settle']);
+    finishSettlement();
+    await expect(cleanup).rejects.toBe(failure);
+    expect(events).toEqual(['kill', 'settle', 'restore']);
+  });
+
+  it('stops a late formatter transfer and restores once after settlement', async () => {
+    const events: string[] = [];
+    let arrived = false;
+    let finish = () => {};
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const stopLateFormatter = () => {
+      if (arrived) events.push('stop');
+    };
+    const settleLateFormatter = async () => {
+      events.push('settle');
+      await held;
+    };
+    const restoreDelegate = () => {
+      events.push('restore');
+    };
+    const owner = createFormatterCleanup(stopLateFormatter, settleLateFormatter, restoreDelegate);
+    const first = owner.cleanup();
+    expect(owner.cleanup()).toBe(first);
+    arrived = true;
+    owner.stopIfStopping();
+    expect(events).toEqual(['settle', 'stop']);
+    finish();
+    await first;
+    expect(events).toEqual(['settle', 'stop', 'restore']);
+  });
+
+  it('preserves both stop and settlement failures', async () => {
+    const stopFailure = new Error('named stop failure');
+    const settlementFailure = new Error('named settlement failure');
+    let restored = false;
+    const throwingKill = () => {
+      throw stopFailure;
+    };
+    const failingSettlement = () => Promise.reject(settlementFailure);
+    const restoreDelegate = () => {
+      restored = true;
+    };
+    const owner = createFormatterCleanup(throwingKill, failingSettlement, restoreDelegate);
+    const failure = await owner.cleanup().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([stopFailure, settlementFailure]);
+    expect(restored).toBe(true);
+  });
+
+  it('settles the held formatter after timeout and an early test failure', async () => {
+    for (const failure of ['timeout', 'early failure'] as const) {
+      const dir = join(
+        repoRoot,
+        '.mango',
+        `formatter-owned-${failure.replace(' ', '-')}-${process.pid}`
+      );
+      tempDirs.push(dir);
+      await mkdir(dir, { recursive: true });
+      const filePath = join(dir, 'sample.rs');
+      const marker = join(dir, 'held-formatter.json');
+      await writeFile(filePath, 'fn main() {}\n');
+      const originalSpawn = Bun.spawn;
+      const hook = ownRealFormatterHook(JSON.stringify({ path: filePath }), {
+        ...realRustfmtEnvironment(
+          join(fakeRustfmtBin, process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt')
+        ),
+        [MARKER_ENV]: marker,
+        [HANG_ENV]: '1',
+        [GRANDCHILD_ENV]: '1',
+      });
+      await withOwnedFormatterCleanup(async () => {
+        await firstHeartbeat(marker, 'held formatter');
+        const started = performance.now();
+        const failed = withOwnedFormatterCleanup(async () => {
+          if (failure === 'timeout') await withinHookDeadline(hook.running, 100);
+          else throw new Error('controlled early test failure');
+        }, hook.cleanup);
+        await expect(failed).rejects.toThrow(
+          failure === 'timeout' ? 'hook exceeded 100ms' : 'controlled early test failure'
+        );
+        expect(performance.now() - started).toBeLessThan(2000);
+        expect(hook.child()).toBeDefined();
+        expect(hook.child()?.exitCode !== null || hook.child()?.signalCode !== null).toBe(true);
+        await hook.running;
+        expect(Bun.spawn).toBe(originalSpawn);
+      }, hook.cleanup);
+    }
   });
 
   it('starts the five-second formatter deadline after cold hook startup', async () => {
