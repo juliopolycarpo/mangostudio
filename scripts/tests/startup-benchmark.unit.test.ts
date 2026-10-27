@@ -11,6 +11,7 @@ import {
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
 import { FakeBenchmarkCancelBarrier } from './support/benchmark-cancel-barrier';
+import { fixtureChildEnvironment } from './support/child-supervision';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const scratch: string[] = [];
@@ -113,7 +114,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       command: [process.execPath, 'scripts/bench/startup.ts', binary, '--runs', '1', '--json'],
       root: ROOT,
       out: directory,
-      env: { ...process.env, BENCHMARK_FIXTURE_ROOT: directory },
+      env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: directory }),
       timeoutSeconds: 15,
       pollIntervalMs: 20,
       settleMs: 500,
@@ -203,7 +204,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       ],
       root: ROOT,
       out: directory,
-      env: { ...process.env, ...fixture.environment },
+      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
       timeoutSeconds: 20,
       pollIntervalMs: 20,
       stream: new DiscardedBenchmarkOutput(),
@@ -258,7 +259,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       ],
       root: ROOT,
       out: directory,
-      env: { ...process.env, ...fixture.environment },
+      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
       timeoutSeconds: 8,
       pollIntervalMs: 20,
       stream: new DiscardedBenchmarkOutput(),
