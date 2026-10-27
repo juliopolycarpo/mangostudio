@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+
 import { isTurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { MessagePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import { getDb } from '../../../../src/db/database';
 import type { Database } from '../../../../src/db/types';
 import {
@@ -249,7 +251,7 @@ describe('TurnCheckpointWriter', () => {
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
     await writer.checkpoint();
     manual.fire();
-    writer.flush();
+    void writer.flush();
     append(5);
     const forced = writer.checkpoint({ force: true });
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { win32 } from 'node:path';
+
 import type { ResourceKind } from '@mangostudio/shared/library';
 import {
   LibraryLocationStatusSchema,
@@ -19,6 +20,7 @@ import {
 } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import Value from 'typebox/value';
+
 import {
   describeLocation,
   describeTargetLocations,

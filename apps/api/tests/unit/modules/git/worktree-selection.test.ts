@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { GitWorktree } from '@mangostudio/shared/git';
+
 import {
   findWorktree,
   isSameWorktreePath,

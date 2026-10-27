@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
   type LibraryLocationSettings,
 } from '@mangostudio/shared/app-settings';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
+
 import { getDb } from '../../../../src/db/database';
 import { migrateLibraryLocationSettings } from '../../../../src/db/migrations/030_library_location_settings';
 import { migrateProfileScopedAppSettings } from '../../../../src/db/migrations/033_profile_scoped_app_settings';

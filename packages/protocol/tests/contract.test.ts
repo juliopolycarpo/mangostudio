@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import Type from 'typebox';
+
 import catalogExample from '../../../spec/fixtures/1/catalog-example.json';
 import { defineContract } from '../src/contract';
-import { RESERVED_ERROR_CODES, RemoteError } from '../src/errors';
+import { RemoteError, RESERVED_ERROR_CODES } from '../src/errors';
 import { assertCatalog } from '../src/schemas/catalog';
 import { Session, type SessionOptions } from '../src/session';
 import { createInProcessPortPair } from '../src/transports/in-process';
@@ -94,8 +96,8 @@ describe('defineContract', () => {
     await expect(client.request('math.add', { a: 1, b: 1 })).rejects.toMatchObject({
       code: RESERVED_ERROR_CODES.METHOD_UNSUPPORTED,
     });
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('answers rpc.discover with the served catalog', async () => {
@@ -116,8 +118,8 @@ describe('defineContract', () => {
     await expect(contract.client(a).discover()).rejects.toMatchObject({
       code: RESERVED_ERROR_CODES.METHOD_UNSUPPORTED,
     });
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('refuses rpc.discover params that are not an object', async () => {
@@ -131,8 +133,8 @@ describe('defineContract', () => {
     await expect(a.request('rpc.discover', null)).rejects.toMatchObject({
       code: RESERVED_ERROR_CODES.INVALID_PARAMS,
     });
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('builds the catalog before registering any method handler', async () => {
@@ -154,8 +156,8 @@ describe('defineContract', () => {
     await expect(a.request('text.echo', { text: 'hi' })).rejects.toMatchObject({
       code: RESERVED_ERROR_CODES.METHOD_UNSUPPORTED,
     });
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('leaves rpc.discover unanswered when the catalog is not offered', async () => {
@@ -171,8 +173,8 @@ describe('defineContract', () => {
     });
     // Opting out of the catalog does not opt out of the contract.
     expect(await contract.client(a).request('text.echo', { text: 'hi' })).toEqual({ text: 'hi' });
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('refuses parameters that fail the schema with INVALID_PARAMS and a path', async () => {
@@ -185,8 +187,8 @@ describe('defineContract', () => {
       code: RESERVED_ERROR_CODES.INVALID_PARAMS,
       details: { method: 'math.add', path: '/a' },
     });
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('runs the guard with the declared capabilities before the handler', async () => {
@@ -212,8 +214,8 @@ describe('defineContract', () => {
     });
     expect(await a.request('math.add', { a: 1, b: 1 })).toBe(2);
     expect(seen).toEqual([['text.echo', 'echo'], ['math.add']]);
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('gives the guard the validated params, the in-flight count and the peer', async () => {
@@ -279,8 +281,8 @@ describe('defineContract', () => {
       code: RESERVED_ERROR_CODES.INTERNAL,
       details: { path: '/text' },
     });
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('emits and receives typed events', async () => {
@@ -293,8 +295,8 @@ describe('defineContract', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(received).toEqual([1]);
     off();
-    a.close();
-    b.close();
+    await a.close();
+    await b.close();
   });
 
   it('assertParams narrows or throws', () => {

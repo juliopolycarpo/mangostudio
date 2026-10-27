@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import { type HubProcessStatus, HubProcessStatusSchema } from '@mangostudio/shared/machine';
 import type { UpdateCheck } from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
+
 import { runStatus } from '../../../../src/cli/commands/status';
 import type { ServerState } from '../../../../src/lib/server-state';
 import type { InstallStatus } from '../../../../src/modules/updates/application/install-status';

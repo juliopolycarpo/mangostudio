@@ -1,10 +1,12 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
 import {
   ChatGptOAuthStatusSchema,
   StartChatGptOAuthResponseSchema,
 } from '@mangostudio/shared/connectors';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
 import {
@@ -93,10 +95,10 @@ beforeAll(async () => {
     .execute();
 });
 
-afterAll(() => {
+afterAll(async () => {
   setChatGptTokenServiceForTests(null);
   resetChatGptOAuthSessions();
-  fakeAuthServer.stop(true);
+  await fakeAuthServer.stop(true);
 });
 
 // The shared test environment re-installs a fresh config before every test,
@@ -344,7 +346,7 @@ describe('chatgpt oauth routes', () => {
       expect(payload.error).toContain(String(blockedPort));
     } finally {
       setChatGptLoopbackPortForTest(0);
-      blocker.stop(true);
+      await blocker.stop(true);
     }
   });
 

@@ -19,10 +19,14 @@ interface SettingsLoadingProps {
 export function SettingsLoading({ shape = 'row', count = 3 }: SettingsLoadingProps) {
   const { t } = useI18n();
   return (
-    <div role="status" className="space-y-3">
+    <div
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+      role="status"
+      className="space-y-3"
+    >
       {Array.from({ length: count }, (_, index) => (
         <Skeleton
-          // biome-ignore lint/suspicious/noArrayIndexKey: identical placeholders with no identity
+          // identical placeholders with no identity
           key={index}
           className={shape === 'card' ? 'h-24 w-full rounded-md' : 'h-8 w-full'}
         />

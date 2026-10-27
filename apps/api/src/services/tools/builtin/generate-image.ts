@@ -4,6 +4,7 @@
  */
 
 import type { ImageGenerationErrorCode } from '@mangostudio/shared/generation';
+
 import {
   IMAGE_ABANDONED_ERROR,
   IMAGE_ABANDONED_ERROR_CODE,
@@ -73,8 +74,7 @@ interface GenerateImageToolFailedOutcome {
 }
 
 export type GenerateImageToolOutcome =
-  | GenerateImageToolCompletedOutcome
-  | GenerateImageToolFailedOutcome;
+  GenerateImageToolCompletedOutcome | GenerateImageToolFailedOutcome;
 
 export interface GenerateImageToolResult {
   images: Array<{
@@ -136,8 +136,7 @@ export async function* generateImagesForToolPlan(
 ): AsyncGenerator<GenerateImageToolOutcome> {
   let modelName: string | undefined;
   let providerGenerateImage:
-    | ((request: ImageGenerationRequest) => Promise<ImageGenerationResult>)
-    | undefined;
+    ((request: ImageGenerationRequest) => Promise<ImageGenerationResult>) | undefined;
 
   try {
     const resolvedModel = await resolveModel({

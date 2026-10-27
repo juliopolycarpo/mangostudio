@@ -229,11 +229,7 @@ export {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from './schemas';
 export { externalActivityStatusForTerminal } from './terminal-status';
-export {
-  type ExternalContextUsage,
-  externalContextUsage,
-  externalReportedTokens,
-} from './usage';
+export { type ExternalContextUsage, externalContextUsage, externalReportedTokens } from './usage';
 export {
   type BoundedVendorText,
   boundVendorText,
@@ -247,8 +243,4 @@ export {
   usableVendorId,
   vendorSelection,
 } from './vendor-text';
-export {
-  EXTERNAL_AGENT_VENDORS,
-  type ExternalAgentVendor,
-  externalAgentVendor,
-} from './vendors';
+export { EXTERNAL_AGENT_VENDORS, type ExternalAgentVendor, externalAgentVendor } from './vendors';

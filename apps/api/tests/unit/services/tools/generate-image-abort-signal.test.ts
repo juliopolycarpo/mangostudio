@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+
 import type { AgentEvent } from '@mangostudio/shared/types';
+
 import { getDb } from '../../../../src/db/database';
 import {
   IMAGE_ABANDONED_ERROR,
@@ -126,9 +128,8 @@ function withFakeProvider(): AbortObservingImageProvider {
 describe('generateImagesForToolPlan — abort signal threading', () => {
   it('passes the turn signal into the provider request', async () => {
     const fake = withFakeProvider();
-    const { createGenerateImageToolPlan, generateImagesForToolPlan } = await import(
-      '../../../../src/services/tools/builtin/generate-image'
-    );
+    const { createGenerateImageToolPlan, generateImagesForToolPlan } =
+      await import('../../../../src/services/tools/builtin/generate-image');
 
     const plan = createGenerateImageToolPlan(
       { prompt: 'Paint mangoes', model: MODEL_ID },
@@ -155,9 +156,8 @@ describe('generateImagesForToolPlan — abort signal threading', () => {
 
   it('lands an in-flight abort on the failed outcome path and leaves the rest for abandonUnreachedImages', async () => {
     const fake = withFakeProvider();
-    const { createGenerateImageToolPlan, generateImagesForToolPlan } = await import(
-      '../../../../src/services/tools/builtin/generate-image'
-    );
+    const { createGenerateImageToolPlan, generateImagesForToolPlan } =
+      await import('../../../../src/services/tools/builtin/generate-image');
 
     // Two images planned: the first is the one in flight when the abort
     // lands, the second is never attempted — that gap is what the caller's
@@ -210,7 +210,7 @@ describe('generateImagesForToolPlan — abort signal threading', () => {
 class SingleImageCallAgentProvider {
   readonly providerType = 'openai-compatible' as const;
 
-  // biome-ignore lint/suspicious/useAwait: an async generator is the stream contract.
+  // eslint-disable-next-line @typescript-eslint/require-await -- an async generator is the stream contract.
   generateAgentTurnStream = async function* (): AsyncIterable<AgentEvent> {
     yield {
       type: 'tool_call_completed',
@@ -257,9 +257,8 @@ function createSubagentSession(signal: AbortSignal): SubagentTurnSession {
 describe('executeSubagentTools — abort signal threading', () => {
   it('forwards the delegating turn signal into a builtin the subagent runs', async () => {
     const fake = withFakeProvider();
-    const { runSubagentStreamLoop } = await import(
-      '../../../../src/modules/generation/application/subagent-turn-stages'
-    );
+    const { runSubagentStreamLoop } =
+      await import('../../../../src/modules/generation/application/subagent-turn-stages');
 
     const controller = new AbortController();
     const loop = runSubagentStreamLoop(createSubagentSession(controller.signal));

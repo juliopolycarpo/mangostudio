@@ -1,7 +1,9 @@
 import type { ProviderType } from '@mangostudio/shared/types';
 import { useCallback, useMemo } from 'react';
+
 import { useProviderSettings } from '@/features/settings/providers/hooks/use-provider-settings';
 import { resolveActiveModeModel } from '@/utils/model-utils';
+
 import type { useGlobalSettings } from './use-global-settings';
 import type { useModelCatalog } from './use-model-catalog';
 

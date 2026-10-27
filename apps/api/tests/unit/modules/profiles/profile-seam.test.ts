@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { sql } from 'kysely';
+
 import { getDb } from '../../../../src/db/database';
 import {
   assertRequestedProfileId,

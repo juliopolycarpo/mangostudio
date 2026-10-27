@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
 import {
   PROTOCOL_CHANGELOG,
@@ -830,11 +831,7 @@ describe('the release job is rerunnable under immutability', () => {
 
   /** What `gh release view` finds: nothing, a draft, or a published release with its assets. */
   type ReleaseState =
-    | 'absent'
-    | 'draft'
-    | 'published'
-    | 'published-missing-protocol'
-    | 'published-missing-catalog';
+    'absent' | 'draft' | 'published' | 'published-missing-protocol' | 'published-missing-catalog';
 
   /** A workspace with the files the step copies, and a `gh` that records its argv. */
   const workspace = (state: ReleaseState): { dir: string; log: string; viewLog: string } => {

@@ -5,7 +5,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { TerminalAvailability, TerminalSession } from '@mangostudio/shared/terminal';
+
 import {
   terminalKeys,
   useCloseTerminalMutation,
@@ -148,6 +150,7 @@ describe('terminal-service', () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true));
       expect(result.current.data).toEqual(session());
       const [, init] = fetchScenario.fetchMock.mock.calls[0] ?? [];
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
       expect(JSON.parse(String(init?.body))).toEqual({
         environmentId: ENVIRONMENT_ID,
         chatId: CHAT_ID,

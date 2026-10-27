@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { Environment } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
@@ -18,6 +19,7 @@ import {
 } from '@tanstack/react-router';
 import userEvent from '@testing-library/user-event';
 import type { FunctionComponent } from 'react';
+
 import { RuntimesPage } from '../../../../src/features/environments/components/RuntimesPage';
 import {
   environmentScopeRoute,
@@ -90,7 +92,7 @@ async function renderRuntimesPage(initialPath = '/environments/runtimes') {
 
   // The test router is deliberately not the app's registered route tree, so its
   // type does not line up with the provider's registered one.
-  // biome-ignore lint/suspicious/noExplicitAny: unregistered test-only route tree
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- unregistered test-only route tree
   const result = render(<RouterProvider router={router as any} />);
   await act(async () => {
     await router.load();

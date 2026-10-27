@@ -25,6 +25,7 @@ import {
 } from 'node:fs';
 import { access, link, lstat, mkdir, open, readlink, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+
 import { resolvePathThroughExistingAncestor } from './path-containment';
 
 // O_NOFOLLOW makes a final-component symlink fail the open (ELOOP) instead of
@@ -288,7 +289,7 @@ function writeTempFile(tempPath: string, data: string | Uint8Array, mode?: numbe
   const fd = openSync(tempPath, 'wx', mode);
   try {
     const buffer = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data);
-    for (let offset = 0; offset < buffer.length; ) {
+    for (let offset = 0; offset < buffer.length;) {
       offset += writeSync(fd, buffer, offset, buffer.length - offset, null);
     }
   } finally {

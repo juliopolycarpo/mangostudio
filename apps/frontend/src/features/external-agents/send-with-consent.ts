@@ -14,7 +14,9 @@
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents/values';
+
 import { ApiError } from '@/lib/utils';
+
 import { type ExternalDisclosureRequest, promptExternalDisclosure } from './disclosure-prompt';
 import { promptExternalWorkspaceTrust } from './workspace-trust-prompt';
 

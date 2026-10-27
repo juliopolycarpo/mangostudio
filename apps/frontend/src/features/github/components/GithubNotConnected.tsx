@@ -1,5 +1,6 @@
 import type { GithubUnavailableState } from '@mangostudio/shared/github';
 import type { ReactNode } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useI18n } from '@/hooks/use-i18n';

@@ -26,7 +26,9 @@ import { TOOLCHAIN_RUNTIME_IDS } from '@mangostudio/shared/environments/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
+
 import { formatMessage } from '@/lib/i18n-format';
+
 import type { ResolvedToolIdentity } from './identity/resolve';
 import { type InstallChainStep, resolveInstallChain } from './install-chain';
 

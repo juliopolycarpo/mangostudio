@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { PrerequisiteCard } from '../../../../src/features/environments/components/PrerequisiteCard';
 import { render, screen } from '../../../support/harness/render';
 import { installation, runtimeStatus } from './fixtures';

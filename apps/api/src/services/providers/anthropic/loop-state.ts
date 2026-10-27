@@ -8,6 +8,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+
 import { parseJsonWith } from '../../../lib/safe-parse';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import { getModelContextLimit } from '../core/context-policy';
@@ -72,12 +73,10 @@ export function buildAnthropicRequestMessages(
   currentInput: Anthropic.MessageParam[]
 ): Anthropic.MessageParam[] {
   return [
-    ...req.history.map(
-      (turn): Anthropic.MessageParam => ({
-        role: turn.role === 'ai' ? 'assistant' : 'user',
-        content: turn.text,
-      })
-    ),
+    ...req.history.map((turn): Anthropic.MessageParam => ({
+      role: turn.role === 'ai' ? 'assistant' : 'user',
+      content: turn.text,
+    })),
     ...(loopState?.loopMessages ?? []),
     ...currentInput,
   ];

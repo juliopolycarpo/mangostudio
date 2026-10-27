@@ -8,8 +8,10 @@
 
 import type { Connector } from '@mangostudio/shared/connectors';
 import { useCallback, useEffect, useState } from 'react';
+
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
+
 import {
   DEFAULT_USAGE_ALERT_THRESHOLD,
   detectUsageAlerts,

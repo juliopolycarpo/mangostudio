@@ -305,6 +305,7 @@ function compilerHelper(row: Row): boolean {
     /^(vctip|cl|link|mspdbsrv|mspdbcmf|mspdbcore|c1|c1xx|c2|ml|ml64|rc|mt)\.exe$/i.test(
       String(row.name)
     ) ||
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Diagnostics intentionally describe arbitrary invalid input, including non-scalar values.
     /[\\/]VC[\\/]Tools[\\/]MSVC[\\/]/i.test(`${row.path ?? ''} ${row.command ?? ''}`)
   );
 }

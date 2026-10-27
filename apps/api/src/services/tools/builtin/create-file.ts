@@ -11,8 +11,8 @@ import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
   normalizePathValidationSettings,
-  type PathValidationSettings,
   pathPolicyParameterDescriptors,
+  type PathValidationSettings,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';

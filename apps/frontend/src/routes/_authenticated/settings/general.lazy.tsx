@@ -1,4 +1,5 @@
 import { createLazyFileRoute } from '@tanstack/react-router';
+
 import { GeneralSettings } from '@/components/settings/GeneralSettings';
 import { useApp } from '@/lib/app-context';
 

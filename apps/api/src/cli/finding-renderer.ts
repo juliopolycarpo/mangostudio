@@ -14,6 +14,7 @@ import {
   environmentFindingTemplatesEn,
   environmentLtsLabelsEn,
 } from '@mangostudio/shared/environments';
+
 import type { CheckResult, CheckStatus } from './doctor-checks';
 
 const LEGACY_DETAIL_CODE = 'legacy-detail' as const;

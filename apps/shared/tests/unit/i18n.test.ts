@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { en, ptBR } from '../../src/i18n';
 
 describe('i18n provider-neutral copy', () => {

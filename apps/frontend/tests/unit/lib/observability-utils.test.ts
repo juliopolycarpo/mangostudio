@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { formatTimestamp } from '../../../src/features/settings/observability/utils';
 
 const TIMESTAMP = 1_700_000_000_000;

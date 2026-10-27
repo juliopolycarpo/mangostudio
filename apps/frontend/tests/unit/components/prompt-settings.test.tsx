@@ -1,9 +1,11 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import type {
   PromptSettings as PromptSettingsData,
   RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
 import { fireEvent, screen, within } from '@testing-library/react';
+
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';

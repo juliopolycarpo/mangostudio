@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { GitRuntimeSelection } from '../../../../src/modules/git/infrastructure/git-cli';
 import { createGithubCache } from '../../../../src/modules/github/application/github-cache';
 import { createGithubReadService } from '../../../../src/modules/github/application/github-read-service';
@@ -279,6 +280,7 @@ describe('GitHub write service', () => {
       cache,
       currentBranch: () => Promise.resolve('feat/panel'),
       pullRequestTemplate: () => Promise.resolve(''),
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       publish: async () => undefined,
       ...noopRepoRootDeps,
     });
@@ -342,6 +344,7 @@ describe('GitHub write service', () => {
       cache: createGithubCache(),
       currentBranch: () => Promise.resolve('feat/panel'),
       pullRequestTemplate: () => Promise.resolve(''),
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       publish: async () => undefined,
       requireRepoRoot: () => Promise.resolve('/remote/repo-root'),
       withRepoMutationLock: (selection, root, mutation) => {

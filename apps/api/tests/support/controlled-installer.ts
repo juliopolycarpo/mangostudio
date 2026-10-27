@@ -2,6 +2,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
 import { shellQuote } from '@mangostudio/shared/environments';
 
 export interface FakeInstaller {
@@ -65,17 +66,16 @@ export async function writeFakeInstaller(
     await writeFile(
       script,
       // Declare UTF-8 for Windows PowerShell 5.1; encoded path payloads keep the body ASCII.
-      '\uFEFF' +
-        [
-          `$releasePath = ${powerShellUtf8Data(release)}`,
-          `$markerPath = ${powerShellUtf8Data(marker)}`,
-          "[Console]::Out.WriteLine('waiting')",
-          "[Console]::Error.WriteLine('warn')",
-          wait,
-          `[IO.File]::AppendAllText($markerPath, "run\`r\`n")`,
-          "[Console]::Out.WriteLine('done')",
-          '',
-        ].join('\r\n')
+      `\uFEFF${[
+        `$releasePath = ${powerShellUtf8Data(release)}`,
+        `$markerPath = ${powerShellUtf8Data(marker)}`,
+        "[Console]::Out.WriteLine('waiting')",
+        "[Console]::Error.WriteLine('warn')",
+        wait,
+        `[IO.File]::AppendAllText($markerPath, "run\`r\`n")`,
+        "[Console]::Out.WriteLine('done')",
+        '',
+      ].join('\r\n')}`
     );
     // The recipes' own POWERSHELL_ARGV_PREFIX shape, ending in `-File`.
     return {

@@ -16,10 +16,12 @@
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
 import { ArrowRight } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { ChatDockNotice } from './ChatPageNotices';
 
 interface DeprecatedModelNoticeProps {
@@ -45,6 +47,7 @@ export function DeprecatedModelNotice({
     <ChatDockNotice>
       <Callout
         tone="warning"
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
         role="status"
         aria-live="polite"
         className="p-4"

@@ -12,6 +12,7 @@
  */
 
 import { hostname, userInfo } from 'node:os';
+
 import type { HubIdentity } from '@mangostudio/shared/runtime-contract';
 
 /** Where the local host and user come from. */

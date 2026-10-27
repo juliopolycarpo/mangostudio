@@ -9,8 +9,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { LibraryResource } from '@mangostudio/shared/library';
+
 import { ContentGroupList } from '../../../../src/features/library/components/ContentGroupList';
 import { CoverageList } from '../../../../src/features/library/components/CoverageList';
 import {

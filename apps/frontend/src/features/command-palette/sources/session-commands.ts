@@ -8,10 +8,11 @@
 
 import type { Chat } from '@mangostudio/shared/chat';
 import { MessageSquare } from 'lucide-react';
+
 import { chatTitleLabel } from '@/features/chat/lib/chat-title';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { chatSearchText } from '@/features/sidebar/lib/filter-chats';
-import { type RunnerBadgeLabels, runnerBadge } from '@/features/sidebar/lib/runner-badge';
+import { runnerBadge, type RunnerBadgeLabels } from '@/features/sidebar/lib/runner-badge';
 import { formatRelativeTime } from '@/lib/i18n-format';
 import { workdirBasename } from '@/lib/paths';
 

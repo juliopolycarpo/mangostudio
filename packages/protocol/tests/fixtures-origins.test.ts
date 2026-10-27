@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import origins from '../../../spec/fixtures/1/origins.json';
 import { isOriginAllowed } from '../src/transports/websocket';
 

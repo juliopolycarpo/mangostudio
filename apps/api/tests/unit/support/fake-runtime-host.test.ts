@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   PROTOCOL_MAJOR,
   PROTOCOL_MINOR,
-  RESERVED_ERROR_CODES,
   RemoteError,
+  RESERVED_ERROR_CODES,
 } from '@mangostudio/protocol';
 import {
   CONSENT_DENIED_KIND,
@@ -13,6 +14,7 @@ import {
   RuntimeServiceError,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import {
   connectFakeRuntime,
   type FakeRuntimeConnection,

@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import { SSEErrorEventSchema } from '../errors';
 import {
   EXTERNAL_COMMAND_CATALOG_MAX_ITEMS,

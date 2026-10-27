@@ -95,6 +95,7 @@ describe('unprivileged collection side', () => {
     expect(collect).toContain(
       '--timings .mango/artifacts/qa-collector-timings.json > metrics.json'
     );
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(upload).toContain('if: ${{ !cancelled() }}');
     expect(upload).toContain('continue-on-error: true');
     expect(upload).toContain('name: qa-collector-timings');
@@ -124,8 +125,10 @@ describe('unprivileged collection side', () => {
     const ci = readText('.github/workflows/ci.yml');
     const qaMetrics = readText('.github/workflows/qa-metrics.yml');
 
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(ci).toContain('test_result: ${{ needs.test.result }}');
     expect(qaMetrics).toContain('test_result:');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(qaMetrics).toContain('QA_TEST_RESULT: ${{ inputs.test_result }}');
     // Only the env mapping interpolates it: never a script body (zizmor template-injection).
     expect(qaMetrics.split('inputs.test_result').length - 1).toBe(1);
@@ -157,9 +160,13 @@ describe('unprivileged collection side', () => {
     const ci = readText('.github/workflows/ci.yml');
     const qaMetrics = readText('.github/workflows/qa-metrics.yml');
 
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(ci).toContain('rust_relevant: ${{ needs.changes.outputs.rust }}');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(ci).toContain('rust_result: ${{ needs.rust-coverage.result }}');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(qaMetrics).toContain('QA_RUST_RELEVANT: ${{ inputs.rust_relevant }}');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(qaMetrics).toContain('QA_RUST_RESULT: ${{ inputs.rust_result }}');
     // Only the env mappings interpolate them: never a script body (zizmor template-injection).
     expect(qaMetrics.split('inputs.rust_relevant').length - 1).toBe(1);

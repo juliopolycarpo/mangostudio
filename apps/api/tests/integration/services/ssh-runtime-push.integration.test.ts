@@ -9,13 +9,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import type { SshEnvironmentConfig } from '@mangostudio/shared/environments';
 import { quoteForRemoteShell } from '@mangostudio/shared/environments';
 import {
-  PLATFORM_PROBE_SCRIPT,
   parsePlatformProbe,
+  PLATFORM_PROBE_SCRIPT,
   resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
+
 import {
   pushRuntimeBinary,
   type RuntimeCommandOptions,

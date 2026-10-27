@@ -36,8 +36,8 @@ import {
   laneSpec,
   resolveWorkerCount,
   runWorkerLane,
-  type StartWorker,
   splitLaneCommand,
+  type StartWorker,
   WORKERS_ENV,
 } from './lib/test-workers';
 

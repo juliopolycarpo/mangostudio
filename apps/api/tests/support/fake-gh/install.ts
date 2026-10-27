@@ -9,6 +9,7 @@
 
 import { chmod, copyFile, link, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
 import { FAKE_GH_SCENARIO_FILE, type FakeGhScenario } from './program';
 
 /** The file name the runtime resolves when it looks for `gh`. */

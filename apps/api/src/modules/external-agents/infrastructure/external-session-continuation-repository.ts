@@ -16,6 +16,7 @@ import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-ag
 import { ExternalAgentConfigurationSchema } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
 import Value from 'typebox/value';
+
 import type { Database } from '../../../db/types';
 
 /** The tuple a stored continuation is only valid for. */

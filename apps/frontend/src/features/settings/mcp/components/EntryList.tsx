@@ -5,6 +5,7 @@
 
 import { Plus, X } from 'lucide-react';
 import type { ReactNode } from 'react';
+
 import { SettingsField } from '@/components/settings/SettingsField';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
@@ -47,7 +48,7 @@ export function EntryList<T>({
       ) : (
         <div className="space-y-2">
           {entries.map((entry, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: rows have no stable identity while being typed
+            // eslint-disable-next-line react/no-array-index-key -- rows have no stable identity while being typed
             <div key={index} className="flex items-center gap-2">
               {renderEntry(entry, index)}
               <Button

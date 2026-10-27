@@ -104,11 +104,7 @@ export type {
 // Errors
 export type { ApiErrorResponse, SSEErrorEvent } from '../errors';
 // Generation
-export type {
-  GeneratedMessage,
-  GenerateImageResponse,
-  GenerateTextResponse,
-} from '../generation';
+export type { GeneratedMessage, GenerateImageResponse, GenerateTextResponse } from '../generation';
 // Library
 export type {
   ConceptComparison,

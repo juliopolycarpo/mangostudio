@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
+
 import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { ROOT_DIR } from '../lib/config';
 import { archiveConcurrency, captureCommand, mapWithConcurrency } from '../lib/exec';
@@ -15,8 +16,8 @@ import {
   createReleaseAssetPlan,
   type FrontendArchivePlan,
   type InstallerScriptPlan,
-  type PlatformArchivePlan,
   platformArchiveMembers,
+  type PlatformArchivePlan,
   type ReleaseAssetPlan,
 } from '../lib/release-assets';
 import { runtimeBinaryName } from '../lib/release-targets';

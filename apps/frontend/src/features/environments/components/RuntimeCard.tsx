@@ -13,12 +13,14 @@ import type {
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import {
   effectiveInstallation,
   findInstallRecipe,

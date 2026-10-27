@@ -7,12 +7,14 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type {
   LibraryLocationId,
   RemovalLocation,
   RemovalPreview,
   RemovalPreviewEntry,
 } from '@mangostudio/shared/library';
+
 import {
   acknowledgedLastCopyKeys,
   buildRemovalDecisions,

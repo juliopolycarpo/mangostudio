@@ -1,6 +1,8 @@
 import { memo } from 'react';
+
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { MessageBubble } from '../MessageBubble';
 
 interface AssistantProsePartProps {

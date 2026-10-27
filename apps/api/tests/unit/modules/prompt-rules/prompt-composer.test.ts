@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
+
 import { composePrompt } from '../../../../src/modules/prompt-rules/application/prompt-composer';
 
 function makeSettings(overrides?: Partial<PromptSettings>): PromptSettings {

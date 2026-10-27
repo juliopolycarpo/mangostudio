@@ -1,7 +1,9 @@
 import { writeFile } from 'node:fs/promises';
+
 import type { MessagesPage } from '@mangostudio/shared/chat';
 import type { GithubInboxResponse } from '@mangostudio/shared/github';
 import { expect, type Page, test } from '@playwright/test';
+
 import { observeMotionNodes, readMotionObservations } from './support/motion-observer';
 import { installMotionReadModels } from './support/motion-read-models';
 

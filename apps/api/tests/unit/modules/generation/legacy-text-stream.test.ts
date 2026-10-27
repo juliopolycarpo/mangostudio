@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+
 import type { StreamTextTurnSession } from '../../../../src/modules/generation/application/stream-text-turn-stages';
 import type {
   StreamingChunk,
@@ -71,9 +72,8 @@ describe('runLegacyTextStream', () => {
 
   it('throws provider error chunks instead of completing successfully', async () => {
     await mockMessageRepository();
-    const { runLegacyTextStream } = await import(
-      '../../../../src/modules/generation/application/stream-text-turn-stages'
-    );
+    const { runLegacyTextStream } =
+      await import('../../../../src/modules/generation/application/stream-text-turn-stages');
     const session = createSession([
       { type: 'error', content: 'Cursor agent run failed.', done: true },
     ]);
@@ -87,9 +87,8 @@ describe('runLegacyTextStream', () => {
 
   it('surfaces Cursor internal tool activity as a system event', async () => {
     await mockMessageRepository();
-    const { runLegacyTextStream } = await import(
-      '../../../../src/modules/generation/application/stream-text-turn-stages'
-    );
+    const { runLegacyTextStream } =
+      await import('../../../../src/modules/generation/application/stream-text-turn-stages');
     const session = createSession([
       { type: 'tool_call', toolCallId: 'tool-1', name: 'read_file', done: false },
       { type: 'text', text: 'done', done: false },
@@ -114,9 +113,8 @@ describe('runLegacyTextStream', () => {
 
   it('scopes the tool-call event name to the provider type', async () => {
     await mockMessageRepository();
-    const { runLegacyTextStream } = await import(
-      '../../../../src/modules/generation/application/stream-text-turn-stages'
-    );
+    const { runLegacyTextStream } =
+      await import('../../../../src/modules/generation/application/stream-text-turn-stages');
     const session = createSession([
       { type: 'tool_call', toolCallId: 'tool-1', name: 'search', done: false },
       { type: 'text', text: '', done: true },
@@ -138,9 +136,8 @@ describe('runLegacyTextStream', () => {
 
   it('passes the resolved tool allowlist and settings to legacy providers', async () => {
     await mockMessageRepository();
-    const { runLegacyTextStream } = await import(
-      '../../../../src/modules/generation/application/stream-text-turn-stages'
-    );
+    const { runLegacyTextStream } =
+      await import('../../../../src/modules/generation/application/stream-text-turn-stages');
     let capturedRequest: TextGenerationRequest | undefined;
     const toolSettingsByName = new Map([
       ['bash', { enabled: true, parameters: { timeoutSeconds: 5, maxOutputBytes: 12_000 } }],
@@ -172,9 +169,8 @@ describe('runLegacyTextStream', () => {
 
   it('forwards workdir and workdirPolicy to legacy text stream requests', async () => {
     await mockMessageRepository();
-    const { runLegacyTextStream } = await import(
-      '../../../../src/modules/generation/application/stream-text-turn-stages'
-    );
+    const { runLegacyTextStream } =
+      await import('../../../../src/modules/generation/application/stream-text-turn-stages');
     let capturedRequest: TextGenerationRequest | undefined;
     const session = createSession([{ type: 'text', text: '', done: true }], {
       onRequest: (req) => {

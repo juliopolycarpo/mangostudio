@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+
 import { ApiError } from '../../../src/lib/utils';
 
 // `vi.hoisted` existed because `vi.mock` is hoisted above the file's own
 // statements. `mock.module` is not hoisted, so a plain const is enough.
 const mockPost = jest.fn();
 
-mock.module('../../../src/lib/api-client', () => ({
+void mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       mcp: {
@@ -22,9 +24,8 @@ mock.module('../../../src/lib/api-client', () => ({
 
 // Below the mock, never as a static import: those are evaluated first and the
 // service would bind the real API client.
-const { McpElicitationGoneError, respondMcpElicitation } = await import(
-  '../../../src/services/mcp-elicitation-service'
-);
+const { McpElicitationGoneError, respondMcpElicitation } =
+  await import('../../../src/services/mcp-elicitation-service');
 
 describe('respondMcpElicitation', () => {
   beforeEach(() => {

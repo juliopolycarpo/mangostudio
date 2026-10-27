@@ -5,9 +5,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { EnvironmentEntitiesOverview } from '../../../../src/features/environments/components/EnvironmentEntitiesOverview';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -175,6 +177,7 @@ describe('Add Environment reachability picker', () => {
         (init as RequestInit | undefined)?.method?.toUpperCase() === 'POST' &&
         String(input instanceof Request ? input.url : input).endsWith('/api/environments')
     );
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
     expect(JSON.parse(String((call?.[1] as RequestInit | undefined)?.body))).toEqual({
       id: 'workshop',
       name: 'Workshop',

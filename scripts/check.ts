@@ -3,23 +3,18 @@ import {
   createActionsLintTasks,
   touchesActionsLintSurface,
 } from './lib/actions-lint/run';
-import { createTurboCheckCommand, createWorkspaceDprintCommand } from './lib/check';
+import { createTurboCheckCommand, createWorkspaceFormatCommand } from './lib/check';
 import { checkReportIdentity, checkReportTarget, writeCheckReport } from './lib/check-report';
 import type { CheckResult, CheckTaskResult } from './lib/check-result';
 import { touchesCodeHealthSurface } from './lib/code-health';
-import {
-  ROOT_BIOME_PATHS,
-  ROOT_DIR,
-  ROOT_DPRINT_PATHS,
-  WORKSPACE_DPRINT_PATHS,
-  type WorkspaceName,
-} from './lib/config';
+import { ROOT_DIR, ROOT_LINT_PATHS, ROOT_TOOLING_PATHS, type WorkspaceName } from './lib/config';
 import { touchesContractArtifactSurface } from './lib/contract-artifacts';
 import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
 } from './lib/dependency-policy';
 import { assertFrontendApiImportBoundary } from './lib/frontend-api-import-boundary';
+import { createImportCycleCommand } from './lib/import-cycles';
 import { assertNoProductionNodeEnvBranches } from './lib/no-node-env-branches';
 import { touchesProtocolSurface } from './lib/protocol';
 import { assertVersionsInLockstep } from './lib/release-version';
@@ -32,10 +27,10 @@ import {
   info,
   mapFilesToWorkspaces,
   parseArgs,
-  type RunResult,
   resolveDefaultBase,
   runCommand,
   runParallel,
+  type RunResult,
   runTask,
 } from './lib/runner';
 import { assertNoSharedRootImports } from './lib/shared-root-import-boundary';
@@ -43,7 +38,7 @@ import { assertNoSharedRootImports } from './lib/shared-root-import-boundary';
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Biome lint/format and import-cycle checks, dprint, tsc typechecks, Knip code health,
+Runs Bun lint and fmt, import-cycle checks, tsc typechecks, Knip code health,
 generated contract-artifact freshness, lockfile dedupe, the TypeScript Mango Protocol
 lanes (spec, schema equality, fixtures) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.
@@ -63,7 +58,7 @@ Mode flags:
   --staged       Scope to workspaces touched by staged files
   --changed      Scope to workspaces changed vs origin/main
   --base <ref>   Base ref for --changed (default: merge-base HEAD origin/main)
-  --skip-format  Skip root Biome and dprint
+  --skip-format  Skip root Bun lint and fmt
   --report-file <path>  Write an internal JSON result (requires --report-id)
   --report-id <UUID>    Caller identity for --report-file
   --help`);
@@ -81,7 +76,7 @@ const commandTask = (label: string, cmd: string[], opts: { cwd: string }): Check
   run: () => runCommand(label, cmd, opts),
 });
 
-const localTask = (label: string, fn: () => void): CheckTask => ({
+const localTask = (label: string, fn: () => void | Promise<void>): CheckTask => ({
   label,
   run: () => runTask(label, fn),
 });
@@ -90,25 +85,19 @@ function createWorkspaceTasks(workspaces: ReadonlyArray<WorkspaceName>): CheckTa
   const turboChecks = commandTask('workspaces:check', createTurboCheckCommand([...workspaces]), {
     cwd: ROOT_DIR,
   });
-  return [turboChecks, ...createWorkspaceDprintTasks(workspaces)];
-}
-
-function createWorkspaceDprintTasks(workspaces: ReadonlyArray<WorkspaceName>): CheckTask[] {
-  return workspaces.filter(hasWorkspaceDprintPaths).map(createWorkspaceDprintTask);
-}
-
-function createWorkspaceDprintTask(workspace: WorkspaceName): CheckTask {
-  return commandTask(`root:dprint:${workspace}`, createWorkspaceDprintCommand(workspace), {
-    cwd: ROOT_DIR,
-  });
-}
-
-function hasWorkspaceDprintPaths(workspace: WorkspaceName): boolean {
-  return WORKSPACE_DPRINT_PATHS[workspace].length > 0;
+  return [
+    turboChecks,
+    ...workspaces.map((workspace) =>
+      commandTask(`root:fmt:${workspace}`, createWorkspaceFormatCommand(workspace), {
+        cwd: ROOT_DIR,
+      })
+    ),
+  ];
 }
 
 function createRootTasks(skipFormat: boolean): CheckTask[] {
   const tasks: CheckTask[] = [
+    commandTask('root:cycles', createImportCycleCommand(ROOT_LINT_PATHS), { cwd: ROOT_DIR }),
     localTask('root:node-env-branches', () => assertNoProductionNodeEnvBranches()),
     localTask('root:versions', () => {
       assertVersionsInLockstep();
@@ -127,11 +116,9 @@ function createRootTasks(skipFormat: boolean): CheckTask[] {
   ];
 
   if (!skipFormat) {
+    tasks.push(commandTask('root:lint', ['bun', 'lint', ...ROOT_LINT_PATHS], { cwd: ROOT_DIR }));
     tasks.push(
-      commandTask('root:biome', ['bunx', 'biome', 'check', ...ROOT_BIOME_PATHS], { cwd: ROOT_DIR })
-    );
-    tasks.push(
-      commandTask('root:dprint', ['bunx', 'dprint', 'check', ...ROOT_DPRINT_PATHS], {
+      commandTask('root:fmt', ['bun', 'fmt', '--check', ...ROOT_TOOLING_PATHS], {
         cwd: ROOT_DIR,
       })
     );
@@ -231,8 +218,7 @@ writeReport([], 'Check setup did not finish');
 process.on('exit', (exitCode) => {
   if (
     !reportTarget ||
-    !latestReport ||
-    latestReport.state !== 'unavailable' ||
+    latestReport?.state !== 'unavailable' ||
     exitCode === 0 ||
     latestReport.exitCode === exitCode
   )

@@ -578,10 +578,10 @@ body {
   }
 
   .composer-chip:is(button, label, select):not(
-    :disabled,
-    [aria-expanded="true"],
-    [aria-pressed="true"]
-  ):active {
+      :disabled,
+      [aria-expanded="true"],
+      [aria-pressed="true"]
+    ):active {
     background: var(--color-fill-pressed);
   }
 

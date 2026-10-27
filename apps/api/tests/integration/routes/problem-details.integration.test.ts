@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import {
   ERROR_CODES,
   PROBLEM_JSON_ACCEPT,
@@ -18,6 +19,7 @@ import {
   problemTypeUri,
 } from '@mangostudio/shared/errors';
 import Value from 'typebox/value';
+
 import { app } from '../../../src/app';
 
 interface OpenApiDocument {
@@ -220,8 +222,7 @@ describe('the published OpenAPI document', () => {
       for (const operation of Object.values(methods)) {
         for (const response of Object.values(operation.responses ?? {})) {
           const media = response.content?.[PROBLEM_JSON_MEDIA_TYPE] as
-            | { schema?: { $ref?: string } }
-            | undefined;
+            { schema?: { $ref?: string } } | undefined;
           if (media?.schema?.$ref) refs.add(media.schema.$ref);
         }
       }

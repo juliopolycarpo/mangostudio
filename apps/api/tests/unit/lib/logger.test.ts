@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
+
 import { createDiagnosticLogger, logDiagnostic } from '../../../src/lib/logger';
 
 type CapturedEntry = Record<string, unknown> & { metadata: Record<string, unknown> };

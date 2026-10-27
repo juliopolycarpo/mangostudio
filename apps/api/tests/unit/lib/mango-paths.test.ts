@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
+
 import { getHomeMangoDir } from '../../../src/lib/config';
 import {
   ensureRuntimeDirs,

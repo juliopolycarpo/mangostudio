@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
+
 import {
   highlightCode,
   highlightLineTokens,

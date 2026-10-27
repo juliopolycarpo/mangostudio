@@ -1,4 +1,5 @@
 import type { TerminalSession } from '@mangostudio/shared/terminal';
+
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 

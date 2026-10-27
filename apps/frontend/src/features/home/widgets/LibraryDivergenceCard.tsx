@@ -19,6 +19,7 @@ import type { LibraryTargetId, ResourceKind } from '@mangostudio/shared/library'
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useMemo } from 'react';
+
 import { buttonClassName } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -27,6 +28,7 @@ import { libraryEnvironmentSearch, libraryResourcesQueryOptions } from '@/featur
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
 import { formatList, formatMessage } from '@/lib/i18n-format';
+
 import { type DivergentResource, summarizeLibraryDivergence } from '../lib/library-divergence';
 import { CARD_LINK_CLASS } from './card-link';
 

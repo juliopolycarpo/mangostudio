@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+
 import type { RuntimeSlotConfig } from '@mangostudio/shared/runtime-home';
+
 import {
   VERSION_SCRIPT,
   wslLaunchCommand,
@@ -143,8 +145,9 @@ function harness(
         // config is on record. Version is a separate round trip, below.
         return Promise.resolve(
           ok(
-            `${DISTRO_HOME}\nLinux\nx86_64\nldd (GNU libc) 2.35\n` +
-              (config ? JSON.stringify(config) : '')
+            `${DISTRO_HOME}\nLinux\nx86_64\nldd (GNU libc) 2.35\n${
+              config ? JSON.stringify(config) : ''
+            }`
           )
         );
       }

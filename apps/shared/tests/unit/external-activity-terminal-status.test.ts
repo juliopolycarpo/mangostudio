@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   EXTERNAL_TURN_TERMINAL_REASONS,
   type ExternalActivityStatus,
-  type ExternalTurnTerminalReason,
   externalActivityStatusForTerminal,
+  type ExternalTurnTerminalReason,
 } from '../../src/external-agents';
 
 const EXPECTED_STATUSES = {

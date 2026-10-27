@@ -19,9 +19,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RuntimeMethod, RuntimePathFilter } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,

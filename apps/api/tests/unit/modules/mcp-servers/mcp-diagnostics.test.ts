@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpToolDescriptor } from '@mangostudio/shared/mcp';
+
 import type { McpServerSelect } from '../../../../src/db/types';
 import {
   classifyMcpProbeError,

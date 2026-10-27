@@ -2,10 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   descendantsOf,
-  type ProcessEntry,
   parentPidFromStat,
+  type ProcessEntry,
   readProcessSnapshot,
   vendorProcessesOf,
 } from '../../support/external-agents/process-tree';

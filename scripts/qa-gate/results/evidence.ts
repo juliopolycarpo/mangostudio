@@ -8,16 +8,15 @@ import { basename } from 'node:path';
 import {
   parseShardReceipt,
   type ShardIdentity,
-  type ShardReceipt,
   shardIdentityFromDirectory,
+  type ShardReceipt,
 } from '../../lib/shard-receipt';
 import type { TestLaneId } from '../../lib/test-lanes';
 import { type JunitCounts, parseJunitXml } from '../junit-results';
 import type { ExpectedJob } from './expected-jobs';
 
 type ReportEvidence =
-  | { readonly kind: 'missing' }
-  | { readonly kind: 'read'; readonly parsed: JunitCounts };
+  { readonly kind: 'missing' } | { readonly kind: 'read'; readonly parsed: JunitCounts };
 
 export type ReceiptEvidence =
   | { readonly kind: 'missing'; readonly why: string }

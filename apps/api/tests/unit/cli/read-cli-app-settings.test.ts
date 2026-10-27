@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
   withLibraryLocations,
 } from '@mangostudio/shared/app-settings';
+
 import { readCliAppSettings } from '../../../src/cli/read-cli-app-settings';
 import type { MangoConfig } from '../../../src/lib/config';
 

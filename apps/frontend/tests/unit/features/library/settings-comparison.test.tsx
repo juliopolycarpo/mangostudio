@@ -8,8 +8,10 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { ConceptComparison } from '@mangostudio/shared/library';
+
 import { SettingsComparison } from '../../../../src/features/library/components/SettingsComparison';
 import { screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';

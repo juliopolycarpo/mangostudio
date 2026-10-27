@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import { screen } from '@testing-library/react';
+
 import { Spinner } from '@/components/ui/Spinner';
+
 import { render } from '../../../support/harness/render';
 
 describe('Spinner', () => {

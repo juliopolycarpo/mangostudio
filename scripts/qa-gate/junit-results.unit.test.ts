@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import { laneById, TEST_LANES } from '../lib/test-lanes';
 import { buildTestSuiteStats, type LaneOutcome, parseJunitXml } from './junit-results';
 import type { LaneResult } from './model/lanes';

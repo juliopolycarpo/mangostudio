@@ -4,6 +4,7 @@
  */
 
 import { existsSync } from 'node:fs';
+
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
@@ -12,6 +13,7 @@ import type {
   UpdateSkillSettingsBody,
 } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { parseSkillKey, SkillError } from '../domain/skill';

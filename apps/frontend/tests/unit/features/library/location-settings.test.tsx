@@ -11,6 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import {
   type AppSettings,
   DEFAULT_APP_SETTINGS,
@@ -20,6 +21,7 @@ import {
 import { en } from '@mangostudio/shared/i18n';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import userEvent from '@testing-library/user-event';
+
 import { LocationSettings } from '../../../../src/features/library/components/LocationSettings';
 import { screen, waitFor, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
@@ -53,6 +55,7 @@ function findRequest(calls: FetchCall[], method: string, path: string): FetchCal
 async function readAppSettingsBody(call: FetchCall): Promise<AppSettings> {
   const [input, init] = call;
   const body = input instanceof Request ? await input.clone().text() : init?.body;
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
   return JSON.parse(typeof body === 'string' ? body : String(body));
 }
 

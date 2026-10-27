@@ -10,10 +10,11 @@ import {
   type UserServiceAction,
 } from '@mangostudio/shared/machine/service';
 import {
+  type UpdateChannel,
   UPGRADE_SHA_PATTERN,
   UPGRADE_VERSION_PATTERN,
-  type UpdateChannel,
 } from '@mangostudio/shared/updates';
+
 import { CliError } from './errors';
 
 export interface ServeArgs {

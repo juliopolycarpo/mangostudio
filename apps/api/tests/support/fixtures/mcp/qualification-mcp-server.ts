@@ -6,6 +6,7 @@
 
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -37,6 +38,7 @@ export function createQualificationMcpServer(): Server {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name } = request.params;
     const text = (value: string) => ({ content: [{ type: 'text' as const, text: value }] });
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
     if (name === 'echo') return text(String(request.params.arguments?.text ?? ''));
     if (name === 'env-keys') return text(JSON.stringify(Object.keys(process.env).sort()));
     if (name === 'big') return text('q'.repeat(200_000));
@@ -126,6 +128,7 @@ export async function startQualificationHttpServer(
 ): Promise<QualificationHttpServer> {
   const requests: QualificationRequest[] = [];
   const sessions = new Map<string, SSEServerTransport>();
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This callback intentionally tests or owns the asynchronous operation described here.
   const http = createServer(async (request, response) => {
     const path = request.url ?? '/';
     requests.push({

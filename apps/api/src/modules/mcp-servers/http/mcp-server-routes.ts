@@ -29,6 +29,7 @@ import {
   UpdateMcpServerBodySchema,
 } from '@mangostudio/shared/mcp';
 import { Elysia, t } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { respondElicitation } from '../../../services/mcp/elicitation-registry';

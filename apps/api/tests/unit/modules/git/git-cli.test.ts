@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { RemoteError } from '@mangostudio/protocol';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+
 import {
   GitCliError,
   isMissingWorkdirError,

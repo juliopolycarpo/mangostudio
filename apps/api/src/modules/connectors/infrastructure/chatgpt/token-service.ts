@@ -5,6 +5,7 @@
  */
 
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { getConfig } from '../../../../lib/config';
 import type { upsertSecretMetadata } from '../../../../services/secret-store/metadata';
 import {

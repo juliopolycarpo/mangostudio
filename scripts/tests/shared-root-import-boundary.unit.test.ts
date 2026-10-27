@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+
 import ts from '@typescript/typescript6';
+
 import { ROOT_DIR } from '../lib/config';
 import { listCheckoutFiles } from '../lib/git';
 import { assertNoSharedRootImports } from '../lib/shared-root-import-boundary';
 import {
   createSourceTree,
+  lintConfiguredSource,
   lintSource,
   removeSourceTrees,
   transparentLoaderForms,
@@ -22,7 +25,16 @@ const createCheckout = (path: string, source: string): string =>
 
 afterEach(removeSourceTrees);
 
-describe('shared root Biome boundary', () => {
+describe('shared root Bun boundary', () => {
+  it('enforces loader restrictions with the actual bunfig.toml', () => {
+    const result = lintConfiguredSource(
+      'apps/api/src/forbidden.ts',
+      `export const shared = import('${SHARED_ROOT}');`
+    );
+    expect(result.exitCode, result.output).toBe(1);
+    expect(result.output).toContain('no-restricted-syntax');
+    expect(result.output).toContain(MESSAGE);
+  });
   it.each([
     `import { AgentId } from '${SHARED_ROOT}';`,
     `import type { AgentId } from '${SHARED_ROOT}';`,
@@ -33,12 +45,18 @@ describe('shared root Biome boundary', () => {
     `export type { AgentId } from '${SHARED_ROOT}';`,
     `export * from '${SHARED_ROOT}';`,
     `const shared = import('${SHARED_ROOT}');`,
+    `const shared = import(\`${SHARED_ROOT}\`);`,
     `const shared = require('${SHARED_ROOT}');`,
+    `const shared = require(\`${SHARED_ROOT}\`);`,
+    `const shared = module.require('${SHARED_ROOT}');`,
+    `const shared = module['require']('${SHARED_ROOT}');`,
+    `const shared = module[\`require\`]('${SHARED_ROOT}');`,
+    `type AgentId = import('${SHARED_ROOT}').AgentId;`,
     `import shared = require('${SHARED_ROOT}');`,
   ])('rejects a private root edge: %s', (source) => {
     const result = lintSource('apps/api/src/forbidden.ts', source);
     expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain('lint/style/noRestrictedImports');
+    expect(result.output).toMatch(/no-restricted-(?:imports|syntax)/);
     expect(result.output).toContain(MESSAGE);
     expect(result.output).toContain('type-only imports');
   });
@@ -59,7 +77,10 @@ describe('shared root Biome boundary', () => {
     '.codex/hooks/forbidden.mjs',
     'tooling/forbidden.cjs',
   ])('keeps the root denial in %s', (path) => {
-    const result = lintSource(path, `import { AgentId } from '${SHARED_ROOT}';`);
+    const source = path.endsWith('.cjs')
+      ? `const shared = require('${SHARED_ROOT}');`
+      : `import { AgentId } from '${SHARED_ROOT}';`;
+    const result = lintSource(path, source);
     expect(result.exitCode, result.output).toBe(1);
     expect(result.output).toContain(MESSAGE);
   });
@@ -74,6 +95,14 @@ describe('shared root Biome boundary', () => {
       expect(result.exitCode, result.output).toBe(0);
     }
   );
+
+  it('does not treat a computed template prefix as a literal root import', () => {
+    const result = lintSource(
+      'apps/api/src/computed.ts',
+      'const shared = import(`@mangostudio/shared$' + '{suffix}`);'
+    );
+    expect(result.exitCode, result.output).toBe(0);
+  });
 
   it.each([
     '@mangostudio/shared/i18n',

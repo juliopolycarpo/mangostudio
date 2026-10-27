@@ -13,14 +13,14 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 let capturedFetcher: ((url: string, init?: RequestInit) => Promise<Response>) | null = null;
 let scheduleLoginRedirectMock = jest.fn();
 
-mock.module('@elysia/eden', () => ({
+void mock.module('@elysia/eden', () => ({
   treaty: jest.fn((_baseUrl: string, options: { fetcher?: typeof fetch }) => {
     capturedFetcher = options.fetcher ?? null;
     return {};
   }),
 }));
 
-mock.module('../../../src/lib/auth-navigate', () => ({
+void mock.module('../../../src/lib/auth-navigate', () => ({
   scheduleLoginRedirect: () => scheduleLoginRedirectMock(),
 }));
 

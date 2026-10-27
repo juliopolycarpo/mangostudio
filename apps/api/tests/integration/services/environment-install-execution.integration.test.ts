@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import type {
   InstallGuard,
   InstallStreamEvent,
   RuntimeStatus,
 } from '@mangostudio/shared/environments';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+
 import { getDb } from '../../../src/db/database';
 import { createInstallService } from '../../../src/modules/environments/application/install-service';
 import type { EnvironmentProbingService } from '../../../src/modules/environments/application/probing-service';

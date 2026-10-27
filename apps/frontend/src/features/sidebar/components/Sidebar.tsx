@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -29,8 +30,8 @@ import { FIELD_CLASS } from '@/components/ui/Input';
 import { KbdHint } from '@/components/ui/KbdHint';
 import { Logo } from '@/components/ui/Logo';
 import { MicroLabel } from '@/components/ui/MicroLabel';
-import { StatusDot } from '@/components/ui/StatusDot';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
+import { StatusDot } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
 import { chatTitleLabel } from '@/features/chat/lib/chat-title';
 import type { ContextInfo } from '@/features/generation/types';
@@ -41,6 +42,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { newChatShortcutHint } from '@/lib/keyboard';
 import { cn } from '@/lib/utils';
+
 import { useLocalDayStart } from '../hooks/use-local-day-start';
 import { filterChats } from '../lib/filter-chats';
 import { chatGroupLabel, groupChatsByDate } from '../lib/group-chats';

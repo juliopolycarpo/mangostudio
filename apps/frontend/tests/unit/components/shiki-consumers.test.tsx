@@ -1,6 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
+
 import type { GitDiffResponse } from '@mangostudio/shared/git';
+
 import { CODE_THEMES, initHighlighter, preloadCodeLanguages } from '@/lib/shiki';
+
 import { stubClipboard } from '../../support/harness/clipboard';
 import { fireEvent, flushAsyncRender, render, screen, waitFor } from '../../support/harness/render';
 
@@ -10,7 +13,7 @@ function useFakeGitDiff() {
   return { data: git.diff, isLoading: false, error: null };
 }
 
-mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
+void mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   useGitDiff: useFakeGitDiff,
 }));
 

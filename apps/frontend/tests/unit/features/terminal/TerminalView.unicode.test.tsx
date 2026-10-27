@@ -1,6 +1,8 @@
 import { expect, it, spyOn } from 'bun:test';
+
 import { act, waitFor } from '@testing-library/react';
 import { Terminal } from '@xterm/xterm';
+
 import { TerminalView } from '../../../../src/features/terminal/TerminalView';
 import { render } from '../../../support/harness/render';
 import { FakeTerminalSocket } from './fake-terminal-socket';
@@ -11,6 +13,7 @@ it('uses Unicode 11 widths for session output after the socket resets the termin
   let mounted: Terminal | undefined;
   const capture = spyOn(Terminal.prototype, 'loadAddon').mockImplementation(
     function captureTerminal(this: Terminal, addon: Parameters<Terminal['loadAddon']>[0]) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- Capture the terminal instance for the assertion below.
       mounted = this;
       loadAddon.call(this, addon);
     }

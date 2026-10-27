@@ -6,6 +6,7 @@ import {
 } from '@mangostudio/shared/git';
 import { RotateCcw } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';

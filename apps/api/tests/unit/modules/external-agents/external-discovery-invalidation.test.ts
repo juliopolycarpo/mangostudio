@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { createDiscoveryInvalidation } from '../../../../src/modules/external-agents/application/external-discovery-invalidation';
 
 describe('createDiscoveryInvalidation', () => {

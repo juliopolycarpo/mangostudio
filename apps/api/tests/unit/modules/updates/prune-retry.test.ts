@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { shouldRetryPrune } from '../../../../src/modules/updates/domain/prune-retry';
 
 describe('shouldRetryPrune', () => {

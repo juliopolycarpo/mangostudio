@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   isTurnCheckpointPart,
   type TurnCheckpointPart,
@@ -6,6 +7,7 @@ import {
 } from '@mangostudio/shared/turn-recovery';
 import type { MessagePart } from '@mangostudio/shared/types';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../../src/db/database';
 import {
   CHECKPOINT_MAX_INTERVAL_MS,

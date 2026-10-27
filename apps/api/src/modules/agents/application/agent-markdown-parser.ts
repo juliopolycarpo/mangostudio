@@ -1,5 +1,6 @@
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import { AgentProfileValidationError, parseAgentMarkdown } from '@mangostudio/shared/agents';
+
 import { AgentSettingsError, normalizeAgentProfile } from '../domain/agent-profile';
 
 const FRONTMATTER_BOUNDARY = '---';

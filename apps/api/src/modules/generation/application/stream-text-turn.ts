@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { publishGitTurnCompletionInvalidation } from '../../git/application/git-realtime-service';
 import {

@@ -8,8 +8,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ExternalAgentCommand } from '@mangostudio/shared/external-agents';
 import { QueryClient } from '@tanstack/react-query';
+
 import {
   externalCommandCatalogKey,
   publishExternalCommandCatalog,

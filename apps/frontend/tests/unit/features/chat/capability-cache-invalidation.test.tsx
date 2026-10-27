@@ -5,6 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
@@ -12,6 +13,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+
 import { chatCapabilitiesQueryOptions } from '../../../../src/features/chat/hooks/use-chat-capabilities';
 import { appSettingsKeys } from '../../../../src/features/settings/app/queries';
 import { useUpdateProviderSettings } from '../../../../src/features/settings/providers/hooks/use-provider-settings';

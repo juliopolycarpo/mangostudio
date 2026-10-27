@@ -6,8 +6,10 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { useQueryClient } from '@tanstack/react-query';
 import { act } from '@testing-library/react';
+
 import { useMachineStatus } from '../../../../src/features/environments/machine/queries';
 import { renderHook, waitFor } from '../../../support/harness/render';
 import {

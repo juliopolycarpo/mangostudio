@@ -8,7 +8,9 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
+
 import { ChoiceRow } from '../../../../src/features/library/components/ChoiceRow';
 import { WizardFrame } from '../../../../src/features/library/components/WizardFrame';
 import { render, screen, within } from '../../../support/harness/render';

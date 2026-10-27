@@ -13,12 +13,14 @@
 import type { InstallPreparation, InstallRecipePreview } from '@mangostudio/shared/environments';
 import { renderShellCommand } from '@mangostudio/shared/environments/values';
 import { Download, FolderPen, Globe, TerminalSquare, X } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import { chainStepLabel, formatBytes } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import type { InstallChainStep } from '../install-chain';

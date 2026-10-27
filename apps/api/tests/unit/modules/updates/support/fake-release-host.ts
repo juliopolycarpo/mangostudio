@@ -25,6 +25,7 @@ export class FakeReleaseHost {
   }
 
   readonly fetch = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
     const url = String(input);
     this.calls.push(url);
     this.signals.push(init?.signal ?? undefined);

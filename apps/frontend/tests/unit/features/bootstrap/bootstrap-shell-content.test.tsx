@@ -8,9 +8,11 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, renderHook, screen, waitFor } from '@testing-library/react';
+
 import { BootstrapShellContent } from '../../../../src/features/bootstrap/BootstrapShellContent';
 import {
   loadShellBootstrap,
@@ -56,10 +58,13 @@ async function renderRegion(queryClient: QueryClient) {
 /** Every request the fake hub saw that was not a read. */
 function writes(): string[] {
   return (
-    globalThis.fetch as unknown as { mock: { calls: [RequestInfo | URL, RequestInit?][] } }
-  ).mock.calls
-    .filter(([, init]) => (init?.method ?? 'GET').toUpperCase() !== 'GET')
-    .map(([input]) => String(input));
+    (
+      globalThis.fetch as unknown as { mock: { calls: [RequestInfo | URL, RequestInit?][] } }
+    ).mock.calls
+      .filter(([, init]) => (init?.method ?? 'GET').toUpperCase() !== 'GET')
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
+      .map(([input]) => String(input))
+  );
 }
 
 describe('BootstrapShellContent', () => {

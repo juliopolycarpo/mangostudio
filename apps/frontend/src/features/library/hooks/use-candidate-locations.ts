@@ -21,7 +21,9 @@ import type {
 } from '@mangostudio/shared/library';
 import { enabledLibraryLocations } from '@mangostudio/shared/library/values';
 import { useMemo } from 'react';
+
 import { useLibraryDefaultsDetection } from '@/features/settings/app/use-library-defaults-detection';
+
 import { propagationCandidateLocationIds } from '../format';
 
 export interface CandidateLocations {

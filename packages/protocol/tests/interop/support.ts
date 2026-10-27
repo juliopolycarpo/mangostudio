@@ -9,6 +9,7 @@
 
 import { expect } from 'bun:test';
 import { fileURLToPath } from 'node:url';
+
 import catalogExample from '../../../../spec/fixtures/1/catalog-example.json';
 import { CLOSE_CODES } from '../../src/close';
 import { CHUNK_HEADER_BYTES } from '../../src/codec/chunk';

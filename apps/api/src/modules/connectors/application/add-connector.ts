@@ -3,9 +3,11 @@
  */
 
 import { randomUUID } from 'node:crypto';
+
 import type { AddConnectorBody, Connector } from '@mangostudio/shared/connectors';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
+
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
 import { maskSecret } from '../../../utils/secrets';
@@ -21,7 +23,7 @@ export class ConnectorValidationError extends Error {
   constructor(
     message: string,
     public readonly code: string = ERROR_CODES.VALIDATION,
-    public readonly status: number = 400
+    public readonly status = 400
   ) {
     super(message);
     this.name = 'ConnectorValidationError';

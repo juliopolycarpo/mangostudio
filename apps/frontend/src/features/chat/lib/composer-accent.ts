@@ -13,6 +13,7 @@
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+
 import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
 
 /** The property `.composer-shell` and everything under it read. */

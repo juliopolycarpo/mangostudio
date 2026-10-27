@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   PROMPT_HISTORY_LIMIT,
   readPromptHistory,

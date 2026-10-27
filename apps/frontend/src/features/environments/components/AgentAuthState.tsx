@@ -15,6 +15,7 @@
  */
 
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 

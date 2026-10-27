@@ -9,10 +9,10 @@
  */
 
 import { afterEach, describe, expect, mock, test } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 
 import type { NoModelAvailableError } from '../../../../src/modules/generation/application/resolve-model';
-
 import {
   getCachedModelMetadata,
   getUnifiedModelCatalog,
@@ -179,9 +179,8 @@ describe('modelUnavailableResponse', () => {
   test('carries the reason and the action the client renders', async () => {
     await stubResolution({ connectorProvider: 'cursor' });
     const { resolveModel } = await loadResolveModel();
-    const { modelUnavailableResponse } = await import(
-      '../../../../src/modules/generation/http/model-unavailable-response'
-    );
+    const { modelUnavailableResponse } =
+      await import('../../../../src/modules/generation/http/model-unavailable-response');
 
     const error = await resolveModel({
       requestedModel: 'cursor/composer-2.5',

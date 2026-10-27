@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { RateLimitStore } from '../../../src/plugins/rate-limit-store';
 
 const WINDOW = 60_000;

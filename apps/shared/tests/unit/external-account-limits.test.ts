@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   EXTERNAL_ACCOUNT_LIMITS_STALE_MS,
-  type ExternalAccountLimits,
   externalAccountHasAlternateCapacity,
+  type ExternalAccountLimits,
   interpretExternalAccountLimits,
   isExternalAccountLimitsStale,
   tightestExternalRateLimitWindow,

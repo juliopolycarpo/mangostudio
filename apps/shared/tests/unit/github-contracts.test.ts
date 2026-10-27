@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   GITHUB_LIST_LIMIT_DEFAULT,
   GithubActorSchema,
@@ -16,10 +17,10 @@ import {
   type GithubInboxResponse,
   GithubInboxResponseSchema,
   GithubIssueFilterSchema,
-  GithubIssueStateSchema,
-  GithubIssueSummarySchema,
   GithubIssuesQuerySchema,
   GithubIssuesResponseSchema,
+  GithubIssueStateSchema,
+  GithubIssueSummarySchema,
   GithubLabelSchema,
   GithubLatestReviewSchema,
   GithubMergeableStateSchema,
@@ -33,11 +34,11 @@ import {
   GithubPrFilterSchema,
   GithubPrRefQuerySchema,
   GithubPrSchema,
-  GithubPrStateSchema,
-  GithubPrSummarySchema,
   GithubPrsQuerySchema,
   type GithubPrsResponse,
   GithubPrsResponseSchema,
+  GithubPrStateSchema,
+  GithubPrSummarySchema,
   GithubPrThreadsResponseSchema,
   GithubRepoSchema,
   GithubReviewDecisionSchema,

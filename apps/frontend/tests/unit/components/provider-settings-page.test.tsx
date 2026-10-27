@@ -3,8 +3,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+
 import { providerSettingsKeys } from '../../../src/features/settings/providers/queries';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
@@ -14,11 +16,13 @@ const routeParams = { provider: 'deepseek' };
 
 // Registered before the subject is imported: `mock.module` is not hoisted and
 // static imports are, so the subject has to come in afterwards to bind to it.
-mock.module('@tanstack/react-router', await routerWithLinkStub({ useParams: () => routeParams }));
-
-const { ProviderSettingsPage } = await import(
-  '../../../src/features/settings/providers/components/ProviderSettingsPage'
+void mock.module(
+  '@tanstack/react-router',
+  await routerWithLinkStub({ useParams: () => routeParams })
 );
+
+const { ProviderSettingsPage } =
+  await import('../../../src/features/settings/providers/components/ProviderSettingsPage');
 
 const DEEPSEEK_DESCRIPTOR = {
   provider: 'deepseek',

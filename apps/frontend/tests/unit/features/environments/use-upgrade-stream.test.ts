@@ -6,8 +6,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import type { UpgradeStreamEvent } from '@mangostudio/shared/updates';
 import { act } from '@testing-library/react';
+
 import {
   UPGRADE_CONSOLE_MAX_LINES,
   useUpgradeStream,

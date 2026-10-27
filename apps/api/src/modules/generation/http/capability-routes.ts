@@ -1,6 +1,7 @@
 import { ChatCapabilitiesQuerySchema } from '@mangostudio/shared/capabilities';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';

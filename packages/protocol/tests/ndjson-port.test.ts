@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { CLOSE_CODES } from '../src/close';
 import { CodecError } from '../src/errors';
 import type { PortClosure } from '../src/port';

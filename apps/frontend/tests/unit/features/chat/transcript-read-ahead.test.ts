@@ -4,6 +4,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   advanceTimersByTimeAsync,
   restoreRealTimers,

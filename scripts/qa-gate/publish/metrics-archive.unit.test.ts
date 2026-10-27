@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  QA_METRICS_FILE_NAME as TS_FILE_NAME,
   QA_METRICS_MAX_BYTES,
   QA_METRICS_SCHEMA_VERSION,
-  QA_METRICS_FILE_NAME as TS_FILE_NAME,
 } from '../metrics-envelope';
 import { buildZip, type ZipEntry } from '../testing/zip-fixture';
 import {
-  QA_METRICS_SCHEMA_VERSION as ARCHIVE_SCHEMA_VERSION,
   baselineIncompleteReason,
   baselineVerdict,
   MAX_METRICS_PAYLOAD_BYTES,
   QA_METRICS_FILE_NAME,
+  QA_METRICS_SCHEMA_VERSION as ARCHIVE_SCHEMA_VERSION,
   readMetricsPayload,
   recordedBaseSha,
 } from './metrics-archive.mjs';

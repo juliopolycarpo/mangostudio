@@ -39,18 +39,19 @@ import {
   SOURCE_SHA_MAX,
   UPDATE_ERROR_MAX,
   UPDATE_VERSION_MAX,
-  UPGRADE_COMMAND_MAX,
   type UpdateChannel,
   type UpdateCheck,
+  UPGRADE_COMMAND_MAX,
   type UpgradeRefusalReason,
   type UpgradeReport,
   type UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
+
 import { restartExecutableOptions, spawnServeChild } from '../../../cli/detach';
 import { canProbeHealth, probeHealth, probeHubHealth } from '../../../cli/health';
 import {
-  type LogTail,
   latestHubLogFile,
+  type LogTail,
   readLogTail,
   resolveHubLogFile,
 } from '../../../cli/log-tail';
@@ -90,8 +91,8 @@ import { hubServiceUnitName } from '../domain/hub-service-identity';
 import {
   INSTALL_SERVICE_COMMAND,
   installServiceReason,
-  type MachineActionsInput,
   machineActions,
+  type MachineActionsInput,
   RESTART_COMMAND,
   restartReason,
   UNINSTALL_SERVICE_COMMAND,

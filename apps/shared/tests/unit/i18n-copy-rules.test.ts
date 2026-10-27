@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en, ptBR } from '../../src/i18n';
 
 type Tree = { readonly [key: string]: string | Tree };

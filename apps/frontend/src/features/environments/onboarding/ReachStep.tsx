@@ -9,9 +9,11 @@
  */
 
 import { sshPreflightCommands } from '@mangostudio/shared/environments/values';
+
 import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { CopyLine } from '../components/CopyLine';
 import type { SshFormFields } from '../ssh-form';
 import { isSshFormUsable, SSH_LEADING_DASH, sshFormToConfig, validateSshForm } from '../ssh-form';
@@ -40,6 +42,7 @@ export function ReachStep({ form, onChange, onContinue }: ReachStepProps) {
           id="onboarding-ssh-host"
           label={add.sshHostLabel}
           value={form.host}
+          // eslint-disable-next-line jsx-a11y/no-autofocus -- Focus the host field when this step opens.
           autoFocus
           error={
             form.host.trim().length > 0 && SSH_LEADING_DASH.test(form.host.trim())

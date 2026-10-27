@@ -9,7 +9,9 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+
 import { useI18n } from '@/hooks/use-i18n';
+
 import {
   useAgentCliStatuses,
   useInstallRecipes,

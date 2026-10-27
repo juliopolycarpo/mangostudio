@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { VersionManagerStatus } from '@mangostudio/shared/environments';
+
 import { collectEnvironmentDoctorSection } from '../../../src/cli/environment-doctor-checks';
 
 function manager(
@@ -19,12 +21,15 @@ function manager(
 describe('collectEnvironmentDoctorSection', () => {
   it('includes every supported version manager', async () => {
     const rows = await collectEnvironmentDoctorSection({
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       listRuntimes: async () => [],
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       listVersionManagers: async () => [
         manager('nvm'),
         manager('fnm', { installed: false }),
         manager('volta'),
       ],
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       listAgents: async () => [],
     });
 
@@ -36,13 +41,16 @@ describe('collectEnvironmentDoctorSection', () => {
 
   it('names a missing version manager in its not-found row', async () => {
     const rows = await collectEnvironmentDoctorSection({
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       listRuntimes: async () => [],
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       listVersionManagers: async () => [
         manager('fnm', {
           installed: false,
           findings: [{ code: 'not-found', params: { manager: 'fnm' } }],
         }),
       ],
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       listAgents: async () => [],
     });
 

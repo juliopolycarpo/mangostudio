@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { CodecError } from '../src/errors';
 import { Session, type SessionOptions } from '../src/session';
 import { type ConformanceFixture, itBehavesLikeAMangoTransport } from '../src/testing/conformance';
@@ -14,9 +15,8 @@ function fixture(validateFrames: boolean): ConformanceFixture {
         a,
         b,
         drop: () => ports.b.close(4000, 'dropped'),
-        close: () => {
-          a.close();
-          b.close();
+        close: async () => {
+          await Promise.all([a.close(), b.close()]);
         },
       });
     },

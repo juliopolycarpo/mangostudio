@@ -38,11 +38,12 @@ import type {
   ExternalSupportedConfiguration,
 } from '@mangostudio/shared/external-agents';
 import {
-  EXTERNAL_DISCLOSURE_VERSION,
   effectivePermissionDefaultOf,
+  EXTERNAL_DISCLOSURE_VERSION,
   externalDisclosureContextFingerprint,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 
 /** What the disclosure covered, as the descriptor that would run the turn reports it. */

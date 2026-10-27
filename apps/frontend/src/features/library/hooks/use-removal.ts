@@ -16,6 +16,7 @@ import type {
 } from '@mangostudio/shared/library';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+
 import { applyRemoval, previewRemoval, undoPropagation } from '../api';
 import { libraryKeys } from '../queries';
 import {
@@ -23,8 +24,8 @@ import {
   buildRemovalDecisions,
   initialRemovalDraft,
   type RemovalDraft,
-  type RemovalStep,
   removalKey,
+  type RemovalStep,
 } from '../removal';
 
 const EMPTY_DRAFT: RemovalDraft = initialRemovalDraft();

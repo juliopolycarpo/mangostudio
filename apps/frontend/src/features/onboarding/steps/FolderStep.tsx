@@ -11,12 +11,14 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { FolderOpen } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { StepFrame } from '../StepFrame';
 
 interface FolderStepProps {

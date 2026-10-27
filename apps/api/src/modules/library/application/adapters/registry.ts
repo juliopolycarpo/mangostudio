@@ -1,4 +1,5 @@
 import type { AdapterStrategy, ResourceFormat, ResourceKind } from '@mangostudio/shared/library';
+
 import { createAgentStrategyAdapter } from './agent-strategy';
 import { markdownToMdcAdapter, mdcToMarkdownAdapter } from './markdown-mdc';
 import { dialectForMarkdownSubagentLocation } from './subagent-dialect';

@@ -3,18 +3,19 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import { screen, within } from '@testing-library/react';
+
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
 // Registered before the subject is imported: `mock.module` is not hoisted and
 // static imports are.
-mock.module('@tanstack/react-router', await routerWithLinkStub());
+void mock.module('@tanstack/react-router', await routerWithLinkStub());
 
-const { ProviderSettingsMenu } = await import(
-  '../../../src/features/settings/providers/components/ProviderSettingsMenu'
-);
+const { ProviderSettingsMenu } =
+  await import('../../../src/features/settings/providers/components/ProviderSettingsMenu');
 
 const MOCK_DESCRIPTORS = {
   providers: [

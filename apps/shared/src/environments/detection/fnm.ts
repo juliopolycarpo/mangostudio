@@ -1,4 +1,5 @@
 import { posix, win32 } from 'node:path';
+
 import type { PathEnv } from '../../runtime-env';
 import type { ManagedVersion, VersionManagerStatus } from '../schemas';
 import { windowsDefaultFnmDir } from './binary-scan';

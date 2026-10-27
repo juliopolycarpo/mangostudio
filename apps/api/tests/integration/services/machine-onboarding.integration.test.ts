@@ -13,7 +13,9 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+
 import { quoteForRemoteShell, type SshEnvironmentConfig } from '@mangostudio/shared/environments';
+
 import {
   buildConnectBootstrapCommand,
   buildServiceInstallCommand,
@@ -166,7 +168,7 @@ describe('machine onboarding over a real sshd', () => {
       // A non-interactive `ssh host command` really does arrive without one;
       // this is the session the workaround exists for.
       const bare = await createSshCommandRunner(config)(
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion on the target, not a JS placeholder
+        // eslint-disable-next-line no-template-curly-in-string -- shell parameter expansion on the target, not a JS placeholder
         'echo "${XDG_RUNTIME_DIR:-unset}"'
       );
       expect(bare.stdout.trim()).toBe('unset');

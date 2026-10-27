@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type Anthropic from '@anthropic-ai/sdk';
+
 import {
   buildAnthropicCurrentInput,
   buildAnthropicLoopMessages,

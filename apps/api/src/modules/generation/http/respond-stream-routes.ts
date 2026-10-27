@@ -8,6 +8,7 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import type { Elysia } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { getErrorCode } from '../../../lib/error-code';
 import { requireAuth } from '../../../plugins/auth-middleware';

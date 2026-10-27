@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { GitWorktree, GitWorktreeListResponse } from '@mangostudio/shared/git';
 import { en } from '@mangostudio/shared/i18n';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { render } from '../../support/harness/render';
 
 const hooks = {
@@ -17,7 +19,7 @@ const hooks = {
   removePending: false,
 };
 
-mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
+void mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   useGitWorktrees: () => ({
     data: hooks.data,
     error: hooks.error,

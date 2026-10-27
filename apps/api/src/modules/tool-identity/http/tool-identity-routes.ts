@@ -13,6 +13,7 @@ import {
   ToolIdentityUpdateSchema,
 } from '@mangostudio/shared/tool-identity';
 import { Elysia, t } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { matchesEtag } from '../../../lib/http-cache';
 import { requireAuth } from '../../../plugins/auth-middleware';

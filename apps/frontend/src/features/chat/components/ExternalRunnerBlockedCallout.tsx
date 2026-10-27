@@ -2,11 +2,12 @@ import type {
   ExternalAgentDescriptor,
   ExternalAgentUnavailableReason,
 } from '@mangostudio/shared/external-agents';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { promptExternalDisclosure } from '@/features/external-agents/disclosure-prompt';
-import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
+import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -89,6 +90,7 @@ export function ExternalRunnerBlockedCallout({ descriptor }: ExternalRunnerBlock
   return (
     <Callout
       tone="warning"
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
       role="status"
       className="mb-2"
       title={

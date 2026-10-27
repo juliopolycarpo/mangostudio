@@ -12,12 +12,14 @@ import type {
   PropagationAdaptation,
 } from '@mangostudio/shared/library';
 import { useId } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { ChoiceRow } from './ChoiceRow';
 
 interface AdaptationNotesProps {

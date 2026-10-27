@@ -6,6 +6,7 @@
 
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
 import { removePaths } from '../lib/fs';
 import {

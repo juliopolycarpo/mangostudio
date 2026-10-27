@@ -16,6 +16,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router';
 import type React from 'react';
+
 import { act, render } from './render';
 
 export async function renderWithRouter(ui: React.ReactElement, initialPath = '/') {
@@ -38,7 +39,7 @@ export async function renderWithRouter(ui: React.ReactElement, initialPath = '/'
 
   // The test router is deliberately not the app's registered route tree, so its
   // type does not line up with the provider's registered one.
-  // biome-ignore lint/suspicious/noExplicitAny: unregistered test-only route tree
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- unregistered test-only route tree
   const result = render(<RouterProvider router={router as any} />);
   // The initial load settles router state, so it belongs inside `act` — without
   // it every test using this harness emits an update-not-wrapped warning.

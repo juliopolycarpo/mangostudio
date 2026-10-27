@@ -1,18 +1,19 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { ChatGptUsageSnapshot, Connector } from '@mangostudio/shared/connectors';
+
 import { fireEvent, render, screen, waitFor } from '../../support/harness/render';
 
 const mockRedeemChatGptResetCredit = jest.fn();
 
-mock.module('@/features/settings/connectors/api', () => ({
+void mock.module('@/features/settings/connectors/api', () => ({
   redeemChatGptResetCredit: (...args: unknown[]) => mockRedeemChatGptResetCredit(...args),
 }));
 
 // After the mock, never before: a static import is evaluated first and would
 // bind the action to the real connectors API.
-const { ChatGptResetCreditAction } = await import(
-  '@/features/settings/connectors/components/ChatGptResetCreditAction'
-);
+const { ChatGptResetCreditAction } =
+  await import('@/features/settings/connectors/components/ChatGptResetCreditAction');
 
 function makeConnector(usage: Partial<ChatGptUsageSnapshot>): Connector {
   return {

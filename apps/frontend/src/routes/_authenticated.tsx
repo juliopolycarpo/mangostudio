@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-router';
 import * as motion from 'motion/react-m';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+
 import { BootstrapErrorPanel } from '@/components/layout/BootstrapErrorPanel';
 import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';

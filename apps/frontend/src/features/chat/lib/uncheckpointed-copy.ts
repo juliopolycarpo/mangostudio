@@ -1,5 +1,6 @@
 import type { UncheckpointedWriteSource } from '@mangostudio/shared/file-checkpoints';
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { type PluralForms, pluralMessage } from '@/hooks/use-plural';
 
 type FileCheckpointLabels = Messages['chat']['fileCheckpoints'];

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import frames from '../../../spec/fixtures/1/frames.json';
 import { decodeLine, encodeLine } from '../src/codec/ndjson';
 import { CodecError, type CodecErrorKind } from '../src/errors';

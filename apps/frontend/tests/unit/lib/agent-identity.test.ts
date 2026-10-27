@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { agentIdentityTokens, MANGO_IDENTITY } from '../../../src/lib/agent-identity';
 
 describe('agentIdentityTokens', () => {

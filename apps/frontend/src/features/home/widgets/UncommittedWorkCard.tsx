@@ -11,6 +11,7 @@ import type { Chat } from '@mangostudio/shared/chat';
 import { useQuery } from '@tanstack/react-query';
 import { GitBranch } from 'lucide-react';
 import { useMemo } from 'react';
+
 import { SectionCard } from '@/components/ui/SectionCard';
 import { chatTitleLabel } from '@/features/chat/lib/chat-title';
 import { chatListQueryOptions } from '@/features/chat/queries';
@@ -19,6 +20,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { uncommittedWork } from '../lib/uncommitted-work';
 
 const NO_CHATS: readonly Chat[] = [];

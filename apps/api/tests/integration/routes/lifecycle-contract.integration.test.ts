@@ -16,9 +16,11 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
+
 import { getAuth } from '../../../src/auth';
 import { apiKeyGuard } from '../../../src/plugins/api-key-guard';
 import { requireAuth } from '../../../src/plugins/auth-middleware';

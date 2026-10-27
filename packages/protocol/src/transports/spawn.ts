@@ -10,9 +10,10 @@
 
 import {
   type ChildProcess,
-  type SpawnOptions as ChildSpawnOptions,
   spawn,
+  type SpawnOptions as ChildSpawnOptions,
 } from 'node:child_process';
+
 import { CLOSE_CODES } from '../close';
 import { resolveIntegerAtLeast } from '../codec/limits';
 import { DEFAULT_MAX_FRAME_BYTES, MIN_MAX_FRAME_BYTES } from '../codec/ndjson';

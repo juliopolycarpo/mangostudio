@@ -1,8 +1,8 @@
 import {
   type EventFrame,
-  RESERVED_ERROR_CODES,
   RemoteError,
   type RequestOptions,
+  RESERVED_ERROR_CODES,
 } from '@mangostudio/protocol';
 import {
   type ExternalAgentAckResult,
@@ -149,6 +149,7 @@ import {
   StaleLineNumbersError,
   UnobservedLineNumbersError,
 } from '@mangostudio/shared/runtime-contract';
+
 import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
@@ -577,7 +578,7 @@ export class RuntimeClient {
           // #964. Whether a *known* type's own shape is malformed is
           // `withKnownEventChecked`'s job.
           const envelope = frame.payload as ExternalAgentEventEnvelopeFrame | null;
-          if (!envelope || envelope.sessionId !== sessionId) return;
+          if (envelope?.sessionId !== sessionId) return;
           listener(withKnownEventChecked(envelope));
         }),
     };

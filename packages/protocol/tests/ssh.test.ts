@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import corpus from '../../../spec/fixtures/1/ssh-argv.json';
-import { classifySshExit, type SshArgvOptions, sshArgv } from '../src/transports/ssh';
+import { classifySshExit, sshArgv, type SshArgvOptions } from '../src/transports/ssh';
 
 interface ArgvCase {
   readonly name: string;

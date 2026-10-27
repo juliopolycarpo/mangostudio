@@ -11,6 +11,7 @@
  * MANGO_TEST_RUSTFMT_MARKER=/tmp/started.json MANGO_TEST_RUSTFMT_HANG=1 rustfmt src/lib.rs
  */
 import { existsSync } from 'node:fs';
+
 import { publishFixtureJson } from './atomic-fixture-json';
 import {
   GRANDCHILD_ENV,

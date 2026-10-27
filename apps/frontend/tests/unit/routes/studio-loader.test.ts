@@ -15,6 +15,7 @@
  */
 
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import { QueryClient } from '@tanstack/react-query';
 
 const galleryKeys = {
@@ -78,7 +79,7 @@ const gallery: { current: CountingGallery | UnreachableGallery } = {
 
 // Before the route is imported, never after: a static import is evaluated
 // first and would bind the loader to the real query, which fetches over HTTP.
-mock.module('../../../src/features/gallery/queries', () => ({
+void mock.module('../../../src/features/gallery/queries', () => ({
   galleryKeys,
   galleryListQueryOptions: () => gallery.current.options(),
   useGalleryQuery: () => ({ data: undefined, status: 'pending' }),

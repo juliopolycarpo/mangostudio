@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   API_KEY_EXPIRY_MAX_DAYS,
   API_KEY_HEADER,
@@ -15,6 +16,7 @@ import {
 } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
 import Value from 'typebox/value';
+
 import { getApiKeyApi } from '../../../src/auth';
 import { getDb } from '../../../src/db/database';
 import { apiKeyRoutes } from '../../../src/modules/api-keys/http/api-key-routes';

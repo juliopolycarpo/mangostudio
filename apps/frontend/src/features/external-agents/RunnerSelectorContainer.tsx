@@ -15,6 +15,7 @@ import type {
 import { normalizePermissionLevel } from '@mangostudio/shared/external-agents/values';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useState } from 'react';
+
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
 import { useToast } from '@/components/ui/Toast';
 import { ExternalDisclosureDialog } from '@/features/chat/components/ExternalDisclosureDialog';
@@ -24,6 +25,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
 import { ApiError } from '@/lib/utils';
 import { adoptExternalSession, forkChatWithRunner } from '@/services/external-agent-service';
+
 import { ExternalSessionPicker } from './ExternalSessionPicker';
 import { useExternalAgents } from './useExternalAgents';
 import { useExternalDisclosures } from './useExternalDisclosures';

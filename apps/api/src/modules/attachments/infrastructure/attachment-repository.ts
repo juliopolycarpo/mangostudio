@@ -1,5 +1,6 @@
 import type { ChatAttachment } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
+
 import type { ChatAttachmentInsert, ChatAttachmentSelect, Database } from '../../../db/types';
 
 export class ChatAttachmentNotFoundError extends Error {
@@ -124,7 +125,7 @@ export async function assertChatAttachmentIdsAvailable(
   return attachments;
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 async function listAttachableRows(
   input: { attachmentIds: string[]; userId: string; chatId: string; messageId?: string },
   db: Kysely<Database>

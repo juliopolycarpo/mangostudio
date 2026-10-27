@@ -5,9 +5,11 @@
  */
 
 import { dirname, join } from 'node:path';
+
 import { type FsProbe, nearestExistingWritable } from '@mangostudio/shared/library/host';
 import type { MachineCheck, MachineCheckStatus } from '@mangostudio/shared/machine';
 import { deniedCapabilities, RUNTIME_CONFIG_FILE_NAME } from '@mangostudio/shared/runtime-home';
+
 import {
   BUILD_INFO_FILENAME,
   type BuildInfo,

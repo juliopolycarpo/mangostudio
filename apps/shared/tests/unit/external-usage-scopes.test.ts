@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
+
 import type { ExternalAccountLimits, ExternalUsage } from '../../src/external-agents';
 import {
   ExternalAccountLimitsSchema,
-  ExternalThreadUsageSchema,
   externalContextUsage,
   externalReportedTokens,
+  ExternalThreadUsageSchema,
 } from '../../src/external-agents';
 import { externalAgentEventToStreamChunk } from '../../src/streaming/external-events';
 

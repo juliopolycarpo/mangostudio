@@ -7,7 +7,9 @@
  */
 
 import { existsSync } from 'node:fs';
+
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+
 import { locateLocalRuntimeBinary } from '../lib/runtime-paths';
 import { readVersionProcess, type VersionProbeProcess } from './version-probe-process';
 

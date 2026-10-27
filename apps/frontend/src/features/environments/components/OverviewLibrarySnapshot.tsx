@@ -8,6 +8,7 @@
  */
 
 import { useQueries } from '@tanstack/react-query';
+
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { summarizeCoverageByTarget } from '@/features/library/format';
 import {
@@ -16,6 +17,7 @@ import {
 } from '@/features/library/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { OverviewSection } from './OverviewSection';

@@ -8,25 +8,26 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type {
   ExternalAgentDescriptor,
   ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
+
 import { render } from '../../../support/harness/render';
 
 const listSessions = jest.fn();
 
-mock.module('@/services/external-agent-service', () => ({
+void mock.module('@/services/external-agent-service', () => ({
   listExternalNativeSessions: (query: unknown) => listSessions(query),
 }));
 
 // Below the mock, never as a static import: those are evaluated first and the
 // component would bind the real service.
-const { ExternalSessionPicker } = await import(
-  '../../../../src/features/external-agents/ExternalSessionPicker'
-);
+const { ExternalSessionPicker } =
+  await import('../../../../src/features/external-agents/ExternalSessionPicker');
 
 function descriptor(
   targetId: ExternalAgentDescriptor['targetId'],

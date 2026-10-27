@@ -24,8 +24,10 @@
 
 import { afterAll, afterEach, beforeEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
+
 import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
 import { Migrator } from 'kysely/migration';
+
 import { getDb } from '../../../src/db/database';
 import { allMigrations } from '../../../src/db/migrations';
 import {

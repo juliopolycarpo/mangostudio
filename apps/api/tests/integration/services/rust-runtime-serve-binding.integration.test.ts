@@ -12,8 +12,10 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import type { EnvironmentConnectionState } from '@mangostudio/shared/environments';
 import { RUNTIME_ALREADY_BOUND_CLOSE_CODE } from '@mangostudio/shared/runtime-contract';
+
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import { createEnvironmentRepository } from '../../../src/modules/environments/infrastructure/environment-repository';

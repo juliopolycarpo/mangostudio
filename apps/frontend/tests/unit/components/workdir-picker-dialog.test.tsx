@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
+
 import { WorkdirPickerDialog } from '../../../src/features/workspace/WorkdirPickerDialog';
 import {
   act,

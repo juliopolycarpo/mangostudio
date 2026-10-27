@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { RuntimeId, RuntimeStatus } from '@mangostudio/shared/environments';
+
 import { INSTALL_RECIPES } from '../../../../src/modules/environments/domain/install-recipes';
 import { computePrerequisiteMissingFindings } from '../../../../src/modules/environments/domain/prerequisite-findings';
 

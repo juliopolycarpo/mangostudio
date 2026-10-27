@@ -3,15 +3,19 @@ import {
   isActiveToolExecutionStatus,
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
+
 import { isFileChangeTool } from './file-change-preview';
 import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
+import type { ToolCallEntry } from './tool-call-grouping';
+import { formatToolSummary, getToolGroupSummary } from './tool-result-summary';
 import { ToolCallBlock } from './ToolCallBlock';
 import {
   formatToolDuration,
@@ -20,8 +24,6 @@ import {
   toneTextClass,
   toolStatusTone,
 } from './ToolCallVisuals';
-import type { ToolCallEntry } from './tool-call-grouping';
-import { formatToolSummary, getToolGroupSummary } from './tool-result-summary';
 
 interface ToolCallGroupBlockProps {
   calls: ToolCallEntry[];
@@ -69,24 +71,41 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
   const holdsExpandedPreview = holdsPreviewToExpand(calls, latestFileChangeId, display);
   const [expanded, setExpanded] = useState(anyError || holdsExpandedPreview);
 
-  /**
-   * What the summary actually depends on, as something stable across frames.
-   *
-   * `planToolGroups` rebuilds `calls` from scratch on every stream token, so a
-   * memo keyed on the array itself memoizes nothing — and `getToolGroupSummary`
-   * re-`JSON.parse`s every member's result, which for a run of greps is the
-   * largest string in the transcript. This tracks the three things that can
-   * change the answer without touching any of the payloads: `length` is O(1) on
-   * a string, so nothing here reads the results themselves.
-   */
-  const callSignature = calls
-    .map((call) => `${call.toolCallId}:${call.status}:${call.result?.length ?? 0}`)
-    .join('|');
-  // biome-ignore lint/correctness/useExhaustiveDependencies: callSignature stands in for the per-frame identity of `calls`
-  const summary = useMemo(
-    () => (isActive ? null : getToolGroupSummary(name, calls)),
-    [isActive, name, callSignature]
-  );
+  // `planToolGroups` rebuilds the array on each stream token. Retain the
+  // result strings and status values so an equal-length result change is seen
+  // without parsing the unchanged payloads on unrelated frames.
+  const summaryCache = useRef<{
+    name: string;
+    isActive: boolean;
+    inputs: Array<Pick<ToolCallEntry, 'toolCallId' | 'status' | 'result'>>;
+    summary: ReturnType<typeof getToolGroupSummary>;
+  } | null>(null);
+  const summary = (() => {
+    const cached = summaryCache.current;
+    if (
+      cached?.name === name &&
+      cached.isActive === isActive &&
+      cached.inputs.length === calls.length &&
+      calls.every((call, index) => {
+        const previous = cached.inputs[index];
+        return (
+          previous.toolCallId === call.toolCallId &&
+          previous.status === call.status &&
+          previous.result === call.result
+        );
+      })
+    ) {
+      return cached.summary;
+    }
+    const value = isActive ? null : getToolGroupSummary(name, calls);
+    summaryCache.current = {
+      name,
+      isActive,
+      inputs: calls.map(({ toolCallId, status, result }) => ({ toolCallId, status, result })),
+      summary: value,
+    };
+    return value;
+  })();
   // Wall-clock is not recoverable from a group (the calls may have overlapped),
   // so this is the run's total work, which is what the per-call rows also show.
   // Not memoized: it is arithmetic over a handful of numbers, and a memo would

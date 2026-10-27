@@ -10,10 +10,12 @@
 
 import type { MachineActionResponse, MachineServiceAction } from '@mangostudio/shared/machine';
 import { useState } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import { EnvironmentScopeHeader } from '../../components/EnvironmentScopeHeader';
 import type { MachineActionResult } from '../api';

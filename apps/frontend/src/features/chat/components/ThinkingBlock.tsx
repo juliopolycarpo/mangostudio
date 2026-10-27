@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';

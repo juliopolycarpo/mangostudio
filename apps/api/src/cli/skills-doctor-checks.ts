@@ -9,8 +9,8 @@
 import {
   collectSkillsDiagnostics,
   type SkillDiagnostic,
-  type SkillSourceDiagnostic,
   type SkillsConfigOrigin,
+  type SkillSourceDiagnostic,
 } from '../modules/skills/application/skill-diagnostics';
 import { getThirdPartySkillDirs } from '../modules/skills/application/skill-discovery';
 import { type CheckResult, fail, ok, warn } from './doctor-checks';

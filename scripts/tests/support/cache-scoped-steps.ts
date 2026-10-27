@@ -145,6 +145,7 @@ function evaluateScopeTerm(term: string, github: WriteScopeContext): ScopeValue 
     for (const segment of path.split('.')) {
       value = (value as Record<string, unknown> | undefined)?.[segment];
     }
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Diagnostics intentionally describe arbitrary invalid input, including non-scalar values.
     return value === undefined ? undefined : String(value);
   };
 

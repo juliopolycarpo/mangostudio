@@ -6,6 +6,7 @@
 
 import { homedir } from 'node:os';
 import { extname, isAbsolute, join } from 'node:path';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   ImportMcpServersBody,
@@ -16,8 +17,9 @@ import type {
 } from '@mangostudio/shared/mcp';
 import { MCP_IMPORT_MAX_SOURCE_BYTES } from '@mangostudio/shared/mcp';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
-import { RegularFileReadError, readRegularFileUtf8 } from '../../../lib/safe-file';
+import { readRegularFileUtf8, RegularFileReadError } from '../../../lib/safe-file';
 import { McpServerError } from '../domain/mcp-server';
 import { listMcpServerRows } from '../infrastructure/mcp-server-repository';
 import { type ParsedImportEntry, parseMcpImportSource } from './mcp-import-parser';

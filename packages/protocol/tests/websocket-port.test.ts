@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { fileURLToPath } from 'node:url';
+
 import { CHUNK_HEADER_BYTES } from '../src/codec/chunk';
 import { RESERVED_ERROR_CODES } from '../src/errors';
 import type { PortClosure } from '../src/port';
@@ -16,7 +17,7 @@ import {
   type WebSocketPortOptions,
   type WebSocketSink,
 } from '../src/transports/websocket';
-import { type WhatwgWebSocketLike, webSocketPort } from '../src/transports/websocket-client';
+import { webSocketPort, type WhatwgWebSocketLike } from '../src/transports/websocket-client';
 
 /** A socket that records what it was asked to do and answers a scripted outcome. */
 class FakeWebSocketSink implements WebSocketSink {

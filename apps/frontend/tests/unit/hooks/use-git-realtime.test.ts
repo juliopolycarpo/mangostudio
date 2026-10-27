@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { GitRepoState } from '@mangostudio/shared/git';
 import { useQuery } from '@tanstack/react-query';
+
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
+
 import { act, renderHook, waitFor } from '../../support/harness/render';
 import { setTestSession } from '../../support/setup/auth-client-stub';
 
@@ -10,7 +13,7 @@ const mocks = {
   subscribe: jest.fn(),
 };
 
-mock.module('@/lib/realtime/realtime-client', () => ({
+void mock.module('@/lib/realtime/realtime-client', () => ({
   bindRealtimeClientToUser: mocks.bindRealtimeClientToUser,
   getRealtimeClient: () => ({ subscribe: mocks.subscribe }),
 }));

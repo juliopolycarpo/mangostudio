@@ -27,9 +27,11 @@ import {
 } from '@mangostudio/shared/library/values';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
+
 import { updateAppSettings } from '@/features/settings/app/api';
 import { appSettingsForLocationWrite, appSettingsKeys } from '@/features/settings/app/queries';
 import { useLibraryDefaultsDetection } from '@/features/settings/app/use-library-defaults-detection';
+
 import { libraryKeys, libraryLocationsQueryOptions } from '../queries';
 
 export interface LocationSetting {

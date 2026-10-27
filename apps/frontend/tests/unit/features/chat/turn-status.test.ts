@@ -7,12 +7,14 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type {
   ExternalActivityPart,
   ExternalApprovalPart,
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
+
 import { deriveTurnStatus, type TurnPhase } from '@/features/chat/lib/turn-status';
 
 function turnPart(overrides: Partial<ExternalTurnPart> = {}): ExternalTurnPart {

@@ -25,8 +25,10 @@
 import { afterAll, describe, expect, it } from 'bun:test';
 import { execFile } from 'node:child_process';
 import { access, constants } from 'node:fs/promises';
+
 import type { ContainerEngine, ContainerEnvironmentConfig } from '@mangostudio/shared/environments';
 import { CONTAINER_NAME_PREFIX } from '@mangostudio/shared/environments';
+
 import { connectContainerRuntime } from '../../../src/services/runtime-client/connect-container-runtime';
 
 const SHELL_DEFAULTS = { kind: 'bash', timeoutMs: 20_000, maxOutputBytes: 65_536 } as const;

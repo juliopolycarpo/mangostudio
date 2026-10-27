@@ -63,7 +63,7 @@ const cursorProvider: AIProvider = {
    * providers, so this is the second answer to the same question — and the one
    * that holds if some other caller ever lists a provider directly.
    */
-  // biome-ignore lint/suspicious/useAwait: satisfies the AIProvider contract
+  // eslint-disable-next-line @typescript-eslint/require-await -- satisfies the AIProvider contract
   async listModels(_userId: string): Promise<ModelInfo[]> {
     return [];
   },

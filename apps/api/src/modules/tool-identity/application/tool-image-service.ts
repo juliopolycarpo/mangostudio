@@ -12,8 +12,9 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ToolImageUpdate } from '@mangostudio/shared/tool-identity';
 import { TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
+
 import type { ToolIdentitySelect } from '../../../db/types';
-import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
+import { safeFetchBytes, type SafeFetchDeps, SafeFetchError } from '../../../lib/safe-fetch';
 import type { ToolImageFields } from '../infrastructure/tool-identity-repository';
 import {
   buildToolImagePath,

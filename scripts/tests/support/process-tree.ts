@@ -27,7 +27,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type RunResult, runCommand, runParallel } from '../../lib/exec';
+import { runCommand, runParallel, type RunResult } from '../../lib/exec';
 
 const FIXTURE = import.meta.path;
 

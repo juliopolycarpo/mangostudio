@@ -23,13 +23,15 @@ import type {
 import { Link } from '@tanstack/react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useMemo, useRef } from 'react';
+
 import { Checkbox } from '@/components/ui/Checkbox';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
-import { type CoverageCellState, coverageCells, type LocationGroup } from '../format';
+
+import { coverageCells, type CoverageCellState, type LocationGroup } from '../format';
 import { libraryEnvironmentSearch } from '../queries';
 import { CoverageCell, CoverageGlyph } from './CoverageCell';
 

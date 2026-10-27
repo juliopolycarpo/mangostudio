@@ -1,5 +1,6 @@
 import type { ActivityEvent, ActivityEventKind } from '@mangostudio/shared/activity';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { generateId } from '../../../utils/id';

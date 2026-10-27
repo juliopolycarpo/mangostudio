@@ -34,6 +34,20 @@
       "problemMatcher": []
     },
     {
+      "label": "lint",
+      "type": "shell",
+      "command": "bun",
+      "args": ["lint"],
+      "problemMatcher": []
+    },
+    {
+      "label": "format",
+      "type": "shell",
+      "command": "bun",
+      "args": ["fmt"],
+      "problemMatcher": []
+    },
+    {
       "label": "fix",
       "type": "shell",
       "command": "bun",

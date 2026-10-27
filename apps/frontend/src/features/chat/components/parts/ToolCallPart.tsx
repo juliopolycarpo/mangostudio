@@ -1,7 +1,8 @@
 import type { MessagePart } from '@mangostudio/shared/types';
+
+import { type ToolCallEntry, toToolCallEntry } from '../tool-call-grouping';
 import { ToolCallBlock } from '../ToolCallBlock';
 import { ToolCallGroupBlock } from '../ToolCallGroupBlock';
-import { type ToolCallEntry, toToolCallEntry } from '../tool-call-grouping';
 
 interface ToolCallPartProps {
   part: Extract<MessagePart, { type: 'tool_call' }>;

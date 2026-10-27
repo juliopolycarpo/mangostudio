@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+
 import {
   InvalidAttachmentError,
   validateChatAttachmentFile,

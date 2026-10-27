@@ -1,4 +1,5 @@
 import { createLazyFileRoute } from '@tanstack/react-router';
+
 import { ResourceDetail } from '@/features/library/components/ResourceDetail';
 
 export const Route = createLazyFileRoute('/_authenticated/environments/library/$resourceKey')({

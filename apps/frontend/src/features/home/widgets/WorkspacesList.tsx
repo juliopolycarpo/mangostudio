@@ -14,6 +14,7 @@ import type { Chat } from '@mangostudio/shared/chat';
 import { useQuery } from '@tanstack/react-query';
 import { FolderGit2, GitBranch, MessageSquarePlus, Play } from 'lucide-react';
 import { useMemo } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SectionCard } from '@/components/ui/SectionCard';
@@ -27,6 +28,7 @@ import { usePlural } from '@/hooks/use-plural';
 import { branchLabel } from '@/lib/git-branch';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import { groupChatsByWorkdir, type WorkspaceGroup } from '../lib/group-chats-by-workdir';
 import { HubSkeletonLines } from './HubSkeletonLines';
 

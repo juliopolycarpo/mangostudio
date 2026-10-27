@@ -18,7 +18,9 @@ import type {
   MachineUpdateStatus,
   UpgradeRefusalReason,
 } from '@mangostudio/shared/updates';
+
 import { formatMessage } from '@/lib/i18n-format';
+
 import { guardReasonLabel } from '../format';
 
 export function launchModeLabel(t: Messages, launch: HubLaunchMode): string {

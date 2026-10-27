@@ -1,8 +1,11 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { InterruptedTurnNotice } from '@/features/chat/components/InterruptedTurnNotice';
+
 import { render } from '../../support/harness/render';
 
 const CHECKPOINT: TurnCheckpointPart = {

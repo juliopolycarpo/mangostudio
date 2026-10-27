@@ -4,10 +4,12 @@
  */
 
 import type { UncheckpointedWriteSource } from '@mangostudio/shared/file-checkpoints';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { uncheckpointedWarning } from '../lib/uncheckpointed-copy';
 
 interface RevertFileChangesDialogProps {

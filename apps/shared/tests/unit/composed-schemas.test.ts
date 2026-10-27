@@ -16,6 +16,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { Static, TSchema } from 'typebox';
 import Value from 'typebox/value';
 

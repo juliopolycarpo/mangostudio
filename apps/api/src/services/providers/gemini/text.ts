@@ -4,6 +4,7 @@
  */
 
 import type { Content, Part } from '@google/genai/web';
+
 import {
   attachmentToBase64,
   getAttachmentSupportKind,

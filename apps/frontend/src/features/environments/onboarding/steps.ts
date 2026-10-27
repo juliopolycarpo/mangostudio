@@ -26,14 +26,7 @@ export type OnboardingEndState =
   | 'paired';
 
 export type OnboardingStepId =
-  | 'reach'
-  | 'end-state'
-  | 'install'
-  | 'permissions'
-  | 'provision'
-  | 'tools'
-  | 'library'
-  | 'done';
+  'reach' | 'end-state' | 'install' | 'permissions' | 'provision' | 'tools' | 'library' | 'done';
 
 /**
  * The two paths differ in the middle, and pretending otherwise would be a lie

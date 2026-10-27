@@ -33,6 +33,7 @@ import { Check, ChevronDown } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import * as motion from 'motion/react-m';
 import { type ReactNode, useId, useRef } from 'react';
+
 import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
@@ -110,7 +111,12 @@ export function ChipSelect({
 
   // The rows are the same whichever side the panel opens on.
   const list = (
-    <div id={listId} role="listbox" aria-label={ariaLabel}>
+    <div
+      id={listId}
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox renders rich options a native select cannot contain.
+      role="listbox"
+      aria-label={ariaLabel}
+    >
       {options.map((option, index) => {
         const isSelected = option.value === value;
         return (
@@ -118,6 +124,7 @@ export function ChipSelect({
             key={option.value}
             id={`${listId}-${index}`}
             type="button"
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox option carries rich content and selection behavior.
             role="option"
             aria-selected={isSelected}
             // Focus stays on the trigger and the cursor travels by
@@ -152,7 +159,7 @@ export function ChipSelect({
   );
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
     <div
       ref={containerRef}
       className={cn('flex items-center', below && 'relative')}
@@ -163,6 +170,7 @@ export function ChipSelect({
       <button
         ref={triggerRef}
         type="button"
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom combobox controls a rich listbox.
         role="combobox"
         disabled={disabled}
         onClick={toggle}

@@ -8,6 +8,7 @@
  */
 
 import type { ToolImage } from '@mangostudio/shared/tool-identity';
+
 import type { ToolImageDisplay } from '@/components/ui/ToolAvatar';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 

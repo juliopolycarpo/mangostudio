@@ -1,6 +1,8 @@
 import Type, { type Static } from 'typebox';
 
 /** Kinds a subject key can name; each mirrors an existing schema family. */
+// The schema derives the public type and does not need a runtime export.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const ToolIdentityKindSchema = Type.Union([
   Type.Literal('agent'),
   Type.Literal('runtime'),

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+
 import { skipWithoutRustBinary } from '../../support/rust-runtime-binary';
 
 const warn = spyOn(console, 'warn').mockImplementation(() => undefined);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+
 import { CLOSE_CODES } from '../src/close';
 import type { PortClosure } from '../src/port';
 import { Session, type SessionOptions } from '../src/session';
@@ -39,9 +40,8 @@ const fixture: ConformanceFixture = {
         aToB.destroy();
         bToA.destroy();
       },
-      close: () => {
-        a.close();
-        b.close();
+      close: async () => {
+        await Promise.all([a.close(), b.close()]);
       },
     };
   },
@@ -61,9 +61,10 @@ const fixture: ConformanceFixture = {
       write: (line: string) => {
         toA.write(line);
       },
-      close: () => {
-        a.close();
+      close: async () => {
+        const closing = a.close();
         toA.end();
+        await closing;
       },
     });
   },

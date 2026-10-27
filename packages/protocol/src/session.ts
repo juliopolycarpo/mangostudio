@@ -1,7 +1,7 @@
 import { CLOSE_CODES, isFatalCloseCode } from './close';
 import { resolveIntegerAtLeast } from './codec/limits';
-import { DEFAULT_MAX_FRAME_BYTES, MIN_MAX_FRAME_BYTES, measureFrameBytes } from './codec/ndjson';
-import { type CodecError, RESERVED_ERROR_CODES, RemoteError } from './errors';
+import { DEFAULT_MAX_FRAME_BYTES, measureFrameBytes, MIN_MAX_FRAME_BYTES } from './codec/ndjson';
+import { type CodecError, RemoteError, RESERVED_ERROR_CODES } from './errors';
 import { Listeners } from './listeners';
 import type { Port, PortClosure } from './port';
 import {

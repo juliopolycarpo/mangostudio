@@ -6,9 +6,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ModelOption } from '@mangostudio/shared/catalog';
 import { en } from '@mangostudio/shared/i18n';
 import { fireEvent, screen, within } from '@testing-library/react';
+
 import { ModelSelector } from '../../../src/components/layout/ModelSelector';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { render } from '../../support/harness/render';

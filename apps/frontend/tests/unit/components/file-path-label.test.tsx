@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { FilePathLabel } from '../../../src/features/workspace/components/FilePathLabel';
 import { render, screen } from '../../support/harness/render';
 

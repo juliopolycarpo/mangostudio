@@ -17,7 +17,7 @@ const WORKFLOW_PATH = '.github/workflows/randomized-order-nightly.yml';
 /** Read once: the workflow is a fixture, not a per-test input. */
 const WORKFLOW = readText(WORKFLOW_PATH);
 
-/** A literal `${{`, assembled so Biome does not read it as a template hole. */
+/** A literal `${{`, assembled so Bun lint does not read it as a template hole. */
 const EXPR = `$${'{{'}`;
 
 // The `include:` list body, bounded at the next key indented 4 (`env:`). Without

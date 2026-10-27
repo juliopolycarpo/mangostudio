@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, parse } from 'node:path';
+
 import { getConfig } from '../../../lib/config';
 
 const FALLBACK_CHAT_TITLE = 'chat';

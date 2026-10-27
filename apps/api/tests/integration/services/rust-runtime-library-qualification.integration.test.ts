@@ -29,6 +29,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import type {
   PropagationDecision,
   PropagationPreview,
@@ -40,6 +41,7 @@ import {
   listBackupSets,
   readBackupManifest,
 } from '@mangostudio/shared/library/machine';
+
 import { getDb } from '../../../src/db/database';
 import { setLibraryLocationDefaultsForTest } from '../../../src/modules/app-settings/application/app-settings-service';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';

@@ -1,5 +1,6 @@
 /** Named preload interposer; only controlled child hooks enable it through CONTROL_ENV. */
 import { existsSync } from 'node:fs';
+
 import { publishFixtureJson } from './atomic-fixture-json';
 import { CONTROL_ENV, formatterControlPath, MARKER_ENV } from './fake-rustfmt-markers';
 

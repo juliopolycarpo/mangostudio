@@ -15,7 +15,7 @@
  * reconciliation is two RPCs and one submission.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import {
   type ExternalAgentEvent,
   type ExternalAgentOpenParams,
@@ -23,6 +23,7 @@ import {
   type ExternalAgentTurnParams,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
+
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import type { RuntimeEnvironmentConnector } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { connectTestRuntime, type TestRuntime } from '../runtime-fixture';

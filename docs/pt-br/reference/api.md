@@ -286,7 +286,7 @@ que um cache compartilhado não entregue a um cliente o body do outro.
 
 Duas coisas ficam fora da negociação. SSE mantém `SSEErrorEvent` — é um stream
 de eventos, não uma resposta HTTP de erro. E alguns endpoints respondem 4xx com
-um erro *mais* dados de domínio, como uma recusa de instalação carregando sua
+um erro _mais_ dados de domínio, como uma recusa de instalação carregando sua
 `recipe`; esses mantêm o shape documentado em qualquer `Accept`, porque a
 conversão é definida apenas sobre bodies que são exatamente um
 `ApiErrorResponse`. A RFC 9457 permitiria esses campos como membros de extensão

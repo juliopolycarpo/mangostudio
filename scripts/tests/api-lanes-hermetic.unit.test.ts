@@ -23,6 +23,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+
 import { assertTemporaryHome } from '../lib/temp-home';
 import { REAL_HOME_ENV, TEST_HOME_KIND, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
 import { laneById, type TestLaneId } from '../lib/test-lanes';

@@ -4,7 +4,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { GithubPrState, GithubPrSummary } from '@mangostudio/shared/github';
+
 import { annotateBranchesWithPrs } from '../../../../src/features/github/lib/branch-pr-annotation';
 
 function pr(number: number, headRefName: string, state: GithubPrState): GithubPrSummary {

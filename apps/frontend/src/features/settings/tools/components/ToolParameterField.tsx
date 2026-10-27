@@ -5,6 +5,7 @@
 import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
+
 import { SettingsField } from '@/components/settings/SettingsField';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { Button } from '@/components/ui/Button';

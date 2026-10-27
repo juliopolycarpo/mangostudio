@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { getDb } from '../../../../../src/db/database';
 import { recordTurnCompletedActivity } from '../../../../../src/modules/chats/application/record-turn-activity';
 import { insertTestChat, insertTestUser } from '../../../../support/factories';

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { UpgradeReport, UpgradeStreamEvent } from '@mangostudio/shared/updates';
+
 import type { ServerState } from '../../../../src/lib/server-state';
 import {
   createUpgradeService,
@@ -16,10 +18,10 @@ import type {
   ScriptRun,
 } from '../../../../src/modules/updates/infrastructure/run-script';
 import {
-  PROBE_VERSION as CURRENT_VERSION,
   cargoProbe,
   dockerProbe,
   npmProbe,
+  PROBE_VERSION as CURRENT_VERSION,
   selfManagedProbe,
 } from './support/install-origin-probes';
 

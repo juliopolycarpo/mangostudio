@@ -14,6 +14,7 @@ import type {
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeCapabilityAllow } from '@mangostudio/shared/runtime-home';
 import type { ToolSettingsCategory } from '@mangostudio/shared/tool-settings';
+
 import type { McpBridgeServerSnapshot } from '../../../services/mcp/tool-bridge';
 import { parseMcpToolName, toolNameMatches } from '../../../services/mcp/tool-naming';
 import type { ToolDefinition } from '../../../services/providers/types';
@@ -153,14 +154,12 @@ function resolveMcpCandidates(
     return { ...base, definition: tool.definition };
   });
 
-  const overlong = server.overlongToolNames.map(
-    (name): ToolCapabilityCandidate => ({
-      name,
-      title: parseMcpToolName(name)?.toolName ?? name,
-      ...provenance,
-      reason: 'name-over-provider-limit',
-    })
-  );
+  const overlong = server.overlongToolNames.map((name): ToolCapabilityCandidate => ({
+    name,
+    title: parseMcpToolName(name)?.toolName ?? name,
+    ...provenance,
+    reason: 'name-over-provider-limit',
+  }));
 
   return [...candidates, ...overlong];
 }

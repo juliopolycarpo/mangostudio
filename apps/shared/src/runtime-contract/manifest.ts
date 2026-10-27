@@ -9,6 +9,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import {
   ExternalAgentTargetIdSchema,
   ExternalIdentityIsolationSchema,
@@ -16,7 +17,6 @@ import {
 import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '../library/hash';
 import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
 import { RuntimeImplementationSchema } from './implementation';
-
 import { RuntimeShellKindSchema } from './shell-kinds';
 
 export { type RuntimeShellKind, RuntimeShellKindSchema } from './shell-kinds';

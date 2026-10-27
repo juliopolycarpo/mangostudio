@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { LibraryInstance, LibraryLocationId } from '@mangostudio/shared/library';
+
 import {
   describeDivergence,
   type InstanceComparison,

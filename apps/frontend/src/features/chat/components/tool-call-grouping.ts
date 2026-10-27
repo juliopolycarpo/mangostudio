@@ -104,8 +104,7 @@ export function toToolCallEntry(
     throw new Error(`Expected tool_call at index ${index}`);
   }
   const result = parts.find((p) => p.type === 'tool_result' && p.toolCallId === call.toolCallId) as
-    | Extract<MessagePart, { type: 'tool_result' }>
-    | undefined;
+    Extract<MessagePart, { type: 'tool_result' }> | undefined;
 
   const status = resolveToolCallStatus({
     execution: call.execution,

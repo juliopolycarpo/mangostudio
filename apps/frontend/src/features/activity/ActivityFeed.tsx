@@ -10,11 +10,13 @@
 
 import type { ActivityEvent } from '@mangostudio/shared/activity';
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import type { StatusDotTone } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatRelativeTime } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { compactElapsed } from './lib/compact-time';
 import { describeActivity } from './lib/describe-activity';
 import {

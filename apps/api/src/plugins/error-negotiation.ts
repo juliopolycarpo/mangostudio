@@ -12,8 +12,8 @@ import {
   API_ERROR_RESPONSE_MEMBERS,
   type ApiErrorResponse,
   ApiErrorResponseSchema,
-  PROBLEM_JSON_MEDIA_TYPE,
   prefersProblemDetails,
+  PROBLEM_JSON_MEDIA_TYPE,
   toProblemDetails,
 } from '@mangostudio/shared/errors';
 import { type Context, ElysiaStatus, StatusMap } from 'elysia';

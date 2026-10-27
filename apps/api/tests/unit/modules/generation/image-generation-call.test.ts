@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import type { GenerateImageToolOutcome } from '../../../../src/services/tools/builtin/generate-image';
 import * as realGenerateImage from '../../../../src/services/tools/builtin/generate-image';
 import { registerTools } from '../../../../src/services/tools/register-tools';
@@ -47,9 +49,8 @@ async function runImageCall(options: {
   }));
 
   // Imported after the mock so the helper binds to the stubbed generator.
-  const { executeImageGenerationCall } = await import(
-    '../../../../src/modules/generation/application/stream-text-turn-helpers'
-  );
+  const { executeImageGenerationCall } =
+    await import('../../../../src/modules/generation/application/stream-text-turn-helpers');
 
   const controller = new AbortController();
   if (options.aborted) controller.abort('client_disconnect');

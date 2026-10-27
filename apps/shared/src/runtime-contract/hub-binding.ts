@@ -10,6 +10,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import { HUB_BINDING_KEY_LENGTH } from './strings';
 
 export const HubBindingKeySchema = Type.String({

@@ -92,7 +92,7 @@ and `frontend-static.ts` refuses to serve its path from a live `dist/`.
 
 That rename is a transaction: the live bundle moves aside to `.dist-backup-<uuid>` first, because
 POSIX cannot rename a directory over a non-empty one. Both renames are synchronous, so a Ctrl-C
-cannot land between them. A build that fails *after* the backup is taken unwinds through the CLI
+cannot land between them. A build that fails _after_ the backup is taken unwinds through the CLI
 entrypoint, which restores `dist/` rather than leaving the only copy of the previous bundle
 stranded under a dotted name — the one exception being a rollback that could not remove the
 failed bundle, where the backup is kept on disk instead of deleted.
@@ -143,7 +143,7 @@ Six things in that build are load-bearing:
   server-side error. `build.ts` asserts on this; nothing in CI catches it otherwise.
 - **The `NODE_ENV` define.** Nothing in this repo sets `NODE_ENV`, and `Bun.build()` then
   resolves `process.env.NODE_ENV` to `'development'` — so React, its scheduler, and every
-  dev-gated dependency selected their *development* builds in a minified production bundle
+  dev-gated dependency selected their _development_ builds in a minified production bundle
   (+78 kB gzip eager, plus React's dev-mode runtime checks). Vite inlined `'production'`;
   the explicit `define` in `build.ts` restores that.
 - **`external: ['/fonts/*']`.** The self-hosted fonts are copied verbatim from `public/fonts/`
@@ -268,7 +268,7 @@ Two shapes there are deliberate and must survive any change:
 
 The directory mode resolves hashed assets and unhashed files (favicon, icons, manifest,
 build-info) inside that same fallback, per request. Enumerating them into routes at boot looked safe — the names are
-fixed — but the *set* is not: a dev rebuild lands while the server runs, so a file added to
+fixed — but the _set_ is not: a dev rebuild lands while the server runs, so a file added to
 `public/` afterwards had no route, fell through to the fallback and came back as `index.html`
 at 200 `text/html`. `isSpaRoute()` therefore stops claiming root-level paths that carry a file
 extension, so a missing one is a 404 instead of an HTML document handed to an `<img>`. The

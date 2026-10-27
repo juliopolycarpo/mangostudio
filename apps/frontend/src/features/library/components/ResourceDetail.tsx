@@ -13,6 +13,7 @@ import { useQueries } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -22,6 +23,7 @@ import { useEnvironmentScope } from '@/features/environments/use-environment-sco
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { hashPrefix, libraryKindPath, validInstances } from '../format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import {

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import type { TerminalSession } from '@mangostudio/shared/terminal';
 import userEvent from '@testing-library/user-event';
+
 import { render, screen, waitFor, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -12,16 +14,15 @@ function TerminalViewStub({ sessionId }: { sessionId: string }) {
   return <div data-testid="terminal-view-stub">{sessionId}</div>;
 }
 
-mock.module('../../../../src/features/terminal/TerminalView', () => ({
+void mock.module('../../../../src/features/terminal/TerminalView', () => ({
   TerminalView: TerminalViewStub,
 }));
 
 // Below the mock, never as a static import: a static import is evaluated
 // before the mock is installed and would bind the real `TerminalView`.
 const { TerminalRailPanel } = await import('../../../../src/features/terminal/TerminalRailPanel');
-const { requestNewTerminalSession } = await import(
-  '../../../../src/features/terminal/terminal-panel-request'
-);
+const { requestNewTerminalSession } =
+  await import('../../../../src/features/terminal/terminal-panel-request');
 
 const ENVIRONMENT_ID = 'env-1';
 const CHAT_ID = 'chat-1';

@@ -7,6 +7,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import {
   AgentCliStatusSchema,
   ConsumerVersionRequirementSchema,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join, posix, win32 } from 'node:path';
+
 import { asGitPath, gitSpelling } from '../../support/git-path';
 
 describe('gitSpelling', () => {

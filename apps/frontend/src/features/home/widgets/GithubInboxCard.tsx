@@ -15,6 +15,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
+
 import { SectionCard } from '@/components/ui/SectionCard';
 import { githubInboxQueryOptions } from '@/features/github/queries';
 import { useI18n } from '@/hooks/use-i18n';

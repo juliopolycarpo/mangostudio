@@ -2,7 +2,9 @@ import { ASK_USER_QUESTION_TOOL_NAME } from '@mangostudio/shared/questions';
 import { TODO_WRITE_TOOL_NAME } from '@mangostudio/shared/todos';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useMemo } from 'react';
+
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
+
 import type { TurnStatus } from '../lib/turn-status';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
@@ -120,7 +122,7 @@ export function MessageParts({
             case 'external_notice':
               return (
                 <TimelineItem
-                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  // eslint-disable-next-line react/no-array-index-key -- message parts do not expose stable ids
                   key={`${messageId}-notice-${idx}`}
                   variant="card"
                 >
@@ -205,7 +207,7 @@ export function MessageParts({
             case 'subagent_trace':
               return (
                 <TimelineItem
-                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  // eslint-disable-next-line react/no-array-index-key -- message parts do not expose stable ids
                   key={`${messageId}-subagent-${idx}`}
                   variant="block"
                 >
@@ -217,7 +219,7 @@ export function MessageParts({
                 <TimelineItem
                   // Message parts are append-only and position-stable, so the
                   // ordinal index is a valid identity. No part-level ID exists.
-                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  // eslint-disable-next-line react/no-array-index-key -- message parts do not expose stable ids
                   key={`${messageId}-text-${idx}`}
                   variant="bubble"
                 >
@@ -232,7 +234,7 @@ export function MessageParts({
               if (loopExhaustion.folded.has(idx)) return null;
               return (
                 <TimelineItem
-                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  // eslint-disable-next-line react/no-array-index-key -- message parts do not expose stable ids
                   key={`${messageId}-se-${idx}`}
                   variant="divider"
                 >
@@ -242,7 +244,7 @@ export function MessageParts({
             case 'continuation_transition':
               return (
                 <TimelineItem
-                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  // eslint-disable-next-line react/no-array-index-key -- message parts do not expose stable ids
                   key={`${messageId}-ct-${idx}`}
                   variant="divider"
                 >
@@ -260,7 +262,7 @@ export function MessageParts({
             case 'error':
               return (
                 <TimelineItem
-                  // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                  // eslint-disable-next-line react/no-array-index-key -- message parts do not expose stable ids
                   key={`${messageId}-error-${idx}`}
                   variant="card"
                   tone="error"

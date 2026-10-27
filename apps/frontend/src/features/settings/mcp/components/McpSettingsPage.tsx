@@ -6,6 +6,7 @@
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { FileDown, FileUp, Plus, Server } from 'lucide-react';
 import { useState } from 'react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Button } from '@/components/ui/Button';
@@ -16,6 +17,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import {
   useAddMcpServer,
   useDeleteMcpServer,

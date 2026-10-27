@@ -13,8 +13,10 @@
  */
 
 import { afterEach, expect } from 'bun:test';
+
 import * as matchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
+
 import { resetThinkingBlockStateForTest } from '../../../src/features/chat/components/ThinkingBlock';
 import { resetComposerDraftsForTest } from '../../../src/features/chat/lib/composer-draft-store';
 import { restoreClipboard } from '../harness/clipboard';

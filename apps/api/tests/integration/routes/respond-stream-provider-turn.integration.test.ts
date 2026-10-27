@@ -10,9 +10,11 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { SSEErrorEventSchema } from '@mangostudio/shared/streaming';
 import Value from 'typebox/value';
+
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import * as realCatalogNs from '../../../src/services/providers/catalog';
 import type {

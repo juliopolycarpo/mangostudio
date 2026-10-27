@@ -1,7 +1,9 @@
 import type { ComponentProps } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
 import type { FallbackNotice } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { CHAT_COLUMN_CLASS, CHAT_GUTTER_X_CLASS } from '../lib/chat-column';
 import { ContextWarningCallout } from './ContextWarningCallout';
 
@@ -36,7 +38,12 @@ export function ChatFallbackNotice({ notice }: ChatFallbackNoticeProps) {
 
   return (
     <ChatDockNotice>
-      <Callout tone="info" role="status" aria-live="polite">
+      <Callout
+        tone="info"
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+        role="status"
+        aria-live="polite"
+      >
         {notice.to === 'replay'
           ? t.chat.fallback.toReplay
           : t.chat.fallback.generic.replace('{from}', notice.from).replace('{to}', notice.to)}

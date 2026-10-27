@@ -8,6 +8,7 @@
  */
 
 import { type Kysely, sql } from 'kysely';
+
 import type {
   Database,
   ExternalTurnAttemptInsert,

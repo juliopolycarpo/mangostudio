@@ -22,7 +22,9 @@ import {
   UserRound,
   Wrench,
 } from 'lucide-react';
+
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import type { TimelineTone } from './TimelineItem';
 
 /**

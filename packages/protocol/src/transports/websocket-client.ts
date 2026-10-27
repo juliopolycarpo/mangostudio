@@ -9,7 +9,7 @@
 
 import { CLOSE_CODES } from '../close';
 import type { Port } from '../port';
-import { abortReason, type ConnectDeadlineOptions, connectDeadline } from './deadline';
+import { abortReason, connectDeadline, type ConnectDeadlineOptions } from './deadline';
 import {
   createWebSocketPort,
   WEBSOCKET_SUBPROTOCOL,

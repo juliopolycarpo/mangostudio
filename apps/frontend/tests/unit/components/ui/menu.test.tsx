@@ -1,9 +1,12 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
+
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { SplitButton } from '@/components/ui/SplitButton';
+
 import { render } from '../../../support/harness/render';
 
 function MenuHarness({

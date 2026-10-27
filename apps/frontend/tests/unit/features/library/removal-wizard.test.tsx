@@ -7,9 +7,11 @@
  */
 
 import { afterEach, describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { RemovalPreview } from '@mangostudio/shared/library';
 import userEvent from '@testing-library/user-event';
+
 import { RemovalWizard } from '../../../../src/features/library/components/RemovalWizard';
 import { screen } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
@@ -182,6 +184,7 @@ describe('RemovalWizard while the environment scope is still loading', () => {
     // would miss every other enabled machine's copies.
     expect(await screen.findByTestId('library-loading')).toBeInTheDocument();
     expect(
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
       fetchMock.mock.calls.filter(([input]) => String(input).includes('/library/removal/preview'))
     ).toEqual([]);
 
@@ -189,6 +192,7 @@ describe('RemovalWizard while the environment scope is still loading', () => {
 
     await screen.findByTestId('removal-row');
     expect(
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
       fetchMock.mock.calls.filter(([input]) => String(input).includes('/library/removal/preview'))
     ).not.toEqual([]);
   });

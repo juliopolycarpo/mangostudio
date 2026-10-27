@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   MACHINE_CHECK_DETAIL_MAX,
   MACHINE_CHECK_LABEL_MAX,
@@ -17,6 +18,7 @@ import {
   type UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
+
 import { tailLines } from '../../../../src/cli/log-tail';
 import type { ServerState } from '../../../../src/lib/server-state';
 import { parseTomlDocument } from '../../../../src/lib/toml';

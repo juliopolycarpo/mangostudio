@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
+
 import { WorkspacePathError } from '../runtime-contract/service-errors';
 
 export { WorkspacePathError };

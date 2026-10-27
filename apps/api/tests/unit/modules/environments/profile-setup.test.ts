@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import { createProfileSetupInspector } from '../../../../src/modules/environments/infrastructure/profile-setup';
 
 const HOME = '/home/tester';

@@ -13,7 +13,9 @@ import type {
 import { ENVIRONMENTS_TOPIC, EXTERNAL_AGENTS_TOPIC } from '@mangostudio/shared/realtime';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
+
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
+
 import { externalAgentKeys, externalAgentsQueryOptions } from './queries';
 
 // Kept importable from here: callers predate the module that holds it.

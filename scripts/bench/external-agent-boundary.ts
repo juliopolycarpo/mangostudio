@@ -11,6 +11,7 @@
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { arch, cpus, platform, release, tmpdir, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+
 import { assertNoUnexpectedArguments, parseArgs } from '../lib/args';
 import { nearestRank } from '../lib/latency-stats';
 
@@ -40,12 +41,7 @@ export const BOUNDARY_CASES = [
 export interface BoundarySample {
   readonly case: string;
   readonly operation:
-    | 'fingerprint'
-    | 'request'
-    | 'event'
-    | 'json-size'
-    | 're-bound'
-    | 'remote-error';
+    'fingerprint' | 'request' | 'event' | 'json-size' | 're-bound' | 'remote-error';
   readonly sourceSha: string;
   readonly iterations: number;
   readonly elapsedNs: number;
@@ -101,6 +97,7 @@ export function parseBoundarySample(stdout: string, expectedSha: string): Bounda
       sample.sourceCapacity < Number(sample.inputBytes))
   )
     throw new Error(
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Diagnostics intentionally describe arbitrary invalid input, including non-scalar values.
       `Expected sourceCapacity >= inputBytes; received ${String(sample.sourceCapacity)}.`
     );
   return sample as unknown as BoundarySample;

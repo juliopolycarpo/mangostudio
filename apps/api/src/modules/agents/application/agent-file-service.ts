@@ -1,10 +1,12 @@
 import { type Dirent, readdirSync, rmSync } from 'node:fs';
 import { basename, extname, relative, resolve } from 'node:path';
+
 import type { AgentProfile, UserAgentId } from '@mangostudio/shared/agents';
+
 import { getConfig } from '../../../lib/config';
 import {
-  RegularFileReadError,
   readRegularFileUtf8,
+  RegularFileReadError,
   statRegularFile,
   writeFileAtomic,
 } from '../../../lib/safe-file';

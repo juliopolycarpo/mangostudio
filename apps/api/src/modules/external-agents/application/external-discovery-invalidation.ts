@@ -1,4 +1,5 @@
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+
 import { publishExternalAgentsInvalidation } from '../../../services/realtime/external-agents-invalidation';
 import {
   type ExternalAgentDiscoveryService,

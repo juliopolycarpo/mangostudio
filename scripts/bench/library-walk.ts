@@ -26,6 +26,7 @@
 import { rm } from 'node:fs/promises';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { resolve } from 'node:path';
+
 import { Session } from '@mangostudio/protocol';
 import { spawnPort } from '@mangostudio/protocol/spawn';
 import {

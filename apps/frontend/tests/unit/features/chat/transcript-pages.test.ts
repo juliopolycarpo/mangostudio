@@ -7,7 +7,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { Message, MessagesPage } from '@mangostudio/shared/chat';
+
 import {
   catchUpNewestPages,
   type FetchMessagesPage,

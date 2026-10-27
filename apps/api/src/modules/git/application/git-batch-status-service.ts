@@ -1,4 +1,5 @@
 import type { GitStatus, GitSummary } from '@mangostudio/shared/git';
+
 import {
   GitCliError,
   type GitRuntimeSelection,

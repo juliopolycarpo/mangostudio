@@ -1,13 +1,14 @@
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { createEnvironmentRepository } from '../../environments/infrastructure/environment-repository';
 import { externalSessionManager } from '../../external-agents/application/external-session-manager';
 import { requireValidWorkdir } from '../../workspaces/application/workdir-validation';
 import { getOwnedChatOrThrow } from '../domain/chat-ownership';
-import { type UpdateChatData, updateChat } from '../infrastructure/chat-repository';
+import { updateChat, type UpdateChatData } from '../infrastructure/chat-repository';
 
 export interface UpdateChatInput {
   chatId: string;

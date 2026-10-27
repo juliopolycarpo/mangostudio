@@ -13,6 +13,7 @@
  */
 
 import type { InputHTMLAttributes, ReactNode } from 'react';
+
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Radio } from '@/components/ui/Radio';
 import { cn } from '@/lib/utils';
@@ -22,8 +23,10 @@ interface RowData {
   readonly [key: `data-${string}`]: string | number | boolean | undefined;
 }
 
-interface ChoiceRowProps
-  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'className' | 'children'> {
+interface ChoiceRowProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'type' | 'className' | 'children'
+> {
   readonly control: 'checkbox' | 'radio';
   /** Hooks for the row's own element; every other prop goes to the input. */
   readonly row?: RowData;
@@ -49,7 +52,7 @@ export function ChoiceRow({
 }: ChoiceRowProps) {
   const controlClass = firstLine === 'sm' ? 'mt-0.5' : undefined;
   return (
-    // biome-ignore lint/a11y/noLabelWithoutControl: the control is a checkbox or a radio picked by `control`, and either one is a child of this label.
+    // the control is a checkbox or a radio picked by `control`, and either one is a child of this label.
     <label
       className={cn(
         'flex items-start gap-3 rounded-sm px-3 py-2 transition-colors',

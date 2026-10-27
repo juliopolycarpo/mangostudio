@@ -20,10 +20,12 @@ import {
   Star,
   TriangleAlert,
 } from 'lucide-react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { type CoverageCell as Cell, hashPrefix } from '../format';
 
 /**

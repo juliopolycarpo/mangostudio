@@ -1,6 +1,7 @@
 import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
+
 import {
   getCachedModelMetadata,
   getUnifiedModelCatalog,

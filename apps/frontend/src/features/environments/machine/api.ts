@@ -19,6 +19,7 @@ import type {
   MachineStatus,
 } from '@mangostudio/shared/machine';
 import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 
@@ -36,8 +37,7 @@ export interface MachineActionRefusal<R extends string = MachineActionReason> {
 }
 
 export type MachineActionResult =
-  | { readonly outcome: 'accepted'; readonly response: MachineActionResponse }
-  | MachineActionRefusal;
+  { readonly outcome: 'accepted'; readonly response: MachineActionResponse } | MachineActionRefusal;
 
 export interface EdenErrorLike {
   readonly status?: number;
@@ -102,8 +102,7 @@ export async function fetchMachineDoctor(
 }
 
 export type MachineLogsResult =
-  | { readonly outcome: 'tail'; readonly tail: MachineLogTail }
-  | MachineActionRefusal;
+  { readonly outcome: 'tail'; readonly tail: MachineLogTail } | MachineActionRefusal;
 
 /** The tail, or the guard's refusal — the log is loopback-only like the actions. */
 export async function fetchMachineLogs(tail: number): Promise<MachineLogsResult> {

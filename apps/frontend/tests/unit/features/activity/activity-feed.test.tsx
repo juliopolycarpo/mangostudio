@@ -12,8 +12,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ActivityEvent } from '@mangostudio/shared/activity';
 import { screen } from '@testing-library/react';
+
 import { ActivityFeed } from '../../../../src/features/activity/ActivityFeed';
 import { render } from '../../../support/harness/render';
 

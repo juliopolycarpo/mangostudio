@@ -9,7 +9,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+
 import { getConfig } from '../../../../src/lib/config';
 import { backupPolicyFor } from '../../../../src/modules/library/infrastructure/backup-roots';
 import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';

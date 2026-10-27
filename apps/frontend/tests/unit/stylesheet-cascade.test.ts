@@ -146,7 +146,7 @@ describe('the coarse-pointer touch floor', () => {
     expect(inputs.length).toBeGreaterThan(0);
     for (const { selector } of inputs) {
       for (const type of ['checkbox', 'radio', 'range']) {
-        expect(selector).toContain(`[type="${type}"]`);
+        expect(selector).toMatch(new RegExp(`\\[type=(['"])${type}\\1\\]`));
       }
     }
   });

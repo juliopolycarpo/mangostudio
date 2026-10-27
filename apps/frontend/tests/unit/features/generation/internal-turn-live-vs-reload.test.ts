@@ -18,9 +18,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { mergeMessageParts } from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { LibraryTargetId, SettingsField, SettingsSnapshot } from '@mangostudio/shared/library';
+
 import { compareSettingsSnapshots } from '../../../../src/modules/library/domain/settings-concepts';
 
 function snapshot(targetId: LibraryTargetId, fields: SettingsField[]): SettingsSnapshot {

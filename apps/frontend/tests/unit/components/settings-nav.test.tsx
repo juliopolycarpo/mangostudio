@@ -8,8 +8,10 @@
  */
 
 import { describe, expect, it, mock } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import { fireEvent, screen, within } from '@testing-library/react';
+
 import { render } from '../../support/harness/render';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
@@ -20,7 +22,7 @@ import { routerWithLinkStub } from '../../support/mocks/router';
  */
 const routerState = { location: { pathname: '/settings/metrics' } };
 
-mock.module(
+void mock.module(
   '@tanstack/react-router',
   await routerWithLinkStub({
     useRouterState: ({ select }: { select: (state: typeof routerState) => unknown }) =>

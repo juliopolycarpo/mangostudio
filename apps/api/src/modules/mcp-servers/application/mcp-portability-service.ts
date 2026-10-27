@@ -5,6 +5,7 @@
  */
 
 import { createHash, timingSafeEqual } from 'node:crypto';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
@@ -26,6 +27,7 @@ import type {
 } from '@mangostudio/shared/mcp';
 import { MCP_SERVER_NAME_MAX_LENGTH, MCP_SERVER_SLUG_MAX_LENGTH } from '@mangostudio/shared/mcp';
 import type { Kysely } from 'kysely';
+
 import type { Database, McpServerInsert, McpServerSelect } from '../../../db/types';
 import { disposeMcpServer } from '../../../services/mcp/connection-manager';
 import {

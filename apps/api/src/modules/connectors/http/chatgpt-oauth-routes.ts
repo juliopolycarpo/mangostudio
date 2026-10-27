@@ -7,6 +7,7 @@ import type { ChatGptOAuthStatus, StartChatGptOAuthResponse } from '@mangostudio
 import { StartChatGptOAuthBodySchema } from '@mangostudio/shared/connectors';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
+
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   cancelChatGptOAuth,

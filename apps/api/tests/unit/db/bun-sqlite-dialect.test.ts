@@ -1,6 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { type Generated, Kysely, sql } from 'kysely';
+
 import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 
 interface TestDatabase {

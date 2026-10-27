@@ -5,8 +5,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ActivityEvent } from '@mangostudio/shared/activity';
 import { screen } from '@testing-library/react';
+
 import { ActivityCard } from '../../../../src/features/activity/ActivityCard';
 import { flushAsyncRender, render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';

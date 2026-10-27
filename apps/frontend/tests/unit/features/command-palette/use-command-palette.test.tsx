@@ -4,7 +4,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { act } from '@testing-library/react';
+
 import { useCommandPalette } from '../../../../src/features/command-palette/use-command-palette';
 import { renderHook } from '../../../support/harness/render';
 

@@ -16,10 +16,10 @@ import { posix } from 'node:path';
 import type { CoverageSummary } from '../model/metrics';
 import {
   absentFromProducer,
-  type Measurement,
   measured,
-  type ProducerAbsence,
+  type Measurement,
   partial,
+  type ProducerAbsence,
   stale,
   unavailable,
 } from '../model/states';

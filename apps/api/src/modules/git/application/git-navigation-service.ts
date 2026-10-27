@@ -7,6 +7,7 @@ import {
   type GitHistoryResponse,
   splitCommitMessage,
 } from '@mangostudio/shared/git';
+
 import { parseCommitterIdentity } from '../domain/commit-command';
 import { GIT_LOG_FORMAT, parseCommitFiles, parseHistoryLog } from '../domain/history-parser';
 import {

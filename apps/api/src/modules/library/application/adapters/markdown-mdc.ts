@@ -1,5 +1,6 @@
 import type { AdaptNote } from '@mangostudio/shared/library';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
+
 import { extractFrontmatterBody, removeFrontmatterSeparator } from './frontmatter-framing';
 import type { FormatAdapter } from './types';
 

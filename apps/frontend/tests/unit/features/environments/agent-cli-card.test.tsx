@@ -4,7 +4,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { AgentCliCard } from '../../../../src/features/environments/components/AgentCliCard';
 import { render, screen } from '../../../support/harness/render';
 import { agentCliStatus, installation, installRecipe } from './fixtures';

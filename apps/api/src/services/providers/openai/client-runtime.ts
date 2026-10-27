@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+
 import type { ProviderWarmupRequest } from '../types';
 
 export interface OpenAIClientRuntime<Config> {

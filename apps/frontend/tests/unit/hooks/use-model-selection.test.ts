@@ -1,20 +1,21 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
 import type { Connector } from '@mangostudio/shared/connectors';
+
 import { act, renderHook } from '../../support/harness/render';
 
 const mockUpdateConnectorModels = jest.fn();
 
-mock.module('../../../src/features/settings/connectors/api', () => ({
+void mock.module('../../../src/features/settings/connectors/api', () => ({
   updateConnectorModels: (...args: unknown[]): Promise<void> =>
     mockUpdateConnectorModels(...args) as Promise<void>,
 }));
 
 // Static imports are evaluated before any statement above runs, so the hook
 // has to come in afterwards or it binds the real connectors api.
-const { useModelSelection } = await import(
-  '../../../src/features/settings/connectors/hooks/use-model-selection'
-);
+const { useModelSelection } =
+  await import('../../../src/features/settings/connectors/hooks/use-model-selection');
 
 function makeCatalog(overrides: Partial<ModelCatalogResponse> = {}): ModelCatalogResponse {
   return {

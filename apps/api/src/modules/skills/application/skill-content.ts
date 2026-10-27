@@ -7,12 +7,14 @@
 
 import { type Dirent, readdirSync, realpathSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
-import { RegularFileReadError, readRegularFileUtf8 } from '../../../lib/safe-file';
+import { readRegularFileUtf8, RegularFileReadError } from '../../../lib/safe-file';
 import { SkillError } from '../domain/skill';
 import {
   listSkills,

@@ -1,4 +1,5 @@
 import type { ElementType, HTMLAttributes } from 'react';
+
 import { cn } from '@/lib/utils';
 
 interface MicroLabelProps extends HTMLAttributes<HTMLElement> {

@@ -5,6 +5,7 @@
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+
 import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
 
 export interface RunnerBadgeLabels {

@@ -1,7 +1,7 @@
 # First run
 
 Everything below is optional. MangoStudio works if you skip all of it — the
-setup flow exists so that nobody has to *guess* what to configure first, not to
+setup flow exists so that nobody has to _guess_ what to configure first, not to
 gate the application behind a form.
 
 ## From an installed binary to a browser
@@ -61,13 +61,13 @@ coming back resumes where you were, on any device.
 ### What "resume" actually means
 
 The flow does not remember which step you were on. It reads what the machine
-says *now* and opens at the first question still unanswered. So:
+says _now_ and opens at the first question still unanswered. So:
 
 - delete the folder you chose, and it reopens at **Folder**;
 - sign an agent CLI out, and it reopens at **Agents**;
 - install Node from somewhere else, and **Toolchain** is simply done.
 
-A request that has not answered yet reads as *Checking*, never as *not done* —
+A request that has not answered yet reads as _Checking_, never as _not done_ —
 a slow network cannot drag you backwards through steps you finished.
 
 ### Skipping
@@ -85,7 +85,7 @@ your machine settings stay exactly as they are.
 
 ## Steps that cannot be done from where you are
 
-Two steps depend on *where the browser is*, not on the account:
+Two steps depend on _where the browser is_, not on the account:
 
 - **Always on** installs a service unit for the hub's own process. If you opened
   MangoStudio from another computer — or the platform has no per-user service

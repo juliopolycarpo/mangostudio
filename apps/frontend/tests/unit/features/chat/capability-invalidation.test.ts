@@ -1,5 +1,7 @@
 import { describe, expect, it, spyOn } from 'bun:test';
+
 import { QueryClient } from '@tanstack/react-query';
+
 import { registerCapabilityInvalidationSources } from '../../../../src/features/chat/hooks/capability-invalidation';
 import { chatCapabilitiesQueryOptions } from '../../../../src/features/chat/hooks/use-chat-capabilities';
 import { chatKeys } from '../../../../src/features/chat/queries';

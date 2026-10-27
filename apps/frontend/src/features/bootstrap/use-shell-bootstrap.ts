@@ -1,8 +1,10 @@
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
+
 import { chatListQueryOptions } from '@/features/chat/queries';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
+
 import {
   isAuthFailure,
   isRateLimited,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseMcpImportSource } from '../../../../src/modules/mcp-servers/application/mcp-import-parser';
 import { McpServerError } from '../../../../src/modules/mcp-servers/domain/mcp-server';
 
@@ -178,18 +179,18 @@ describe('parseMcpImportSource', () => {
   });
 
   it('flags placeholder expansions in any string field', () => {
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal editor placeholder under test
+    // eslint-disable-next-line no-template-curly-in-string -- literal editor placeholder under test
     const env = parseOne({ command: 'bun', env: { TOKEN: '${GITHUB_TOKEN}' } });
     const header = parseOne({
       url: 'https://mcp.example.com/',
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal editor placeholder under test
+      // eslint-disable-next-line no-template-curly-in-string -- literal editor placeholder under test
       headers: { Authorization: 'Bearer ${input:token}' },
     });
 
     expect(env.preview).toMatchObject({
       action: 'unsupported',
       reason: 'placeholder-value',
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: literal editor placeholder under test
+      // eslint-disable-next-line no-template-curly-in-string -- literal editor placeholder under test
       detail: '${GITHUB_TOKEN}',
     });
     expect(header.preview).toMatchObject({ action: 'unsupported', reason: 'placeholder-value' });

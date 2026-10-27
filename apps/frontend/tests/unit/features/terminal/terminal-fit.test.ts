@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   TERMINAL_COLS_MAX,
   TERMINAL_COLS_MIN,
   TERMINAL_ROWS_MAX,
   TERMINAL_ROWS_MIN,
 } from '@mangostudio/shared/terminal';
+
 import { clampTerminalSize } from '../../../../src/features/terminal/terminal-fit';
 
 // Asserted against the contract's own constants, not a copy of their values:

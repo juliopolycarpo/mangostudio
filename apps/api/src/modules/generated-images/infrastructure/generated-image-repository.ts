@@ -1,6 +1,7 @@
 import type { GeneratedImageArtifact } from '@mangostudio/shared/chat';
 import type { GalleryItem } from '@mangostudio/shared/types';
 import { type Kysely, sql } from 'kysely';
+
 import type { Database, GeneratedImageSelect } from '../../../db/types';
 import {
   type GalleryCursor,

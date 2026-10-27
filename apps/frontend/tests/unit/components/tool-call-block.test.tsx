@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+
 import { ToolCallBlock } from '@/features/chat/components/ToolCallBlock';
+
 import { stubClipboard } from '../../support/harness/clipboard';
 import { render } from '../../support/harness/render';
 

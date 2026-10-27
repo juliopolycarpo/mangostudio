@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { INTEROP_ENABLED, peerBinary } from './support';
 
 const describeInterop = INTEROP_ENABLED ? describe : describe.skip;

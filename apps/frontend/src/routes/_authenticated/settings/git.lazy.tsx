@@ -1,4 +1,5 @@
 import { createLazyFileRoute } from '@tanstack/react-router';
+
 import { GitSettingsPage } from '@/features/settings/git';
 import { useApp } from '@/lib/app-context';
 

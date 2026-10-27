@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type {
   ProviderObservabilityLogsResponse,
   ProviderObservabilityMetricsResponse,
 } from '@mangostudio/shared/observability';
+
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
   recordProviderCacheHit,

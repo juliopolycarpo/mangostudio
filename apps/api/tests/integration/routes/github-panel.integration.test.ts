@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+
 import {
   GithubCreatePrResponseSchema,
   GithubInboxResponseSchema,
@@ -12,6 +13,7 @@ import {
 } from '@mangostudio/shared/github';
 import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { createGithubCache } from '../../../src/modules/github/application/github-cache';
 import { createGithubReadService } from '../../../src/modules/github/application/github-read-service';

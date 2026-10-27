@@ -63,8 +63,10 @@ describe('nightly distribution health workflow', () => {
     // now names a tag that does not exist, and pinning npm's version as the tag
     // turns a failed GitHub publish into a 404 halfway through the run.
     expect(workflow).toContain('--json tagName,isPrerelease');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(workflow).toContain('asset_version="${release_tag#v}"');
     expect(workflow).toContain('archive_version="$asset_version"');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(workflow).not.toContain('asset_version="${npm_version%.*}"');
     // The canary version the archive reports comes from the tag or, for the
     // frozen release, from its manifest — never parsed back out of release
@@ -101,6 +103,7 @@ describe('nightly distribution health workflow', () => {
     // would fail every `--version` assertion the archive lane makes. Only its
     // manifest records what the bytes call themselves; asset names stay on the
     // tag version, which is what the filenames actually use.
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     const [, canaryBranch = ''] = workflow.split('asset_version="${release_tag#v}"');
     expect(canaryBranch).toContain('--pattern canary-manifest.json');
     expect(canaryBranch).toContain(

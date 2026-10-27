@@ -1,4 +1,5 @@
 import { GIT_SCOPES, type GitScope, gitTopic } from '@mangostudio/shared/realtime';
+
 import { getRealtimeBus } from '../../../services/realtime/realtime-bus';
 
 const FILE_MUTATION_SCOPES = ['state', 'diffs'] as const satisfies readonly GitScope[];

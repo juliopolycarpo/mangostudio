@@ -8,6 +8,7 @@
  * If someone narrows or removes checks inside isSpaRoute(), these tests fail.
  */
 import { describe, expect, test } from 'bun:test';
+
 import { isSpaRoute } from '../../../src/lib/spa-guard';
 
 describe('SPA onError NOT_FOUND guard', () => {

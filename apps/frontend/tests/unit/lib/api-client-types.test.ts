@@ -14,7 +14,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+
 import { client } from '../../../src/lib/api-client';
 
 /**

@@ -15,10 +15,12 @@
 
 import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { InstallConsole } from '../components/InstallConsole';
 import { useInstallStream } from '../hooks/use-install-stream';
 import {

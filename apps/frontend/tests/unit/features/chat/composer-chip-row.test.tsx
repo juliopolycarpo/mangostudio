@@ -7,10 +7,12 @@
 
 import { describe, expect, it, jest } from 'bun:test';
 import { join } from 'node:path';
+
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import {
   ComposerChipRow,
   type ComposerChipRowProps,
@@ -137,7 +139,7 @@ describe('ComposerChipRow — phone summary', () => {
     const stylesheet = Bun.file(join(import.meta.dir, '../../../../src/index.css')).text();
     // The one rule that draws a `·`, inside the `sm` media query.
     const GATED_SEPARATOR =
-      /@media \(width >= 40rem\)\s*\{\s*\.composer-chip-row[^{]*::after\s*\{[^}]*content:\s*"·"[^}]*\}\s*\}/;
+      /@media \(width >= 40rem\)\s*\{\s*\.composer-chip-row[^{]*::after\s*\{[^}]*content:\s*(['"])·\1[^}]*\}\s*\}/;
 
     it('are drawn from sm up only, by the stylesheet', async () => {
       const source = (await stylesheet).replace(/\/\*[\s\S]*?\*\//g, '');

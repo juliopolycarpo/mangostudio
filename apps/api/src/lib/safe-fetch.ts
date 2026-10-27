@@ -31,8 +31,8 @@
 import {
   UnsafeBaseUrlError,
   type UnsafeBaseUrlReason,
-  type ValidateBaseUrlOptions,
   validateBaseUrl,
+  type ValidateBaseUrlOptions,
 } from '../services/providers/core/base-url-policy';
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);

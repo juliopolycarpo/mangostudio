@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { KbdHint, ReturnKey } from '@/components/ui/KbdHint';
@@ -21,6 +22,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { steerExternalTurn } from '@/services/external-agent-service';
+
 import { filesFromClipboard, useComposerAttachments } from '../hooks/use-composer-attachments';
 import { useComposerDraft } from '../hooks/use-composer-draft';
 import { usePromptHistory } from '../hooks/use-prompt-history';
@@ -435,10 +437,24 @@ export function InputBar({
       <div className={CHAT_COLUMN_CLASS}>
         {externalRunnerBlocked && <ExternalRunnerBlockedCallout descriptor={externalDescriptor} />}
 
-        {steerError && <Callout tone="danger" role="status" className="mb-2" title={steerError} />}
+        {steerError && (
+          <Callout
+            tone="danger"
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+            role="status"
+            className="mb-2"
+            title={steerError}
+          />
+        )}
 
         {uploads.error && (
-          <Callout tone="danger" role="status" className="mb-2" title={uploads.error} />
+          <Callout
+            tone="danger"
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+            role="status"
+            className="mb-2"
+            title={uploads.error}
+          />
         )}
 
         {(pendingAttachments.length > 0 || uploads.uploading.length > 0) && (
@@ -462,7 +478,12 @@ export function InputBar({
               </span>
             ))}
             {uploads.uploading.map((name) => (
-              <div key={name} role="status" className="terminal-chip">
+              <div
+                key={name}
+                // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+                role="status"
+                className="terminal-chip"
+              >
                 <Spinner size="sm" className="shrink-0" />
                 <span className="max-w-[12rem] truncate">
                   {formatMessage(t.chat.input.attachUploading, { name })}

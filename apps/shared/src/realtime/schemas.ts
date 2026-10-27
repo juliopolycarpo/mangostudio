@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import { ApiErrorResponseSchema } from '../errors/schemas';
 
 /**

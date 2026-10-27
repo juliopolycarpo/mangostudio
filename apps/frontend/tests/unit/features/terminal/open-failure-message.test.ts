@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { openFailureMessage } from '../../../../src/features/terminal/open-failure-message';
 import { ApiError } from '../../../../src/lib/utils';
 

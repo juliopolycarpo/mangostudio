@@ -28,6 +28,7 @@ import {
 } from '@mangostudio/shared/workspaces';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+
 import { useToast } from '@/components/ui/Toast';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';

@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import {
   createMemoryHistory,
   createRootRoute,
@@ -16,6 +17,7 @@ import {
   createRouter,
   Outlet,
 } from '@tanstack/react-router';
+
 import { Route as LegacyLibraryRoute } from '../../../src/routes/_authenticated/library/$';
 
 type BeforeLoad = (ctx: { location: { href: string } }) => void;

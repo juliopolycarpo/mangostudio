@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 // statements. `mock.module` is not hoisted, so a plain const is enough.
 const mockPost = jest.fn();
 
-mock.module('../../../src/lib/api-client', () => ({
+void mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       chats: {
@@ -18,9 +18,8 @@ mock.module('../../../src/lib/api-client', () => ({
 
 // Below the mock, never as a static import: those are evaluated first and the
 // service would bind the real API client.
-const { generateChatTitleSuggestion } = await import(
-  '../../../src/features/chat/services/chat-title'
-);
+const { generateChatTitleSuggestion } =
+  await import('../../../src/features/chat/services/chat-title');
 
 describe('generateChatTitleSuggestion', () => {
   beforeEach(() => {

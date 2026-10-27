@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { composerAccent } from '../../../../src/features/chat/lib/composer-accent';
 
 describe('composer accent', () => {

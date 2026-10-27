@@ -30,6 +30,7 @@ import {
   RUNTIME_CONTRACT_VERSION,
   type RuntimeCapabilityManifest,
 } from '@mangostudio/shared/runtime-contract';
+
 import { TEST_RUNTIME_MANIFEST } from '../runtime-fixture';
 
 export class DeferredSpawnPort {
@@ -49,6 +50,7 @@ export class DeferredSpawnPort {
       pid: 4321,
       exited: this.#exit.promise,
       stderrTail: () => '',
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       startError: async () => ({ exit: undefined, spawnErrorCode: undefined, stderrLine: '' }),
       setTerminateGraceMs: (ms) => {
         this.promotedTerminateGraceMs = ms;

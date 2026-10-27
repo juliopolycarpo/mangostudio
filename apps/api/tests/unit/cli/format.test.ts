@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { formatUptime } from '../../../src/cli/format';
 
 describe('formatUptime', () => {

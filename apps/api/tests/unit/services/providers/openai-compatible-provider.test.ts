@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
 import { createCompatibleClient } from '../../../../src/services/providers/openai-compatible/client';
 import { resolveCompatibleClientConfig } from '../../../../src/services/providers/openai-compatible/resolve-client-config';
@@ -144,9 +146,8 @@ async function collectCompatEvents(
   overrides: Partial<AgentTurnRequest> = {},
   capture: CaptureCall = {}
 ): Promise<AgentEvent[]> {
-  const { streamOAICompatAgentTurn } = await import(
-    '../../../../src/services/providers/openai-compatible/chat-completions-stream'
-  );
+  const { streamOAICompatAgentTurn } =
+    await import('../../../../src/services/providers/openai-compatible/chat-completions-stream');
   const client = createFakeChatCompletionsClient((args) => {
     capture.args = args;
     return Promise.resolve(stream);
@@ -179,25 +180,22 @@ describe('openai-compatible-provider', () => {
   });
 
   it('providerType is openai-compatible', async () => {
-    const { openAICompatibleProvider } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { openAICompatibleProvider } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(openAICompatibleProvider.providerType).toBe('openai-compatible');
   });
 
   it('is registered in the provider registry after import', async () => {
     await import('../../../../src/services/providers/openai-compatible/index');
-    const { getProvider } = await import(
-      '../../../../src/services/providers/core/provider-registry'
-    );
+    const { getProvider } =
+      await import('../../../../src/services/providers/core/provider-registry');
     const provider = getProvider('openai-compatible');
     expect(provider.providerType).toBe('openai-compatible');
   });
 
   it('implements the required AIProvider methods', async () => {
-    const { openAICompatibleProvider } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { openAICompatibleProvider } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(typeof openAICompatibleProvider.generateText).toBe('function');
     expect(typeof openAICompatibleProvider.listModels).toBe('function');
     expect(typeof openAICompatibleProvider.validateApiKey).toBe('function');
@@ -511,74 +509,65 @@ describe('openai-compatible listModels filtering', () => {
 
 describe('classifyEndpoint', () => {
   it('classifies DeepSeek base URLs', async () => {
-    const { classifyEndpoint } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('https://api.deepseek.com/v1')).toBe('deepseek');
     expect(classifyEndpoint('https://api.deepseek.com')).toBe('deepseek');
   });
 
   it('classifies OpenRouter base URLs', async () => {
-    const { classifyEndpoint } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('https://openrouter.ai/api/v1')).toBe('openrouter');
   });
 
   it('classifies unknown endpoints as generic', async () => {
-    const { classifyEndpoint } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('https://my-custom-llm.example.com/v1')).toBe('generic');
     expect(classifyEndpoint('http://localhost:11434')).toBe('generic');
   });
 
   it('does not classify deceptive hostnames that embed provider domains', async () => {
-    const { classifyEndpoint } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('https://api.deepseek.com.evil.test/v1')).toBe('generic');
     expect(classifyEndpoint('https://evil.test/?next=openrouter.ai')).toBe('generic');
     expect(classifyEndpoint('https://deepseek.com.attacker.example/v1')).toBe('generic');
   });
 
   it('classifies provider subdomains correctly', async () => {
-    const { classifyEndpoint } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('https://api.deepseek.com/v1')).toBe('deepseek');
     expect(classifyEndpoint('https://openrouter.ai/api/v1')).toBe('openrouter');
   });
 
   it('classifies malformed base URLs as generic', async () => {
-    const { classifyEndpoint } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { classifyEndpoint } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(classifyEndpoint('not-a-url')).toBe('generic');
   });
 });
 
 describe('extractReasoningChunks', () => {
   it('extracts from delta.reasoning_content', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({ reasoning_content: 'thinking step 1' });
     expect(chunks).toEqual(['thinking step 1']);
   });
 
   it('extracts from delta.reasoning (OpenRouter normalized)', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({ reasoning: 'openrouter thinking' });
     expect(chunks).toEqual(['openrouter thinking']);
   });
 
   it('prefers reasoning_content over reasoning when both present', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     // The || short-circuits: if reasoning_content is non-empty, reasoning is not used
     const chunks = extractReasoningChunks({
       reasoning_content: 'primary',
@@ -588,17 +577,15 @@ describe('extractReasoningChunks', () => {
   });
 
   it('falls back to delta.reasoning when reasoning_content is empty string', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({ reasoning_content: '', reasoning: 'fallback' });
     expect(chunks).toEqual(['fallback']);
   });
 
   it('extracts reasoning.text entries from delta.reasoning_details', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({
       reasoning_details: [
         { type: 'reasoning.text', text: 'step A' },
@@ -609,9 +596,8 @@ describe('extractReasoningChunks', () => {
   });
 
   it('extracts reasoning.summary entries from delta.reasoning_details', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({
       reasoning_details: [{ type: 'reasoning.summary', text: 'summary text' }],
     });
@@ -619,9 +605,8 @@ describe('extractReasoningChunks', () => {
   });
 
   it('skips reasoning_details entries with unknown type', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({
       reasoning_details: [{ type: 'unknown.type', text: 'ignored' }],
     });
@@ -629,17 +614,15 @@ describe('extractReasoningChunks', () => {
   });
 
   it('returns empty array when delta has no reasoning fields', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     expect(extractReasoningChunks({ content: 'Hello' })).toEqual([]);
     expect(extractReasoningChunks({})).toEqual([]);
   });
 
   it('combines simple field and reasoning_details in one delta', async () => {
-    const { extractReasoningChunks } = await import(
-      '../../../../src/services/providers/openai-compatible/index'
-    );
+    const { extractReasoningChunks } =
+      await import('../../../../src/services/providers/openai-compatible/index');
     const chunks = extractReasoningChunks({
       reasoning_content: 'inline',
       reasoning_details: [{ type: 'reasoning.text', text: 'detailed' }],
@@ -653,9 +636,8 @@ describe('openai-compatible capability metadata flags', () => {
   it('sets parallelToolCalls=true and reasoningWithTools=false for text-only model IDs', async () => {
     // Validate the logic the listModels function uses to assemble capabilities.
     // Since listModels calls the live API, we test the flag derivation logic directly.
-    const { isImageModelId, isReasoningModel } = await import(
-      '@mangostudio/shared/utils/model-detection'
-    );
+    const { isImageModelId, isReasoningModel } =
+      await import('@mangostudio/shared/utils/model-detection');
 
     const gpt4oId = 'gpt-4o';
     const isImage = isImageModelId(gpt4oId);
@@ -669,9 +651,8 @@ describe('openai-compatible capability metadata flags', () => {
   });
 
   it('sets parallelToolCalls=false and reasoningWithTools=false for image model IDs', async () => {
-    const { isImageModelId, isReasoningModel } = await import(
-      '@mangostudio/shared/utils/model-detection'
-    );
+    const { isImageModelId, isReasoningModel } =
+      await import('@mangostudio/shared/utils/model-detection');
 
     const imageModelId = 'dall-e-3';
     const isImage = isImageModelId(imageModelId);
@@ -684,9 +665,8 @@ describe('openai-compatible capability metadata flags', () => {
   });
 
   it('sets parallelToolCalls=true and reasoningWithTools=true for deepseek-r1', async () => {
-    const { isImageModelId, isReasoningModel } = await import(
-      '@mangostudio/shared/utils/model-detection'
-    );
+    const { isImageModelId, isReasoningModel } =
+      await import('@mangostudio/shared/utils/model-detection');
 
     const reasoningModelId = 'deepseek-r1';
     const isImage = isImageModelId(reasoningModelId);

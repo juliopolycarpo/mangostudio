@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, spyOn } fr
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { DEFAULT_DOCTOR_ARGS } from '../../../../src/cli/args';
 import { runDoctor } from '../../../../src/cli/commands/doctor';
 import type { FsProbe } from '../../../../src/cli/doctor-checks';

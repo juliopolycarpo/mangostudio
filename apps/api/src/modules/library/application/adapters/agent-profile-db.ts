@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
+
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
+
 import {
   parseAgentMarkdownProfile,
   serializeAgentMarkdown,

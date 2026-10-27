@@ -14,6 +14,7 @@ import type {
   RuntimeMethod,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import type { HubSession } from '../../src/services/runtime-client/hub-session';
 import { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 import {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { InstallPlatform } from '@mangostudio/shared/environments';
 import { AGENT_CLI_DEFINITIONS } from '@mangostudio/shared/environments/detection';
+
 import {
   getInstallRecipe,
   hasInstallRecipeForRuntime,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { createTurboCheckCommand, createWorkspaceDprintCommand } from '../lib/check';
+
+import { createTurboCheckCommand, createWorkspaceFormatCommand } from '../lib/check';
 import { createImportCycleCommand } from '../lib/import-cycles';
 import { readText } from './support/read-text';
 
@@ -7,20 +8,11 @@ describe('check script', () => {
   test('shares a cycle-only command with explicit configuration, complete diagnostics and roots', () => {
     const roots = ['apps/api', 'packages/protocol'];
     expect(createImportCycleCommand(roots)).toEqual([
-      'bunx',
-      'biome',
-      'lint',
-      '--config-path=biome.cycles.json',
-      '--only=suspicious/noImportCycles',
-      '--only=nursery/noSelfImport',
-      '--max-diagnostics=none',
-      '--diagnostic-level=error',
-      '--error-on-warnings',
-      '--colors=off',
-      '--reporter=default',
+      'bun',
+      'scripts/check-import-cycles.ts',
       ...roots,
     ]);
-    expect(createImportCycleCommand(roots, 'json')).toContain('--reporter=json');
+    expect(createImportCycleCommand(roots, 'json')).toContain('--json');
     expect(roots).toEqual(['apps/api', 'packages/protocol']);
   });
   test('creates one filtered Turbo invocation for selected workspaces', () => {
@@ -36,14 +28,8 @@ describe('check script', () => {
     ]);
   });
 
-  test('preserves selected workspace dprint checks outside Turbo', () => {
-    expect(createWorkspaceDprintCommand('api')).toEqual([
-      'bunx',
-      'dprint',
-      'check',
-      'apps/api/AGENTS.md',
-      'apps/api/bunfig.toml',
-    ]);
+  test('checks selected workspace docs and configuration outside Turbo', () => {
+    expect(createWorkspaceFormatCommand('api')).toEqual(['bun', 'fmt', '--check', 'apps/api']);
   });
 
   test('delegates workspace source checks to Turbo', () => {
@@ -87,7 +73,7 @@ describe('check script', () => {
     expect(turboConfig).toContain('"dependsOn": ["typecheck", "^typecheck:with-deps"]');
     expect(turboConfig).not.toContain('"dependsOn": ["^typecheck"]');
     expect(turboConfig).toContain('"$TURBO_ROOT$/tsconfig.json"');
-    expect(turboConfig).toContain('"$TURBO_ROOT$/biome.json"');
+    expect(turboConfig).toContain('"$TURBO_ROOT$/bunfig.toml"');
     expect(turboConfig).toContain('"$TURBO_DEFAULT$"');
   });
 
@@ -100,7 +86,9 @@ describe('check script', () => {
     ]) {
       const manifest = JSON.parse(readText(manifestPath)) as { scripts?: Record<string, string> };
 
-      expect(manifest.scripts?.['check:quick']).toBe('biome check .');
+      expect(manifest.scripts?.['check:quick']).toBe(
+        `bun --cwd ../.. lint ${manifestPath.slice(0, -13)} && bun --cwd ../.. fmt --check ${manifestPath.slice(0, -13)}`
+      );
       expect(manifest.scripts?.['check:cycles']).toBe('bun ../../scripts/check-import-cycles.ts .');
       expect(manifest.scripts?.check).toBe(
         'bun run check:quick && bun run check:cycles && bun run typecheck'
@@ -117,7 +105,9 @@ describe('check script', () => {
     ]) {
       const manifest = JSON.parse(readText(manifestPath)) as { scripts?: Record<string, string> };
 
-      expect(manifest.scripts?.fix, `${manifestPath} fix script`).toBe('biome check --write .');
+      expect(manifest.scripts?.fix, `${manifestPath} fix script`).toBe(
+        `bun --cwd ../.. lint --fix ${manifestPath.slice(0, -13)} && bun --cwd ../.. fmt ${manifestPath.slice(0, -13)}`
+      );
     }
   });
 });

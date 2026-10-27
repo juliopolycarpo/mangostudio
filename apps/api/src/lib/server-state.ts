@@ -8,6 +8,7 @@
  */
 
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+
 import type { BuildInfo } from './build-info';
 import { getPidFilePath } from './mango-paths';
 

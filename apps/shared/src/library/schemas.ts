@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import { ProfileIdSchema } from '../profiles';
 import type { SkillSource } from '../skills';
 import {

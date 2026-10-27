@@ -17,6 +17,7 @@
  */
 
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { formatMessage } from '@/lib/i18n-format';
 
 type ActivityLabels = Messages['home']['activity'];

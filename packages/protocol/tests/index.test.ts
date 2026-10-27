@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
 import * as protocol from '../src';
 
 const SOURCE_DIR = fileURLToPath(new URL('../src', import.meta.url));

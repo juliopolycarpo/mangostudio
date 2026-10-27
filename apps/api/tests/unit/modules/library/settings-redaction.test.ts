@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseTomlDocument, stringifyTomlDocument } from '../../../../src/lib/toml';
 import { redactSettingsDocument } from '../../../../src/modules/library/domain/settings-redaction';
 

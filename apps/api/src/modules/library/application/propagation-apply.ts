@@ -1,5 +1,4 @@
 import { RemoteError } from '@mangostudio/protocol';
-
 /**
  * The write half of library propagation: verify the preview still describes
  * reality, plan every operation, write with a backup and a post-write hash
@@ -10,7 +9,6 @@ import { RemoteError } from '@mangostudio/protocol';
  * what makes it reasonable to ask a user to let an app write into `~/.claude`.
  * None of them is optional, and none of them should be relaxed for speed.
  */
-
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type AdapterStrategy,
@@ -41,6 +39,7 @@ import {
   type RuntimeLibraryUndoParams,
 } from '@mangostudio/shared/runtime-contract';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
+
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';

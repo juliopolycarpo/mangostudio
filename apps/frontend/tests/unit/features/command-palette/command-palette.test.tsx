@@ -7,7 +7,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import { fireEvent, screen, within } from '@testing-library/react';
+
 import { ConfirmDialog } from '../../../../src/components/ui/ConfirmDialog';
 import { CommandPalette } from '../../../../src/features/command-palette/CommandPalette';
 import type { CommandItem } from '../../../../src/features/command-palette/lib/command-item';

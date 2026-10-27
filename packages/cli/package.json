@@ -7,7 +7,10 @@
   "bin": {
     "mangostudio": "bin/mangostudio.js"
   },
-  "files": ["bin/mangostudio.js", "README.md"],
+  "files": [
+    "bin/mangostudio.js",
+    "README.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/juliopolycarpo/mangostudio.git",
@@ -23,5 +26,11 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["mangostudio", "ai", "image-generation", "chat", "cli"]
+  "keywords": [
+    "mangostudio",
+    "ai",
+    "image-generation",
+    "chat",
+    "cli"
+  ]
 }

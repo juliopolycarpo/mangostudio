@@ -5,8 +5,10 @@
 
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
+
 import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
 import { NotFound } from 'elysia';
+
 import type { App } from '../app';
 import { contentEtag, fileEtag, matchesEtag } from '../lib/http-cache';
 import { HASHED_ASSET_DIR, isApiOwnedPath, isSpaRoute } from '../lib/spa-guard';
@@ -431,7 +433,7 @@ function resolveFrontendFile(
   // Hardlinks have different realpaths but share file identity with the private
   // metadata. Check per request because a rebuild can replace that metadata.
   const buildStateStats = statFile(join(frontendRoot, BUILD_STATE_FILE));
-  if (buildStateStats && stats.dev === buildStateStats.dev && stats.ino === buildStateStats.ino) {
+  if (stats.dev === buildStateStats?.dev && stats.ino === buildStateStats?.ino) {
     return null;
   }
   return { filePath: real, stats, urlPath: decoded };

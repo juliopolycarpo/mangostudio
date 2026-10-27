@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { resolveGitCommonDir } from '../../../../src/modules/git/domain/git-common-dir';
 import type { WorktreePathSemantics } from '../../../../src/modules/git/domain/worktree-selection';
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';

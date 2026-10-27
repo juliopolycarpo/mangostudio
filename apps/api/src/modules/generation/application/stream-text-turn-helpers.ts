@@ -4,12 +4,13 @@ import {
 } from '@mangostudio/shared/tool-executions';
 import type { GeneratedImagePart, MessagePart, ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import {
   buildPersistedContextSnapshot,
-  type ContinuationDisplayMode,
   computeContextSnapshot,
+  type ContinuationDisplayMode,
 } from '../../../services/providers/core/context-policy';
 import type {
   AgentTurnExecutionState,
@@ -33,8 +34,8 @@ import type {
 import { getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import {
   createGenerateImageToolPlan,
-  type GenerateImageToolOutcome,
   generateImagesForToolPlan,
+  type GenerateImageToolOutcome,
   summarizeGenerateImageToolResult,
 } from '../../../services/tools/builtin/generate-image';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
@@ -202,9 +203,11 @@ export async function* executeImageGenerationCall(
 ): AsyncGenerator<StreamEvent> {
   const args = parseToolArgs(argsStr);
   let result: unknown;
+  // eslint-disable-next-line no-useless-assignment -- The initial value is retained across asynchronous control flow and failure paths.
   let isError = false;
   let thrown: { error: unknown } | undefined;
   /** Images the generator never reached — see `abandonUnreachedImages`. */
+  // eslint-disable-next-line no-useless-assignment -- The initial value is retained across asynchronous control flow and failure paths.
   let abandonedCount = 0;
 
   // This path yields stream events directly instead of routing through the

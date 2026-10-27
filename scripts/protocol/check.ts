@@ -7,8 +7,8 @@
  * each in its own Cargo target directory, and the run fails unless both ran
  * and passed), and the cross-language round trip.
  *
- * The workspace Biome task enforces value, type-only and self-import cycles
- * even when this command runs alone. The repository root owns dprint.
+ * The workspace lint task runs with the protocol check. The repository root
+ * owns Bun formatting; Dockerfiles are the only excluded file family.
  *
  * Flags: `--skip-format` (no rustfmt), `--ts-only`, `--rs-only`.
  *

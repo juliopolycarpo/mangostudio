@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
+
 import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 
 class NeverPublishingApp {

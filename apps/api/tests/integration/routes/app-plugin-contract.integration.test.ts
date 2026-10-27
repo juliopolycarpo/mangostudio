@@ -17,7 +17,9 @@
 
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+
 import { app } from '../../../src/app';
 import { getConfig, loadConfigForTest } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
@@ -248,8 +250,7 @@ describe('OpenAPI document', () => {
     const document = await openApiDocument();
     const body = document.paths['/api/upload/chat']?.post?.requestBody;
     const multipart = body?.content['multipart/form-data']?.schema as
-      | { required?: string[]; properties?: Record<string, Record<string, unknown>> }
-      | undefined;
+      { required?: string[]; properties?: Record<string, Record<string, unknown>> } | undefined;
 
     expect(body?.required).toBe(true);
     expect(multipart?.required).toEqual(['chatId', 'file']);

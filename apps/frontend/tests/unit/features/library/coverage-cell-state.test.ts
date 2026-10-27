@@ -8,10 +8,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import {
-  type CoverageCellState,
   coverageCell,
   coverageCells,
+  type CoverageCellState,
   majorityContentHash,
   presentTargetCount,
   summarizeCoverageByTarget,

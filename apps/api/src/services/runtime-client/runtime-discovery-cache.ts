@@ -17,6 +17,7 @@ import {
   type RuntimeCapabilityManifest,
   type RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
+
 import { createDiagnosticLogger, type DiagnosticLogger } from '../../lib/logger';
 
 const logger = createDiagnosticLogger('runtime-discovery');

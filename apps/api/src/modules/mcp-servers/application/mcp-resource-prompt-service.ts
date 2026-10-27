@@ -17,6 +17,7 @@ import type {
 } from '@mangostudio/shared/mcp';
 import { capMcpResultText } from '@mangostudio/shared/mcp/content-mapping';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { getMcpClient } from '../../../services/mcp/connection-manager';
 import { persistMcpResourceAttachments } from '../../../services/mcp/rich-content';
@@ -47,19 +48,17 @@ export async function readMcpServerResource(
   const contents = await wrapProviderError(() => handle.readResource(body.uri));
 
   const response: ReadMcpResourceResponse = {
-    contents: contents.map(
-      (entry): McpResourceContent => ({
-        uri: entry.uri,
-        ...(entry.mimeType !== undefined ? { mimeType: entry.mimeType } : {}),
-        ...(entry.text !== undefined ? { text: capMcpResultText(entry.text) } : {}),
-        isBinary: entry.text === undefined && entry.blob !== undefined,
-      })
-    ),
+    contents: contents.map((entry): McpResourceContent => ({
+      uri: entry.uri,
+      ...(entry.mimeType !== undefined ? { mimeType: entry.mimeType } : {}),
+      ...(entry.text !== undefined ? { text: capMcpResultText(entry.text) } : {}),
+      isBinary: entry.text === undefined && entry.blob !== undefined,
+    })),
   };
 
   if (body.chatId) {
     const chat = await getChatById(body.chatId, db);
-    if (!chat || chat.userId !== userId) {
+    if (chat?.userId !== userId) {
       throw new McpServerError('Chat not found.', 404, ERROR_CODES.NOT_FOUND);
     }
     response.attachments = await persistMcpResourceAttachments(contents, {

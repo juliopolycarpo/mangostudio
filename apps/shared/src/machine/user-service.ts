@@ -12,6 +12,7 @@
 import { chmod, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir, userInfo } from 'node:os';
 import { posix } from 'node:path';
+
 import { HIDDEN_WINDOW } from '../process';
 import { RuntimeServiceManagementError } from '../runtime-contract/service-errors';
 import type { UserServicePlatform, UserServiceStatus } from '../runtime-home';
@@ -936,7 +937,9 @@ export function parseScheduledTaskJson(stdout: string): ScheduledTaskJson | null
   const state =
     typeof record.state === 'number'
       ? (SCHEDULED_TASK_STATES[record.state] ?? 'Unknown')
-      : String(record.state ?? 'Unknown');
+      : // Task Scheduler may return arbitrary values; preserve their prior diagnostic rendering.
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
+        String(record.state ?? 'Unknown');
   return {
     installed: true,
     state,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { createGithubCache } from '../../../../src/modules/github/application/github-cache';
 import { createGithubReadService } from '../../../../src/modules/github/application/github-read-service';
 import { GhCliError } from '../../../../src/modules/github/infrastructure/gh-cli';

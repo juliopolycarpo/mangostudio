@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { type RestartDeps, runRestart } from '../../../../src/cli/commands/restart';
 import { confirmsHealthy } from '../../../../src/cli/health';
 import type { ServerState } from '../../../../src/lib/server-state';

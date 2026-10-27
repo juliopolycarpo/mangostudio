@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { RuntimeFindingCode } from '@mangostudio/shared/environments';
 import { environmentFindingTemplatesEn } from '@mangostudio/shared/environments';
+
 import { fail, ok } from '../../../src/cli/doctor-checks';
 import {
   checkResultToFinding,
   findingSeverity,
   hasUnfilledPlaceholders,
-  RUNTIME_FINDING_CODES,
   renderFinding,
+  RUNTIME_FINDING_CODES,
   runtimeHealthToCheckStatus,
 } from '../../../src/cli/finding-renderer';
 

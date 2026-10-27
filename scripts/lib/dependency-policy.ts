@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+
 import { ROOT_DIR } from './config';
 
 export const MANIFEST_SECTIONS = [

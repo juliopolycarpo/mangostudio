@@ -23,6 +23,7 @@ import type {
   ExternalAgentCommand,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
+
 import { setBounded } from '../../../lib/bounded-map';
 
 export interface ExternalCommandCatalogKey {

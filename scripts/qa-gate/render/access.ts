@@ -23,8 +23,7 @@ import type { CoverageBucket } from '../parse-lcov';
 import { lanesForComponentRoot } from '../results/lane-components';
 import { inlineCode, NA } from './format';
 
-const COVERAGE_KEYS = ['lines', 'statements', 'functions', 'branches', 'regions'] as const;
-export type CoverageKey = (typeof COVERAGE_KEYS)[number];
+export type CoverageKey = 'lines' | 'statements' | 'functions' | 'branches' | 'regions';
 
 const JS_COVERAGE_KEYS: readonly CoverageKey[] = ['lines', 'statements', 'functions', 'branches'];
 const RUST_COVERAGE_KEYS: readonly CoverageKey[] = ['lines', 'functions', 'regions'];

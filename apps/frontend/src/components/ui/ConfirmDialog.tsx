@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 
@@ -58,6 +59,7 @@ export function ConfirmDialog({
       closeDisabled={isPending}
       footer={
         <>
+          {/* eslint-disable-next-line jsx-a11y/no-autofocus -- Focus the safe action when the confirmation dialog opens. */}
           <Button variant="secondary" onClick={onCancel} disabled={isPending} autoFocus>
             {cancelLabel}
           </Button>

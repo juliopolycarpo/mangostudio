@@ -28,6 +28,7 @@
  */
 
 import { type GitScope, gitTopic } from '@mangostudio/shared/realtime';
+
 import { getDb } from '../../../db/database';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRealtimeBus } from '../../../services/realtime/realtime-bus';

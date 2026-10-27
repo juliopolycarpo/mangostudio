@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { WorkspaceBreadcrumbView } from '../../../src/features/workspace/components/WorkspaceBreadcrumb';
 import { render } from '../../support/harness/render';
 

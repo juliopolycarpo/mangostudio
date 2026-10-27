@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   EXTERNAL_AGENT_CAPACITY_CODE,
   isExternalAgentKindCode,

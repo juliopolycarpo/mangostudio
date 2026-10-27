@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { PassThrough } from 'node:stream';
+
 import { CLOSE_CODES } from '../src/close';
 import type { PortClosure } from '../src/port';
 import type { Frame } from '../src/schemas/frames';

@@ -25,7 +25,9 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import type { UpgradeStreamEvent } from '@mangostudio/shared/updates';
+
 import { releaseAssetUrl } from '../../../../src/modules/environments/domain/wsl-runtime-release';
 import {
   createUpgradeService,

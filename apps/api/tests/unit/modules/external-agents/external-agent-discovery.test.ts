@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import type {
   ExternalAgentCapabilities,

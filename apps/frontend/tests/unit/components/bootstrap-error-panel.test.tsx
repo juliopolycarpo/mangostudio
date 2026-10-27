@@ -5,9 +5,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { en } from '@mangostudio/shared/i18n';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+
 import {
   BootstrapErrorPanel,
   errorDetail,

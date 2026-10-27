@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ExternalAccountLimits, ExternalUsage } from '@mangostudio/shared/external-agents';
+
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
+
 import { render } from '../../../support/harness/render';
 
 const NOW = 1_700_000_000_000;

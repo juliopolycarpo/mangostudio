@@ -8,6 +8,7 @@
  */
 
 import Type, { type Static, type TSchema } from 'typebox';
+
 import { ReadonlyArraySchema } from '../../schema-helpers';
 import { RuntimePathPolicyParamsSchema } from '../path-policy';
 

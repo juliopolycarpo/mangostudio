@@ -1,6 +1,7 @@
 import type { GitCommitFile, GitCommitSummary } from '@mangostudio/shared/git';
 import { ArrowLeft, FileCode2, GitCommitHorizontal } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
@@ -12,6 +13,7 @@ import { usePlural } from '@/hooks/use-plural';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { FilePathLabel } from './components/FilePathLabel';
 import { RowList } from './components/RowList';
 import type { DiffSelection } from './DiffViewer';

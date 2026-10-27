@@ -6,6 +6,7 @@ import type {
   CreateAgentProfileBody,
   DeleteAgentProfileResponse,
 } from '@mangostudio/shared/agents';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

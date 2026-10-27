@@ -10,13 +10,14 @@
  * which is the one place this module is used from.
  *
  * Moving `HOME` also hides what the toolchain finds there, so `CARGO_HOME`,
- * `RUSTUP_HOME`, `BUN_INSTALL`, Bun's install cache and dprint's plugin cache
+ * `RUSTUP_HOME`, `BUN_INSTALL`, Bun's install cache
  * are pinned to the real ones. `MANGOSTUDIO_RUNTIME_BINARY` and every other
  * inherited variable pass through untouched.
  */
 
 import { constants } from 'node:os';
 import { join } from 'node:path';
+
 import {
   createTemporaryHome,
   currentHost,
@@ -60,29 +61,6 @@ export function launcherHost(
 }
 
 /**
- * Where dprint keeps its compiled plugins on the real home, or `undefined` on
- * Windows, where the cache is under `%LOCALAPPDATA%` and a moved home does not
- * hide it. A test that runs `bun run check` in a fixture reaches dprint; with an
- * empty cache it recompiles every plugin, which takes longer than a test's
- * timeout.
- *
- * @example
- * dprintCacheDir({}, { tmpDir: '/tmp', realHome: '/home/me' }, 'linux');
- * // => '/home/me/.cache/dprint/cache'
- */
-function dprintCacheDir(
-  ambient: NodeJS.ProcessEnv,
-  host: TemporaryHomeHost,
-  platform: NodeJS.Platform = process.platform
-): string | undefined {
-  const exported = ambient.DPRINT_CACHE_DIR?.trim();
-  if (exported) return exported;
-  if (platform === 'win32') return undefined;
-  if (platform === 'darwin') return join(host.realHome, 'Library', 'Caches', 'dprint', 'cache');
-  return join(ambient.XDG_CACHE_HOME?.trim() || join(host.realHome, '.cache'), 'dprint', 'cache');
-}
-
-/**
  * The environment a test process starts with: the temporary home, the original
  * home for the preload's comparison, and the toolchain homes pinned to the real
  * ones.
@@ -94,11 +72,9 @@ function dprintCacheDir(
 export function testHomeEnv(
   root: string,
   ambient: NodeJS.ProcessEnv = process.env,
-  host: TemporaryHomeHost = launcherHost(ambient),
-  platform: NodeJS.Platform = process.platform
+  host: TemporaryHomeHost = launcherHost(ambient)
 ): Record<string, string> {
   const bunInstall = ambient.BUN_INSTALL?.trim() || join(host.realHome, '.bun');
-  const dprintCache = dprintCacheDir(ambient, host, platform);
   return {
     ...homeEnv(root),
     // `$HOME/.gitconfig` and `$XDG_CONFIG_HOME/git/config` both resolve from
@@ -115,7 +91,6 @@ export function testHomeEnv(
     BUN_INSTALL: bunInstall,
     BUN_INSTALL_CACHE_DIR:
       ambient.BUN_INSTALL_CACHE_DIR?.trim() || join(bunInstall, 'install', 'cache'),
-    ...(dprintCache ? { DPRINT_CACHE_DIR: dprintCache } : {}),
   };
 }
 

@@ -1,11 +1,13 @@
 import type { McpMediaPart } from '@mangostudio/shared/types';
 import { Download, FileText, ImageOff, Plug } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import { ImageActionBar } from './ImageActionBar';
 import { ReservedAspectImage } from './ReservedAspectImage';
 

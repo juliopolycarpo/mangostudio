@@ -4,7 +4,7 @@
 // pedantic/high-confidence mode, and ShellCheck over tracked `*.sh` files.
 
 import { ROOT_DIR } from '../config';
-import { type RunResult, runCommand } from '../exec';
+import { runCommand, type RunResult } from '../exec';
 import { ensureTool } from './bootstrap';
 import type { ToolName } from './manifest';
 

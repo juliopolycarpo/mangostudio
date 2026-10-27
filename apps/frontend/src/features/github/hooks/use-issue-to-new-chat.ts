@@ -13,6 +13,7 @@
 
 import type { GithubIssueSummary } from '@mangostudio/shared/github';
 import { useCallback } from 'react';
+
 import { setComposerDraft } from '@/features/chat/lib/composer-draft-store';
 import { useApp } from '@/lib/app-context';
 

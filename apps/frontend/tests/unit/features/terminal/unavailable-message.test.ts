@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
+
 import {
   unavailableMessage,
   unavailableTone,

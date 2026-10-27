@@ -10,6 +10,7 @@
  */
 
 import { decodeLine } from '@mangostudio/protocol';
+
 import frames from '../../spec/fixtures/1/frames.json';
 import { ROOT_DIR } from '../lib/config';
 import { type CorpusCase, judgeAnswers, parseAnswer, roundTripCases } from './roundtrip';
@@ -27,7 +28,7 @@ const proc = Bun.spawn(['cargo', 'run', '--quiet', '--locked', '--example', 'rou
   stdout: 'pipe',
   stderr: 'pipe',
 });
-proc.stdin.write(`${cases.map((entry) => entry.line).join('\n')}\n`);
+await proc.stdin.write(`${cases.map((entry) => entry.line).join('\n')}\n`);
 await proc.stdin.end();
 const [stdout, stderr, code] = await Promise.all([
   new Response(proc.stdout).text(),

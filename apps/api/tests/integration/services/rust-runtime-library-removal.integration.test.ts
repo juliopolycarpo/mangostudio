@@ -41,6 +41,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import type {
   LibraryLocationId,
   RemovalApply,
@@ -53,6 +54,7 @@ import {
   hashResourceAt,
   readBackupManifest,
 } from '@mangostudio/shared/library/machine';
+
 import { undoLibraryPropagation } from '../../../src/modules/library/application/propagation-apply';
 import {
   applyLibraryRemoval,

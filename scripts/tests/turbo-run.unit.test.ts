@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
-import { runTurbo, type TurboResult, turboDryRun } from './support/turbo-run';
+import { runTurbo, turboDryRun, type TurboResult } from './support/turbo-run';
 
 class CapturedTurbo {
   calls: { cmd: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }[] = [];

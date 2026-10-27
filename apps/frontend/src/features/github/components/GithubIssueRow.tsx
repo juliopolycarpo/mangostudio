@@ -1,10 +1,12 @@
 import type { GithubIssueSummary } from '@mangostudio/shared/github';
 import { MessageSquarePlus } from 'lucide-react';
+
 import { Badge } from '@/components/ui/Badge';
 import { MenuItem } from '@/components/ui/Menu';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { GithubRowMenu } from './GithubRowMenu';
 import { GithubRowShell } from './GithubRowShell';
 

@@ -9,6 +9,7 @@ import type {
   ToolSettingsCategory,
 } from '@mangostudio/shared/tool-settings';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../db/types';
 import type { ToolDefinition } from '../providers/types';
 

@@ -5,8 +5,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import { act, render, screen } from '@testing-library/react';
+
 import { I18nProvider, useI18n } from '../../../src/hooks/use-i18n';
 import {
   createLocaleDictionaryStore,

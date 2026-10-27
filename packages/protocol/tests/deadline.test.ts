@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { abortReason, connectDeadline } from '../src/transports/deadline';
 
 /** Resolves after `ms`, so a test can watch a deadline pass or fail to. */

@@ -30,6 +30,7 @@
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { arch, cpus, loadavg, platform, release, tmpdir, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
+
 import { RESERVED_ERROR_CODES, Session } from '@mangostudio/protocol';
 import { spawnPort } from '@mangostudio/protocol/spawn';
 import {
@@ -37,7 +38,7 @@ import {
   RUNTIME_CONTRACT_VERSION,
 } from '@mangostudio/shared/runtime-contract';
 
-import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
+import { fatal, parseArgs } from '../lib/args';
 import { type LatencySummary, summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
 

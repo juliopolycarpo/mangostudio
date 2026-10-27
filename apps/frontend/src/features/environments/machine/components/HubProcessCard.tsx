@@ -4,8 +4,10 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { formatDuration } from '../../format';
 import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';

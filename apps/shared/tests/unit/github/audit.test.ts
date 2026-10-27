@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { summarizeGhSubcommand } from '../../../src/github/audit';
 
 describe('summarizeGhSubcommand', () => {

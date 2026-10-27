@@ -40,7 +40,7 @@ export function createReadinessCache<T>(options: ReadinessCacheOptions = {}): {
   // silently re-populates the cache with the pre-clear answer.
   const generations = new Map<string, number>();
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   async function get(key: string, loader: () => Promise<T>): Promise<T> {
     const currentTime = now();
     const cachedEntry = cachedEntries.get(key);

@@ -6,6 +6,7 @@ import type {
   MessagePart,
 } from '@mangostudio/shared/types';
 import { type Kysely, sql } from 'kysely';
+
 import { boolToInt, parseStyleParams, serializeStyleParams } from '../../../db/serializers';
 import type { Database } from '../../../db/types';
 import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/attachment-repository';

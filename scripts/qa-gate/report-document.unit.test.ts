@@ -8,8 +8,8 @@ import {
   composeMetricsReport,
   GITHUB_COMMENT_LIMIT,
   QA_COMMITS_MARKER,
-  type ReportStatus,
   renderChangelogForComment,
+  type ReportStatus,
 } from './report-document';
 import { makeCiDurations, makeMetrics } from './testing/metrics-fixture';
 

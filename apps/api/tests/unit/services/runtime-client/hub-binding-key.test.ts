@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { createInProcessPortPair } from '@mangostudio/protocol/in-process';
 import {
   HUB_BINDING_KEY_HEADER,
@@ -7,6 +8,7 @@ import {
   RUNTIME_ALREADY_BOUND_REASON,
 } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
+
 import { runtimeUpgradeHeaders } from '../../../../src/services/runtime-client/connect-http-runtime';
 import { hubBindingKeyFor } from '../../../../src/services/runtime-client/hub-binding-key';
 import { openHubSession } from '../../../../src/services/runtime-client/hub-session';

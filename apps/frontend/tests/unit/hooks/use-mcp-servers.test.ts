@@ -5,9 +5,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { useQueryClient } from '@tanstack/react-query';
+
 import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import {
   useAddMcpServer,

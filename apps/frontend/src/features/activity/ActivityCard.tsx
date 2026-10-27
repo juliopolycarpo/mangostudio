@@ -19,6 +19,7 @@ import { SectionCard } from '@/components/ui/SectionCard';
 import { HubSkeletonLines } from '@/features/home/widgets/HubSkeletonLines';
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
+
 import { ActivityFeed } from './ActivityFeed';
 import { countNewSince } from './lib/group-activity';
 import { useActivityBookmark } from './use-activity-bookmark';

@@ -9,7 +9,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
+
 import { ExternalAgentSettingsPage } from '../../../src/features/settings/external-agents';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
@@ -78,6 +80,7 @@ describe('ExternalAgentSettingsPage', () => {
         fetchScenario.fetchMock.mock.calls.some(
           ([input, init]) =>
             (init?.method ?? 'GET').toUpperCase() === 'DELETE' &&
+            // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
             String(input).includes('/external-agents/claude/disclosure')
         )
       ).toBe(true);

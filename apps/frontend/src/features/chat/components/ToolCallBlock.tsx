@@ -6,6 +6,7 @@ import {
 } from '@mangostudio/shared/tool-executions';
 import { Check, Copy } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -15,11 +16,18 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
-import { FileChangePreviewBody } from './FileChangePreview';
+
 import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
+import { FileChangePreviewBody } from './FileChangePreview';
 import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
+import {
+  formatToolSummary,
+  getShellStreams,
+  parseToolResult,
+  summarizeParsedToolResult,
+} from './tool-result-summary';
 import {
   formatToolDuration,
   getToolHint,
@@ -27,12 +35,6 @@ import {
   toneTextClass,
   toolStatusTone,
 } from './ToolCallVisuals';
-import {
-  formatToolSummary,
-  getShellStreams,
-  parseToolResult,
-  summarizeParsedToolResult,
-} from './tool-result-summary';
 
 interface ToolCallBlockProps {
   name: string;

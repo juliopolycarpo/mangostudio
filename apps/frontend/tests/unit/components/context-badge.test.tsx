@@ -5,8 +5,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { ContextBadge } from '@/features/chat/components/ContextBadge';
 import type { ContextInfo } from '@/features/generation/types';
+
 import { render } from '../../support/harness/render';
 
 function info(overrides: Partial<ContextInfo> = {}): ContextInfo {

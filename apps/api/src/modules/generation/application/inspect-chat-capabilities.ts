@@ -20,6 +20,7 @@ import type {
 } from '@mangostudio/shared/capabilities';
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
+
 import type { Database, McpServerSelect } from '../../../db/types';
 import { getMcpRuntimeStatus } from '../../../services/mcp/connection-manager';
 import type { McpBridgeServerSnapshot } from '../../../services/mcp/tool-bridge';

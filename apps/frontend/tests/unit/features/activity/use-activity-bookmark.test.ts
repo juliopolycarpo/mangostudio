@@ -7,7 +7,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { useActivityBookmark } from '@/features/activity/use-activity-bookmark';
+
 import { flushAsyncRender, renderHook } from '../../../support/harness/render';
 import { setTestSession } from '../../../support/setup/auth-client-stub';
 

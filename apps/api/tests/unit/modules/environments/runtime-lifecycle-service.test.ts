@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { DEFAULT_SSH_RUNTIME_PATH, type RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { RUNTIME_CAPABILITY_KEYS, RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import {
   buildSetupCommand,
   pushRuntimeOverSsh,

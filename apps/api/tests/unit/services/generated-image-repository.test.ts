@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { getDb } from '../../../src/db/database';
 import { listGeneratedImagesForGallery } from '../../../src/modules/generated-images/infrastructure/generated-image-repository';
 import { persistImageTurn } from '../../../src/modules/generation/infrastructure/conversation-persistence';

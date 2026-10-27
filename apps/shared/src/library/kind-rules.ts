@@ -1,4 +1,5 @@
 import { SKILL_SLUG_MAX_LENGTH, SKILL_SLUG_PATTERN } from '@mangostudio/shared/skills';
+
 import type { ResourceKind } from './schemas';
 
 const SKILL_SLUG_REGEX = new RegExp(SKILL_SLUG_PATTERN);

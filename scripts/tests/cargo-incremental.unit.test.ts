@@ -142,6 +142,7 @@ describe('CARGO_INCREMENTAL environment precedence', () => {
     ).toBe(false);
   });
 
+  // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
   for (const value of [undefined, null, false, 'false', '1', '${{ vars.CARGO_INCREMENTAL }}']) {
     test(`rejects explicit invalid ${typeof value} value ${String(value)}`, () => {
       expect(

@@ -1,8 +1,10 @@
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';
+
 import { computeBurnPace } from '../lib/usage-pace';
 
 type ConnectorMessages = Messages['settings']['connectors'];
@@ -85,6 +87,7 @@ function UsageWindowBar({
           button fill does not) and turns to the danger colour near the limit.
           The percentage beside it is the signal; colour only confirms it. */}
       <div
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom progress indicator exposes its value through ARIA.
         role="progressbar"
         aria-label={label}
         aria-valuenow={Math.round(percent)}

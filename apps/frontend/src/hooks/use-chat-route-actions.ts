@@ -2,18 +2,13 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { useNavigate } from '@tanstack/react-router';
 import { useCallback } from 'react';
+
 import { useToast } from '@/components/ui/Toast';
 import type { useChats } from '@/features/chat/hooks/use-chats';
 import { useI18n } from '@/hooks/use-i18n';
 
 export type AppPage =
-  | 'home'
-  | 'chat'
-  | 'environments'
-  | 'gallery'
-  | 'settings'
-  | 'studio'
-  | 'terminal';
+  'home' | 'chat' | 'environments' | 'gallery' | 'settings' | 'studio' | 'terminal';
 
 interface UseChatRouteActionsParams {
   readonly chats: ReturnType<typeof useChats>;

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { copyFileSync, cpSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { copyFileSync, cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
 import { createTurboCheckCommand } from '../lib/check';
 import { ROOT_DIR, type WorkspaceName } from '../lib/config';
 import { protocolCheckTasks } from '../protocol/tasks';
@@ -19,8 +20,6 @@ const commands = new FixtureCommands();
 // must leave each command its own execution and tree-stop allowance, plus setup.
 const COMMAND_BUDGET_MS = FIXTURE_COMMAND_TIMEOUT_MS + FIXTURE_STOP_TIMEOUT_MS;
 const CACHE_CHECK_TIMEOUT_MS = 3 * COMMAND_BUDGET_MS + 5_000;
-// These CLI cases also compile dprint's plugins in a fresh writable cache.
-// Keep that tool startup bounded separately from the small Turbo-only cases.
 const ROOT_CHECK_TIMEOUT_MS = CACHE_CHECK_TIMEOUT_MS;
 
 /** Real lint/cycle scripts and Turbo config, with only tsc replaced by the existing fake. */
@@ -28,26 +27,9 @@ function createFixture(): TypecheckFixture {
   const fixture = createTypecheckFixture();
   fixtures.push(fixture);
   const { root } = fixture;
-  for (const file of [
-    'biome.json',
-    'biome.cycles.json',
-    '.editorconfig',
-    '.gitignore',
-    'tsconfig.json',
-    'dprint.json',
-  ]) {
+  for (const file of ['bunfig.toml', '.editorconfig', '.gitignore', 'tsconfig.json']) {
     copyFileSync(join(ROOT_DIR, file), join(root, file));
   }
-  // Check formats only AGENTS.md and bunfig.toml in this fixture. Keep the
-  // installed formatters, without fetching the unused remote YAML plugin.
-  const formatter = JSON.parse(readFileSync(join(root, 'dprint.json'), 'utf8'));
-  formatter.plugins = formatter.plugins.filter((plugin: string) => plugin.startsWith('./'));
-  formatter.yaml = undefined;
-  writeFileSync(join(root, 'dprint.json'), `${JSON.stringify(formatter, null, 2)}\n`);
-  writeFileSync(
-    join(root, '.gitignore'),
-    `${readFileSync(join(root, '.gitignore'))}\n.turbo-cache/\n.dprint-cache/\n`
-  );
   cpSync(join(ROOT_DIR, 'scripts/lib'), join(root, 'scripts/lib'), { recursive: true });
   for (const file of ['scripts/check.ts', 'scripts/check-import-cycles.ts']) {
     copyFileSync(join(ROOT_DIR, file), join(root, file));
@@ -103,9 +85,6 @@ function requiredCheck(fixture: TypecheckFixture, workspace: string) {
 function rootCheck(fixture: TypecheckFixture, workspace: WorkspaceName) {
   return commands.run(['bun', 'run', 'check', `--${workspace}`], fixture.root, {
     ...process.env,
-    // Root test workers can inherit a read-only formatter cache. Keep this
-    // fixture's real dprint invocation writable and independent of that home.
-    DPRINT_CACHE_DIR: join(fixture.root, '.dprint-cache'),
     TURBO_CACHE_DIR: join(fixture.root, '.turbo-cache'),
     TURBO_TELEMETRY_DISABLED: '1',
     TURBO_NO_UPDATE_NOTIFIER: '1',
@@ -135,7 +114,7 @@ describe('lint cache and required cycle scans', () => {
       files: {
         'a.ts': "import { cycle as self } from './a';\nexport const cycle = () => self();\n",
       },
-      rule: 'lint/nursery/noSelfImport',
+      rule: 'import/no-self-import',
     },
     {
       name: 'value cycle',
@@ -143,7 +122,7 @@ describe('lint cache and required cycle scans', () => {
         'a.ts': "import { b } from './b';\nexport const a = () => b();\n",
         'b.ts': "import { a } from './a';\nexport const b = () => a();\n",
       },
-      rule: 'lint/suspicious/noImportCycles',
+      rule: 'import/no-cycle',
     },
     {
       name: 'type-only cycle',
@@ -151,7 +130,7 @@ describe('lint cache and required cycle scans', () => {
         'a.ts': "import type { B } from './b';\nexport type A = { b?: B };\n",
         'b.ts': "import type { A } from './a';\nexport type B = { a?: A };\n",
       },
-      rule: 'lint/suspicious/noImportCycles',
+      rule: 'import/no-cycle',
     },
   ];
   for (const workspace of WORKSPACES) {
@@ -181,6 +160,62 @@ describe('lint cache and required cycle scans', () => {
   }
 
   test(
+    'root check reports isolated tooling cycles even with formatting skipped',
+    async () => {
+      const fixture = createFixture();
+      for (const file of [
+        '.claude/hooks/leaf.ts',
+        '.codex/hooks/leaf.ts',
+        'tests/browser-smoke/leaf.ts',
+        'playwright.config.ts',
+        'apps/frontend/build.ts',
+      ]) {
+        mkdirSync(dirname(join(fixture.root, file)), { recursive: true });
+        writeFileSync(join(fixture.root, file), 'export {};\n');
+      }
+      const report = join(fixture.root, 'root-report.json');
+      const run = async () => {
+        const result = await commands.run(
+          [
+            'bun',
+            './scripts/check.ts',
+            '--root',
+            '--skip-format',
+            '--report-file',
+            report,
+            '--report-id',
+            '8f92b9cc-267b-4b95-b3af-d9c6637660e8',
+          ],
+          fixture.root
+        );
+        const parsed = JSON.parse(readFileSync(report, 'utf8')) as {
+          tasks: { label: string; state: string; exitCode?: number }[];
+        };
+        return { result, cycle: parsed.tasks.find((task) => task.label === 'root:cycles') };
+      };
+      // Other root policies use application manifests absent from this small fixture.
+      // Assert the required task's own result so they cannot cause an incidental pass.
+      const before = await run();
+      expect(before.cycle, before.result.stdout + before.result.stderr).toMatchObject({
+        state: 'executed',
+        exitCode: 0,
+      });
+      await Bun.write(
+        join(fixture.root, 'scripts/isolated-a.ts'),
+        "import type { B } from './isolated-b';\nexport type A = { b?: B };\n"
+      );
+      await Bun.write(
+        join(fixture.root, 'scripts/isolated-b.ts'),
+        "import type { A } from './isolated-a';\nexport type B = { a?: A };\n"
+      );
+      const after = await run();
+      expect(after.cycle).toMatchObject({ state: 'executed', exitCode: 1 });
+      expect(after.result.stdout + after.result.stderr).toContain('scripts/isolated-a.ts');
+    },
+    ROOT_CHECK_TIMEOUT_MS
+  );
+
+  test(
     'an ignored cycle introduced after a warm pass reaches the root check exit',
     async () => {
       const fixture = createFixture();
@@ -193,7 +228,7 @@ describe('lint cache and required cycle scans', () => {
       const rejected = expectOutcome(await rootCheck(fixture, 'frontend'), 'fail');
       expect(rejected).toMatch(/@mangostudio\/frontend:check:quick(?:: |\r?\n)cache hit/);
       expect(rejected).toMatch(/@mangostudio\/frontend:check:cycles(?:: |\r?\n)cache bypass/);
-      expect(rejected).toContain('lint/nursery/noSelfImport');
+      expect(rejected).toContain('import/no-self-import');
       expect(rejected.replaceAll('\\', '/')).toContain('build/new-cycle.ts');
     },
     ROOT_CHECK_TIMEOUT_MS
@@ -231,7 +266,7 @@ describe('lint cache and required cycle scans', () => {
 
 describe('lint cache inputs', () => {
   for (const file of [
-    'biome.json',
+    'bunfig.toml',
     '.editorconfig',
     '.gitignore',
     'tsconfig.json',

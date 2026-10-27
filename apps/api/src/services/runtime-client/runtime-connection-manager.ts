@@ -1,4 +1,4 @@
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type {
   EnvironmentConnectionState,
   EnvironmentConnectionStatus,
@@ -22,10 +22,11 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
+
 import { raceAgainstAbort } from '../../lib/abort-race';
 import { getVersion, isDevelopmentVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
-import { RuntimeBinaryNotFoundError, resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
+import { resolveRuntimeLaunchCommand, RuntimeBinaryNotFoundError } from '../../lib/runtime-paths';
 import {
   type EnvironmentStateTransitionRecorder,
   recordEnvironmentStateTransition,
@@ -862,7 +863,7 @@ export class RuntimeConnectionManager {
       'superseded'
     );
     // Register the replacement before either callback can request shutdown.
-    if (superseded) this.#closeConnection(entry, superseded, 'superseded');
+    if (superseded) void this.#closeConnection(entry, superseded, 'superseded');
     supersededAbort?.abort(unavailable('Runtime connection was closed.'));
     this.#publish(userId);
 
@@ -937,7 +938,7 @@ export class RuntimeConnectionManager {
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry) return;
 
-    this.#release(entry);
+    void this.#release(entry);
     this.#publish(userId);
   }
 
@@ -948,9 +949,9 @@ export class RuntimeConnectionManager {
     expectedClient: RuntimeClient
   ): boolean {
     const entry = this.#entries.get(connectionKey(userId, environmentId));
-    if (!entry?.connection || entry.connection.client !== expectedClient) return false;
+    if (entry?.connection?.client !== expectedClient) return false;
 
-    this.#release(entry);
+    void this.#release(entry);
     this.#publish(userId);
     return true;
   }
@@ -1085,7 +1086,7 @@ export class RuntimeConnectionManager {
         ready.reject(error);
       }
     );
-    this.#trackTeardown(entry, Promise.race([ownership, expired.promise]));
+    void this.#trackTeardown(entry, Promise.race([ownership, expired.promise]));
     return ready.promise;
   }
 
@@ -1127,7 +1128,7 @@ export class RuntimeConnectionManager {
     entry.status = { state: 'disconnected', ...this.#cachedPeer(entry) };
     for (const boundOpening of entry.pendingOpenings ?? []) boundOpening();
     abort?.abort(unavailable('Runtime connection was closed.'));
-    if (connection) this.#closeConnection(entry, connection, 'released');
+    if (connection) void this.#closeConnection(entry, connection, 'released');
     const teardowns = [...(entry.pendingTeardowns ?? [])];
     if (previousRelease) teardowns.push(previousRelease);
     void this.#awaitTeardowns(teardowns).then(release.resolve, release.reject);
@@ -1283,11 +1284,11 @@ export class RuntimeConnectionManager {
    */
   #markUnavailable(key: string, userId: string, revision: number): void {
     const entry = this.#entries.get(key);
-    if (!entry || entry.revision !== revision || !entry.connection) return;
+    if (entry?.revision !== revision || !entry.connection) return;
 
     const connection = entry.connection;
     entry.connection = undefined;
-    this.#closeConnection(entry, connection);
+    void this.#closeConnection(entry, connection);
     if (entry.expectedUpdateDisconnect) {
       entry.expectedUpdateDisconnect = false;
       entry.connectedAtMs = undefined;

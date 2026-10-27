@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { getDb } from '../../../../src/db/database';
 import {
   listToolSettingsDescriptors,
@@ -105,23 +106,23 @@ describe('tool-settings-service', () => {
   });
 
   describe('updateToolSettingsDescriptor', () => {
-    it('throws ToolSettingsError for unknown tools', () => {
+    it('throws ToolSettingsError for unknown tools', async () => {
       const db = getDb();
-      expect(
+      await expect(
         updateToolSettingsDescriptor(db, USER_ID, 'nonexistent', { enabled: true })
       ).rejects.toBeInstanceOf(ToolSettingsError);
     });
 
-    it('throws ToolSettingsError when disabling a non-disableable tool', () => {
+    it('throws ToolSettingsError when disabling a non-disableable tool', async () => {
       const db = getDb();
-      expect(
+      await expect(
         updateToolSettingsDescriptor(db, USER_ID, 'test_beta', { enabled: false })
       ).rejects.toBeInstanceOf(ToolSettingsError);
     });
 
-    it('throws ToolSettingsError for invalid parameter values', () => {
+    it('throws ToolSettingsError for invalid parameter values', async () => {
       const db = getDb();
-      expect(
+      await expect(
         updateToolSettingsDescriptor(db, USER_ID, 'test_alpha', {
           parameters: { unknown_param: 'bad' },
         })

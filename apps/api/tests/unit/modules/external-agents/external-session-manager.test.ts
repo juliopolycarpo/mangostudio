@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+
 import { RemoteError } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
 import { UpdateQueryBuilder } from 'kysely';
+
 import { getDb } from '../../../../src/db/database';
 import {
   createExternalSessionManager,
@@ -682,6 +684,7 @@ describe('external session manager', () => {
   });
 
   it('closes a session that was reaped while the vendor was starting', async () => {
+    // eslint-disable-next-line prefer-const -- This binding is assigned after a callback closes over it.
     let manager: ReturnType<typeof managerFor> | undefined;
     const runtime = createFakeExternalRuntime({
       // Stands in for a consent revocation or a chat deletion landing while the
@@ -698,6 +701,7 @@ describe('external session manager', () => {
   });
 
   it('closes a session still opening when its scope is revoked', async () => {
+    // eslint-disable-next-line prefer-const -- This binding is assigned after a callback closes over it.
     let manager: ReturnType<typeof managerFor> | undefined;
     const runtime = createFakeExternalRuntime({
       // A scoped revocation only sees established sessions; this chat exists

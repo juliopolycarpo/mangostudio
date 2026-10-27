@@ -22,6 +22,7 @@ import type {
   ValidLibraryInstance,
 } from '@mangostudio/shared/library';
 import { parseResourceKey } from '@mangostudio/shared/library/values';
+
 import { formatMessage } from '@/lib/i18n-format';
 
 /**
@@ -32,12 +33,7 @@ import { formatMessage } from '@/lib/i18n-format';
  * look at, and merging them into one warning would hide the difference.
  */
 export type CoverageCellState =
-  | 'present'
-  | 'absent'
-  | 'shadowed'
-  | 'divergent'
-  | 'only-here'
-  | 'incomparable';
+  'present' | 'absent' | 'shadowed' | 'divergent' | 'only-here' | 'incomparable';
 
 export interface CoverageCell {
   readonly targetId: LibraryTargetId;

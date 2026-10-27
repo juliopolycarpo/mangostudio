@@ -28,6 +28,7 @@
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { type Elysia, status } from 'elysia';
+
 import { getApiKeyApi, resolveApiKeyScope } from '../auth';
 import { getDb } from '../db/database';
 import { getSavedAppSettings } from '../modules/app-settings/infrastructure/app-settings-repository';

@@ -120,8 +120,8 @@ export function startOAuthLoopbackServer(options: LoopbackServerOptions): OAuthL
     // Stop listening immediately, but let the in-flight callback response
     // flush before force-closing lingering keep-alive connections — a held
     // connection would keep the fixed port busy for the next OAuth session.
-    server.stop();
-    setTimeout(() => server.stop(true), 1_000).unref?.();
+    void server.stop();
+    setTimeout(() => void server.stop(true), 1_000).unref?.();
   }
 
   // `Bun.serve` types the port as optional because unix-socket servers have

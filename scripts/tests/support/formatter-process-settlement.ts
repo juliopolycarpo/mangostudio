@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+
 import {
   type NativeProcess,
   parseNativeProcesses,
@@ -118,7 +119,7 @@ export async function readNativeFormatterProcess(
     );
   }
   const identity = parseNativeProcesses(`${match[1]} ${match[3]}`, queries.platform)[0];
-  if (!identity || identity.pid !== pid) {
+  if (identity?.pid !== pid) {
     throw new Error(
       `formatter ${pid}: expected its own native identity | received: ${JSON.stringify(identity)}`
     );

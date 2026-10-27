@@ -6,9 +6,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import type { InstallStreamEvent } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { InstallAction } from '../../../../src/features/environments/components/InstallAction';
 import { render, screen, waitFor } from '../../../support/harness/render';
 import { installRecipe } from './fixtures';
@@ -99,9 +101,12 @@ describe('InstallAction', () => {
 
   /** The recipe id each `start` call carried, in the order the calls were made. */
   function startedRecipeIds(): string[] {
-    return fetchMock.mock.calls
-      .filter(([input]) => isStartRequest(String(input)))
-      .map(([, init]) => JSON.parse(String((init as RequestInit).body)).recipeId as string);
+    return (
+      fetchMock.mock.calls
+        .filter(([input]) => isStartRequest(String(input)))
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
+        .map(([, init]) => JSON.parse(String((init as RequestInit).body)).recipeId as string)
+    );
   }
 
   beforeEach(() => {
@@ -226,6 +231,7 @@ describe('InstallAction', () => {
         );
       }
       if (isStartRequest(url)) {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
         const { recipeId } = JSON.parse(String(init?.body)) as { recipeId: string };
         return Promise.resolve(json({ runId: `run-${recipeId}`, attached: false }));
       }
@@ -286,6 +292,7 @@ describe('InstallAction', () => {
       }
       if (isStartRequest(url)) {
         started += 1;
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
         const { recipeId } = JSON.parse(String(init?.body)) as { recipeId: string };
         if (started === 2) {
           return secondStartGate.then(() => json({ runId: `run-${recipeId}`, attached: false }));

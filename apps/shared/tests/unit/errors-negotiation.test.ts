@@ -9,11 +9,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import {
   LEGACY_ERROR_MEDIA_TYPE,
+  prefersProblemDetails,
   PROBLEM_JSON_ACCEPT,
   PROBLEM_JSON_MEDIA_TYPE,
-  prefersProblemDetails,
 } from '@mangostudio/shared/errors';
 
 describe('prefersProblemDetails', () => {

@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { GitRepoState } from '@mangostudio/shared/git';
 import type { GithubContext } from '@mangostudio/shared/github';
+
 import type * as ApiClient from '@/lib/api-client';
+
 import { renderHook, waitFor } from '../../support/harness/render';
 
 const mockContext = jest.fn();
 
-mock.module('@/lib/api-client', () => ({
+void mock.module('@/lib/api-client', () => ({
   client: {
     api: {
       github: {

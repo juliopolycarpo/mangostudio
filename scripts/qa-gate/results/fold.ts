@@ -21,7 +21,7 @@
 import type { TestLane } from '../../lib/test-lanes';
 import type { JunitCase, LaneOutcome } from '../junit-results';
 import type { LaneResult, TestErrorHeadline } from '../model/lanes';
-import { type Measurement, measured, partial, unavailable } from '../model/states';
+import { measured, type Measurement, partial, unavailable } from '../model/states';
 import type { JobEvidence } from './evidence';
 
 /** Exit code the watchdog reports for an attempt it had to kill. */

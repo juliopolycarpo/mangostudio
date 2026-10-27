@@ -3,7 +3,9 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { fireEvent, screen } from '@testing-library/react';
+
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { DEFAULT_PROMPT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';

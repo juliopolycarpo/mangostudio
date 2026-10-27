@@ -9,10 +9,12 @@ import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
 import type { ReasoningEffort } from '@mangostudio/shared/types';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { type ComponentProps, useCallback, useMemo, useState } from 'react';
+
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 import { WorkspaceRail } from '@/features/workspace/rail/WorkspaceRail';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { useUserFirstName } from '@/hooks/use-user-first-name';
+
 import { ChatPageContent } from './components/ChatPageContent';
 import { ChatContextDecisionNotice, ChatFallbackNotice } from './components/ChatPageNotices';
 import { DeprecatedModelNotice } from './components/DeprecatedModelNotice';

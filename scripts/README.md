@@ -17,7 +17,7 @@ scripts/
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
-├── fix.ts            Apply Biome + dprint fixes (bun run fix)
+├── fix.ts            Apply Bun lint and format fixes (bun run fix)
 ├── test.ts           Run unit/integration/e2e/coverage lanes, whole, sharded, or --changed (bun run test)
 ├── run-test-workers.ts
 │                     Run one test lane in worker processes with one merged report (API unit/integration, root test:scripts:workers)
@@ -57,7 +57,7 @@ importing the specific module in new code:
 | `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                           |
 | `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
 | `config.ts`            | Workspace definitions + root lint/format path lists                                                      |
-| `import-cycles.ts`     | Shared cycle-only Biome command for required workspace checks and QA                                     |
+| `import-cycles.ts`     | TypeScript-resolved JS/TS graph scan shared by workspace checks and QA                                   |
 | `changelog.ts`         | git-cliff arg/format logic (wrapped behind a project API)                                                |
 | `npm-pack.ts`          | npm distribution manifest builders                                                                       |
 | `release-version.ts`   | Canonical release version resolver + lockstep consistency check                                          |
@@ -69,21 +69,21 @@ importing the specific module in new code:
 | `junit-report.ts`      | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
 
-Workspace `check:quick` scripts run cacheable normal Biome checks. The lint key
+Workspace `check:quick` scripts run cacheable Bun lint and format checks. The lint key
 includes the workspace's VCS inputs, upstream workspace sources through `transit`,
-and the root Biome, EditorConfig, Git ignore, TypeScript and Turbo configurations.
+and the root Bun, EditorConfig, Git ignore, TypeScript and Turbo configurations.
 Workspace `check:cycles` scripts always run `check-import-cycles.ts`, independently
 of lint cache hits. Both tasks are selected by `bun run check`, the protocol lane
-and each workspace's `check` script. The cycle pass uses the independent
-`biome.cycles.json`, so formatting exclusions and `.gitignore` cannot hide TS/JS
-cycles. It checks TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including JavaScript
+and each workspace's `check` script. The cycle pass uses a TypeScript-resolved
+graph scan, so formatting exclusions and `.gitignore` cannot hide TS/JS cycles.
+It checks TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including JavaScript
 dependencies reached from TypeScript roots and independent JavaScript roots.
 It includes declarations and generated/build source files. It force-excludes
 `node_modules`, `.git`, and the repository's `.mango/artifacts` and `.mango/out`
 caches so concurrent tool installation cannot race scanner discovery. The scan
-raises the file-size limit to JavaScript's largest safe integer instead of
-inheriting Biome's one-MiB limit. Turbo always reruns
-`check:cycles` because ignored files are absent from its VCS cache inputs.
+resolves imports with the TypeScript compiler API and retains type-only edges.
+Turbo always reruns `check:cycles` because ignored files are absent from its VCS
+cache inputs. Dockerfiles are excluded from formatting.
 
 Run one scan from the repository root with
 `bun scripts/check-import-cycles.ts apps/api`.
@@ -244,7 +244,7 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   that balance the next run's split, and fail the run if two shards claimed the
   same file. That is the observable symptom of shards reading different timings,
   which means they did not cover the suite between them while all exiting 0.
-- `collect/circular.ts` — count Biome cycle witnesses across the discovered JS
+- `collect/circular.ts` — count import cycles across the discovered JS
   workspaces and `scripts/`, using the same independent TS/JS scope and command
   as required workspace checks, including type-only and self imports. A complete
   JSON scan returns zero directly when clean. For cycles, the text reporter
@@ -497,7 +497,7 @@ the catalog stale.
 `catalog.json` is validated against the protocol's published
 [`catalog.json`](https://mangostudio.dev/protocol/schema/1/catalog.json) on every run of either
 mode, with ajv: a wrong catalog is byte-stable too, so a diff check alone would never see it.
-Nothing under `generated/` is formatted by Biome.
+Nothing under `generated/` is formatted; see `bunfig.toml` for the current exclusions.
 
 ## Conventions
 

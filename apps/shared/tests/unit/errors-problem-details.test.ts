@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import {
   API_ERROR_RESPONSE_MEMBERS,
   type ApiErrorResponse,

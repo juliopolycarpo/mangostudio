@@ -1,4 +1,5 @@
 import type { GitRepoState } from '@mangostudio/shared/git';
+
 import { parseGitStatus } from '../domain/status-parser';
 import {
   GitCliError,

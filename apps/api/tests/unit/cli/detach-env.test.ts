@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { buildDetachedEnv } from '../../../src/cli/detach';
 import type { MangoConfig } from '../../../src/lib/config';
 import { updateCheckSkipReason } from '../../../src/modules/updates/application/update-check';

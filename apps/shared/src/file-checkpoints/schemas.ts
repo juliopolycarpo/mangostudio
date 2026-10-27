@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import { ReadonlyArraySchema } from '../schema-helpers';
 
 export const FileCheckpointOpSchema = Type.Union([

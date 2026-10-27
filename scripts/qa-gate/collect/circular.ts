@@ -1,37 +1,61 @@
-// Import cycle witnesses across discovered JS workspaces and Bun scripts.
-
 import { createImportCycleCommand } from '../../lib/import-cycles';
-import { countBiomeCycleWitnesses, parseBiomeCycleReport } from './biome-cycles';
 import type { ComponentSpec } from './registry';
-import { runCapture } from './support';
+import { runCapture, type RunResult } from './support';
 
-type Run = (
-  cmd: readonly string[]
-) => Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>;
+type Run = (cmd: readonly string[]) => Promise<RunResult>;
 
-/**
- * Roots Biome can scan: every JS workspace and the Bun-native `scripts/` tree.
- * Crates are Rust and have no JavaScript import graph.
- * // Usage: countCircularDeps(circularRoots(specs))
+/** Select JS workspaces and scripts as the roots for one cycle scan.
+ * @example circularRoots(specs);
  */
 export const circularRoots = (specs: readonly ComponentSpec[]): string[] =>
   specs
     .filter((spec) => spec.kind === 'workspace' || spec.kind === 'scripts')
     .map((spec) => spec.root);
 
-/**
- * Count deduplicated Biome cycle witnesses, including type-only and self imports.
- * All roots share one scan so cross-workspace cycles are counted once. A clean
- * JSON scan returns zero; cycles need Biome's text trace because its JSON
- * reporter omits the trace. `run` is injected for tests.
- * // Usage: await countCircularDeps(['apps/api', 'packages/protocol'])
+/** Validate the complete scanner report before using its count.
+ * @example parseCycleReport(await runCapture(command));
+ */
+export function parseCycleReport(result: RunResult): number {
+  let value: unknown;
+  try {
+    value = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(
+      `Invalid cycle report: expected JSON | received ${JSON.stringify(result.stdout.slice(0, 300))}; stderr ${JSON.stringify(result.stderr.slice(0, 300))}`
+    );
+  }
+  if (!value || typeof value !== 'object' || !('cycles' in value) || !Array.isArray(value.cycles)) {
+    throw new Error(
+      `Invalid cycle report: expected cycles array | received ${JSON.stringify(value)}`
+    );
+  }
+  for (const cycle of value.cycles) {
+    if (
+      !Array.isArray(cycle) ||
+      cycle.length < 2 ||
+      cycle.some((path: unknown) => typeof path !== 'string' || !path) ||
+      cycle[0] !== cycle.at(-1)
+    ) {
+      throw new Error(
+        `Invalid cycle report: expected a closed path of nonempty filenames | received ${JSON.stringify(cycle)}`
+      );
+    }
+  }
+  const expected = value.cycles.length ? 1 : 0;
+  if (result.exitCode !== expected)
+    throw new Error(
+      `Invalid cycle report: expected exit ${expected} | received ${result.exitCode}: ${result.stderr.slice(0, 300)}`
+    );
+  return value.cycles.length;
+}
+
+/** Count cycle witnesses across all roots with a single complete scan.
+ * @example await countCircularDeps(['apps/api', 'packages/protocol']);
  */
 export const countCircularDeps = async (
   roots: readonly string[],
   run: Run = runCapture
 ): Promise<number> => {
   if (roots.length === 0) return 0;
-  const diagnostics = parseBiomeCycleReport(await run(createImportCycleCommand(roots, 'json')));
-  if (diagnostics.length === 0) return 0;
-  return countBiomeCycleWitnesses(diagnostics, await run(createImportCycleCommand(roots)));
+  return parseCycleReport(await run(createImportCycleCommand(roots, 'json')));
 };

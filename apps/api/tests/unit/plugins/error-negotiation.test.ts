@@ -16,6 +16,7 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { inspect } from 'node:util';
+
 import {
   ApiErrorResponseSchema,
   ERROR_CODES,
@@ -26,6 +27,7 @@ import {
 } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
 import Value from 'typebox/value';
+
 import { errorHandler } from '../../../src/plugins/error-handler';
 
 const SECRET = 'sk-live-do-not-log-me';

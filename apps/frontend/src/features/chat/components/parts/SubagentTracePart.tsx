@@ -1,11 +1,13 @@
 import type { MessagePart } from '@mangostudio/shared/types';
 import { type ComponentProps, useState } from 'react';
+
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { Badge } from '@/components/ui/Badge';
 import { Chip } from '@/components/ui/Chip';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { DisclosureChevron } from '../DisclosureChevron';
 
 type SubagentTracePartValue = Extract<MessagePart, { type: 'subagent_trace' }>;
@@ -69,7 +71,7 @@ export function SubagentTracePart({ part }: SubagentTracePartProps) {
               <div className="space-y-1.5">
                 {part.events.map((event, index) => (
                   <div
-                    // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                    // eslint-disable-next-line react/no-array-index-key -- message parts do not expose stable ids
                     key={`${part.toolCallId}-event-${index}`}
                     className="flex items-center justify-between gap-3 rounded-sm bg-canvas px-3 py-2 text-xs text-fg-muted"
                   >
@@ -89,7 +91,7 @@ export function SubagentTracePart({ part }: SubagentTracePartProps) {
               <div className="space-y-2">
                 {part.messages.map((message, index) => (
                   <div
-                    // biome-ignore lint/suspicious/noArrayIndexKey: message parts do not expose stable ids
+                    // eslint-disable-next-line react/no-array-index-key -- message parts do not expose stable ids
                     key={`${part.toolCallId}-message-${index}`}
                     className="rounded-sm bg-canvas px-3 py-2 text-fg-muted"
                   >

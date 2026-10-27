@@ -30,11 +30,13 @@ import {
   Wrench,
 } from 'lucide-react';
 import { useState } from 'react';
+
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { agentRunnerName } from '../lib/turn-identity';
 import { TIMELINE_PANEL_CLASS } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';

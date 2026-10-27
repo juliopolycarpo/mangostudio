@@ -7,7 +7,9 @@
  */
 
 import type { RuntimeStatus } from '@mangostudio/shared/environments';
+
 import { useI18n } from '@/hooks/use-i18n';
+
 import { effectiveInstallation, versionLabel } from '../format';
 import { HealthBadge } from './HealthBadge';
 import { ToolCard } from './ToolCard';

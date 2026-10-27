@@ -15,7 +15,7 @@
 import { parseJsonWith } from '../../../../lib/safe-parse';
 import type { AgentTurnRequest } from '../../types';
 import { createContinuationEnvelope } from '../continuation-envelope';
-import { type ResponsesRequestPolicy, resolveResponsesContextLimit } from './request-builder';
+import { resolveResponsesContextLimit, type ResponsesRequestPolicy } from './request-builder';
 
 export interface ResponsesLoopState {
   /** Stable id shared by every iteration of one agentic turn. */

@@ -87,7 +87,7 @@ The recipe table is described in [`environment-installs.md`](../architecture/env
 What matters for this page:
 
 - **Windows Node** defaults to winget's `OpenJS.NodeJS.LTS` (install and upgrade; the `.LTS`
-  package tracks the current LTS *line*, so an upgrade crosses majors when Node promotes a new
+  package tracks the current LTS _line_, so an upgrade crosses majors when Node promotes a new
   one). **fnm** is the second, helper-managed Node manager: installed through winget on Windows,
   driven on every platform through `fnm install` and `fnm default` only — never `fnm use`, which
   needs a shell hook a service-launched runtime would not see. Every other Node installation

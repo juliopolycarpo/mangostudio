@@ -85,7 +85,7 @@ A tabela de receitas está descrita em
 [`environment-installs.md`](../../architecture/environment-installs.md). O que importa aqui:
 
 - **Node no Windows** usa por padrão o `OpenJS.NodeJS.LTS` do winget (instalar e atualizar; o
-  pacote `.LTS` acompanha a *linha* LTS atual, então uma atualização cruza majors quando o Node
+  pacote `.LTS` acompanha a _linha_ LTS atual, então uma atualização cruza majors quando o Node
   promove uma nova). O **fnm** é o segundo gerenciador de Node assistido: instalado via winget no
   Windows, operado em toda plataforma apenas por `fnm install` e `fnm default` — nunca `fnm use`,
   que precisa de um hook de shell que um runtime iniciado como serviço não veria. Toda outra

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, mock, setSystemTime } from 'bun:test';
 import * as realChildProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { type HandlerContext, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { type HandlerContext, RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type {
   EnvironmentConnectionState,
   EnvironmentTransportKind,
@@ -15,6 +16,7 @@ import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
+
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
 import { RuntimeBinaryNotFoundError } from '../../../src/lib/runtime-paths';
@@ -27,8 +29,8 @@ import type { RuntimeClient } from '../../../src/services/runtime-client/runtime
 import {
   createLocalRuntimeConnector,
   getRuntimeClient,
-  type LocalRuntimeOpenOptions,
   localLaunchFailure,
+  type LocalRuntimeOpenOptions,
   type ManagedRuntimeConnection,
   type RuntimeConnectContext,
   RuntimeConnectionManager,
@@ -1721,6 +1723,7 @@ describe('RuntimeConnectionManager', () => {
       calls.push({
         isolation,
         succeed: (close = () => undefined) => {
+          // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This callback intentionally tests or owns the asynchronous operation described here.
           opened.resolve(fakeConnection(close, { ...TEST_MANIFEST, ...attestationFor(isolation) }));
         },
         succeedWith: (connection) => {
@@ -2227,9 +2230,8 @@ describe('connectWslRuntime', () => {
       spawn: () => enoentChild(),
     }));
 
-    const { connectWslRuntime } = await import(
-      '../../../src/services/runtime-client/runtime-connection-manager'
-    );
+    const { connectWslRuntime } =
+      await import('../../../src/services/runtime-client/runtime-connection-manager');
 
     const outcome = await connectWslRuntime(
       {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents';
+
 import { quotaActivityDelta } from '../../../../src/modules/external-agents/domain/quota-activity';
 
 function limits(usedPercent: number | undefined): ExternalAccountLimits {

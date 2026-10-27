@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import { fireEvent, screen } from '@testing-library/react';
+
 import { ThinkingBlock } from '@/features/chat/components/ThinkingBlock';
+
 import { flushAsyncRender, render } from '../../support/harness/render';
 
 describe('ThinkingBlock', () => {

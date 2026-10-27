@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import {
   type BinaryTarget,
   filterBinaryTargets,
+  releaseArchiveFileName,
   type ReleasePlatformId,
   type ReleaseRuntimeBinaryName,
-  releaseArchiveFileName,
   runtimeBinaryName,
 } from './release-targets';
 

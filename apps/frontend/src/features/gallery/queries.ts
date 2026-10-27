@@ -1,5 +1,6 @@
 import type { GalleryPage } from '@mangostudio/shared/chat';
 import { infiniteQueryOptions, useInfiniteQuery } from '@tanstack/react-query';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

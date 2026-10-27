@@ -11,8 +11,8 @@ import {
   type DistributionManifestExpectation,
   type DistributionManifestScope,
   parseRuntimeProfile,
-  type RuntimeProfile,
   readDistributionManifest,
+  type RuntimeProfile,
   validateDistributionManifest,
 } from '../lib/distribution-manifest';
 import { captureCommand } from '../lib/exec';

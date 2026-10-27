@@ -29,6 +29,7 @@
  */
 
 import { mock } from 'bun:test';
+
 import * as googleGenAI from '@google/genai/web';
 
 // The whole namespace, not a hand-listed subset: mock.module() on an already

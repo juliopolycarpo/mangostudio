@@ -10,7 +10,9 @@
 import type { ChatGptRedeemOutcome } from '@mangostudio/shared/connectors';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useCallback, useRef, useState } from 'react';
+
 import { pluralMessage } from '@/hooks/use-plural';
+
 import { redeemChatGptResetCredit } from '../api';
 
 type ToastType = 'success' | 'error' | 'info';

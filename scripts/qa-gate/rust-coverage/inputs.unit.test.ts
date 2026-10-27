@@ -8,8 +8,8 @@ import { fakeFiles } from '../testing/junit-fixture';
 import { expectState } from '../testing/measurement-assertions';
 import {
   exportJson,
-  RUST_SHA,
   receiptJson,
+  RUST_SHA,
   TWO_CRATE_FILES,
   TWO_CRATE_ROOTS,
 } from '../testing/rust-coverage-fixture';

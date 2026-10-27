@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { hostname, userInfo } from 'node:os';
+
 import type { HubIdentity } from '@mangostudio/shared/runtime-contract';
+
 import {
   type HubIdentitySource,
   resolveLocalHubIdentity,
@@ -18,10 +20,7 @@ class FakeHubIdentitySource implements HubIdentitySource {
   readonly #hostname: string | Error;
   readonly #username: string | Error;
 
-  constructor(answers: {
-    readonly hostname: string | Error;
-    readonly username: string | Error;
-  }) {
+  constructor(answers: { readonly hostname: string | Error; readonly username: string | Error }) {
     this.#hostname = answers.hostname;
     this.#username = answers.username;
   }

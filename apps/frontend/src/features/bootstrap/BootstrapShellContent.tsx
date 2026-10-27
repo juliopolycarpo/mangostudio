@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
+
 import { BootstrapErrorPanel } from '@/components/layout/BootstrapErrorPanel';
+
 import type { ShellBootstrapState } from './use-shell-bootstrap';
 
 /**

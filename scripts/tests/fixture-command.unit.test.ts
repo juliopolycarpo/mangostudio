@@ -2,15 +2,16 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { fixtureChildEnvironment } from './support/child-supervision';
 import {
   disposeFixtureJob,
   FIXTURE_COMMAND_TIMEOUT_MS,
   type FixtureChild,
   type FixtureCommandHost,
+  fixtureCommandHost,
   FixtureCommands,
   FixtureSettlementError,
-  fixtureCommandHost,
 } from './support/fixture-command';
 import type { FixtureJob } from './support/fixture-windows-job';
 

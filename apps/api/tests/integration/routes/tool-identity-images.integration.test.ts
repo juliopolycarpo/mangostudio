@@ -10,8 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { ToolIdentityUpdateResponse } from '@mangostudio/shared/tool-identity';
+
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
 import { updateToolIdentity } from '../../../src/modules/tool-identity/application/tool-identity-service';
@@ -77,6 +79,7 @@ function remoteHost(response: Response) {
     calls,
     deps: {
       fetch: ((input: Parameters<typeof fetch>[0]) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         calls.push(String(input));
         return Promise.resolve(response);
       }) as unknown as typeof fetch,

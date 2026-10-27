@@ -6,6 +6,7 @@
  * lives beside the bus instead of inside any one of them.
  */
 import { SETTINGS_TOPIC, type SettingsScope } from '@mangostudio/shared/realtime';
+
 import { getRealtimeBus } from './realtime-bus';
 
 /**

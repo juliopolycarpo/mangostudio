@@ -15,11 +15,13 @@
 import { expect } from 'bun:test';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
+
 import type { PropagationApply, RemovalApply } from '@mangostudio/shared/library';
 import type {
   RuntimeLibraryApplyParams,
   RuntimeLibraryRemoveParams,
 } from '@mangostudio/shared/runtime-contract';
+
 import { getDb } from '../../src/db/database';
 import { setLibraryLocationDefaultsForTest } from '../../src/modules/app-settings/application/app-settings-service';
 import { createEnvironmentService } from '../../src/modules/environments/application/environment-service';

@@ -2,7 +2,9 @@ import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { isShellAvailable } from '@mangostudio/shared/process/host';
+
 import { cancelActiveTurn } from '../../../src/modules/generation/application/active-turn-registry';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';

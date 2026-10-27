@@ -23,6 +23,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
@@ -35,6 +36,7 @@ import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewA
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
+
 import { BranchControl } from './BranchControl';
 import { BranchPrChip } from './BranchPrChip';
 import { CommitForm } from './CommitForm';
@@ -57,11 +59,11 @@ import {
 } from './hooks/use-git-state';
 import { useGithubContext } from './hooks/use-github-context';
 import { LazyDiffViewer } from './LazyDiffViewer';
+import { RailPanelActions } from './rail/RailPanel';
 import { RemoteActions } from './RemoteActions';
 import { RepositoryHistory } from './RepositoryHistory';
-import { RailPanelActions } from './rail/RailPanel';
-import { StashSheet } from './StashSheet';
 import { shortHash } from './short-hash';
+import { StashSheet } from './StashSheet';
 import { type AmendMode, useAmendMode } from './use-amend-mode';
 import { WorktreeSection } from './WorktreeSection';
 

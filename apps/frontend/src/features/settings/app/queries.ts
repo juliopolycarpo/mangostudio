@@ -5,6 +5,7 @@ import {
   normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
 import { type QueryClient, queryOptions } from '@tanstack/react-query';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

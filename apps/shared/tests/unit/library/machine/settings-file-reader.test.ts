@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { constants } from 'node:fs';
+
 import {
   MAX_SETTINGS_SOURCE_BYTES,
   readBoundedUtf8,

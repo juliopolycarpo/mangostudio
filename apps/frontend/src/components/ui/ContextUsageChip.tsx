@@ -10,6 +10,7 @@
 
 import type { ContextSeverity } from '@mangostudio/shared/chat';
 import type { ReactNode } from 'react';
+
 import { ContextRing } from './ContextRing';
 
 export interface ContextUsageLine {

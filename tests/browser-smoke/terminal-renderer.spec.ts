@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import { expect, test } from '@playwright/test';
+
 import type {} from '../../apps/frontend/tests/browser-support/terminal-renderer-fixture';
 
 // Headless hosts use an explicit software renderer for functional coverage.

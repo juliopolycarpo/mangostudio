@@ -3,6 +3,7 @@ import type { ChildProcess, SpawnOptions as ChildSpawnOptions } from 'node:child
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+
 import { CLOSE_CODES } from '../src/close';
 import type { PortClosure } from '../src/port';
 import { Session } from '../src/session';
@@ -10,9 +11,9 @@ import { CONFORMANCE_A } from '../src/testing/conformance';
 import { createInProcessPortPair } from '../src/transports/in-process';
 import {
   type ExitStatus,
+  sanitizedEnv,
   type SpawnChild,
   type SpawnedPeer,
-  sanitizedEnv,
   spawnPort,
   withErrorCode,
 } from '../src/transports/spawn';
@@ -175,7 +176,7 @@ describe('spawn launcher', () => {
     const session = new Session(peer.port, { peer: CONFORMANCE_A, livenessIntervalMs: false });
     await session.ready;
 
-    session.close();
+    await session.close();
 
     expect(await peer.exited).toEqual({ code: 0, signal: null });
   });

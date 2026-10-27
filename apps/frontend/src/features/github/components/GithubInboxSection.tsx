@@ -1,10 +1,12 @@
 import { Inbox } from 'lucide-react';
+
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
+
 import type { GithubInbox } from '../hooks/use-github-inbox';
 import { GithubNotConnected } from './GithubNotConnected';
 import { GithubPrBadge } from './GithubPrBadge';

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { INSTALLED_VIA_PATH_MAX } from '@mangostudio/shared/updates';
+
 import {
   detectInstallOrigin,
   fitInstalledVia,

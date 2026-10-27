@@ -6,6 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { ReadAheadHandle } from '../../../../src/features/chat/hooks/use-chat-page-state';
 import { fireEvent, renderHook } from '../../../support/harness/render';
 import {
@@ -15,12 +16,10 @@ import {
 } from '../../../support/harness/timers';
 import { FakeIdleScheduler } from '../../../support/mocks/fake-idle-scheduler';
 
-const { useTranscriptReadAhead } = await import(
-  '../../../../src/features/chat/hooks/use-transcript-read-ahead'
-);
-const { READ_AHEAD_SCROLL_ACTIVE_MS } = await import(
-  '../../../../src/features/chat/transcript-read-ahead'
-);
+const { useTranscriptReadAhead } =
+  await import('../../../../src/features/chat/hooks/use-transcript-read-ahead');
+const { READ_AHEAD_SCROLL_ACTIVE_MS } =
+  await import('../../../../src/features/chat/transcript-read-ahead');
 
 const VIEWPORT = 800;
 /** Far from the top of what is loaded, so only the page the reader is in matters. */

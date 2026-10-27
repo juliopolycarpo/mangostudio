@@ -1,4 +1,4 @@
-import { WORKSPACES, type WorkspaceName } from './config';
+import { type WorkspaceName, WORKSPACES } from './config';
 import { TEST_LANES } from './test-lanes';
 
 export type TestLaneTask = 'test:unit' | 'test:integration' | 'test:coverage';

@@ -8,10 +8,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import type { MachineStatus } from '@mangostudio/shared/machine';
 import userEvent from '@testing-library/user-event';
+
 import { OverviewPage } from '../../../../src/features/environments/components/OverviewPage';
 import { screen, waitFor, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';

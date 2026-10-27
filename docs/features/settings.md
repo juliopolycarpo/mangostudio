@@ -60,10 +60,10 @@ The rule, in full:
   changed, forget that folder" is said at all;
 - arrays replace for the same reason — merging by index would make "remove the
   second rule" inexpressible;
-- only the containers *above* those fields merge: `profileSettings` and one
+- only the containers _above_ those fields merge: `profileSettings` and one
   profile's entry, whose children have different owners;
 - `null` on a key that admits it resets that subtree to its default. That is how
-  a whole subtree is cleared, and it works because normalization runs *after*
+  a whole subtree is cleared, and it works because normalization runs _after_
   the merge.
 
 The unit of a patch is a whole top-level field: send `contextSettings` and you

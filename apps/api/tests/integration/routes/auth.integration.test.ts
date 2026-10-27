@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
 import Value from 'typebox/value';
+
 import { requireAuth } from '../../../src/plugins/auth-middleware';
 import { errorHandler } from '../../../src/plugins/error-handler';
 import { authRoutes } from '../../../src/routes/auth';

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type {
   AgentCliStatus,
   InstallGuard,
@@ -9,6 +10,7 @@ import type {
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
+
 import {
   createInstallService,
   InstallBlockedError,

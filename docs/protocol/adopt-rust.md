@@ -174,7 +174,7 @@ it, because reaching it means this side leaked stream ids rather than that the p
 stopped, and either way the stream key `emit` was called with is never spent — a session whose
 driver died does not burn its `max_stream_keys` budget on frames nobody saw.
 
-`with_max_frame_bytes` sets what this session *asks for*; the port it opens over may decode less.
+`with_max_frame_bytes` sets what this session _asks for_; the port it opens over may decode less.
 The session announces the lower of the two — never the session's own ceiling outright — so a
 session configured above a port's ceiling never tells the peer to send frames the port then
 refuses.
@@ -262,7 +262,7 @@ let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
 let port = connect_ipc(ipc_path("mango-hub")?, &deadline).await?;
 ```
 
-On POSIX, `listen_ipc` treats a socket file at the address as *stale* — and replaces it — only
+On POSIX, `listen_ipc` treats a socket file at the address as _stale_ — and replaces it — only
 when a connection to it is refused; a connection that succeeds, or one the dial cannot judge
 either way, leaves the address in use and `listen_ipc` refuses to bind. `IpcListener::close` only
 ever removes the address when it is still this listener's own: the inode recorded when it

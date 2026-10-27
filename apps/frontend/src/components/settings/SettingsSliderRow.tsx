@@ -1,5 +1,7 @@
 import { type CSSProperties, type ReactNode, useState } from 'react';
+
 import { Input } from '@/components/ui/Input';
+
 import { SettingsRow } from './SettingsRow';
 
 interface SettingsSliderRowProps {

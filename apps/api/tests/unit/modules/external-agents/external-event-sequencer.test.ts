@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ExternalAgentEventEnvelope } from '@mangostudio/shared/external-agents';
+
 import {
   ExternalEventSequencer,
   isExpectedTailOfEndedTurn,

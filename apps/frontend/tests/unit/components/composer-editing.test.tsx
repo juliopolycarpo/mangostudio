@@ -5,9 +5,11 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { ChatAttachment } from '@mangostudio/shared/chat';
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { InputBar } from '../../../src/features/chat/components/InputBar';
 import {
   requestComposerFocus,

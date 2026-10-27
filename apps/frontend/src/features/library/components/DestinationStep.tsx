@@ -24,11 +24,13 @@ import type {
 import { Link } from '@tanstack/react-router';
 import { Server } from 'lucide-react';
 import { useMemo, useState } from 'react';
+
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { hashPrefix } from '../format';
 import { destinationKey, destinationsByEnvironment, type WizardDraft } from '../propagation';
 import { BlockedReason } from './BlockedReason';

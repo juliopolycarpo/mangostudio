@@ -1,5 +1,6 @@
 import { type BigIntStats, type Dirent, lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
 import {
   descendantsOf,
   type ProcessEntry,
@@ -93,6 +94,7 @@ export function createReleaseDiagnostics(
       if (child && process.platform !== 'linux') {
         lines.push(`descendant snapshot unavailable on ${process.platform}`);
       } else {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         if (processSnapshotError) lines.push(`descendant snapshot failed: ${processSnapshotError}`);
         const present = new Map(snapshot.map((entry) => [entry.pid, entry]));
         lines.push('observed descendants:');

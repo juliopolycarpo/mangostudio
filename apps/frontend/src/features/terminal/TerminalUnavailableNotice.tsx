@@ -1,11 +1,15 @@
 import type { ReactNode } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { unavailableTitle } from './unavailable-message';
 import type { TerminalAvailabilityState } from './use-terminal-availability';
 
-export interface TerminalUnavailableNoticeProps
-  extends Pick<TerminalAvailabilityState, 'message' | 'tone' | 'reason'> {
+export interface TerminalUnavailableNoticeProps extends Pick<
+  TerminalAvailabilityState,
+  'message' | 'tone' | 'reason'
+> {
   /**
    * The way out, when this surface has one the notice cannot see: the rail at
    * the per-user cap links to `/terminal`, where the open sessions are listed.

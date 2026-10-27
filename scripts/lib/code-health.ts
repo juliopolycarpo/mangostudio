@@ -2,9 +2,8 @@
 
 const ROOT_CONFIG_FILES = new Set([
   '.gitignore',
-  'biome.json',
+  'bunfig.toml',
   'bun.lock',
-  'dprint.json',
   'lefthook.yml',
   'package.json',
   'playwright.config.ts',

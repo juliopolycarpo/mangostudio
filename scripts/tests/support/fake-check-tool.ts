@@ -1,12 +1,12 @@
 /**
- * A stand-in for the `turbo`, `bunx dprint` and `git` commands Check spawns, compiled by
+ * A stand-in for the `turbo`, `bun fmt` and `git` commands Check spawns, compiled by
  * `check-report.unit.test.ts` into native executables named after each tool, so Check's real
  * `PATH` lookup finds them on Windows too.
  *
  * - `turbo` blocks `CHECK_FIXTURE_BLOCK_REPORT` when set, sleeps when
  *   `CHECK_FIXTURE_TURBO_DELAY=yes`, then exits with `CHECK_FIXTURE_TURBO_EXIT`.
- * - `bunx` unblocks `CHECK_FIXTURE_UNBLOCK_REPORT` once Check has failed to publish a snapshot
- *   onto it, then exits with `CHECK_FIXTURE_DPRINT_EXIT`.
+ * - `bun` unblocks `CHECK_FIXTURE_UNBLOCK_REPORT` once Check has failed to publish a snapshot
+ *   onto it, then exits with `CHECK_FIXTURE_FMT_EXIT`.
  * - `git` blocks `CHECK_FIXTURE_BLOCK_REPORT` and fails with a fixed message.
  *
  * Blocking replaces the report file with a directory, so Check's next rename onto it fails and
@@ -48,7 +48,7 @@ async function unblockAfterFailedSnapshot(report: string): Promise<void> {
   while (!readdirSync(dirname(report)).some((name) => name.startsWith(prefix))) {
     if (Date.now() > deadline) {
       throw new Error(
-        `fake bunx (unblock): expected a failed snapshot beside ${report} within ${UNBLOCK_TIMEOUT_MS}ms | received: none`
+        `fake bun (unblock): expected a failed snapshot beside ${report} within ${UNBLOCK_TIMEOUT_MS}ms | received: none`
       );
     }
     await Bun.sleep(10);
@@ -66,10 +66,10 @@ if (tool === 'git') {
   console.error('fake git failed after blocking the report');
   process.exit(128);
 }
-if (tool === 'bunx') {
+if (tool === 'bun') {
   const report = fixtureEnv('CHECK_FIXTURE_UNBLOCK_REPORT');
   if (report) await unblockAfterFailedSnapshot(report);
-  process.exit(exitCodeFrom('CHECK_FIXTURE_DPRINT_EXIT'));
+  process.exit(exitCodeFrom('CHECK_FIXTURE_FMT_EXIT'));
 }
 
 const report = fixtureEnv('CHECK_FIXTURE_BLOCK_REPORT');

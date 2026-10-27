@@ -9,7 +9,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { renderHook } from '@testing-library/react';
+
 import { useRouteEntrance } from '@/lib/motion/use-route-entrance';
 import { motionPresets } from '@/lib/motion/variants';
 

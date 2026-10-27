@@ -5,8 +5,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen } from '@testing-library/react';
+
 import { QuotaPillView } from '../../../src/features/external-agents/HeaderQuotaPill';
 import { render } from '../../support/harness/render';
 

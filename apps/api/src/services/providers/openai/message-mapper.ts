@@ -4,6 +4,7 @@
  */
 
 import type OpenAI from 'openai';
+
 import {
   attachmentToDataUrl,
   isAttachmentSupportedByProvider,
@@ -26,12 +27,10 @@ const OPENAI_CHAT_ATTACHMENT_KINDS = ['image'] as const;
 export function buildChatMessages(req: TextGenerationRequest): OpenAI.ChatCompletionMessageParam[] {
   return [
     ...(req.systemPrompt?.trim() ? [{ role: 'system' as const, content: req.systemPrompt }] : []),
-    ...req.history.map(
-      (msg): OpenAI.ChatCompletionMessageParam => ({
-        role: msg.role === 'ai' ? 'assistant' : 'user',
-        content: msg.text,
-      })
-    ),
+    ...req.history.map((msg): OpenAI.ChatCompletionMessageParam => ({
+      role: msg.role === 'ai' ? 'assistant' : 'user',
+      content: msg.text,
+    })),
     buildOpenAIChatUserMessage(req),
   ];
 }

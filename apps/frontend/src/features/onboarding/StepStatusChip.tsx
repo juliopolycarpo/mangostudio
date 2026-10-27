@@ -10,6 +10,7 @@
 
 import type { OnboardingStepStatus } from '@mangostudio/shared/onboarding';
 import type { ComponentProps } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 

@@ -7,12 +7,14 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type {
   ExternalAccountLimits,
   ExternalAgentDescriptor,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { QueryClient } from '@tanstack/react-query';
+
 import {
   externalAccountLimitsKey,
   publishExternalAccountLimits,

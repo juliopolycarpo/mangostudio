@@ -8,9 +8,11 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import { screen } from '@testing-library/react';
+
 import {
   ChatContextDecisionNotice,
   ChatFallbackNotice,

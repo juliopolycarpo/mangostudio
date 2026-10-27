@@ -8,6 +8,7 @@
  */
 
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { upsertSecretMetadata } from '../../../../services/secret-store/metadata';
 import { bunSecretStore, type SecretStore } from '../../../../services/secret-store/store';
 import { parseStringArray } from '../../../../utils/json';

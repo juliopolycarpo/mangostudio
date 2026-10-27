@@ -13,7 +13,7 @@
  * bun ./scripts/protocol/fixtures/generate-ssh-argv.ts --check  # exit 1 when stale
  */
 
-import { type SshArgvOptions, sshArgv } from '@mangostudio/protocol/spawn';
+import { sshArgv, type SshArgvOptions } from '@mangostudio/protocol/spawn';
 
 const OUTPUT = new URL('../../../spec/fixtures/1/ssh-argv.json', import.meta.url);
 

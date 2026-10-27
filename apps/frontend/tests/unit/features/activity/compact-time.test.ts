@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en, ptBR } from '@mangostudio/shared/i18n';
+
 import { compactElapsed } from '../../../../src/features/activity/lib/compact-time';
 
 const NOW = Date.UTC(2026, 5, 15, 12, 0, 0);

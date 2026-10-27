@@ -1,4 +1,5 @@
 import type { ContextSeverity } from '@mangostudio/shared/chat';
+
 import { useI18n } from '@/hooks/use-i18n';
 
 interface ContextRingProps {

@@ -16,6 +16,7 @@ import {
   type QueryCacheNotifyEvent,
   type QueryClient,
 } from '@tanstack/react-query';
+
 import { environmentKeys } from '@/features/environments/queries';
 import { agentSettingsKeys } from '@/features/settings/agents/queries';
 import { appSettingsKeys } from '@/features/settings/app/queries';
@@ -24,6 +25,7 @@ import { providerSettingsKeys } from '@/features/settings/providers/queries';
 import { skillSettingsKeys } from '@/features/settings/skills/queries';
 import { toolSettingsKeys } from '@/features/settings/tools/queries';
 import { catalogKeys } from '@/hooks/use-model-catalog';
+
 import { chatCapabilitiesKeys } from './use-chat-capabilities';
 
 const CAPABILITY_SOURCE_KEYS: readonly (readonly unknown[])[] = [

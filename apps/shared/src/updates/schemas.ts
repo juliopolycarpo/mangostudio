@@ -8,6 +8,7 @@
 
 import type { Static } from 'typebox';
 import Type from 'typebox';
+
 import { SSEErrorEventSchema } from '../errors';
 
 /** Release channel a build came from or an upgrade targets. */

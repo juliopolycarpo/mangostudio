@@ -1,4 +1,4 @@
-import { RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
+import { access, readFile } from 'node:fs/promises';
 /**
  * Runtime install/upgrade/reinstall runs with an SSE log stream.
  *
@@ -6,10 +6,9 @@ import { RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
  * frontend can reuse the install console parser. One active run per
  * environment; progress bytes from {@link pushRuntimeBinary} land as log lines.
  */
-
-import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type {
   EnvironmentTransportKind,
   InstallStreamEvent,
@@ -27,15 +26,17 @@ import {
   sshRuntimePath,
 } from '@mangostudio/shared/environments';
 import { directoryHashDomainOf } from '@mangostudio/shared/library';
+import { RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
 import {
-  PLATFORM_PROBE_SCRIPT,
   parsePlatformProbe,
+  PLATFORM_PROBE_SCRIPT,
+  resolveRuntimePlatformId,
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
   type RuntimeHealthReport,
-  resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
+
 import { getConfig, getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import {
   getRuntimeConnectionManager,
@@ -79,8 +80,8 @@ import {
 import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
 import {
   type WslProvisioner,
-  WslProvisioningError,
   wslProvisioner,
+  WslProvisioningError,
 } from '../infrastructure/wsl-provisioner';
 import { type RuntimePairingService, runtimePairingService } from './runtime-pairing-service';
 
@@ -828,13 +829,13 @@ export function createRuntimeLifecycleService(
         return Promise.resolve(active.stream.subscribe());
       }
       const recent = recentStreams.get(runId);
-      if (!recent || recent.userId !== userId) return Promise.resolve(null);
+      if (recent?.userId !== userId) return Promise.resolve(null);
       return Promise.resolve(recent.stream.subscribe());
     },
 
     cancel(runId, userId) {
       const run = activeByRun.get(runId);
-      if (!run || run.userId !== userId) return Promise.resolve(false);
+      if (run?.userId !== userId) return Promise.resolve(false);
       // Aborting alone, not finishing here too: the run's own async body — the
       // one place that knows whether cleanup (e.g. revoking a just-issued
       // pairing credential) is still in flight — is what calls `finish` once
@@ -1130,7 +1131,7 @@ export async function pushRuntimeOverSsh(
       timeoutMs: 15_000,
       signal,
     }).catch(() => null);
-    if (current && current.exitCode === 0 && current.stdout.trim() === version) {
+    if (current?.exitCode === 0 && current.stdout.trim() === version) {
       stream.publish({
         type: 'log',
         stream: 'system',

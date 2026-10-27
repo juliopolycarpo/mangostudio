@@ -1,6 +1,7 @@
 import * as motion from 'motion/react-m';
 import { type FormEventHandler, type ReactNode, useCallback, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
+
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
@@ -232,6 +233,7 @@ export function Dialog({
       <motion.div
         {...dialogPanel}
         ref={dialogRef}
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- This custom dialog owns its focus and dismissal behavior.
         role="dialog"
         aria-modal="true"
         aria-labelledby={hasTitle ? titleId : undefined}

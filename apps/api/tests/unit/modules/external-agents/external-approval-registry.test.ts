@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ExternalApprovalRequest } from '@mangostudio/shared/external-agents';
+
 import {
   createExternalApprovalRegistry,
   type ExternalApprovalBinding,

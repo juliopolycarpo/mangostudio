@@ -1,8 +1,11 @@
-import { beforeEach, describe, expect, it, jest } from 'bun:test';
+import { beforeEach, describe, expect, it, jest, spyOn } from 'bun:test';
+
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import { fireEvent, screen, within } from '@testing-library/react';
-import { ToolCallGroupBlock } from '@/features/chat/components/ToolCallGroupBlock';
+
 import type { ToolCallEntry } from '@/features/chat/components/tool-call-grouping';
+import { ToolCallGroupBlock } from '@/features/chat/components/ToolCallGroupBlock';
+
 import { render } from '../../support/harness/render';
 
 function executionSnapshot(durationMs: number): ToolExecutionSnapshot {
@@ -133,6 +136,45 @@ describe('ToolCallGroupBlock', () => {
     );
 
     expect(screen.getByRole('button', { name: /\+1 more/i })).toHaveTextContent('3 hits');
+  });
+
+  it('updates a search summary when the result changes without changing length', () => {
+    const previous = '{"matches":[{},{}]}';
+    const next = '{"matches":[{}]}'.padEnd(previous.length);
+    expect(next).toHaveLength(previous.length);
+    const second = entry({ toolCallId: 't2', name: 'grep', result: '{"matches":[{}]}' });
+    const { rerender } = render(
+      <ToolCallGroupBlock calls={[entry({ name: 'grep', result: previous }), second]} />
+    );
+
+    expect(screen.getByRole('button', { name: /\+1 more/i })).toHaveTextContent('3 hits');
+    const updated = [entry({ name: 'grep', result: next }), { ...second }];
+    rerender(<ToolCallGroupBlock calls={updated} />);
+    expect(screen.getByRole('button', { name: /\+1 more/i })).toHaveTextContent('2 hits');
+    updated[0].result = previous;
+    rerender(<ToolCallGroupBlock calls={updated} />);
+    expect(screen.getByRole('button', { name: /\+1 more/i })).toHaveTextContent('3 hits');
+  });
+
+  it('does not reparse unchanged results when the calls array is rebuilt', () => {
+    const first = '{"matches":[{"file":"first"}]}';
+    const second = '{"matches":[{"file":"second"}]}';
+    const calls = [
+      entry({ toolCallId: 't1', name: 'grep', result: first }),
+      entry({ toolCallId: 't2', name: 'grep', result: second }),
+    ];
+    const parse = spyOn(JSON, 'parse');
+    try {
+      const { rerender } = render(<ToolCallGroupBlock calls={calls} />);
+      expect(screen.getByRole('button', { name: /\+1 more/i })).toHaveTextContent('2 hits');
+      const parses = () =>
+        parse.mock.calls.filter(([value]) => value === first || value === second);
+      expect(parses()).toHaveLength(2);
+      rerender(<ToolCallGroupBlock calls={calls.map((call) => ({ ...call }))} />);
+      expect(parses()).toHaveLength(2);
+    } finally {
+      parse.mockRestore();
+    }
   });
 
   it('opens failed calls and presents their remediation without a JSON wrapper', () => {

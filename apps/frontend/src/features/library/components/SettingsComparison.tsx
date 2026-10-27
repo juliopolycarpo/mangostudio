@@ -28,6 +28,7 @@ import type {
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { Ban, EyeOff } from 'lucide-react';
 import type { ReactNode } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
@@ -35,6 +36,7 @@ import { useEnvironmentScope } from '@/features/environments/use-environment-sco
 import { useI18n } from '@/hooks/use-i18n';
 import { formatList, formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import {
   libraryLocationsQueryOptions,
   settingsComparisonQueryOptions,

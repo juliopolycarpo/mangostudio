@@ -4,9 +4,11 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+
 import type * as ApiClient from '../../../src/lib/api-client';
 import { act, flushAsyncRender, renderHook, waitFor } from '../../support/harness/render';
 
@@ -31,7 +33,7 @@ const mockChatsFn = Object.assign(
 );
 
 // Eden Treaty's generic types are too strict for jest.fn() mocks, so the factory is cast via unknown.
-mock.module('../../../src/lib/api-client', () => ({
+void mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: { chats: mockChatsFn },
   } as unknown as typeof ApiClient,

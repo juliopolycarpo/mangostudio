@@ -1,6 +1,7 @@
 import type { GitBranchInfo } from '@mangostudio/shared/git';
 import { Check, History, Sparkles } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { SplitButton } from '@/components/ui/SplitButton';
@@ -8,15 +9,12 @@ import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useCommit, useGitPull, useGitPush, useStagePaths } from './hooks/use-git-state';
 import { shortHash } from './short-hash';
 
 export type CommitAction =
-  | 'commit'
-  | 'stage-all-and-commit'
-  | 'commit-and-push'
-  | 'commit-and-sync'
-  | 'amend';
+  'commit' | 'stage-all-and-commit' | 'commit-and-push' | 'commit-and-sync' | 'amend';
 
 interface CommitActionsInput {
   readonly chatId: string;

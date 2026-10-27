@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { touchesContractArtifactSurface } from '../lib/contract-artifacts';
 
 describe('contract artifact check scoping', () => {

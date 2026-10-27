@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+
 import {
   closeAllMcpClients,
   disposeMcpServer,

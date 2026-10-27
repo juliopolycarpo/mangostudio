@@ -1,6 +1,8 @@
 import { TerminalSquare } from 'lucide-react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { TerminalView } from './TerminalView';
 
 export interface TerminalSessionPageProps {

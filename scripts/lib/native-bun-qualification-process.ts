@@ -23,8 +23,7 @@ export interface NativeProcessScope {
 
 interface NativeSettlement {
   readonly scope:
-    | 'observed descendants and command process group'
-    | 'atomic Windows Job membership';
+    'observed descendants and command process group' | 'atomic Windows Job membership';
   readonly pollIntervalMs: number;
   readonly rootObserved: boolean;
   readonly observed: readonly NativeProcess[];
@@ -114,6 +113,7 @@ export function parseNativeProcesses(text: string, platform: NodeJS.Platform): N
         parentPid,
         group: null,
         identity: `${pid}:${value.created}`,
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Diagnostics intentionally describe arbitrary invalid input, including non-scalar values.
         command: String(value.command ?? ''),
         ...(value.name !== undefined ? { name: value.name as string } : {}),
         ...(value.executablePath !== undefined
@@ -168,7 +168,7 @@ function processStart(row: NativeProcess): { clock: 'ticks' | 'time'; value: big
 function validParentEdge(child: NativeProcess, parent: NativeProcess): boolean {
   const childStart = processStart(child);
   const parentStart = processStart(parent);
-  if (childStart && parentStart && childStart.clock === parentStart.clock)
+  if (childStart && childStart.clock === parentStart?.clock)
     return childStart.value >= parentStart.value;
   // POSIX reports a current parent; Windows retains its creation-time parent PID after reuse.
   return child.group !== null && parent.group !== null;

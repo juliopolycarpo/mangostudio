@@ -11,6 +11,7 @@
  */
 
 import type { GitRepoState } from '@mangostudio/shared/git';
+
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useGitRealtimeInvalidation, useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';

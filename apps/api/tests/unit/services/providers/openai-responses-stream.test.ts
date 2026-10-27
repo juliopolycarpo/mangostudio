@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { APIError } from 'openai';
+
 import {
   computeSystemPromptHash,
   computeToolsetHash,

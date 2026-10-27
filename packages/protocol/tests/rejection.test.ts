@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { rejectionOf } from '../src/testing/rejection';
 
 describe('rejectionOf', () => {

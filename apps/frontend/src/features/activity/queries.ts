@@ -10,6 +10,7 @@
 
 import type { ListActivityQuery } from '@mangostudio/shared/activity';
 import { queryOptions } from '@tanstack/react-query';
+
 import { listActivity } from '@/services/activity-service';
 
 export const activityKeys = {

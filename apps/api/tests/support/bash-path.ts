@@ -1,4 +1,5 @@
 import { shellQuote } from '@mangostudio/shared/environments';
+
 import { asGitPath } from './git-path';
 
 /**

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+
 import type { InstallProfileSetup } from '@mangostudio/shared/environments';
 
 const PROFILE_FILENAMES = ['.bashrc', '.bash_profile', '.profile', '.zprofile', '.zshrc'] as const;

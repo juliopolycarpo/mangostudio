@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import {
   type ChatGptDoctorDeps,
   collectChatGptDoctorChecks,
@@ -233,6 +235,7 @@ describe('collectChatGptDoctorChecks', () => {
       false,
       makeDeps({
         fetchImpl: (input) => {
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
           if (new URL(String(input)).host === 'auth.example.test') {
             return Promise.resolve(new Response(null, { status: 403 }));
           }

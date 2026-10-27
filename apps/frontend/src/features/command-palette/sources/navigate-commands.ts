@@ -9,6 +9,7 @@
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { LinkProps } from '@tanstack/react-router';
 import { House, Image, LayoutGrid, MessageSquare, MonitorCog, Settings } from 'lucide-react';
+
 import { settingsNavGroups } from '@/components/settings/settings-nav';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { environmentNavEntries } from '@/features/environments/environments-nav';

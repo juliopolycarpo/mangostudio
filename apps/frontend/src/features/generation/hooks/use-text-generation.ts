@@ -31,6 +31,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { MessagePart, ReasoningEffort } from '@mangostudio/shared/types';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
+
 import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-file-checkpoints';
 import { useChatStream } from '@/features/chat/hooks/use-chat-stream';
 import { setChatTodos } from '@/features/chat/hooks/use-chat-todos';
@@ -404,9 +405,9 @@ export function useTextGeneration({
         await queryClient.invalidateQueries({ queryKey });
         restoreRefusalRows(queryClient, queryKey, refusalRows.current.get(chatId));
         const data = queryClient.getQueryData<TranscriptListQueryData>(queryKey);
-        const settled =
-          data === undefined ||
-          !data.pages.some((page) => page.messages.some((message) => message.isGenerating));
+        const settled = !data?.pages.some((page) =>
+          page.messages.some((message) => message.isGenerating)
+        );
         if (settled) {
           pendingTranscriptReconciles.current.delete(chatId);
           continue;

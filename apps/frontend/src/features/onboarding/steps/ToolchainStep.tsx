@@ -10,6 +10,7 @@
 
 import { useQueries } from '@tanstack/react-query';
 import { CircleAlert, CircleCheck } from 'lucide-react';
+
 import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
 import { RecipeAction } from '@/features/environments/components/RecipeAction';
@@ -21,6 +22,7 @@ import {
 } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { StepFrame } from '../StepFrame';
 import { isRuntimeReady, PROJECT_RUNTIME_IDS } from '../use-onboarding-facts';
 

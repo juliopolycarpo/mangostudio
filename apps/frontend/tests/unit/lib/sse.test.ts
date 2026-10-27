@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { readSseChunks } from '@/lib/sse';
 
 function readerOf(chunks: readonly string[]): ReadableStreamDefaultReader<Uint8Array> {

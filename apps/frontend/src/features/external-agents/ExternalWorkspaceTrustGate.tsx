@@ -14,12 +14,14 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { trustExternalWorkspace } from '@/services/external-agent-service';
+
 import {
   type ExternalWorkspaceTrustRequest,
   onExternalWorkspaceTrustPrompt,

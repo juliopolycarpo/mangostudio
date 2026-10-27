@@ -238,7 +238,7 @@ Servers advertising the `resources` or `prompts` capability get two extra surfac
 - **Chat composer** — the MCP menu lists every enabled server's prompts and resources. A prompt
   inserts its resolved text into the input (argument-bearing prompts get a small form first).
   A resource is attached to the current chat as context: `POST
-  /mcp/servers/:id/resources/read` with a `chatId` persists text (`text/plain`, `markdown`,
+/mcp/servers/:id/resources/read` with a `chatId` persists text (`text/plain`, `markdown`,
   `csv`, `json`), image, and PDF contents as chat attachments, and the next turn carries their
   ids through the existing attachments pipeline.
 

@@ -1,9 +1,12 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { cn } from '@/lib/utils';
 
-interface IconButtonProps
-  extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'aria-label'> {
+interface IconButtonProps extends Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  'children' | 'aria-label'
+> {
   /**
    * The accessible name, and the tooltip unless `title` says more: an icon
    * alone says nothing to a screen reader.

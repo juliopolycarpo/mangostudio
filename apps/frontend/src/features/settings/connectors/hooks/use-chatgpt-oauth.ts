@@ -3,10 +3,12 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useMutation } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import {
-  ConnectorApiError,
   cancelChatGptOAuth,
+  ConnectorApiError,
   getChatGptOAuthStatus,
   startChatGptOAuth,
 } from '../api';
@@ -140,7 +142,6 @@ export function useChatGptOAuth({ messages, onSuccess }: UseChatGptOAuthOptions)
 
     let stopped = false;
     let settled = false;
-    let intervalId: number | undefined;
 
     const settleSuccess = async (status: ChatGptOAuthStatus) => {
       activeSessionIdRef.current = null;
@@ -181,11 +182,11 @@ export function useChatGptOAuth({ messages, onSuccess }: UseChatGptOAuthOptions)
     };
 
     void poll();
-    intervalId = window.setInterval(() => void poll(), POLL_INTERVAL_MS);
+    const intervalId = window.setInterval(() => void poll(), POLL_INTERVAL_MS);
 
     return () => {
       stopped = true;
-      if (intervalId !== undefined) window.clearInterval(intervalId);
+      window.clearInterval(intervalId);
     };
   }, [fail, messages, phase, session]);
 

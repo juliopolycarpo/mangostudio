@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { createGeminiClient } from '../../../../src/services/providers/gemini/client';
 import { generateGeminiImage } from '../../../../src/services/providers/gemini/image-generation';
 

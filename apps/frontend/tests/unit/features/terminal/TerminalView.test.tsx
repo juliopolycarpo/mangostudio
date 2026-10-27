@@ -8,6 +8,7 @@
  */
 
 import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
+
 import {
   decodeTerminalClientMessage,
   encodeTerminalServerMessage,
@@ -17,6 +18,7 @@ import { act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
+
 import { TerminalView } from '../../../../src/features/terminal/TerminalView';
 import { render, screen } from '../../../support/harness/render';
 import { FakeTerminalSocket } from './fake-terminal-socket';

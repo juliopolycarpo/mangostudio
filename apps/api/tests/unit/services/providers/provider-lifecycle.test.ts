@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { createProviderLifecycle } from '../../../../src/services/providers/core/provider-lifecycle';
 
 describe('createProviderLifecycle', () => {
@@ -8,6 +9,7 @@ describe('createProviderLifecycle', () => {
 
     const lifecycle = createProviderLifecycle({
       provider: 'openai',
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       loadPreparedRuntime: async (userId: string, modelName?: string) => ({
         cacheKey: `${userId}:${modelName ?? ''}`,
         loadCount: ++loadCount,
@@ -39,6 +41,7 @@ describe('createProviderLifecycle', () => {
 
     const lifecycle = createProviderLifecycle({
       provider: 'anthropic',
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       loadPreparedRuntime: async (userId: string, modelName?: string) => ({
         cacheKey: `${userId}:${modelName ?? ''}`,
         loadCount: ++loadCount,

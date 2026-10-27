@@ -1,6 +1,7 @@
 import type { GenerateCommitMessageResponse, GitBranchInfo } from '@mangostudio/shared/git';
 import { History, X } from 'lucide-react';
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
@@ -10,6 +11,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
+
 import { CommitActions, useCommitActions } from './CommitActions';
 import { IconButton } from './components/IconButton';
 import { useGenerateCommitMessage, useGitHeadMessage } from './hooks/use-git-state';
@@ -91,7 +93,7 @@ export function CommitForm({
     onRemoteFailure,
   });
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: applySuggestion only writes state and refs, and re-running on its identity would re-prefill an edited draft.
+  // applySuggestion only writes state and refs, and re-running on its identity would re-prefill an edited draft.
   useEffect(() => {
     if (!amend) {
       prefilledHash.current = null;
@@ -108,6 +110,7 @@ export function CommitForm({
       return;
     }
     applySuggestion(suggestion);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applySuggestion identity must not re-prefill an edited draft.
   }, [amend, headMessage.data]);
 
   useEffect(() => {

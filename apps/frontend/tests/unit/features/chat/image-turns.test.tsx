@@ -6,8 +6,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { createMockMessage } from '@mangostudio/shared/test-utils';
 import { screen } from '@testing-library/react';
+
 import { AssistantImageTurn } from '../../../../src/features/chat/components/AssistantImageTurn';
 import { GeneratedImagePart } from '../../../../src/features/chat/components/GeneratedImagePart';
 import { render } from '../../../support/harness/render';

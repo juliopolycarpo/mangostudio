@@ -1,10 +1,12 @@
 import { getActiveTodo, summarizeTodos } from '@mangostudio/shared/todos';
 import { ListTodo } from 'lucide-react';
 import { useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { ChatDockNotice } from './ChatPageNotices';
 import { DisclosureChevron } from './DisclosureChevron';
 import { TodoItemRow } from './TodoItemRow';
@@ -57,7 +59,7 @@ export function PinnedTodoPanel({ chatId }: PinnedTodoPanelProps) {
         {expanded && (
           <ul className="space-y-1.5 px-4 pb-3">
             {todos.map((todo, idx) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: todo items do not expose stable ids
+              // eslint-disable-next-line react/no-array-index-key -- todo items do not expose stable ids
               <TodoItemRow key={`pinned-todo-${idx}`} todo={todo} />
             ))}
           </ul>

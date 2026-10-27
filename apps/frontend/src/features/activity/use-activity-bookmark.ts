@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+
 import { authClient } from '@/lib/auth-client';
+
 import { readActivityLastSeen, writeActivityLastSeen } from './last-seen';
 
 /**

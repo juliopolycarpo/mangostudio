@@ -1,6 +1,7 @@
 import type { StashEntry } from '@mangostudio/shared/git';
 import { ArchiveRestore, Copy, Trash2, X } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -12,6 +13,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { DialogCodeBlock } from './components/DialogBlocks';
 import { IconButton } from './components/IconButton';
 import { RowList } from './components/RowList';

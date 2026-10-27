@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import ts from '@typescript/typescript6';
+
 import { ROOT_DIR } from '../lib/config';
 import { assertFrontendApiImportBoundary } from '../lib/frontend-api-import-boundary';
 import {
   createSourceTree,
+  lintConfiguredSource,
   lintSource,
   removeSourceTrees,
   transparentLoaderForms,
@@ -19,7 +22,32 @@ const TRANSCRIPT =
 
 afterEach(removeSourceTrees);
 
-describe('frontend API-internal Biome restriction', () => {
+describe('frontend API-internal Bun restriction', () => {
+  it('enforces the scoped loader restriction with the actual bunfig.toml', () => {
+    const result = lintConfiguredSource(
+      'apps/frontend/src/forbidden.ts',
+      `export const transcript = import('${TRANSCRIPT}');`
+    );
+    expect(result.exitCode, result.output).toBe(1);
+    expect(result.output).toContain('no-restricted-syntax');
+    expect(result.output).toContain(PARITY_TEST);
+  });
+
+  it('preserves the parity exception with the actual bunfig.toml', () => {
+    const result = lintConfiguredSource(
+      PARITY_TEST,
+      `export const transcript = import('${TRANSCRIPT}');`
+    );
+    expect(result.exitCode, result.output).toBe(0);
+  });
+
+  it('preserves the locale exception with the actual bunfig.toml', () => {
+    const result = lintConfiguredSource(
+      'apps/frontend/src/lib/locale-dictionaries.ts',
+      "import '@mangostudio/shared/i18n/en';"
+    );
+    expect(result.exitCode, result.output).toBe(0);
+  });
   it.each([
     `import { ExternalTurnTranscript } from '${TRANSCRIPT}';`,
     `import * as transcript from '${TRANSCRIPT}';`,
@@ -27,11 +55,16 @@ describe('frontend API-internal Biome restriction', () => {
     `export { ExternalTurnTranscript } from '${TRANSCRIPT}';`,
     `export * from '${TRANSCRIPT}';`,
     `const transcript = import('${TRANSCRIPT}');`,
+    `const transcript = import(\`${TRANSCRIPT}\`);`,
+    `const transcript = require('${TRANSCRIPT}');`,
+    `const transcript = module.require('${TRANSCRIPT}');`,
+    `const transcript = module['require']('${TRANSCRIPT}');`,
+    `type Transcript = import('${TRANSCRIPT}').ExternalTurnTranscript;`,
     `import transcript = require('${TRANSCRIPT}');`,
   ])('rejects a new frontend value edge: %s', (source) => {
     const result = lintSource('apps/frontend/src/forbidden.ts', source);
     expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain('lint/style/noRestrictedImports');
+    expect(result.output).toMatch(/no-restricted-(?:imports|syntax)/);
     expect(result.output).toContain(PARITY_TEST);
     expect(result.output).toContain('real hub transcript');
   });
@@ -88,6 +121,16 @@ describe('frontend API-internal Biome restriction', () => {
   });
 
   it.each([
+    '@mangostudio/shared/i18n',
+    '@mangostudio/shared/i18n/en',
+    '@mangostudio/shared/i18n/pt-BR',
+  ])('rejects dynamic locale dictionary loading for %s', (specifier) => {
+    const result = lintSource('apps/frontend/src/forbidden-locale.ts', `import(\`${specifier}\`);`);
+    expect(result.exitCode, result.output).toBe(1);
+    expect(result.output).toContain('Locale dictionaries are i18n plumbing');
+  });
+
+  it.each([
     'apps/frontend/src/hooks/use-i18n.tsx',
     'apps/frontend/src/lib/locale-dictionaries.ts',
     'apps/frontend/tests/unit/locale.test.ts',
@@ -103,9 +146,19 @@ describe('frontend API-internal Biome restriction', () => {
     );
     expect(result.exitCode, result.output).toBe(0);
   });
+
+  it.each([
+    "import * as locale from '@mangostudio/shared/i18n';",
+    "import locale from '@mangostudio/shared/i18n';",
+    "import { en } from '@mangostudio/shared/i18n';",
+  ])('rejects non-plumbing locale imports: %s', (source) => {
+    const result = lintSource('apps/frontend/src/forbidden-locale.ts', source);
+    expect(result.exitCode, result.output).toBe(1);
+    expect(result.output).toContain('Locale dictionaries are i18n plumbing');
+  });
 });
 
-describe('frontend shared entrypoint Biome restriction', () => {
+describe('frontend shared entrypoint Bun restriction', () => {
   const paths = [
     'apps/frontend/src/shared-root.ts',
     'apps/frontend/src/hooks/use-i18n.tsx',
@@ -116,7 +169,7 @@ describe('frontend shared entrypoint Biome restriction', () => {
   it.each(paths)('rejects the shared root in %s', (path) => {
     const result = lintSource(path, "import '@mangostudio/shared';");
     expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain('lint/style/noRestrictedImports');
+    expect(result.output).toContain('no-restricted-imports');
     expect(result.output).toContain(
       'Use a bounded-context entrypoint such as @mangostudio/shared/agents.'
     );

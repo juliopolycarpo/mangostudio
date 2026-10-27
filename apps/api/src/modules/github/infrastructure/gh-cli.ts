@@ -1,5 +1,4 @@
 import { RemoteError } from '@mangostudio/protocol';
-
 /**
  * Hub-side facade over the runtime's `gh.exec` / `gh.mutate` methods.
  *
@@ -12,9 +11,9 @@ import { RemoteError } from '@mangostudio/protocol';
  * the spawn moved to the runtime, exactly where `git` already runs, and this
  * file became the transport call and the error translation around it.
  */
-
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RuntimeGhExecResult } from '@mangostudio/shared/runtime-contract';
+
 import { getRuntimeClient } from '../../../services/runtime-client';
 import {
   detailBoolean,

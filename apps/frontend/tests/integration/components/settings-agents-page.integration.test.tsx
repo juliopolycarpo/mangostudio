@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
+
 import { AgentSettingsPage } from '../../../src/features/settings/agents/components/AgentSettingsPage';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';

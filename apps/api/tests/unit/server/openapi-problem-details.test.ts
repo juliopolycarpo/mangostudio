@@ -10,7 +10,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { PROBLEM_JSON_MEDIA_TYPE } from '@mangostudio/shared/errors';
+
 import { withProblemDetailsMedia } from '../../../src/server/openapi-problem-details';
 
 const PROBLEM_REF = { $ref: '#/components/schemas/ProblemDetails' };

@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { annotateBranchesWithPrs, type BranchPrAnnotation } from '../lib/branch-pr-annotation';
 import { githubPrsQueryOptions } from '../queries';
 

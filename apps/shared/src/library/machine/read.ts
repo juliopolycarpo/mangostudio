@@ -5,6 +5,7 @@
  */
 
 import { posix, win32 } from 'node:path';
+
 import type { LibraryHashPathStyle } from '../hash';
 import type { ResourceKind } from '../index';
 import { SKILL_ENTRYPOINT } from './instance-reader';

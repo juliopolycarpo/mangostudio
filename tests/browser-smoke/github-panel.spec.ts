@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+
 import { dismissWorkdirPicker } from './support/workdir-picker';
 
 test('github rail panel renders and obeys its visibility setting', async ({ page }) => {

@@ -10,6 +10,7 @@
  */
 
 import { dirname, join } from 'node:path';
+
 import type {
   AgentCliStatus,
   RuntimeId,
@@ -25,6 +26,7 @@ import {
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+
 import { getConfig, getHomeMangoDir, getVersion } from '../../../lib/config';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
@@ -325,7 +327,7 @@ export function createEnvironmentProbingService(
     const statuses: T[] = [];
     for (const id of ids) {
       const entry = cache.get(entryKey(scope, kind, id));
-      if (!entry || entry.client !== client || currentTime - entry.checkedAt >= cacheTtlMs) {
+      if (entry?.client !== client || currentTime - entry.checkedAt >= cacheTtlMs) {
         return null;
       }
       statuses.push(entry.status as T);
@@ -475,8 +477,7 @@ export function createEnvironmentProbingService(
       // the same connection `readFresh` would demand.
       const lastForced = forcedCompletions.get(key);
       if (
-        lastForced &&
-        lastForced.client === client &&
+        lastForced?.client === client &&
         requestArrivedAt - lastForced.completedAt < FORCED_PROBE_MIN_INTERVAL_MS
       ) {
         return lastForced.statuses as T[];
@@ -712,8 +713,7 @@ export function createEnvironmentProbingService(
           continue;
         }
         const cached = cache.get(entryKey(scope, 'runtime', runtimeId))?.status as
-          | RuntimeStatus
-          | undefined;
+          RuntimeStatus | undefined;
         if (!cached) return status;
         batch.push(cached);
       }

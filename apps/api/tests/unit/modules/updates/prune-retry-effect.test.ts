@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { runPruneRetry } from '../../../../src/modules/updates/application/prune-retry';
 import type { InstallOriginProbe } from '../../../../src/modules/updates/domain/install-origin';
 import type {

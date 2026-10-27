@@ -57,18 +57,17 @@ bun run --filter @mangostudio/frontend build
 
 A [lefthook](https://github.com/evilmartians/lefthook) pre-commit hook is installed automatically during `bun install`. It runs these checks on every commit:
 
-| Check             | Trigger      | Files targeted                 | Fails commit on                                                      |
-| ----------------- | ------------ | ------------------------------ | -------------------------------------------------------------------- |
-| Biome format/lint | `pre-commit` | `*.{ts,tsx,js,jsx,json}`       | Format or lint errors                                                |
-| dprint format     | `pre-commit` | `*.{md,mdc,mdx,toml,yml,yaml}` | Format errors                                                        |
-| dprint Dockerfile | `pre-commit` | `{Dockerfile,Dockerfile.*}`    | Format errors                                                        |
-| Affected checks   | `pre-commit` | All staged files               | Workspace validation and relevant repository-wide code-health errors |
+| Check           | Trigger      | Files targeted                   | Fails commit on                                                      |
+| --------------- | ------------ | -------------------------------- | -------------------------------------------------------------------- |
+| Bun lint        | `pre-commit` | JavaScript and TypeScript        | Lint errors                                                          |
+| Bun fmt         | `pre-commit` | Supported code and documentation | Formatting errors                                                    |
+| Affected checks | `pre-commit` | All staged files                 | Workspace validation and relevant repository-wide code-health errors |
 
 Formatted files are re-staged automatically. The affected-check command is
 `bun run check --staged --skip-format`: it runs workspace lint, import-cycle and type checks,
-plus relevant repository-wide checks. Root format checks are skipped because the format hooks
-handle staged files; workspace lint may still report formatting errors. The affected-check
-step is skipped during merge or rebase. [`lefthook.yml`](../../lefthook.yml) owns the hook configuration.
+plus relevant repository-wide checks. Formatting is handled by the preceding hooks. Dockerfiles
+are excluded from formatting. The affected-check step is skipped during merge or rebase.
+[`lefthook.yml`](../../lefthook.yml) owns the hook configuration.
 
 ## 5. Common Commands
 

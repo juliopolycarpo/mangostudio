@@ -3,6 +3,7 @@
  */
 
 import OpenAI, { APIError as OpenAIAPIError } from 'openai';
+
 import { getOrCreateCachedClient } from '../core/client-cache';
 import { PROVIDER_PROBE_TIMEOUT_MS, withAbortTimeout } from '../core/probe-timeout';
 import {

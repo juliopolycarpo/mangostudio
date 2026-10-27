@@ -10,9 +10,10 @@ import { chmod, lstat, unlink } from 'node:fs/promises';
 import { connect as connectSocket, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { CLOSE_CODES } from '../close';
 import type { Port } from '../port';
-import { abortReason, type ConnectDeadlineOptions, connectDeadline } from './deadline';
+import { abortReason, connectDeadline, type ConnectDeadlineOptions } from './deadline';
 import { asError, createStreamPort } from './node-stream';
 
 /** Owner-only, the permission local-socket.md requires of a POSIX socket file. */

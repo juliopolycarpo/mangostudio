@@ -11,8 +11,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { GithubPanel } from '../../../src/features/github/components/GithubPanel';
 import { requestGithubCreatePr } from '../../../src/features/github/lib/github-panel-request';
 import { AppContext } from '../../../src/lib/app-context';

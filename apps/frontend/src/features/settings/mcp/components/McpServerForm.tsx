@@ -7,6 +7,7 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { McpServer, McpTransport } from '@mangostudio/shared/mcp';
 import { type FormEvent, useState } from 'react';
+
 import { SettingsField } from '@/components/settings/SettingsField';
 import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { Badge } from '@/components/ui/Badge';
@@ -18,6 +19,7 @@ import { Select } from '@/components/ui/Select';
 import { Toggle } from '@/components/ui/Toggle';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
+
 import {
   createEmptyFormState,
   formStateFromServer,

@@ -10,12 +10,14 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import { TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ToolAvatar } from '../../../../src/components/ui/ToolAvatar';
+
 import { toolAvatarPalette } from '../../../../src/components/ui/tool-avatar-palette';
+import { ToolAvatar } from '../../../../src/components/ui/ToolAvatar';
 import { IdentityEditDialog } from '../../../../src/features/environments/identity/IdentityEditDialog';
 import { toolImageDisplay } from '../../../../src/features/environments/identity/image';
 import type { ResolvedToolIdentity } from '../../../../src/features/environments/identity/resolve';

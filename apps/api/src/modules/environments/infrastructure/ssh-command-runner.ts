@@ -8,13 +8,15 @@
  */
 
 import { spawn } from 'node:child_process';
+
 import {
   quoteForRemoteShell,
   SSH_FORCED_OPTIONS,
-  type SshEnvironmentConfig,
   sshDestination,
+  type SshEnvironmentConfig,
 } from '@mangostudio/shared/environments';
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+
 import type {
   RuntimeCommandOptions,
   RuntimeCommandResult,

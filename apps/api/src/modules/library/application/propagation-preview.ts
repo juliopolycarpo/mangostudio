@@ -28,6 +28,7 @@ import {
   type LibraryLocationStatus,
   type LibraryResource,
   type LibraryResourceRef,
+  parseResourceKey,
   type PropagationBlockedReason,
   type PropagationDestination,
   type PropagationOutcome,
@@ -35,7 +36,6 @@ import {
   type PropagationPreviewEntry,
   type PropagationPreviewRequest,
   type PropagationSourceGroup,
-  parseResourceKey,
   type ResourceFormat,
   type ResourceKind,
   type ValidLibraryInstance,
@@ -45,6 +45,7 @@ import {
   getLibraryLocation,
   type LocationDefinition,
 } from '@mangostudio/shared/library/host';
+
 import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getRuntimeClient } from '../../../services/runtime-client';
@@ -264,21 +265,19 @@ export async function previewLibraryPropagation(
     )
   );
   const stateHash = hashLibraryState(
-    snapshots.map(
-      (snapshot): LibraryStateSlice => ({
-        environmentId: snapshot.environmentId,
-        resources: snapshot.resources,
-        // Only the locations this preview looked at: hashing every location a
-        // machine reports would make an unrelated directory appearing elsewhere
-        // invalidate a preview that never mentioned it.
-        statuses: new Map(
-          locations.flatMap((location) => {
-            const status = snapshot.statuses.get(location.id);
-            return status ? [[location.id, status] as const] : [];
-          })
-        ),
-      })
-    )
+    snapshots.map((snapshot): LibraryStateSlice => ({
+      environmentId: snapshot.environmentId,
+      resources: snapshot.resources,
+      // Only the locations this preview looked at: hashing every location a
+      // machine reports would make an unrelated directory appearing elsewhere
+      // invalidate a preview that never mentioned it.
+      statuses: new Map(
+        locations.flatMap((location) => {
+          const status = snapshot.statuses.get(location.id);
+          return status ? [[location.id, status] as const] : [];
+        })
+      ),
+    }))
   );
 
   return {
@@ -553,6 +552,8 @@ function destinationBlockedReason(
   sourceDomains: ReadonlySet<number>,
   usesDirectoryHash: boolean
 ): PropagationBlockedReason | undefined {
+  // Missing status is unsupported before any path access.
+  // eslint-disable-next-line @typescript-eslint/prefer-optional-chain
   if (!status || status.path === null) return 'unsupported-location';
   if (location.access !== 'read-write') return 'read-only-location';
   // A single-file location is one named resource — `~/.claude/CLAUDE.md` is

@@ -7,9 +7,11 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { PropagationApply, PropagationUndo } from '@mangostudio/shared/library';
 import userEvent from '@testing-library/user-event';
+
 import { ResultPanel } from '../../../../src/features/library/components/ResultPanel';
 import { render, screen } from '../../../support/harness/render';
 

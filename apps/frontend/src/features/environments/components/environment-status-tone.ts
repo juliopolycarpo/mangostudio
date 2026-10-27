@@ -1,4 +1,5 @@
 import type { EnvironmentConnectionState } from '@mangostudio/shared/environments';
+
 import type { StatusDotTone } from '@/components/ui/StatusDot';
 
 /**

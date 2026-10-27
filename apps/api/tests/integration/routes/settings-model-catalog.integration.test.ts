@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import Type from 'typebox';
 import Value from 'typebox/value';
+
 import { settingsRoutes } from '../../../src/routes/settings';
 import { clearGeminiModelCatalog } from '../../../src/services/gemini';
 import { isProviderModelsUrl } from '../../support/connectors';
@@ -17,7 +19,7 @@ let originalFetch: typeof globalThis.fetch = globalThis.fetch;
 
 function installProviderModelListFetch(): void {
   originalFetch = globalThis.fetch;
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (isProviderModelsUrl(url, 'api.openai.com')) {

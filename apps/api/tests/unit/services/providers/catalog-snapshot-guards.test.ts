@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { createUnifiedModelCatalogService } from '../../../../src/services/providers/catalog';
 import type { AIProvider } from '../../../../src/services/providers/types';
 

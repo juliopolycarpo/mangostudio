@@ -3,6 +3,7 @@
  */
 
 import type { ProviderType } from '@mangostudio/shared/types';
+
 import {
   UnsafeBaseUrlError,
   validateBaseUrl,

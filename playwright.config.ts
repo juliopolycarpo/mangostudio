@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test';
+
 import { STORAGE_STATE_PATH } from './tests/browser-smoke/support/global-auth';
 import { prepareSmokeHome, smokeHubEnv } from './tests/browser-smoke/support/smoke-home';
 

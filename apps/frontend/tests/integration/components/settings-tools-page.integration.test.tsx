@@ -3,7 +3,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
+
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';

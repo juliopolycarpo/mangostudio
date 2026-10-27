@@ -2,12 +2,14 @@ import type { Message } from '@mangostudio/shared/chat';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import { TOOL_AVATAR_SIZE_CLASS, ToolAvatar } from '@/components/ui/ToolAvatar';
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { MANGO_IDENTITY } from '@/lib/agent-identity';
 import { formatClockTime } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
+
 import { agentRunnerName, deriveTurnIdentity } from '../lib/turn-identity';
 import type { TurnStatus } from '../lib/turn-status';
 import { CopyMessageButton } from './CopyMessageButton';

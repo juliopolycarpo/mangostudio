@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
-import { exportJson, RUST_SHA, receiptJson } from '../testing/rust-coverage-fixture';
+import { exportJson, receiptJson, RUST_SHA } from '../testing/rust-coverage-fixture';
 import { parseLlvmCovExport, parseRustCoverageReceipt } from './llvm-cov-export';
 
 const SAMPLE = join(import.meta.dir, '../testing/fixtures/llvm-cov-export.sample.json');

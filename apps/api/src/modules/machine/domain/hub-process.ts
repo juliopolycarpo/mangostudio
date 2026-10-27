@@ -5,6 +5,7 @@
  */
 
 import type { HubHealth, HubLaunchMode, HubProcessStatus } from '@mangostudio/shared/machine';
+
 import { formatHostForUrl } from '../../../lib/ip-address';
 import type { ServerState } from '../../../lib/server-state';
 

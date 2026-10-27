@@ -9,15 +9,17 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { DEFAULT_APP_SETTINGS, onboardingFor } from '@mangostudio/shared/app-settings';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { en } from '@mangostudio/shared/i18n';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
-mock.module('@/lib/realtime/realtime-client', () => ({
+void mock.module('@/lib/realtime/realtime-client', () => ({
   bindRealtimeClientToUser: jest.fn(),
   resetRealtimeClient: jest.fn(),
   getRealtimeClient: () => ({ subscribe: () => () => undefined }),
@@ -151,6 +153,7 @@ describe('OnboardingWizard', () => {
     const put = scenario.fetchMock.mock.calls.find(
       (call) => String(call[1]?.method).toUpperCase() === 'PUT'
     );
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
     const body = JSON.parse(String(put?.[1]?.body)) as {
       profileSettings: { default: { onboarding: { completedAt?: number } } };
     };
@@ -158,6 +161,7 @@ describe('OnboardingWizard', () => {
 
     // Nothing about a chat: skipping is not a send.
     expect(
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
       scenario.fetchMock.mock.calls.some((call) => String(call[0]).includes('/api/respond/stream'))
     ).toBe(false);
   });
@@ -269,6 +273,7 @@ describe('OnboardingWizard', () => {
       (call) => String(call[1]?.method).toUpperCase() === 'PUT'
     );
     expect(put).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
     const body = JSON.parse(String(put?.[1]?.body)) as {
       profileSettings: { default: { onboarding: { completedAt?: number } } };
     };
@@ -424,6 +429,7 @@ describe('OnboardingWizard', () => {
         (call) => String(call[1]?.method).toUpperCase() === 'PUT'
       );
       expect(put).toBeDefined();
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
       const body = JSON.parse(String(put?.[1]?.body)) as {
         profileSettings: { default: { onboarding: { runner?: unknown } } };
       };
@@ -541,6 +547,7 @@ describe('OnboardingWizard', () => {
     const respond = respondFromScenario;
     scenario.fetchMock.mockImplementation((input, init) => {
       // Chat creation never answers: that is the whole window under test.
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
       if (String(init?.method).toUpperCase() === 'POST' && String(input).includes('/api/chats')) {
         return new Promise<Response>(() => undefined);
       }
@@ -662,6 +669,7 @@ describe('OnboardingWizard', () => {
     const put = scenario.fetchMock.mock.calls.find(
       (call) => String(call[1]?.method).toUpperCase() === 'PUT'
     );
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
     const body = JSON.parse(String(put?.[1]?.body)) as {
       profileSettings: { default: { onboarding: { skippedSteps: string[] } } };
     };

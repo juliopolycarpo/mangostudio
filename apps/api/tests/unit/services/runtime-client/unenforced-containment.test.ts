@@ -12,6 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { join } from 'node:path';
+
 import { directoryHashDomainVersion } from '@mangostudio/shared/library';
 import type {
   RuntimeCapabilityManifest,
@@ -19,6 +20,7 @@ import type {
   RuntimeReadFileResult,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import {
   connectFakeRuntime,

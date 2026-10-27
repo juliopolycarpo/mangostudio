@@ -1,14 +1,14 @@
 import { describe, expect, it, mock } from 'bun:test';
+
 import { render, screen } from '../../../support/harness/render';
 import { routerWithLinkStub } from '../../../support/mocks/router';
 
-mock.module('@tanstack/react-router', await routerWithLinkStub());
+void mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 describe('EnvironmentTabs', () => {
   it('carries the library as a tab of the umbrella', async () => {
-    const { EnvironmentTabs } = await import(
-      '../../../../src/features/environments/components/EnvironmentTabs'
-    );
+    const { EnvironmentTabs } =
+      await import('../../../../src/features/environments/components/EnvironmentTabs');
 
     render(<EnvironmentTabs />);
 
@@ -25,9 +25,8 @@ describe('EnvironmentTabs', () => {
   });
 
   it('opens the umbrella root as its own tab, leaving the deeper ones alone', async () => {
-    const { EnvironmentTabs } = await import(
-      '../../../../src/features/environments/components/EnvironmentTabs'
-    );
+    const { EnvironmentTabs } =
+      await import('../../../../src/features/environments/components/EnvironmentTabs');
 
     render(<EnvironmentTabs />);
 

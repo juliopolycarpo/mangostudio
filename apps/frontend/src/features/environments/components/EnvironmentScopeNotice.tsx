@@ -12,11 +12,13 @@
 
 import type { Environment } from '@mangostudio/shared/environments';
 import { PlugZap, ShieldOff } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
+
 import { useConnectEnvironmentMutation } from '../queries';
 import { TOOL_CARD_SURFACE } from './ToolCard';
 

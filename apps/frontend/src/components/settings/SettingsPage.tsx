@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+
 import { SettingsSaveIndicator } from './SettingsSaveIndicator';
 
 interface SettingsPageProps {

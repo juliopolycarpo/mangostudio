@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { Elysia } from 'elysia';
+
 import { rateLimit } from '../../../src/plugins/rate-limit';
 
 function createTestApp(trustProxy?: boolean) {

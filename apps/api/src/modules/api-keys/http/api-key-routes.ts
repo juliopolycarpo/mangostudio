@@ -11,6 +11,7 @@ import {
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
+
 import { requireCookieAuth } from '../../../plugins/auth-middleware';
 import {
   ApiKeyServiceError,

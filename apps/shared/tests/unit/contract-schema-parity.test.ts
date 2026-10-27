@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { Static } from 'typebox';
 import Value from 'typebox/value';
 
@@ -37,15 +38,15 @@ import type {
   SettingsSnapshot as ModuleSettingsSnapshot,
 } from '../../src/library';
 import {
-  type ProviderObservabilityMetrics as ModuleObsMetrics,
   ProviderObservabilityLogsResponseSchema,
+  type ProviderObservabilityMetrics as ModuleObsMetrics,
   ProviderObservabilityMetricsResponseSchema,
 } from '../../src/observability';
 import type { ProviderTypeSchema, ReasoningEffortSchema } from '../../src/provider-settings';
 import type {
+  SSEErrorEvent as StreamingSSEErrorEvent,
   StreamChunk,
   StreamChunkSchema,
-  SSEErrorEvent as StreamingSSEErrorEvent,
 } from '../../src/streaming';
 import { assertType, type Equals } from '../../src/test-utils/type-assert';
 import type { ProviderType, ReasoningEffort } from '../../src/types';

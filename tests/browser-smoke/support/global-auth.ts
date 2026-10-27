@@ -22,6 +22,7 @@
 
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
+
 import { type FullConfig, request } from '@playwright/test';
 
 export const STORAGE_STATE_PATH = '.mango/artifacts/playwright/.auth/smoke-user.json';

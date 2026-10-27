@@ -1,6 +1,7 @@
 import type { GithubCheckBucket } from '@mangostudio/shared/github';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, MessageSquareQuote } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -17,6 +18,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { markPullRequestReady } from '../api';
 import { reviewThreadsToTask } from '../lib/review-thread-task';
 import {
@@ -233,6 +235,7 @@ function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly num
             collides on exactly the pull requests with the most checks. */}
         {query.data.checks.map((check, index) => (
           <li
+            // eslint-disable-next-line react/no-array-index-key -- Matrix checks can share both name and workflow.
             key={`${index}:${check.workflow}/${check.name}`}
             className="flex items-center gap-1.5"
           >

@@ -13,14 +13,16 @@
 import type { Environment } from '@mangostudio/shared/environments';
 import { Box, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import {
-  type ContainerFormFields,
   containerConfigToForm,
+  type ContainerFormFields,
   containerFormToConfig,
   validateContainerForm,
 } from '../container-form';

@@ -8,9 +8,11 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Radio } from '@/components/ui/Radio';
 import { Select, type SelectOption } from '@/components/ui/Select';
+
 import { fireEvent, render, screen } from '../../../support/harness/render';
 
 const OPTIONS: readonly SelectOption[] = [

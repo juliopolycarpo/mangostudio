@@ -6,9 +6,11 @@
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { useUpdateToolSetting } from '../hooks/use-tool-settings';
 import { ToolParameterField } from './ToolParameterField';
 
@@ -226,7 +228,12 @@ export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
             );
           })}
           {isPending && (
-            <p className="text-xs text-fg-muted" role="status" aria-live="polite">
+            <p
+              className="text-xs text-fg-muted"
+              // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+              role="status"
+              aria-live="polite"
+            >
               {s.saving}
             </p>
           )}

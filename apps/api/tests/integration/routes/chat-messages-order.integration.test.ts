@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
@@ -52,7 +53,7 @@ function describeRows(chatId: string, page: PageBody): string {
     message.id.startsWith(prefix) ? Number(message.id.slice(prefix.length)) : Number.NaN
   );
   const runs: string[] = [];
-  for (let index = 0; index < positions.length; ) {
+  for (let index = 0; index < positions.length;) {
     let end = index;
     while (positions[end + 1] === (positions[end] ?? 0) + 1) end++;
     runs.push(end === index ? `${positions[index]}` : `${positions[index]}-${positions[end]}`);

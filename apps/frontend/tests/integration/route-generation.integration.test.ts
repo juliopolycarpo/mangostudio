@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import { generateRouteTree } from '../../scripts/routes';
 
 // Load the cold generator graph during collection, before per-test deadlines start.

@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { GitBatchStateRequest, GitSummary } from '@mangostudio/shared/git';
 import { useQuery } from '@tanstack/react-query';
+
 import type * as ApiClient from '@/lib/api-client';
+
 import { act, flushAsyncRender, renderHook, waitFor } from '../../support/harness/render';
 
 const mockBatch = jest.fn();
 const mockCommit = jest.fn();
 
-mock.module('@/lib/api-client', () => ({
+void mock.module('@/lib/api-client', () => ({
   client: {
     api: {
       git: {
@@ -20,9 +23,8 @@ mock.module('@/lib/api-client', () => ({
 
 // Static imports are evaluated before any statement above runs, so the hooks
 // under test have to come in afterwards or they bind the real api-client.
-const { useBatchedGitSummaries, useCommit } = await import(
-  '@/features/workspace/hooks/use-git-state'
-);
+const { useBatchedGitSummaries, useCommit } =
+  await import('@/features/workspace/hooks/use-git-state');
 
 function summaryFor(chatId: string): GitSummary {
   return {
@@ -36,6 +38,7 @@ function summaryFor(chatId: string): GitSummary {
 
 function respondPerRequest() {
   // The server omits chats it has no answer for instead of sending null.
+  // eslint-disable-next-line @typescript-eslint/require-await -- The fake preserves the async API and rejects malformed requests.
   mockBatch.mockImplementation(async ({ chatIds }: GitBatchStateRequest) => ({
     data: {
       states: Object.fromEntries(
@@ -173,7 +176,7 @@ describe('useBatchedGitSummaries', () => {
   it('refetches only the chunk containing a chat when a git write invalidates it', async () => {
     respondPerRequest();
     mockCommit.mockResolvedValue({ data: { hash: 'abc123', subject: 'feat' }, error: null });
-    const otherChunkSpy = jest.fn(async () => ({ states: { unrelated: null } }));
+    const otherChunkSpy = jest.fn(() => Promise.resolve({ states: { unrelated: null } }));
 
     const { result } = renderHook(() => {
       // A second, already-populated chunk that must survive the invalidation.

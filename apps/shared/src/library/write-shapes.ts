@@ -18,6 +18,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import { ReadonlyArraySchema } from '../schema-helpers';
 import {
   AdapterStrategySchema,

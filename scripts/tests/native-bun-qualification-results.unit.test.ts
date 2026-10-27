@@ -2,11 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
 import {
   collectNativeTestEvidence,
-  type NativeTestLane,
   nativeTestInventory,
+  type NativeTestLane,
   parseNativeTestLog,
 } from '../lib/native-bun-qualification-results';
 import { parseJunitXml } from '../qa-gate/junit-results';

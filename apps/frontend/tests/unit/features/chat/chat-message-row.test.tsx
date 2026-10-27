@@ -6,8 +6,10 @@
  */
 
 import { describe, expect, it, mock } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import { useCallback } from 'react';
+
 import { render } from '../../../support/harness/render';
 import { ToolIdentitiesProbe } from '../../../support/mocks/tool-identities';
 
@@ -15,14 +17,14 @@ import { ToolIdentitiesProbe } from '../../../support/mocks/tool-identities';
 // statements. `mock.module` is not hoisted, so a plain const is enough.
 const renders: string[] = [];
 
-// Declared at module level rather than inline in the factory: biome's
+// Declared at module level rather than inline in the factory: Bun lint's
 // `noComponentHookFactories` rejects a component defined inside a function.
 function UserMessageBubbleStub({ msg }: { msg: Message }) {
   renders.push(msg.id);
   return <div data-testid={`bubble-${msg.id}`}>{msg.id}</div>;
 }
 
-mock.module('../../../../src/features/chat/components/UserMessageBubble', () => ({
+void mock.module('../../../../src/features/chat/components/UserMessageBubble', () => ({
   UserMessageBubble: UserMessageBubbleStub,
 }));
 

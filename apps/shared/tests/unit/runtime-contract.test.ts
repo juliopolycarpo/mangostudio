@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { defineContract } from '@mangostudio/protocol';
 import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '@mangostudio/shared/library';
 import {

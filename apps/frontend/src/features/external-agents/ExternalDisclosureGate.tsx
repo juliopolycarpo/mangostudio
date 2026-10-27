@@ -16,9 +16,11 @@
 import type { ExternalPermissionLevel } from '@mangostudio/shared/external-agents';
 import { normalizePermissionLevel } from '@mangostudio/shared/external-agents/values';
 import { useCallback, useEffect, useState } from 'react';
+
 import { useToast } from '@/components/ui/Toast';
 import { ExternalDisclosureDialog } from '@/features/chat/components/ExternalDisclosureDialog';
 import { useI18n } from '@/hooks/use-i18n';
+
 import {
   type ExternalDisclosureRequest,
   onExternalDisclosurePrompt,

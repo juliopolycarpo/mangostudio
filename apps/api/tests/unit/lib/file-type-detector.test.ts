@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+
 import { type DetectedFileType, detectFileType } from '../../../src/lib/file-type-detector';
 import fixtures from '../../support/fixtures/file-type/fixtures.json';
 

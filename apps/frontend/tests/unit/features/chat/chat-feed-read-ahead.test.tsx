@@ -9,8 +9,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
+
 import { FakeTranscriptLayout } from '../../../support/harness/fake-transcript-layout';
 import { act, fireEvent, render, waitFor } from '../../../support/harness/render';
 import { FakeIdleScheduler } from '../../../support/mocks/fake-idle-scheduler';
@@ -18,9 +20,8 @@ import { FakeTranscriptApi } from '../../../support/mocks/fake-transcript-api';
 
 const { ChatFeed } = await import('../../../../src/features/chat/components/ChatFeed');
 const { messageKeys } = await import('../../../../src/features/chat/queries');
-const { useChatPageMessages } = await import(
-  '../../../../src/features/chat/hooks/use-chat-page-state'
-);
+const { useChatPageMessages } =
+  await import('../../../../src/features/chat/hooks/use-chat-page-state');
 
 const CHAT_ID = 'chat-1';
 

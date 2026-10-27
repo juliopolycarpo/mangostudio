@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { bridgeEmitter } from '../../../src/lib/emit-bridge';
 
 async function collect<T>(items: AsyncGenerator<T>): Promise<T[]> {

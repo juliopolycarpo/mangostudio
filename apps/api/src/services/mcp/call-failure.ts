@@ -5,7 +5,8 @@
  * see — its own deadline expiring, and the runtime going away mid-call.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
+
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
 
 export type McpCallFailure = 'timeout' | 'server_closed' | 'other';

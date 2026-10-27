@@ -5,21 +5,25 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
 import { act } from '@testing-library/react';
+
 import { useChatRouteActions } from '../../../src/hooks/use-chat-route-actions';
 import { renderHook, screen } from '../../support/harness/render';
 
 function setup(createdId = 'chat-new') {
   // Creation always lands on the local machine — the create body carries no
   // environment field — which is the whole premise of the scoped variant below.
-  const createChat = jest.fn(async () => ({ id: createdId, environmentId: 'local' }) as Chat);
-  const updateChatRunner = jest.fn(async () => undefined);
-  const updateChatRunnerOnEnvironment = jest.fn(async () => undefined);
-  const updateChatWorkdir = jest.fn(async () => undefined);
-  const updateChatWorkdirOnEnvironment = jest.fn(async () => undefined);
-  const deleteChat = jest.fn(async () => undefined);
-  const navigate = jest.fn(async () => undefined);
+  const createChat = jest.fn(() =>
+    Promise.resolve({ id: createdId, environmentId: 'local' } as Chat)
+  );
+  const updateChatRunner = jest.fn(() => Promise.resolve());
+  const updateChatRunnerOnEnvironment = jest.fn(() => Promise.resolve());
+  const updateChatWorkdir = jest.fn(() => Promise.resolve());
+  const updateChatWorkdirOnEnvironment = jest.fn(() => Promise.resolve());
+  const deleteChat = jest.fn(() => Promise.resolve());
+  const navigate = jest.fn(() => Promise.resolve());
   const addRecentWorkdir = jest.fn();
   const chats = {
     createChat,

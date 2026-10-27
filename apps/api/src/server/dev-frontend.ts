@@ -24,6 +24,7 @@
 
 import { type Dirent, existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+
 import {
   parseTailwindInputs,
   type TailwindInputs,
@@ -31,6 +32,7 @@ import {
 } from '@mangostudio/shared/frontend-build/host';
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
+
 import { setDevFrontendDir } from './dev-frontend-dir';
 
 // Resolved from this file rather than from `process.cwd()`: Turbo runs the API's
@@ -268,7 +270,7 @@ export function distIsCurrent(
   if (!existsSync(join(distDirectory, 'index.html'))) return false;
 
   const state = readBuildState(distDirectory);
-  if (!state || state.apiUrl !== effectiveApiUrl()) return false;
+  if (state?.apiUrl !== effectiveApiUrl()) return false;
   try {
     if (!tailwindInputsAreCurrent(repositoryDirectory, state.tailwindInputs)) return false;
   } catch {

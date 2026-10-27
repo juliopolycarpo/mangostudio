@@ -40,6 +40,7 @@
  */
 
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
+
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { type ExternalSessionManager, externalSessionManager } from './external-session-manager';
 

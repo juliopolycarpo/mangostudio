@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
+
 import { render, screen, waitFor } from '../../support/harness/render';
 import { routerWithLinkStub } from '../../support/mocks/router';
 import { setTestSession, setTestSignIn, setTestSignUp } from '../../support/setup/auth-client-stub';
@@ -14,7 +16,7 @@ const { mockHistoryPush, mockNavigate, mockSignInEmail, mockSignUpEmail, searchS
   searchState: { current: {} as { redirect?: string } },
 };
 
-mock.module(
+void mock.module(
   '@tanstack/react-router',
   await routerWithLinkStub({
     createLazyFileRoute: () => (config: Record<string, unknown>) => ({

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
 import { createMockChat } from '@mangostudio/shared/test-utils';
+
 import { act, renderHook } from '../../support/harness/render';
 import { useFakeTimers } from '../../support/harness/timers';
 
@@ -29,17 +31,15 @@ const { mockCreateChat, mockUpdateChat, mockDeleteChat, mockLoadChats, mockChats
   mockUpdateChat: jest.fn(),
   mockDeleteChat: jest.fn(),
   mockLoadChats: jest.fn(),
-  mockChatsQueryResult: jest.fn(
-    (): ChatsQueryResult => ({
-      data: [] as Chat[],
-      isLoading: false,
-      error: null,
-      refetch: jest.fn(),
-    })
-  ),
+  mockChatsQueryResult: jest.fn((): ChatsQueryResult => ({
+    data: [] as Chat[],
+    isLoading: false,
+    error: null,
+    refetch: jest.fn(),
+  })),
 };
 
-mock.module('../../../src/features/chat/queries', () => ({
+void mock.module('../../../src/features/chat/queries', () => ({
   useChatsQuery: () => mockChatsQueryResult(),
   useCreateChatMutation: () => ({ mutateAsync: mockCreateChat }),
   useUpdateChatMutation: () => ({ mutateAsync: mockUpdateChat }),

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+
+import { readCleanupContext } from '../ci/rust-cache-cleanup';
 import { cleanupRustCaches } from '../ci/rust-cache/cleanup';
 import {
   type CacheWriterRun,
@@ -7,7 +9,6 @@ import {
   type RustCacheApi,
 } from '../ci/rust-cache/github';
 import { type RustCacheEntry, selectRustCacheDeletions } from '../ci/rust-cache/selection';
-import { readCleanupContext } from '../ci/rust-cache-cleanup';
 import { readText } from './support/read-text';
 
 const listing = JSON.parse(readText('scripts/tests/fixtures/rust-cache-listing.json')) as {

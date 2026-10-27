@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   UnsafeBaseUrlError,
   validateBaseUrl,
@@ -8,6 +9,7 @@ import { ADDRESS_FIXTURES } from '../lib/ip-address.fixtures';
 function resolveHostnameTo(
   ...results: ReadonlyArray<{ address: string; family: 4 | 6 }>
 ): (hostname: string) => Promise<ReadonlyArray<{ address: string; family: 4 | 6 }>> {
+  // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
   return async (_hostname: string) => results;
 }
 

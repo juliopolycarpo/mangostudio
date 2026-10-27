@@ -1,5 +1,6 @@
 import { statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
+
 import { RegularFileWriteError } from '../../runtime-contract/service-errors';
 import { isPathPrefix, resolvePathThroughExistingAncestor } from '../../workspaces/host';
 import { isValidResourceSlug } from '../index';

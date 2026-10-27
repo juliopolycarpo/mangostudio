@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, jest, spyOn } from 'bun:test';
+
 import { triggerImageDownload } from '../../../src/lib/download-image';
 
 describe('triggerImageDownload', () => {

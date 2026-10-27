@@ -161,14 +161,14 @@ flag at all, and `test:coverage` delegates to
 `scripts/ci/run-workspace-coverage.ts`, which runs both lanes and merges their
 LCOV slices into the one staged `coverage/api/lcov.info`. The orchestrator is
 there instead of an `&&` chain because a chain lets one failing unit test skip
-the integration lane *and* the merge: the red shard then uploads no integration
+the integration lane _and_ the merge: the red shard then uploads no integration
 JUnit and no api LCOV, and a failure shared across the shards kills the merge
 job on a missing input rather than reporting the test failures. Every lane runs
 whatever the earlier ones did, the merge runs over whatever slices exist (none
 is not an error), and the exit code is the first failing lane's. The split
 itself exists because the unit
 suite cannot live without isolation (the 172-failure table below) while the
-integration suite cannot safely live *inside* it — Bun's isolate machinery is
+integration suite cannot safely live _inside_ it — Bun's isolate machinery is
 what intermittently hangs the whole invocation in CI (see [The isolate runner can hang](#the-isolate-runner-can-hang)), and the spawn-heavy integration
 files are where the wedge has been observed.
 
@@ -183,8 +183,7 @@ Measured on `apps/api/tests/unit` (3437 tests, 301 files), Bun
 
 Dropping the flag costs 172 failures, not the seven this table used to record.
 The seven are still there — the same turn-recovery and checkpoint tests, now
-timing out at the 15s floor rather than the old 5s default — but they are 7 of
-172. The other 165 fail in **under 2ms**, on assertions rather than wall clock:
+timing out at the 15s floor rather than the old 5s default — but they are 7 of 172. The other 165 fail in **under 2ms**, on assertions rather than wall clock:
 `todo repository`, `requiresExternalDisclosure`, `external turn controller` and
 `external session manager` account for most of them. So the mode does not merely
 buy failures that read as unrelated flakes; it buys a suite that is wrong about
@@ -224,7 +223,7 @@ constant so tests can take an OS-assigned one
 (`setChatGptLoopbackPortForTest`). Before that, `apps/api/tests/integration` at
 four workers failed 5 runs in 24 with a spurious 503 from whichever file lost
 the race for `127.0.0.1:1455`; after, 22 runs in 22 were clean locally and 12 of
-12 on a CI runner. A test that needs a *busy* port should bind one itself and
+12 on a CI runner. A test that needs a _busy_ port should bind one itself and
 point the code under test at it.
 
 The same rule covers paths: `mkdtemp` rather than a static name under
@@ -294,7 +293,7 @@ in the test that reports it, and it is not fixable from this repository.
 It is [oven-sh/bun#37968](https://github.com/oven-sh/bun/issues/37968), reproduced
 and root-caused upstream — a leaked epoll registration on a reused stdio
 descriptor at the isolate global swap. Note that the issue recommends
-redirecting to regular files as a workaround; that made it *worse* here, not
+redirecting to regular files as a workaround; that made it _worse_ here, not
 better, so measure before adopting it.
 
 Two patches address it from opposite ends, and only one has shipped:
@@ -335,7 +334,7 @@ is the messenger.
 Redirecting the run to a file makes it likelier but is not the cause; it happens
 through a pipe too, which is what CI gives it.
 
-So before 1.4.3 the unit lane could not take Bun's *in-process* worker
+So before 1.4.3 the unit lane could not take Bun's _in-process_ worker
 parallelism (the integration lane could: 12 of 12 clean at four workers on a
 runner, 50.6s against 71–75s unflagged). Its plain run took separate processes
 instead, each of them a one-worker `bun test` that never shares an isolate with
@@ -363,7 +362,7 @@ that patch is the unblock for this too.
 
 **Still true on the 1.4.2 pin (re-checked 2026-09-27).** None of #38008, #39709,
 #39584, or #37190 — the candidate fix for #39584 — is merged upstream; #39709
-has no fix in flight at all. Both mitigations below stay. What 1.4.1 *did* ship
+has no fix in flight at all. Both mitigations below stay. What 1.4.1 _did_ ship
 is adjacent and easy to mistake for the unblock:
 
 - `bun test --isolate` no longer keeps a finished file's module graph alive when
@@ -371,7 +370,7 @@ is adjacent and easy to mistake for the unblock:
   is a **memory leak**, not the hang — worth having on a lane that mocks in
   nearly every file, but it does not retire the watchdog.
 - A `bun test --parallel` hang when a worker exited before finishing startup.
-  Narrower than #39709, which parks *after* every per-file child has finished.
+  Narrower than #39709, which parks _after_ every per-file child has finished.
 - 1.4.2 closed a `FileSink` double-close on a **failed** epoll registration.
   Same file, different bug: #38008 is a leaked dup on a **successful** one.
 
@@ -418,7 +417,7 @@ The two compose, and since Bun 1.4.3 they do: each shard runs the api unit lane
 at `--parallel=4`, and `--timings` balances both the shard split and the
 workers inside it.
 
-What sharding does *not* sidestep is [the isolate runner hang](#the-isolate-runner-can-hang): that needs no concurrency, only isolate
+What sharding does _not_ sidestep is [the isolate runner hang](#the-isolate-runner-can-hang): that needs no concurrency, only isolate
 mode, so it rode along into the shard jobs until the api integration suite
 left isolate mode. More shards is not a defense either — it only reshuffles
 which shard the trigger files land on.
@@ -443,7 +442,7 @@ cannot even receive `$MANGOSTUDIO_BUN_TEST_ARGS`.
 > was open upstream when the lane was adopted. Bun 1.4.3 closed it by removing
 > the collision, not the leak (see
 > [Known upstream blocker on the unit lane](#known-upstream-blocker-on-the-unit-lane)). If CI ever reproduces it, drop to
-> `--parallel=2` first — parallelism *divides* the stale-registration
+> `--parallel=2` first — parallelism _divides_ the stale-registration
 > accumulation across workers, so serial `--isolate` concentrates rather than
 > avoids it.
 
@@ -459,7 +458,7 @@ running the lanes concurrently, the frontend then still on Vitest at 189.4s):
 | root `test:scripts`                           | 81    | 16.3s    |
 | `apps/shared`                                 | 54    | 1.8s     |
 
-The shard boundary is a slice of *every* sharded lane rather than one job per
+The shard boundary is a slice of _every_ sharded lane rather than one job per
 workspace: a per-workspace split leaves `apps/api` alone at 278s.
 
 The earlier four-shard configuration came from five first-attempt hosted CI runs
@@ -824,7 +823,7 @@ root (9.6s) and `apps/runtime` (6.5s) all land on shard 1, which is why the
 balanced critical shard is 58.6s rather than the 45.0s mean.
 
 **The timings file is a correctness dependency, not just a speed one.** Under
-round-robin, all N shards derive the same partition independently and *cannot*
+round-robin, all N shards derive the same partition independently and _cannot_
 disagree. Under `--timings` the partition is a function of a shared file, so N
 shards reading different bytes will not cover the file set between them — some
 files run twice, others not at all, and every shard still exits 0. Three things
@@ -853,7 +852,7 @@ assumes each file starts from a fresh global, and that lane is the one where it
 does not.
 
 It is the only lane that is both **sharded and unisolated**. Its files share one
-module graph, so what a shard runs a file *beside* decides what that file
+module graph, so what a shard runs a file _beside_ decides what that file
 inherits — the in-memory database from `setupTestEnvironment()`, any
 `mock.module` registration, the memoized `getAuth()`. A timings-balanced
 partition is a function of a file that `--update-timings` refreshes every run and
@@ -861,8 +860,8 @@ CI caches across runs, so it **rotates**: a file's companions change from run to
 run, and the shard a file lands on moves with the baseline. A leak then surfaces
 as an intermittent failure in a file nobody touched. This is not hypothetical —
 PR #951's own first CI run failed on shard 3 because `app.ts` snapshotted
-`getConfig().corsOrigins` at module evaluation, so *which file imported `app`
-first* decided what the CORS gate saw.
+`getConfig().corsOrigins` at module evaluation, so _which file imported `app`
+first_ decided what the CORS gate saw.
 
 Round-robin is derived by each shard from the file set alone, so the same commit
 always produces the same partition and a leak is reproducible from the SHA.
@@ -874,7 +873,7 @@ Measured on the 101-file lane (Bun 1.4.0, 85.3s total, `--shard=i/8`):
 | Round-robin (what the lane now runs) | 29.9s          | yes          |
 
 +9.6s, and cheap because one file (`spawn-runtime-child`, 20.3s) is 24% of the
-lane and is the floor under *any* split — the balancing had little left to win.
+lane and is the floor under _any_ split — the balancing had little left to win.
 Determinism verified rather than assumed: two consecutive no-timings runs
 produced byte-identical partitions, union 101 files, no duplicates.
 
@@ -895,7 +894,7 @@ path instead of 29.9s.
 
 #### Merging is not concatenation
 
-Bun's per-file `LF:`/`FNF:` are *run-dependent*: a source
+Bun's per-file `LF:`/`FNF:` are _run-dependent_: a source
 file a shard loaded but never exercised reports every line as coverable, while
 the same file under a shard that ran its code reports the collapsed set lazy
 parsing leaves behind. On `apps/shared` at `--shard=i/3`,
@@ -1062,11 +1061,11 @@ which is why the matrix carries it per entry:
 
 | Lane              | Invocation                                | Detects                          |
 | ----------------- | ----------------------------------------- | -------------------------------- |
-| `api`             | `--parallel=1` over the whole workspace   | order dependence *within* a file |
-| `api-integration` | no `--parallel`, over `tests/integration` | *cross-file* leakage             |
+| `api`             | `--parallel=1` over the whole workspace   | order dependence _within_ a file |
+| `api-integration` | no `--parallel`, over `tests/integration` | _cross-file_ leakage             |
 | `shared`          | `--parallel=1`                            | order dependence within a file   |
 
-`--parallel=1` means "one worker, *isolated*" (see [Parallelism](#parallelism)),
+`--parallel=1` means "one worker, _isolated_" (see [Parallelism](#parallelism)),
 so a fresh global per file is exactly what hides cross-file leakage. The
 `api-integration` entry deliberately re-runs files the `api` entry already
 covered, in the mode the merge gate actually uses — without it, the class this
@@ -1100,7 +1099,7 @@ truncated attempt is exactly where the night's only finding may sit.
 The unisolated lane failed 4–5 tests on every seed tried (1, 2 and 3), in four
 files that are green in the fixed order. All of them are one of three shapes,
 and `--randomize` reaches all three because it reorders `it` blocks and
-`describe` blocks *within* a file as well as the files themselves:
+`describe` blocks _within_ a file as well as the files themselves:
 
 | Shape                                                      | Files                                      | Symptom                                                        |
 | ---------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------- |
@@ -1131,7 +1130,7 @@ before the preload-registered one, so a local teardown still sees its own
 override — `describe` scopes unwind inner→outer, and hooks sharing a scope run
 in reverse registration order, which is what covers a test file's own top-level
 `afterEach` (root scope, same as the preload's, registered later). Both verified
-on Bun 1.4.0 and 1.4.2. `afterAll` is the other side of that: it runs *after* the
+on Bun 1.4.0 and 1.4.2. `afterAll` is the other side of that: it runs _after_ the
 preload's `afterEach`, so per-file teardown cannot read the last test's
 override.
 
@@ -1147,11 +1146,10 @@ aliases belong in the narrowest `entry` list in `knip.json`. Do not hide them wi
 file ignores. A dependency may be ignored only when repository execution evidence
 shows it is loaded outside a JavaScript or TypeScript import:
 
-| Workspace | Dependency                                               | Execution evidence                                                      |
-| --------- | -------------------------------------------------------- | ----------------------------------------------------------------------- |
-| root      | `@dprint/markdown`, `@dprint/toml`, `@dprint/dockerfile` | `dprint.json` loads each package's WASM plugin from `node_modules`      |
-| root      | `jscpd`                                                  | `scripts/qa-gate/collect/duplication.ts` spawns the installed CLI       |
-| frontend  | `tailwindcss`                                            | `apps/frontend/src/index.css` loads it through the CSS `@import` syntax |
+| Workspace | Dependency    | Execution evidence                                                      |
+| --------- | ------------- | ----------------------------------------------------------------------- |
+| root      | `jscpd`       | `scripts/qa-gate/collect/duplication.ts` spawns the installed CLI       |
+| frontend  | `tailwindcss` | `apps/frontend/src/index.css` loads it through the CSS `@import` syntax |
 
 ## Browser Smoke
 
@@ -1240,7 +1238,7 @@ bun run --filter @mangostudio/api test:integration
 > spawns it by path; `runtime-module-allow-list.test.ts` fails the lane if one does.
 
 > **The cached unit lane keys on the binary's content.** `test:unit` is a cached Turbo
-> task. Turbo hashes the *path* `MANGOSTUDIO_RUNTIME_BINARY` names (the task allows
+> task. Turbo hashes the _path_ `MANGOSTUDIO_RUNTIME_BINARY` names (the task allows
 > `MANGOSTUDIO_*`), never the file behind it, and a default `target/debug` build is not in
 > the key at all, so a rebuilt or replaced runtime used to replay the pass recorded against
 > the old one. `bun run test` now takes the SHA-256 of the binary the tests spawn once,
@@ -1388,14 +1386,14 @@ Frontend support lives in `apps/frontend/tests/support/`:
   thing in both runners.
 - **Bun links a mocked module's whole namespace at import.** A `mock.module`
   factory returning fewer names than the real module throws a hard
-  `SyntaxError: Export named 'x' not found` from whichever *other* consumer
+  `SyntaxError: Export named 'x' not found` from whichever _other_ consumer
   imports it next — Vitest resolved lazily and let a partial factory pass
   unnoticed. Spread `const actual = await import(spec)` into any factory that
   does not cover the full module.
 - **`mock.restore()` does not revert `mock.module()`.** It restores `mock()` /
   `spyOn` doubles and leaves module registrations installed for the rest of the
   process — in an unisolated lane, for every file scheduled after the one that
-  registered them. `mock.module()` on an already-loaded module also *merges*
+  registered them. `mock.module()` on an already-loaded module also _merges_
   into the live namespace rather than replacing it, so re-registering a
   hand-listed subset leaves the rest of the fake in place. The sanctioned undo
   is a whole-namespace capture (`const real = { ...mod }`) in a support module,
@@ -1409,7 +1407,7 @@ Frontend support lives in `apps/frontend/tests/support/`:
 - **Never add a direct import of a mocked module to the bunfig preload.** The
   capture above has to run before any test installs a fake, which makes the
   preload look like its natural home. It is the one place it cannot go: mocking
-  a module the preload imports *at top level* re-evaluates that graph, producing
+  a module the preload imports _at top level_ re-evaluates that graph, producing
   a second `test-environment.ts` whose `initialized` flag is false, and every
   later `createApiTestApp` throws the not-initialized guard. Measured on Bun
   1.4.0 — importing `@google/genai` from the preload took `--randomize --seed=1`
@@ -1590,7 +1588,7 @@ sources by `coverage-summary.ts`.
 
 > **Why not `bunfig.toml`'s `coverageThreshold`?** Measured on Bun 1.4.0 and
 > re-verified on 1.4.2, it is a different feature than it looks: the threshold
-> applies per *file* (every file must individually clear the bar, so one
+> applies per _file_ (every file must individually clear the bar, so one
 > legitimately uncovered file fails any positive value), a key you omit still
 > enforces a hidden ~0.9 default, singular key names (`line`) are silently
 > ignored, and a miss prints nothing — it exists only in the exit code
@@ -1677,7 +1675,7 @@ in #922 and are worth knowing before you read one:
 - It is printed **above** the `(fail)` it belongs to, so it reads as if the
   previous, passing test leaked something.
 
-It also never says *which* child. `MANGOSTUDIO_SPAWN_DIAGNOSTICS=1` does:
+It also never says _which_ child. `MANGOSTUDIO_SPAWN_DIAGNOSTICS=1` does:
 
 ```bash
 MANGOSTUDIO_SPAWN_DIAGNOSTICS=1 bun run --filter @mangostudio/api test:integration

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import { REALTIME_CLOSE_CODES } from '@mangostudio/shared/realtime';
+
 import {
   bindRealtimeClientToUser,
   createRealtimeClient,
@@ -10,6 +12,7 @@ import {
   type RealtimeTopicListener,
   resetRealtimeClient,
 } from '@/lib/realtime/realtime-client';
+
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
 
 /** Heartbeat cadence: the idle timeout (60 s) divided by 2.5. */

@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   EXTERNAL_AGENT_TARGET_IDS,
   EXTERNAL_TURN_TERMINAL_REASONS,
   type ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
 import { EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES } from '@mangostudio/shared/runtime-contract';
+
 import {
-  EXTERNAL_RESUME_POLICIES,
   endLeavesConversationUnresumable,
+  EXTERNAL_RESUME_POLICIES,
   resumeModeFor,
 } from '../../../../src/modules/external-agents/domain/external-resume-policy';
 

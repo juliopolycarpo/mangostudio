@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+
 import { HOMEBREW_FORMULA_TEMPLATE_PATH, renderHomebrewFormula } from '../release/update-homebrew';
 
 const SHAS = {

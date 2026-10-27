@@ -10,12 +10,13 @@ import {
   useRef,
   useState,
 } from 'react';
+
 import { StartupSpinner } from '@/components/layout/StartupSpinner';
 import {
   detectLocale,
   LOCALE_STORAGE_KEY,
-  type LocaleDictionaryStore,
   localeDictionaries,
+  type LocaleDictionaryStore,
   type ResolvedDictionary,
 } from '@/lib/locale-dictionaries';
 

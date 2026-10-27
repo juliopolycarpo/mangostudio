@@ -4,6 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import {
   API_KEY_MAX_PER_USER,
   API_KEY_PREFIX,
@@ -12,6 +13,7 @@ import {
 } from '@mangostudio/shared/api-keys';
 import { DEFAULT_EXTERNAL_API_SETTINGS } from '@mangostudio/shared/app-settings';
 import userEvent from '@testing-library/user-event';
+
 import { ExternalApiSettingsPage } from '../../../src/features/settings/external-api/components/ExternalApiSettingsPage';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';

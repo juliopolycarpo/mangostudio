@@ -1,5 +1,7 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import { mockChats } from '@mangostudio/shared/test-utils';
+
 import { Layout } from '../../../src/components/layout/Layout';
 import { render, screen } from '../../support/harness/render';
 

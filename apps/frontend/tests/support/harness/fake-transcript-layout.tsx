@@ -34,6 +34,7 @@ export class FakeTranscriptLayout {
   private originalInnerHeight: PropertyDescriptor | undefined;
 
   install(): void {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- The callback needs its own this, while the alias retains the enclosing instance.
     const layout = this;
     this.stub('offsetHeight', {
       get(this: HTMLElement) {

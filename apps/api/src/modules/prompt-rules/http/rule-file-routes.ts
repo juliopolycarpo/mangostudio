@@ -1,6 +1,7 @@
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { RuleFilePreviewBodySchema } from '@mangostudio/shared/prompt-rules';
 import { Elysia } from 'elysia';
+
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getDefaultRuleFileDescriptors,

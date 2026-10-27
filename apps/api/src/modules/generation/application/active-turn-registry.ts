@@ -78,7 +78,7 @@ export function cancelActiveTurn(
   reasonCode: TurnInterruptionReasonCode
 ): boolean {
   const turn = activeTurns.get(messageId);
-  if (!turn || turn.userId !== userId || turn.chatId !== chatId) return false;
+  if (turn?.userId !== userId || turn.chatId !== chatId) return false;
   turn.abort(reasonCode);
   return true;
 }

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+
 import { EnvironmentConnectionStatusSchema } from '@mangostudio/shared/environments';
 import type {
   RuntimeCapabilityManifest,
   RuntimeImplementation,
 } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
+
 import { connectTestRuntime, TEST_RUNTIME_MANIFEST } from '../../../support/runtime-fixture';
 
 const IMPLEMENTATION: RuntimeImplementation = {

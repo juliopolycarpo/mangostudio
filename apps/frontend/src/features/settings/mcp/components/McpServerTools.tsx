@@ -6,6 +6,7 @@
 
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { useQuery } from '@tanstack/react-query';
+
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsLoading } from '@/components/settings/SettingsStates';
 import { Callout } from '@/components/ui/Callout';
@@ -16,6 +17,7 @@ import {
   useUpdateToolSetting,
 } from '@/features/settings/tools/hooks/use-tool-settings';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { mcpServerToolsQueryOptions } from '../queries';
 
 interface McpServerToolsProps {

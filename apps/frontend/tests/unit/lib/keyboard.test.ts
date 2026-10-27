@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { isCommandPaletteShortcut, isNewChatShortcut } from '../../../src/lib/keyboard';
 
 function keydown(overrides: Partial<KeyboardEvent>): KeyboardEvent {

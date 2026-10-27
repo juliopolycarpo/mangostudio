@@ -14,3 +14,259 @@
 # own cooldown applies. To take an urgent fix younger than 3 days, pass
 # `--minimum-release-age=0` for that one command.
 minimumReleaseAge = 259200
+
+[lint]
+ignorePatterns = [
+  "apps/frontend/src/routeTree.gen.ts",
+  "apps/shared/src/runtime-contract/generated/",
+  ".mango/artifacts/",
+  ".mango/out/",
+]
+
+[lint.rules]
+# Bun enables this additional policy by default; error wrapping is owned by callers.
+"preserve-caught-error" = "off"
+"import/no-self-import" = "error"
+"no-restricted-imports" = [
+  "error",
+  { paths = [
+    { name = "@mangostudio/shared", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  ] },
+]
+"no-console" = ["warn", { allow = ["warn", "error"] }]
+"no-else-return" = "error"
+"no-array-constructor" = "error"
+"prefer-const" = "error"
+"prefer-exponentiation-operator" = "error"
+"prefer-spread" = "error"
+"prefer-template" = "error"
+"no-empty" = "error"
+"no-template-curly-in-string" = "error"
+"no-var" = "error"
+"no-restricted-syntax" = [
+  "error",
+  { selector = "ForInStatement", message = "Use an explicit iterable instead of for-in." },
+  { selector = "ImportExpression[source.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked='@mangostudio/shared'][source.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "TSImportType[argument.literal.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+]
+"prefer-rest-params" = "error"
+"unicorn/prefer-node-protocol" = "error"
+"@typescript-eslint/no-wrapper-object-types" = "error"
+"@typescript-eslint/no-empty-object-type" = ["error", { allowInterfaces = "with-single-extends" }]
+"@typescript-eslint/no-unsafe-function-type" = "error"
+"@typescript-eslint/dot-notation" = "error"
+"@typescript-eslint/restrict-plus-operands" = "error"
+"@typescript-eslint/no-this-alias" = "error"
+"@typescript-eslint/no-unnecessary-type-constraint" = "error"
+"@typescript-eslint/prefer-optional-chain" = "error"
+"@typescript-eslint/no-unused-vars" = "error"
+"@typescript-eslint/no-base-to-string" = "error"
+"@typescript-eslint/no-floating-promises" = "error"
+"@typescript-eslint/no-implied-eval" = "error"
+"@typescript-eslint/no-misused-promises" = "error"
+"@typescript-eslint/no-require-imports" = "error"
+"@typescript-eslint/no-inferrable-types" = "error"
+"@typescript-eslint/no-namespace" = "error"
+"@typescript-eslint/no-non-null-assertion" = "error"
+"@typescript-eslint/prefer-as-const" = "error"
+"@typescript-eslint/consistent-type-imports" = ["error", { disallowTypeAnnotations = false }]
+"@typescript-eslint/only-throw-error" = "error"
+"@typescript-eslint/no-explicit-any" = "error"
+"@typescript-eslint/no-extra-non-null-assertion" = "error"
+"@typescript-eslint/no-non-null-asserted-optional-chain" = "error"
+"@typescript-eslint/ban-ts-comment" = [
+  "error",
+  { "ts-ignore" = true, "ts-nocheck" = false, "ts-expect-error" = false, "ts-check" = false },
+]
+"@typescript-eslint/no-unsafe-declaration-merging" = "error"
+"@typescript-eslint/require-await" = "error"
+"@typescript-eslint/prefer-namespace-keyword" = "error"
+"@typescript-eslint/no-duplicate-enum-values" = "error"
+"jsx-a11y/label-has-associated-control" = [
+  "error",
+  { controlComponents = ["Checkbox", "Input", "Select", "Toggle"], depth = 3 },
+]
+"jsx-a11y/no-static-element-interactions" = "error"
+"jsx-a11y/no-autofocus" = "error"
+"jsx-a11y/click-events-have-key-events" = "error"
+"jsx-a11y/prefer-tag-over-role" = "error"
+
+[[lint.overrides]]
+files = ["**/*.ts", "**/*.tsx"]
+[lint.overrides.rules]
+"no-restricted-syntax" = [
+  "error",
+  { selector = "ForInStatement", message = "Use an explicit iterable instead of for-in." },
+  { selector = "ImportExpression[source.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked='@mangostudio/shared'][source.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "TSImportType[argument.literal.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "ImportExpression[source.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/][source.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/][arguments.0.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/][arguments.0.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "TSImportType[argument.literal.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "ImportDeclaration[source.value='@mangostudio/shared/i18n']:not(:has(ImportSpecifier))", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+]
+"no-restricted-imports" = [
+  "error",
+  { paths = [
+    { name = "@mangostudio/shared", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+    { name = "@mangostudio/shared/i18n", allowImportNames = ["Locale", "Messages", "defaultLocale"], message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+    { name = "@mangostudio/shared/i18n/en", message = "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()." },
+    { name = "@mangostudio/shared/i18n/pt-BR", message = "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()." },
+  ] },
+]
+
+[[lint.overrides]]
+files = ["scripts/**/*.{ts,mjs}"]
+rules = { "no-console" = "off" }
+
+[[lint.overrides]]
+files = ["apps/frontend/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}"]
+excludeFiles = ["apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts"]
+[lint.overrides.rules]
+"no-restricted-syntax" = [
+  "error",
+  { selector = "ForInStatement", message = "Use an explicit iterable instead of for-in." },
+  { selector = "ImportExpression[source.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked='@mangostudio/shared'][source.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "TSImportType[argument.literal.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "ImportExpression[source.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/][source.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/][arguments.0.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/][arguments.0.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "TSImportType[argument.literal.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "ImportDeclaration[source.value='@mangostudio/shared/i18n']:not(:has(ImportSpecifier))", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "ImportExpression[source.value=/^@mangostudio\\/api\\/internal\\//]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked=/^@mangostudio\\/api\\/internal\\//][source.expressions.length=0]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value=/^@mangostudio\\/api\\/internal\\//]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked=/^@mangostudio\\/api\\/internal\\//][arguments.0.expressions.length=0]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value=/^@mangostudio\\/api\\/internal\\//]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked=/^@mangostudio\\/api\\/internal\\//][arguments.0.expressions.length=0]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "TSImportType[argument.literal.value=/^@mangostudio\\/api\\/internal\\//]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+]
+"no-restricted-imports" = [
+  "error",
+  { paths = [{ name = "@mangostudio/shared", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." }, { name = "@mangostudio/shared/i18n", allowImportNames = ["Locale", "Messages", "defaultLocale"], message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." }, { name = "@mangostudio/shared/i18n/en", message = "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()." }, { name = "@mangostudio/shared/i18n/pt-BR", message = "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()." }], patterns = [{ group = ["@mangostudio/api/internal/**"], message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." }] },
+]
+
+[[lint.overrides]]
+files = [
+  "apps/frontend/src/hooks/use-i18n.tsx",
+  "apps/frontend/src/lib/locale-dictionaries.ts",
+  "apps/frontend/tests/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+]
+excludeFiles = ["apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts"]
+[lint.overrides.rules]
+"no-restricted-syntax" = [
+  "error",
+  { selector = "ForInStatement", message = "Use an explicit iterable instead of for-in." },
+  { selector = "ImportExpression[source.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked='@mangostudio/shared'][source.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "TSImportType[argument.literal.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "ImportExpression[source.value=/^@mangostudio\\/api\\/internal\\//]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked=/^@mangostudio\\/api\\/internal\\//][source.expressions.length=0]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value=/^@mangostudio\\/api\\/internal\\//]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked=/^@mangostudio\\/api\\/internal\\//][arguments.0.expressions.length=0]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value=/^@mangostudio\\/api\\/internal\\//]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked=/^@mangostudio\\/api\\/internal\\//][arguments.0.expressions.length=0]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+  { selector = "TSImportType[argument.literal.value=/^@mangostudio\\/api\\/internal\\//]", message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." },
+]
+"no-restricted-imports" = [
+  "error",
+  { paths = [{ name = "@mangostudio/shared", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." }], patterns = [{ group = ["@mangostudio/api/internal/**"], message = "Only apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts may import API internals to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere." }] },
+]
+
+[[lint.overrides]]
+files = ["apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts"]
+[lint.overrides.rules]
+"no-restricted-syntax" = [
+  "error",
+  { selector = "ForInStatement", message = "Use an explicit iterable instead of for-in." },
+  { selector = "ImportExpression[source.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked='@mangostudio/shared'][source.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked='@mangostudio/shared'][arguments.0.expressions.length=0]", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  { selector = "TSImportType[argument.literal.value='@mangostudio/shared']", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+]
+"no-restricted-imports" = [
+  "error",
+  { paths = [
+    { name = "@mangostudio/shared", message = "Use a bounded-context entrypoint such as @mangostudio/shared/agents. The private shared root export was removed; type-only imports must also use a subpath." },
+  ] },
+]
+
+[[lint.overrides]]
+files = ["apps/frontend/**/*.{ts,tsx}"]
+rules = { "react/no-children-prop" = "warn", "react/no-unstable-nested-components" = ["error", { propNamePattern = "{render*,trigger,before,after}" }], "react/no-render-return-value" = "error", "react/void-dom-elements-no-children" = "error", "react-hooks/exhaustive-deps" = "error", "react-hooks/rules-of-hooks" = "error", "react/jsx-key" = "error", "react-hooks/component-hook-factories" = "error", "react/no-danger" = "warn", "react/no-danger-with-children" = "error", "react/jsx-no-script-url" = "warn", "react/no-array-index-key" = "warn", "react/jsx-no-comment-textnodes" = "error" }
+
+[fmt]
+printWidth = 100
+tabWidth = 2
+useTabs = false
+singleQuote = true
+trailingComma = "es5"
+proseWrap = "preserve"
+embeddedLanguageFormatting = "off"
+sortImports = true
+ignorePatterns = [
+  ".mango/artifacts/",
+  ".mango/out/",
+  "**/dist/",
+  "**/coverage/",
+  "**/build/",
+  "**/test-results/",
+  "**/playwright-report/",
+  ".jscpd-out/",
+  ".qa-gate/",
+  "apps/frontend/src/routeTree.gen.ts",
+  "apps/shared/src/runtime-contract/generated/",
+  "**/CHANGELOG.md",
+  "bun.lock",
+  "spec/fixtures/",
+  "crates/mangostudio-runtime/tests/fixtures/",
+  "**/Dockerfile",
+  "**/Dockerfile.*",
+]
+
+[[fmt.overrides]]
+files = ["**/*.mdc"]
+options = { parser = "markdown" }
+
+# CSS selectors and design-token fixtures use double quotes.
+[[fmt.overrides]]
+files = ["**/*.css"]
+options = { singleQuote = false }
+
+[[fmt.overrides]]
+files = ["**/*.yml", "**/*.yaml"]
+options = { singleQuote = false }
+
+# The published launcher is deliberately CommonJS; the prior TS-only rule did
+# not apply to JavaScript entrypoints.
+[[lint.overrides]]
+files = ["**/*.{js,jsx,mjs,cjs}"]
+rules = { "@typescript-eslint/no-require-imports" = "off" }

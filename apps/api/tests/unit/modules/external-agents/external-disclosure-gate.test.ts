@@ -8,11 +8,13 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type {
   ExternalAgentCapabilities,
   ExternalSupportedConfiguration,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+
 import { getDb } from '../../../../src/db/database';
 import {
   acknowledgeExternalDisclosure,

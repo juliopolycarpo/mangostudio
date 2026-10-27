@@ -23,9 +23,11 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import * as motion from 'motion/react-m';
+
 import { ACTIVITY_PANEL_ROWS, ActivityCard } from '@/features/activity/ActivityCard';
 import { useI18n } from '@/hooks/use-i18n';
 import { useCardGrid } from '@/lib/motion/use-card-grid';
+
 import { AgentsCard } from './widgets/AgentsCard';
 import { EnvironmentHealthCard } from './widgets/EnvironmentHealthCard';
 import { GithubInboxCard } from './widgets/GithubInboxCard';

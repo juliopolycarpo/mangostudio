@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { activePageForPath } from '@/lib/active-page';
 
 describe('activePageForPath', () => {

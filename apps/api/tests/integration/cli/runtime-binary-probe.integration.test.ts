@@ -1,4 +1,5 @@
 import { expect, it } from 'bun:test';
+
 import { probeRuntimeBinary } from '../../../src/cli/runtime-binary-probe';
 
 class RetainedRuntimeOutput {

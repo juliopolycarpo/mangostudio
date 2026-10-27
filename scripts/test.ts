@@ -10,11 +10,11 @@ import {
   getWorkingTreeChanges,
   header,
   info,
-  type RunResult,
   resolveDefaultBase,
   resolveMergeBase,
   runCommand,
   runParallel,
+  type RunResult,
 } from './lib/runner';
 import { RUNTIME_BINARY_DIGEST_ENV, runtimeBinaryDigestEnv } from './lib/runtime-binary-digest';
 import {
@@ -27,9 +27,9 @@ import {
   planChangedLanes,
   type RootScriptsPhase,
   shardedCoverageWorkspaces,
+  testLaneEnv,
   type TestLaneTask,
   type TestShard,
-  testLaneEnv,
 } from './lib/test';
 import { JUNIT_DIR, TIMINGS_DIR } from './lib/test-lanes';
 

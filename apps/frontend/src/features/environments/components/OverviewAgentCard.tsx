@@ -10,13 +10,15 @@
 import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/environments';
 import { Link } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import {
   describeFinding,
-  findInstallRecipe,
   findingSeverity,
+  findInstallRecipe,
   isQuietFinding,
   prefixedVersionLabel,
   worstFinding,

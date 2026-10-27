@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
+
 import { classifyMcpCallFailure } from '../../../../src/services/mcp/call-failure';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 

@@ -1,6 +1,7 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { Download, ImageOff, Sparkles } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
@@ -10,6 +11,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { triggerImageDownload } from '@/lib/download-image';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { ImageActionBar } from './ImageActionBar';
 import { ReservedAspectImage } from './ReservedAspectImage';
 

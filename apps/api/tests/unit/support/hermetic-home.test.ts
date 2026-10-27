@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { homedir } from 'node:os';
+
 import { assertHermeticHome } from '../../support/setup/hermetic-home';
 
 describe('assertHermeticHome', () => {

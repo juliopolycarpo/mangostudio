@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { sseResponse } from '../../../src/lib/sse-stream';
 
 async function readEvents(response: Response): Promise<unknown[]> {
@@ -25,7 +26,7 @@ describe('sseResponse', () => {
   });
 
   it('turns a thrown Error into one error event carrying its message', async () => {
-    // biome-ignore lint/correctness/useYield: this generator only ever throws.
+    // eslint-disable-next-line require-yield -- this generator only ever throws.
     async function* failing(): AsyncGenerator<{ type: string }> {
       await Promise.resolve();
       throw new Error('the source blew up');

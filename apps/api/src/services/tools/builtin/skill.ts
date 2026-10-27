@@ -44,7 +44,7 @@ const definition = {
   },
 };
 
-// biome-ignore lint/suspicious/useAwait: tool executors are async by contract
+// tool executors are async by contract
 async function execute(
   args: Record<string, unknown>,
   context: ToolContext

@@ -16,7 +16,9 @@ import { describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import { DEFAULT_SSH_RUNTIME_PATH } from '@mangostudio/shared/environments';
+
 import {
   buildConnectBootstrapCommand,
   buildServiceInstallCommand,
@@ -149,7 +151,7 @@ describePosix('buildServiceInstallCommand', () => {
   const reportEnvironment = (script: string) =>
     script.replace(
       'exec "$p" service install --mode connect',
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion on the target, not a JS placeholder
+      // eslint-disable-next-line no-template-curly-in-string -- shell parameter expansion on the target, not a JS placeholder
       'echo "XDG=$XDG_RUNTIME_DIR"; echo "DBUS=${DBUS_SESSION_BUS_ADDRESS:-unset}"'
     );
 

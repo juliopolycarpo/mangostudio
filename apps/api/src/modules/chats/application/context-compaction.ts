@@ -5,6 +5,7 @@ import type {
 } from '@mangostudio/shared/chat';
 import type { MessagePart, ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import {
   buildPersistedContextSnapshot,
@@ -96,7 +97,7 @@ async function loadOwnedChat(
   db: Kysely<Database>
 ): Promise<OwnedChat> {
   const chat = await getById(chatId, db);
-  if (!chat || chat.userId !== userId) throw new ChatNotFoundError(chatId);
+  if (chat?.userId !== userId) throw new ChatNotFoundError(chatId);
 
   return {
     id: chat.id,

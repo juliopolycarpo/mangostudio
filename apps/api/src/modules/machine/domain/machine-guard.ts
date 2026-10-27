@@ -7,6 +7,7 @@
  */
 
 import type { InstallGuard } from '@mangostudio/shared/environments';
+
 import { evaluateInstallGuard } from '../../environments/domain/install-guards';
 
 export interface MachineGuardContext {

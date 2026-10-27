@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   parsePlatformProbe,
-  RUNTIME_PLATFORM_IDS,
   resolveLinuxPlatformId,
   resolveRuntimePlatformId,
+  RUNTIME_PLATFORM_IDS,
 } from '@mangostudio/shared/runtime-home';
+
 import { platformFromProbe } from '../../../../src/modules/environments/infrastructure/container-engine';
 
 const GLIBC = 'ldd (Ubuntu GLIBC 2.35) 2.35';

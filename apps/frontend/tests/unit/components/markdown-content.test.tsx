@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { act } from 'react';
+
 import { stubClipboard } from '../../support/harness/clipboard';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
@@ -15,7 +17,7 @@ const shiki = {
   preloadCodeLanguages: jest.fn(() => Promise.resolve(true)),
 };
 
-mock.module('@/lib/shiki', () => ({
+void mock.module('@/lib/shiki', () => ({
   ...shiki,
   CODE_THEMES: ['one-dark-pro', 'github-dark-dimmed', 'github-light', 'one-light'],
 }));

@@ -1,4 +1,5 @@
 import Type, { type Static, type TSchema } from 'typebox';
+
 import type { MessagePart } from '../types/agent-events';
 import type { InteractionMode } from '../types/provider';
 import {

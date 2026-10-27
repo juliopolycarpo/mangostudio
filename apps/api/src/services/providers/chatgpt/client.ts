@@ -8,6 +8,7 @@
  */
 
 import OpenAI from 'openai';
+
 import { getConfig } from '../../../lib/config';
 import type { ChatGptTokenBundle } from '../../../modules/connectors/infrastructure/chatgpt/oauth-client';
 import { getOrCreateCachedClient } from '../core/client-cache';

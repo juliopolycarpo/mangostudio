@@ -2,11 +2,11 @@ import { describe, expect, it } from 'bun:test';
 
 import type { WorkspaceName } from '../../lib/config';
 import type { CoverageSummary } from '../model/metrics';
-import { type Measurement, measured, stale, unavailable, unsupported } from '../model/states';
+import { measured, type Measurement, stale, unavailable, unsupported } from '../model/states';
 import { BASE_REPOSITORY_FILES, makeFakeRepository } from '../testing/fake-repository';
 import { expectState } from '../testing/measurement-assertions';
 import { makeCoverageSummary } from '../testing/metrics-fixture';
-import { type ComponentDeps, collectComponents, coverageLane } from './components';
+import { collectComponents, type ComponentDeps, coverageLane } from './components';
 import { type ComponentSpec, discoverComponents } from './registry';
 import { CollectorTimings } from './timings';
 

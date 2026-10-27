@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { listDirectory } from '../../../../src/modules/workspaces/application/directory-browser';
 import {
   requireValidWorkdir,

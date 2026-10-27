@@ -36,8 +36,8 @@ import {
   type GuardContext,
   type Port,
   type ProtocolVersion,
-  RESERVED_ERROR_CODES,
   RemoteError,
+  RESERVED_ERROR_CODES,
   Session,
 } from '@mangostudio/protocol';
 import { createInProcessPortPair } from '@mangostudio/protocol/in-process';
@@ -56,6 +56,7 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeCapabilityAllow, RuntimeSlot } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
+
 import type { HubSession } from '../../src/services/runtime-client/hub-session';
 import { openHubSession } from '../../src/services/runtime-client/hub-session';
 
@@ -82,6 +83,7 @@ export interface FakeConsentSource {
  * const consent = fixedConsent(RUNTIME_CONSENT_PRESETS.full, 'host');
  */
 export function fixedConsent(allow: RuntimeCapabilityAllow, slot: RuntimeSlot): FakeConsentSource {
+  // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
   return { slot, current: () => allow, refresh: async () => allow };
 }
 
@@ -340,7 +342,7 @@ export async function connectFakeRuntime(
         : {}),
     });
   } catch (error) {
-    runtime.close();
+    void runtime.close();
     throw error;
   }
 
@@ -349,7 +351,7 @@ export async function connectFakeRuntime(
     runtime,
     async close() {
       hub.close();
-      runtime.close();
+      void runtime.close();
       await runtimeClosed;
     },
   };

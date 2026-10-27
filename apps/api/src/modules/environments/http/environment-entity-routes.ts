@@ -22,13 +22,14 @@ import {
 } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
+
 import { requireAuth } from '../../../plugins/auth-middleware';
 import type { EnvironmentService } from '../application/environment-service';
 import {
   RuntimeLifecycleConflictError,
   type RuntimeLifecycleService,
-  RuntimeLifecycleUnavailableError,
   runtimeLifecycleService,
+  RuntimeLifecycleUnavailableError,
 } from '../application/runtime-lifecycle-service';
 import {
   type RuntimePairingService,

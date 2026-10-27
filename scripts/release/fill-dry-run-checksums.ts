@@ -7,8 +7,8 @@ import { fillDryRunChecksumManifest } from '../lib/dry-run-checksums';
 import {
   assertNoUnexpectedArguments,
   error,
-  type ParsedArgs,
   parseArgs,
+  type ParsedArgs,
   success,
 } from '../lib/runner';
 

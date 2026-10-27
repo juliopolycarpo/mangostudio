@@ -18,6 +18,7 @@
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
+
 import {
   acknowledgeExternalDisclosure,
   type ExternalDisclosureRecord,

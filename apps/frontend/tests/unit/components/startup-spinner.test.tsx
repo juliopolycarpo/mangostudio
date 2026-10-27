@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { StartupSpinner } from '../../../src/components/layout/StartupSpinner';
 import { render, screen } from '../../support/harness/render';
 

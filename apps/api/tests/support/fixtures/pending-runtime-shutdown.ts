@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   type ManagedRuntimeConnection,
@@ -43,6 +44,7 @@ class PendingRuntimeOpener {
 async function runPendingShutdown(): Promise<void> {
   const opener = new PendingRuntimeOpener();
   const manager = new RuntimeConnectionManager({
+    // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
     resolveEnvironment: async () => ({
       id: 'pending-warmup',
       userId: 'fixture-user',

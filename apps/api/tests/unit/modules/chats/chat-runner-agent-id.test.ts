@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { resolveRunnerAgentId } from '../../../../src/modules/chats/domain/chat-runner';
 
 describe('resolveRunnerAgentId', () => {

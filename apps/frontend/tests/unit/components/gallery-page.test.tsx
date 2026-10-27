@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { GalleryItem } from '@mangostudio/shared/types';
 import userEvent from '@testing-library/user-event';
+
 import { render, screen, waitFor } from '../../support/harness/render';
 
 const { fetchNextPageMock, galleryQueryState } = {
@@ -20,7 +22,7 @@ const { fetchNextPageMock, galleryQueryState } = {
   },
 };
 
-mock.module('../../../src/features/gallery/queries', () => ({
+void mock.module('../../../src/features/gallery/queries', () => ({
   useGalleryQuery: () => ({
     data: galleryQueryState.current.data,
     fetchNextPage: fetchNextPageMock,

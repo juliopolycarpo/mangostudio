@@ -1,14 +1,16 @@
 import { homedir } from 'node:os';
 import { extname, isAbsolute, join } from 'node:path';
+
 import type {
   FixedRuleFileKind,
   RuleFileDescriptor,
   RuleFilePreviewResponse,
 } from '@mangostudio/shared/prompt-rules';
+
 import {
+  readRegularFileUtf8,
   type RegularFileContent,
   RegularFileReadError,
-  readRegularFileUtf8,
   statRegularFile,
 } from '../../../lib/safe-file';
 

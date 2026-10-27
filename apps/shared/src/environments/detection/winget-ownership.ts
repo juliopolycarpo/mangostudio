@@ -1,4 +1,5 @@
 import { win32 } from 'node:path';
+
 import type { RuntimeInstallation } from '../schemas';
 import { normalizedPath } from './binary-scan';
 

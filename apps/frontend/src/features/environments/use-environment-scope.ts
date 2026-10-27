@@ -10,6 +10,7 @@
 import type { Environment } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useNavigate, useSearch } from '@tanstack/react-router';
+
 import { useEnvironmentEntitiesQuery } from './queries';
 
 export interface EnvironmentScopeSearch {

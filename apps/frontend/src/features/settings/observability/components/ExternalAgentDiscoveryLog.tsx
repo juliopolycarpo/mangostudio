@@ -15,6 +15,7 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Badge } from '@/components/ui/Badge';
@@ -24,6 +25,7 @@ import {
 } from '@/features/external-agents/useExternalAgents';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
+
 import { formatTimestamp } from '../utils';
 
 export function ExternalAgentDiscoveryLog() {

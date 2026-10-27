@@ -12,6 +12,7 @@
 import type { McpServer, McpServerStatus, TestMcpServerResponse } from '@mangostudio/shared/mcp';
 import { ChevronDown, ChevronRight, Pencil, RefreshCw, Server, Trash2 } from 'lucide-react';
 import { type ComponentProps, useState } from 'react';
+
 import { StatusNote } from '@/components/settings/StatusNote';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -28,6 +29,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useTestMcpServer, useUpdateMcpServer } from '../hooks/use-mcp-servers';
 import { McpServerResources } from './McpServerResources';
 import { McpServerTools } from './McpServerTools';
@@ -236,7 +238,11 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
 
       {note ? (
         note.ok ? (
-          <StatusNote tone="success" role="status">
+          <StatusNote
+            tone="success"
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+            role="status"
+          >
             {note.message}
           </StatusNote>
         ) : (

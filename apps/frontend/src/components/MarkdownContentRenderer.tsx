@@ -1,5 +1,6 @@
 import { Marked, Renderer } from 'marked';
 import { useEffect, useMemo, useRef, useState } from 'react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import type { CodeThemeId } from '@/lib/code-themes';
@@ -50,6 +51,7 @@ export function MarkdownContentRenderer({
 
   const parser = useMemo(
     () => createParser(resolvedCodeTheme, resolvedCopyLabel, highlighter),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- The highlighter mutates in place when another language loads.
     [resolvedCodeTheme, resolvedCopyLabel, highlighter, highlightVersion]
   );
   // The memo re-parses whenever content or parser changes (i.e. every streamed
@@ -63,7 +65,7 @@ export function MarkdownContentRenderer({
       // HTML is produced by `marked` with a custom renderer that only emits
       // a fixed tag set and escapes raw HTML; rendering as HTML is required
       // to surface Shiki-highlighted code blocks and safe link elements.
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized markdown is rendered as HTML here
+      // eslint-disable-next-line react/no-danger -- sanitized markdown is rendered as HTML here
       dangerouslySetInnerHTML={{ __html: renderedHtml }}
     />
   );
@@ -253,7 +255,8 @@ function detectCodeLanguages(content: string): string[] {
   const languages = new Set<string>();
   // walkTokens recurses into list items and blockquotes, so fenced code nested
   // inside them still has its grammar preloaded for highlighting.
-  codeLanguageLexer.walkTokens(codeLanguageLexer.lexer(content), (token) => {
+  // This callback is synchronous, so there are no pending token visits to await.
+  void codeLanguageLexer.walkTokens(codeLanguageLexer.lexer(content), (token) => {
     if (token.type === 'code' && 'lang' in token && token.lang) languages.add(token.lang);
   });
   return [...languages].sort();

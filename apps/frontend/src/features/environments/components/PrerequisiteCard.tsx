@@ -7,8 +7,10 @@
  */
 
 import type { RuntimeStatus } from '@mangostudio/shared/environments';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { effectiveInstallation, versionLabel } from '../format';
 import { useProbeRuntime } from '../hooks/use-runtime-status';
 import { useToolIdentities } from '../identity/use-tool-identities';

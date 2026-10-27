@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ServeArgs, ServiceArgs, SetupArgs } from '../../../../src/cli/args';
 import { canOpenBrowser, runSetup, type SetupDeps } from '../../../../src/cli/commands/setup';
 import type { ServerState } from '../../../../src/lib/server-state';

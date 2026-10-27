@@ -6,6 +6,7 @@ import {
   type ApiKeyScope,
 } from '@mangostudio/shared/api-keys';
 import { betterAuth } from 'better-auth';
+
 import { getDb } from './db/database';
 import { assertValidAuthSecret, getConfig } from './lib/config';
 

@@ -6,6 +6,7 @@
  */
 
 import { Inbox } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';

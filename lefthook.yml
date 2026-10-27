@@ -1,17 +1,13 @@
 pre-commit:
-  parallel: true
+  parallel: false
   commands:
-    biome:
-      glob: "*.{ts,tsx,js,jsx,json}"
-      run: bunx biome check --write --no-errors-on-unmatched {staged_files}
+    bun-lint:
+      glob: "*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"
+      run: bun lint --staged --fix --no-script --no-warn-ignored
       stage_fixed: true
-    dprint:
-      glob: "*.{md,mdc,mdx,toml,yml,yaml}"
-      run: bunx dprint fmt --allow-no-files {staged_files}
-      stage_fixed: true
-    dprint-dockerfile:
-      glob: "{Dockerfile,Dockerfile.*}"
-      run: bunx dprint fmt --allow-no-files {staged_files}
+    bun-fmt:
+      glob: "*.{ts,tsx,js,jsx,mts,cts,mjs,cjs,json,jsonc,css,html,md,mdc,mdx,toml,yml,yaml}"
+      run: bun fmt --staged
       stage_fixed: true
     check-affected:
       run: bun run check --staged --skip-format

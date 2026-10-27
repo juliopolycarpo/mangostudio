@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+
 import { getDb } from '../../../../src/db/database';
 import {
   listToolSettingsDescriptors,
@@ -110,12 +112,12 @@ describe('tool settings with MCP tools', () => {
     const intruder = nextUserId();
     await insertServer(owner, 'github', 'GitHub');
 
-    expect(
+    await expect(
       updateToolSettingsDescriptor(getDb(), intruder, 'mcp__github__create_issue', {
         enabled: false,
       })
     ).rejects.toThrow(ToolSettingsError);
-    expect(
+    await expect(
       updateToolSettingsDescriptor(getDb(), owner, 'mcp____broken', { enabled: false })
     ).rejects.toThrow('Unknown tool');
   });
@@ -124,7 +126,7 @@ describe('tool settings with MCP tools', () => {
     const userId = nextUserId();
     await insertServer(userId, 'github', 'GitHub');
 
-    expect(
+    await expect(
       updateToolSettingsDescriptor(getDb(), userId, 'mcp__github__create_issue', {
         parameters: { quality: 5 },
       })

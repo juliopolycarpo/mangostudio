@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { waitForProcessExit } from '../../support/fixtures/managed-process';
-import { type ProcessLivenessProbe, processGone } from '../../support/process-liveness';
+import { processGone, type ProcessLivenessProbe } from '../../support/process-liveness';
 
 /** A named zero-signal probe with an explicit sequence, rejecting accidental extra calls. */
 class FakeProcessLivenessProbe {
@@ -90,7 +91,7 @@ describe('installer processGone evidence', () => {
     try {
       expect(child.pid).toBeGreaterThan(0);
       expect(await processGone(child.pid, 0)).toBe(false);
-      child.stdin.end();
+      await child.stdin.end();
       expect(await child.exited).toBe(0);
       expect(await processGone(child.pid, 0)).toBe(true);
     } finally {

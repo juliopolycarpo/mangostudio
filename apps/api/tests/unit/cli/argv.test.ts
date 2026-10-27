@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { extractUserArgs } from '../../../src/cli/argv';
 
 describe('extractUserArgs', () => {

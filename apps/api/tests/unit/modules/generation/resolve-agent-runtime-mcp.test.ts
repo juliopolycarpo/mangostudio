@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+
 import { getDb } from '../../../../src/db/database';
 import { resolveAgentRuntime } from '../../../../src/modules/generation/application/resolve-agent-runtime';
 import { upsertToolSettings } from '../../../../src/modules/tool-settings/infrastructure/tool-settings-repository';

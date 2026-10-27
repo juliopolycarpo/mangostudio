@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
 import {
   ExternalAgentEventSchema,
@@ -21,6 +22,7 @@ import {
 } from '@mangostudio/shared/external-agents';
 import type { ExternalActivityPart, MessagePart } from '@mangostudio/shared/types';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../../src/db/database';
 import {
   compactChatUseCase,

@@ -5,9 +5,12 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import { screen } from '@testing-library/react';
+
 import { RevertFileChangesDialog } from '@/features/chat/components/RevertFileChangesDialog';
+
 import { render } from '../../../support/harness/render';
 
 const labels = en.chat.fileCheckpoints;

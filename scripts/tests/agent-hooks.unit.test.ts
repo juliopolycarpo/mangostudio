@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from 'bun
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative, resolve } from 'node:path';
+
 import {
   findProtectedFile,
   runProtectGeneratedHook,
@@ -236,9 +237,11 @@ describe('agent auto-fix hooks', () => {
   });
 
   it('chooses the formatter from the touched file name', () => {
-    expect(chooseFormatter('src/app.ts')).toBe('biome');
-    expect(chooseFormatter('docs/README.md')).toBe('dprint');
-    expect(chooseFormatter('Dockerfile.release')).toBe('dprint');
+    expect(chooseFormatter('src/app.ts')).toBe('bun');
+    expect(chooseFormatter('src/app.json')).toBe('fmt');
+    expect(chooseFormatter('docs/README.md')).toBe('fmt');
+    expect(chooseFormatter('docs/README.mdc')).toBe('fmt');
+    expect(chooseFormatter('Dockerfile.release')).toBeUndefined();
     expect(chooseFormatter('crates/mango-protocol/src/lib.rs')).toBe('rustfmt');
     expect(chooseFormatter('assets/logo.png')).toBeUndefined();
   });
@@ -324,8 +327,8 @@ describe('agent auto-fix hooks', () => {
       proc,
       fakes,
       async () => {
-        proc.stdin.write(JSON.stringify({ path: filePath }));
-        proc.stdin.end();
+        await proc.stdin.write(JSON.stringify({ path: filePath }));
+        await proc.stdin.end();
         const nativeOwned =
           process.platform === 'win32' ? undefined : await captureOwnedFormatters(proc, fakes);
         const exitCode = await proc.exited;
@@ -386,8 +389,8 @@ describe('agent auto-fix hooks', () => {
         fakes,
         async () => {
           try {
-            proc.stdin.write(JSON.stringify({ path: filePath }));
-            proc.stdin.end();
+            await proc.stdin.write(JSON.stringify({ path: filePath }));
+            await proc.stdin.end();
             const owned = await captureOwnedFormatters(proc, fakes, true);
             if (mode === 'deadline-first') {
               await writeFile(formatterControlPath(marker, 'fire-deadline'), '');
@@ -466,8 +469,8 @@ describe('agent auto-fix hooks', () => {
         proc,
         fakes,
         async () => {
-          proc.stdin.write(JSON.stringify({ path: filePath }));
-          proc.stdin.end();
+          await proc.stdin.write(JSON.stringify({ path: filePath }));
+          await proc.stdin.end();
           expect(await proc.exited).toBe(mode === 'spawn-throw' ? 0 : 130);
           const receipt = JSON.parse(
             await readFile(formatterControlPath(marker, 'control-exit'), 'utf8')
@@ -658,8 +661,8 @@ describe('agent auto-fix hooks', () => {
         stderr: 'ignore',
         timeout: 8000,
       });
-      proc.stdin.write(JSON.stringify({ cwd: dir, path: touchedPath(dir) }));
-      proc.stdin.end();
+      await proc.stdin.write(JSON.stringify({ cwd: dir, path: touchedPath(dir) }));
+      await proc.stdin.end();
 
       expect(await proc.exited).toBe(0);
       const recorded = await readMarker(marker, 'fake rustfmt');
@@ -779,8 +782,10 @@ describe('Claude protect-generated hook', () => {
       [process.execPath, join(repoRoot, '.claude', 'hooks', 'protect-generated.mjs')],
       { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }
     );
-    proc.stdin.write(JSON.stringify({ tool_input: { file_path: join(repoRoot, 'bun.lock') } }));
-    proc.stdin.end();
+    await proc.stdin.write(
+      JSON.stringify({ tool_input: { file_path: join(repoRoot, 'bun.lock') } })
+    );
+    await proc.stdin.end();
 
     expect(await proc.exited).toBe(2);
     expect(await new Response(proc.stderr).text()).toContain('bun install');

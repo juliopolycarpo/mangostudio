@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
+
 import { settleWorker } from '../../lib/test-worker-settle';
 import type { FixtureJob } from './fixture-windows-job';
 
@@ -36,6 +37,7 @@ export function disposeFixtureJob(job: FixtureJob): void {
   }
   if (failure !== undefined || cleanupErrors.length)
     throw new FixtureSettlementError(
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Diagnostics intentionally describe arbitrary invalid input, including non-scalar values.
       `fixture Windows job settlement failed; storage retained: ${String(failure ?? 'native handle disposal failed')}${cleanupErrors.length ? `; cleanup errors: ${cleanupErrors.map(String).join('; ')}` : ''}`
     );
 }
@@ -246,6 +248,7 @@ export class FixtureCommands {
       .then((result) => {
         if (timedOut)
           throw new Error(
+            // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Diagnostics intentionally describe arbitrary invalid input, including non-scalar values.
             `fixture command ${cmd.join(' ')} exceeded ${this.timeoutMs}ms${stopError ? `; stop failed: ${String(stopError)}` : ''}`
           );
         return result;

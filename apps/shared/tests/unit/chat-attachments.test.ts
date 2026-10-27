@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
+
 import {
   ChatAttachmentKindSchema,
   ChatAttachmentSchema,
   UploadChatAttachmentResponseSchema,
 } from '../../src/chat';
 import {
+  GenerateTextBodySchema,
   GENERATION_ATTACHMENT_IDS_MAX_ITEMS,
   GENERATION_MODEL_ID_MAX_LENGTH,
   GENERATION_PROMPT_MAX_LENGTH,
-  GenerateTextBodySchema,
   RespondStreamBodySchema,
 } from '../../src/generation';
 

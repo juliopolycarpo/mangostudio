@@ -1,7 +1,8 @@
 import { expect, it } from 'bun:test';
+
 import { CLOSE_CODES } from '../close';
 import { DEFAULT_MAX_FRAME_BYTES } from '../codec/ndjson';
-import { RESERVED_ERROR_CODES, RemoteError } from '../errors';
+import { RemoteError, RESERVED_ERROR_CODES } from '../errors';
 import type { EventFrame } from '../schemas/frames';
 import type { RequestHandler, Session, SessionOptions } from '../session';
 import { rejectionOf } from './rejection';
@@ -403,7 +404,7 @@ export function itBehavesLikeAMangoTransport(fixture: ConformanceFixture): void 
     await withPair(async ({ a, b }) => {
       await Promise.all([a.ready, b.ready]);
       const closed = new Promise((resolve) => a.onClose(resolve));
-      b.close(CLOSE_CODES.SUPERSEDED, 'superseded by a newer connection');
+      await b.close(CLOSE_CODES.SUPERSEDED, 'superseded by a newer connection');
       expect(await closed).toMatchObject({ code: CLOSE_CODES.SUPERSEDED, fatal: true });
       expect(b.closure).toMatchObject({ code: CLOSE_CODES.SUPERSEDED });
     });

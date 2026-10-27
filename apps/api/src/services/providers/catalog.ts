@@ -7,6 +7,7 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
+
 import { setBounded } from '../../lib/bounded-map';
 import { parseStringArray } from '../../utils/json';
 import { listAllSecretMetadata } from '../secret-store/metadata';
@@ -67,8 +68,7 @@ interface UnifiedModelCatalogService {
     userId: string,
     modelId: string
   ):
-    | { providerType: ProviderType; capabilities: ModelInfo['capabilities'] | undefined }
-    | undefined;
+    { providerType: ProviderType; capabilities: ModelInfo['capabilities'] | undefined } | undefined;
   getCachedModelCapabilities(
     userId: string,
     modelId: string
@@ -211,7 +211,7 @@ export function createUnifiedModelCatalogService(
     );
   }
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   async function refreshCatalog(userId: string): Promise<ModelCatalogResponse> {
     const inflight = refreshPromises.get(userId);
     if (inflight) return inflight;
@@ -227,7 +227,7 @@ export function createUnifiedModelCatalogService(
         const PROVIDER_TIMEOUT_MS = 5_000;
 
         const results = await Promise.allSettled(
-          // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+          // Migrated from ESLint
           providerTypes.map(async (pt) => {
             const provider = getProviderFn(pt);
             const timeoutPromise = new Promise<never>((_, reject) =>
@@ -295,7 +295,7 @@ export function createUnifiedModelCatalogService(
      * Refreshes the catalog by calling listModels() on every registered provider.
      * Providers that fail (e.g. no connector configured) are silently skipped.
      */
-    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+    // Migrated from ESLint
     async refresh(userId: string): Promise<ModelCatalogResponse> {
       return refreshCatalog(userId);
     },

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 // Bun parses JSONC natively, so importing the config tolerates the comments and
 // trailing commas `turbo.jsonc` is allowed to carry (JSON.parse would throw).
 import turboConfigJson from '../../turbo.jsonc';

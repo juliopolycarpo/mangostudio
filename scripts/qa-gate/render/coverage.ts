@@ -5,9 +5,9 @@
 import type { ComponentKind, Metrics } from '../collect/types';
 import type { CoverageBucket } from '../parse-lcov';
 import {
-  type CoverageKey,
   componentLabel,
   componentRows,
+  type CoverageKey,
   coverageKeysFor,
   findComponent,
   getCoverageBucket,

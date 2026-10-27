@@ -24,6 +24,7 @@ import {
   LIBRARY_LOCATION_DEFINITIONS,
   type LocationDefinition,
 } from '@mangostudio/shared/library/host';
+
 import type { DiagnosticLogger } from '../../../lib/logger';
 import {
   type EnvironmentProbingService,

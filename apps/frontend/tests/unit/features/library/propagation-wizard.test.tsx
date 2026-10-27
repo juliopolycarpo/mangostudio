@@ -11,8 +11,10 @@
  */
 
 import { afterEach, describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { PropagationWizard } from '../../../../src/features/library/components/PropagationWizard';
 import { screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
@@ -62,6 +64,7 @@ describe('PropagationWizard without candidate destinations', () => {
     // The contract requires at least one target, so the request the guard
     // prevents would come back 422.
     const previewCalls = scenario.fetchMock.mock.calls.filter(([input]) =>
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
       String(input).includes('/library/propagate/preview')
     );
     expect(previewCalls).toEqual([]);

@@ -13,11 +13,13 @@ import type {
   LtsStatus,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+
 import { Badge } from '@/components/ui/Badge';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { displayName, ltsLabel } from '../format';
 import { useProbeVersionManager } from '../hooks/use-runtime-status';
 import { ToolIdentityMenu } from '../identity/ToolIdentityMenu';

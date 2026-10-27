@@ -10,11 +10,13 @@
  */
 
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useEnableInstallsMutation } from '../queries';
 
 export function EnableInstallsButton() {

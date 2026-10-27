@@ -12,6 +12,7 @@
 
 import type { GitSummary } from '@mangostudio/shared/git';
 import { GitBranch, GitBranchPlus } from 'lucide-react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
 import { branchLabel } from '@/lib/git-branch';

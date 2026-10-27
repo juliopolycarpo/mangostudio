@@ -1,6 +1,8 @@
 import { Ellipsis } from 'lucide-react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { TimelineItem } from '../TimelineItem';
 import { TimelineRow } from '../TimelineRow';
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { HUB_BINDING_KEY_LENGTH, HubBindingKeySchema } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 

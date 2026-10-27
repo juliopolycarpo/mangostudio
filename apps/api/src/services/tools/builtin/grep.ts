@@ -4,6 +4,7 @@
  */
 
 import { GrepPatternError } from '@mangostudio/shared/runtime-contract';
+
 import { getRuntimeClient } from '../../runtime-client';
 import {
   clampIntegerSetting,
@@ -17,8 +18,8 @@ import {
   createResultPathReporter,
   getRequiredPathArg,
   normalizePathValidationSettings,
-  type PathValidationSettings,
   pathPolicyParameterDescriptors,
+  type PathValidationSettings,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';

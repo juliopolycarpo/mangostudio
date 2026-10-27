@@ -163,7 +163,7 @@ function buildGeminiInteractionParams(
   return params;
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 async function createGeminiInteractionStream(
   ai: ReturnType<typeof createGeminiClient>,
   params: Record<string, unknown>,

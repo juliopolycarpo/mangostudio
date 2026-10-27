@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { SlashCommandMenu } from '../../../../src/features/chat/components/SlashCommandMenu';
 import type { SlashCommandEntry } from '../../../../src/features/chat/lib/slash-commands';
 import { render } from '../../../support/harness/render';

@@ -13,6 +13,7 @@
 
 import type { Chat } from '@mangostudio/shared/chat';
 import type { GitSummary } from '@mangostudio/shared/git';
+
 import { branchLabel } from '@/lib/git-branch';
 
 interface UncommittedChat {

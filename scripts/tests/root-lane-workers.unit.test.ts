@@ -20,8 +20,8 @@ import {
   discoverTestFiles,
   laneSpec,
   planWorkers,
-  type StartWorker,
   splitLaneCommand,
+  type StartWorker,
   WORKERS_ENV,
 } from '../lib/test-workers';
 import { main, type RunnerDeps } from '../run-test-workers';

@@ -6,8 +6,8 @@ import { NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import {
   ALL_BINARY_TARGETS,
   platformArchiveLayout,
-  type ReleasePlatformId,
   releaseArchiveFileName,
+  type ReleasePlatformId,
 } from './release-targets';
 
 /**
@@ -371,8 +371,8 @@ function selectFiles(
   switch (scope) {
     case 'checksums':
       return manifest.files.filter((file) => file.path === 'release-assets/SHA256SUMS');
-    case 'assets':
     // Transitional alias of assets; remove after one transition cycle.
+    case 'assets':
     case 'packaged':
       return manifest.files.filter((file) => file.path.startsWith('release-assets/'));
     case 'npm':

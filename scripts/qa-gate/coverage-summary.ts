@@ -4,8 +4,8 @@ import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from '../lib/config
 import { readCoveredSources } from './lcov-sources';
 import {
   type CoverageBucket,
-  type CoverageSummary,
   coverageBucket,
+  type CoverageSummary,
   parseLcovSummary,
 } from './parse-lcov';
 import { sourceBranchCoverageFromSources } from './source-branch-coverage';

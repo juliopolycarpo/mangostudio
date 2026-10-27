@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
+
 import { authClient } from '@/lib/auth-client';
+
 import {
   bindRealtimeClientToUser,
   getRealtimeClient,

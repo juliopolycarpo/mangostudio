@@ -15,10 +15,12 @@
 import type { InstallRecipePreview, RecipeInput } from '@mangostudio/shared/environments';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { chainStepLabel, runtimeNameList } from '../format';
 import { chainStopped, useInstallFlow } from '../hooks/use-install-flow';
 import { useInstallStream } from '../hooks/use-install-stream';
@@ -90,9 +92,9 @@ export function InstallAction({
   // cards re-render on a 15s status poll. The chain depends on the input's
   // value, so the value is what the memo keys on.
   const inputKey = input.kind === 'node-version' ? `node-version:${input.version}` : input.kind;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `inputKey` is `input` by value.
   const chain = useMemo(
     () => (recipe ? resolveInstallChain(catalog, recipe, input) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- inputKey represents the input by value.
     [catalog, inputKey, recipe]
   );
 

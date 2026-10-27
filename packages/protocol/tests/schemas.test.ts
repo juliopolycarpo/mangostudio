@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { assertCatalog, type Catalog, isCatalog } from '../src/schemas/catalog';
 import {
   isReservedMethodName,

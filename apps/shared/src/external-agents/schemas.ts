@@ -21,6 +21,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import { ToolchainSelectionSchema } from '../environments/toolchain-schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
 import {

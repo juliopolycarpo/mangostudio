@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
+
 import { render } from '../../support/harness/render';
 import { setTestSession, setTestSignOut } from '../../support/setup/auth-client-stub';
 
@@ -14,7 +16,10 @@ const mockSignOut = jest.fn();
 // register the mock over it, then import the subject.
 const actualRouter = await import('@tanstack/react-router');
 
-mock.module('@tanstack/react-router', () => ({ ...actualRouter, useNavigate: () => mockNavigate }));
+void mock.module('@tanstack/react-router', () => ({
+  ...actualRouter,
+  useNavigate: () => mockNavigate,
+}));
 
 const { Header } = await import('../../../src/components/layout/Header');
 

@@ -298,20 +298,18 @@ export function parseNativeTestLog(
   rootJunit: JunitCounts | null,
   workerJunit: Readonly<Record<string, JunitCounts | undefined>> = {}
 ): NativeLaneResult[] {
-  const lanes = inventory.map(
-    (lane): MutableLane => ({
-      id: lane.id,
-      file: null,
-      files: new Set(),
-      cases: [],
-      recap: false,
-      recaps: [],
-      summaries: [],
-      passFooters: [],
-      filtered: [],
-      errors: [],
-    })
-  );
+  const lanes = inventory.map((lane): MutableLane => ({
+    id: lane.id,
+    file: null,
+    files: new Set(),
+    cases: [],
+    recap: false,
+    recaps: [],
+    summaries: [],
+    passFooters: [],
+    filtered: [],
+    errors: [],
+  }));
   const tasks = new Map(
     inventory.map((lane, index) => [lane.task, { spec: lane, lane: lanes[index] }])
   );

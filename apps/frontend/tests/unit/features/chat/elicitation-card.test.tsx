@@ -6,7 +6,9 @@
  */
 
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import { fireEvent, render, screen, waitFor, within } from '../../../support/harness/render';
 
 const respondMock = jest.fn();
@@ -15,15 +17,14 @@ const respondMock = jest.fn();
 // subject — `mock.module` is not hoisted and static imports are.
 const actualService = await import('../../../../src/services/mcp-elicitation-service');
 
-mock.module('../../../../src/services/mcp-elicitation-service', () => ({
+void mock.module('../../../../src/services/mcp-elicitation-service', () => ({
   ...actualService,
   respondMcpElicitation: respondMock,
 }));
 
 const { McpElicitationGoneError } = actualService;
-const { ElicitationCard } = await import(
-  '../../../../src/features/chat/components/ElicitationCard'
-);
+const { ElicitationCard } =
+  await import('../../../../src/features/chat/components/ElicitationCard');
 
 type ElicitationPart = Extract<MessagePart, { type: 'mcp_elicitation' }>;
 

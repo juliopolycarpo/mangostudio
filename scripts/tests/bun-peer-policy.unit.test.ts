@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { assertNoRegistryBunPackages, type BunDependencyLock } from '../lib/bun-peer-policy';
 import { readText } from './support/read-text';
 

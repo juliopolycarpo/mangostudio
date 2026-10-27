@@ -5,9 +5,11 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { Environment } from '@mangostudio/shared/environments';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { EnvironmentSelector } from '../../../src/features/environments/components/EnvironmentSelector';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';

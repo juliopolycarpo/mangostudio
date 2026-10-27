@@ -12,6 +12,7 @@
  */
 
 import type { UpdateChannel, UpgradeTarget } from '@mangostudio/shared/updates';
+
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
 import { releaseAssetUrl } from '../../environments/domain/wsl-runtime-release';
 import {

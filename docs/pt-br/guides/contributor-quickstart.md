@@ -57,19 +57,17 @@ bun run --filter @mangostudio/frontend build
 
 Um hook [lefthook](https://github.com/evilmartians/lefthook) de pre-commit é instalado automaticamente durante `bun install`. Ele executa estas verificações em cada commit:
 
-| Verificação        | Gatilho      | Arquivos alvo                  | Impede o commit em caso de                                           |
-| ------------------ | ------------ | ------------------------------ | -------------------------------------------------------------------- |
-| Biome formato/lint | `pre-commit` | `*.{ts,tsx,js,jsx,json}`       | Erros de formato ou lint                                             |
-| dprint formato     | `pre-commit` | `*.{md,mdc,mdx,toml,yml,yaml}` | Erros de formato                                                     |
-| dprint Dockerfile  | `pre-commit` | `{Dockerfile,Dockerfile.*}`    | Erros de formato                                                     |
-| Checks afetados    | `pre-commit` | Todos os arquivos staged       | Erros de validação dos workspaces e checks relevantes do repositório |
+| Verificação     | Gatilho      | Arquivos alvo                    | Impede o commit em caso de                                           |
+| --------------- | ------------ | -------------------------------- | -------------------------------------------------------------------- |
+| Bun lint        | `pre-commit` | JavaScript e TypeScript          | Erros de lint                                                        |
+| Bun fmt         | `pre-commit` | Código e documentação suportados | Erros de formatação                                                  |
+| Checks afetados | `pre-commit` | Todos os arquivos staged         | Erros de validação dos workspaces e checks relevantes do repositório |
 
 Arquivos formatados são re-adicionados ao stage automaticamente. O comando de checks afetados
 é `bun run check --staged --skip-format`: executa lint, ciclos de importação e tipos dos
-workspaces, além de checks relevantes do repositório. Os checks de formato da raiz são
-ignorados porque os hooks de formatação cuidam dos arquivos staged; o lint dos workspaces
-ainda pode apontar erros de formato. A etapa de checks afetados é ignorada durante merge ou
-rebase. [`lefthook.yml`](../../../lefthook.yml) define a configuração dos hooks.
+workspaces, além de checks relevantes do repositório. A formatação fica com os hooks anteriores;
+Dockerfiles não são formatados. A etapa de checks afetados é ignorada durante merge ou rebase.
+[`lefthook.yml`](../../../lefthook.yml) define a configuração dos hooks.
 
 ## 5. Comandos Comuns
 

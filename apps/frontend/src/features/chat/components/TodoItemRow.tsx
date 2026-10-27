@@ -1,5 +1,6 @@
 import type { TodoItem } from '@mangostudio/shared/todos';
 import { Check, ChevronsRight, Circle } from 'lucide-react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 

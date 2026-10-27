@@ -1,18 +1,20 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
+
 import {
   defaultAuditEnabledForSlot,
   defaultConsentForSlot,
   deniedCapabilities,
   mangoHomeDir,
   profileForAllow,
+  resolveRuntimeSlotConfig,
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
-  RuntimeHealthReportSchema,
-  RuntimeSlotConfigSchema,
-  resolveRuntimeSlotConfig,
   runtimeBinaryName,
+  RuntimeHealthReportSchema,
   runtimeSlotConfigPath,
+  RuntimeSlotConfigSchema,
   runtimeSlotCurrentBinaryPath,
   runtimeSlotDir,
   runtimeSlotForPath,

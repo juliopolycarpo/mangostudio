@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { RuntimeInstallation } from '@mangostudio/shared/environments';
 import {
   markWingetOwnedNodeInstallations,

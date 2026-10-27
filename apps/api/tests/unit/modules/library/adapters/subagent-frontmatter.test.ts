@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseAgentMarkdown } from '@mangostudio/shared/agents';
+
 import { parseTomlDocument } from '../../../../../src/lib/toml';
 import { createSubagentAdapter } from '../../../../../src/modules/library/application/adapters/subagent-frontmatter';
 

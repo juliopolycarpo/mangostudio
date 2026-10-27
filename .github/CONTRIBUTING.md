@@ -107,7 +107,7 @@ bun run test --e2e
 bun run check
 ```
 
-This includes Biome, dprint, circular dependency checks, and TypeScript type-checking across all workspaces. See `bun run check --help` and [`scripts/check.ts`](../scripts/check.ts) for the complete command contract, including code-health, generated-contract, lockfile and protocol checks.
+This includes Bun lint and fmt, circular dependency checks, and TypeScript type-checking across all workspaces. See `bun run check --help` and [`scripts/check.ts`](../scripts/check.ts) for the complete command contract, including code-health, generated-contract, lockfile and protocol checks.
 
 ## Building
 

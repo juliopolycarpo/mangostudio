@@ -3,6 +3,7 @@ import type {
   ContextCompactionBehavior,
   ContextSettings as ContextSettingsValue,
 } from '@mangostudio/shared/chat';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';

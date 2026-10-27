@@ -8,11 +8,13 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
 import type { Environment } from '@mangostudio/shared/environments';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { WorkspaceHub, type WorkspaceHubProps } from '../../../src/features/home/WorkspaceHub';
 import { flushAsyncRender } from '../../support/harness/render';
 import { renderWithRouter } from '../../support/harness/render-with-router';

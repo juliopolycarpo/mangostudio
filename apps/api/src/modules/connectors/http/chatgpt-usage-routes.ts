@@ -11,6 +11,7 @@ import type {
 import { RedeemChatGptResetCreditBodySchema } from '@mangostudio/shared/connectors';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
+
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getChatGptUsageHistory,

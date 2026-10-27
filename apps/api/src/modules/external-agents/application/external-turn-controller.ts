@@ -31,7 +31,7 @@
  *    external turn, and the converse is enforced where internal turns start.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import {
   type ExternalAgentAttachment,
   type ExternalAgentConfiguration,
@@ -52,6 +52,7 @@ import type { TurnInterruptionReasonCode } from '@mangostudio/shared/turn-recove
 import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import Value from 'typebox/value';
+
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
@@ -73,9 +74,9 @@ import {
 } from '../../generation/infrastructure/conversation-persistence';
 import { isExpectedTailOfEndedTurn } from '../domain/external-event-sequencer';
 import {
-  type OpenRefusalPresentation,
   openFailureCodeFor,
   openRefusalFor,
+  type OpenRefusalPresentation,
 } from '../domain/external-open-refusal';
 import { endLeavesConversationUnresumable } from '../domain/external-resume-policy';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
@@ -109,8 +110,8 @@ import {
 import { ExternalTranscriptWriter } from './external-transcript-writer';
 import {
   type CancellableSleep,
-  type SubmissionOutcome,
   sleepUnlessAborted,
+  type SubmissionOutcome,
   submitExternalTurn,
 } from './external-turn-submission';
 

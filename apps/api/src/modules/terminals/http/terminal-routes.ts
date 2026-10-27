@@ -13,6 +13,7 @@ import {
   TerminalSessionResponseSchema,
 } from '@mangostudio/shared/terminal';
 import { Elysia, t } from 'elysia';
+
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import {

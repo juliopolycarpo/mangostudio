@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+
 import {
   assertChangelogHasRelease,
-  type CliffResult,
   cliffArgs,
+  type CliffResult,
   countChangelogEntries,
-  PREVIEW_MARKER,
   parseChangelogArgs,
+  PREVIEW_MARKER,
   releaseHeading,
   renderChangelogPreviewSection,
   runChangelog,

@@ -1,8 +1,10 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { InputBar } from '../../../src/features/chat/components/InputBar';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
@@ -413,6 +415,7 @@ describe('InputBar — mid-turn steering', () => {
       await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue(''));
       expect(scenario.fetchMock).toHaveBeenCalledTimes(1);
       const [, init] = scenario.fetchMock.mock.calls[0] as [unknown, RequestInit | undefined];
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
       expect(JSON.parse(String(init?.body))).toEqual({
         clientMessageId: expect.any(String),
         text: 'actually use the existing helper',
@@ -492,6 +495,7 @@ describe('InputBar — mid-turn steering', () => {
   /** The request bodies the scenario saw, in order. */
   function steerBodies(scenario: ReturnType<typeof createFetchScenario>) {
     return scenario.fetchMock.mock.calls.map(
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
       ([, init]) => JSON.parse(String(init?.body)) as { clientMessageId: string; text: string }
     );
   }

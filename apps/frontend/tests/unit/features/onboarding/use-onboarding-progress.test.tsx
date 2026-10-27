@@ -9,8 +9,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { DEFAULT_APP_SETTINGS, onboardingFor } from '@mangostudio/shared/app-settings';
 import { act, waitFor } from '@testing-library/react';
+
 import { useOnboardingProgress } from '../../../../src/features/onboarding/use-onboarding-progress';
 import { renderHook } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -19,6 +21,7 @@ const scenario = createFetchScenario();
 
 function bodyOf(callIndex: number): Record<string, unknown> {
   const init = scenario.fetchMock.mock.calls[callIndex]?.[1];
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
   return JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
 }
 
@@ -75,6 +78,7 @@ describe('useOnboardingProgress', () => {
     const puts = scenario.fetchMock.mock.calls.filter(
       (call) => String(call[1]?.method).toUpperCase() === 'PUT'
     );
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
     const second = JSON.parse(String(puts[1]?.[1]?.body)) as {
       profileSettings: { default: { onboarding: { welcomeAcknowledged: boolean } } };
     };

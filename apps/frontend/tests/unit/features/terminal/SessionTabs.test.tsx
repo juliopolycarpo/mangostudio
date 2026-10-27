@@ -1,7 +1,9 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { TerminalSession } from '@mangostudio/shared/terminal';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { SessionTabs, type SessionTabsProps } from '../../../../src/features/terminal/SessionTabs';
 import { render } from '../../../support/harness/render';
 

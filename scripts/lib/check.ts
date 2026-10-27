@@ -1,4 +1,4 @@
-import { WORKSPACE_DPRINT_PATHS, WORKSPACES, type WorkspaceName } from './config';
+import { type WorkspaceName, WORKSPACES } from './config';
 
 /**
  * The Turbo task that typechecks a workspace and every workspace it imports,
@@ -14,8 +14,9 @@ export function createTurboCheckCommand(workspaces: WorkspaceName[]): string[] {
   const filters = workspaces.map((workspace) => `--filter=${WORKSPACES[workspace].packageName}`);
   return ['turbo', 'run', ...TURBO_CHECK_TASKS, '--ui=stream', ...filters];
 }
-
-/** Build a workspace dprint command. // Usage: createWorkspaceDprintCommand('api'); */
-export function createWorkspaceDprintCommand(workspace: WorkspaceName): string[] {
-  return ['bunx', 'dprint', 'check', ...WORKSPACE_DPRINT_PATHS[workspace]];
+/** Build a selected workspace format check from the shared root policy.
+ * @example createWorkspaceFormatCommand('api');
+ */
+export function createWorkspaceFormatCommand(workspace: WorkspaceName): string[] {
+  return ['bun', 'fmt', '--check', `apps/${workspace}`];
 }

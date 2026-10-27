@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { constants } from 'node:os';
-import { basename, extname, isAbsolute, relative, resolve } from 'node:path';
+import { extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -12,21 +12,20 @@ const ignoredSegments = [
   '/playwright-report/',
   '/test-results/',
 ];
-const biomeExtensions = new Set([
-  '.js',
-  '.jsx',
-  '.mjs',
-  '.cjs',
-  '.ts',
-  '.tsx',
-  '.mts',
-  '.cts',
+const bunLintExtensions = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts']);
+const bunFormatExtensions = new Set([
+  ...bunLintExtensions,
   '.json',
   '.jsonc',
   '.css',
   '.html',
+  '.md',
+  '.mdc',
+  '.mdx',
+  '.toml',
+  '.yml',
+  '.yaml',
 ]);
-const dprintExtensions = new Set(['.md', '.mdx', '.toml', '.yml', '.yaml']);
 
 /**
  * Read the touched file path from Claude or Codex hook JSON.
@@ -112,12 +111,12 @@ export function shouldSkipFile(filePath) {
 export function chooseFormatter(filePath) {
   const extension = extname(filePath).toLowerCase();
 
-  if (biomeExtensions.has(extension)) {
-    return 'biome';
+  if (bunLintExtensions.has(extension)) {
+    return 'bun';
   }
 
-  if (dprintExtensions.has(extension) || isDockerfile(filePath)) {
-    return 'dprint';
+  if (bunFormatExtensions.has(extension)) {
+    return 'fmt';
   }
 
   if (extension === '.rs') {
@@ -141,12 +140,13 @@ export async function runAutoFixHook(input) {
 
   const formatter = chooseFormatter(filePath);
 
-  if (formatter === 'biome') {
-    await runBiome(filePath);
+  if (formatter === 'bun') {
+    await runBunLint(filePath);
+    await runBunFormat(filePath);
   }
 
-  if (formatter === 'dprint') {
-    await runDprint(filePath);
+  if (formatter === 'fmt') {
+    await runBunFormat(filePath);
   }
 
   if (formatter === 'rustfmt') {
@@ -166,10 +166,6 @@ function normalizePath(filePath) {
   return filePath.replaceAll('\\', '/');
 }
 
-function isDockerfile(filePath) {
-  return basename(filePath).toLowerCase().startsWith('dockerfile');
-}
-
 async function isExistingFile(filePath) {
   if (!filePath) {
     return false;
@@ -182,30 +178,12 @@ async function isExistingFile(filePath) {
   }
 }
 
-async function runBiome(filePath) {
-  await runFormatter([
-    process.execPath,
-    'x',
-    '--no-install',
-    'biome',
-    'check',
-    '--write',
-    '--no-errors-on-unmatched',
-    '--files-ignore-unknown=true',
-    filePath,
-  ]);
+async function runBunLint(filePath) {
+  await runFormatter([process.execPath, 'lint', '--fix', '--no-script', filePath]);
 }
 
-async function runDprint(filePath) {
-  await runFormatter([
-    process.execPath,
-    'x',
-    '--no-install',
-    'dprint',
-    'fmt',
-    '--allow-no-files',
-    filePath,
-  ]);
+async function runBunFormat(filePath) {
+  await runFormatter([process.execPath, 'fmt', filePath]);
 }
 
 // rustfmt reads the edition and style from the nearest rustfmt.toml.

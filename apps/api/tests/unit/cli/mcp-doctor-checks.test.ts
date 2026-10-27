@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+
 import { collectMcpDoctorChecks } from '../../../src/cli/mcp-doctor-checks';
 import type { McpServerSelect } from '../../../src/db/types';
 import type { McpDiagnosticsDeps } from '../../../src/modules/mcp-servers/application/mcp-diagnostics';

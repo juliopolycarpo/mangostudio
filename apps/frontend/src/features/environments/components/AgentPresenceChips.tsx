@@ -14,10 +14,12 @@ import type { Environment } from '@mangostudio/shared/environments';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import { useQueries } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { agentCliStatusesQueryOptions } from '../queries';
 
 interface AgentPresenceChipsProps {

@@ -7,7 +7,6 @@ import {
   type NativeMsvcInventory,
   parseNativeMsvcInventory,
 } from './native-bun-qualification-msvc';
-
 import {
   type NativeCommandOptions,
   type NativeCommandReceipt,
@@ -21,8 +20,8 @@ import {
 import {
   collectNativeTestEvidence,
   type NativeTestEvidence,
-  type NativeTestLane,
   nativeTestInventory,
+  type NativeTestLane,
 } from './native-bun-qualification-results';
 import {
   type ArtifactSeal,
@@ -31,9 +30,9 @@ import {
   nativeCompilerArtifacts,
   nativeSourceChanged,
   requireNativeBuildFeatures,
-  type SourceSeal,
   sealNativeArtifact,
   sealNativeSource,
+  type SourceSeal,
 } from './native-bun-qualification-source';
 import {
   type NativeWindowsJobContext,
@@ -226,6 +225,33 @@ async function writeReceipt(receipt: NativeQualificationReceipt): Promise<void> 
   await Bun.write(join(receipt.out, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
+/** Read the source checkout's Bun selector, with a fallback for older sources. */
+async function sourceBunSelector(root: string): Promise<unknown> {
+  try {
+    return (await readFile(join(root, '.bun-version'), 'utf8')).trim();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const packageManager: unknown = (await Bun.file(join(root, 'package.json')).json())
+    .packageManager;
+  return typeof packageManager === 'string' && packageManager.startsWith('bun@')
+    ? packageManager.slice(4)
+    : { invalidPackageManager: packageManager ?? null };
+}
+
+/** Match a channel or pinned source version against the complete native revision. */
+function matchesSourceBunRevision(selector: unknown, revision: string): boolean {
+  if (typeof selector !== 'string') return false;
+  if (selector === 'canary') {
+    return /^\d+\.\d+\.\d+-canary\.\d+\+[a-f0-9]{9}$/.test(revision);
+  }
+  // Build metadata does not participate in semver identity. Bun reports its
+  // own revision after `+`, so compare the version portion of the selector.
+  const pinned = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+[0-9A-Za-z.-]+)?$/.exec(selector);
+  const actual = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\+[a-f0-9]{9}$/.exec(revision);
+  return pinned !== null && actual !== null && pinned[1] === actual[1];
+}
+
 async function runSetup(
   receipt: NativeQualificationReceipt,
   env: Record<string, string | undefined>,
@@ -252,13 +278,11 @@ async function runSetup(
     receipt.toolchain[label] = await readFile(join(receipt.out, result.log), 'utf8');
     if (receipt.setupErrors.length) return [];
   }
-  const expectedBun = (await Bun.file(join(receipt.root, 'package.json')).json()).packageManager;
-  if (
-    typeof expectedBun !== 'string' ||
-    !receipt.toolchain['bun-revision'].trim().startsWith(`${expectedBun.slice(4)}+`)
-  ) {
+  const selector = await sourceBunSelector(receipt.root);
+  const revision = receipt.toolchain['bun-revision'].trim();
+  if (!matchesSourceBunRevision(selector, revision)) {
     receipt.setupErrors.push(
-      `Bun revision ${JSON.stringify(receipt.toolchain['bun-revision'].trim())}; expected ${expectedBun}`
+      `Bun revision ${JSON.stringify(revision)}; expected source Bun selector ${JSON.stringify(selector)} (canary or a pinned version)`
     );
     return [];
   }
@@ -446,7 +470,7 @@ export async function runNativeQualification(
       const sealedHelper = receipt.toolingBefore.files.find(
         (file) => file.path === 'scripts/lib/native-windows-job.ps1'
       );
-      if (!sealedHelper || sealedHelper.sha256 !== helper.sha256)
+      if (sealedHelper?.sha256 !== helper.sha256)
         throw new Error(
           `Unsealed Windows helper ${helperPath}; expected tracked bytes matching tooling identity`
         );

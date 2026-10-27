@@ -9,6 +9,7 @@
 
 import { normalizeMonogram, TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
 import { useEffect, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/Input';
 import { ToolAvatar, type ToolImageDisplay } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { deriveMonogram, type ResolvedToolIdentity } from './resolve';
 import { IMAGE_URL_PATTERN, ToolImageFields, type ToolImageMode } from './ToolImageFields';
 import { useSaveToolIdentity } from './use-tool-identities';
@@ -166,6 +168,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
           value={name}
           // The dialog exists to edit this field; opening it and landing
           // outside the form is the keyboard user's version of a dead end.
+          // eslint-disable-next-line jsx-a11y/no-autofocus -- Focus the field this dialog edits.
           autoFocus
           maxLength={64}
           placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { predecessorPid, waitForPredecessor } from '../../../src/cli/restart-handshake';
 import { FakeProcessController } from '../../support/mocks/fake-process-controller';
 

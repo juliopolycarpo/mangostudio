@@ -6,7 +6,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import {
   type LoopbackServerOptions,
   type OAuthLoopbackServer,
@@ -138,7 +140,9 @@ describe('oauth core with a second provider profile', () => {
       codeVerifier: 'verifier-1',
       authBaseUrl: AUTH_BASE_URL,
       fetchImpl: (input, init) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         expect(String(input)).toBe(`${AUTH_BASE_URL}/oauth/token`);
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         capturedBody = String(init?.body);
         return Promise.resolve(jsonResponse(makeAcmeTokenResponse()));
       },
@@ -158,6 +162,7 @@ describe('oauth core with a second provider profile', () => {
       code: 'code-1',
       codeVerifier: 'verifier-1',
       authBaseUrl: AUTH_BASE_URL,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       fetchImpl: async () =>
         jsonResponse(makeAcmeTokenResponse({ access_token: makeJwt({ sub: 'no-claim' }) })),
     });
@@ -182,6 +187,7 @@ describe('oauth core with a second provider profile', () => {
     const refresh = refreshTokenGrant(acmeProfile, {
       bundle,
       authBaseUrl: AUTH_BASE_URL,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       fetchImpl: async () => jsonResponse({ error: 'invalid_grant' }, 400),
     });
 
@@ -263,6 +269,7 @@ describe('oauth token service with a second provider profile', () => {
       {
         secretStore,
         now: () => NOW,
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         fetchImpl: async () => options.tokenEndpoint?.() ?? jsonResponse(makeAcmeTokenResponse()),
         upsertMetadata: (input) => {
           upserts.push(input);

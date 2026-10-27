@@ -5,6 +5,7 @@
 
 import type { HubHealth } from '@mangostudio/shared/machine';
 import type { UpdateCheck } from '@mangostudio/shared/updates';
+
 import { formatBuildInfo, formatBuildSha } from '../../lib/build-info';
 import { getConfig, getVersion } from '../../lib/config';
 import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';

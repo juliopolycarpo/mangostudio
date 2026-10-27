@@ -5,7 +5,7 @@
  * entry there put the test stub's code in the production bundle, with a green
  * `check`, `test` and `build`. So the aliases live in `tsconfig.test.json`,
  * reached only through `bun test --tsconfig-override`. Two things then need
- * asserting, and neither is visible to `tsc`, biome or knip: that the override
+ * asserting, and neither is visible to `tsc`, Bun lint or knip: that the override
  * is actually in effect when the lane runs, and that nobody has moved an alias
  * back into the config the bundler reads.
  *
@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+
 import { authClient, setTestSession } from '../support/setup/auth-client-stub';
 import * as smallMotionStub from '../support/setup/motion-react-m-stub';
 

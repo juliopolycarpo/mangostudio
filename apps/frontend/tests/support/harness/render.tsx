@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   act,
-  type RenderHookOptions,
-  type RenderOptions,
   render as tlRender,
   renderHook as tlRenderHook,
+  type RenderHookOptions,
+  type RenderOptions,
 } from '@testing-library/react';
 import type React from 'react';
+
 import { ToastProvider } from '../../../src/components/ui/Toast';
 import { registerCapabilityInvalidationSources } from '../../../src/features/chat/hooks/capability-invalidation';
 import { I18nProvider } from '../../../src/hooks/use-i18n';

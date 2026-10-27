@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import { ROOT_DIR } from '../../lib/config';
 
 const DEPENDENCY_SECTIONS = [

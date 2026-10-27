@@ -5,6 +5,7 @@ import {
 } from '@mangostudio/shared/activity';
 import { type ApiErrorResponse, ApiErrorResponseSchema } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
+
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { listActivity } from '../application/list-activity';
 

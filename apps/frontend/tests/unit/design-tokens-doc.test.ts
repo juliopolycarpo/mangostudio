@@ -28,7 +28,7 @@ function colorTokens(block: string): Map<string, string> {
 async function themes() {
   const css = (await Bun.file(STYLESHEET).text()).replace(/\/\*[\s\S]*?\*\//g, '');
   const darkStart = css.indexOf('@theme static');
-  const lightStart = css.indexOf('[data-theme="light"] {');
+  const lightStart = css.search(/\[data-theme=(['"])light\1\]\s*\{/);
   const lightEnd = css.indexOf('@utility', lightStart);
   return {
     dark: colorTokens(css.slice(darkStart, css.indexOf('@keyframes blink', darkStart))),

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { browserCommand, runOpen } from '../../../../src/cli/commands/open';
 import type { ServerState } from '../../../../src/lib/server-state';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';

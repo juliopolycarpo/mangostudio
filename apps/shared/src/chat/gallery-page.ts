@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import type { GalleryItem } from '../types/gallery';
 
 /** Query of `GET /api/messages/images`. */

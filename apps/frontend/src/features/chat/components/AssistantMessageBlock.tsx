@@ -4,9 +4,11 @@ import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpo
 import type { MessagePart } from '@mangostudio/shared/types';
 import { CircleStop, CircleX, type LucideIcon, Sparkles } from 'lucide-react';
 import { useMemo } from 'react';
+
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { deriveTurnStatus, type TurnStatus } from '../lib/turn-status';
 import { AssistantImageTurn } from './AssistantImageTurn';
 import { AssistantTurnBody } from './AssistantTurnBody';

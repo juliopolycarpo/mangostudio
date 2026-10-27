@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { openRefusalFor } from '@mangostudio/api/internal/modules/external-agents/domain/external-open-refusal';
 import { turnErrorRemedyFor } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-error-remedy';
 import { ExternalTurnTranscript } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
@@ -30,6 +31,7 @@ import {
   externalTurnCompletedChunk,
 } from '@mangostudio/shared/streaming';
 import type { ExternalActivityPart, MessagePart } from '@mangostudio/shared/types';
+
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,

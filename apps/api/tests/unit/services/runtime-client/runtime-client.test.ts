@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+
 import { RemoteError } from '@mangostudio/protocol';
 import { PathAccessError, RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
+
 import {
   isRequestNotSent,
   noReplyOf,
@@ -536,6 +538,7 @@ describe('RuntimeClient', () => {
     // the path a `readonly` machine actually takes.
     const runtime = await connectTestRuntime({
       handlers: { 'shell.run': () => ({ stdout: '', stderr: '', exitCode: 0 }) },
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       consent: { slot: 'host', current: withoutShell, refresh: async () => withoutShell() },
     });
 

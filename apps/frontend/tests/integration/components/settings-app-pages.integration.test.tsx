@@ -3,9 +3,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { type AppSettings, DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { GeneralSettings } from '../../../src/components/settings/GeneralSettings';
 import { PromptSettings } from '../../../src/components/settings/PromptSettings';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';

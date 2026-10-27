@@ -4,6 +4,7 @@
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
+
 import { getAuth } from '../auth';
 import { createDiagnosticLogger } from '../lib/logger';
 

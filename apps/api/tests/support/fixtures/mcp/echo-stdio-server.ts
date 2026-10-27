@@ -4,7 +4,9 @@
  */
 
 import { writeFileSync } from 'node:fs';
+
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+
 import { createEchoMcpServer } from './create-echo-mcp-server';
 
 const pidFile = process.env.MCP_FIXTURE_PID_FILE;

@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
+
 import { LOCAL_ENVIRONMENT_ID, renderShellCommand } from '@mangostudio/shared/environments';
 import { isShellAvailable } from '@mangostudio/shared/process/host';
 import type { RuntimeShellKind as ShellKind } from '@mangostudio/shared/runtime-contract';
+
 import { environmentToolchainRepository } from '../../../../src/modules/environments/infrastructure/environment-toolchain-repository';
 import {
   buildShellTool,

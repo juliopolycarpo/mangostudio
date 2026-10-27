@@ -9,11 +9,13 @@
 import type { Environment } from '@mangostudio/shared/environments';
 import { Link } from '@tanstack/react-router';
 import { useMemo } from 'react';
+
 import { SectionCard } from '@/components/ui/SectionCard';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { environmentScopeRoute } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { environmentAlerts } from '../lib/environment-health';
 import { CARD_LINK_CLASS } from './card-link';
 

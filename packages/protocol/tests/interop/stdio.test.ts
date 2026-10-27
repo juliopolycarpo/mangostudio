@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import legacyHello from '../../../../spec/fixtures/1/legacy-hello.json';
 import { CLOSE_CODES } from '../../src/close';
 import { LineDecoder } from '../../src/codec/ndjson';
@@ -33,7 +34,7 @@ describeInterop('interop: stdio (TypeScript launches, Rust serves)', () => {
     try {
       await expectMangoPeerBehaviour(session);
     } finally {
-      session.close(CLOSE_CODES.RELEASED, 'interop done');
+      await session.close(CLOSE_CODES.RELEASED, 'interop done');
       status = await peer.terminate();
     }
     // The child leaves on the end of its stdin; no signal was needed. Asserted
@@ -117,7 +118,7 @@ describeInterop('interop: stdio (TypeScript launches, Rust serves)', () => {
       stderr: 'ignore',
     });
     try {
-      child.stdin.write(`${legacyHello.cases[0]?.line ?? ''}\n`);
+      await child.stdin.write(`${legacyHello.cases[0]?.line ?? ''}\n`);
       await child.stdin.flush();
 
       const farewell = await readCloseFrame(child.stdout);

@@ -10,7 +10,9 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import { distFilePath, listDistFiles } from '@mangostudio/shared/utils/dist-files';
+
 import { type PrecompressedVariant, writePrecompressedVariants } from './precompress-assets';
 
 export interface EmbedModuleOptions {

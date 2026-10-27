@@ -13,7 +13,7 @@ import type {
 } from '../collect/types';
 import type { Provenance } from '../model/envelope';
 import type { LaneEntry, LaneResult } from '../model/lanes';
-import { type Measurement, measured, unsupported } from '../model/states';
+import { measured, type Measurement, unsupported } from '../model/states';
 import { lanesForComponentRoot } from '../results/lane-components';
 
 /** Build a coverage summary where every bucket sits at `pct`. // Usage: makeCoverageSummary(82) */

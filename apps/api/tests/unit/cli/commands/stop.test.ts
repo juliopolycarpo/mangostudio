@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { runStop } from '../../../../src/cli/commands/stop';
 import type { ServerState } from '../../../../src/lib/server-state';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';

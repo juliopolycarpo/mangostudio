@@ -11,6 +11,7 @@
  */
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+
 import type { NoModelAvailableError } from '../application/resolve-model';
 
 export interface ModelUnavailableHttpResponse {

@@ -7,7 +7,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ToolIdentityMap } from '@mangostudio/shared/tool-identity';
+
 import {
   TOOL_AVATAR_PALETTE,
   type ToolAvatarColors,

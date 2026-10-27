@@ -4,6 +4,7 @@
 // an empty workspace, and must fail instead of silently reporting 0/0.
 
 import { isAbsolute, relative, resolve } from 'node:path';
+
 import * as ts from '@typescript/typescript6';
 
 interface LcovFileCoverage {
@@ -97,8 +98,10 @@ export const readCoveredSources = async (
 
   if (missing.length > 0) {
     throw new Error(
-      `${lcovPath} references ${missing.length} source file(s) missing under ${baseDir}: ` +
-        describePaths(missing, baseDir)
+      `${lcovPath} references ${missing.length} source file(s) missing under ${baseDir}: ${describePaths(
+        missing,
+        baseDir
+      )}`
     );
   }
   if (sources.length === 0 && (recordCount > 0 || malformedRecords.length > 0)) {

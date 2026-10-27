@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { getAuth, resetAuth } from '../../src/auth';
 import { loadConfigForTest } from '../../src/lib/config';
 

@@ -56,6 +56,7 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+
 import { onEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation-hooks';
 import { publishExternalAgentsInvalidation } from '../../../services/realtime/external-agents-invalidation';
 import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
@@ -696,7 +697,7 @@ export function createExternalAgentDiscoveryService(
     key: string
   ): { readonly byTarget: AuthoritativeAnswers; readonly fresh: boolean } | undefined {
     const cached = cache.get(key);
-    if (!cached || cached.generation !== (generations.get(key) ?? 0)) return undefined;
+    if (cached?.generation !== (generations.get(key) ?? 0)) return undefined;
     return { byTarget: cached.byTarget, fresh: cached.expiresAt > now() };
   }
 
@@ -707,7 +708,7 @@ export function createExternalAgentDiscoveryService(
     const key = scopeKey(scope);
     const generation = generations.get(key) ?? 0;
     const cached = cache.get(key);
-    if (cached && cached.generation === generation && cached.expiresAt > now()) {
+    if (cached?.generation === generation && cached.expiresAt > now()) {
       return Promise.resolve(cached.byTarget);
     }
 

@@ -3,6 +3,7 @@
  */
 
 import { type MigrationResult, Migrator } from 'kysely/migration';
+
 import { getDb } from '../db/database';
 import { allMigrations } from '../db/migrations';
 

@@ -1,4 +1,5 @@
 import type { SettingsField } from '@mangostudio/shared/library';
+
 import { looksCredentialShaped } from '../../../lib/credential-policy';
 
 export interface SettingsRedactionOptions {
@@ -91,6 +92,7 @@ function collectFields(
 function renderScalarValue(value: unknown): string {
   if (typeof value !== 'object' || value === null) return String(value);
   if (value instanceof Date) return value.toISOString();
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- TOML temporal objects retain their existing string representation.
   const rendered = String(value);
   const tag = Object.prototype.toString.call(value);
   if (!/^\[object Temporal\.(?:Instant|PlainDateTime|PlainTime)\]$/.test(tag)) return rendered;

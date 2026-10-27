@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { GitSummary } from '@mangostudio/shared/git';
+
 import type { ChatWorkdirRow } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import {
-  type GitSummaryChat,
   getBatchGitSummaries,
+  type GitSummaryChat,
   WORKDIR_CONCURRENCY,
 } from '../../../../src/modules/git/application/git-batch-status-service';
 import { GitCliError } from '../../../../src/modules/git/infrastructure/git-cli';

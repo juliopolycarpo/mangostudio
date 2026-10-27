@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import { HubProcessStatusSchema } from '@mangostudio/shared/machine';
 import Value from 'typebox/value';
+
 import type { ServerState } from '../../../../src/lib/server-state';
 import {
   describeHubProcess,

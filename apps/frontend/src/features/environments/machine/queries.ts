@@ -20,6 +20,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
+
 import {
   changeMachineService,
   fetchMachineDoctor,

@@ -4,9 +4,9 @@ import type { WorkspaceName } from '../../lib/config';
 import type { TestMetricsFragment } from '../model/fragment';
 import type { CoverageSummary } from '../model/metrics';
 import {
-  type Measurement,
   measured,
   measuredValue,
+  type Measurement,
   unavailable,
   unsupported,
 } from '../model/states';

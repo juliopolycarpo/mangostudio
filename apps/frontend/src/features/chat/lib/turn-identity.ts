@@ -2,6 +2,7 @@ import type { Message } from '@mangostudio/shared/chat';
 import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents/values';
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import {
   deriveMonogram,
   type ResolvedToolIdentity,

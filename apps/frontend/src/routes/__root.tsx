@@ -1,5 +1,6 @@
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router';
+
 import { NotFound } from '@/components/layout/NotFound';
 import { ToastProvider } from '@/components/ui/Toast';
 import { I18nProvider } from '@/hooks/use-i18n';

@@ -1,5 +1,7 @@
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents/values';
+
 import { useI18n } from '@/hooks/use-i18n';
+
 import { EventRule } from './EventRule';
 
 type Severity = 'info' | 'error';

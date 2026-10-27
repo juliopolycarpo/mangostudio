@@ -13,7 +13,9 @@
  */
 
 import { createServer } from 'node:net';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import type { MangoConfig } from '../lib/config';
 import {
   CHATGPT_REAUTH_REQUIRED_CODE,

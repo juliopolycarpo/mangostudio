@@ -6,7 +6,9 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { fireEvent, screen } from '@testing-library/react';
+
 import { CheckboxRow } from '../../../src/components/settings/CheckboxRow';
 import { SettingsField } from '../../../src/components/settings/SettingsField';
 import {
@@ -64,7 +66,12 @@ describe('CheckboxRow', () => {
 describe('StatusNote', () => {
   it('says the words in plain text beside a glyph, as a span where a paragraph is not allowed', () => {
     render(
-      <StatusNote as="span" tone="danger" role="status">
+      <StatusNote
+        as="span"
+        tone="danger"
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+        role="status"
+      >
         Connection failed
       </StatusNote>
     );

@@ -8,7 +8,9 @@ import type {
   UpdateMcpServerBody,
 } from '@mangostudio/shared/mcp';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
 import { toolSettingsKeys } from '@/features/settings/tools/queries';
+
 import {
   addMcpServer,
   applyPortableMcpImport,

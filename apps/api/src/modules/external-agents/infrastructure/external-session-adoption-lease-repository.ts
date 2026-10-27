@@ -22,6 +22,7 @@
  */
 
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 
 /** Long enough to outlive a slow vendor start, short enough that a dead hub frees the session. */
@@ -40,6 +41,7 @@ export interface ExternalAdoptionLease extends ExternalAdoptionLeaseKey {
   readonly expiresAt: number;
 }
 
+// The named input interface is a public extension point.
 export interface AcquireAdoptionLeaseInput extends ExternalAdoptionLease {}
 
 /**

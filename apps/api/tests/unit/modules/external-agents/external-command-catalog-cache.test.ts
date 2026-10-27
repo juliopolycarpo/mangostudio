@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ExternalCommandCatalogKey } from '../../../../src/modules/external-agents/application/external-command-catalog-cache';
 import { createExternalCommandCatalogCache } from '../../../../src/modules/external-agents/application/external-command-catalog-cache';
 

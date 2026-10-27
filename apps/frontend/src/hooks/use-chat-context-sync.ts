@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+
 import type { ChatWithContext } from '@/features/chat/queries';
 import type { ContextInfo } from '@/features/generation/types';
 

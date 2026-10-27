@@ -161,7 +161,7 @@ Two conventions every tool definition follows, both enforced by
 
 Per-message **file checkpoints** cover the built-in filesystem mutation tools above, including the ones a subagent (`delegate_to_agent`) runs — those inherit the delegating turn's `assistantMessageId`, so their mutations join the same manifest. Revert is whole-turn (`POST /api/chats/:id/checkpoints/:messageId/revert`) and compares on-disk hashes before restoring. **Not checkpointed:** shell tools and MCP file writes — only explicit builtin mutators participate.
 
-That boundary is now reported rather than left implicit. A tool declares `uncheckpointedWriteSource` in its settings metadata (`buildShellTool` sets `'shell'`), and `executeTool` records it against the turn's message in `message_uncheckpointed_sources` before running the executor. That is the only place a builtin runs, so declaring the field is all a tool has to do — no dispatcher has to remember it, and the subagent loop is covered by the same seam as the main turn. MCP tools never become a `RegisteredTool`, so the two dispatchers name `'mcp'` themselves, and every MCP call counts because the hub cannot know whether a foreign tool writes. Both `GET /api/chats/:id/checkpoints` and the revert response carry `uncheckpointedSources`, and the confirmation dialog and result toast name the classes the revert will not undo. Extending *coverage* instead of reporting it — a post-hoc workdir diff for shell, declared writes for MCP — is a separate design question and is not attempted here.
+That boundary is now reported rather than left implicit. A tool declares `uncheckpointedWriteSource` in its settings metadata (`buildShellTool` sets `'shell'`), and `executeTool` records it against the turn's message in `message_uncheckpointed_sources` before running the executor. That is the only place a builtin runs, so declaring the field is all a tool has to do — no dispatcher has to remember it, and the subagent loop is covered by the same seam as the main turn. MCP tools never become a `RegisteredTool`, so the two dispatchers name `'mcp'` themselves, and every MCP call counts because the hub cannot know whether a foreign tool writes. Both `GET /api/chats/:id/checkpoints` and the revert response carry `uncheckpointedSources`, and the confirmation dialog and result toast name the classes the revert will not undo. Extending _coverage_ instead of reporting it — a post-hoc workdir diff for shell, declared writes for MCP — is a separate design question and is not attempted here.
 
 Two invariants the checkpoint path depends on:
 
@@ -365,7 +365,7 @@ Open these first:
   `use-environment-scope.ts` is which machine a tab is describing)
 - `apps/frontend/src/routes/_authenticated/environments/`
 
-Detection runs on the runtime and describes *that* machine. Toolchains, Agents and
+Detection runs on the runtime and describes _that_ machine. Toolchains, Agents and
 Health carry an `environmentId` search param (absent means the hub's own), and the
 Health tab's compare mode puts two of them side by side.
 
@@ -465,7 +465,7 @@ Open these first:
   vendor emitted, at the runtime boundary)
 - `apps/shared/src/external-agents/permissions.ts` (reading a persisted choice back, restrictively)
 - `apps/shared/src/external-agents/presets.ts` (the three named permission choices and the
-  per-vendor candidate resolution behind them — a *different* responsibility from reading one back)
+  per-vendor candidate resolution behind them — a _different_ responsibility from reading one back)
 - `apps/shared/src/external-agents/remedies.ts` (reason → what would fix it, `satisfies`-guarded so
   a new reason cannot ship without one)
 - `crates/mangostudio-runtime/src/external_agents/` (the runtime host over the External Agents
@@ -513,7 +513,7 @@ Two Codex-specific traps, both of which cost a debugging session if met unprepar
   camelCase **tagged object**. The SDK's Codex adapter owns both encodings.
 - `item/tool/call` is a server→client request asking MangoStudio to run a tool, and `initialize`
   offers no capability to decline it. It is answered with a JSON-RPC error unconditionally.
-- `thread/list` returns `Thread`s whose `id` is the thread and whose `sessionId` is a *different*
+- `thread/list` returns `Thread`s whose `id` is the thread and whose `sessionId` is a _different_
   required field naming the thread tree. Adoption maps `id`; `sessionId` is the one that looks
   right and resumes nothing. Timestamps there are Unix **seconds** (Cursor's are ISO-8601), and
   `sourceKinds` must be an explicit allowlist or the listing includes Codex's own subagent, review
@@ -966,7 +966,7 @@ touches push, setup, service or probing internals belongs in one of the files ab
   the whole of resume — read it before any step component)
 - Reference: `docs/operations/remote-runtimes.md` — Onboard a new machine
 
-Containers are the third launcher, and the only one whose point is what the agent *cannot*
+Containers are the third launcher, and the only one whose point is what the agent _cannot_
 do. Nothing is installed on the far side — the runtime is bind-mounted read-only — so none of
 the push path above applies:
 
@@ -1022,7 +1022,7 @@ on `connect()`, not `adopt()`, and is not in the dial-in transport set:
 - `apps/frontend/src/features/environments/components/DirectUrlPanel.tsx`
 
 Paths inside a distribution are native Linux paths end to end — there is no
-translation layer and none is wanted. What the hub does is *resolve* in the
+translation layer and none is wanted. What the hub does is _resolve_ in the
 target's style, from the manifest; see the Paths Across Hosts section of
 `hub-runtime.md` before adding anything that touches `~` or a relative path.
 

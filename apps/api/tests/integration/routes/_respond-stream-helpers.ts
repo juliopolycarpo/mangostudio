@@ -1,8 +1,10 @@
 import { mock } from 'bun:test';
+
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration, ChatRunnerPermissions } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ProviderType } from '@mangostudio/shared/types';
+
 import { getDb } from '../../../src/db/database';
 import { getAgentProfile } from '../../../src/modules/agents/application/agent-settings-service';
 import { AgentSettingsError } from '../../../src/modules/agents/domain/agent-profile';
@@ -23,8 +25,8 @@ import {
 } from '../../../src/modules/generation/application/subagent-runner';
 import {
   insertMessage,
-  listLegacyGalleryImages,
   listByChatId as listMessagesByChatId,
+  listLegacyGalleryImages,
   loadHistory,
   loadRichHistory,
   updateMessage,

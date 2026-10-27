@@ -7,6 +7,7 @@ import type {
 } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { listRegisteredProviderTypes } from '../../../services/providers/core/provider-registry';
 import {

@@ -7,9 +7,9 @@
 import {
   assertBackupId as assertBackupIdEngine,
   type BackupEntry,
+  backupExistingResource as backupExistingResourceEngine,
   type BackupManifest,
   type BackupStoreDeps,
-  backupExistingResource as backupExistingResourceEngine,
   createBackupId as createBackupIdEngine,
   createBackupStoreDeps,
   discardBackupSet as discardBackupSetEngine,
@@ -20,6 +20,7 @@ import {
   restoreBackupEntry as restoreBackupEntryEngine,
   writeBackupManifest as writeBackupManifestEngine,
 } from '@mangostudio/shared/library/machine';
+
 import { getConfig } from '../../../lib/config';
 
 export type { BackupEntry, BackupManifest, BackupStoreDeps };

@@ -1,5 +1,6 @@
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
+
 import { getAuth } from '../../../src/auth';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { assertTestEnvironmentReady } from '../setup/test-environment';

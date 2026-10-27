@@ -105,7 +105,7 @@ export function findCanaryVersionForSha(packument: NpmPackument, sha: string): s
   const target = sha.toLowerCase().slice(0, 7);
   for (const version of Object.keys(packument.versions)) {
     const candidate = canaryPrereleaseSha(version);
-    if (candidate && candidate.slice(0, 7) === target) return version;
+    if (candidate?.slice(0, 7) === target) return version;
   }
   return null;
 }

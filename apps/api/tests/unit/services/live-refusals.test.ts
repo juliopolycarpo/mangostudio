@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { delimiter, join } from 'node:path';
+
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+
 import {
-  CheapPassFake,
   cachedBeforeRefusal,
+  CheapPassFake,
   executableDirectory,
   isOlderVersion,
   LIVE_REFUSAL_CASES,

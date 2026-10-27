@@ -12,6 +12,7 @@ import type {
   RuntimePairingStatus,
   RuntimePairingToken,
 } from '@mangostudio/shared/environments';
+
 import { getConfig } from '../../../lib/config';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import {
@@ -160,7 +161,7 @@ export function createRuntimePairingService(
       if (!parsed) return null;
 
       const record = await repository.findById(parsed.id);
-      if (!record || record.revokedAt !== null) return null;
+      if (record?.revokedAt !== null) return null;
       if (!constantTimeEquals(hashPairingSecret(parsed.secret), record.tokenHash)) return null;
 
       return {

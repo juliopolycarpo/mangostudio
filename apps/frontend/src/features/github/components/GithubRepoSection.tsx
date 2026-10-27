@@ -3,10 +3,11 @@ import type {
   GithubPrsResponse,
   GithubUnavailableState,
 } from '@mangostudio/shared/github';
-import { type UseQueryResult, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { CircleDot, FolderOpen, GitPullRequest, Plus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -17,6 +18,7 @@ import { gitWriteScopes, invalidateGitScopes } from '@/features/workspace/hooks/
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { checkoutPullRequest } from '../api';
 import { useForceRefresh } from '../hooks/use-force-refresh';
 import { useIssueToNewChat } from '../hooks/use-issue-to-new-chat';

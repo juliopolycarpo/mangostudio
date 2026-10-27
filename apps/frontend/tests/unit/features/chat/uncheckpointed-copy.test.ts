@@ -10,7 +10,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en, type Messages, ptBR } from '@mangostudio/shared/i18n';
+
 import { revertedMessage, uncheckpointedWarning } from '@/features/chat/lib/uncheckpointed-copy';
 
 const locales: ReadonlyArray<[string, Messages['chat']['fileCheckpoints']]> = [

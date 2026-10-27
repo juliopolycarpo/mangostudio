@@ -4,6 +4,7 @@
  */
 
 import { Migrator } from 'kysely/migration';
+
 import { closeDb, getDb } from './database';
 import { allMigrations } from './migrations';
 

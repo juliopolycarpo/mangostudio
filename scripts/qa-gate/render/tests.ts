@@ -9,8 +9,8 @@ import {
   componentLabel,
   getTestSuiteEvidence,
   type LaneRow,
-  type LaneTally,
   laneRows,
+  type LaneTally,
   tallyLanes,
 } from './access';
 import { formatNumber, inlineCode, NA, renderDelta } from './format';

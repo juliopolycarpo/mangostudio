@@ -13,6 +13,7 @@
 
 import type { GithubReviewThread } from '@mangostudio/shared/github';
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { formatMessage } from '@/lib/i18n-format';
 
 type ReviewTaskLabels = Messages['github']['reviewTask'];

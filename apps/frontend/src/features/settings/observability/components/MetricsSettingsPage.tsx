@@ -6,6 +6,7 @@ import type {
 } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3 } from 'lucide-react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Badge } from '@/components/ui/Badge';
@@ -19,6 +20,7 @@ import { formatCompactDuration } from '@/features/settings/connectors/components
 import { connectorQueryOptions } from '@/features/settings/connectors/hooks/use-connectors';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
+
 import { observabilityMetricsQueryOptions } from '../queries';
 import { formatPercent, formatTimestamp, formatTokenCount } from '../utils';
 import { ChatGptMetricsCard } from './ChatGptMetricsCard';
@@ -191,7 +193,11 @@ export function MetricsSettingsPage() {
       ))}
 
       {isLoading ? (
-        <div role="status" className="space-y-3">
+        <div
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+          role="status"
+          className="space-y-3"
+        >
           <Skeleton className="h-40 w-full rounded-md" />
           <span className="sr-only">{t.common.loading}</span>
         </div>

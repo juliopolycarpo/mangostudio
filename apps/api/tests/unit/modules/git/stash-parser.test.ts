@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseStashList } from '../../../../src/modules/git/domain/stash-parser';
 
 describe('parseStashList', () => {

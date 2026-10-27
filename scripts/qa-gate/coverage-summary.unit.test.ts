@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { mergeCoverageSummaries, readJsonCoverageSummary } from './coverage-summary';
 import type { CoverageSummary } from './parse-lcov';
 

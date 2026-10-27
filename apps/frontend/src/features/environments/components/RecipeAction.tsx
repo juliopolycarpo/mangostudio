@@ -10,9 +10,11 @@
 
 import type { InstallRecipePreview } from '@mangostudio/shared/environments';
 import { Download } from 'lucide-react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import type { InstallChainStep } from '../install-chain';
 import { InstallAction } from './InstallAction';
 

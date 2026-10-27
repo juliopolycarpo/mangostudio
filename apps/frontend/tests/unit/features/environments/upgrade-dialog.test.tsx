@@ -6,24 +6,25 @@
  */
 
 import { describe, expect, it, mock } from 'bun:test';
+
 import type {
   MachineUpdateStatus,
   UpgradeReport,
   UpgradeRestart,
 } from '@mangostudio/shared/updates';
+
 import type { UseUpgradeStreamResult } from '../../../../src/features/environments/machine/hooks/use-upgrade-stream';
 
 /** One canned terminal stream, swapped per case before the dialog mounts. */
 let streamResult: UseUpgradeStreamResult;
 
-mock.module('../../../../src/features/environments/machine/hooks/use-upgrade-stream', () => ({
+void mock.module('../../../../src/features/environments/machine/hooks/use-upgrade-stream', () => ({
   UPGRADE_CONSOLE_MAX_LINES: 2000,
   useUpgradeStream: () => streamResult,
 }));
 
-const { UpgradeDialog } = await import(
-  '../../../../src/features/environments/machine/components/UpgradeDialog'
-);
+const { UpgradeDialog } =
+  await import('../../../../src/features/environments/machine/components/UpgradeDialog');
 const { fireEvent, render, screen } = await import('../../../support/harness/render');
 
 const STATUS: MachineUpdateStatus = {

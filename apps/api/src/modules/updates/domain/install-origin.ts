@@ -15,6 +15,7 @@ import {
   type InstallManager,
   type UpdateChannel,
 } from '@mangostudio/shared/updates';
+
 import { resolveRuntimeRelease } from '../../environments/domain/runtime-release-resolution';
 import {
   grandparentDirectory,

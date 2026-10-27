@@ -12,9 +12,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
+
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import { TERMINAL_SCROLLBACK_MAX_BYTES } from '@mangostudio/shared/terminal';
 import type { UpdateChannel } from '@mangostudio/shared/updates';
+
 import { CliError } from '../cli/errors';
 import { parseTomlDocument } from './toml';
 

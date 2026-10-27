@@ -22,13 +22,14 @@ import {
   LIBRARY_TARGET_DEFINITIONS,
   type LocationDefinition,
 } from '@mangostudio/shared/library/host';
+
 import {
   type JsonSettingsParserOptions,
   parseJsonSettings,
 } from '../infrastructure/settings-parsers/json';
 import {
-  type PermissionRulesSource,
   parsePermissionRules,
+  type PermissionRulesSource,
 } from '../infrastructure/settings-parsers/rules';
 import { parseTomlSettings } from '../infrastructure/settings-parsers/toml';
 import type { SettingsParserResult } from '../infrastructure/settings-parsers/types';

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { createGeminiSecretService, InvalidGeminiApiKeyError } from '../../../src/services/gemini';
 import type { SecretMetadataInput } from '../../../src/services/secret-store/metadata';
 import { InMemorySecretStore } from '../../support/mocks/mock-secret-store';

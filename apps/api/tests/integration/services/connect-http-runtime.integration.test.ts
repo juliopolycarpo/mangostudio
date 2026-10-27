@@ -11,7 +11,8 @@
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { realpath } from 'node:fs/promises';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import {
   type ExternalAgentConfiguration,
@@ -22,6 +23,7 @@ import {
   type RuntimeCapabilityManifest,
 } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import { createEnvironmentRepository } from '../../../src/modules/environments/infrastructure/environment-repository';
@@ -409,6 +411,7 @@ describe('Direct URL http runtime', () => {
     setRuntimeTokenStoreForTests(store);
     const repository = createEnvironmentRepository(getDb());
     const manager = new RuntimeConnectionManager({
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       resolveEnvironment: async () => null,
       connectors: {},
     });

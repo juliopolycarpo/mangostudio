@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   appendNpmPublishGithubOutputs,
   classifyPublishFailure,
@@ -15,8 +16,8 @@ import {
   type NpmPublishPackage,
   type NpmRunner,
   orderNpmPackageDirs,
-  type ProvenancePolicy,
   parseProvenancePolicy,
+  type ProvenancePolicy,
   publishPackages,
   resolveNpmPublishAuth,
 } from '../lib/npm-publish';

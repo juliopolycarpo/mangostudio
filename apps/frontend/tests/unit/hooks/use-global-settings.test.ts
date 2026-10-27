@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { AppSettings, AppSettingsPutBody } from '@mangostudio/shared/app-settings';
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
 import { en } from '@mangostudio/shared/i18n';
 import type { WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+
 import { act, flushAsyncRender, renderHook, screen, waitFor } from '../../support/harness/render';
 import {
   advanceTimersByTimeAsync,
@@ -16,7 +18,7 @@ import {
 const mockGet = jest.fn();
 const mockPut = jest.fn();
 
-mock.module('../../../src/lib/api-client', () => ({
+void mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       settings: {
@@ -32,9 +34,8 @@ mock.module('../../../src/lib/api-client', () => ({
 // Static imports are evaluated before any statement above runs, so the hook
 // has to come in afterwards or it binds the real api-client.
 const { useGlobalSettings } = await import('../../../src/hooks/use-global-settings');
-const { appSettingsKeys, appSettingsQueryOptions, libraryLocationDefaultsPending } = await import(
-  '../../../src/features/settings/app/queries'
-);
+const { appSettingsKeys, appSettingsQueryOptions, libraryLocationDefaultsPending } =
+  await import('../../../src/features/settings/app/queries');
 
 type MockGetResult = Awaited<ReturnType<typeof mockGet>>;
 type MockPutResult = Awaited<ReturnType<typeof mockPut>>;

@@ -10,6 +10,7 @@ import type {
   UpdateMcpServerBody,
 } from '@mangostudio/shared/mcp';
 import type { Kysely } from 'kysely';
+
 import type { Database, McpServerSelect } from '../../../db/types';
 import {
   disposeMcpServer,

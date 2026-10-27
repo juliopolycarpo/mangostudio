@@ -4,6 +4,7 @@
  */
 
 import { LOCAL_ENVIRONMENT_ID, LOCAL_ENVIRONMENT_NAME } from '@mangostudio/shared/environments';
+
 import { environmentRepository } from '../../environments/infrastructure/environment-repository';
 
 /** // Usage: const name = await resolveEnvironmentDisplayName(userId, chat.environmentId) */

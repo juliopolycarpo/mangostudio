@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
+
 import {
   ARTIFACT_DIR,
   CATALOG_SCHEMA_URL,

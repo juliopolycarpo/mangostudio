@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it, mock } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { QueryClient } from '@tanstack/react-query';
 
@@ -26,7 +27,7 @@ function fakeQueryOptions(kind: 'availability' | 'sessions', environmentId: stri
 
 // Before the route is imported, never after: a static import binds the
 // loader to the real HTTP-backed query options.
-mock.module('../../../src/features/terminal/services/terminal-service', () => ({
+void mock.module('../../../src/features/terminal/services/terminal-service', () => ({
   terminalAvailabilityQueryOptions: (environmentId: string) =>
     fakeQueryOptions('availability', environmentId),
   terminalSessionsQueryOptions: (environmentId: string) =>

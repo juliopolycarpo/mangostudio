@@ -5,8 +5,10 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { ExternalSupportedConfiguration } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen } from '@testing-library/react';
+
 import { PermissionSelector } from '../../../src/features/chat/components/PermissionSelector';
 import { render } from '../../support/harness/render';
 

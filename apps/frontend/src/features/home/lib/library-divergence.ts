@@ -18,6 +18,7 @@
  */
 
 import type { LibraryResource, LibraryTargetId, ResourceKind } from '@mangostudio/shared/library';
+
 import { coverageCells, presentTargetCount } from '@/features/library/format';
 
 export interface LibraryDivergenceSummary {

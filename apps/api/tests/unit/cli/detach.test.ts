@@ -2,17 +2,18 @@ import { describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   buildWaiterCommand,
   DETACH_ENV_ALLOWLIST,
   type DetachDeps,
   ensureLogDir,
-  POWERSHELL_HOST_FLAGS,
   pickAllowedEnv,
+  POWERSHELL_HOST_FLAGS,
   restartExecutableOptions,
   spawnDetached,
-  WINDOWS_SYSTEM_ENV_KEYS,
   waiterArgv,
+  WINDOWS_SYSTEM_ENV_KEYS,
 } from '../../../src/cli/detach';
 import type { ServerState } from '../../../src/lib/server-state';
 import { installerArgv } from '../../../src/modules/updates/infrastructure/installer-invocation';

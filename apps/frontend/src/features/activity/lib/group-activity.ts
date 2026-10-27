@@ -9,6 +9,7 @@
  */
 
 import type { ActivityEvent } from '@mangostudio/shared/activity';
+
 import { startOfLocalDay } from '@/features/sidebar/lib/group-chats';
 
 export interface ActivityDayGroup {

@@ -22,8 +22,8 @@ import {
 } from '../../apps/api/src/lib/runtime-paths';
 import { ROOT_DIR } from '../lib/config';
 import {
-  RUNTIME_BINARY_DIGEST_ENV,
   resolveLaneRuntimeBinary,
+  RUNTIME_BINARY_DIGEST_ENV,
   runtimeBinaryDigestEnv,
   sha256OfFile,
 } from '../lib/runtime-binary-digest';

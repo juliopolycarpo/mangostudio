@@ -6,14 +6,16 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { fireEvent, screen } from '@testing-library/react';
+
 import { flushAsyncRender, render, waitFor } from '../../support/harness/render';
 
 // The virtualizer depends on DOM layout measurements not available in happy-dom.
 // We mock it so every item in the messages array is rendered directly.
-mock.module('@tanstack/react-virtual', () => ({
+void mock.module('@tanstack/react-virtual', () => ({
   useVirtualizer: (opts: { count: number }) => ({
     getTotalSize: () => opts.count * 200,
     getVirtualItems: () =>

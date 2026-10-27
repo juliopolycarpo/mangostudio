@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { type LogsDeps, runLogs } from '../../../../src/cli/commands/logs';
 import { type LogTail, tailLines } from '../../../../src/cli/log-tail';
 import type { ServerState } from '../../../../src/lib/server-state';

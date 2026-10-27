@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+
 import { observeMotionNodes, readMotionObservations } from './support/motion-observer';
 
 /**

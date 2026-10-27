@@ -5,14 +5,15 @@
  */
 
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+
 import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
+
 import { routerWithLinkStub } from '../../../support/mocks/router';
 
-mock.module('@tanstack/react-router', await routerWithLinkStub());
+void mock.module('@tanstack/react-router', await routerWithLinkStub());
 
-const { UpdateBanner } = await import(
-  '../../../../src/features/environments/machine/components/UpdateBanner'
-);
+const { UpdateBanner } =
+  await import('../../../../src/features/environments/machine/components/UpdateBanner');
 const { act, render, screen, waitFor, within } = await import('../../../support/harness/render');
 const { useQueryClient } = await import('@tanstack/react-query');
 

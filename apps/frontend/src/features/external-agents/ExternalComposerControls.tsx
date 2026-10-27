@@ -29,6 +29,7 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useEffect, useRef } from 'react';
+
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { PermissionSelector } from '@/features/chat/components/PermissionSelector';
 import { useI18n } from '@/hooks/use-i18n';

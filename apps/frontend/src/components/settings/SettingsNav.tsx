@@ -1,12 +1,14 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { ChevronDown } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
+
 import { FIELD_CLASS } from '@/components/ui/Input';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { type SettingsNavGroup, settingsNavGroups } from './settings-nav';
 
 // Router `Link` concatenates `className` with the matching state's className,

@@ -14,10 +14,12 @@
  */
 
 import type { PropagationPreview, PropagationPreviewEntry } from '@mangostudio/shared/library';
+
 import { Badge } from '@/components/ui/Badge';
 import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { resolutionFor, type WizardDraft } from '../propagation';
 import { ChoiceRow } from './ChoiceRow';
 import { ContentGroupList } from './ContentGroupList';

@@ -1,6 +1,7 @@
 /** Credential-safe normalization for portable MCP HTTP URLs. */
 
 import { Buffer } from 'node:buffer';
+
 import { looksCredentialShaped } from '../../../lib/credential-policy';
 
 export { looksCredentialShaped };

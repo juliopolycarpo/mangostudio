@@ -8,6 +8,7 @@
  */
 
 import type { Responses } from 'openai/resources/responses/responses';
+
 import type { AgentEvent } from '../../types';
 import { extractResponsesUsage, type ResponseStreamEvent } from './normalizers';
 import { createResponsesReasoningTracker } from './reasoning-tracker';

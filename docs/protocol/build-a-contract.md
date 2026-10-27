@@ -66,7 +66,7 @@ const off = files.serve(session, {
 });
 ```
 
-The guard runs *after* the parameters passed the method's schema and before the handler, so a
+The guard runs _after_ the parameters passed the method's schema and before the handler, so a
 policy that logs, counts or audits a refusal is never handed a request the contract itself
 refuses. Every handler receives parameters already validated against its schema; a bad request
 never reaches your code, the peer gets `INVALID_PARAMS` with the failing JSON pointer in

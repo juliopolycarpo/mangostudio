@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import type { ResolvedDownload } from '../../../../src/modules/updates/domain/resolve-target';
 import { downloadVerified } from '../../../../src/modules/updates/infrastructure/release-download';
 import { FakeReleaseHost } from './support/fake-release-host';

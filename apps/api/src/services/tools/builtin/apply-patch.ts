@@ -4,6 +4,7 @@
  */
 
 import type { RuntimePatchOperation } from '@mangostudio/shared/runtime-contract';
+
 import { getRuntimeClient } from '../../runtime-client';
 import { getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
 import { withMutationPersistence } from '../file-mutation-snapshot';
@@ -11,10 +12,10 @@ import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   normalizePathValidationSettings,
-  type PathValidationSettings,
   pathPolicyParameterDescriptors,
-  type ResolvePathOptions,
+  type PathValidationSettings,
   resolveAndValidatePath,
+  type ResolvePathOptions,
   runtimePathPolicy,
 } from './_fs-utils';
 import { parseV4aPatch, type V4aPatchOperation } from './_v4a-patch';

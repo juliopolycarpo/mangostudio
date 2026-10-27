@@ -1,7 +1,8 @@
 import type { Static, TSchema } from 'typebox';
 import type { TLocalizedValidationError } from 'typebox/error';
 import Value from 'typebox/value';
-import { RESERVED_ERROR_CODES, RemoteError } from './errors';
+
+import { RemoteError, RESERVED_ERROR_CODES } from './errors';
 import { assertCatalog, type Catalog } from './schemas/catalog';
 import { isReservedMethodName, isValidMethodName, RPC_DISCOVER } from './schemas/common';
 import type { EventFrame } from './schemas/frames';

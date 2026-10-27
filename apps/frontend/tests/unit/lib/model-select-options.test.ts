@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { modelSelectOptions } from '../../../src/lib/model-select-options';
 
 const FALLBACK = { value: 'current_model', label: 'Use the current model' };

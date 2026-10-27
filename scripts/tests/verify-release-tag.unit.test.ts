@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { verifyReleaseTag } from '../release/verify-release-tag';
 import { readText } from './support/read-text';
 import { extractJobBlock, extractStepBlocks, runScriptLines } from './support/workflow-blocks';
@@ -258,6 +259,7 @@ describe('release signature gates', () => {
     ] as const) {
       const block = extractJobBlock(readText(`.github/workflows/${file}`), job);
       expect(block).toContain('git archive refs/remotes/origin/main');
+      // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
       expect(block).toContain('bun-version-file: ${{ runner.temp }}/release-trust/.bun-version');
       const verification = block.indexOf('bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/');
       expect(verification).toBeGreaterThan(-1);
@@ -271,7 +273,9 @@ describe('release signature gates', () => {
 
   test('binds the resolved app version to a tag ref before signature verification', () => {
     const block = extractJobBlock(readText('.github/workflows/release.yml'), 'prepare');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(block).toContain('RELEASE_REF_TYPE: ${{ github.ref_type }}');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(block).toContain('EXPECTED_RELEASE_TAG: v${{ steps.resolve.outputs.version }}');
     expect(block).toContain('[ "$RELEASE_REF_TYPE" != "tag" ]');
     expect(block).toContain('"$RELEASE_TAG" != "$EXPECTED_RELEASE_TAG"');

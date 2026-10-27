@@ -11,6 +11,7 @@ import {
 } from '@mangostudio/shared/file-checkpoints';
 import { PathAccessError } from '@mangostudio/shared/runtime-contract';
 import { type Elysia, t } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { assertChatOwnership, ChatNotFoundError } from '../../chats/domain/chat-ownership';

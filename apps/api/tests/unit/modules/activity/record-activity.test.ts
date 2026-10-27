@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ActivityEventInsert } from '../../../../src/db/types';
 import {
   recordActivities,

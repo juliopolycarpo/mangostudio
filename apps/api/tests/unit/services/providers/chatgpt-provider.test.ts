@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { getConfig } from '../../../../src/lib/config';
 import {
   ChatGptReauthRequiredError,
@@ -396,8 +398,8 @@ describe('chatgpt provider — 401 refresh/retry policy', () => {
     }));
   });
 
-  afterEach(() => {
-    server?.stop(true);
+  afterEach(async () => {
+    await server?.stop(true);
     server = null;
   });
 

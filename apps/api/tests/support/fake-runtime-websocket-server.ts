@@ -16,6 +16,7 @@ import {
   WEBSOCKET_SUBPROTOCOL,
   type WebSocketPortHandle,
 } from '@mangostudio/protocol/ws';
+
 import { type FakeRuntimeDefinition, serveFakeRuntime } from './fake-runtime-host';
 
 export interface FakeRuntimeWebSocketServer {
@@ -91,7 +92,7 @@ export function serveFakeRuntimeOverWebSocket(
           close: (code, reason) => socket.close(code, reason),
         });
         socket.data.handle = handle;
-        active?.close(CLOSE_CODES.SUPERSEDED, 'Superseded');
+        void active?.close(CLOSE_CODES.SUPERSEDED, 'Superseded');
         active = serveFakeRuntime(handle.port, definition, { livenessIntervalMs: false });
       },
       message(socket, message) {
@@ -112,7 +113,7 @@ export function serveFakeRuntimeOverWebSocket(
     port,
     baseUrl: `http://127.0.0.1:${port}`,
     async close() {
-      active?.close(CLOSE_CODES.RELEASED, 'Runtime stopped');
+      await active?.close(CLOSE_CODES.RELEASED, 'Runtime stopped');
       await server.stop(true);
     },
   };

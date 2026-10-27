@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ApiKeyScope } from '@mangostudio/shared/api-keys';
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import {
@@ -7,6 +8,7 @@ import {
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
 import Value from 'typebox/value';
+
 import { getApiKeyApi } from '../../../src/auth';
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';

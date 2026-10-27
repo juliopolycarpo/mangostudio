@@ -5,6 +5,7 @@
  */
 
 import type { Chat } from '@mangostudio/shared/chat';
+
 import { workdirBasename } from '@/lib/paths';
 
 /**

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+
 import { useI18n } from '../../../src/hooks/use-i18n';
 import { AppContext } from '../../../src/lib/app-context';
 import { LOCALE_STORAGE_KEY } from '../../../src/lib/locale-dictionaries';
@@ -17,7 +19,7 @@ function withApp(children: React.ReactNode, currentEnvironmentId: string | null 
   return <AppContext value={{ currentEnvironmentId } as never}>{children}</AppContext>;
 }
 
-mock.module(
+void mock.module(
   '@tanstack/react-router',
   await routerWithLinkStub({
     useRouterState: () => ({ location: { pathname: '/settings/metrics' } }),
@@ -25,9 +27,8 @@ mock.module(
 );
 
 // Below the mock, never as static imports.
-const { LogsSettingsPage, MetricsSettingsPage } = await import(
-  '../../../src/features/settings/observability'
-);
+const { LogsSettingsPage, MetricsSettingsPage } =
+  await import('../../../src/features/settings/observability');
 
 const fetchScenario = createFetchScenario();
 

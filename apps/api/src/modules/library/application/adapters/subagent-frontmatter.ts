@@ -5,6 +5,7 @@ import type {
   SubagentDescriptor,
 } from '@mangostudio/shared/library';
 import { type MarkdownFrontmatter, parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
+
 import { parseTomlDocument } from '../../../../lib/toml';
 import { extractFrontmatterBody, removeFrontmatterSeparator } from './frontmatter-framing';
 import { dialectForMarkdownSubagentLocation } from './subagent-dialect';
@@ -38,6 +39,7 @@ export function createSubagentAdapter(from: ResourceFormat, to: ResourceFormat):
     to,
     strategy: 'mechanical',
     lossy: true,
+    // eslint-disable-next-line @typescript-eslint/require-await -- The adapter preserves its Promise-returning interface contract.
     adapt: async (input) => adaptSubagent(input),
   };
 }

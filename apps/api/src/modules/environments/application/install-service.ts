@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+
 import type {
   AgentCliStatus,
   InstallCancelResponse,
@@ -22,6 +23,7 @@ import type {
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+
 import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
@@ -906,8 +908,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         if (recipe.download) {
           const preparation = body.preparationId ? preparations.get(body.preparationId) : undefined;
           if (
-            !preparation ||
-            preparation.userId !== context.userId ||
+            preparation?.userId !== context.userId ||
             preparation.recipeId !== recipe.id ||
             preparation.inputKey !== recipeInputKey(body.input)
           ) {
@@ -1008,7 +1009,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       const run = await deps.repository.find(runId, userId, profileId);
       if (!run) return null;
       const active = activeByRun.get(runId);
-      if (!active || active.userId !== userId) {
+      if (active?.userId !== userId) {
         // There is no child to signal. If the row still claims to be running it
         // belongs to a process that no longer exists, so settle it here rather
         // than report a cancellation that can never be honoured.

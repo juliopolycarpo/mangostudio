@@ -16,6 +16,7 @@ import {
 } from '@mangostudio/shared/environments/values';
 import { Terminal } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
@@ -23,6 +24,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useUpdateEnvironmentMutation } from '../queries';
 import { type SshFormFields, sshFormToConfig, validateSshForm } from '../ssh-form';
 import { CopyLine } from './CopyLine';

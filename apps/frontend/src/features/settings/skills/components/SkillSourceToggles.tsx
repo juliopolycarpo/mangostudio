@@ -6,6 +6,7 @@
 
 import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { RefreshCw } from 'lucide-react';
+
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { StatusNote } from '@/components/settings/StatusNote';
@@ -14,6 +15,7 @@ import { Callout } from '@/components/ui/Callout';
 import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import {
   type SkillSourceKey,
   useRescanLibrary,

@@ -1,8 +1,10 @@
 import type { Message } from '@mangostudio/shared/chat';
 import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { memo } from 'react';
+
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { cn } from '@/lib/utils';
+
 import { AssistantMessageBlock } from './AssistantMessageBlock';
 import { isImageInteraction } from './message-content';
 import { UserMessageBubble } from './UserMessageBubble';

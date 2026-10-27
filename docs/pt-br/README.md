@@ -282,14 +282,14 @@ mangostudio/
 | `bun run dev --api`       | Inicia apenas o servidor de dev da API                                 |
 | `bun run build`           | Build do frontend para produção                                        |
 | `bun run build --binary`  | Gera os binários standalone do host (hub + runtime cargo)              |
-| `bun run check`           | Executa Biome, dprint, ciclos de importação e typecheck                |
+| `bun run check`           | Executa Bun lint/fmt, ciclos de importação e typecheck                 |
 | `bun run test`            | Executa as lanes unit e integration                                    |
 | `bun run test --unit`     | Executa apenas as suítes unitárias                                     |
 | `bun run test:e2e:setup`  | Instala Playwright Chromium para browser smoke                         |
 | `bun run test --e2e`      | Executa a suíte end-to-end com Playwright (opt-in)                     |
 | `bun run test --coverage` | Coleta cobertura de testes nos workspaces aplicáveis                   |
 | `bun run test:scripts`    | Executa testes de automação em `scripts/`                              |
-| `bun run fix`             | Aplica correções do Biome e dprint                                     |
+| `bun run fix`             | Aplica correções do Bun lint e formato                                 |
 | `bun run verify`          | Sequência local: check, test --coverage, build --all                   |
 | `bun run clean`           | Remove dist, relatórios locais de teste, coverage e artefatos de build |
 
@@ -299,30 +299,30 @@ separados; veja o [checklist de validação](reference/testing.md#checklist-de-v
 
 ## Ferramentas de Desenvolvimento
 
-| Ferramenta     | Escopo                                                  | Funcionalidade Principal                          |
-| -------------- | ------------------------------------------------------- | ------------------------------------------------- |
-| **Biome**      | JS, TS, JSX, TSX, JSON, JSONC, CSS, HTML                | Linter e formatador com regras unificadas         |
-| **dprint**     | Markdown, MDC, MDX, TOML, YAML, Dockerfile              | Formatador plugável com plugins WASM              |
-| **Knip**       | Grafos de entrypoints da raiz e dos workspaces          | Detecção de código e dependências não utilizados  |
-| **lefthook**   | Git hooks (pre-commit)                                  | Gerenciador de hooks Git para validação em commit |
-| **jscpd**      | Todos os arquivos fonte                                 | Detecção de código duplicado                      |
-| **bun:test**   | Testes unitários e de integração de todos os workspaces | Executor nativo rápido com cobertura LCOV         |
-| **Playwright** | Testes end-to-end no Chromium                           | Automação de navegador para fluxos de auth        |
+| Ferramenta      | Escopo                                                  | Funcionalidade Principal                             |
+| --------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| **Bun lint**    | JavaScript, TypeScript, JSX                             | Lint configurado em `bunfig.toml`                    |
+| **Bun fmt**     | Código, JSON, CSS, HTML, Markdown/MDC/MDX, TOML, YAML   | Formatação configurada em `bunfig.toml`              |
+| **Scan ciclos** | JavaScript e TypeScript                                 | Ciclos de valores, tipos e imports do próprio módulo |
+| **Knip**        | Grafos de entrypoints da raiz e dos workspaces          | Detecção de código e dependências não utilizados     |
+| **lefthook**    | Git hooks (pre-commit)                                  | Gerenciador de hooks Git para validação em commit    |
+| **jscpd**       | Todos os arquivos fonte                                 | Detecção de código duplicado                         |
+| **bun:test**    | Testes unitários e de integração de todos os workspaces | Executor nativo rápido com cobertura LCOV            |
+| **Playwright**  | Testes end-to-end no Chromium                           | Automação de navegador para fluxos de auth           |
 
-Estes binários são instalados como devDependencies e invocados através dos scripts `bun run`. Nenhuma instalação global é necessária.
+O CLI Bun usa a versão fixada pelo repositório. As demais ferramentas continuam como devDependencies; nenhuma instalação global é necessária.
 
 ## Validação Local
 
 ### Git Hooks
 
-Um hook [lefthook](https://github.com/evilmartians/lefthook) de pre-commit é instalado automaticamente via `bun install` (através do script `prepare`). Ele executa as seguintes verificações em paralelo a cada `git commit`:
+Um hook [lefthook](https://github.com/evilmartians/lefthook) de pre-commit é instalado automaticamente via `bun install` (através do script `prepare`). Ele executa lint e formatação em sequência a cada `git commit`:
 
-| Hook                | Gatilho      | Arquivos alvo                  | Comando                                                                |
-| ------------------- | ------------ | ------------------------------ | ---------------------------------------------------------------------- |
-| `biome`             | `pre-commit` | `*.{ts,tsx,js,jsx,json}`       | `bunx biome check --write --no-errors-on-unmatched {staged_files}`     |
-| `dprint`            | `pre-commit` | `*.{md,mdc,mdx,toml,yml,yaml}` | `bunx dprint fmt --allow-no-files {staged_files}`                      |
-| `dprint-dockerfile` | `pre-commit` | `{Dockerfile,Dockerfile.*}`    | `bunx dprint fmt --allow-no-files {staged_files}`                      |
-| `check-affected`    | `pre-commit` | Todos os arquivos staged       | `bun run check --staged --skip-format` (ignorado durante merge/rebase) |
+| Hook             | Gatilho      | Arquivos alvo                    | Comando                                                 |
+| ---------------- | ------------ | -------------------------------- | ------------------------------------------------------- |
+| `bun-lint`       | `pre-commit` | JavaScript e TypeScript          | `bun lint --staged --fix --no-script --no-warn-ignored` |
+| `bun-fmt`        | `pre-commit` | Código e documentação suportados | `bun fmt --staged`                                      |
+| `check-affected` | `pre-commit` | Todos os arquivos staged         | `bun run check --staged --skip-format`                  |
 
 Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks devem ser bem-sucedidos para o commit prosseguir.
 
@@ -346,90 +346,33 @@ Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks
 
 ## Configuração do Editor
 
-Os hooks do Claude Code prependem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.mjs` para formatar o arquivo modificado (Biome, dprint ou rustfmt). Antes de cada escrita ou edição, um hook `PreToolUse` (`protect-generated.mjs`) bloqueia edições manuais em arquivos gerados, como `CHANGELOG.md`, lockfiles e `routeTree.gen.ts`, e indica o comando que os regenera.
+Os hooks do Claude Code prependem `node_modules/.bin` ao PATH automaticamente ao iniciar sessão e ao mudar de diretório (`SessionStart` / `CwdChanged`). Após cada escrita ou edição, um hook `PostToolUse` executa `auto-fix.mjs` para aplicar lint e formatação Bun a JavaScript e TypeScript, formatar arquivos suportados de dados e documentação, ou executar rustfmt. Dockerfiles ficam excluídos. O Zed usa Bun fmt pela interface de formatador externo. O VS Code oferece as tarefas `lint` e `format`; a formatação automática está desativada porque Bun não fornece um language server de editor. Um hook `PreToolUse` (`protect-generated.mjs`) bloqueia edições manuais em arquivos gerados, como `CHANGELOG.md`, lockfiles e `routeTree.gen.ts`, e indica o comando que os regenera.
 
 ### OpenCode
 
 A configuração de instruções e formatadores do OpenCode está em `opencode.json`.
 
-| Formatador   | Comando                       | Extensões                                                                                        |
-| ------------ | ----------------------------- | ------------------------------------------------------------------------------------------------ |
-| `biome-fix`  | `biome check --write`         | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts`, `.json`, `.jsonc`, `.css`, `.html` |
-| `dprint-fmt` | `dprint fmt --allow-no-files` | `.md`, `.mdx`, `.toml`, `.yml`, `.yaml`                                                          |
+OpenCode executa `bun fmt` para arquivos de código, JSON, CSS, HTML, Markdown, TOML e YAML. Dockerfiles ficam excluídos.
 
 Prettier está desativado. As instruções do OpenCode são carregadas de `.agents/opencode/rules/*.md`.
 
 ## Qualidade de Código
 
-### Biome (Lint)
+### Lint e formatação
 
-Configurado em `biome.json` com as regras `recommended` ativadas e sobrescritas específicas por workspace.
+`bun lint` e `bun fmt` são as ferramentas padrão do repositório. Regras, sobrescritas e exclusões
+de arquivos ficam em [`bunfig.toml`](bunfig.toml). Consulte o [guia de ferramentas Bun](../reference/bun-tooling.md)
+para conhecer a cobertura e os detalhes da migração. Editores usam Bun fmt quando a interface de
+formatador externo permite; o VS Code oferece as tarefas `lint` e `format`, pois Bun não fornece
+um language server de editor. Os hooks de agentes executam lint e formatação em JavaScript e
+TypeScript e formatam arquivos de dados e documentação suportados. Dockerfiles ficam excluídos.
 
-**Regras globais (todos os arquivos):**
+### Ciclos de dependência
 
-| Categoria   | Regras principais                                   |
-| ----------- | --------------------------------------------------- |
-| Correctness | Padrões recomendados                                |
-| Performance | `noDelete` (warn)                                   |
-| Style       | `noNestedTernary` (off), `useBlockStatements` (off) |
-| Nursery     | `useAwaitThenable` (off), `useErrorCause` (off)     |
-
-**Sobrescritas TypeScript/TSX (`**/*.{ts,tsx}`):**
-
-| Categoria   | Regras aplicadas                                                                                                                                                                                                                                                                       |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Complexity  | `noArguments`, `noBannedTypes`, `noUselessThisAlias`, `noUselessTypeConstraint`, `useLiteralKeys`, `useOptionalChain` — todas `error`                                                                                                                                                  |
-| Correctness | `noUnusedVariables` (`error`)                                                                                                                                                                                                                                                          |
-| Nursery     | `noBaseToString`, `noDuplicateEnumValues`, `noFloatingPromises`, `noForIn`, `noImpliedEval`, `noMisusedPromises`, `noUnsafePlusOperands` — todas `error`                                                                                                                               |
-| Style       | `noCommonJs`, `noInferrableTypes`, `noNamespace`, `noNonNullAssertion`, `noUselessElse`, `useArrayLiterals`, `useAsConstAssertion`, `useConst`, `useExponentiationOperator`, `useImportType`, `useNodejsImportProtocol`, `useTemplate`, `useThrowOnlyError` — todas `error`            |
-| Suspicious  | `noConsole` (warn, permite `warn`/`error`), `noEmptyBlockStatements`, `noExplicitAny`, `noExtraNonNullAssertion`, `noMisleadingInstantiator`, `noNonNullAssertedOptionalChain`, `noTsIgnore`, `noUnsafeDeclarationMerging`, `noVar`, `useAwait`, `useNamespaceKeyword` — todas `error` |
-
-**Sobrescritas específicas do frontend (`apps/frontend/**/*.{ts,tsx}`):**
-
-| Categoria   | Regras aplicadas                                                                                                                                                                                                                      |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Correctness | `noChildrenProp` (warn), `noNestedComponentDefinitions` (error), `noRenderReturnValue` (error), `noVoidElementsWithChildren` (error), `useExhaustiveDependencies` (error), `useHookAtTopLevel` (error), `useJsxKeyInIterable` (error) |
-| Nursery     | `noComponentHookFactories` (error), `noJsxNamespace` (error), `noScriptUrl` (warn), `useReactAsyncServerFunction` (error)                                                                                                             |
-| Security    | `noDangerouslySetInnerHtml` (warn), `noDangerouslySetInnerHtmlWithChildren` (error)                                                                                                                                                   |
-| Suspicious  | `noArrayIndexKey` (warn), `noCommentText` (error), `noReactForwardRef` (warn), `noSuspiciousSemicolonInJsx` (error)                                                                                                                   |
-
-**Atenuações por workspace:**
-
-| Workspace / caminho                                                    | Regra atenuada                          |
-| ---------------------------------------------------------------------- | --------------------------------------- |
-| `apps/api/src/**`                                                      | `nursery.noUnnecessaryConditions` (off) |
-| `scripts/**`                                                           | `suspicious.noConsole` (off)            |
-| `apps/api/src/services/`, `utils/`, `lib/`, `db/` e `apps/shared/src/` | `nursery.useExplicitType` (off)         |
-
-**Configurações adicionais de formatação:**
-
-- Largura de linha: 100, indentação: 2 espaços, aspas simples, ponto e vírgula, vírgulas finais (es5)
-- Parser CSS ativa diretivas Tailwind
-- Formatador HTML auto-fecha elementos void
-- `assist.actions.source.organizeImports` ativado
-
-### dprint (Formatação)
-
-Configurado em `dprint.json` com o seguinte escopo e configurações:
-
-| Configuração             | Valor                                                                                                                                                                                        |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Largura de linha         | 100                                                                                                                                                                                          |
-| Indentação               | 2 espaços                                                                                                                                                                                    |
-| Fim de linha             | LF                                                                                                                                                                                           |
-| Tabulação                | false                                                                                                                                                                                        |
-| Quebra de texto Markdown | `maintain`                                                                                                                                                                                   |
-| Inclusões                | `**/*.{md,mdc,mdx,toml,yml,yaml}`, `**/Dockerfile`, `**/Dockerfile.*`                                                                                                                        |
-| Exclusões                | `node_modules`, `dist`, `coverage`, `build`, `test-results`, `playwright-report`, `.jscpd-out`, `.qa-gate`, `.mango/artifacts`, `.mango/out`, `routeTree.gen.ts`, `CHANGELOG.md`, `bun.lock` |
-| Plugins                  | markdown (WASM), toml (WASM), dockerfile (WASM), pretty_yaml                                                                                                                                 |
-
-O plugin remoto Pretty YAML fixa a versão e o SHA-256 juntos em `dprint.json`. Ao atualizá-lo,
-compare o hash do WASM baixado com o digest do artefato na release upstream do GitHub e atualize a
-versão e o checksum. Execute `bun run check` para verificar o novo plugin.
-
-### Dependências Circulares
-
-O Biome verifica os ciclos de importação como parte do `bun run check`, incluindo imports de valores, de tipos e do próprio módulo. Cada workspace verifica arquivos TS, TSX, MTS, CTS, JS, JSX, MJS e CJS, incluindo arquivos na raiz, arquivos gerados e saídas de build ignoradas pelo Git, com o `biome.cycles.json`. Arquivos JavaScript são verificados como dependências de arquivos TypeScript e como raízes independentes. A verificação de ciclos exclui `node_modules`, `.git` e os diretórios `.mango/artifacts` e `.mango/out` da raiz do repositório. As duas configurações do Biome impedem a descoberta e a indexação de metadados nesses dois diretórios de cache da raiz. A formatação e os demais checks de lint continuam seguindo o `biome.json`.
+`bun run check` executa uma análise dedicada do grafo JavaScript e TypeScript para ciclos de
+imports de valores, tipos e do próprio módulo. Ela inclui arquivos gerados e ignorados pelo Git,
+excluindo dependências e caches do repositório. A análise permanece separada de `bun lint` porque
+a regra `import/no-cycle` do Bun ignora imports somente de tipos.
 
 ### Detecção de Código Duplicado
 

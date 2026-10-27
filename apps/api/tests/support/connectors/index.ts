@@ -9,8 +9,10 @@
  */
 
 import { mock } from 'bun:test';
+
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
 import Type from 'typebox';
+
 import * as geminiService from '../../../src/services/gemini';
 import * as baseUrlPolicy from '../../../src/services/providers/core/base-url-policy';
 import * as openaiModule from '../../../src/services/providers/openai/index';
@@ -104,7 +106,7 @@ export function isProviderModelsUrl(rawUrl: string, hostname: string): boolean {
  * list and forwards everything else. // Usage: globalThis.fetch = makeOpenAISuccessFetch(globalThis.fetch)
  */
 export function makeOpenAISuccessFetch(originalFetch: FetchImpl): FetchImpl {
-  // biome-ignore lint/suspicious/useAwait: matches the fetch signature
+  // matches the fetch signature
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (isProviderModelsUrl(url, 'api.openai.com')) {
@@ -125,7 +127,7 @@ export function makeOpenAISuccessFetch(originalFetch: FetchImpl): FetchImpl {
  * 200 list and forwards everything else — for openai-compatible/deepseek tests.
  */
 export function makeModelsEndpointFetch(originalFetch: FetchImpl, modelsUrl: string): FetchImpl {
-  // biome-ignore lint/suspicious/useAwait: matches the fetch signature
+  // matches the fetch signature
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (url === modelsUrl) {

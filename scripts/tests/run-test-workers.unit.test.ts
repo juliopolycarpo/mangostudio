@@ -15,8 +15,8 @@ import {
   describeCaseDifference,
   discoverTestFiles,
   type StartWorker,
-  WORKERS_ENV,
   type WorkerPlan,
+  WORKERS_ENV,
 } from '../lib/test-workers';
 import { main, type RunnerDeps, systemDeps } from '../run-test-workers';
 import {

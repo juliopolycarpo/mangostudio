@@ -1,5 +1,4 @@
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
-
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 /**
  * Opens an MCP session on the environment that owns the server row and hands
  * back the hub-side handle. Every request is a protocol call; the session, the
@@ -11,7 +10,6 @@ import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
  * id, which the hub mints and the runtime echoes back so a mid-call question
  * can be routed to the call that caused it.
  */
-
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { DEFAULT_MCP_TIMEOUT_MS } from '@mangostudio/shared/mcp';
 import {
@@ -22,6 +20,7 @@ import {
   type RuntimeMcpServerConfig,
   type RuntimeMcpSessionEvent,
 } from '@mangostudio/shared/runtime-contract';
+
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
 import type { RuntimeClient } from '../runtime-client/runtime-client';
 import { getRuntimeClient } from '../runtime-client/runtime-connection-manager';

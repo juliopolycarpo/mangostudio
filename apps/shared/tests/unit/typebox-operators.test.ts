@@ -12,6 +12,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import Type, { type Static } from 'typebox';
 import Value from 'typebox/value';
 

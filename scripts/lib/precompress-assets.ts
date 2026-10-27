@@ -16,6 +16,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { brotliCompressSync, constants } from 'node:zlib';
+
 import { distFilePath } from '@mangostudio/shared/utils/dist-files';
 
 /** Codings a variant can be stored in. Order is the server's tie-break preference. */

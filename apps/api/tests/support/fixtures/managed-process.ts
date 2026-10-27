@@ -2,7 +2,9 @@ import { mkdtemp } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { $ } from 'bun';
+
 import { isProcessAbsent, type ProcessLivenessProbe } from '../process-liveness';
 import { createReleaseDiagnostics, readRootIdentity } from './managed-process-diagnostics';
 

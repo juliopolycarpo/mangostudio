@@ -8,6 +8,7 @@ import type { McpServer, ReadMcpResourceResponse } from '@mangostudio/shared/mcp
 import { useQuery } from '@tanstack/react-query';
 import { Eye, FileText } from 'lucide-react';
 import { useState } from 'react';
+
 import { SettingsLoading } from '@/components/settings/SettingsStates';
 import { StatusNote } from '@/components/settings/StatusNote';
 import { Button } from '@/components/ui/Button';
@@ -16,6 +17,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { readMcpResource } from '../api';
 import { mcpServerResourcesQueryOptions } from '../queries';
 

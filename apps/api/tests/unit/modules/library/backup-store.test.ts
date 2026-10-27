@@ -11,11 +11,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   type BackupEntry,
+  backupExistingResource,
   type BackupManifest,
   type BackupStoreDeps,
-  backupExistingResource,
   createBackupId,
   defaultBackupStoreDeps,
   discardBackupSet,

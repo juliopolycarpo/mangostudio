@@ -5,7 +5,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import {
   type ChatGptDoctorDeps,
   collectChatGptDoctorChecks,

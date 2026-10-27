@@ -6,11 +6,13 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import { en } from '@mangostudio/shared/i18n';
 import { createMockMessage } from '@mangostudio/shared/test-utils';
 import { fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { QuestionCard } from '../../../../src/features/chat/components/QuestionCard';
 import { TimelineRow } from '../../../../src/features/chat/components/TimelineRow';
 import { ToolCallBlock } from '../../../../src/features/chat/components/ToolCallBlock';

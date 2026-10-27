@@ -3,6 +3,7 @@
  */
 
 import type { SecretMetadataRow, SecretSource } from '@mangostudio/shared/types';
+
 import { getDb } from '../../db/database';
 
 /** Supported provider key for Gemini secret metadata. */
@@ -61,7 +62,7 @@ export async function listSecretMetadata(
 /**
  * Loads all metadata records across all providers for a user.
  */
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 export async function listAllSecretMetadata(userId: string): Promise<SecretMetadataRow[]> {
   const db = getDb();
   return db

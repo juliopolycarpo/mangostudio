@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { renderHook } from '@testing-library/react';
+
 import { useCardGrid } from '@/lib/motion/use-card-grid';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { CARD_ENTER, CARD_REST } from '@/lib/motion/variants';

@@ -171,7 +171,7 @@ function parseUpdateOperation(
     if (line.text === '@@' || line.text.startsWith('@@ ')) {
       if (current) hunks.push(finishHunk(current));
       const marker = line.text === '@@' ? undefined : line.text.slice(3);
-      if (marker !== undefined && marker.length === 0) {
+      if (marker?.length === 0) {
         throw new V4aPatchParseError(line.number, 'an "@@" context marker must not be empty.');
       }
       current = { ...(marker ? { marker } : {}), lines: [], lineNumber: line.number };

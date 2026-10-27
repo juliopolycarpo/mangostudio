@@ -2,6 +2,7 @@ import type { Environment } from '@mangostudio/shared/environments';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import { Cable, Check, Pencil, Plus, Server, Trash2, Unplug, X } from 'lucide-react';
 import { useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -14,6 +15,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
+
 import { toolchainSummary } from '../format';
 import { useRuntimeStatuses } from '../hooks/use-runtime-status';
 import { MachineOnboardingWizard } from '../onboarding/MachineOnboardingWizard';
@@ -31,8 +33,8 @@ import { ContainerPanel } from './ContainerPanel';
 import { CopyLine } from './CopyLine';
 import { DirectUrlPanel } from './DirectUrlPanel';
 import { EntityPanel } from './EntityPanel';
-import { EnvironmentPageState } from './EnvironmentPageState';
 import { ENVIRONMENT_STATE_TONE } from './environment-status-tone';
+import { EnvironmentPageState } from './EnvironmentPageState';
 import { InstallTrustToggle } from './InstallTrustToggle';
 import { RuntimeLifecyclePanel } from './RuntimeLifecyclePanel';
 import { RuntimePairingPanel } from './RuntimePairingPanel';

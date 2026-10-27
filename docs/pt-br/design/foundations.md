@@ -148,7 +148,7 @@ canvas          a janela, o chat, uma página de settings
   surface-raised  um menu, diálogo, toast, popover        (+ borda stroke + elevação)
 ```
 
-Hover, pressão e seleção em qualquer coisa *sem* preenchimento próprio usam as camadas
+Hover, pressão e seleção em qualquer coisa _sem_ preenchimento próprio usam as camadas
 neutras `fill-hover` / `fill-pressed` / `fill-selected`. Elas são translúcidas, então
 funcionam igualmente sobre `canvas`, `sidebar` e `surface`. O hover nunca puxa para o
 destaque: o destaque diz "principal" ou "atual", não "o ponteiro está aqui".
@@ -200,18 +200,18 @@ arbitrário como `text-[13px]`.
 
 Uma grade de 4px. A escala do próprio Tailwind já é uma; o sistema a estreita.
 
-| Passo | px | Uso típico                                                                |
-| ----- | -- | ------------------------------------------------------------------------- |
-| `0.5` | 2  | Só ajustes ópticos (um `mt-0.5` sob um rótulo de duas linhas).            |
-| `1`   | 4  | Padding de menu; o espaço dentro de um chip.                              |
-| `1.5` | 6  | O espaço entre um ícone e seu rótulo numa linha densa.                    |
-| `2`   | 8  | Espaço entre controles vizinhos; ícone e rótulo em botões.                |
-| `3`   | 12 | Padding horizontal de botões e campos; espaço entre linhas de formulário. |
-| `4`   | 16 | Padding de card; margens laterais da barra lateral e do cabeçalho.        |
-| `5`   | 20 | Espaço entre grupos dentro de um card.                                    |
-| `6`   | 24 | Padding de diálogo e de página; espaço entre cards.                       |
-| `8`   | 32 | Espaço entre seções de página.                                            |
-| `12`  | 48 | Respiro acima de estados vazios e saudações.                              |
+| Passo | px  | Uso típico                                                                |
+| ----- | --- | ------------------------------------------------------------------------- |
+| `0.5` | 2   | Só ajustes ópticos (um `mt-0.5` sob um rótulo de duas linhas).            |
+| `1`   | 4   | Padding de menu; o espaço dentro de um chip.                              |
+| `1.5` | 6   | O espaço entre um ícone e seu rótulo numa linha densa.                    |
+| `2`   | 8   | Espaço entre controles vizinhos; ícone e rótulo em botões.                |
+| `3`   | 12  | Padding horizontal de botões e campos; espaço entre linhas de formulário. |
+| `4`   | 16  | Padding de card; margens laterais da barra lateral e do cabeçalho.        |
+| `5`   | 20  | Espaço entre grupos dentro de um card.                                    |
+| `6`   | 24  | Padding de diálogo e de página; espaço entre cards.                       |
+| `8`   | 32  | Espaço entre seções de página.                                            |
+| `12`  | 48  | Respiro acima de estados vazios e saudações.                              |
 
 `2.5` e `3.5` (10px, 14px) ficam fora da grade. O teste de conformidade os rejeita como
 passos de padding, margin, gap e `space-*` (`px-2.5`, `gap-3.5`, `-mt-2.5`). Um tamanho
@@ -225,15 +225,15 @@ coluna do chat; veja [Layout](#layout). A densidade do chat é uma preferência
 
 ### Alturas
 
-| Utilitário | px | Uso                                                                                                                 |
-| ---------- | -- | ------------------------------------------------------------------------------------------------------------------- |
-| `h-5`      | 20 | Badges, keycaps (`KbdHint`), o trilho do switch.                                                                    |
-| `h-6`      | 24 | Os chips `key: value` (`.terminal-chip`, `.composer-chip`, que a definem no CSS).                                   |
-| `h-7`      | 28 | Controles compactos: botões `sm` e `icon-sm`, os chips de tool do compositor, o botão de copiar do bloco de código. |
-| `h-8`      | 32 | O padrão: botões `md` e `icon`, campos, gatilhos de Select, itens de menu, linhas de navegação, segmentos.          |
-| `h-9`      | 36 | Abas sublinhadas (`Tabs`, `TabNav`).                                                                                |
-| `h-10`     | 40 | Botões `lg`: as ações das telas de login, cadastro e onboarding.                                                    |
-| `h-12`     | 48 | O cabeçalho e a linha da marca na barra lateral, para que compartilhem a mesma linha de base.                       |
+| Utilitário | px  | Uso                                                                                                                 |
+| ---------- | --- | ------------------------------------------------------------------------------------------------------------------- |
+| `h-5`      | 20  | Badges, keycaps (`KbdHint`), o trilho do switch.                                                                    |
+| `h-6`      | 24  | Os chips `key: value` (`.terminal-chip`, `.composer-chip`, que a definem no CSS).                                   |
+| `h-7`      | 28  | Controles compactos: botões `sm` e `icon-sm`, os chips de tool do compositor, o botão de copiar do bloco de código. |
+| `h-8`      | 32  | O padrão: botões `md` e `icon`, campos, gatilhos de Select, itens de menu, linhas de navegação, segmentos.          |
+| `h-9`      | 36  | Abas sublinhadas (`Tabs`, `TabNav`).                                                                                |
+| `h-10`     | 40  | Botões `lg`: as ações das telas de login, cadastro e onboarding.                                                    |
+| `h-12`     | 48  | O cabeçalho e a linha da marca na barra lateral, para que compartilhem a mesma linha de base.                       |
 
 32px é a altura de controle do próprio WinUI e fica a dois pixels da do libadwaita.
 
@@ -271,13 +271,13 @@ Quatro raios por papel, mais a pílula. O tema esvazia a escala do próprio Tail
 então `rounded-xl` e maiores não geram nada. O teste de conformidade os rejeita, e também
 um `rounded` puro sem tamanho.
 
-| Utilitário     | px | Aplica-se a                                                                                                                                                                             |
-| -------------- | -- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rounded-xs`   | 4  | Checkboxes, keycaps, código inline, miniaturas, skeletons.                                                                                                                              |
-| `rounded-sm`   | 6  | **Tudo que é clicável**: botões, campos, Select, chips, itens de menu, linhas de navegação, segmentos.                                                                                  |
-| `rounded-md`   | 8  | Contêineres: cards, blocos de tool, menus, toasts, blocos de código, callouts.                                                                                                          |
-| `rounded-lg`   | 12 | Superfícies grandes: diálogos, o compositor, a paleta de comandos, a mensagem do usuário, os cards de login e cadastro.                                                                 |
-| `rounded-full` | —  | Marcas de status e glifos redondos: badges, pontos de status, spinners, barras de progresso, as barras de destaque, o radio, o switch e o slider. Nenhum botão, chip ou linha é pílula. |
+| Utilitário     | px  | Aplica-se a                                                                                                                                                                             |
+| -------------- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rounded-xs`   | 4   | Checkboxes, keycaps, código inline, miniaturas, skeletons.                                                                                                                              |
+| `rounded-sm`   | 6   | **Tudo que é clicável**: botões, campos, Select, chips, itens de menu, linhas de navegação, segmentos.                                                                                  |
+| `rounded-md`   | 8   | Contêineres: cards, blocos de tool, menus, toasts, blocos de código, callouts.                                                                                                          |
+| `rounded-lg`   | 12  | Superfícies grandes: diálogos, o compositor, a paleta de comandos, a mensagem do usuário, os cards de login e cadastro.                                                                 |
+| `rounded-full` | —   | Marcas de status e glifos redondos: badges, pontos de status, spinners, barras de progresso, as barras de destaque, o radio, o switch e o slider. Nenhum botão, chip ou linha é pílula. |
 
 Um controle e o contêiner em que está diferem por um degrau (um botão `rounded-sm` num
 card `rounded-md`), para que os cantos nunca pareçam chutados. O `ToolAvatar` muda o
@@ -309,7 +309,7 @@ em `Dialog.tsx` faz o mesmo para diálogos.
 - **Foco**: um contorno `focus` sólido de 2px, deslocado 2px, aplicado globalmente a
   `:focus-visible`. Componentes não desenham o próprio anel. Campos de texto e gatilhos
   de Select o trocam por uma mudança de borda (`focus:outline-none focus:border-focus
-  focus:ring-1 focus:ring-focus`). Alguns controles mudam o mesmo anel de lugar: abas
+focus:ring-1 focus:ring-focus`). Alguns controles mudam o mesmo anel de lugar: abas
   sublinhadas o puxam para dentro (`-outline-offset-2`) para que a faixa com rolagem não
   o corte, um slider o desenha no polegar, o switch no trilho (o input em si fica
   visualmente oculto), um chip do compositor em volta do `<label>` que envolve seu
@@ -333,7 +333,7 @@ em `Dialog.tsx` faz o mesmo para diálogos.
   variantes preenchidas (`primary`, `secondary`, `danger`); as discretas (`subtle`,
   `subtle-danger`) não têm preenchimento de saída e só passam o texto para `fg-subtle`,
   porque um bloco pareceria a linha em hover ou selecionada
-  ([decisões 10 e 14](./decisions.md)). Um botão que está apenas *carregando*
+  ([decisões 10 e 14](./decisions.md)). Um botão que está apenas _carregando_
   mantém a cor e mostra o spinner; `aria-busy` distingue os dois casos. Outros controles
   desabilitados (campos, Select, checkbox, switch, slider, chips, itens de menu) caem
   para 50% de opacidade. O critério é se a coisa desabilitada carrega informação
@@ -345,7 +345,7 @@ em `Dialog.tsx` faz o mesmo para diálogos.
     bloqueado ganha um cadeado), e o nome passa de `fg` para `fg-muted`. Ela perde o
     hover e mostra `cursor-not-allowed`; o motivo fica ao lado ou no topo da lista
     ([decisões 17 e 21](./decisions.md)).
-  - Um chip do compositor *travado* porque o chat já tem turnos (o agente, o ambiente) é
+  - Um chip do compositor _travado_ porque o chat já tem turnos (o agente, o ambiente) é
     um `LockedChip`: texto com força total, sem chevron
     ([decisão 18](./decisions.md)). Só um chip carregando ou com falha
     esmaece.
@@ -395,11 +395,11 @@ troca para presets parados, porque a regra de CSS não alcança a animação em 
 Lucide (`lucide-react`), com o traço padrão de 2px e pontas arredondadas. Os tamanhos
 são constantes em `@/lib/icon-sizes`:
 
-| Constante | px | Uso                                                                                               |
-| --------- | -- | ------------------------------------------------------------------------------------------------- |
-| `ICON_SM` | 14 | Dentro de chips, badges e linhas compactas; glifos de status inline.                              |
-| `ICON_MD` | 16 | Botões, itens de menu, linhas de navegação, glifos de callout.                                    |
-| `ICON_LG` | 20 | Os blocos da navegação no celular, o botão de menu do cabeçalho, glifos de toast, estados vazios. |
+| Constante | px  | Uso                                                                                               |
+| --------- | --- | ------------------------------------------------------------------------------------------------- |
+| `ICON_SM` | 14  | Dentro de chips, badges e linhas compactas; glifos de status inline.                              |
+| `ICON_MD` | 16  | Botões, itens de menu, linhas de navegação, glifos de callout.                                    |
+| `ICON_LG` | 20  | Os blocos da navegação no celular, o botão de menu do cabeçalho, glifos de toast, estados vazios. |
 
 Escolha um dos três; não escreva um `size` literal. A única exceção é um check desenhado
 dentro de uma caixa de 16px (`Checkbox`, `ChoiceButton`), que tem 12px. O teste de

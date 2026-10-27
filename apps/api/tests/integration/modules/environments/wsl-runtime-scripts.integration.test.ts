@@ -16,12 +16,13 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readlink, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir, type } from 'node:os';
 import { join } from 'node:path';
+
 import {
   CONFIG_LOCK_BUSY_EXIT,
   INSTALL_ARCHIVE_SCRIPT,
   INSTALL_BINARY_SCRIPT,
-  PROBE_SLOT_SCRIPT,
   parseDistroSlotProbe,
+  PROBE_SLOT_SCRIPT,
   REMOVE_LEGACY_RUNTIME_SCRIPT,
   VERSION_SCRIPT,
   WRITE_CONFIG_SCRIPT,

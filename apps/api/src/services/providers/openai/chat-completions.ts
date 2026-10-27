@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+
 import type { StreamingChunk, TextGenerationRequest, TextGenerationResult } from '../types';
 import { buildChatMessages } from './message-mapper';
 

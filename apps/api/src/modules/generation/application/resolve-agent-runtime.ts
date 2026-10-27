@@ -3,6 +3,7 @@ import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-setti
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import type { ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import {
   listDeniedMcpBridgeServers,

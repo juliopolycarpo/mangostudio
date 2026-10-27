@@ -7,6 +7,7 @@ import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import {
   getProvider,
@@ -28,7 +29,7 @@ import {
 import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { resolveEnvironmentDisplayName } from './environment-display-name';
-import { type ResolvedAgentRuntime, resolveAgentRuntime } from './resolve-agent-runtime';
+import { resolveAgentRuntime, type ResolvedAgentRuntime } from './resolve-agent-runtime';
 import { type ResolvedModel, resolveModel } from './resolve-model';
 import { resolveRunnerAgentProfile } from './resolve-runner-agent';
 import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';

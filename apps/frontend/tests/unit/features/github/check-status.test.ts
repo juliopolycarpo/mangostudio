@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { checkChipStatus } from '../../../../src/features/github/lib/check-status';
 
 describe('checkChipStatus', () => {

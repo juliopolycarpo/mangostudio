@@ -11,15 +11,16 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import { en } from '@mangostudio/shared/i18n';
+
 import type { OlderMessages } from '../../../../src/features/chat/hooks/use-chat-page-state';
 import { FakeTranscriptLayout } from '../../../support/harness/fake-transcript-layout';
 import { fireEvent, render } from '../../../support/harness/render';
 
-const { ChatFeed, ESTIMATED_ROW_HEIGHT_PX } = await import(
-  '../../../../src/features/chat/components/ChatFeed'
-);
+const { ChatFeed, ESTIMATED_ROW_HEIGHT_PX } =
+  await import('../../../../src/features/chat/components/ChatFeed');
 
 /** Collects the index of every transcript row the feed ever mounts. */
 class MountedRowRecorder {

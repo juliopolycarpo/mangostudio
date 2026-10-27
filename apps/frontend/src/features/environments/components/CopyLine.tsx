@@ -9,6 +9,7 @@
  */
 
 import { Check, Copy } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';

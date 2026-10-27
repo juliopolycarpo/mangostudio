@@ -18,6 +18,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import { createTailwindPlugin } from '../../scripts/tailwind';
 
 const STYLESHEET = join(import.meta.dir, '../../src/index.css');

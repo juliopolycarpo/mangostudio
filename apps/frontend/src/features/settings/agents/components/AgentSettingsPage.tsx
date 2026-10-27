@@ -8,6 +8,7 @@ import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/cata
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { useModelCatalog } from '@/hooks/use-model-catalog';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { toolSettingsListQueryOptions } from '../../tools/queries';
 import {
   createAgentProfile,
@@ -64,7 +66,7 @@ export function AgentSettingsPage() {
     queryClient.invalidateQueries({ queryKey: agentSettingsKeys.list() });
 
   const saveMutation = useMutation({
-    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+    // Migrated from ESLint
     mutationFn: async ({ agent, body }: SaveAgentInput) => {
       if (agent.kind === 'user' && agent.id === NEW_AGENT_ID) {
         const createBody: CreateAgentProfileBody = {

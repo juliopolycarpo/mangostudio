@@ -41,6 +41,7 @@ import {
 } from '@mangostudio/shared/external-agents/values';
 import { AlertTriangle, Check, ChevronDown, Shield } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useDismissable } from '@/hooks/use-dismissable';
@@ -155,7 +156,7 @@ export function PermissionSelector({
       : labels.levelName[level];
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Escape is handled for the trigger and the panel it owns, both inside this wrapper.
     <div ref={containerRef} onKeyDown={onKeyDown} className="flex items-center">
       <button
         ref={triggerRef}

@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
+
 import {
   DEFAULT_SSH_RUNTIME_PATH,
   expandUserPath,
   quoteForRemoteShell,
   SSH_FORCED_OPTIONS,
+  sshDestination,
   type SshEnvironmentConfig,
   SshEnvironmentConfigSchema,
-  sshDestination,
   sshPreflightCommands,
   sshRuntimePath,
 } from '../../src/environments';

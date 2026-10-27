@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { LibraryResource } from '@mangostudio/shared/library';
 import Value from 'typebox/value';
+
 import { parseLibraryArgs } from '../../../src/cli/args';
 import {
   CliLibraryLocationsSchema,
@@ -50,6 +52,7 @@ describe('runLibrary', () => {
     await runLibrary(
       { subcommand: null, kind: undefined, divergent: true, json: false },
       {
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         discoverResources: async () => [divergentResource, uniformResource],
         listLocations: () => [],
         log: (line) => lines.push(line),
@@ -66,6 +69,7 @@ describe('runLibrary', () => {
     await runLibrary(
       { subcommand: 'locations', kind: undefined, divergent: false, json: true },
       {
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         discoverResources: async () => [],
         listLocations: () => [
           {
@@ -93,6 +97,7 @@ describe('runLibrary', () => {
     await runLibrary(
       { subcommand: null, kind: undefined, divergent: false, json: true },
       {
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         discoverResources: async () => [uniformResource],
         listLocations: () => [],
         log: (line) => lines.push(line),

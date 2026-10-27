@@ -11,10 +11,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { createMockMessage } from '@mangostudio/shared/test-utils';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { CopyMessageButton } from '../../../../src/features/chat/components/CopyMessageButton';
 import { GeneratedImagePart } from '../../../../src/features/chat/components/GeneratedImagePart';
 import { SubagentTracePart } from '../../../../src/features/chat/components/parts/SubagentTracePart';

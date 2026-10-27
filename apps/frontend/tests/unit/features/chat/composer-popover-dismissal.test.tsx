@@ -7,9 +7,11 @@
  */
 
 import { afterEach, describe, expect, it, jest } from 'bun:test';
+
 import type { ModelOption } from '@mangostudio/shared/catalog';
 import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { ModelSelector } from '../../../../src/components/layout/ModelSelector';
 import { RunnerSelector } from '../../../../src/components/layout/RunnerSelector';
 import { CapabilityInspector } from '../../../../src/features/chat/components/CapabilityInspector';

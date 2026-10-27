@@ -17,9 +17,9 @@ import {
   type EventFrame,
   isSessionClosedRequestError,
   type Port,
-  RESERVED_ERROR_CODES,
   RemoteError,
   type RequestOptions,
+  RESERVED_ERROR_CODES,
   Session,
   type SessionClosure,
 } from '@mangostudio/protocol';
@@ -42,10 +42,11 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
+
 import { createDiagnosticLogger } from '../../lib/logger';
 import {
-  type ContractCheckResult,
   checkAgainstContract,
+  type ContractCheckResult,
   schemaByDiscriminant,
 } from './contract-schema';
 import {
@@ -321,7 +322,7 @@ export async function openHubSession(
   try {
     remote = await session.ready;
   } catch (error) {
-    session.close(CLOSE_CODES.RELEASED, 'handshake failed');
+    void session.close(CLOSE_CODES.RELEASED, 'handshake failed');
     if (options.signal?.aborted) {
       throw new RemoteError(
         RESERVED_ERROR_CODES.CANCELLED,
@@ -335,7 +336,7 @@ export async function openHubSession(
 
   const manifest = manifestOf(remote.capabilities, options.externalAgentIsolation);
   if (!manifest) {
-    session.close(CLOSE_CODES.PROTOCOL_ERROR, 'capabilities are not a runtime manifest');
+    void session.close(CLOSE_CODES.PROTOCOL_ERROR, 'capabilities are not a runtime manifest');
     throw new RemoteError(
       RESERVED_ERROR_CODES.UNAVAILABLE,
       `Peer "${remote.peer.name}" did not announce a runtime capability manifest; expected the members of RuntimeCapabilityManifest in hello.capabilities.`,
@@ -343,7 +344,7 @@ export async function openHubSession(
     );
   }
   if (options.requireMatchingRelease && remote.peer.version !== options.hubVersion) {
-    session.close(CLOSE_CODES.FORBIDDEN, 'release mismatch');
+    void session.close(CLOSE_CODES.FORBIDDEN, 'release mismatch');
     throw new RemoteError(
       RESERVED_ERROR_CODES.PROTOCOL_MISMATCH,
       `Runtime reports version ${remote.peer.version}; this hub is ${options.hubVersion}. A hub-managed runtime must be the same release.`,
@@ -376,6 +377,8 @@ export async function openHubSession(
     },
     onEvent,
     onClose,
+    // Preserve the existing return value for callers that can observe settlement.
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises
     close: (code, reason) => session.close(code ?? CLOSE_CODES.RELEASED, reason),
   };
 }
@@ -489,7 +492,7 @@ function attachValidatedEventFanOut(session: Session): HubSession['onEvent'] {
         fatal: outcome.fatal,
       });
       if (outcome.fatal) {
-        session.close(
+        void session.close(
           CLOSE_CODES.PROTOCOL_ERROR,
           `Event on "${frame.topic}" does not match the contract at ${outcome.violation?.path ?? '#/'}.`
         );

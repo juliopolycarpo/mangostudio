@@ -13,7 +13,9 @@
  */
 
 import { randomBytes } from 'node:crypto';
+
 import { RUNTIME_PAIRING_TOKEN_PREFIX } from '@mangostudio/shared/runtime-contract';
+
 import { computeHash } from '../../../utils/hash';
 
 /**

@@ -1,4 +1,5 @@
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
+
 import { CheckboxRow } from '@/components/settings/CheckboxRow';
 
 interface AgentToolPickerProps {

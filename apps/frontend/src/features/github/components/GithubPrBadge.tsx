@@ -1,4 +1,5 @@
 import type { GithubPrState } from '@mangostudio/shared/github';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 

@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   CANCEL_GRACE_MS,
+  cancelExitStatus,
   type CancelSignal,
   CHILD_LIMIT_ENV,
-  ChildSupervisor,
-  cancelExitStatus,
   childLimit,
+  ChildSupervisor,
   createDescendantBinder,
   DEFAULT_CHILD_LIMIT,
   DIRECT_SIGINT_DELAY_MS,
@@ -16,8 +16,8 @@ import {
   RUNNER_GROUP_ENV,
   SlotPool,
   type SupervisedChild,
-  type SupervisorHost,
   supervisionMode,
+  type SupervisorHost,
 } from '../lib/process-tree';
 
 // The real thing (which pids survive a cancelled runner) is covered with live

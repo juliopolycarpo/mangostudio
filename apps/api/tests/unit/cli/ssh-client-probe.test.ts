@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, jest } from 'bun:test';
+
 import { probeSshClient, type SshClientProcess } from '../../../src/cli/ssh-client-probe';
 
 class FakeSshClient implements SshClientProcess {

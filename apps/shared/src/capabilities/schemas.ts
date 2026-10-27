@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import { AgentIdSchema, AgentKindSchema } from '../agents/schemas';
 import { ContextInfoSchema } from '../chat/schemas';
 import { EnvironmentIdSchema } from '../environments/schemas';

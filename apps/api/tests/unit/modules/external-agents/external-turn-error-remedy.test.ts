@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { EXTERNAL_AGENT_TARGET_IDS } from '@mangostudio/shared/external-agents';
+
 import { productDescriptorFor } from '../../../../src/modules/external-agents/domain/adapter-descriptors';
 import { turnErrorRemedyFor } from '../../../../src/modules/external-agents/domain/external-turn-error-remedy';
 

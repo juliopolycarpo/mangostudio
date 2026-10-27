@@ -161,7 +161,7 @@ export function createExternalApprovalRegistry(
       // One indistinguishable answer for "no such request", "not your chat" and
       // "already forgotten": a caller must not be able to probe another user's
       // chats by watching which of them answers differently.
-      if (!pending || pending.binding.userId !== input.userId) {
+      if (pending?.binding.userId !== input.userId) {
         return { status: 'rejected', reason: 'not-found' };
       }
       if (input.sessionId !== undefined && input.sessionId !== pending.binding.sessionId) {

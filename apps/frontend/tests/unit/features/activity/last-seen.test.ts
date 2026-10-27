@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+
 import { readActivityLastSeen, writeActivityLastSeen } from '@/features/activity/last-seen';
 
 const LAST_SEEN_KEY = 'mangostudio:activity-last-seen';

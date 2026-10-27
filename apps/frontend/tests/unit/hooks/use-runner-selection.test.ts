@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { createMockChat } from '@mangostudio/shared/test-utils';
+
 import type { ChatWithContext } from '../../../src/features/chat/queries';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
-mock.module('../../../src/features/settings/agents/queries', () => ({
+void mock.module('../../../src/features/settings/agents/queries', () => ({
   agentSettingsKeys: { all: ['agent-settings'] },
   agentSettingsListQueryOptions: () => ({
     queryKey: ['agent-settings', 'test'],

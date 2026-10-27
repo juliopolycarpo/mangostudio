@@ -8,8 +8,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
+
 import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 import type { McpClientHandle } from '../../../../src/services/mcp/types';
 import { createEchoMcpServer } from '../../../support/fixtures/mcp/create-echo-mcp-server';

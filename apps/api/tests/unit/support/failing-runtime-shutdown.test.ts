@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 import { fileURLToPath } from 'node:url';
+
 import { createManagedProcessFixture } from '../../support/fixtures/managed-process';
 
 it('awaits a cancelled warmup opener and its late close before injecting shutdown failure', async () => {

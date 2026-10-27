@@ -1,4 +1,5 @@
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
+
 import { SqliteDialect } from 'kysely';
 
 /**

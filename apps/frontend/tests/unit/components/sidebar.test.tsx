@@ -7,9 +7,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
 import { en } from '@mangostudio/shared/i18n';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+
 import { Sidebar } from '../../../src/features/sidebar/components/Sidebar';
 import { flushAsyncRender, render } from '../../support/harness/render';
 

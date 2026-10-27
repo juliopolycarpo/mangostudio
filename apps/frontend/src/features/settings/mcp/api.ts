@@ -18,6 +18,7 @@ import type {
   TestMcpServerResponse,
   UpdateMcpServerBody,
 } from '@mangostudio/shared/mcp';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   type GitBatchStateResponse,
   GitBatchStateResponseSchema,
   type GitSummary,
 } from '@mangostudio/shared/git';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
 import { insertTestChat, insertTestUser } from '../../support/factories';
@@ -78,8 +80,7 @@ async function createFixtureRepo(): Promise<string> {
 
 function postBatch(
   app:
-    | ReturnType<typeof createAuthenticatedApiTestApp>['app']
-    | ReturnType<typeof createApiTestApp>,
+    ReturnType<typeof createAuthenticatedApiTestApp>['app'] | ReturnType<typeof createApiTestApp>,
   chatIds: readonly string[]
 ) {
   return app.handle(

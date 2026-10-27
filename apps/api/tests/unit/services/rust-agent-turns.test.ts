@@ -1,19 +1,21 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   type ExternalAgentConfiguration,
   type ExternalAgentRuntimeDescriptor,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
+
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import { createFakeExternalRuntime } from '../../support/external-agents/fake-external-runtime';
 import {
   createRustTurnHarness,
   insertCursorChat,
   openRustSmokeHub,
-  type RustTurnHarnessOptions,
   runRustAgentSmoke,
   rustSmokeConfiguration,
   rustSmokeRuntimeEnv,
+  type RustTurnHarnessOptions,
 } from '../../support/external-agents/rust-agent-turns';
 import { insertTestUser } from '../../support/factories';
 

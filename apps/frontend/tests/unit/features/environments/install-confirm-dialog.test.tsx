@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { InstallConfirmDialog } from '../../../../src/features/environments/components/InstallConfirmDialog';
 import { render, screen } from '../../../support/harness/render';
 import { installRecipe } from './fixtures';

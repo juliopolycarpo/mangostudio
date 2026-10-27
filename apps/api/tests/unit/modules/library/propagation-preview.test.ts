@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type AdapterStrategy,
@@ -14,6 +15,7 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
+
 import type { AcknowledgedKeysOptions } from '../../../../src/modules/library/application/conflict-resolution';
 import {
   type EnvironmentSnapshot,

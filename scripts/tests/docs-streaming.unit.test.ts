@@ -29,6 +29,7 @@ async function runExample(locale: string, chunks: Uint8Array[]): Promise<unknown
     ['fetch', 'request', 'signal', 'onChunk']
   );
   await execute(
+    // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
     async () => new Response(stream),
     {},
     undefined,

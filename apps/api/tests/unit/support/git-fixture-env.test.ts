@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+
 import { gitFixtureEnv } from '../../support/git-fixture-env';
 
 const KEY = 'GIT_CONFIG_GLOBAL';

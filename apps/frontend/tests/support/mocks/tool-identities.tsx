@@ -20,6 +20,7 @@
  */
 
 import type { ReactElement } from 'react';
+
 import type { ToolIdentityResolver } from '@/features/environments/identity/use-tool-identities';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 

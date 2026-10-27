@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { type PromptStarterId, promptStarterIds, starterContext } from '../lib/prompt-starters';
 
 interface SuggestedActionsProps {

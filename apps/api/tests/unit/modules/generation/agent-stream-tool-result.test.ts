@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import {
   emitAgentStreamEvent,
   type StreamTextTurnSession,
@@ -53,7 +55,7 @@ async function collect(
 ): Promise<StreamEvent[]> {
   const emitted: StreamEvent[] = [];
   for (const event of events) {
-    // biome-ignore lint/suspicious/noExplicitAny: loop state is module-private
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- loop state is module-private
     for await (const out of emitAgentStreamEvent(session, event, loop as any, [])) {
       emitted.push(out);
     }

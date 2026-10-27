@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { McpPromptArgument } from '@mangostudio/shared/mcp';
+
 import {
   flattenMcpPromptText,
   missingRequiredMcpArguments,

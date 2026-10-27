@@ -10,7 +10,9 @@
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
 import { ACTIVITY_TOPIC, type RealtimeInvalidateEvent } from '@mangostudio/shared/realtime';
+
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import {

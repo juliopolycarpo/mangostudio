@@ -17,6 +17,7 @@ import type { GalleryItem } from '@mangostudio/shared/types';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Image, ImagePlus } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -141,7 +142,7 @@ function RecentStrip({
     return (
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-6">
         {Array.from({ length: RECENT_LIMIT }, (_, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
+          // static placeholder list
           <Skeleton key={index} className="aspect-square rounded-md" />
         ))}
       </div>

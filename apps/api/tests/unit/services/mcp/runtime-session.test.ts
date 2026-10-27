@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import { DEFAULT_MCP_TIMEOUT_MS } from '@mangostudio/shared/mcp';
+
 import {
-  RUNTIME_MCP_CALL_GRACE_MS,
   requestDeadline,
+  RUNTIME_MCP_CALL_GRACE_MS,
 } from '../../../../src/services/mcp/runtime-session';
 
 describe('MCP request deadlines compose across the runtime boundary', () => {

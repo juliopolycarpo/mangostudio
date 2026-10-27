@@ -1,5 +1,7 @@
 import { extname } from 'node:path';
+
 import { Elysia } from 'elysia';
+
 import { resolveContainedPath } from '../utils/paths';
 
 const GENERATED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';

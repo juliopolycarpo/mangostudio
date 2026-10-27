@@ -180,7 +180,7 @@ bun run --filter @mangostudio/api test:integration
 > Fechar a conexão aguarda o processo filho encerrar.
 
 > **A lane unit com cache usa o conteúdo do binário na chave.** `test:unit` é uma task do
-> Turbo com cache. O Turbo calcula o hash do *caminho* que `MANGOSTUDIO_RUNTIME_BINARY`
+> Turbo com cache. O Turbo calcula o hash do _caminho_ que `MANGOSTUDIO_RUNTIME_BINARY`
 > informa (a task permite `MANGOSTUDIO_*`), nunca do arquivo, e um build padrão em
 > `target/debug` nem entra na chave; por isso um runtime recompilado ou substituído
 > reaproveitava o resultado gravado com o binário antigo. O `bun run test` agora calcula
@@ -422,7 +422,7 @@ arredondados para baixo com ~1pt de folga. Os pisos vivem em
 `scripts/qa-gate/enforce-coverage-thresholds.ts`, encadeado dentro do próprio
 `test:coverage` — um estouro falha a mesma invocação que o CI observa. O
 `coverageThreshold` do `bunfig.toml` não serve para isso: no Bun 1.4.2 ele
-ainda é aplicado por *arquivo* e um estouro não imprime nada
+ainda é aplicado por _arquivo_ e um estouro não imprime nada
 ([oven-sh/bun#17028](https://github.com/oven-sh/bun/issues/17028), ainda
 aberta). No 1.4.0 ele também ficava silenciosamente inerte com
 `coverageReporter = ["lcov"]` sem `"text"`; no 1.4.2 isso não se reproduz.

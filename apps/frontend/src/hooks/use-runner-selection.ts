@@ -7,6 +7,7 @@ import type {
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import type { ChatWithContext } from '@/features/chat/queries';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 

@@ -7,16 +7,18 @@ import {
 import { PanelRightOpen } from 'lucide-react';
 import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
 import { Button } from '@/components/ui/Button';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
-import { RailPanel } from './RailPanel';
 import { onRailPanelRequest } from './rail-panel-request';
 import { readRailCollapsed, writeRailCollapsed } from './rail-state';
+import { RailPanel } from './RailPanel';
 
 const DESKTOP_RAIL_QUERY = '(min-width: 1024px)';
 const COLLAPSED_RAIL_WIDTH = 48;
@@ -224,6 +226,7 @@ export function WorkspaceRail({
         <>
           <div aria-hidden="true" onClick={closeMobile} className="fixed inset-0 z-[45] bg-scrim" />
           <aside
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- This custom dialog owns its focus and dismissal behavior.
             role="dialog"
             aria-modal="true"
             aria-label={t.workspace.sidePanelTitle}

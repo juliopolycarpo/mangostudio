@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ContextInfo } from '@mangostudio/shared/chat';
+
 import { getDb } from '../../../../../src/db/database';
 import { listChatsUseCase } from '../../../../../src/modules/chats/application/list-chats';
 import { insertTestChat, insertTestUser } from '../../../../support/factories';

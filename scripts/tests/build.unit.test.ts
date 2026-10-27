@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, relative, sep } from 'node:path';
+
 import {
   binaryCompileDefines,
   binaryCompileFlags,

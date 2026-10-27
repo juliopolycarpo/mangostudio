@@ -1,4 +1,5 @@
 import type { EnvironmentConnectionState } from '@mangostudio/shared/environments';
+
 import { recordActivity } from '../../activity/application/record-activity';
 
 export interface EnvironmentStateTransition {

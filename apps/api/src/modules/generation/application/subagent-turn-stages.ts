@@ -2,14 +2,15 @@ import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { SubagentTracePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { executeMcpTool } from '../../../services/mcp/tool-bridge';
 import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import {
-  getProviderForModel,
   getProvider as getRegisteredProvider,
+  getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
 import type {
   AgentTurnRequest,
@@ -597,7 +598,7 @@ async function streamSubagentSummarizeTurn(input: {
   return text;
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 async function executeSubagentTools(input: {
   readonly calls: ReadonlyMap<string, { name: string; argsStr: string }>;
   readonly db: Kysely<Database>;

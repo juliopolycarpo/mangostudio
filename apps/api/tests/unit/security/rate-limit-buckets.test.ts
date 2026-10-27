@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
-import { type RateLimitBucket, rateLimit } from '../../../src/plugins/rate-limit';
+
+import { rateLimit, type RateLimitBucket } from '../../../src/plugins/rate-limit';
 
 const CALLER = { 'x-forwarded-for': '203.0.113.5' };
 

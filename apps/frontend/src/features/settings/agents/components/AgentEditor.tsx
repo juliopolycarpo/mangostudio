@@ -1,7 +1,9 @@
 import type { AgentProfile, AgentProfileUpsertBody } from '@mangostudio/shared/agents';
 import { useCallback, useEffect, useState } from 'react';
+
 import { Card } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+
 import type { AgentEditorMode, AgentEditorProps, EditableAgentProfile } from './AgentEditor.types';
 import { AgentEditorActionBar, AgentEditorHeader } from './AgentEditorChrome';
 import { AgentFriendlyEditor, AgentRawMarkdownSection } from './AgentEditorSections';

@@ -14,6 +14,7 @@ import type {
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { FileText, Plug, SquareSlash } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -32,6 +33,7 @@ import { useDismissable } from '@/hooks/use-dismissable';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import {
   flattenMcpPromptText,
   missingRequiredMcpArguments,
@@ -115,7 +117,7 @@ export function McpComposerMenu({
   return (
     <>
       {/* Not `relative`: the panel is anchored to the composer, not to this chip. */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Escape is handled for the trigger and the panel it owns, both inside this wrapper. */}
       <div ref={containerRef} onKeyDown={onKeyDown}>
         <button
           ref={triggerRef}
@@ -276,7 +278,11 @@ function McpMenuCatalog({ chatId, busy, onPromptClick, onResourceClick }: McpMen
 function McpMenuLoading() {
   const { t } = useI18n();
   return (
-    <div role="status" className="space-y-1">
+    <div
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+      role="status"
+      className="space-y-1"
+    >
       <span className="sr-only">{t.common.loading}</span>
       <Skeleton className="h-8 w-full" />
       <Skeleton className="h-8 w-full" />

@@ -1,11 +1,13 @@
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import { DEFAULT_GIT_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { render } from '../../support/harness/render';
 import { chooseOption } from '../../support/harness/select';
 
-mock.module('@/hooks/use-model-catalog', () => ({
+void mock.module('@/hooks/use-model-catalog', () => ({
   catalogKeys: { all: ['model-catalog'] },
   useModelCatalog: () => ({
     catalog: {

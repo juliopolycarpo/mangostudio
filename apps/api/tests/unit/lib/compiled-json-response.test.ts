@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import { ValidationError } from 'elysia';
 import Type, { type TSchema } from 'typebox';
 import { Validator as CompileValidator } from 'typebox/compile';
 import { Validator as SchemaValidator } from 'typebox/schema';
+
 import {
   type CompiledCheck,
   createJsonResponseEncoder,

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+
 import { act, renderHook, waitFor } from '../support/harness/render';
 
 describe('React Query observer notifications', () => {

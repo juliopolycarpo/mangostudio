@@ -3,9 +3,11 @@ import type {
   PromptSendFrequency,
   RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
+
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Toggle, ToggleSwitch } from '@/components/ui/Toggle';
+
 import { SettingsRow } from './SettingsRow';
 import { SettingsSegmented } from './SettingsSegmented';
 

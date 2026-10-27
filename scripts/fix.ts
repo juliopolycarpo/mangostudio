@@ -1,4 +1,4 @@
-import { ROOT_BIOME_PATHS, ROOT_DIR } from './lib/config';
+import { ROOT_DIR, ROOT_LINT_PATHS, ROOT_TOOLING_PATHS } from './lib/config';
 import { touchesProtocolSurface } from './lib/protocol';
 import {
   assertNoUnexpectedArguments,
@@ -9,16 +9,16 @@ import {
   info,
   mapFilesToWorkspaces,
   parseArgs,
-  type RunResult,
   resolveDefaultBase,
   runCommand,
+  type RunResult,
   runWorkspaceScript,
 } from './lib/runner';
 
 function printHelp(): never {
   console.log(`Usage: bun run fix [workspace flags] [mode flags]
 
-Runs Biome fixes for workspaces plus root Biome and dprint fixes.
+Runs Bun lint --fix and bun fmt for selected workspaces and root paths.
 Default workspace selection: --all
 
 Workspace flags:
@@ -91,25 +91,25 @@ if (effectiveWorkspaces.length > 0) {
 
 if (effectiveIncludeRoot) {
   info('\nRoot');
-  const rootBiomeResult = await runCommand(
-    'root:biome:fix',
-    ['bunx', 'biome', 'check', '--write', ...ROOT_BIOME_PATHS],
+  const rootLintResult = await runCommand(
+    'root:lint:fix',
+    ['bun', 'lint', '--fix', ...ROOT_LINT_PATHS],
     { cwd: ROOT_DIR }
   );
-  results.push(rootBiomeResult);
+  results.push(rootLintResult);
 
-  if (rootBiomeResult.exitCode !== 0) {
+  if (rootLintResult.exitCode !== 0) {
     exitWithResults(results);
   }
 
-  const rootDprintResult = await runCommand('root:dprint:fix', ['bunx', 'dprint', 'fmt'], {
+  const rootFmtResult = await runCommand('root:fmt:fix', ['bun', 'fmt', ...ROOT_TOOLING_PATHS], {
     cwd: ROOT_DIR,
   });
-  results.push(rootDprintResult);
+  results.push(rootFmtResult);
 }
 
 if (includeProtocol) {
-  // rustfmt over the protocol crate. Biome and dprint above already cover the
+  // rustfmt over the protocol crate. Bun lint and fmt above already cover the
   // package's TypeScript and its markdown; nothing else here speaks Rust.
   results.push(
     await runCommand('root:protocol:fix', ['bun', './scripts/protocol/fix.ts'], { cwd: ROOT_DIR })

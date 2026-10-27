@@ -17,6 +17,7 @@ import {
 } from '@mangostudio/shared/errors';
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import { type Elysia, t } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { createJsonResponseEncoder } from '../../../lib/compiled-json-response';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -68,7 +69,7 @@ export const chatRoutes = (app: Elysia) =>
       .post(
         '/',
         { body: CreateChatBodySchema, response: { 200: ChatSchema } },
-        // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+        // Migrated from ESLint
         async ({ body, user }) => {
           return createChatUseCase(
             { title: body.title, model: body.model, userId: user?.id ?? '' },

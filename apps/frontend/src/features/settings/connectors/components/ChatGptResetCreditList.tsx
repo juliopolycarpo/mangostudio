@@ -1,8 +1,10 @@
 import type { ChatGptResetCredit } from '@mangostudio/shared/connectors';
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';
+
 import { formatCompactDuration } from './ChatGptUsageMeter';
 
 type ConnectorMessages = Messages['settings']['connectors'];

@@ -54,7 +54,7 @@ function tokens(block: string): Map<string, string> {
 async function themes(): Promise<Record<'dark' | 'light', Map<string, string>>> {
   const css = (await Bun.file(STYLESHEET).text()).replace(/\/\*[\s\S]*?\*\//g, '');
   const darkStart = css.indexOf('@theme static');
-  const lightStart = css.indexOf('[data-theme="light"] {');
+  const lightStart = css.search(/\[data-theme=(['"])light\1\]\s*\{/);
   return {
     dark: tokens(css.slice(darkStart, css.indexOf('@keyframes blink', darkStart))),
     light: tokens(css.slice(lightStart, css.indexOf('@utility', lightStart))),

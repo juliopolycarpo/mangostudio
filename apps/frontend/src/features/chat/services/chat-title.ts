@@ -1,4 +1,5 @@
 import type { GenerateChatTitleBody, GenerateChatTitleResponse } from '@mangostudio/shared/chat';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

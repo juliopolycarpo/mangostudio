@@ -8,8 +8,11 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { GalleryItem } from '@mangostudio/shared/types';
+
 import { GalleryLightbox } from '@/features/gallery/components/GalleryLightbox';
+
 import { fireEvent, render, screen } from '../../support/harness/render';
 
 const ITEM: GalleryItem = {

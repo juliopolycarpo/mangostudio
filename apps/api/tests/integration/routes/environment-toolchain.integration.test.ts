@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   type AgentCliStatus,
   type Environment,
@@ -10,6 +11,7 @@ import {
   type VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
+
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import type {
@@ -120,6 +122,7 @@ function createTestApp(installedPaths: Partial<Record<RuntimeId, readonly string
     {
       hasActiveInstall: () => false,
       cancelActiveRun: () => false,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       removeRuntimeBytes: async () => undefined,
     },
     toolchain

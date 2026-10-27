@@ -9,6 +9,7 @@
  */
 
 import type { McpToolDescriptor, McpTransport } from '@mangostudio/shared/mcp';
+
 import type { McpServerSelect } from '../../../db/types';
 import { disposeMcpServer, getMcpClient } from '../../../services/mcp/connection-manager';
 import { toMcpRuntimeConfig } from '../../../services/mcp/runtime-config';
@@ -21,12 +22,7 @@ const MCP_PROBE_TIMEOUT_MS = 10_000;
 
 /** Typed failure category for a probe, so the reason is greppable, not free text. */
 export type McpProbeReason =
-  | 'spawn-enoent'
-  | 'connection-refused'
-  | 'auth'
-  | 'protocol'
-  | 'timeout'
-  | 'unreachable';
+  'spawn-enoent' | 'connection-refused' | 'auth' | 'protocol' | 'timeout' | 'unreachable';
 
 interface McpProbeDiagnostic {
   ok: boolean;

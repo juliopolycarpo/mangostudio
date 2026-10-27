@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   buildChatCompletionsReplay,
   buildGeminiInteractionsReplay,
@@ -289,8 +290,7 @@ describe('buildChatCompletionsReplay', () => {
     ];
     const result = buildChatCompletionsReplay(history);
     const assistantMsg = result.find((m) => m.role === 'assistant' && 'tool_calls' in m) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     expect(assistantMsg).toBeDefined();
     expect(assistantMsg?.content).toBeNull();
   });

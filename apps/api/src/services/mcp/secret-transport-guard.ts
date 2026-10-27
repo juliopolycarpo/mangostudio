@@ -9,6 +9,7 @@
 
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import { isLoopbackHostname } from '@mangostudio/shared/utils/net';
+
 import { McpConnectionError } from './types';
 
 /** Refusal to put credentials on a transport that cannot protect them. */

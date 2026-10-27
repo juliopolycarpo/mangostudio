@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ExternalAgentSteerResult } from '@mangostudio/shared/external-agents';
 import { EXTERNAL_WORKSPACE_TRUST_VERSION } from '@mangostudio/shared/external-agents';
+
 import { getDb } from '../../../src/db/database';
 import { getAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import type { AnswerExternalApprovalResult } from '../../../src/modules/external-agents/application/external-approval-registry';

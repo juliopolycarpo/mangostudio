@@ -9,6 +9,7 @@
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import { type ParsedSubjectKey, parseSubjectKey } from '@mangostudio/shared/tool-identity';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 
 export class ToolIdentityError extends Error {

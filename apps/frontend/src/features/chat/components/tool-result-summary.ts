@@ -1,4 +1,5 @@
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { formatMessage } from '@/lib/i18n-format';
 
 type SummaryLabels = Messages['tools']['summary'];
@@ -14,8 +15,7 @@ type ToolSummaryUnit = 'item' | 'file' | 'line' | 'hit' | 'replacement' | 'call'
  * successful empty run.
  */
 export type ToolResultSummary =
-  | { kind: 'count'; unit: ToolSummaryUnit; count: number }
-  | { kind: 'exit'; code: number };
+  { kind: 'count'; unit: ToolSummaryUnit; count: number } | { kind: 'exit'; code: number };
 
 /** Tools whose repeated calls are counted in files, not in their own units. */
 const FILE_TARGET_TOOLS = new Set([

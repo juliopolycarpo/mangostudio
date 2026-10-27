@@ -4,7 +4,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { screen } from '@testing-library/react';
+
 import { MessageBubble } from '../../../src/features/chat/components/MessageBubble';
 import { render } from '../../support/harness/render';
 

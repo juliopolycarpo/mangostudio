@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import { ChatRunnerConfigurationSchema } from '../chat/schemas';
 import { EnvironmentConnectionStateSchema } from '../environments/schemas';
 import { ExternalAgentTargetIdSchema } from '../external-agents/schemas';

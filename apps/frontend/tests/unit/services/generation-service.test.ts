@@ -6,10 +6,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from 'bun:test';
+
 import type { GenerateImageResponse, RespondStreamBody } from '@mangostudio/shared/generation';
 import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { externalSessionStartedChunk } from '@mangostudio/shared/streaming';
+
 import type * as ApiClient from '../../../src/lib/api-client';
 import { ExternalRefusalError } from '../../../src/lib/external-refusal-error';
 import { ApiError } from '../../../src/lib/utils';
@@ -30,7 +32,7 @@ const mockRecoveryMessages = jest.fn(() => ({
 }));
 const mockRecoveryChats = jest.fn(() => ({ messages: mockRecoveryMessages }));
 
-mock.module('../../../src/lib/api-client', () => ({
+void mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       generate: { post: mockGeneratePost },
@@ -189,9 +191,8 @@ describe('respondTextStream', () => {
 
     await respondTextStream(makeRequest(), onChunk);
 
-    const { createTextGenerationStreamState, reduceTextGenerationStreamChunk } = await import(
-      '../../../src/features/generation/text-generation-stream-reducer'
-    );
+    const { createTextGenerationStreamState, reduceTextGenerationStreamChunk } =
+      await import('../../../src/features/generation/text-generation-stream-reducer');
     const state = chunks.reduce(
       (current, chunk) =>
         reduceTextGenerationStreamChunk(current, chunk, { pendingSubagentName: 'Pending' }),
