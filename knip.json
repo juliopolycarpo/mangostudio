@@ -35,7 +35,7 @@
         "scripts/tests/support/push-dist-repo-fixture.ts"
       ],
       "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"],
-      "ignoreBinaries": ["lint", "fmt"]
+      "ignoreBinaries": ["lint"]
     },
     "apps/api": {
       "entry": [

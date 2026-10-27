@@ -41,10 +41,10 @@ export const RUST_CACHE_WRITERS = [
 export const MAIN_CACHE_REF = 'refs/heads/main';
 export const MAIN_WRITER_EVENTS = ['push', 'schedule', 'workflow_dispatch'] as const;
 
-// Grammar from Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6:
+// Grammar from Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0:
 // prefix + shared-key (or key + job) + os.type() + os.arch() + 8-hex
 // Rust/environment hash + 8-hex dependency hash. The manifest hash is 64-hex.
-// https://github.com/Swatinem/rust-cache/blob/6323deb102c322ba6fcbdcafc7e3dddab59af2b6/src/config.ts
+// https://github.com/Swatinem/rust-cache/blob/d1527c8f67ef9af357290475d4af4b0fab8f12e0/src/config.ts
 // Match the entire key so hyphenated families are never guessed.
 const KEY_GRAMMAR =
   /^v0-rust-([a-f0-9]{64})-([a-z0-9-]+)-(Linux|Darwin|Windows_NT)-(x64|arm64)-([a-f0-9]{8})-([a-f0-9]{8})$/;

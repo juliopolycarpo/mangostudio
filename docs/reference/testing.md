@@ -1965,7 +1965,7 @@ step as a PR light build, so it saves under the key a PR restores:
 hash>-<lockfile hash>`. Nothing in the job `env`, the runner, or the steps
 before the cache step may read the mode, and `runtime-profile.unit.test.ts`
 rebuilds that key for both paths and every target, so a seed cannot drift from
-the key a PR looks up. It reproduces rust-cache v2.9.2's hash, which it cannot
+the key a PR looks up. It reproduces rust-cache v2.9.3's hash, which it cannot
 read from the action at test time.
 
 The guard accepts `cache-seed` only for a `push` to `refs/heads/main`, profile
@@ -2112,7 +2112,7 @@ interleaved runs per side, medians, the exact commands the lanes run:
 | `cargo clippy --workspace --all-targets --all-features`               | 67.6 s to 64.6 s   | +1.3% | 0.76 GB to 0.37 GB |
 | `cargo nextest run --no-run --workspace --all-targets --all-features` | 126.7 s to 112.0 s | -7.2% | 3.88 GB to 2.09 GB |
 
-`Swatinem/rust-cache` (the pinned v2.9.2 exports it in `restore.ts`) already sets
+`Swatinem/rust-cache` (the pinned v2.9.3 exports it in `restore.ts`) already sets
 the same value for jobs that restore a cache, so the explicit setting changes
 nothing there. It matters for the uncached `workspace-windows-arm64` lane and for the
 `local-runtime` composite when its cache step is skipped. `--release` steps are

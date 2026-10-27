@@ -184,7 +184,7 @@ describe('CI cache policy', () => {
     for (const step of rustCacheSteps()) {
       if (RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file)) continue;
       expect(step.block, step.file).toContain(
-        'Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6'
+        'Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0'
       );
       expect(step.block, step.file).not.toMatch(/add-(?:job-id|rust-environment-hash)-key:.*false/);
       const shared = /^\s+shared-key: (.+)$/m.exec(step.block)?.[1];
