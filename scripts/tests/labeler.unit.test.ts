@@ -231,6 +231,23 @@ describe('labeler coverage', () => {
     ).toBe('sync-labels: $' + "{{ github.event.pull_request.user.login != 'dependabot[bot]' }}");
   });
 
+  test('preserves mapped labels when the file list may be truncated', () => {
+    const labeler = readText('.github/labeler.yml');
+    const caps = [...labeler.matchAll(/^max-files-changed:\s*(\d+)\s*$/gm)].map(
+      (match) => match[1]
+    );
+    expect(caps, 'expected one 2999-file cap before the GitHub 3000-file limit').toEqual(['2999']);
+
+    const sections = [...labeler.matchAll(/^"((?:area|type): [^"]+)":\s*$/gm)];
+    expect(sections.length).toBeGreaterThan(0);
+    const withoutFiles = sections.flatMap((section, index) => {
+      const next = sections[index + 1];
+      const body = labeler.slice(section.index, next?.index);
+      return body.includes('changed-files:') ? [] : [section[1]];
+    });
+    expect(withoutFiles, 'expected all mapped labels to use changed-files rules').toEqual([]);
+  });
+
   test('reads applied labels from the labeler output, not a second API call', () => {
     const workflow = readText('.github/workflows/labeler.yml');
 
