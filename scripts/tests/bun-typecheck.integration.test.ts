@@ -25,7 +25,7 @@ test('workspace typecheck bypasses check scripts, checks imports and emits no fi
   writeFileSync(join(root, 'dependency.ts'), 'export const value: number = "invalid";\n');
   const files = readdirSync(root).sort();
   const run = () =>
-    Bun.spawnSync([process.execPath, 'run', 'typecheck'], {
+    Bun.spawnSync([process.execPath, 'run', 'typecheck', '--no-pretty'], {
       cwd: root,
       stdout: 'pipe',
       stderr: 'pipe',
