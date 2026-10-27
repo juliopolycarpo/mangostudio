@@ -1,13 +1,5 @@
-// Guards the two fields that name the Bun toolchain, and the resolver that
-// decides who downloads a cross-compile runtime.
-//
-// Every one of these broke once, on the `canary` channel the repo tracked until
-// Bun 1.4.0 shipped: `packageManager: "bun@canary"` stopped Turborepo resolving
-// the workspace at all, and `Bun.version` reporting a bare `1.4.0` sent
-// `--compile` looking for a release tag that did not exist. Those failures
-// surfaced on a runner, minutes into a distribution build. These tests move them
-// to `bun run check`, where the feedback costs seconds — and they stay after the
-// pin, because the pin is exactly what they now assert.
+// Guards Turborepo's version-shaped marker, the CI channel and the resolver
+// used to download cross-compile runtimes.
 
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -63,19 +55,6 @@ describe('Bun toolchain pins', () => {
 
     expect(raw.trim()).not.toBe('');
     expect(raw.trim().split(/\s+/)).toHaveLength(1);
-  });
-
-  test('both fields name the same Bun while the pin is a released version', () => {
-    // They were allowed to disagree on `canary`, because they had to: setup-bun
-    // could only be given the literal channel tag and Turborepo refuses to parse
-    // it. A released pin removes that excuse, and one field bumped without the
-    // other is now a plain mistake — CI installing a Bun the workspace floor
-    // does not describe, with nothing else in the repo to notice.
-    const { packageManager } = JSON.parse(readText('package.json')) as {
-      packageManager?: string;
-    };
-
-    expect(packageManager).toBe(`bun@${readText('.bun-version').trim()}`);
   });
 
   test('every setup-bun call site reads .bun-version, never package.json', () => {
@@ -154,13 +133,8 @@ describe('Bun cross-compile runtime', () => {
     expect(await withVersionFile(null, bunCrossCompileChannel)).toBeNull();
   });
 
-  test('the repository pins a released Bun, so nothing fetches a runtime', async () => {
-    // Not a preference — a statement of the state the rest of this file guards.
-    // Null here is what makes the fetcher below dormant: `--compile` resolves
-    // `bun-v<Bun.version>` on its own and no target downloads anything. Naming a
-    // channel in `.bun-version` again flips this, and the download path it
-    // re-enables has no CI lane left to cover it.
-    expect(await bunCrossCompileChannel()).toBeNull();
+  test('the repository uses the canary cross-compile channel', async () => {
+    expect(await bunCrossCompileChannel()).toBe('canary');
   });
 
   test('every release target has a Bun asset to download', () => {

@@ -1,17 +1,8 @@
 // Cross-compilation runtime resolver for `bun build --compile`.
 //
-// `--compile` builds a foreign-platform binary by downloading a prebuilt Bun for
-// that platform, and it resolves the download from `Bun.version`. That works
-// whenever `Bun.version` names a real release tag — which is the case today, and
-// so this module is dormant: `bunCrossCompileChannel` returns null against the
-// released version in `.bun-version` and the build keeps Bun's own download path.
-//
-// It exists for the case that pin does not hold. While the repo tracked `canary`,
-// `Bun.version` reported a bare `1.4.0` — the channel suffix dropped — so the
-// lookup asked for the release tag `bun-v1.4.0`, which did not exist, and every
-// target except the host failed. Fetching the channel's asset here and handing
-// the path to `--compile-executable-path` skips that lookup entirely, and one
-// line in `.bun-version` is all it takes to switch back on.
+// Bun resolves foreign-platform downloads from `Bun.version`, which does not
+// identify the moving canary tag. Fetch the channel asset and pass its path to
+// `--compile-executable-path`. Released pins use Bun's own download path.
 
 import { type Dirent, existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
@@ -30,6 +21,8 @@ const CACHE_DIR = join(ROOT_DIR, '.mango', 'artifacts', 'bun-cross');
 const RELEASE_DOWNLOAD_BASE = 'https://github.com/oven-sh/bun/releases/download';
 /** Digest listing Bun publishes beside every release asset, on every tag. */
 const CHECKSUM_FILE = 'SHASUMS256.txt';
+const RELEASE_API_BASE = 'https://api.github.com/repos/oven-sh/bun/releases/tags';
+const metadataRequests = new Map<string, Promise<unknown>>();
 
 /**
  * Ceilings on the two release-host requests, generous enough that only a stalled
@@ -47,6 +40,7 @@ const ASSET_TIMEOUT_MS = 120_000;
 interface AssetTimeouts {
   readonly checksumMs?: number;
   readonly assetMs?: number;
+  readonly metadataBase?: string;
 }
 
 /**
@@ -412,8 +406,9 @@ async function installCrossRuntime(
  * The tag can also advance between the two fetches, which is indistinguishable
  * from corruption at this layer. The listing is re-read once before failing: a
  * genuine mismatch survives a fresh listing, a tag that moved does not. That
- * second case is reported rather than merely tolerated — it is the one moment a
- * build can observe the channel moving underneath it.
+ * second case is reported rather than merely tolerated. If the listing remains
+ * stale, GitHub release metadata supplies a second digest for the exact asset;
+ * no bytes are accepted without a matching SHA-256.
  *
  * `downloadBase` is a parameter rather than a constant so the verification can
  * be tested against a local server: every branch worth having — a corrupted
@@ -466,6 +461,17 @@ export async function downloadVerifiedAsset(
   const reread = await fetchAssetChecksum(asset, channel, downloadBase, timeouts);
   if (actual === reread) return { sha256: actual, tagAdvanced: true };
 
+  const metadataBase =
+    timeouts.metadataBase ??
+    (downloadBase === RELEASE_DOWNLOAD_BASE ? RELEASE_API_BASE : `${downloadBase}/api`);
+  const metadataDigest = await fetchReleaseAssetDigest(asset, channel, metadataBase, timeouts);
+  if (actual === metadataDigest) {
+    console.warn(
+      `${asset}.zip: checksum listing disagrees with GitHub release metadata; verified against the asset digest`
+    );
+    return { sha256: actual, tagAdvanced: false };
+  }
+
   throw new Error(
     `SHA-256 mismatch for ${asset}.zip on the "${channel}" channel: expected ${reread}, got ${actual}`
   );
@@ -500,6 +506,57 @@ async function fetchAssetChecksum(
     if (digest && /^[a-f0-9]{64}$/.test(digest)) return digest;
   }
   throw new Error(`${CHECKSUM_FILE} on the "${channel}" channel lists no digest for ${wanted}`);
+}
+
+async function fetchReleaseAssetDigest(
+  asset: string,
+  channel: string,
+  metadataBase: string,
+  timeouts: AssetTimeouts
+): Promise<string> {
+  const url = `${metadataBase}/${encodeURIComponent(channel)}`;
+  let request = metadataRequests.get(url);
+  if (!request) {
+    request = underDeadline(
+      `reading release metadata: ${url}`,
+      timeouts.checksumMs ?? CHECKSUM_TIMEOUT_MS,
+      async (signal) => {
+        const response = await fetch(url, {
+          signal,
+          headers: { Accept: 'application/vnd.github+json' },
+        });
+        if (!response.ok)
+          throw new Error(`Release metadata download failed (${response.status}): ${url}`);
+        return (await response.json()) as unknown;
+      }
+    );
+    metadataRequests.set(url, request);
+    void request
+      .finally(() => metadataRequests.delete(url))
+      .catch(() => {
+        // The original promise carries the error to each caller.
+      });
+  }
+  const data = await request;
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    !('assets' in data) ||
+    !Array.isArray(data.assets)
+  ) {
+    throw new Error(`Invalid release metadata for "${channel}": expected an assets array`);
+  }
+  const matches = data.assets.filter(
+    (item: unknown) =>
+      typeof item === 'object' && item !== null && 'name' in item && item.name === `${asset}.zip`
+  );
+  const digest: unknown = matches.length === 1 && 'digest' in matches[0] ? matches[0].digest : null;
+  if (typeof digest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(digest)) {
+    throw new Error(
+      `Invalid release metadata digest for ${asset}.zip on "${channel}": expected one sha256 digest`
+    );
+  }
+  return digest.slice('sha256:'.length);
 }
 
 async function sha256File(path: string): Promise<string> {

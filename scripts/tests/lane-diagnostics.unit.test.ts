@@ -88,6 +88,9 @@ function expectedGate(name: string, source: string, original: { needs: string[];
       "format('{0} {1} {2} {3} {4} {5}',\n            github.event_name != 'pull_request' && 'release-dry-run' || '',\n"
     );
   }
+  if (name === 'ci') {
+    expected.needs.splice(expected.needs.indexOf('distribution') + 1, 0, 'cross-runtimes');
+  }
   if (name === 'release-dry-run' && source.includes('reuse_distribution:')) {
     expected.skips = expected.skips.replace(
       "needs.changes.outputs.release == 'false' && 'runtime'",

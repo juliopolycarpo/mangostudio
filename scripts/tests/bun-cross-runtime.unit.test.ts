@@ -65,6 +65,7 @@ function startFakeRelease(handlers: {
   /** Called with the 1-based request count, so a test can move the tag. */
   listing: (call: number) => Reply;
   body: () => Reply;
+  metadata?: () => Reply;
 }) {
   let listingCalls = 0;
   const server = Bun.serve({
@@ -75,6 +76,7 @@ function startFakeRelease(handlers: {
         listingCalls += 1;
         return reply(handlers.listing(listingCalls));
       }
+      if (pathname === `/api/${CHANNEL}`) return reply(handlers.metadata?.() ?? 404);
       if (pathname === `/${CHANNEL}/${ASSET}.zip`) {
         return reply(handlers.body());
       }
@@ -124,10 +126,30 @@ describe('downloadVerifiedAsset', () => {
     expect(server.listingCalls).toBe(1);
   });
 
+  test('accepts the GitHub asset digest when the checksum listing is stale', async () => {
+    const body = 'new-canary-bytes';
+    const server = serve({
+      listing: () => listingFor(sha256('old-canary-bytes')),
+      body: () => body,
+      metadata: () =>
+        JSON.stringify({ assets: [{ name: `${ASSET}.zip`, digest: `sha256:${sha256(body)}` }] }),
+    });
+
+    const result = await downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base, {
+      metadataBase: `${server.base}/api`,
+    });
+    expect(result.sha256).toBe(sha256(body));
+    expect(result.tagAdvanced).toBe(false);
+  });
+
   test('rejects a body that does not match the published digest', async () => {
     const server = serve({
       listing: () => listingFor(sha256('the-real-asset')),
       body: () => 'corrupted-in-transit',
+      metadata: () =>
+        JSON.stringify({
+          assets: [{ name: `${ASSET}.zip`, digest: `sha256:${sha256('the-real-asset')}` }],
+        }),
     });
 
     await expect(downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base)).rejects.toThrow(
@@ -135,6 +157,51 @@ describe('downloadVerifiedAsset', () => {
     );
     // Re-read once before failing, to tell corruption from a tag that moved.
     expect(server.listingCalls).toBe(2);
+  });
+
+  test.each([
+    ['missing asset', JSON.stringify({ assets: [] })],
+    ['malformed digest', JSON.stringify({ assets: [{ name: `${ASSET}.zip`, digest: 'bad' }] })],
+    [
+      'duplicate asset',
+      JSON.stringify({
+        assets: [
+          { name: `${ASSET}.zip`, digest: `sha256:${sha256('body')}` },
+          { name: `${ASSET}.zip`, digest: `sha256:${sha256('body')}` },
+        ],
+      }),
+    ],
+  ])('rejects %s in release metadata', async (_, metadata) => {
+    const server = serve({
+      listing: () => listingFor(sha256('old')),
+      body: () => 'body',
+      metadata: () => metadata,
+    });
+    await expect(downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base)).rejects.toThrow(
+      'Invalid release metadata digest'
+    );
+  });
+
+  test('fails closed when release metadata is unavailable', async () => {
+    const server = serve({
+      listing: () => listingFor(sha256('old')),
+      body: () => 'body',
+      metadata: () => 503,
+    });
+    await expect(downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base)).rejects.toThrow(
+      'Release metadata download failed (503)'
+    );
+  });
+
+  test('bounds a stalled release metadata request', async () => {
+    const server = serve({
+      listing: () => listingFor(sha256('old')),
+      body: () => 'body',
+      metadata: () => STALL,
+    });
+    await expect(
+      downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base, { checksumMs: 50 })
+    ).rejects.toThrow('Timed out after 50ms reading release metadata');
   });
 
   test('accepts a channel tag that advanced between the listing and the download', async () => {

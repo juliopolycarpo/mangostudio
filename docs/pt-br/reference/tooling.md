@@ -4,15 +4,12 @@
 
 ## Bun
 
-A versão instalada vem de [`.bun-version`](../../../.bun-version); o campo
-`packageManager` no [`package.json`](../../../package.json) precisa indicar a mesma versão
-para o Turborepo. `scripts/tests/bun-toolchain.unit.test.ts` verifica a igualdade.
-Instale a versão exata indicada em `.bun-version` a partir da
-[release oficial correspondente do Bun](https://github.com/oven-sh/bun/releases). O instalador
-sem versão ou `bun upgrade` seleciona a release estável mais recente, que pode diferir do pin.
-As chaves de cache de instalação usam `bun --revision`, e o manifesto de distribuição grava
-`bunRevision` além de `bunVersion`. A seção [Bun em inglês](../../reference/tooling.md#bun)
-mantém os detalhes do pin e o histórico do canal canary.
+A versão instalada vem do canal `canary` em [`.bun-version`](../../../.bun-version).
+Instale com `bun upgrade --canary`. O campo `packageManager` registra uma versão
+estável para o Turborepo, que não aceita `bun@canary`. As chaves de cache usam
+`bun --revision` e o manifesto de distribuição registra a revisão e a origem dos
+runtimes por plataforma. A seção [Bun em inglês](../../reference/tooling.md#bun)
+explica a verificação de downloads no CI.
 
 ## TypeScript 7
 
