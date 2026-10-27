@@ -35,7 +35,9 @@ export function createImportCycleCommand(
 }
 
 function canonical(path: string): string {
-  return realpathSync(path);
+  // Windows realpathSync can preserve an 8.3 short-name spelling. The native
+  // variant expands it, keeping roots and resolved imports in the same graph.
+  return realpathSync.native(path);
 }
 
 function excluded(path: string, root: string): boolean {

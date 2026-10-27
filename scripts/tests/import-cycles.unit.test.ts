@@ -825,6 +825,16 @@ describe('import cycle checks', () => {
     expectCycleCount(rejected.circularDeps, 1, 'new ignored type cycle', rejected.required.output);
   });
 
+  test('counts the same cycle through a directory alias and the workspace gate', async () => {
+    const root = createFixture();
+    injectCycle(root, 'apps/api/dist/aliased-cycle', TYPE_CYCLE);
+    symlinkSync(join(root, 'apps/api'), join(root, 'api-alias'), 'junction');
+    const required = runCheck(root, 'apps/api');
+    expectCheck(required, 'fail', 'workspace check with an ignored type cycle');
+    const direct = await countCycles(root, ['api-alias']);
+    expectCycleCount(direct, 1, 'QA scan through a directory alias', required.output);
+  }, 30_000);
+
   test('keeps node_modules and git internals outside the TS/JS scan', async () => {
     const root = createFixture();
     const files = {
@@ -914,7 +924,7 @@ describe('import cycle checks', () => {
     const result = await runCapture(createImportCycleCommand(['apps/api']), { cwd: root });
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain('Cannot read');
-    expect(result.stderr).toContain('apps/api/tsconfig.json');
+    expect(posix(result.stderr)).toContain('apps/api/tsconfig.json');
   });
 
   test('cycle scanner rejects malformed source with its location and parse error', async () => {
@@ -922,7 +932,7 @@ describe('import cycle checks', () => {
     injectCycle(root, 'apps/api/src', { 'malformed.ts': 'export const n = ;\n' });
     const result = await runCapture(createImportCycleCommand(['apps/api']), { cwd: root });
     expect(result.exitCode, 'malformed.ts: expected a failing scanner exit').not.toBe(0);
-    expect(result.stderr).toContain('apps/api/src/malformed.ts:1:18');
+    expect(posix(result.stderr)).toContain('apps/api/src/malformed.ts:1:18');
     expect(result.stderr).toContain('Expression expected');
   });
 
