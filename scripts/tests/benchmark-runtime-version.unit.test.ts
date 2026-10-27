@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { settleBenchmarkWork } from '../bench/benchmark-child-scope';
 import { assertBenchmarkPlatform } from '../bench/benchmark-platform';
 import { runtimeVersion, RuntimeVersionError } from '../bench/runtime-version';
 import type {
@@ -305,4 +306,82 @@ test('platform admission accepts POSIX and rejects Windows', () => {
   expect(() => assertBenchmarkPlatform('linux')).not.toThrow();
   expect(() => assertBenchmarkPlatform('darwin')).not.toThrow();
   expect(() => assertBenchmarkPlatform('win32')).toThrow('received: win32');
+});
+
+test('an already canceled version probe never invokes its supervisor', async () => {
+  class UnstartedSupervisor {
+    calls = 0;
+    readonly run = (_options: NativeProcessCommandOptions): Promise<NativeCommandReceipt> => {
+      this.calls++;
+      return Promise.resolve(receipt());
+    };
+  }
+  const supervisor = new UnstartedSupervisor();
+  const controller = new AbortController();
+  controller.abort(new Error('before launch cancellation'));
+  const error = await retainedFailure(
+    runtimeVersion('unstarted', controller.signal, { platform: 'linux', run: supervisor.run })
+  );
+  try {
+    expect(error.message).toContain('before launch cancellation');
+    expect(supervisor.calls).toBe(0);
+  } finally {
+    await rm(error.home, { recursive: true, force: true });
+  }
+});
+
+test('cancellation bounds a version read that has not settled', async () => {
+  class HeldVersionReader {
+    private begin!: () => void;
+    private reject!: (error: Error) => void;
+    readonly started = new Promise<void>((resolve) => {
+      this.begin = resolve;
+    });
+    readonly result = new Promise<string>((_resolve, reject) => {
+      this.reject = reject;
+    });
+    readonly read = (_path: string): Promise<string> => {
+      this.begin();
+      return this.result;
+    };
+    async release(): Promise<void> {
+      this.reject(new Error('controlled late read failure'));
+      await this.result.catch(() => {});
+    }
+  }
+  const reader = new HeldVersionReader();
+  const base = receipt();
+  const supervisor = new ReceiptSupervisor({
+    ...base,
+    settlement: { ...base.settlement, rootObserved: true },
+  });
+  const controller = new AbortController();
+  const pending = runtimeVersion('held-read', controller.signal, {
+    platform: 'linux',
+    run: supervisor.run,
+    readVersion: reader.read,
+    cleanupMs: 5,
+  });
+  let failure: RuntimeVersionError | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    expect(await settleBenchmarkWork(reader.started, 2_000)).toBeNull();
+    controller.abort(new Error('held read cancellation'));
+    const observed = await Promise.race([
+      retainedFailure(pending),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), 50);
+      }),
+    ]);
+    expect(observed).not.toBeNull();
+    if (!observed) return;
+    failure = observed;
+    expect(failure.message).toContain('held read cancellation');
+    expect(await stat(failure.home)).toBeDefined();
+  } finally {
+    if (timer) clearTimeout(timer);
+    await reader.release();
+    failure ??= await retainedFailure(pending);
+    await rm(failure.home, { recursive: true, force: true });
+  }
 });

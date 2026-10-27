@@ -60,6 +60,7 @@ export async function runtimeVersion(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let escalation: ReturnType<typeof setTimeout> | undefined;
   let cancellationReason: Error | undefined;
+  let running = false;
   let expire!: () => void;
   const expired = new Promise<null>((done) => {
     expire = () => done(null);
@@ -69,6 +70,11 @@ export async function runtimeVersion(
       signal.reason instanceof Error
         ? signal.reason
         : new Error('Runtime version canceled', { cause: signal.reason });
+    if (!running) {
+      controller.abort(cancellationReason);
+      return;
+    }
+    if (escalation) clearTimeout(escalation);
     void Bun.write(join(home, 'version-cancel'), 'cancel').catch(() => {});
     escalation = setTimeout(() => controller.abort(cancellationReason), Math.min(500, cleanupMs));
     if (timer) clearTimeout(timer);
@@ -142,6 +148,8 @@ export async function runtimeVersion(
     return rows;
   };
   try {
+    assertActive();
+    running = true;
     const pending = (options.run ?? runNativeCommand)({
       label: 'runtime-version',
       command: [process.execPath, join(import.meta.dir, 'runtime-version-child.ts'), binary, home],
@@ -180,12 +188,16 @@ export async function runtimeVersion(
       throw new Error(
         `expected successful exit, closed pipes and an error-free empty scope | received: ${JSON.stringify({ exitCode: receipt.exitCode, signal: receipt.signal, canceled: receipt.canceled, timedOut: receipt.timedOut, errors: receipt.errors, settlement: receipt.settlement })}`
       );
-    const version = (
-      await (options.readVersion ?? ((path: string) => readFile(path, 'utf8')))(
+    const output = await Promise.race([
+      (options.readVersion ?? ((path: string) => readFile(path, 'utf8')))(
         join(home, 'logs', 'runtime-version.stdout.log')
-      )
-    ).trim();
+      ),
+      expired,
+    ]);
     assertActive();
+    if (output === null)
+      throw new Error('version output: expected settled read | received: cleanup deadline');
+    const version = output.trim();
     if (!version) throw new Error('expected nonempty version output');
     rmSync(home, { recursive: true, force: true, maxRetries: 5 });
     return version;
