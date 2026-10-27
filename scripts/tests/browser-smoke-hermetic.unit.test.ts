@@ -30,13 +30,13 @@ const HOME_KEYS = [
 // one). Note whether this process made it, so only that directory is removed.
 const publishedBefore = process.env[SMOKE_HOME_ENV];
 const { default: config } = await import('../../playwright.config');
+const { default: productionConfig } = await import('../../playwright.production.config');
 
 type WebServer = Exclude<NonNullable<typeof config.webServer>, readonly unknown[]>;
 
 const EXPECTED_SHAPE = join(tmpdir(), 'mangostudio-smoke-<random>');
 
-function webServers(): WebServer[] {
-  const declared = config.webServer;
+function webServers(declared = config.webServer): WebServer[] {
   if (!declared) return [];
   return Array.isArray(declared) ? declared : [declared];
 }
@@ -61,6 +61,38 @@ describe('browser smoke lane hermeticity', () => {
     const created = process.env[SMOKE_HOME_ENV];
     if (created) removeSmokeHome(created);
     delete process.env[SMOKE_HOME_ENV];
+  });
+
+  test('production reuses home, authentication and execution policy with a static root hub', () => {
+    const development = webServers();
+    const production = webServers(productionConfig.webServer);
+    expect(development).toHaveLength(1);
+    expect(production).toHaveLength(1);
+    expect(development[0]?.command).toBe('bun run dev --api');
+    expect(production[0]).toEqual({
+      ...development[0],
+      command: 'bun apps/api/src/index.ts serve',
+      cwd: resolve(import.meta.dir, '../..'),
+    });
+    expect(productionConfig.globalSetup).toBe(config.globalSetup);
+    expect(productionConfig.use).toEqual(config.use);
+    expect(productionConfig.timeout).toBe(config.timeout);
+    expect(productionConfig.retries).toBe(config.retries);
+    expect(productionConfig.workers).toBe(config.workers);
+    expect(productionConfig.reporter).toEqual(config.reporter);
+  });
+
+  test('production keeps terminal first and limits the dependent project to rendering regressions', () => {
+    expect(productionConfig.projects?.map((project) => project.name)).toEqual([
+      'terminal',
+      'chromium',
+    ]);
+    expect(productionConfig.projects?.[0]).toEqual(config.projects?.[0]);
+    expect(productionConfig.projects?.[1]).toEqual({
+      ...config.projects?.[1],
+      testMatch: ['**/grid-late-card-state.spec.ts', '**/motion-presets.spec.ts'],
+    });
+    expect(productionConfig.projects?.[1]?.dependencies).toEqual(['terminal']);
   });
 
   test('declares a web server to guard', () => {

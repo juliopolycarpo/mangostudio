@@ -34,7 +34,11 @@ concurrency:
 
 jobs:
   browser-smoke:
-    name: Chromium smoke suite
+    name: ${{ matrix.mode == 'production' && 'Production frontend regressions' || 'Chromium smoke suite' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [development, production]
     # ubuntu-24.04: Playwright 1.60 cannot install Chromium system deps on 26.04 yet.
     runs-on: ubuntu-24.04
     # Bound installation separately from the existing ten-minute smoke allowance;
@@ -103,10 +107,21 @@ jobs:
           artifact: ${{ inputs.runtime_artifact || '' }}
 
       - name: Run browser smoke suite
+        if: matrix.mode == 'development'
         timeout-minutes: 10
         run: |
           set -o pipefail
           bun run test --e2e 2>&1 | tee smoke-run.log
+        env:
+          CI: true
+
+      - name: Run production frontend regressions
+        if: matrix.mode == 'production'
+        timeout-minutes: 10
+        # Build and browser share the same deadline and supervised step tree.
+        run: |
+          set -o pipefail
+          bun run test:e2e:production 2>&1 | tee smoke-run.log
         env:
           CI: true
 
@@ -124,7 +139,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-results
+          name: ${{ matrix.mode == 'production' && 'playwright-results-production' || 'playwright-results' }}
           path: |
             .mango/artifacts/playwright/test-results/
           retention-days: 7
@@ -135,6 +150,6 @@ jobs:
         if: ${{ failure() || inputs.always_upload_report }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-report
+          name: ${{ matrix.mode == 'production' && 'playwright-report-production' || 'playwright-report' }}
           path: .mango/artifacts/playwright/html-report/
           retention-days: 7
