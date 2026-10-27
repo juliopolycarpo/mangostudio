@@ -25,6 +25,7 @@ import {
   bunCrossCompileChannel,
   ensureBunCrossRuntime,
 } from '../lib/bun-cross-runtime';
+import { settleCrossRuntimeResolutions } from '../lib/cross-runtime-settlement';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 
 const channel = await bunCrossCompileChannel();
@@ -48,12 +49,14 @@ try {
 
   // Concurrently, and deliberately: one download at a time always worked, and
   // the failure being guarded only appears when several are in flight.
-  const resolved = await Promise.all(
-    ALL_BINARY_TARGETS.map(async (target) => ({
-      arch: target.arch,
-      path: await ensureBunCrossRuntime(target, { channel, cacheDir, cacheKey }),
-    }))
-  );
+  const resolved = await settleCrossRuntimeResolutions(ALL_BINARY_TARGETS, async (target) => ({
+    arch: target.arch,
+    path: await ensureBunCrossRuntime(target, {
+      channel,
+      cacheDir,
+      cacheKey,
+    }),
+  }));
 
   const provenance = await bunCompiledRuntimes(channel, { cacheDir, cacheKey });
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
