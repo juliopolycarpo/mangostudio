@@ -4,7 +4,7 @@
  * the lane uses. The verdict rules are in test-workers.unit.test.ts; this proves
  * the processes end up in them.
  */
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, onTestFinished } from 'bun:test';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -36,14 +36,33 @@ import {
   readProcessState,
 } from './support/process-liveness';
 import { fakeLane } from './support/test-worker-fakes';
+import {
+  settleWorkerLanesBeforeRemoval,
+  trackWorkerHandle,
+  trackWorkerStream,
+  WorkerLaneOwner,
+} from './support/worker-lane-cleanup';
 
 const TEST_DIR = 'tests/unit';
 const FILES = fakeLane(8, 1);
 const workspaces: string[] = [];
+const activeLanes: WorkerLaneOwner[] = [];
 
-afterEach(() => {
-  for (const dir of workspaces.splice(0)) rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  const paths = workspaces.splice(0);
+  const lanes = activeLanes.splice(0);
+  await settleWorkerLanesBeforeRemoval(lanes, () => {
+    for (const dir of paths) rmSync(dir, { recursive: true, force: true });
+  });
 });
+
+/** Register a cancellation lane before it starts, for example `const owner = ownLane(controller)`. */
+function ownLane(controller: AbortController): WorkerLaneOwner {
+  const owner = new WorkerLaneOwner(controller);
+  activeLanes.push(owner);
+  onTestFinished(() => owner.close());
+  return owner;
+}
 
 function workspace() {
   const root = mkdtempSync(join(tmpdir(), 'mangostudio-worker-process-'));
@@ -73,6 +92,7 @@ async function runLane(
     drainGraceMs?: number;
     settle?: boolean;
     env?: NodeJS.ProcessEnv;
+    owner?: WorkerLaneOwner;
   } = {}
 ) {
   const { spec: base, mergedPath, scratch } = workspace();
@@ -99,14 +119,35 @@ async function runLane(
     scratchRoot: scratch,
     signal: options.signal,
     killAfterMs: 2_000,
-    start: (plan) =>
-      startWorkerProcess(
+    start: (plan) => {
+      const handle = startWorkerProcess(
         plan,
         `[${spec.id} ${plan.index}/${plan.count}] `,
         sinks,
         options.drainGraceMs,
-        env
-      ),
+        env,
+        (spawnOptions) => {
+          const child = spawnWorkerChild(spawnOptions);
+          if (!options.owner) return child;
+          const owner = options.owner;
+          owner.track(child.exited);
+          return {
+            pid: child.pid,
+            stdout: trackWorkerStream(child.stdout, owner),
+            stderr: trackWorkerStream(child.stderr, owner),
+            exited: child.exited,
+            get exitCode() {
+              return child.exitCode;
+            },
+            get signalCode() {
+              return child.signalCode;
+            },
+            kill: (signal) => child.kill(signal),
+          };
+        }
+      );
+      return options.owner ? trackWorkerHandle(handle, options.owner) : handle;
+    },
   });
   return { ...result, lines, mergedPath, scratch };
 }
@@ -327,31 +368,46 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
     const pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
     workspaces.push(pidDir);
     const controller = new AbortController();
-    const running = runLane(
-      2,
-      { 1: 'hang-tree', 2: 'hang-tree' },
-      {
-        settle: true,
-        signal: controller.signal,
-        pidDir,
-      }
+    const owner = ownLane(controller);
+    owner.verify(() => {
+      const alive = readdirSync(pidDir)
+        .map((name) => readPid(pidDir, name))
+        .filter((pid) => isAlive(pid));
+      if (alive.length)
+        throw new Error(
+          `worker cleanup: expected live descendants: 0 | received: ${JSON.stringify(alive)}`
+        );
+    });
+    const running = owner.start(() =>
+      runLane(
+        2,
+        { 1: 'hang-tree', 2: 'hang-tree' },
+        {
+          settle: true,
+          signal: controller.signal,
+          pidDir,
+          owner,
+        }
+      )
     );
-    const up = await until(() => readdirSync(pidDir).length === 4, 10_000);
-    const pids = readdirSync(pidDir).map((name) => readPid(pidDir, name));
-    try {
-      expect(up, 'expected two workers and two children running before cancellation').toBe(true);
-      controller.abort();
-      const { verdict } = await running;
-      expect(verdict.failures).toHaveLength(2);
-      expect(verdict.failures.every((failure) => failure.includes('was cancelled'))).toBe(true);
-      expect(
-        pids.filter((pid) => isAlive(pid)),
-        'expected no live descendants after cancellation'
-      ).toEqual([]);
-    } finally {
-      controller.abort();
-      cleanupPids(pids);
-    }
+    await owner.run(async () => {
+      const up = await until(() => readdirSync(pidDir).length === 4, 10_000, controller.signal);
+      const pids = readdirSync(pidDir).map((name) => readPid(pidDir, name));
+      try {
+        expect(up, 'expected two workers and two children running before cancellation').toBe(true);
+        controller.abort();
+        const { verdict } = await running;
+        expect(verdict.failures).toHaveLength(2);
+        expect(verdict.failures.every((failure) => failure.includes('was cancelled'))).toBe(true);
+        expect(
+          pids.filter((pid) => isAlive(pid)),
+          'expected no live descendants after cancellation'
+        ).toEqual([]);
+      } finally {
+        controller.abort();
+        cleanupPids(pids);
+      }
+    });
   });
 
   it('pass, in a group of their own, when nothing outlives them', async () => {
@@ -418,14 +474,38 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
   });
 });
 
-async function until(ready: () => boolean, timeoutMs: number): Promise<boolean> {
+async function until(
+  ready: () => boolean,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     if (ready()) return true;
     await Bun.sleep(25);
   }
+  signal?.throwIfAborted();
   return ready();
 }
+
+describe('cancellation fixture readiness', () => {
+  it('stops polling before touching storage after cancellation', async () => {
+    const controller = new AbortController();
+    let reads = 0;
+    const heldReadiness = () => {
+      reads += 1;
+      return false;
+    };
+    const waiting = until(heldReadiness, 20_000, controller.signal).catch(
+      (error: unknown) => error
+    );
+    expect(reads).toBe(1);
+    controller.abort();
+    expect(await waiting).toBe(controller.signal.reason);
+    expect(reads).toBe(1);
+  });
+});
 
 describe('a worker that leaks a process holding its pipes', () => {
   it('does not hold the lane open past the drain grace, and still passes', async () => {
@@ -476,32 +556,42 @@ describe('cancelling real worker processes', () => {
     const pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
     workspaces.push(pidDir);
     const controller = new AbortController();
-    const running = runLane(
-      3,
-      { 1: 'hang', 2: 'hang', 3: 'hang' },
-      { signal: controller.signal, pidDir }
+    const owner = ownLane(controller);
+    owner.verify(() => {
+      const alive = readdirSync(pidDir)
+        .map((name) => readPid(pidDir, name))
+        .filter((pid) => isAlive(pid));
+      if (alive.length)
+        throw new Error(
+          `worker cleanup: expected live workers: 0 | received: ${JSON.stringify(alive)}`
+        );
+    });
+    const running = owner.start(() =>
+      runLane(3, { 1: 'hang', 2: 'hang', 3: 'hang' }, { signal: controller.signal, pidDir, owner })
     );
 
-    // Cancel only once every worker is up, or a late one would never be signalled.
-    const deadline = Date.now() + 20_000;
-    while (readdirSync(pidDir).length < 3 && Date.now() < deadline) await Bun.sleep(25);
-    expect(readdirSync(pidDir).sort(), 'expected all 3 workers running before cancelling').toEqual([
-      'worker-1.pid',
-      'worker-2.pid',
-      'worker-3.pid',
-    ]);
-    const pids = readdirSync(pidDir).map((name) =>
-      Number(readFileSync(join(pidDir, name), 'utf8'))
-    );
-    controller.abort();
-    const { verdict } = await running;
+    await owner.run(async () => {
+      // Cancel only once every worker is up, or a late one would never be signalled.
+      await until(() => readdirSync(pidDir).length >= 3, 20_000, controller.signal);
+      expect(
+        readdirSync(pidDir).sort(),
+        'expected all 3 workers running before cancelling'
+      ).toEqual(['worker-1.pid', 'worker-2.pid', 'worker-3.pid']);
+      const pids = readdirSync(pidDir).map((name) =>
+        Number(readFileSync(join(pidDir, name), 'utf8'))
+      );
+      controller.abort();
+      const { verdict } = await running;
 
-    expect(verdict.failures.filter((failure) => failure.includes('was cancelled'))).toHaveLength(3);
-    expect(verdict.failures[0]).toContain('api-unit worker 1/3 was cancelled');
-    const alive = pids.filter((pid) => isAlive(pid));
-    expect(alive, `expected live workers: 0 | received: ${alive.length} (pids ${alive})`).toEqual(
-      []
-    );
+      expect(verdict.failures.filter((failure) => failure.includes('was cancelled'))).toHaveLength(
+        3
+      );
+      expect(verdict.failures[0]).toContain('api-unit worker 1/3 was cancelled');
+      const alive = pids.filter((pid) => isAlive(pid));
+      expect(alive, `expected live workers: 0 | received: ${alive.length} (pids ${alive})`).toEqual(
+        []
+      );
+    });
   });
 });
 
