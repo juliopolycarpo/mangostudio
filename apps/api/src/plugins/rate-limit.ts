@@ -15,6 +15,7 @@
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { type Elysia, type ElysiaStatus, status } from 'elysia';
+import { ElysiaWS } from 'elysia/ws';
 
 import { extractClientIp } from '../lib/client-ip';
 import { resolveRateLimitClientId } from './rate-limit-policy';
@@ -159,6 +160,9 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         return { clientIp };
       })
       .onBeforeHandle((context) => {
+        // Elysia replays this hook for WebSocket messages. The HTTP upgrade
+        // is already counted; message limits belong to the socket route.
+        if (context instanceof ElysiaWS) return;
         const ctx = context as RateLimitContext;
         const { clientIp } = ctx;
 
