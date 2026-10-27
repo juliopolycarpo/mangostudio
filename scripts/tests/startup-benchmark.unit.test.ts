@@ -3,13 +3,13 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
+
 import { ownsStartupState } from '../bench/startup';
 import {
   type NativeProcess,
   runNativeCommand,
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
-
 import { FakeBenchmarkCancelBarrier } from './support/benchmark-cancel-barrier';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -75,7 +75,101 @@ process.on('SIGTERM', () => { server.stop(true); process.exit(0); });
   }
 }
 
+/** A hub whose descendant keeps the inherited output open after the hub exits. */
+class FakeHeldOutputHub {
+  constructor(private readonly root: string) {}
+
+  async create(): Promise<string> {
+    const binary = join(this.root, 'fake-held-output-hub');
+    await Bun.write(
+      binary,
+      `#!/usr/bin/env bun
+import { mkdir, writeFile } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const root = process.env.BENCHMARK_FIXTURE_ROOT;
+const leaf = Bun.spawn([process.execPath, '-e', "import {join} from 'node:path'; import {rename} from 'node:fs/promises'; const root=process.env.BENCHMARK_FIXTURE_ROOT; await Bun.write(join(root,'leaf-pid-tmp'),String(process.pid)); await rename(join(root,'leaf-pid-tmp'),join(root,'leaf-pid')); while (!(await Bun.file(join(root,'leaf-release')).exists())) await Bun.sleep(5);"], { stdout:'inherit', stderr:'inherit', env:{...process.env,BUN_FEATURE_FLAG_NO_ORPHANS:'0'} });
+while (!(await Bun.file(join(root,'allow-ready')).exists())) await Bun.sleep(5);
+const port = Number(process.argv.at(-1));
+const server = Bun.serve({hostname:'127.0.0.1',port,fetch:()=>Response.json({status:'ok'})});
+const stateDir = join(process.env.HOME,'.mango','run');
+await mkdir(stateDir,{recursive:true});
+await writeFile(join(stateDir,'server.json'),JSON.stringify({pid:process.pid,port,host:'127.0.0.1',startedAt:Date.now()}));
+process.on('SIGTERM',()=>{ writeFileSync(join(root,'hub-stopped'),'stopped'); server.stop(true); process.exit(0); });
+`
+    );
+    await chmod(binary, 0o755);
+    return binary;
+  }
+}
+
 describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () => {
+  it('settles descendants that retain startup output after the hub exits', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mango-startup-held-output-'));
+    const binary = await new FakeHeldOutputHub(directory).create();
+    const cleanup = new AbortController();
+    const pending = runNativeCommand({
+      label: 'startup-held-output',
+      command: [process.execPath, 'scripts/bench/startup.ts', binary, '--runs', '1', '--json'],
+      root: ROOT,
+      out: directory,
+      env: { ...process.env, BENCHMARK_FIXTURE_ROOT: directory },
+      timeoutSeconds: 15,
+      pollIntervalMs: 20,
+      settleMs: 500,
+      signal: cleanup.signal,
+      stream: new DiscardedBenchmarkOutput(),
+    });
+    try {
+      const leafMarker = join(directory, 'leaf-pid');
+      const deadline = Date.now() + 4_000;
+      while (Date.now() < deadline && !(await Bun.file(leafMarker).exists())) await Bun.sleep(5);
+      expect(await Bun.file(leafMarker).exists()).toBe(true);
+      const pid = Number(await Bun.file(leafMarker).text());
+      const owned = (await snapshotNativeProcesses()).find((row) => row.pid === pid);
+      expect(owned, `expected live leaf pid ${pid} | received: absent`).toBeDefined();
+      if (!owned) throw new Error(`expected owned leaf ${pid} | received: absent`);
+      escapedFixtures.push(owned);
+      const terminal = join(directory, 'terminal-startup-held-output.jsonl');
+      while (
+        Date.now() < deadline &&
+        !(
+          await Bun.file(terminal)
+            .text()
+            .catch(() => '')
+        ).includes(owned.identity)
+      )
+        await Bun.sleep(5);
+      expect(await Bun.file(terminal).text()).toContain(owned.identity);
+      await Bun.write(join(directory, 'allow-ready'), 'start readiness');
+      const stopMarker = Bun.file(join(directory, 'hub-stopped'));
+      const stopDeadline = Date.now() + 4_000;
+      while (Date.now() < stopDeadline && !(await stopMarker.exists())) await Bun.sleep(5);
+      expect(await stopMarker.exists()).toBe(true);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const first = await Promise.race([
+        pending.then((result) => ({ result })),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), 6_000);
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      if (!first) await Bun.write(join(directory, 'leaf-release'), 'release held output');
+      const result = first?.result ?? (await pending);
+      escapedFixtures.push(...result.settlement.survivors);
+      expect(result.timedOut).toBe(false);
+      expect(first).not.toBeNull();
+      expect(result.settlement.empty).toBe(true);
+    } finally {
+      await Bun.write(join(directory, 'leaf-release'), 'release held output');
+      cleanup.abort();
+      const settled = await Promise.race([pending, Bun.sleep(5_000).then(() => undefined)]);
+      if (settled?.settlement.empty && settled.settlement.rootObserved) scratch.push(directory);
+      expect(settled?.settlement.empty).toBe(true);
+      expect(settled?.settlement.rootObserved).toBe(true);
+    }
+  }, 20_000);
+
   it('keeps executable source independent of fixture paths and settings', async () => {
     const first = await mkdtemp(join(tmpdir(), 'benchmark-program-first-'));
     const second = await mkdtemp(join(tmpdir(), 'benchmark-program-second-'));
@@ -86,7 +180,9 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
   });
 
   it('preserves finished samples when the intended later attempt cancels the benchmark', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'mango-startup-cancel-\'"`-${literal}-'));
+    const directory = await mkdtemp(
+      join(tmpdir(), 'mango-startup-cancel-\'"`-' + '${' + 'literal}-')
+    );
     scratch.push(directory);
     const fixture = new FakeStartupBinary(directory, true);
     const binary = await fixture.create();

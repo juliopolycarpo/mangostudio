@@ -9,10 +9,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
 import { benchmarkCancellation, withBenchmarkCancellation } from '../lib/benchmark-cancellation';
 import { appendBenchmarkJournal, writeBenchmarkProgress } from '../lib/benchmark-journal';
-import { pumpStream } from '../lib/child-streams';
 import { summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
 import { linuxProcessResourceUnits, type ProcessResourceUnits } from '../lib/process-resource-host';
@@ -23,16 +23,24 @@ import {
 } from '../lib/process-resource-monitor';
 import { homeEnv } from '../lib/temp-home';
 import { sha256File } from '../release/verify-checksum';
+import {
+  BenchmarkChildScope,
+  pumpBenchmarkStream,
+  recordBenchmarkCleanup,
+  settleBenchmarkWork,
+} from './benchmark-child-scope';
+import { assertBenchmarkPlatform } from './benchmark-platform';
 
 const READY_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 5;
-const SHUTDOWN_TIMEOUT_MS = 5_000;
 const BENCH_AUTH_SECRET = 'startup-bench-secret-at-least-32-chars';
 const ROOT = resolve(import.meta.dir, '../..');
 
 type ResourceStart = { monitor: ProcessResourceMonitor | null; error: string | null };
 interface RunSample {
   readonly status: 'success' | 'failed';
+  readonly cleanupProven: boolean;
+  readonly cleanupErrors: readonly string[];
   readonly toHealthMs: number | null;
   /** Single-process VmHWM, retained separately from sampled process-tree RSS. */
   readonly peakRssKb: number | null;
@@ -138,28 +146,10 @@ async function reserveEphemeralPort(): Promise<number> {
   return address.port;
 }
 
-async function stopChild(child: Bun.Subprocess): Promise<void> {
-  if (child.exitCode === null) child.kill('SIGTERM');
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const exited = await Promise.race([
-      child.exited.then(() => true),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), SHUTDOWN_TIMEOUT_MS);
-      }),
-    ]);
-    if (!exited) {
-      child.kill('SIGKILL');
-      await child.exited;
-    }
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 function spawnHub(binary: string, home: string, port: number) {
   return Bun.spawn([binary, 'serve', String(port)], {
     env: benchEnv(home, port),
+    detached: process.platform !== 'win32',
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -190,14 +180,22 @@ async function measureOnce(
   const startedAt = performance.now();
   const spawnedAt = Date.now();
   const child = spawnHub(binary, home, port);
-  const stdout = pumpStream(child.stdout);
-  const stderr = pumpStream(child.stderr);
+  const scope = new BenchmarkChildScope({
+    pid: child.pid,
+    exited: child.exited,
+    alive: () => child.exitCode === null && child.signalCode === null,
+    kill: (signal) => child.kill(signal),
+  });
+  const stdout = pumpBenchmarkStream(child.stdout);
+  const stderr = pumpBenchmarkStream(child.stderr);
   const monitoring = resourceStart(child.pid, units);
   let toHealthMs: number | null = null;
   let peakRssKb: number | null = null;
-  let resources: ProcessResourceObservation | null = null;
+  const cleanupState: { resources: ProcessResourceObservation | null } = { resources: null };
   let failure: string | null = null;
   let monitor: ProcessResourceMonitor | null = null;
+  let cleanupProven: boolean;
+  const cleanupErrors: string[] = [];
   const deadline = startedAt + READY_TIMEOUT_MS;
   const poll = (async () => {
     while (performance.now() < deadline && child.exitCode === null && !signal.aborted) {
@@ -221,7 +219,10 @@ async function measureOnce(
     }
   })();
   try {
-    await withBenchmarkCancellation(Promise.race([poll, child.exited]), signal);
+    await withBenchmarkCancellation(
+      Promise.race([poll, child.exited]),
+      AbortSignal.any([signal, AbortSignal.timeout(READY_TIMEOUT_MS)])
+    );
     if (toHealthMs === null) {
       failure =
         child.exitCode === null
@@ -229,21 +230,45 @@ async function measureOnce(
           : `Startup readiness: expected a live healthy child | received: exit ${child.exitCode}`;
     }
     peakRssKb = await readPeakRssKb(child.pid);
+    const monitoringError = await settleBenchmarkWork(monitoring, 2_000);
+    if (monitoringError) throw new Error(`Startup resource monitor: ${monitoringError}`);
     const observation = await monitoring;
     monitor = observation.monitor;
     failure ??= observation.error;
-    if (toHealthMs !== null) await monitor?.markReady(startedAt + toHealthMs);
+    if (toHealthMs !== null) {
+      const readyError = await settleBenchmarkWork(
+        monitor?.markReady(startedAt + Number(toHealthMs)) ?? Promise.resolve(),
+        2_000
+      );
+      if (readyError) throw new Error(`Startup readiness observation: ${readyError}`);
+    }
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   } finally {
-    await stopChild(child);
-    await poll;
-    const observation = await monitoring;
-    monitor ??= observation.monitor;
-    failure ??= observation.error;
-    resources = (await monitor?.stop()) ?? null;
-    await Promise.all([stdout.done, stderr.done]);
+    const settlement = await scope.stop();
+    cleanupProven = settlement.settled;
+    for (const error of settlement.errors)
+      failure = recordBenchmarkCleanup(cleanupErrors, failure, 'Startup', error);
+    const pollError = await settleBenchmarkWork(poll, 2_000);
+    const monitorError = await settleBenchmarkWork(
+      monitoring.then(async (observation) => {
+        monitor ??= observation.monitor;
+        failure ??= observation.error;
+        cleanupState.resources = (await monitor?.stop()) ?? null;
+      }),
+      2_000
+    );
+    const streamError = await settleBenchmarkWork(Promise.all([stdout.done, stderr.done]), 2_000);
+    if (streamError) {
+      await settleBenchmarkWork(Promise.allSettled([stdout.cancel(), stderr.cancel()]), 2_000);
+    }
+    for (const error of [pollError, monitorError, streamError]) {
+      if (!error) continue;
+      cleanupProven = false;
+      failure = recordBenchmarkCleanup(cleanupErrors, failure, 'Startup', error);
+    }
   }
+  const resources = cleanupState.resources;
   if (
     resources &&
     (resources.errors.length > 0 ||
@@ -255,6 +280,8 @@ async function measureOnce(
   }
   return {
     status: failure ? 'failed' : 'success',
+    cleanupProven,
+    cleanupErrors,
     toHealthMs,
     peakRssKb,
     resources,
@@ -286,6 +313,7 @@ async function main(): Promise<void> {
     );
   if (flags['--resources'] && process.platform !== 'linux')
     fatal(`--resources: expected Linux procfs | received: ${process.platform}`);
+  assertBenchmarkPlatform(process.platform);
   const units = flags['--resources'] ? linuxProcessResourceUnits() : undefined;
   const binarySha256 = await sha256File(binary);
   const gitHead = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], {
@@ -333,6 +361,7 @@ async function main(): Promise<void> {
   const sharedHome = warm ? await mkdtemp(join(tmpdir(), 'mango-bench-')) : undefined;
   const cancellation = benchmarkCancellation();
   let cleanupError: string | null = null;
+  let sharedHomeSafe = true;
   try {
     for (let index = 0; index < warmups + runs; index += 1) {
       if (cancellation.signal.aborted) break;
@@ -357,6 +386,8 @@ async function main(): Promise<void> {
       } catch (error) {
         sample = {
           status: 'failed',
+          cleanupProven: false,
+          cleanupErrors: ['cleanup could not be confirmed'],
           toHealthMs: null,
           peakRssKb: null,
           resources: null,
@@ -364,13 +395,15 @@ async function main(): Promise<void> {
           stdout: '',
           stderr: '',
         };
-      } finally {
-        if (!sharedHome) {
-          try {
-            await rm(home, { recursive: true, force: true, maxRetries: 5 });
-          } catch (error) {
-            cleanupError = String(error);
-          }
+      }
+      if (!sample.cleanupProven) {
+        sharedHomeSafe = false;
+        cleanupError = `Startup cleanup unconfirmed; retained home ${home}`;
+      } else if (!sharedHome) {
+        try {
+          await rm(home, { recursive: true, force: true, maxRetries: 5 });
+        } catch (error) {
+          cleanupError = String(error);
         }
       }
       attempts.push({
@@ -402,7 +435,7 @@ async function main(): Promise<void> {
     }
   } finally {
     cancellation.dispose();
-    if (sharedHome) {
+    if (sharedHome && sharedHomeSafe) {
       try {
         await rm(sharedHome, { recursive: true, force: true, maxRetries: 5 });
       } catch (error) {

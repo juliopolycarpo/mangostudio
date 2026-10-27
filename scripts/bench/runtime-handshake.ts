@@ -27,6 +27,7 @@
  * reported separately and is the closest this gets to a cold disk.
  */
 
+import { type ChildProcess, spawn } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { arch, cpus, platform, release, tmpdir, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -37,6 +38,7 @@ import {
   RUNTIME_CONTRACT_NAME,
   RUNTIME_CONTRACT_VERSION,
 } from '@mangostudio/shared/runtime-contract';
+
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
 import { benchmarkCancellation, withBenchmarkCancellation } from '../lib/benchmark-cancellation';
 import { appendBenchmarkJournal, writeBenchmarkProgress } from '../lib/benchmark-journal';
@@ -50,6 +52,12 @@ import {
 } from '../lib/process-resource-monitor';
 import { homeEnv } from '../lib/temp-home';
 import { sha256File } from '../release/verify-checksum';
+import {
+  BenchmarkChildScope,
+  recordBenchmarkCleanup,
+  settleBenchmarkWork,
+} from './benchmark-child-scope';
+import { runtimeVersion, RuntimeVersionError } from './runtime-version';
 
 /** Far above any budget the hub uses, so a slow sample is measured, not refused. */
 const HANDSHAKE_CEILING_MS = 120_000;
@@ -59,6 +67,8 @@ const REPO_ROOT = resolve(import.meta.dir, '../..');
 
 interface RunSample {
   readonly status: 'success' | 'failed';
+  readonly cleanupProven: boolean;
+  readonly cleanupErrors: readonly string[];
   readonly failure: string | null;
   readonly resources: ProcessResourceObservation | null;
   /** Until the launcher returned with a process, in ms. */
@@ -101,29 +111,6 @@ async function newestWorkspaceBuild(): Promise<string | undefined> {
   return newest?.path;
 }
 
-/** Identifies the runtime; this invocation is not a protocol warmup or measured sample. */
-async function runtimeVersion(binary: string): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), 'mango-handshake-version-'));
-  try {
-    const child = Bun.spawn([binary, '--version'], {
-      env: { ...process.env, ...homeEnv(home), MANGO_HOME: home },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-    if (code !== 0)
-      throw new Error(`${binary} --version: expected exit 0 | received: ${code}: ${stderr}`);
-    return stdout.trim();
-  } finally {
-    await rm(home, { recursive: true, force: true, maxRetries: 5 });
-  }
-}
-
-/** Spawns one actual child, negotiates hello, answers health, then observes cleanup. */
 async function measureOnce(
   binary: string,
   mangoHome: string,
@@ -134,26 +121,51 @@ async function measureOnce(
   let firstStderrMs: number | null = null;
   const startedAt = performance.now();
   const elapsed = () => performance.now() - startedAt;
-  const peer = spawnPort({
-    argv: [binary, '--stdio'],
-    env: {
-      ...(process.env as Record<string, string>),
-      ...homeEnv(mangoHome),
-      MANGO_HOME: mangoHome,
+  const owned: { scope?: BenchmarkChildScope; child?: ChildProcess; closed?: Promise<void> } = {};
+  const peer = spawnPort(
+    {
+      argv: [binary, '--stdio'],
+      env: {
+        ...(process.env as Record<string, string>),
+        ...homeEnv(mangoHome),
+        MANGO_HOME: mangoHome,
+      },
+      onStderr: () => {
+        firstStderrMs ??= elapsed();
+      },
     },
-    onStderr: () => {
-      firstStderrMs ??= elapsed();
-    },
-  });
+    (command, args, options) => {
+      const child = spawn(command, args, { ...options, detached: process.platform !== 'win32' });
+      owned.child = child;
+      const exited = new Promise<void>((resolve) => {
+        child.once('exit', () => resolve());
+        child.once('error', () => resolve());
+      });
+      owned.closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+      if (child.pid !== undefined) {
+        owned.scope = new BenchmarkChildScope({
+          pid: child.pid,
+          exited,
+          alive: () => child.exitCode === null && child.signalCode === null,
+          kill: (signal) => {
+            child.kill(signal);
+          },
+        });
+      }
+      return child;
+    }
+  );
   const spawnMs = elapsed();
   const resourceState: { monitor: ProcessResourceMonitor | null; error: string | null } = {
     monitor: null,
     error: null,
   };
-  let resources: ProcessResourceObservation | null = null;
+  const cleanupState: { resources: ProcessResourceObservation | null } = { resources: null };
   let helloMs: number | null = null;
   let firstRequestMs: number | null = null;
   let failure: string | null = null;
+  let cleanupProven = true;
+  const cleanupErrors: string[] = [];
   // Register handshake listeners immediately: procfs must not delay Session construction.
   const session = new Session(peer.port, {
     peer: { name: 'mangostudio-bench', version: 'bench', role: 'hub' },
@@ -179,19 +191,56 @@ async function measureOnce(
       signal
     );
     firstRequestMs = elapsed();
-    await monitoring;
-    await resourceState.monitor?.markReady(startedAt + firstRequestMs);
+    const monitoringError = await settleBenchmarkWork(monitoring, 2_000);
+    if (monitoringError) throw new Error(`Runtime resource monitor: ${monitoringError}`);
+    const readyError = await settleBenchmarkWork(
+      resourceState.monitor?.markReady(startedAt + firstRequestMs) ?? Promise.resolve(),
+      2_000
+    );
+    if (readyError) throw new Error(`Runtime readiness observation: ${readyError}`);
     failure = resourceState.error;
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   } finally {
+    const settlement = await owned.scope?.stop();
+    if (!settlement?.settled) {
+      cleanupProven = false;
+      for (const error of settlement?.errors ?? ['child identity unavailable'])
+        failure = recordBenchmarkCleanup(cleanupErrors, failure, 'Runtime', error);
+    }
     session.closeNow();
     const exit = await peer.terminate();
-    if (!exit && peer.pid !== undefined)
-      failure ??= `Runtime cleanup: expected terminal child pid ${peer.pid} | received: termination deadline`;
-    await monitoring;
-    resources = (await resourceState.monitor?.stop()) ?? null;
+    if (!exit && peer.pid !== undefined) {
+      cleanupProven = false;
+      failure = recordBenchmarkCleanup(
+        cleanupErrors,
+        failure,
+        'Runtime',
+        `expected terminal child pid ${peer.pid} | received: termination deadline`
+      );
+    }
+    const closeError = owned.closed
+      ? await settleBenchmarkWork(owned.closed, 2_000)
+      : 'child close unavailable';
+    if (closeError) {
+      cleanupProven = false;
+      failure = recordBenchmarkCleanup(cleanupErrors, failure, 'Runtime', closeError);
+      owned.child?.stdin?.destroy();
+      owned.child?.stdout?.destroy();
+      owned.child?.stderr?.destroy();
+    }
+    const monitorError = await settleBenchmarkWork(
+      monitoring.then(async () => {
+        cleanupState.resources = (await resourceState.monitor?.stop()) ?? null;
+      }),
+      2_000
+    );
+    if (monitorError) {
+      cleanupProven = false;
+      failure = recordBenchmarkCleanup(cleanupErrors, failure, 'Runtime', monitorError);
+    }
   }
+  const resources = cleanupState.resources;
   if (
     resources &&
     (resources.errors.length ||
@@ -204,6 +253,8 @@ async function measureOnce(
   if (failure) failure += `\nRuntime stderr:\n${peer.stderrTail().trim().slice(-2_000)}`;
   return {
     status: failure ? 'failed' : 'success',
+    cleanupProven,
+    cleanupErrors,
     failure,
     resources,
     spawnMs,
@@ -268,7 +319,35 @@ async function main(): Promise<void> {
   const units = flags['--resources'] ? linuxProcessResourceUnits() : undefined;
   const freshCopy = flags['--fresh-copy'] ?? false;
   const quiet = flags['--json'] ?? false;
-  const version = await runtimeVersion(binary);
+  const output = values['--output'] ? resolve(values['--output']) : undefined;
+  const journal = values['--journal']
+    ? resolve(values['--journal'])
+    : output
+      ? `${output}.jsonl`
+      : undefined;
+  const cancellation = benchmarkCancellation();
+  let version: string;
+  try {
+    version = await runtimeVersion(binary, cancellation.signal);
+  } catch (error) {
+    cancellation.dispose();
+    const failure = error instanceof Error ? error.message : String(error);
+    const receipt = {
+      complete: false,
+      binary,
+      phase: 'version',
+      failure,
+      retainedHome: error instanceof RuntimeVersionError ? error.home : null,
+      settlement: error instanceof RuntimeVersionError ? error.settlement : 'unconfirmed',
+      commandReceipt: error instanceof RuntimeVersionError ? error.commandReceipt : null,
+    };
+    await appendBenchmarkJournal(journal, { kind: 'version-failure', ...receipt });
+    await writeBenchmarkProgress(output, receipt);
+    if (quiet) log(JSON.stringify(receipt, null, 2));
+    else console.error(failure);
+    process.exitCode = 1;
+    return;
+  }
   const environment = await environmentNotes(binary, version, freshCopy, values['--build']);
   const sourceHead = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: REPO_ROOT });
   const sourceStatus = Bun.spawnSync(['git', 'status', '--porcelain'], { cwd: REPO_ROOT });
@@ -282,12 +361,6 @@ async function main(): Promise<void> {
   }
   const scratch = await mkdtemp(join(tmpdir(), 'mango-handshake-bench-'));
   const attempts: Array<RunSample & { phase: 'warmup' | 'measured'; index: number }> = [];
-  const output = values['--output'] ? resolve(values['--output']) : undefined;
-  const journal = values['--journal']
-    ? resolve(values['--journal'])
-    : output
-      ? `${output}.jsonl`
-      : undefined;
   await appendBenchmarkJournal(journal, {
     kind: 'batch',
     binary,
@@ -306,8 +379,8 @@ async function main(): Promise<void> {
     warmups,
     attempts,
   });
-  const cancellation = benchmarkCancellation();
   let cleanupError: string | null = null;
+  let scratchSafe = true;
   try {
     for (let run = 0; run < warmups + runs; run += 1) {
       if (cancellation.signal.aborted) break;
@@ -335,6 +408,8 @@ async function main(): Promise<void> {
       } catch (error) {
         sample = {
           status: 'failed',
+          cleanupProven: false,
+          cleanupErrors: ['cleanup could not be confirmed'],
           failure: String(error),
           resources: null,
           spawnMs: null,
@@ -342,6 +417,10 @@ async function main(): Promise<void> {
           firstRequestMs: null,
           firstStderrMs: null,
         };
+      }
+      if (!sample.cleanupProven) {
+        scratchSafe = false;
+        cleanupError = `Runtime cleanup unconfirmed; retained scratch ${scratch}`;
       }
       attempts.push({ ...sample, phase, index });
       await appendBenchmarkJournal(journal, {
@@ -365,10 +444,12 @@ async function main(): Promise<void> {
     }
   } finally {
     cancellation.dispose();
-    try {
-      await rm(scratch, { recursive: true, force: true, maxRetries: 5 });
-    } catch (error) {
-      cleanupError = String(error);
+    if (scratchSafe) {
+      try {
+        await rm(scratch, { recursive: true, force: true, maxRetries: 5 });
+      } catch (error) {
+        cleanupError = String(error);
+      }
     }
   }
   const samples = attempts.filter(

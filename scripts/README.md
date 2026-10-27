@@ -467,14 +467,25 @@ each; a startup claim is only worth as much as its median and spread.
 `runtime-handshake.ts` spawns `mangostudio-runtime --stdio` through the protocol SDK's
 launcher, exchanges `hello` as the hub does and asks for `runtime.health`, with a fresh
 `MANGO_HOME`, `HOME` and `USERPROFILE` per run. It defaults to the newest `target/` build; `--fresh-copy` runs a new
-copy of the binary each time, which on Windows puts the antivirus and loader's first look at a
-file into every sample. The numbers it produced are recorded under "Runtime startup budgets" in
+copy of the binary each time, including the copy in the stated page-cache conditions. The numbers it produced are recorded under "Runtime startup budgets" in
 `docs/reference/tooling.md`.
 
 ```bash
 bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --runs 30
 bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --fresh-copy
 ```
+
+Both startup scripts require POSIX process groups. They reject native Windows before launching
+benchmark children because the benchmark adapter does not provide Windows Job containment. This
+admission change does not requalify historical Windows observations.
+
+Cleanup tracks observed native birth identities and the private process group. A failed census,
+unconfirmed exit, held output pipe or surviving observed child fails the attempt and retains its
+home. These observations do not prove containment of previously unseen descendants that detach into
+another session. Untimed runtime version identification uses observation barriers and bounded
+cancellation; failed setup is retained separately from measured samples. Resource initialization,
+readiness observations and output settlement also have explicit bounds. Existing readiness events
+and measurement deadlines remain unchanged.
 
 Both startup scripts accept `--warmups`, `--output` and Linux `--resources`. Receipts retain
 warmups and failures, binary hashes and checkout identity. `--output` enables synced per-attempt JSONL events and atomic checkpoints; `--journal` selects a separate event path. The study driver enables both so an outer timeout preserves earlier samples. Resource observations distinguish sampled
