@@ -1,5 +1,6 @@
 import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
 
+import { type RealtimeProbe, watchRealtime } from './support/realtime-probe';
 import { dismissWorkdirPicker } from './support/workdir-picker';
 
 /**
@@ -14,64 +15,10 @@ import { dismissWorkdirPicker } from './support/workdir-picker';
 // Generous on purpose: the reload marker and the socket count, not this bound,
 // are what tell "the hub signalled the tab" from "the tab started over".
 const SYNC_TIMEOUT_MS = 15_000;
-const SUBSCRIBE_TIMEOUT_MS = 20_000;
 const NO_RELOAD_MARKER = '__twoTabRenameNoReload';
 const QUIET_MS = 2_500;
 const QUIET_LIMIT_MS = 20_000;
 const SMOKE_PASSWORD = 'smoke-pass-123';
-
-/** What a page's realtime socket has done, observed from the outside. */
-interface RealtimeProbe {
-  /**
-   * Resolves once the hub has acknowledged the page's subscription to the
-   * activity topic; rejects, naming `label`, after `SUBSCRIBE_TIMEOUT_MS`.
-   */
-  subscribed(label: string): Promise<void>;
-  /** How many realtime sockets the page has opened; a second one is a reconnect. */
-  opened(): number;
-  /** How many `invalidate` frames for the activity topic have arrived. */
-  invalidations(): number;
-}
-
-/**
- * Starts watching `page`'s realtime socket. Call before the page navigates,
- * since the socket opens during the first bootstrap.
- *
- * @example
- * const probe = watchRealtime(page);
- * await page.goto('/');
- * await probe.subscribed('first tab');
- */
-function watchRealtime(page: Page): RealtimeProbe {
-  let received = 0;
-  let sockets = 0;
-  let ack = false;
-
-  page.on('websocket', (socket) => {
-    sockets += 1;
-    socket.on('framereceived', ({ payload }) => {
-      const text = typeof payload === 'string' ? payload : payload.toString('utf8');
-      if (text.includes('"subscribed"') && text.includes('"activity"')) ack = true;
-      if (text.includes('"invalidate"') && text.includes('"activity"')) received += 1;
-    });
-  });
-
-  return {
-    async subscribed(label) {
-      const deadline = Date.now() + SUBSCRIBE_TIMEOUT_MS;
-      while (!ack) {
-        if (Date.now() >= deadline) {
-          throw new Error(
-            `expected ${label} activity subscription ack within ${SUBSCRIBE_TIMEOUT_MS} ms | received: none (${sockets} socket(s) opened)`
-          );
-        }
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    },
-    opened: () => sockets,
-    invalidations: () => received,
-  };
-}
 
 /** The chat-list row whose title is exactly `title`, in the page's sidebar. */
 function sidebarRow(page: Page, title: string) {
