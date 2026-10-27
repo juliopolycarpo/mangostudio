@@ -29,9 +29,13 @@ use tokio_util::sync::CancellationToken;
 
 #[cfg(any(windows, test))]
 mod batch;
+#[cfg(test)]
+pub(crate) mod fixture_cleanup;
 mod pipe_child;
 #[cfg(any(windows, test))]
 mod powershell_script;
+#[cfg(all(test, windows))]
+pub(crate) mod windows_fixture;
 #[cfg(test)]
 pub(crate) use powershell_script::powershell_script_request;
 mod supervisor;

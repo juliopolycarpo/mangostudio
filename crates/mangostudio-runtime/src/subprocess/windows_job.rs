@@ -75,6 +75,34 @@ pub(crate) struct WindowsJobChild {
 }
 
 impl WindowsJobChild {
+    /// Observe whether the retained fixture Job has no active processes.
+    /// Usage: `while !child.fixture_job_empty()? { /* bounded poll */ }`.
+    #[cfg(test)]
+    pub(super) fn fixture_job_empty(&self) -> io::Result<bool> {
+        use windows_sys::Win32::System::JobObjects::{
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation,
+        };
+        let mut information =
+            std::mem::MaybeUninit::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>::zeroed();
+        // SAFETY: the retained Job handle is valid; the writable buffer matches this
+        // information class and remains live for the synchronous query.
+        if unsafe {
+            QueryInformationJobObject(
+                self.job.raw(),
+                JobObjectBasicAccountingInformation,
+                information.as_mut_ptr().cast(),
+                u32::try_from(size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>())
+                    .expect("Job accounting structure size fits u32"),
+                ptr::null_mut(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: a successful query initialized the complete accounting structure.
+        Ok(unsafe { information.assume_init() }.ActiveProcesses == 0)
+    }
+
     pub(super) fn resize(
         &self,
         cols: u16,

@@ -2,9 +2,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProcessLifetime {
     process_id: u32,
@@ -81,9 +81,90 @@ pub(super) fn ensure_stopped(output: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn control_receipt(output: &str) -> Result<CleanupReceipt, String> {
+    let receipt: CleanupReceipt = serde_json::from_str(output).map_err(|error| {
+        format!("expected a complete process-lifetime receipt | received: {output:?}: {error}")
+    })?;
+    let capture_only = serde_json::json!({
+        "captured": receipt.captured,
+        "queriedProcessIds": receipt.queried_process_ids,
+        "survivors": [],
+    });
+    ensure_stopped(&capture_only.to_string())?;
+    Ok(receipt)
+}
+
+/// Requires the root, command and leaf alive, including every additional captured lifetime.
+///
+/// Usage: `ensure_live_control(&powershell_json, fixture.id()).expect("complete live control")`.
+pub(super) fn ensure_live_control(output: &str, root_pid: u32) -> Result<(), String> {
+    let receipt = control_receipt(output)?;
+    let root_present = receipt
+        .captured
+        .iter()
+        .any(|row| row.process_id == root_pid && row.image.eq_ignore_ascii_case("powershell.exe"));
+    let command_present = receipt
+        .captured
+        .iter()
+        .any(|row| row.image.eq_ignore_ascii_case("cmd.exe"));
+    let leaf_present = receipt
+        .captured
+        .iter()
+        .any(|row| row.image.eq_ignore_ascii_case("PING.EXE"));
+    if !root_present || !command_present || !leaf_present {
+        return Err(format!(
+            "expected owned powershell.exe root PID {root_pid}, cmd.exe and PING.EXE | received: {:?}",
+            receipt.captured
+        ));
+    }
+    let captured: BTreeMap<_, _> = receipt
+        .captured
+        .iter()
+        .map(|row| (row.process_id, row))
+        .collect();
+    let survivors: BTreeMap<_, _> = receipt
+        .survivors
+        .iter()
+        .map(|row| (row.process_id, row))
+        .collect();
+    if survivors.len() != receipt.survivors.len() || survivors != captured {
+        return Err(format!(
+            "expected every captured lifetime alive exactly once: {:?} | received: {:?}",
+            receipt.captured, receipt.survivors
+        ));
+    }
+    Ok(())
+}
+
+/// Requires cleanup to query the unchanged complete capture and end all its lifetimes.
+///
+/// Usage: `ensure_capture_unchanged(&before_json, &after_json).expect("all captures settled")`.
+pub(super) fn ensure_capture_unchanged(before: &str, after: &str) -> Result<(), String> {
+    let before = control_receipt(before)?;
+    ensure_stopped(after)?;
+    let after = control_receipt(after)?;
+    let original: BTreeMap<_, _> = before
+        .captured
+        .iter()
+        .map(|row| (row.process_id, row))
+        .collect();
+    let current: BTreeMap<_, _> = after
+        .captured
+        .iter()
+        .map(|row| (row.process_id, row))
+        .collect();
+    if original != current {
+        return Err(format!(
+            "expected unchanged captured lifetimes: {:?} | received: {:?}",
+            before.captured, after.captured
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::ensure_stopped;
+    use super::{ensure_capture_unchanged, ensure_live_control, ensure_stopped};
     use serde_json::{Value, json};
 
     fn lifetime(id: u32, image: &str, ticks: &str) -> Value {
@@ -93,6 +174,138 @@ mod tests {
     fn receipt(captured: &[Value], queried: &[u32], survivors: &[Value]) -> String {
         json!({"captured": captured, "queriedProcessIds": queried, "survivors": survivors})
             .to_string()
+    }
+
+    fn live_control_rows() -> Vec<Value> {
+        vec![
+            lifetime(700, "powershell.exe", "99"),
+            lifetime(748, "cmd.exe", "100"),
+            lifetime(756, "PING.EXE", "101"),
+        ]
+    }
+
+    fn row_ids(rows: &[Value]) -> Vec<u32> {
+        rows.iter()
+            .map(|row| row["processId"].as_u64().unwrap() as u32)
+            .collect()
+    }
+
+    #[test]
+    fn accepts_three_and_additional_live_control_members_without_omitting_any() {
+        let mut rows = live_control_rows();
+        for extra in [
+            None,
+            Some(lifetime(860, "conhost.exe", "102")),
+            Some(lifetime(864, "extra.exe", "103")),
+        ] {
+            if let Some(extra) = extra {
+                rows.push(extra);
+            }
+            let ids = row_ids(&rows);
+            let live = receipt(&rows, &ids, &rows);
+            ensure_live_control(&live, 700).unwrap();
+            ensure_capture_unchanged(&live, &receipt(&rows, &ids, &[])).unwrap();
+        }
+    }
+
+    #[test]
+    fn rejects_missing_control_roles_and_wrong_root_identity() {
+        let rows = live_control_rows();
+        for missing in 0..rows.len() {
+            let remaining: Vec<_> = rows
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != missing)
+                .map(|(_, row)| row.clone())
+                .collect();
+            let error =
+                ensure_live_control(&receipt(&remaining, &row_ids(&remaining), &remaining), 700)
+                    .unwrap_err();
+            assert!(
+                error.contains("owned powershell.exe root PID 700, cmd.exe and PING.EXE"),
+                "received: {error}"
+            );
+        }
+        let error = ensure_live_control(&receipt(&rows, &row_ids(&rows), &rows), 701).unwrap_err();
+        assert!(error.contains("root PID 701"), "received: {error}");
+        let mut wrong_image = rows.clone();
+        wrong_image[0]["image"] = json!("unrelated.exe");
+        assert!(
+            ensure_live_control(
+                &receipt(&wrong_image, &row_ids(&wrong_image), &wrong_image),
+                700
+            )
+            .unwrap_err()
+            .contains("owned powershell.exe root")
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_duplicate_foreign_and_reused_live_control_evidence() {
+        let rows = live_control_rows();
+        let ids = row_ids(&rows);
+        for queried in [
+            vec![700, 748],
+            vec![700, 748, 756, 756],
+            vec![700, 748, 756, 900],
+        ] {
+            let error = ensure_live_control(&receipt(&rows, &queried, &rows), 700).unwrap_err();
+            assert!(
+                error.contains("every captured PID queried exactly once"),
+                "received: {error}"
+            );
+        }
+        let mut duplicate = rows.clone();
+        duplicate.push(rows[1].clone());
+        assert!(
+            ensure_live_control(&receipt(&duplicate, &ids, &duplicate), 700)
+                .unwrap_err()
+                .contains("one captured lifetime per PID")
+        );
+        let mut cases = vec![rows[..2].to_vec(), duplicate];
+        let mut foreign = rows.clone();
+        foreign.push(lifetime(900, "foreign.exe", "120"));
+        cases.push(foreign);
+        let mut reused = rows.clone();
+        reused[1]["creationTimeUtcTicks"] = json!("200");
+        cases.push(reused);
+        let mut renamed = rows.clone();
+        renamed[1]["image"] = json!("other.exe");
+        cases.push(renamed);
+        for survivors in cases {
+            let error = ensure_live_control(&receipt(&rows, &ids, &survivors), 700).unwrap_err();
+            assert!(
+                error.contains("every captured lifetime alive exactly once"),
+                "received: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_omitted_replaced_extra_and_surviving_post_fallback_members() {
+        let mut rows = live_control_rows();
+        rows.push(lifetime(860, "conhost.exe", "102"));
+        let ids = row_ids(&rows);
+        let before = receipt(&rows, &ids, &rows);
+        let mut replaced = rows.clone();
+        replaced[3]["creationTimeUtcTicks"] = json!("202");
+        let mut extra = rows.clone();
+        extra.push(lifetime(900, "extra.exe", "203"));
+        for changed in [rows[..3].to_vec(), replaced, extra] {
+            let error =
+                ensure_capture_unchanged(&before, &receipt(&changed, &row_ids(&changed), &[]))
+                    .unwrap_err();
+            assert!(
+                error.contains("unchanged captured lifetimes"),
+                "received: {error}"
+            );
+        }
+        let error =
+            ensure_capture_unchanged(&before, &receipt(&rows, &ids, &rows[3..])).unwrap_err();
+        assert!(
+            error.contains("same-lifetime survivors") && error.contains("conhost.exe"),
+            "received: {error}"
+        );
     }
 
     #[test]
