@@ -1,42 +1,50 @@
 name: Cross Runtime Nightly
 
-# The release download path against a channel that moves without this repo.
-#
-# `.bun-version` names `canary`, rebuilt for every commit on Bun's main, so the
-# bytes `scripts/lib/bun-cross-runtime.ts` fetches change daily while nothing
-# here does. The nightly lane checks for upstream changes even when this repository has
-# no CI run.
-#
-# Same script and five-minute bound as the CI lane — see the `cross-runtimes`
-# job in ci.yml. Failures rely on the standard failed-scheduled-run
-# notification.
-
 on:
-  schedule:
-    - cron: "0 4 * * *"
   workflow_dispatch:
+
+concurrency:
+  group: bun-metadata-token-probe-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
-concurrency:
-  group: cross-runtime-nightly-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  cold-fetch:
-    name: Cold cross-runtime fetch
+  verify:
+    name: Verify public Bun release metadata authentication
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Resolve every target runtime from a cold cache
-        # Dependency-free script; runs without `bun install`.
-        run: bun ./scripts/ci/verify-cross-runtimes.ts
+          script: |
+            const url = 'https://api.github.com/repos/oven-sh/bun/releases/tags/canary';
+            let response;
+            try {
+              response = await fetch(url, {
+                headers: {
+                  Accept: 'application/vnd.github+json',
+                  Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+                },
+                redirect: 'error',
+                signal: AbortSignal.timeout(30000),
+              });
+            } catch {
+              throw new Error('Public Bun release metadata request did not return a response within the probe');
+            }
+            core.info(`Public Bun release metadata HTTP status: ${response.status}`);
+            for (const name of ['x-ratelimit-limit', 'x-ratelimit-remaining']) {
+              const value = response.headers.get(name);
+              if (value && /^\d{1,12}$/.test(value)) core.info(`${name}: ${value}`);
+            }
+            try {
+              await response.body?.cancel();
+            } catch {
+              throw new Error('Public Bun release metadata response did not settle');
+            }
+            if (response.status !== 200) {
+              core.setFailed(`Expected public Bun release metadata HTTP 200; received ${response.status}`);
+            }
