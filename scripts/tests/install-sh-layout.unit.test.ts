@@ -632,6 +632,96 @@ describe('install.sh internals (network-free)', () => {
     expect(PLATFORM).toBe('linux-x64');
   });
 
+  test.each([
+    { name: 'empty response', payload: '' },
+    {
+      name: 'partial redirect URL',
+      payload: 'https://github.com/juliopolycarpo/mangostudio/releases/tag/v9.9.9',
+    },
+  ])('failed stable lookup rejects $name and preserves curl failure', ({ payload }) => {
+    const result = sourceAndCall(`
+      fixture_failed_redirect() {
+        printf 'curl: (22) The requested URL returned error: 403\\n' >&2
+        printf '%s' '${payload}'
+        return 22
+      }
+      curl() { fixture_failed_redirect "$@"; }
+      version="$(resolve_latest_version)"
+      printf 'resolved=%s\\n' "$version"
+    `);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('curl: (22) The requested URL returned error: 403');
+    expect(result.stderr).toContain('failed to fetch latest release');
+    expect(result.stderr).not.toContain('version is empty');
+    expect(result.stdout).toBe('');
+  });
+
+  test('successful stable lookup normalizes the redirect tag', () => {
+    const result = sourceAndCall(`
+      fixture_latest_redirect() {
+        printf '%s' 'https://github.com/juliopolycarpo/mangostudio/releases/tag/v0.1.2'
+      }
+      curl() { fixture_latest_redirect "$@"; }
+      version="$(resolve_latest_version)"
+      printf '%s\\n' "$version"
+    `);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout.trim()).toBe('0.1.2');
+  });
+
+  test.each([
+    { name: 'empty response', payload: '' },
+    { name: 'partial response with a tag', payload: '[{"tag_name":"v0.1.1-canary.abc1234"}]' },
+  ])('failed canary lookup rejects $name and preserves curl failure', ({ payload }) => {
+    const result = sourceAndCall(`
+      fixture_failed_curl() {
+        printf 'curl: (22) The requested URL returned error: 403\\n' >&2
+        printf '%s' '${payload}'
+        return 22
+      }
+      curl() { fixture_failed_curl "$@"; }
+      tag="$(resolve_canary_tag)"
+      printf 'resolved=%s\\n' "$tag"
+    `);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('curl: (22) The requested URL returned error: 403');
+    expect(result.stderr).toContain('failed to fetch canary releases');
+    expect(result.stderr).not.toContain('no canary release found');
+    expect(result.stdout).toBe('');
+  });
+
+  test('successful empty canary lookup reports no matching release', () => {
+    const result = sourceAndCall(`
+      fixture_empty_releases() { printf '[]'; }
+      curl() { fixture_empty_releases "$@"; }
+      tag="$(resolve_canary_tag)"
+    `);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('no canary release found');
+    expect(result.stderr).not.toContain('failed to fetch');
+    expect(result.stdout).toBe('');
+  });
+
+  test('successful canary lookup returns the newest tag', () => {
+    const result = sourceAndCall(`
+      fixture_canary_releases() {
+        printf '[{"tag_name":"v0.1.1-canary.abc1234"}]'
+      }
+      curl() { fixture_canary_releases "$@"; }
+      tag="$(resolve_canary_tag)"
+      printf '%s\\n' "$tag"
+    `);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout.trim()).toBe('v0.1.1-canary.abc1234');
+  });
+
   test('extract_canary_tag picks the newest per-commit canary tag_name', () => {
     // GitHub lists newest first, and canary now cuts one release per green
     // commit, so the first match is the build to install.
