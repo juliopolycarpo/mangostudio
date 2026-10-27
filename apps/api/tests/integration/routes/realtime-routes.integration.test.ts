@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import {
+  ACTIVITY_TOPIC,
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
   gitTopic,
@@ -21,6 +22,8 @@ import {
   REALTIME_WEBSOCKET_OPTIONS,
 } from '../../../src/modules/realtime/http/realtime-routes';
 import { apiKeyGuard } from '../../../src/plugins/api-key-guard';
+import { errorHandler } from '../../../src/plugins/error-handler';
+import { rateLimit } from '../../../src/plugins/rate-limit';
 import { authRoutes } from '../../../src/routes/auth';
 import { createRealtimeBus, type RealtimeBus } from '../../../src/services/realtime/realtime-bus';
 import { createApiTestApp } from '../../support/harness/create-api-test-app';
@@ -41,7 +44,7 @@ let stopServer: (() => void) | undefined;
 
 async function startServer(
   dependencies: Parameters<typeof createRealtimeRoutes>[0] = {},
-  options: { withApiKeyGuard?: boolean } = {}
+  options: { withApiKeyGuard?: boolean; limiter?: ReturnType<typeof rateLimit> } = {}
 ) {
   const bus = dependencies.bus ?? createRealtimeBus();
   const routes = createRealtimeRoutes({ ...dependencies, bus });
@@ -62,9 +65,12 @@ async function startServer(
   // Transport caps live on the composed root in `app.ts`. This helper omits
   // them so protocol cases can run without the limits; the cap itself is
   // asserted by listening on the exported application.
-  const app = createApiTestApp(apiRoutes);
+  const app = options.limiter
+    ? createApiTestApp(errorHandler, options.limiter, apiRoutes)
+    : createApiTestApp(apiRoutes);
   const port = await listenOnEphemeralPort(app);
   stopServer = () => {
+    options.limiter?.teardown();
     // Bun can leave the stop promise pending after a server-initiated close.
     // Trigger abrupt shutdown; the following test starts on a fresh port.
     void app.server?.stop(true);
@@ -75,6 +81,10 @@ async function startServer(
     httpUrl: `http://127.0.0.1:${port}`,
     wsUrl: `ws://127.0.0.1:${port}/api/ws`,
   };
+}
+
+function resolveRateLimitFixtureUser(): Promise<string> {
+  return Promise.resolve('rate-limit-fixture-user');
 }
 
 async function signUp(httpUrl: string): Promise<TestUser> {
@@ -422,6 +432,56 @@ describe('realtime WebSocket origins and liveness', () => {
 });
 
 describe('realtime WebSocket subscriptions', () => {
+  it('charges the HTTP limit for upgrades, not for realtime messages', async () => {
+    const limiter = rateLimit({ max: 1, windowMs: 60_000 });
+    const { httpUrl, wsUrl } = await startServer(
+      { resolveUserId: resolveRateLimitFixtureUser, now: () => 10_000 },
+      { limiter }
+    );
+    const client = connect(wsUrl);
+
+    await client.opened;
+    expect(await client.nextMessage()).toEqual({ type: 'ready' });
+    send(client.socket, { type: 'subscribe', topics: [ACTIVITY_TOPIC] });
+    expect(await client.nextMessage()).toEqual({ type: 'subscribed', topics: [ACTIVITY_TOPIC] });
+    send(client.socket, { type: 'ping' });
+    expect(await client.nextMessage()).toEqual({ type: 'pong' });
+
+    const response = await fetch(`${httpUrl}/api/realtime-scope-probe`);
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: 'Too many requests, please try again later.',
+      code: ERROR_CODES.RATE_LIMITED,
+    });
+
+    const rejectedUpgrade = await fetch(`${httpUrl}/api/ws`, {
+      headers: {
+        Connection: 'Upgrade',
+        Upgrade: 'websocket',
+        'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+        'Sec-WebSocket-Version': '13',
+      },
+    });
+    expect(rejectedUpgrade.status).toBe(429);
+    expect(await rejectedUpgrade.json()).toEqual({
+      error: 'Too many requests, please try again later.',
+      code: ERROR_CODES.RATE_LIMITED,
+    });
+
+    // The route's own message budget remains active after the HTTP upgrade.
+    for (let index = 0; index < 18; index += 1) {
+      send(client.socket, { type: 'ping' });
+      expect(await client.nextMessage()).toEqual({ type: 'pong' });
+    }
+    send(client.socket, { type: 'ping' });
+    expect(await client.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Realtime message rate exceeded',
+      code: ERROR_CODES.RATE_LIMITED,
+    });
+    expect((await client.closed).code).toBe(REALTIME_CLOSE_CODES.RATE_LIMITED);
+  });
+
   it('delivers user-scoped environment invalidations without a resource ownership lookup', async () => {
     const { bus, httpUrl, wsUrl } = await startServer();
     const firstUser = await signUp(httpUrl);
