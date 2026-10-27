@@ -2,7 +2,7 @@ import { type WorkspaceName, WORKSPACES } from './config';
 
 /**
  * The Turbo task that typechecks a workspace and every workspace it imports,
- * with all of those `tsc` runs started together. `typecheck` alone would check
+ * with all of those `bun check` runs started together. `typecheck` alone would check
  * only the filtered workspace (see `turbo.jsonc`).
  */
 export const TYPECHECK_TASK = 'typecheck:with-deps';

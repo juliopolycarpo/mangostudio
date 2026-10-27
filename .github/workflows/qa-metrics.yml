@@ -53,14 +53,12 @@ jobs:
         run: |
           set -euo pipefail
           turbo="$(bun run turbo:version | tail -n 1)"
-          typescript="$(bunx --bun tsc --version | awk '{print $2}')"
-          if [ -z "${turbo}" ] || [ -z "${typescript}" ]; then
-            echo "::error::empty toolchain version (turbo='${turbo}', typescript='${typescript}')"
+          if [ -z "${turbo}" ]; then
+            echo "::error::empty toolchain version (turbo='${turbo}')"
             exit 1
           fi
           {
             echo "turbo=${turbo}"
-            echo "typescript=${typescript}"
           } >> "$GITHUB_OUTPUT"
 
       # Reuse a prior Check snapshot without waiting for or saving this run's

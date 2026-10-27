@@ -11,38 +11,27 @@ estável para o Turborepo, que não aceita `bun@canary`. As chaves de cache usam
 runtimes por plataforma. A seção [Bun em inglês](../../reference/tooling.md#bun)
 explica a verificação de downloads no CI.
 
-## TypeScript 7
+## Verificação de tipos
 
-O monorepo verifica tipos com [TypeScript 7](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/),
-o port nativo em Go. O TS 7 traz um único binário `tsc` que paraleliza parsing,
-type-checking e emit entre núcleos, tipicamente 8–12x mais rápido que o TS 6 em
-builds completos.
+O script `typecheck` de cada workspace executa o verificador nativo
+`bun check --no-script`. O projeto de scripts da raiz é verificado separadamente
+com `-p scripts/tsconfig.json`. A flag `--no-script` seleciona o verificador
+nativo, pois os manifests da raiz e dos workspaces também definem um script
+`check`. Use `bun run check` para executar todas as verificações do repositório;
+`bun check` executa esse script quando ele existe.
 
-### Type-checking
-
-Cada workspace executa `tsc --noEmit` (fixado em `7.0.2`) via seu script
-`typecheck`. O Turbo inicia esses scripts em paralelo, e cada `tsc` paraleliza
-internamente. Nenhum workspace espera pelo typecheck upstream: o `tsc` lê as fontes e não
-produz saída. A task sem script `transit` inclui as fontes upstream na chave de cache.
+O Turbo inicia os typechecks em paralelo. Cada verificação lê as fontes e não
+produz saída, então não precisa esperar pelo workspace upstream. A task sem
+script `transit` inclui as fontes upstream na chave de cache. O verificador do
+Bun segue a semântica do TypeScript 7; o pacote `typescript` fixado continua
+instalado para editores e ferramentas que geram declarações.
 
 Não use `with` para selecionar typechecks upstream: o Turbo encerra uma task `with` quando a
 task que a lista termina, podendo perder um erro de tipo mais lento. `typecheck:with-deps`
 seleciona esses workspaces sem esse limite de duração.
 
-### Ajuste de paralelismo
-
-O TS 7 expõe flags experimentais para ajustar o paralelismo:
-
-| Flag               | Padrão | Finalidade                                                                                                                 |
-| ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `--checkers N`     | 4      | Número de workers de type-checker. Aumente em máquinas com mais núcleos; defina como 1 em runners de CI com pouca memória. |
-| `--builders N`     | 1      | Builders de project-references paralelos sob `--build`. Não usado aqui — o Turbo cuida da orquestração entre workspaces.   |
-| `--singleThreaded` | off    | Desabilita todo o paralelismo. Útil para depurar diagnósticos dependentes de ordem.                                        |
-
-Os padrões são mantidos; o monorepo é pequeno o suficiente para que
-`--checkers 4` seja o ponto ideal. Se os runners de CI ficarem com pouca
-memória, defina `--checkers 2` ou `--checkers 1` nos scripts de `typecheck`
-dos workspaces.
+Por padrão, o Bun usa uma thread por núcleo de CPU. A opção `--threads` limita
+esse número em máquinas com recursos restritos.
 
 ### API de compatibilidade
 
@@ -101,8 +90,8 @@ anteriores e entradas confiáveis de `main`; `main` nunca restaura o cache de um
 A [política de cache de CI em inglês](../../reference/testing.md#ci-cache-policy) mantém as
 chaves, a ordem de restauração, a retenção e os invalidadores completos.
 
-A lane check não tem cache separado de build-info TypeScript: `incremental` está desativado
-em todos os tsconfigs. O Turbo é o único cache de typecheck. O teste
+A lane check não tem cache separado de build-info TypeScript: `bun check` não
+gera build-info, e `incremental` está desativado em todos os tsconfigs. O Turbo é o único cache de typecheck. O teste
 `scripts/tests/typescript-incremental.unit.test.ts` fixa esse contrato.
 
 ### Trabalho futuro

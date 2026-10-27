@@ -38,7 +38,7 @@ import { assertNoSharedRootImports } from './lib/shared-root-import-boundary';
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
 
-Runs Bun lint and fmt, import-cycle checks, tsc typechecks, Knip code health,
+Runs Bun lint and fmt, import-cycle checks, Bun typechecks, Knip code health,
 generated contract-artifact freshness, lockfile dedupe, the TypeScript Mango Protocol
 lanes (spec, schema equality, fixtures) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.
@@ -110,7 +110,7 @@ function createRootTasks(skipFormat: boolean): CheckTask[] {
     commandTask('root:dedupe', ['bun', 'dedupe', '--check'], { cwd: ROOT_DIR }),
     commandTask(
       'root:typecheck-scripts',
-      ['bunx', 'tsc', '--noEmit', '-p', 'scripts/tsconfig.json'],
+      ['bun', 'check', '--no-script', '-p', 'scripts/tsconfig.json'],
       { cwd: ROOT_DIR }
     ),
   ];

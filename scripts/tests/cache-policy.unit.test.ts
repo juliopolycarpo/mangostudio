@@ -329,7 +329,7 @@ describe('CI cache policy', () => {
     // already skips unchanged workspaces on a content hash, which is the
     // trustworthy half of what this cache was doing.
     expect(byFamily('tsbuildinfo')).toHaveLength(0);
-    expect(readText('.github/workflows/lint.yml')).toContain('tsc --version');
+    expect(readText('.github/workflows/lint.yml')).not.toContain('tsc --version');
 
     const lintTools = byFamily('lint-tools');
     expect(lintTools).toHaveLength(1);
@@ -539,10 +539,9 @@ describe('QA check cache restore', () => {
     expect(collect).toMatch(/- id: setup\n\s+uses: \.\/\.github\/actions\/setup-mango/);
     expect(collect).toMatch(/- id: toolchain\n\s+name: Resolve check cache toolchains/);
     expect(collect).toContain('bun run turbo:version');
-    expect(collect).toContain('bunx --bun tsc --version');
+    expect(collect).not.toContain('tsc --version');
     expect(collect).toContain(`echo "turbo=\${turbo}"`);
-    expect(collect).toContain(`echo "typescript=\${typescript}"`);
-    expect(collect).toContain(`if [ -z "\${turbo}" ] || [ -z "\${typescript}" ]; then`);
+    expect(collect).toContain(`if [ -z "\${turbo}" ]; then`);
   });
 });
 

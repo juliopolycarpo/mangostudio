@@ -89,7 +89,7 @@ function buildBaseFixture(): string {
     // Keep the actual lint/check scripts. This named fake isolates typecheck
     // I/O so a missing application fixture never causes the expected failure.
     const manifest = readText(`${workspace}/package.json`).replace(
-      '"typecheck": "tsc --noEmit"',
+      '"typecheck": "bun check --no-script"',
       '"typecheck": "bun ./fake-typecheck.ts"'
     );
     writeFileSync(join(root, workspace, 'fake-typecheck.ts'), 'process.exit(0);\n');

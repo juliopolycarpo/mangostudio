@@ -93,6 +93,7 @@ describe('check script', () => {
       expect(manifest.scripts?.check).toBe(
         'bun run check:quick && bun run check:cycles && bun run typecheck'
       );
+      expect(manifest.scripts?.typecheck).toBe('bun check --no-script');
       expect(manifest.scripts?.circular).toBeUndefined();
     }
   });

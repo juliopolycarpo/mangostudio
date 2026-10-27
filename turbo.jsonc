@@ -94,8 +94,7 @@
     },
     "typecheck": {
       "dependsOn": ["transit"],
-      // No outputs: `incremental` is off, so tsc leaves no build info to cache
-      // (scripts/tests/typescript-incremental.unit.test.ts pins that).
+      // No outputs: Bun checks types without writing build info or emitted files.
       "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"],
     },
     // Script-less, and the task `bun run check` requests. `transit` selects

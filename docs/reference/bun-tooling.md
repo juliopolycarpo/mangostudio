@@ -34,7 +34,7 @@ these reports individually before applying fixes or adding a narrowly scoped sup
 
 Bun lint currently checks JavaScript and TypeScript. It does not replace Biome's
 JSON, CSS, or HTML lint rules: for example, duplicate JSON keys remain valid formatter
-input. Repository schema and TypeScript checks remain separate.
+input. Repository schema checks and type checking with `bun check --no-script` remain separate.
 
 The formatter retains 100-column lines, two-space indentation, single-quoted JavaScript,
 and double-quoted CSS and YAML. Generated routes and runtime contracts, byte-sensitive

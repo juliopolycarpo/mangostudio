@@ -91,7 +91,7 @@ assertType<
 
 describe('Eden treaty type seam', () => {
   it('keeps route input and output types inferable from App', () => {
-    // The assertions above are enforced by `tsc --noEmit`. Reaching this body
+    // The assertions above are enforced by `bun check`. Reaching this body
     // at all means the client module loaded and every one of them compiled.
     expect(typeof client.api.chats.post).toBe('function');
     expect(typeof client.api.health.get).toBe('function');

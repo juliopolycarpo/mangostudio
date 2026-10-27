@@ -19,41 +19,27 @@ against its GitHub release metadata digest and fails closed on disagreement.
 The channel can advance during a build; the distribution manifest records
 per-target provenance and flags detected drift.
 
-## TypeScript 7
+## Type checking
 
-The monorepo type-checks with [TypeScript 7](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/),
-the native Go port. TS 7 ships a single `tsc` binary that parallelizes parsing,
-type-checking, and emitting across cores, typically 8–12x faster than TS 6 on
-full builds.
+Each workspace's `typecheck` script runs Bun's native `bun check --no-script`.
+The root scripts project is checked separately with `-p scripts/tsconfig.json`.
+`--no-script` selects the native checker because the root and workspace manifests
+also define a `check` script. Run `bun run check` for the full repository gate;
+`bun check` alone invokes that script where one exists.
 
-### Type-checking
-
-Each workspace runs `tsc --noEmit` (pinned to `7.0.2`) via its `typecheck`
-script. Turbo starts these across workspaces together, and each `tsc`
-invocation further parallelizes internally — the two layers compose without
-conflict. Nothing waits for an upstream workspace: `tsc` reads sources and
-writes no output, so the order between workspaces carries no data. What a
-downstream workspace needs from upstream is the cache key, which the script-less
-`transit` task supplies (see the task table below).
+Turbo starts workspace checks together. Each check reads sources and writes no
+output, so upstream checks need not finish first. The script-less `transit` task
+includes upstream sources in the cache key (see the task table below). Bun's
+checker uses the semantics of TypeScript 7; the pinned `typescript` package
+remains available to editors and to tools that emit declarations.
 
 Do not list the upstream typechecks under `with` in a workspace `turbo.json` to
 keep them in a filtered run. Turbo stops a `with` task when the task that lists
 it exits, so a slower workspace's type error is lost and its cache entry is
 never written. `typecheck:with-deps` selects them instead.
 
-### Parallelization tuning
-
-TS 7 exposes experimental flags for fine-tuning parallelism:
-
-| Flag               | Default | Purpose                                                                                                           |
-| ------------------ | ------- | ----------------------------------------------------------------------------------------------------------------- |
-| `--checkers N`     | 4       | Number of type-checker workers. Increase on machines with more cores; set to 1 on memory-constrained CI runners.  |
-| `--builders N`     | 1       | Parallel project-reference builders under `--build`. Not used here — Turbo handles cross-workspace orchestration. |
-| `--singleThreaded` | off     | Disables all parallelism. Useful for debugging order-dependent diagnostics.                                       |
-
-The defaults are left in place; the monorepo is small enough that `--checkers 4`
-is the sweet spot. If CI runners run low on memory, set `--checkers 2` or
-`--checkers 1` in the workspace `typecheck` scripts.
+Bun defaults to one checker thread per CPU core. Its `--threads` option can
+bound a run on a resource-constrained machine.
 
 ### Compatibility API
 
@@ -129,9 +115,9 @@ entries; `main` never restores a pull request's cache.
 `v1` fallback. The key policy, restore order, retention and invalidators are
 specified in [CI Cache Policy](./testing.md#ci-cache-policy).
 
-The check lane has no separate TypeScript build-info cache. `incremental` is off
-in every tsconfig, so `tsc` leaves no build info behind to cache, and TypeScript
-7.0.2 reports `TS2589` when it reads one produced from different sources
+The check lane has no separate TypeScript build-info cache. `bun check` writes
+no build info; `incremental` remains off in every tsconfig because TypeScript
+7.0.2 reported `TS2589` when it read one produced from different sources
 (`scripts/tests/typescript-incremental.unit.test.ts`). The Turbo cache is the
 only typecheck cache.
 
