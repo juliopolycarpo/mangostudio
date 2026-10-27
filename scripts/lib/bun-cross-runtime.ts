@@ -6,6 +6,7 @@
 
 import { type Dirent, existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
+import { STATUS_CODES } from 'node:http';
 import { basename, dirname, join } from 'node:path';
 
 import { ROOT_DIR } from './config';
@@ -22,7 +23,7 @@ const RELEASE_DOWNLOAD_BASE = 'https://github.com/oven-sh/bun/releases/download'
 /** Digest listing Bun publishes beside every release asset, on every tag. */
 const CHECKSUM_FILE = 'SHASUMS256.txt';
 const RELEASE_API_BASE = 'https://api.github.com/repos/oven-sh/bun/releases/tags';
-const metadataRequests = new Map<string, Promise<unknown>>();
+const metadataRequests = new Map<string, Map<string | undefined, Promise<unknown>>>();
 
 /**
  * Ceilings on the two release-host requests, generous enough that only a stalled
@@ -41,6 +42,8 @@ interface AssetTimeouts {
   readonly checksumMs?: number;
   readonly assetMs?: number;
   readonly metadataBase?: string;
+  /** Used only for the official GitHub release metadata endpoint. */
+  readonly githubToken?: string;
 }
 
 /**
@@ -104,6 +107,8 @@ interface CrossRuntimeOptions {
   readonly cacheDir?: string;
   /** Overrides the default `<channel>-<host Bun.revision>` cache key. */
   readonly cacheKey?: string;
+  /** Optional read-capable GitHub token for the official release metadata endpoint. */
+  readonly githubToken?: string;
 }
 
 /**
@@ -264,13 +269,13 @@ async function readProvenance(installDir: string): Promise<BunRuntimeProvenance 
   }
 }
 
-const inflight = new Map<string, Promise<string>>();
+const inflight = new Map<string, Map<string | undefined, Promise<string>>>();
 
 /**
  * Absolute path of a Bun executable able to compile for `target`, downloading
  * and caching the channel asset on first use. Concurrent callers asking for the
- * same asset share one download.
- * // Usage: await ensureBunCrossRuntime(target, { channel: 'canary' })
+ * same asset and credential share one download.
+ * // Usage: await ensureBunCrossRuntime(target, { channel: 'canary', githubToken: token })
  */
 export function ensureBunCrossRuntime(
   target: BinaryTarget,
@@ -289,13 +294,18 @@ export function ensureBunCrossRuntime(
   const cacheKey = options.cacheKey ?? defaultCacheKey(options.channel);
   const installDir = join(options.cacheDir ?? CACHE_DIR, cacheKey, asset);
 
-  const pending = inflight.get(installDir);
+  const byToken = inflight.get(installDir) ?? new Map<string | undefined, Promise<string>>();
+  inflight.set(installDir, byToken);
+  const pending = byToken.get(options.githubToken);
   if (pending) return pending;
 
-  const task = installCrossRuntime(asset, installDir, options.channel).finally(() => {
-    inflight.delete(installDir);
-  });
-  inflight.set(installDir, task);
+  const task = installCrossRuntime(asset, installDir, options.channel, options.githubToken).finally(
+    () => {
+      byToken.delete(options.githubToken);
+      if (byToken.size === 0) inflight.delete(installDir);
+    }
+  );
+  byToken.set(options.githubToken, task);
   return task;
 }
 
@@ -337,7 +347,8 @@ export async function clearBunCrossRuntimeCache(
 async function installCrossRuntime(
   asset: string,
   installDir: string,
-  channel: string
+  channel: string,
+  githubToken: string | undefined
 ): Promise<string> {
   const cached = await findBunExecutable(installDir);
   if (cached) {
@@ -355,7 +366,9 @@ async function installCrossRuntime(
   let renameError: unknown;
   try {
     const archivePath = join(stagingDir, `${asset}.zip`);
-    const verified = await downloadVerifiedAsset(asset, channel, archivePath);
+    const verified = await downloadVerifiedAsset(asset, channel, archivePath, undefined, {
+      githubToken,
+    });
 
     const extractDir = join(stagingDir, 'extracted');
     await mkdir(extractDir, { recursive: true });
@@ -414,7 +427,8 @@ async function installCrossRuntime(
  * be tested against a local server: every branch worth having — a corrupted
  * body, a tag that advanced mid-download, a listing that omits the asset — is
  * unreachable through the real one. `timeouts` follows the same seam, because a
- * ceiling nothing exercises is a ceiling nobody knows still fires.
+ * ceiling nothing exercises is a ceiling nobody knows still fires. An optional
+ * `githubToken` is sent only to the official GitHub release metadata endpoint.
  *
  * // Usage: await downloadVerifiedAsset('bun-linux-x64', 'canary', '/tmp/bun.zip')
  */
@@ -515,24 +529,53 @@ async function fetchReleaseAssetDigest(
   timeouts: AssetTimeouts
 ): Promise<string> {
   const url = `${metadataBase}/${encodeURIComponent(channel)}`;
-  let request = metadataRequests.get(url);
+  const credential = timeouts.githubToken?.trim() || undefined;
+  const token = metadataBase === RELEASE_API_BASE ? credential : undefined;
+  const safeUrl = credential
+    ? metadataBase === RELEASE_API_BASE
+      ? url.replaceAll(credential, '[redacted]')
+      : '[redacted]'
+    : url;
+  if (token && !/^[\x21-\x7e]+$/.test(token)) {
+    throw new Error('expected GitHub token: visible ASCII without spaces');
+  }
+  const byToken = metadataRequests.get(url) ?? new Map<string | undefined, Promise<unknown>>();
+  metadataRequests.set(url, byToken);
+  let request = byToken.get(credential);
   if (!request) {
     request = underDeadline(
-      `reading release metadata: ${url}`,
+      `reading release metadata: ${safeUrl}`,
       timeouts.checksumMs ?? CHECKSUM_TIMEOUT_MS,
       async (signal) => {
-        const response = await fetch(url, {
-          signal,
-          headers: { Accept: 'application/vnd.github+json' },
-        });
-        if (!response.ok)
-          throw new Error(`Release metadata download failed (${response.status}): ${url}`);
-        return (await response.json()) as unknown;
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            signal,
+            headers: {
+              Accept: 'application/vnd.github+json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            ...(token ? { redirect: 'error' as const } : {}),
+          });
+        } catch (caught) {
+          if (!credential) throw caught;
+          throw new Error(`Release metadata request failed: ${safeUrl}`);
+        }
+        if (!response.ok) throw new Error(metadataFailure(response, safeUrl, credential));
+        try {
+          return (await response.json()) as unknown;
+        } catch (caught) {
+          const reason = caught instanceof SyntaxError ? 'Invalid' : 'Could not read';
+          throw new Error(`${reason} release metadata JSON: ${safeUrl}`);
+        }
       }
     );
-    metadataRequests.set(url, request);
+    byToken.set(credential, request);
     void request
-      .finally(() => metadataRequests.delete(url))
+      .finally(() => {
+        byToken.delete(credential);
+        if (byToken.size === 0) metadataRequests.delete(url);
+      })
       .catch(() => {
         // The original promise carries the error to each caller.
       });
@@ -557,6 +600,37 @@ async function fetchReleaseAssetDigest(
     );
   }
   return digest.slice('sha256:'.length);
+}
+
+/** Describe a refused metadata request without exposing its response body or credential. */
+function metadataFailure(response: Response, url: string, token: string | undefined): string {
+  const status = STATUS_CODES[response.status] ?? '';
+  const safeStatus = containsCredentialFragment(status, token) ? '' : status;
+  const parts = [`${response.status}${safeStatus ? ` ${safeStatus}` : ''}`];
+  const remaining = response.headers.get('x-ratelimit-remaining');
+  if (remaining && /^\d{1,12}$/.test(remaining) && !containsCredentialFragment(remaining, token)) {
+    parts.push(`rate limit remaining: ${remaining}`);
+  }
+  const requestId = response.headers.get('x-github-request-id');
+  if (
+    requestId &&
+    /^[a-fA-F0-9:]{1,100}$/.test(requestId) &&
+    !containsCredentialFragment(requestId, token)
+  ) {
+    parts.push(`request ID: ${requestId}`);
+  }
+  const safeUrl = token ? url.replaceAll(token, '[redacted]') : url;
+  return `Release metadata download failed (${parts.join('; ')}): ${safeUrl}`;
+}
+
+/** Refuse a diagnostic field that contains a recognizable part of a credential. */
+function containsCredentialFragment(value: string, token: string | undefined): boolean {
+  if (!token) return false;
+  const length = Math.min(8, token.length);
+  for (let start = 0; start <= token.length - length; start += 1) {
+    if (value.includes(token.slice(start, start + length))) return true;
+  }
+  return false;
 }
 
 async function sha256File(path: string): Promise<string> {

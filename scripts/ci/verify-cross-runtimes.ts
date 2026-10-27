@@ -55,6 +55,7 @@ try {
       channel,
       cacheDir,
       cacheKey,
+      githubToken: process.env.GITHUB_TOKEN,
     }),
   }));
 

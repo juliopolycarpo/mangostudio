@@ -112,6 +112,7 @@ jobs:
       - name: Build standalone binaries once
         env:
           VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
         # Every target's runtime is staged from the runtime job's output and
         # checked against its target from the header; nothing is compiled here
         # except the hub.

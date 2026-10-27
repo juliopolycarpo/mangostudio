@@ -296,6 +296,7 @@ async function buildStandaloneTarget(
     try {
       crossRuntimePath = await ensureBunCrossRuntime(target, {
         channel: context.crossRuntimeChannel,
+        githubToken: process.env.GITHUB_TOKEN,
       });
       console.log(
         `   🥟 ${context.crossRuntimeChannel} Bun for ${target.arch}: ${crossRuntimePath}`
