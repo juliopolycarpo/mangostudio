@@ -1,5 +1,8 @@
 import { type AddressInfo, createConnection, createServer, type Socket } from 'node:net';
+
 import { fixtureChildEnvironment } from './child-supervision';
+import { readNativeFormatterProcess } from './formatter-process-settlement';
+import { isAlive } from './process-liveness';
 
 export const DRAIN_CHANNEL_ENV = 'MANGOSTUDIO_FAKE_DRAIN_CHANNEL';
 const CHANNEL_TIMEOUT_MS = 2_000;
@@ -31,6 +34,8 @@ export interface DrainFixtureOwner {
 export interface LiveDrainFixture extends DrainFixtureOwner {
   readonly env: NodeJS.ProcessEnv;
   readonly holdingPipes: boolean;
+  /** PID received over the authenticated channel, if any. */
+  readonly nativePid?: number;
   /** Retained cooperative connection and listener closure, not a native process receipt. */
   readonly settled: boolean;
   ready(): Promise<number>;
@@ -106,6 +111,7 @@ export async function createDrainFixture(
   void ready.promise.catch(() => undefined);
   const sockets = new Set<Socket>();
   let owned: Socket | undefined;
+  let nativePid: number | undefined;
   let ownedClosed = Promise.resolve();
   let closing = false;
   let settled = false;
@@ -138,6 +144,7 @@ export async function createDrainFixture(
       )
         return void socket.destroy();
       owned = socket;
+      nativePid = pid;
       ownedClosed = new Promise<void>((resolve) => socket.once('close', resolve));
       clearTimeout(handshake);
       ready.resolve(pid);
@@ -163,6 +170,9 @@ export async function createDrainFixture(
     env: { [DRAIN_CHANNEL_ENV]: `${port} ${token}` },
     get holdingPipes() {
       return owned !== undefined && !owned.destroyed;
+    },
+    get nativePid() {
+      return nativePid;
     },
     get settled() {
       return settled;
@@ -292,3 +302,119 @@ function holdPipes(): void {
 }
 
 if (import.meta.main) holdPipes();
+
+interface DrainScopeHost {
+  create(): Promise<LiveDrainFixture>;
+  readNativeAlive(pid: number, timeoutMs: number): Promise<boolean>;
+  now(): number;
+  pause(ms: number): Promise<void>;
+}
+
+const DRAIN_SCOPE_HOST: DrainScopeHost = {
+  create: () => createDrainFixture(),
+  async readNativeAlive(pid, timeoutMs) {
+    if (process.platform === 'win32') return isAlive(pid);
+    const current = await readNativeFormatterProcess(pid, timeoutMs);
+    return current !== undefined && isAlive(pid, () => current.state);
+  },
+  now: () => performance.now(),
+  pause: (ms) => Bun.sleep(ms),
+};
+
+/**
+ * Own channel allocation and native pipe-holder settlement across test teardown.
+ * @example const scope = new DrainFixtureScope(controller.signal); const channel = await scope.allocate();
+ */
+export class DrainFixtureScope implements DrainFixtureOwner {
+  private allocation?: Promise<LiveDrainFixture>;
+  private closing?: Promise<void>;
+  private laneStarted = false;
+  private readonly completion = Promise.withResolvers<void>();
+  readonly closed = this.completion.promise;
+
+  constructor(
+    private readonly signal: AbortSignal,
+    private readonly host: DrainScopeHost = DRAIN_SCOPE_HOST,
+    private readonly timeoutMs = CHANNEL_TIMEOUT_MS
+  ) {
+    void this.closed.catch(() => undefined);
+    if (signal.aborted) void this.close();
+    else signal.addEventListener('abort', this.onAbort, { once: true });
+  }
+
+  private readonly onAbort = () => {
+    void this.close().catch(() => undefined);
+  };
+
+  /** Allocate once and refuse a continuation after cleanup, for example `await scope.allocate()`. */
+  allocate(): Promise<LiveDrainFixture> {
+    this.signal.throwIfAborted();
+    if (this.allocation || this.closing)
+      return Promise.reject(new Error('drain fixture already allocated or closing'));
+    this.allocation = this.host.create();
+    return this.allocation.then((fixture) => {
+      this.signal.throwIfAborted();
+      if (this.closing) throw new Error('drain fixture closed during allocation');
+      return fixture;
+    });
+  }
+
+  /** Mark the lane before it may spawn a pipe-holder, for example `scope.markLaneStarted()`. */
+  markLaneStarted(): void {
+    this.signal.throwIfAborted();
+    if (this.closing) throw new Error('drain fixture is closing');
+    this.laneStarted = true;
+  }
+
+  /** Close the cooperative channel and separately prove native absence, for example `await scope.close()`. */
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    this.signal.removeEventListener('abort', this.onAbort);
+    this.closing = this.closeOnce();
+    void this.closing.then(
+      () => this.completion.resolve(),
+      (error: unknown) => this.completion.reject(error)
+    );
+    return this.closing;
+  }
+
+  private async closeOnce(): Promise<void> {
+    if (!this.allocation) return;
+    let fixture: LiveDrainFixture;
+    try {
+      fixture = await within(this.allocation, this.timeoutMs, 'drain fixture allocation cleanup');
+    } catch (error) {
+      // If allocation completes after the deadline, still close its channel; the
+      // original failure retains storage because this cleanup was not proven.
+      void this.allocation.then((late) => late.close()).catch(() => undefined);
+      throw error;
+    }
+    await fixture.close();
+    if (!this.laneStarted) return;
+    const pid = fixture.nativePid;
+    if (pid === undefined)
+      throw new Error(
+        'drain fixture: expected authenticated native PID | received none; storage retained'
+      );
+    const deadline = this.host.now() + this.timeoutMs;
+    while (true) {
+      const remaining = Math.floor(deadline - this.host.now());
+      if (remaining < 1)
+        throw new Error(
+          `drain fixture PID ${pid}: expected native exit within ${this.timeoutMs}ms | received unconfirmed; storage retained`
+        );
+      const budget = Math.min(300, remaining);
+      const live = await within(
+        this.host.readNativeAlive(pid, budget),
+        budget + 1000,
+        'drain fixture native observation'
+      );
+      if (this.host.now() > deadline)
+        throw new Error(
+          `drain fixture PID ${pid}: expected native exit within ${this.timeoutMs}ms | received late observation; storage retained`
+        );
+      if (!live) return;
+      await this.host.pause(Math.min(25, Math.max(0, deadline - this.host.now())));
+    }
+  }
+}

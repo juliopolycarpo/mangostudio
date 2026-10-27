@@ -38,7 +38,7 @@ import {
 import { fakeLane } from './support/test-worker-fakes';
 import {
   assertDrainPipeHolder,
-  createDrainFixture,
+  DrainFixtureScope,
   withOwnedDrainFixture,
 } from './support/worker-drain-fixture';
 import {
@@ -514,31 +514,45 @@ describe('cancellation fixture readiness', () => {
 
 describe('a worker that leaks a process holding its pipes', () => {
   it('does not hold the lane open past the drain grace, and still passes', async () => {
-    const owner = await createDrainFixture();
-    const storageStart = workspaces.length;
-    let pidDir = '';
-    try {
-      await withOwnedDrainFixture(owner, {
+    const controller = new AbortController();
+    const lane = ownLane(controller);
+    const scope = new DrainFixtureScope(controller.signal);
+    lane.track(scope.closed);
+    await lane.run(async () => {
+      const owner = await scope.allocate();
+      let pidDir = '';
+      await withOwnedDrainFixture(scope, {
         async start() {
+          controller.signal.throwIfAborted();
           pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
           workspaces.push(pidDir);
           const began = Date.now();
-          const result = await runLane(
-            2,
-            { 1: 'grandchild' },
-            {
-              pidDir,
-              drainGraceMs: 300,
-              env: fixtureChildEnvironment({ ...process.env, ...owner.env }),
-            }
+          scope.markLaneStarted();
+          const result = await lane.start(() =>
+            runLane(
+              2,
+              { 1: 'grandchild' },
+              {
+                pidDir,
+                drainGraceMs: 300,
+                env: fixtureChildEnvironment({ ...process.env, ...owner.env }),
+                signal: controller.signal,
+                owner: lane,
+              }
+            )
           );
+          controller.signal.throwIfAborted();
           return { ...result, elapsed: Date.now() - began };
         },
-        readPid: () => Number(readFileSync(join(pidDir, 'grandchild-1.pid'), 'utf8')),
+        readPid: () => {
+          controller.signal.throwIfAborted();
+          return Number(readFileSync(join(pidDir, 'grandchild-1.pid'), 'utf8'));
+        },
         async check({ verdict, elapsed }, observedPid) {
           expect(verdict.failures).toEqual([]);
           if (process.platform !== 'win32') {
             expect(await owner.ready()).toBe(observedPid);
+            controller.signal.throwIfAborted();
             assertDrainPipeHolder(observedPid, owner.holdingPipes, isAlive);
             expect(
               elapsed,
@@ -554,10 +568,7 @@ describe('a worker that leaks a process holding its pipes', () => {
       expect(owner.settled, 'expected the retained drain connection and listener to close').toBe(
         true
       );
-    } finally {
-      // Unknown settlement must not remove storage while the fixture may still use it.
-      if (!owner.settled) workspaces.splice(storageStart);
-    }
+    });
   });
 });
 

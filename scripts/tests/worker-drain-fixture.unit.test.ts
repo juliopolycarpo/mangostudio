@@ -1,15 +1,19 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 
+import { FixtureCommands } from './support/fixture-command';
 import {
   assertDrainPipeHolder,
   createDrainFixture,
   DRAIN_CHANNEL_ENV,
   type DrainFixtureActions,
   type DrainFixtureOwner,
+  DrainFixtureScope,
   type LiveDrainFixture,
   startDrainPipeHolder,
   withOwnedDrainFixture,
 } from './support/worker-drain-fixture';
+import type { WorkerDrainLifecycleEvent } from './support/worker-drain-lifecycle.fixture';
 
 class FakeNativeDrainReader {
   readonly observations: number[] = [];
@@ -221,6 +225,217 @@ class RealDrainActions implements DrainFixtureActions<Bun.Subprocess, number> {
   };
 }
 
+/** A named channel fake whose native lifetime is controlled independently. */
+class ControlledScopeFixture implements LiveDrainFixture {
+  readonly env = {};
+  holdingPipes = true;
+  settled = false;
+  nativePid: number | undefined = 4242;
+  closeCalls = 0;
+  readonly closeObserved = Promise.withResolvers<void>();
+  close(): Promise<void> {
+    this.closeCalls += 1;
+    this.holdingPipes = false;
+    this.settled = true;
+    this.closeObserved.resolve();
+    return Promise.resolve();
+  }
+  ready(): Promise<number> {
+    return Promise.resolve(this.nativePid ?? 0);
+  }
+}
+
+/** Controls allocation, native observations and time without signaling any PID. */
+class ControlledScopeHost {
+  readonly fixture = new ControlledScopeFixture();
+  readonly allocation = Promise.withResolvers<LiveDrainFixture>();
+  readonly observations: Array<[number, number]> = [];
+  states: Array<boolean | Error> = [];
+  time = 0;
+  create = () => this.allocation.promise;
+  readNativeAlive = (pid: number, timeoutMs: number): Promise<boolean> => {
+    this.observations.push([pid, timeoutMs]);
+    const state = this.states.shift() ?? true;
+    return state instanceof Error ? Promise.reject(state) : Promise.resolve(state);
+  };
+  now = () => this.time;
+  pause = (ms: number) => {
+    this.time += ms;
+    return Promise.resolve();
+  };
+}
+
+describe('drain fixture timeout ownership', () => {
+  test('closes a late allocation and prevents its callback from continuing', async () => {
+    const controller = new AbortController();
+    const host = new ControlledScopeHost();
+    const scope = new DrainFixtureScope(controller.signal, host, 100);
+    const allocation = scope.allocate().catch((error: unknown) => error);
+    controller.abort();
+    host.allocation.resolve(host.fixture);
+    expect(await allocation).toBe(controller.signal.reason);
+    await scope.closed;
+    expect(host.fixture.closeCalls).toBe(1);
+    expect(host.observations).toEqual([]);
+  });
+
+  test('retains uncertainty when the channel closes while the authenticated process stays alive', async () => {
+    const controller = new AbortController();
+    const host = new ControlledScopeHost();
+    const scope = new DrainFixtureScope(controller.signal, host, 100);
+    host.allocation.resolve(host.fixture);
+    await scope.allocate();
+    scope.markLaneStarted();
+    await expect(scope.close()).rejects.toThrow('expected native exit within 100ms');
+    expect(host.fixture.settled).toBe(true);
+    expect(host.observations.length).toBeGreaterThan(0);
+    expect(host.observations.every(([pid]) => pid === 4242)).toBe(true);
+  });
+
+  test('preserves native query failures instead of reporting absence', async () => {
+    const host = new ControlledScopeHost();
+    const failure = new Error('named native query refusal');
+    host.states.push(failure);
+    host.allocation.resolve(host.fixture);
+    const scope = new DrainFixtureScope(new AbortController().signal, host, 100);
+    await scope.allocate();
+    scope.markLaneStarted();
+    expect(await scope.close().catch((error: unknown) => error)).toBe(failure);
+    expect(host.observations).toEqual([[4242, 100]]);
+  });
+
+  test('bounds a native query that does not settle and never infers absence', async () => {
+    const host = new ControlledScopeHost();
+    const held = Promise.withResolvers<boolean>();
+    host.readNativeAlive = (pid, timeoutMs) => {
+      host.observations.push([pid, timeoutMs]);
+      return held.promise;
+    };
+    host.allocation.resolve(host.fixture);
+    const scope = new DrainFixtureScope(new AbortController().signal, host, 25);
+    await scope.allocate();
+    scope.markLaneStarted();
+    try {
+      await expect(scope.close()).rejects.toThrow('drain fixture native observation');
+      expect(host.fixture.settled).toBe(true);
+      expect(host.observations).toEqual([[4242, 25]]);
+    } finally {
+      held.resolve(false);
+      await held.promise;
+    }
+  });
+
+  test('preserves the primary failure and a distinct native cleanup failure', async () => {
+    const host = new ControlledScopeHost();
+    const cleanup = new Error('named native census failure');
+    const primary = new Error('named metadata failure');
+    host.states.push(cleanup);
+    host.allocation.resolve(host.fixture);
+    const scope = new DrainFixtureScope(new AbortController().signal, host, 100);
+    await scope.allocate();
+    scope.markLaneStarted();
+    const failure = await withOwnedDrainFixture(scope, {
+      start: () => Promise.resolve('started'),
+      readPid: () => {
+        throw primary;
+      },
+      check: () => undefined,
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([primary, cleanup]);
+    expect((failure as AggregateError).cause).toBe(primary);
+    expect(host.observations).toEqual([[4242, 100]]);
+  });
+
+  test('accepts only a timely native absence after the channel closes', async () => {
+    const host = new ControlledScopeHost();
+    host.states.push(true, false);
+    host.allocation.resolve(host.fixture);
+    const scope = new DrainFixtureScope(new AbortController().signal, host, 100);
+    await scope.allocate();
+    scope.markLaneStarted();
+    await scope.close();
+    expect(host.fixture.settled).toBe(true);
+    expect(host.observations).toEqual([
+      [4242, 100],
+      [4242, 75],
+    ]);
+  });
+
+  test('rejects native absence that arrives after the observation deadline', async () => {
+    const host = new ControlledScopeHost();
+    host.readNativeAlive = (pid, timeoutMs) => {
+      host.observations.push([pid, timeoutMs]);
+      host.time = 101;
+      return Promise.resolve(false);
+    };
+    host.allocation.resolve(host.fixture);
+    const scope = new DrainFixtureScope(new AbortController().signal, host, 100);
+    await scope.allocate();
+    scope.markLaneStarted();
+    await expect(scope.close()).rejects.toThrow('received late observation');
+    expect(host.observations).toEqual([[4242, 100]]);
+  });
+
+  test('rejects a started lane without an authenticated PID', async () => {
+    const host = new ControlledScopeHost();
+    host.fixture.nativePid = undefined;
+    host.allocation.resolve(host.fixture);
+    const scope = new DrainFixtureScope(new AbortController().signal, host, 100);
+    await scope.allocate();
+    scope.markLaneStarted();
+    await expect(scope.close()).rejects.toThrow('expected authenticated native PID');
+    expect(host.observations).toEqual([]);
+  });
+
+  test('closes a late channel even after its allocation cleanup timed out', async () => {
+    const host = new ControlledScopeHost();
+    const scope = new DrainFixtureScope(new AbortController().signal, host, 25);
+    const allocation = scope.allocate().catch((error: unknown) => error);
+    await expect(scope.close()).rejects.toThrow('drain fixture allocation cleanup');
+    host.allocation.resolve(host.fixture);
+    await host.fixture.closeObserved.promise;
+    expect(await allocation).toBeInstanceOf(Error);
+    expect(host.fixture.closeCalls).toBe(1);
+  });
+
+  test('timeout teardown settles channel, lane and callback before fixture removal', async () => {
+    const commands = new FixtureCommands();
+    try {
+      const result = await commands.run(
+        [
+          process.execPath,
+          'test',
+          join(import.meta.dir, 'support/worker-drain-lifecycle.fixture.ts'),
+          '--timeout',
+          '1000',
+        ],
+        import.meta.dir
+      );
+      expect(result.exitCode).toBe(1);
+      const events = result.stdout
+        .split('\n')
+        .filter((line) => line.startsWith('{'))
+        .map((line) => JSON.parse(line) as WorkerDrainLifecycleEvent);
+      expect(events.map((event) => event.event)).toEqual([
+        'afterEach',
+        'removed',
+        'onTestFinished',
+      ]);
+      expect(events[0]).toMatchObject({ directory: true });
+      expect(events[1]).toMatchObject({
+        channelOpen: false,
+        laneLive: false,
+        callbackPending: false,
+      });
+      expect(events[2]).toMatchObject({ directory: false });
+      expect(result.stderr).toContain('timed out after 80ms');
+    } finally {
+      await commands.settle();
+    }
+  });
+});
+
 describe('retained cooperative drain connection', () => {
   test('rejects missing channel authority before spawning a child', async () => {
     const children = new OwnedDrainChildren();
@@ -228,6 +443,27 @@ describe('retained cooperative drain connection', () => {
       `${DRAIN_CHANNEL_ENV}: expected port and private token | received undefined`
     );
     expect(children.children).toEqual([]);
+  });
+
+  test('confirms native exit separately after closing the real channel', async () => {
+    const scope = new DrainFixtureScope(new AbortController().signal);
+    const owner = await scope.allocate();
+    const children = new OwnedDrainChildren();
+    scope.markLaneStarted();
+    try {
+      const child = await startDrainPipeHolder({
+        env: { ...process.env, ...owner.env },
+        onStarted: children.track,
+      });
+      expect(await owner.ready()).toBe(child.pid);
+      expect(owner.nativePid).toBe(child.pid);
+      await scope.close();
+      expect(owner.settled).toBe(true);
+      expect(await children.wait()).toEqual([0]);
+    } finally {
+      await children.stop();
+      await scope.close();
+    }
   });
 
   test('settles its connection, listener and real owned child', async () => {
