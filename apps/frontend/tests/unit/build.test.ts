@@ -14,6 +14,8 @@ import {
   trackTempPath,
   writeBuildState,
 } from '../../build';
+import { BuildFixtureDiagnostics } from '../support/build-fixture-diagnostics';
+import { BuildFixtureOwner } from '../support/build-fixture-owner';
 
 describe('resolveApiUrlOverride', () => {
   test('uses MANGO_API_URL ahead of the deprecated alias', () => {
@@ -405,11 +407,21 @@ describe('removeTempPaths', () => {
 });
 
 describe('compiler failure publication', () => {
-  async function isolatedBuildFixture(): Promise<{ isolated: string; frontend: string }> {
+  async function isolatedBuildFixture(
+    diagnostics: BuildFixtureDiagnostics,
+    owner: BuildFixtureOwner,
+    afterAllocation: (path: string) => void = () => {}
+  ): Promise<{ isolated: string; frontend: string }> {
+    diagnostics.record('fixture:prepare-started');
     const repository = join(import.meta.dir, '../../../..');
+    diagnostics.record('fixture:directory-started');
     await mkdir(join(repository, '.mango'), { recursive: true });
     const isolated = await mkdtemp(join(repository, '.mango/tailwind-rollback-'));
+    owner.own(isolated);
+    afterAllocation(isolated);
     const frontend = join(isolated, 'apps/frontend');
+    diagnostics.record('fixture:directory-ready');
+    diagnostics.record('fixture:frontend-copy-started');
     cpSync(join(repository, 'apps/frontend'), frontend, {
       recursive: true,
       filter: (path) =>
@@ -417,6 +429,8 @@ describe('compiler failure publication', () => {
           basename(path)
         ),
     });
+    diagnostics.record('fixture:frontend-copied');
+    diagnostics.record('fixture:dependencies-started');
     const modules = join(frontend, 'node_modules');
     await mkdir(modules);
     const installed = join(repository, 'apps/frontend/node_modules');
@@ -436,6 +450,8 @@ describe('compiler failure publication', () => {
         else symlinkSync(source, join(modules, entry, child), 'junction');
       }
     }
+    diagnostics.record('fixture:dependencies-ready');
+    diagnostics.record('fixture:shared-and-previous-output-started');
     await mkdir(join(isolated, '.git'));
     await mkdir(join(isolated, 'apps/shared/src/frontend-build'), { recursive: true });
     cpSync(
@@ -446,6 +462,7 @@ describe('compiler failure publication', () => {
     await mkdir(join(frontend, 'dist'));
     await writeFile(join(frontend, 'dist/index.html'), 'previous published bundle');
     await writeFile(join(frontend, 'dist-metafile.json'), 'previous metafile');
+    diagnostics.record('fixture:prepared');
     return { isolated, frontend };
   }
 
@@ -457,39 +474,66 @@ describe('compiler failure publication', () => {
     expect((await readdir(frontend)).filter((name) => name.startsWith('.dist-'))).toEqual([]);
   }
 
-  test('keeps the previous dist and metafile when stylesheet compilation fails', async () => {
-    const { isolated, frontend } = await isolatedBuildFixture();
+  test('removes a partial fixture when setup fails immediately after allocation', async () => {
+    const failure = new Error('named fixture setup failure');
+    let directory = '';
+    const failingPreparation = (path: string) => {
+      directory = path;
+      throw failure;
+    };
     try {
-      await writeFile(
-        join(frontend, 'src/index.css'),
-        '@import "./missing-tailwind-stylesheet.css";'
+      const diagnostics = new BuildFixtureDiagnostics('setup failure');
+      const owner = new BuildFixtureOwner(diagnostics);
+      const received = await owner
+        .run(async () => {
+          await owner.prepare(() => isolatedBuildFixture(diagnostics, owner, failingPreparation));
+        })
+        .catch((error: unknown) => error);
+      expect(received).toBe(failure);
+      expect(directory).not.toBe('');
+      expect(existsSync(directory)).toBe(false);
+    } finally {
+      if (directory) await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps the previous dist and metafile when stylesheet compilation fails', async () => {
+    const diagnostics = new BuildFixtureDiagnostics('stylesheet compilation failure');
+    const owner = new BuildFixtureOwner(diagnostics);
+    await owner.run(async () => {
+      const { frontend } = await owner.prepare(() => isolatedBuildFixture(diagnostics, owner));
+      diagnostics.record('fixture:invalid-stylesheet-started');
+      await owner.prepare(() =>
+        writeFile(join(frontend, 'src/index.css'), '@import "./missing-tailwind-stylesheet.css";')
       );
+      diagnostics.record('fixture:invalid-stylesheet-written');
+      diagnostics.record('child:spawn-requested');
       const child = Bun.spawn([process.execPath, './build.ts', '--dev'], {
         cwd: frontend,
         stdout: 'pipe',
         stderr: 'pipe',
       });
-      const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
-      ]);
+      const { exitCode, stdout, stderr } = await diagnostics.observe(child);
+      diagnostics.record('assertions:started');
       expect({ exitCode, output: stdout + stderr }).toMatchObject({ exitCode: 1 });
       expect(stderr).toContain('expected resolvable Tailwind stylesheet');
       expect(stderr).toContain('missing-tailwind-stylesheet.css');
       await assertPreviousOutput(frontend);
-    } finally {
-      await rm(isolated, { recursive: true, force: true });
-    }
+      diagnostics.record('assertions:passed');
+    });
   });
 
   test('rejects a source mutation during final compilation and cleans staged output', async () => {
-    const { isolated, frontend } = await isolatedBuildFixture();
-    try {
+    const diagnostics = new BuildFixtureDiagnostics('source mutation during compilation');
+    const owner = new BuildFixtureOwner(diagnostics);
+    await owner.run(async () => {
+      const { frontend } = await owner.prepare(() => isolatedBuildFixture(diagnostics, owner));
+      diagnostics.record('fixture:mutation-preload-started');
       const preload = join(frontend, 'scripts/mutate-after-discovery.ts');
-      await writeFile(
-        preload,
-        `
+      await owner.prepare(() =>
+        writeFile(
+          preload,
+          `
         import { mock } from 'bun:test';
         import { writeFileSync } from 'node:fs';
         import * as original from '@tailwindcss/node';
@@ -506,25 +550,24 @@ describe('compiler failure publication', () => {
         function fakeTailwindModule() { return { ...original, compile: fakeCompileMutatesSourceAfterDiscovery }; }
         mock.module('@tailwindcss/node', fakeTailwindModule);
       `
+        )
       );
+      diagnostics.record('fixture:mutation-preload-written');
+      diagnostics.record('child:spawn-requested');
       const child = Bun.spawn([process.execPath, '--preload', preload, './build.ts', '--dev'], {
         cwd: frontend,
         stdout: 'pipe',
         stderr: 'pipe',
       });
-      const [exitCode, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stderr).text(),
-        new Response(child.stdout).text(),
-      ]);
+      const { exitCode, stderr } = await diagnostics.observe(child);
+      diagnostics.record('assertions:started');
       expect(exitCode).toBe(1);
       expect(stderr).toContain('compiler mutation applied after discovery');
       expect(stderr).toContain(
         'expected unchanged Tailwind inputs between dependency discovery and publication'
       );
       await assertPreviousOutput(frontend);
-    } finally {
-      await rm(isolated, { recursive: true, force: true });
-    }
+      diagnostics.record('assertions:passed');
+    });
   });
 });
