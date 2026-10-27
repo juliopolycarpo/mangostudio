@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { BuildFixtureDiagnostics } from '../support/build-fixture-diagnostics';
 
 class RecordingBuildEvents {
@@ -27,6 +28,11 @@ class RecordingBuildEvents {
 
 class HeldBuildChild {
   readonly pid = 6712;
+  stops = 0;
+  kill(): void {
+    this.stops += 1;
+    this.resolveExit(143);
+  }
   signalCode: string | number | null = null;
   resolveExit!: (code: number) => void;
   rejectExit!: (error: Error) => void;
@@ -46,6 +52,13 @@ class HeldBuildChild {
       this.errors = controller;
     },
   });
+}
+
+class ThrowingKillChild extends HeldBuildChild {
+  readonly stopFailure = new Error('named stop failure');
+  override kill(): void {
+    throw this.stopFailure;
+  }
 }
 
 describe('build fixture diagnostics', () => {
@@ -115,23 +128,22 @@ describe('build fixture diagnostics', () => {
     expect(child.stderr.locked).toBe(false);
   });
 
-  test('preserves an exit observation rejection and still records later stream settlement', async () => {
+  test('reports an unconfirmed exit when exit observation rejects', async () => {
     const recording = new RecordingBuildEvents();
     const diagnostics = new BuildFixtureDiagnostics('rejected exit', recording.emit, recording.now);
     const child = new HeldBuildChild();
     const failure = new Error('controlled exit observation failure');
     const observation = diagnostics.observe(child).catch((error: unknown) => error);
     child.rejectExit(failure);
-    try {
-      expect(await observation).toBe(failure);
-      expect(recording.events()).toContainEqual(
-        expect.objectContaining({ phase: 'child:exit-rejected', error: String(failure) })
-      );
-    } finally {
-      child.output.close();
-      child.errors.close();
-      await Promise.all([recording.waitFor('stdout:drained'), recording.waitFor('stderr:drained')]);
-    }
+    const result = await observation;
+    expect(result).toBeInstanceOf(AggregateError);
+    expect((result as AggregateError).errors[0]).toBe(failure);
+    expect(child.stops).toBe(1);
+    expect(child.stdout.locked).toBe(false);
+    expect(child.stderr.locked).toBe(false);
+    expect(recording.events()).toContainEqual(
+      expect.objectContaining({ phase: 'child:exit-rejected', error: String(failure) })
+    );
     expect(
       recording.events().filter((event) => String(event.phase).endsWith(':drained'))
     ).toHaveLength(2);
@@ -170,5 +182,104 @@ describe('build fixture diagnostics', () => {
     );
     expect(child.stdout.locked).toBe(false);
     expect(child.stderr.locked).toBe(false);
+  });
+  test('diagnostic failures never interrupt child observation or replace its error', async () => {
+    const failure = new Error('named stderr failure');
+    const child = new HeldBuildChild();
+    const throwingEmitter = () => {
+      throw new Error('named emitter failure');
+    };
+    const throwingClock = () => {
+      throw new Error('named clock failure');
+    };
+    const clockFailure = new BuildFixtureDiagnostics(
+      'broken clock',
+      throwingEmitter,
+      throwingClock
+    );
+    expect(() => clockFailure.record('clock')).not.toThrow();
+    let calls = 0;
+    const failsAfterStart = () => {
+      if (calls++ === 0) return 0;
+      throw new Error('late clock failure');
+    };
+    const lateClock = new BuildFixtureDiagnostics('late clock', () => {}, failsAfterStart);
+    expect(() => lateClock.record('clock')).not.toThrow();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const serialization = new BuildFixtureDiagnostics(
+      'cyclic',
+      () => {},
+      () => 0
+    );
+    expect(() => serialization.record('cyclic', cyclic)).not.toThrow();
+    const diagnostics = new BuildFixtureDiagnostics('broken emitter', throwingEmitter, () => 0);
+    expect(() => diagnostics.record('emit')).not.toThrow();
+    const observation = diagnostics.observe(child).catch((error: unknown) => error);
+    child.errors.error(failure);
+    child.output.close();
+    child.resolveExit(1);
+    expect(await observation).toBe(failure);
+  });
+
+  test('stops and settles held siblings before returning a drain failure', async () => {
+    const diagnostics = new BuildFixtureDiagnostics(
+      'held siblings',
+      () => {},
+      () => 0
+    );
+    const child = new HeldBuildChild();
+    const failure = new Error('named held stderr failure');
+    const result = diagnostics.observe(child).catch((error: unknown) => error);
+    child.errors.error(failure);
+    try {
+      expect(await result).toBe(failure);
+      expect(child.stops).toBe(1);
+      expect(child.stdout.locked).toBe(false);
+      expect(child.stderr.locked).toBe(false);
+    } finally {
+      child.resolveExit(143);
+      if (!child.stdout.locked) await child.stdout.cancel();
+    }
+  });
+
+  test('preserves an unprintable drain rejection as the primary error', async () => {
+    const recording = new RecordingBuildEvents();
+    const diagnostics = new BuildFixtureDiagnostics('unprintable', recording.emit, recording.now);
+    const child = new HeldBuildChild();
+    const failure: unknown = Object.create(null);
+    const result = diagnostics.observe(child).catch((error: unknown) => error);
+    child.errors.error(failure);
+    expect(await result).toBe(failure);
+    expect(recording.events()).toContainEqual(
+      expect.objectContaining({ phase: 'stderr:drain-rejected', error: '[unprintable error]' })
+    );
+  });
+  test('retains the stop failure when held child cleanup reaches its deadline', async () => {
+    const diagnostics = new BuildFixtureDiagnostics(
+      'held exit and failed stop',
+      () => {},
+      () => 0
+    );
+    const child = new ThrowingKillChild();
+    const primary = new Error('named drain failure');
+    const observation = diagnostics.observe(child).catch((error: unknown) => error);
+    child.errors.error(primary);
+    try {
+      const result = await observation;
+      expect(result).toBeInstanceOf(AggregateError);
+      const [observed, cleanup] = (result as AggregateError).errors;
+      expect(observed).toBe(primary);
+      expect(cleanup).toBeInstanceOf(AggregateError);
+      const errors = (cleanup as AggregateError).errors;
+      expect(errors).toContain(child.stopFailure);
+      expect(errors.some((error: unknown) => String(error).includes('did not settle'))).toBe(true);
+      expect(
+        errors.some((error: unknown) => String(error).includes('exit was not confirmed'))
+      ).toBe(true);
+    } finally {
+      child.resolveExit(143);
+      await child.exited;
+    }
   });
 });
