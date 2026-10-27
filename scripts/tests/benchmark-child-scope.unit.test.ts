@@ -130,7 +130,7 @@ class FakeReparentedChild {
     const script = `
       const [trigger, marker, release] = process.argv.slice(1);
       while (!(await Bun.file(trigger).exists())) await Bun.sleep(5);
-      const program = 'const [marker, release] = process.argv.slice(1); await Bun.write(marker, String(process.pid)); while (!(await Bun.file(release).exists())) await Bun.sleep(5);';
+      const program = 'const { rename } = await import("node:fs/promises"); const [marker, release] = process.argv.slice(1); await Bun.write(marker + ".tmp", String(process.pid)); await rename(marker + ".tmp", marker); while (!(await Bun.file(release).exists())) await Bun.sleep(5);';
       const leaf = Bun.spawn([process.execPath, '-e', program, marker, release], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
       leaf.unref();
       while (!(await Bun.file(marker).exists())) await Bun.sleep(5);
@@ -171,10 +171,15 @@ test.skipIf(process.platform === 'win32')(
       await Bun.write(join(home, 'trigger'), 'start descendant');
       const exitError = await settleBenchmarkWork(child.exited, 5_000);
       expect(exitError).toBeNull();
-      const pid = Number(await Bun.file(join(home, 'leaf')).text());
+      const marker = await Bun.file(join(home, 'leaf')).text();
+      const pid = Number(marker);
+      expect({ marker, valid: /^[1-9][0-9]*$/.test(marker) && Number.isSafeInteger(pid) }).toEqual({
+        marker,
+        valid: true,
+      });
       const leaf = (await snapshotNativeProcesses()).find((row) => row.pid === pid);
       leafIdentity = leaf?.identity;
-      expect(leafIdentity).toBeDefined();
+      expect({ pid, observed: Boolean(leafIdentity) }).toEqual({ pid, observed: true });
       const result = await scope.stop();
       expect(result.settled).toBe(false);
       expect(result.errors.join(' ')).toContain('root exited without a verified group anchor');
@@ -192,7 +197,7 @@ test.skipIf(process.platform === 'win32')(
       const alive =
         leafIdentity &&
         (await snapshotNativeProcesses()).some((row) => row.identity === leafIdentity);
-      if (!alive && !rootError) await rm(home, { recursive: true, force: true });
+      if (leafIdentity && !alive && !rootError) await rm(home, { recursive: true, force: true });
       expect(rootError).toBeNull();
       expect(alive).toBeFalsy();
     }
