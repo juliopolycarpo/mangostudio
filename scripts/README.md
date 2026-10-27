@@ -326,7 +326,7 @@ chosen file. `collect/tooling.ts` creates a fresh temporary directory and UUID
 for each invocation, validates the document and observed process exit, and
 removes the temporary directory afterward. It continues to execute Check
 locally; this document does not enable cross-job artifact reuse. Per-component
-TypeScript error counts still come from direct `tsc` executions in
+TypeScript error counts still come from direct `bun check --no-script` executions in
 `collect/typescript.ts`.
 
 The document's `kind` is `mangostudio.check-result` and `schemaVersion` is `1`.

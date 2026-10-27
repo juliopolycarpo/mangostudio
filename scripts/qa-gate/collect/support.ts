@@ -64,7 +64,7 @@ const cancellationExit = (): Promise<never> => new Promise(() => undefined);
  * Capture a command's output and exit while retaining ownership through pipe
  * draining. Root POSIX captures own a group; nested runners keep their owner's
  * group and Windows uses the existing kill-on-close job binding.
- * @example await runCapture(['bunx', 'tsc', '--noEmit'])
+ * @example await runCapture(['bun', 'check', '--no-script'])
  */
 export const runCapture = async (
   cmd: readonly string[],

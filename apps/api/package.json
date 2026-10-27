@@ -16,7 +16,7 @@
     "check": "bun run check:quick && bun run check:cycles && bun run typecheck",
     "check:quick": "bun --cwd ../.. lint apps/api && bun --cwd ../.. fmt --check apps/api",
     "check:cycles": "bun ../../scripts/check-import-cycles.ts .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "bun check --no-script",
     "fix": "bun --cwd ../.. lint --fix apps/api && bun --cwd ../.. fmt apps/api",
     "migrate": "bun run src/db/migrate.ts",
     "test": "bun run test:unit && bun run test:integration",
