@@ -79,7 +79,9 @@ const PROTOCOL_TASKS = [
   '',
 ].join('\n');
 
-async function checkout(): Promise<{ root: string; out: string; sha: string }> {
+async function checkout(
+  options: { bunVersion?: string; packageManager?: unknown } = {}
+): Promise<{ root: string; out: string; sha: string }> {
   const base = await mkdtemp(join(tmpdir(), 'native-qualification-'));
   temporary.push(base);
   const root = join(base, 'source');
@@ -87,7 +89,7 @@ async function checkout(): Promise<{ root: string; out: string; sha: string }> {
   await file(
     join(root, 'package.json'),
     JSON.stringify({
-      packageManager: 'bun@1.4.2',
+      packageManager: options.packageManager === undefined ? 'bun@1.4.2' : options.packageManager,
       scripts: {
         test: 'bun ./scripts/test.ts',
         'test:scripts':
@@ -95,6 +97,7 @@ async function checkout(): Promise<{ root: string; out: string; sha: string }> {
       },
     })
   );
+  if (options.bunVersion !== undefined) await file(join(root, '.bun-version'), options.bunVersion);
   await file(join(root, 'scripts/test.ts'), PRODUCER);
   await file(join(root, PROTOCOL_TASKS_PATH), PROTOCOL_TASKS);
   await file(
@@ -158,6 +161,7 @@ async function emptyNativeCensus(): Promise<NativeProcess[]> {
 
 class FakeNativeCommands {
   readonly calls: NativeCommandOptions[] = [];
+  bunRevision = '1.4.2+744846f84';
   checkExit = 0;
   installExit = 0;
   omitIntegration = false;
@@ -177,7 +181,7 @@ class FakeNativeCommands {
     if (options.label === this.receiptlessLabel)
       throw new Error(`fixture runner refused ${options.label} evidence`);
     let content = '';
-    if (options.label === 'bun-revision') content = '1.4.2+744846f84\n';
+    if (options.label === 'bun-revision') content = `${this.bunRevision}\n`;
     if (options.label === 'rustc-version') content = 'rustc 1.99.0\n';
     if (options.label === 'cargo-version') content = 'cargo 1.99.0\n';
     if (options.label === 'cargo-normal-tree') content = 'mangostudio-runtime v0.1.1\n';
@@ -582,6 +586,73 @@ describe('full qualification receipts', () => {
       });
     }
   }
+
+  test.each([
+    { selector: 'canary', revision: '1.4.4-canary.1+98a436596', accepted: true },
+    { selector: 'canary', revision: '1.4.5-canary.22+abcdef123', accepted: true },
+    { selector: 'canary', revision: '1.4.2+744846f84', accepted: false },
+    { selector: 'canary', revision: '1.4.4-canary.1+not-a-hash', accepted: false },
+    { selector: 'canary', revision: 'garbage', accepted: false },
+    { selector: '1.4.3', revision: '1.4.3+744846f84', accepted: true },
+    { selector: 'v1.4.2', revision: '1.4.2+744846f84', accepted: true },
+    { selector: '1.4.2-canary.7', revision: '1.4.2-canary.7+744846f84', accepted: true },
+    { selector: '1.4.3', revision: '1.4.2+744846f84', accepted: false },
+    { selector: '1.4.2', revision: '1.4.2-canary.1+744846f84', accepted: false },
+    { selector: '1.4.2', revision: '1.4.2+broken', accepted: false },
+    { selector: 'nightly', revision: '1.4.2+744846f84', accepted: false },
+    { selector: '', revision: '1.4.2+744846f84', accepted: false },
+  ])(
+    'honours source Bun selector $selector for revision $revision',
+    async ({ selector, revision, accepted }) => {
+      // The package manager marker intentionally differs from several selectors:
+      // this qualification belongs to the source checkout, not the tooling checkout.
+      const source = await checkout({ bunVersion: `${selector}\n` });
+      const fake = new FakeNativeCommands();
+      fake.bunRevision = revision;
+      const receipt = await runNativeQualification(source, {
+        runCommand: fake.run,
+        snapshotProcesses: emptyNativeCensus,
+      });
+      expect(
+        receipt.status,
+        `selector ${JSON.stringify(selector)} and revision ${JSON.stringify(revision)}`
+      ).toBe(accepted ? 'qualified' : 'setup-failed');
+      expect(receipt.toolchain['bun-revision']).toBe(`${revision}\n`);
+      if (accepted) {
+        expect(receipt.setupErrors).toEqual([]);
+        expect(fake.calls.some((call) => call.label === 'install')).toBe(true);
+      } else {
+        expect(receipt.setupErrors.join('\n')).toContain(JSON.stringify(revision));
+        expect(fake.calls.some((call) => call.label === 'install')).toBe(false);
+      }
+    }
+  );
+
+  test('falls back to the packageManager pin for an older checkout without .bun-version', async () => {
+    const source = await checkout();
+    const fake = new FakeNativeCommands();
+    const receipt = await runNativeQualification(source, {
+      runCommand: fake.run,
+      snapshotProcesses: emptyNativeCensus,
+    });
+    expect(receipt.status).toBe('qualified');
+    expect(receipt.setupErrors).toEqual([]);
+  });
+
+  test.each(['1.4.2', 'other@1.4.2', 42, null])(
+    'rejects malformed legacy packageManager selector %p',
+    async (packageManager) => {
+      const source = await checkout({ packageManager });
+      const fake = new FakeNativeCommands();
+      const receipt = await runNativeQualification(source, {
+        runCommand: fake.run,
+        snapshotProcesses: emptyNativeCensus,
+      });
+      expect(receipt.status).toBe('setup-failed');
+      expect(receipt.setupErrors.join('\n')).toContain(JSON.stringify(packageManager));
+      expect(fake.calls.some((call) => call.label === 'install')).toBe(false);
+    }
+  );
 
   test('passes a complete single-attempt run with immutable source/artifacts and explicit binaries', async () => {
     const source = await checkout();
