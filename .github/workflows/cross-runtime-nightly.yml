@@ -38,5 +38,7 @@ jobs:
           bun-version-file: .bun-version
 
       - name: Resolve every target runtime from a cold cache
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/verify-cross-runtimes.ts

@@ -48,6 +48,42 @@ describe('Integration branch coverage', () => {
   );
 });
 
+describe('cross-runtime metadata credentials', () => {
+  test.each([
+    [
+      '.github/workflows/distribution-build.yml',
+      'build',
+      'Build standalone binaries once',
+      'bun run build --binary',
+      'scripts/build.ts',
+    ],
+    [
+      '.github/workflows/ci.yml',
+      'cross-runtimes',
+      'Resolve every target runtime from a cold cache',
+      'bun ./scripts/ci/verify-cross-runtimes.ts',
+      'scripts/ci/verify-cross-runtimes.ts',
+    ],
+    [
+      '.github/workflows/cross-runtime-nightly.yml',
+      'cold-fetch',
+      'Resolve every target runtime from a cold cache',
+      'bun ./scripts/ci/verify-cross-runtimes.ts',
+      'scripts/ci/verify-cross-runtimes.ts',
+    ],
+  ])(
+    '%s passes the GitHub token to its metadata consumer',
+    (workflowPath, job, stepName, command, consumer) => {
+      const steps = extractStepBlocks(extractJobBlock(readText(workflowPath), job));
+      const step = steps.find((entry) => entry.includes(`name: ${stepName}`));
+      expect(step, `expected ${stepName} in ${workflowPath}`).toBeDefined();
+      expect(step).toContain(command);
+      expect(step).toContain(`GITHUB_TOKEN: ${EXPR} github.token }}`);
+      expect(readText(consumer)).toContain('githubToken: process.env.GITHUB_TOKEN');
+    }
+  );
+});
+
 describe('gate result evaluation', () => {
   const skips = parseAllowedSkips('qa-metrics');
 
