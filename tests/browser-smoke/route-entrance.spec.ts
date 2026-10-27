@@ -1,6 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 
 import { observeMotionNodes, readMotionObservations } from './support/motion-observer';
+import { installMotionReadModels } from './support/motion-read-models';
 
 /**
  * The authenticated layout's route container, in a real browser: the first
@@ -30,6 +31,7 @@ test.use({ reducedMotion: 'no-preference' });
 
 test('the first page appears settled and later pages still fade in', async ({ page }) => {
   test.setTimeout(90_000);
+  await installMotionReadModels(page, { emptyChatList: true });
 
   const consoleErrors: string[] = [];
   page.on('pageerror', (error) => consoleErrors.push(error.message));
