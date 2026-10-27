@@ -12,6 +12,15 @@ alterados para labels. O workflow `Labeler` executa o job `label`, chamado
 `area:` ou `type:`. O contexto obrigatório da API em `main` é `Apply path-based labels`, não
 o nome do step — veja [`ci.md`](./ci.md#proteção-de-branch--checks-obrigatórios).
 
+A cada push em um PR de outro autor que não o Dependabot, o workflow remove as labels
+definidas no mapa quando nenhum arquivo alterado continua correspondendo a elas. Com 3.000
+ou mais arquivos alterados, o labeler deixa de adicionar e remover labels por caminho, pois
+a lista do GitHub pode estar incompleta. Se o PR não tiver classificação, adicione uma label
+`area:` ou `type:` manualmente e execute o check novamente. Labels fora
+do mapa, incluindo tipos atribuídos apenas manualmente, permanecem intactas. PRs do Dependabot
+mantêm suas labels de ecossistema configuradas, que podem classificar atualizações de
+dependências além do mapa de arquivos alterados.
+
 A atribuição de PRs é separada: o workflow `auto-assign.yml` atribui o autor e solicita review
 de quem já commitou nos arquivos alterados pelo PR (histórico da branch base), então ele não
 precisa de configuração de dono por label.

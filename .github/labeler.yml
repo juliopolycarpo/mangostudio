@@ -4,6 +4,10 @@
 # maintained by hand, so update it here and there together. Globs are matched against
 # the PR's changed file paths only — actions/labeler never checks out or executes PR code.
 
+# The pull request files API returns at most 3,000 files. Skip file-based labeling
+# at the limit as well: a 3,000-file response can be a truncated larger PR.
+max-files-changed: 2999
+
 "area: frontend":
   - changed-files:
       - any-glob-to-any-file: "apps/frontend/**"

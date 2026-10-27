@@ -12,6 +12,14 @@ its `Verify classification labels` step fails a PR with no `area:` or `type:` la
 required API check context on `main` is `Apply path-based labels`, not the step's name —
 see [`ci.md`](./ci.md#branch-protection--required-checks).
 
+On each push to a PR by an author other than Dependabot, the workflow removes labels defined
+in the map when no changed file still matches them. At 3,000 or more changed files, the
+labeler skips adding and removing path-based labels because GitHub's file list may be
+truncated. Manually add an `area:` or `type:` label and rerun the check if the PR has no
+classification. Labels outside the map, including
+manual-only types, remain untouched. Dependabot PRs keep their configured ecosystem labels,
+which can classify dependency updates beyond the changed-file map.
+
 PR ownership is separate: the `auto-assign.yml` workflow assigns the author and requests reviews
 from prior committers of the PR's changed files (base-branch history), so it needs no per-label
 owner config.
