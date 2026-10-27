@@ -273,23 +273,23 @@ preservou o hash executável; cada nova versão recompilou uma unidade, mudou o 
 não vazios das bibliotecas e devolveu exatamente `0.1.1-bench.1` até `.10`. Não existe candidato de
 otimização; essas cargas diferentes não estabelecem economia relativa.
 
-| Carga                   |  n |   Mín s | Mediana s |   p95 s |   Máx s | Amplitude s | CPU final mediana usuário/sistema s | RSS amostrado mediano da árvore MiB |
-| ----------------------- | -: | ------: | --------: | ------: | ------: | ----------: | ----------------------------------: | ----------------------------------: |
-| Runtime, target vazio   |  3 | 471.520 |   471.980 |       — | 473.020 |       1.500 |                    854.690 / 36.470 |                            4405.098 |
-| Launcher, target vazio  |  3 |  44.350 |    44.610 |       — |  44.740 |       0.390 |                      70.170 / 5.390 |                            1254.852 |
-| Runtime, sem alterações | 10 |   0.360 |     0.390 |   0.430 |   0.430 |       0.070 |                       0.235 / 0.110 |                              75.512 |
-| Runtime, nova versão    | 10 | 233.110 |   234.510 | 238.750 | 238.750 |       5.640 |                     230.640 / 4.085 |                            2150.988 |
+| Carga                   |   n |   Mín s | Mediana s |   p95 s |   Máx s | Amplitude s | CPU final mediana usuário/sistema s | RSS amostrado mediano da árvore MiB |
+| ----------------------- | --: | ------: | --------: | ------: | ------: | ----------: | ----------------------------------: | ----------------------------------: |
+| Runtime, target vazio   |   3 | 471.520 |   471.980 |       — | 473.020 |       1.500 |                    854.690 / 36.470 |                            4405.098 |
+| Launcher, target vazio  |   3 |  44.350 |    44.610 |       — |  44.740 |       0.390 |                      70.170 / 5.390 |                            1254.852 |
+| Runtime, sem alterações |  10 |   0.360 |     0.390 |   0.430 |   0.430 |       0.070 |                       0.235 / 0.110 |                              75.512 |
+| Runtime, nova versão    |  10 | 233.110 |   234.510 | 238.750 | 238.750 |       5.640 |                     230.640 / 4.085 |                            2150.988 |
 
 Após a atribuição não pontuada, hello/health do runtime, health do hub com banco novo e health com
 banco migrado executaram dois aquecimentos retidos e vinte tentativas medidas cada. As 66 passaram;
 os seis aquecimentos ficam fora dos resumos e permanecem abaixo. Hello negociado do runtime teve
 mín/mediana/p95/máx/amplitude de 174,824 / 193,737 / 213,288 / 214,148 / 39,324 ms (n=20).
 
-| Prontidão útil                   |  n |  Mín ms | Mediana ms |  p95 ms |  Máx ms | Amplitude ms | CPU amostrada mediana usuário/sistema ms | RSS amostrado mediano da árvore MiB |
-| -------------------------------- | -: | ------: | ---------: | ------: | ------: | -----------: | ---------------------------------------: | ----------------------------------: |
-| Runtime GNU hello + health       | 20 | 305.877 |    325.993 | 345.907 | 352.488 |       46.612 |                                 150 / 85 |                              67.033 |
-| Hub + runtime Zig, banco novo    | 20 | 360.742 |    419.285 | 439.980 | 446.751 |       86.008 |                                635 / 150 |                             111.791 |
-| Hub + runtime Zig, banco migrado | 20 | 286.377 |    349.174 | 358.860 | 365.151 |       78.774 |                                540 / 130 |                             109.400 |
+| Prontidão útil                   |   n |  Mín ms | Mediana ms |  p95 ms |  Máx ms | Amplitude ms | CPU amostrada mediana usuário/sistema ms | RSS amostrado mediano da árvore MiB |
+| -------------------------------- | --: | ------: | ---------: | ------: | ------: | -----------: | ---------------------------------------: | ----------------------------------: |
+| Runtime GNU hello + health       |  20 | 305.877 |    325.993 | 345.907 | 352.488 |       46.612 |                                 150 / 85 |                              67.033 |
+| Hub + runtime Zig, banco novo    |  20 | 360.742 |    419.285 | 439.980 | 446.751 |       86.008 |                                635 / 150 |                             111.791 |
+| Hub + runtime Zig, banco migrado |  20 | 286.377 |    349.174 | 358.860 | 365.151 |       78.774 |                                540 / 130 |                             109.400 |
 
 Cada coluna tem resumo independente. Percentis usam posto mais próximo (10 de 10 ou 19 de 20);
 três builds limpos não sustentam estimativa estável de cauda, portanto seu p95 foi omitido.

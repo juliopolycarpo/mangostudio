@@ -395,23 +395,23 @@ executable hash; every restamp rebuilt one unit, changed the executable hash, ke
 hashes identical and returned the exact `0.1.1-bench.1` through `.10` version. No optimization candidate
 exists, so these distinct workloads establish no savings delta.
 
-| Workload                 |  n |   Min s | Median s |   p95 s |   Max s | Spread s | Median final CPU user/system s | Median sampled tree RSS MiB |
-| ------------------------ | -: | ------: | -------: | ------: | ------: | -------: | -----------------------------: | --------------------------: |
-| Runtime, empty target    |  3 | 471.520 |  471.980 |       — | 473.020 |    1.500 |               854.690 / 36.470 |                    4405.098 |
-| Launcher, empty target   |  3 |  44.350 |   44.610 |       — |  44.740 |    0.390 |                 70.170 / 5.390 |                    1254.852 |
-| Runtime, no-op           | 10 |   0.360 |    0.390 |   0.430 |   0.430 |    0.070 |                  0.235 / 0.110 |                      75.512 |
-| Runtime, version restamp | 10 | 233.110 |  234.510 | 238.750 | 238.750 |    5.640 |                230.640 / 4.085 |                    2150.988 |
+| Workload                 |   n |   Min s | Median s |   p95 s |   Max s | Spread s | Median final CPU user/system s | Median sampled tree RSS MiB |
+| ------------------------ | --: | ------: | -------: | ------: | ------: | -------: | -----------------------------: | --------------------------: |
+| Runtime, empty target    |   3 | 471.520 |  471.980 |       — | 473.020 |    1.500 |               854.690 / 36.470 |                    4405.098 |
+| Launcher, empty target   |   3 |  44.350 |   44.610 |       — |  44.740 |    0.390 |                 70.170 / 5.390 |                    1254.852 |
+| Runtime, no-op           |  10 |   0.360 |    0.390 |   0.430 |   0.430 |    0.070 |                  0.235 / 0.110 |                      75.512 |
+| Runtime, version restamp |  10 | 233.110 |  234.510 | 238.750 | 238.750 |    5.640 |                230.640 / 4.085 |                    2150.988 |
 
 After an unscored attribution build, runtime hello/health, fresh-DB hub health and migrated-DB hub
 health each ran two retained warmups followed by twenty measured attempts. All 66 attempts succeeded;
 the six warmups are excluded from summaries and retained below. Runtime negotiated hello had
 min/median/p95/max/spread 174.824 / 193.737 / 213.288 / 214.148 / 39.324 ms (n=20).
 
-| Useful endpoint                |  n |  Min ms | Median ms |  p95 ms |  Max ms | Spread ms | Median sampled CPU user/system ms | Median sampled tree RSS MiB |
-| ------------------------------ | -: | ------: | --------: | ------: | ------: | --------: | --------------------------------: | --------------------------: |
-| GNU runtime hello + health     | 20 | 305.877 |   325.993 | 345.907 | 352.488 |    46.612 |                          150 / 85 |                      67.033 |
-| Hub + Zig runtime, fresh DB    | 20 | 360.742 |   419.285 | 439.980 | 446.751 |    86.008 |                         635 / 150 |                     111.791 |
-| Hub + Zig runtime, migrated DB | 20 | 286.377 |   349.174 | 358.860 | 365.151 |    78.774 |                         540 / 130 |                     109.400 |
+| Useful endpoint                |   n |  Min ms | Median ms |  p95 ms |  Max ms | Spread ms | Median sampled CPU user/system ms | Median sampled tree RSS MiB |
+| ------------------------------ | --: | ------: | --------: | ------: | ------: | --------: | --------------------------------: | --------------------------: |
+| GNU runtime hello + health     |  20 | 305.877 |   325.993 | 345.907 | 352.488 |    46.612 |                          150 / 85 |                      67.033 |
+| Hub + Zig runtime, fresh DB    |  20 | 360.742 |   419.285 | 439.980 | 446.751 |    86.008 |                         635 / 150 |                     111.791 |
+| Hub + Zig runtime, migrated DB |  20 | 286.377 |   349.174 | 358.860 | 365.151 |    78.774 |                         540 / 130 |                     109.400 |
 
 Each table column is summarized independently. Percentiles use nearest rank (rank 10 of 10 or
 19 of 20); three clean builds provide no stable tail estimate, so their p95 is omitted.

@@ -3,6 +3,7 @@ import { createWriteStream } from 'node:fs';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+
 import {
   assertMachineStdoutLimit,
   createMachineStdoutCapture,

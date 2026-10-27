@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
-  type BenchmarkSignalHost,
   benchmarkCancellation,
+  type BenchmarkSignalHost,
   withBenchmarkCancellation,
 } from '../lib/benchmark-cancellation';
 
