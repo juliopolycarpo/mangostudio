@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+
 import type {
   UpgradeReport,
   UpgradeRestart,
   UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
+
 import type { UpgradeArgs } from '../../../../src/cli/args';
 import { runUpgrade, type UpgradeCliDeps } from '../../../../src/cli/commands/upgrade';
 import type { ServerState } from '../../../../src/lib/server-state';

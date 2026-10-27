@@ -14,6 +14,7 @@ import {
   type ExternalAgentTargetId,
   externalRemedyForError,
 } from '@mangostudio/shared/external-agents';
+
 import { productDescriptorFor } from './adapter-descriptors';
 
 /**

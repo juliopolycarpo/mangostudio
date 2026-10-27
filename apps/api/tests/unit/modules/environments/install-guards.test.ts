@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { InstallGuard } from '@mangostudio/shared/environments';
+
 import { UNVERIFIED_CLIENT_IP } from '../../../../src/lib/client-ip';
 import {
   evaluateInstallGuard,

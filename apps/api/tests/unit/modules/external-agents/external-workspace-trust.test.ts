@@ -9,7 +9,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
+
 import { getDb } from '../../../../src/db/database';
 import { setLibraryLocationDefaultsForTest } from '../../../../src/modules/app-settings/application/app-settings-service';
 import { environmentProbingService } from '../../../../src/modules/environments/application/probing-service';

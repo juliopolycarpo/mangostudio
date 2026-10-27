@@ -7,12 +7,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { render, screen } from '../../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
 
-const { GithubStaleness } = await import(
-  '../../../../src/features/github/components/GithubStaleness'
-);
+const { GithubStaleness } =
+  await import('../../../../src/features/github/components/GithubStaleness');
 
 describe('GithubStaleness', () => {
   it('ages the label while the panel sits idle', async () => {

@@ -23,9 +23,11 @@ import { realpathSync, statSync } from 'node:fs';
 import { mkdir, realpath, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+
 import { sanitizedEnv, spawnPort } from '@mangostudio/protocol/spawn';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import type { ExternalApprovalPart } from '@mangostudio/shared/types';
+
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import { createEnvironmentRepository } from '../../../src/modules/environments/infrastructure/environment-repository';

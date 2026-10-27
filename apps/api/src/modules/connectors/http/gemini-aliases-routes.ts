@@ -11,6 +11,7 @@ import {
 } from '@mangostudio/shared/connectors';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
+
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -32,12 +33,12 @@ const connectorLogger = createDiagnosticLogger('connectors');
 export const geminiAliasRoutes = new Elysia()
   .use(requireAuth)
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   .get('/secrets/gemini', async ({ user }): Promise<ConnectorStatus> => {
     return getGeminiSecretStatus(user?.id ?? '');
   })
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   .get('/models/gemini', async ({ user }): Promise<ModelCatalogResponse> => {
     return getUnifiedModelCatalog(user?.id ?? '');
   })

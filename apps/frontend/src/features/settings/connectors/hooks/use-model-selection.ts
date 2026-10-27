@@ -5,6 +5,7 @@
 import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
 import type { Connector } from '@mangostudio/shared/connectors';
 import { useRef, useState } from 'react';
+
 import { updateConnectorModels } from '../api';
 
 function withModelToggled(enabledModels: string[], modelId: string, checked: boolean): string[] {
@@ -60,7 +61,7 @@ export function useModelSelection(
     } catch (err) {
       // Undo only this toggle; concurrent toggles that already landed stay applied.
       const pending = selectedConnectorRef.current;
-      if (pending && pending.id === connectorId) {
+      if (pending?.id === connectorId) {
         setConnector({
           ...pending,
           enabledModels: withModelToggled(pending.enabledModels, modelId, !checked),

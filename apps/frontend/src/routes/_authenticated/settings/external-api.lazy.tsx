@@ -1,4 +1,5 @@
 import { createLazyFileRoute } from '@tanstack/react-router';
+
 import { ExternalApiSettingsPage } from '@/features/settings/external-api';
 import { useApp } from '@/lib/app-context';
 

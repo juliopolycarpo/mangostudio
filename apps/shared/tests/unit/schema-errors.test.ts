@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import Type, { type TSchema } from 'typebox';
 import Value from 'typebox/value';
 

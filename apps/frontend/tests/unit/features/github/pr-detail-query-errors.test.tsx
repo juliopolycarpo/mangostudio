@@ -9,7 +9,9 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { screen } from '@testing-library/react';
+
 import { GithubPrDetail } from '../../../../src/features/github/components/GithubPrDetail';
 import { flushAsyncRender, render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';

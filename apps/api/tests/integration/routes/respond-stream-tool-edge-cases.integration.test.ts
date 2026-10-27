@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
@@ -287,6 +288,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     // Simulates a client disconnect: the route aborts streamTextTurn's signal
     // from the ReadableStream's cancel() callback, so cancelling the reader is
     // how a real abort reaches the delegation retry loop.
+    // eslint-disable-next-line prefer-const -- This binding is assigned after a callback closes over it.
     let cancelStream: (() => void) | undefined;
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({

@@ -1,7 +1,7 @@
 # Primeira execução
 
 Tudo abaixo é opcional. O MangoStudio funciona se você pular tudo — o fluxo de
-configuração existe para que ninguém precise *adivinhar* o que configurar
+configuração existe para que ninguém precise _adivinhar_ o que configurar
 primeiro, não para trancar a aplicação atrás de um formulário.
 
 > 🇺🇸 [Read in English](../../guides/first-run.md)
@@ -63,15 +63,15 @@ retoma de onde você estava, em qualquer dispositivo.
 
 ### O que "retomar" significa de verdade
 
-O fluxo não lembra em que passo você estava. Ele lê o que a máquina diz *agora*
+O fluxo não lembra em que passo você estava. Ele lê o que a máquina diz _agora_
 e abre na primeira pergunta ainda sem resposta. Então:
 
 - apague a pasta escolhida, e ele reabre em **Pasta**;
 - desconecte uma CLI de agente, e ele reabre em **Agentes**;
 - instale o Node por fora, e o **Toolchain** simplesmente fica pronto.
 
-Uma requisição que ainda não respondeu aparece como *Verificando*, nunca como
-*não feito* — uma rede lenta não pode arrastar você de volta por passos que já
+Uma requisição que ainda não respondeu aparece como _Verificando_, nunca como
+_não feito_ — uma rede lenta não pode arrastar você de volta por passos que já
 terminou.
 
 ### Pular
@@ -89,7 +89,7 @@ suas configurações de máquina continuam exatamente como estão.
 
 ## Passos que não podem ser feitos de onde você está
 
-Dois passos dependem de *onde o navegador está*, não da conta:
+Dois passos dependem de _onde o navegador está_, não da conta:
 
 - **Sempre ativo** instala uma unidade de serviço para o processo do próprio
   hub. Se você abriu o MangoStudio de outro computador — ou a plataforma não tem

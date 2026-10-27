@@ -1,11 +1,20 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import { useFocusTrap } from '@/hooks/use-focus-trap';
+
 import { fireEvent, render, screen } from '../../support/harness/render';
 
 function TrappedDialog({ label, onEscape }: { label: string; onEscape: () => void }) {
   const dialogRef = useFocusTrap(onEscape);
   return (
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+    <div
+      ref={dialogRef}
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- This custom dialog owns its focus and dismissal behavior.
+      role="dialog"
+      aria-modal="true"
+      aria-label={label}
+      tabIndex={-1}
+    >
       <button type="button">{`${label} action`}</button>
     </div>
   );
@@ -110,7 +119,14 @@ describe('useFocusTrap with a second dialog stacked over the first', () => {
 function DialogWithSkippedButton({ onEscape }: { onEscape: () => void }) {
   const dialogRef = useFocusTrap(onEscape);
   return (
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Dialog" tabIndex={-1}>
+    <div
+      ref={dialogRef}
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- This custom dialog owns its focus and dismissal behavior.
+      role="dialog"
+      aria-modal="true"
+      aria-label="Dialog"
+      tabIndex={-1}
+    >
       <button type="button">First</button>
       <button type="button" tabIndex={-1}>
         Skipped
@@ -142,8 +158,15 @@ describe('useFocusTrap with a tabIndex={-1} control after the last real stop', (
 function DialogWithAutofocusField() {
   const dialogRef = useFocusTrap(jest.fn());
   return (
-    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Dialog" tabIndex={-1}>
-      {/* biome-ignore lint/a11y/noAutofocus: the case under test. */}
+    <div
+      ref={dialogRef}
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- This custom dialog owns its focus and dismissal behavior.
+      role="dialog"
+      aria-modal="true"
+      aria-label="Dialog"
+      tabIndex={-1}
+    >
+      {/* the case under test. */}
       <input aria-label="Field" autoFocus />
     </div>
   );

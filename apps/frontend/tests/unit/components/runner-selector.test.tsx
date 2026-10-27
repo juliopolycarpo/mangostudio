@@ -8,11 +8,12 @@
  */
 
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import { routerWithLinkStub } from '../../support/mocks/router';
 
 // The remedy for a missing or outdated agent is a link into the surface that
 // owns the install recipes, so this file now renders a router `Link`.
-mock.module('@tanstack/react-router', await routerWithLinkStub());
+void mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
@@ -22,6 +23,7 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen, within } from '@testing-library/react';
+
 import { RunnerSelector } from '../../../src/components/layout/RunnerSelector';
 import { render } from '../../support/harness/render';
 

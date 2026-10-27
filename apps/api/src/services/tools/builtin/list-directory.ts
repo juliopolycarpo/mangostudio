@@ -10,8 +10,8 @@ import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
   normalizePathValidationSettings,
-  type PathValidationSettings,
   pathPolicyParameterDescriptors,
+  type PathValidationSettings,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';
@@ -80,7 +80,7 @@ export async function executeListDirectory(
   return { ...result, entries: [...result.entries] };
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 async function execute(
   args: Record<string, unknown>,
   context: ToolContext

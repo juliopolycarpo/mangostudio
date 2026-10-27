@@ -1,4 +1,5 @@
 import type { ModelOption } from '@mangostudio/shared/catalog';
+
 import { CheckboxRow } from '@/components/settings/CheckboxRow';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 

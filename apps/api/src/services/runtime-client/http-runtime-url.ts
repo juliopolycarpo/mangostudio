@@ -4,7 +4,7 @@
  * is the point of this transport.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 
 export function parseHttpRuntimeBaseUrl(baseUrl: string): URL {
   let url: URL;

@@ -2,8 +2,10 @@ import type { ProviderType, SecretMetadataRow } from '../types/provider';
 import type { ChatGptUsageSnapshot } from './schemas';
 
 /** Represents a validated and configured API connector. */
-export interface Connector
-  extends Omit<SecretMetadataRow, 'configured' | 'enabledModels' | 'provider'> {
+export interface Connector extends Omit<
+  SecretMetadataRow,
+  'configured' | 'enabledModels' | 'provider'
+> {
   provider: ProviderType;
   configured: boolean;
   enabledModels: string[];

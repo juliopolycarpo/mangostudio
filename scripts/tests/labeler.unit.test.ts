@@ -112,8 +112,7 @@ describe('labeler coverage', () => {
 
     expect(labeler).toContain('"area: tooling":');
     const toolingSection = extractLabelSection(labeler, '"area: tooling":', '"area: db":');
-    expect(toolingSection).toContain('- "biome.json"');
-    expect(toolingSection).toContain('- "dprint.json"');
+    expect(toolingSection).toContain('- "bunfig.toml"');
     expect(toolingSection).toContain('- "lefthook.yml"');
     expect(toolingSection).toContain('- "opencode.json"');
     expect(toolingSection).toContain('- ".editorconfig"');
@@ -125,8 +124,7 @@ describe('labeler coverage', () => {
     expect(toolingSection).toContain('- ".agents/skills/**"');
 
     const buildSection = extractLabelSection(labeler, '"area: build":', '"area: docs":');
-    expect(buildSection).not.toContain('biome.json');
-    expect(buildSection).not.toContain('dprint.json');
+    expect(buildSection).not.toContain('bunfig.toml');
     expect(buildSection).not.toContain('lefthook.yml');
     expect(buildSection).not.toContain('opencode.json');
     expect(buildSection).not.toContain('.editorconfig');

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import * as EnvironmentValues from '@mangostudio/shared/environments/values';
 import * as ExternalValues from '@mangostudio/shared/external-agents/values';
 import * as GenerationValues from '@mangostudio/shared/generation/values';
@@ -6,6 +7,7 @@ import * as LibraryValues from '@mangostudio/shared/library/values';
 import * as MachineLimits from '@mangostudio/shared/machine/limits';
 import * as RuntimeValues from '@mangostudio/shared/runtime-home/values';
 import Value from 'typebox/value';
+
 import * as Environments from '../../src/environments';
 import * as External from '../../src/external-agents';
 import * as Generation from '../../src/generation';

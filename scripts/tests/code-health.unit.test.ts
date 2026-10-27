@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { touchesCodeHealthSurface } from '../lib/code-health';
 import { readText } from './support/read-text';
 

@@ -1,5 +1,6 @@
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { type ChatRecord, getById } from '../infrastructure/chat-repository';
 

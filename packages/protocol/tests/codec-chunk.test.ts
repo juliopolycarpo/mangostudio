@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   CHUNK_FORMAT_VERSION,
   CHUNK_HEADER_BYTES,
   ChunkReassembler,
   DEFAULT_MAX_MESSAGE_BYTES,
   encodeChunks,
+  maxChunksFor,
   MIN_MAX_MESSAGE_BYTES,
   MIN_NONFINAL_PAYLOAD_BYTES,
-  maxChunksFor,
 } from '../src/codec/chunk';
 import type { Frame } from '../src/schemas/frames';
 import { refusalOf } from './support/refusal';

@@ -13,6 +13,7 @@ import type {
   McpElicitationTerminalStatus,
   RespondMcpElicitationBody,
 } from '@mangostudio/shared/mcp';
+
 import { createDiagnosticLogger } from '../../lib/logger';
 
 type McpElicitationResultAction = 'accept' | 'decline' | 'cancel';
@@ -178,7 +179,7 @@ export function respondElicitation(
   body: RespondMcpElicitationBody
 ): McpElicitationStatus | null {
   const entry = pending.get(elicitationId);
-  if (!entry || entry.userId !== userId) return null;
+  if (entry?.userId !== userId) return null;
 
   const status = actionToStatus(body.action);
   entry.settle(status, 'responded', {

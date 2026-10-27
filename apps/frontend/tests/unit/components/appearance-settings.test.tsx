@@ -3,7 +3,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { act, fireEvent, screen } from '@testing-library/react';
+
 import { AppearanceSettings } from '../../../src/components/settings/AppearanceSettings';
 import { useTheme } from '../../../src/hooks/use-theme';
 import { render, renderHook } from '../../support/harness/render';

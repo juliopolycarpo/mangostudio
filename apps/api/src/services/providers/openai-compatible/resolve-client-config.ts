@@ -1,4 +1,5 @@
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { parseStringArray } from '../../../utils/json';
 
 export interface CompatibleClientConfig {

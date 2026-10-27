@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { CodecError, isReservedErrorCode, RESERVED_ERROR_CODES, RemoteError } from '../src/errors';
+
+import { CodecError, isReservedErrorCode, RemoteError, RESERVED_ERROR_CODES } from '../src/errors';
 
 describe('isReservedErrorCode', () => {
   it('accepts every code the spec reserves', () => {

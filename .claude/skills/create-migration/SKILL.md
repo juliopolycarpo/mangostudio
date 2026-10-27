@@ -32,12 +32,12 @@ that has drifted.
 3. **Register it** in `apps/api/src/db/migrations/index.ts`: add the import and the
    `'NNN_<snake_description>': <namedExport>` entry, keeping numeric order.
 4. **Update `apps/api/src/db/types.ts`:**
-   - Add the table interface, named `<TableNamePascal>Table` after the *plural*
+   - Add the table interface, named `<TableNamePascal>Table` after the _plural_
      `snake_case` table (e.g. `chat_todos` → `ChatTodosTable`), hand-written;
      nothing is generated.
    - Add the table to the `Database` interface (key is the `snake_case` table name).
    - Derive the Kysely aliases the owning module will use, named from the
-     *singular* entity (e.g. `ChatTodo`, not `ChatTodos`):
+     _singular_ entity (e.g. `ChatTodo`, not `ChatTodos`):
      `export type <Entity>Select = Selectable<<TableNamePascal>Table>` and likewise
      `Insert = Insertable<…>` / `Update = Updateable<…>`. Existing entries only
      declare the aliases actually consumed — match that, don't emit all three

@@ -19,6 +19,7 @@ import {
   McpPortableDocumentSchema,
 } from '@mangostudio/shared/mcp';
 import Value from 'typebox/value';
+
 import { isHttpUrl, isValidMcpServerSlug, McpServerError } from '../domain/mcp-server';
 import { analyzeMcpHttpUrl, looksCredentialShaped } from './mcp-credential-policy';
 
@@ -159,8 +160,7 @@ function mapServerEntry(
 }
 
 type TransportClass =
-  | { kind: 'stdio' | 'http' }
-  | { kind: 'unsupported'; detail: string | undefined };
+  { kind: 'stdio' | 'http' } | { kind: 'unsupported'; detail: string | undefined };
 
 function classifyTransport(value: Record<string, unknown>): TransportClass {
   const type = value.type;

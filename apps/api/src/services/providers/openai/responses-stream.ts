@@ -3,6 +3,7 @@
  */
 
 import type OpenAI from 'openai';
+
 import type { ResponsesRequestPolicy } from '../core/responses-protocol/request-builder';
 import { streamAgentTurnWithResponses, streamResponses } from '../core/responses-protocol/stream';
 import type { AgentEvent, AgentTurnRequest, StreamingChunk, TextGenerationRequest } from '../types';

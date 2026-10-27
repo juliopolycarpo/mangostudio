@@ -10,6 +10,7 @@
  */
 
 import { join } from 'node:path';
+
 import { getConfig } from '../../lib/config';
 import { readUtf8FileOrNull, SECRET_FILE_MODE, writeFileAtomic } from '../../lib/safe-file';
 

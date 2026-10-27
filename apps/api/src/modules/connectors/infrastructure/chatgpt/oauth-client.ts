@@ -8,15 +8,16 @@
  */
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+
 import {
   exchangeAuthorizationCode as coreExchangeAuthorizationCode,
-  parseTokenBundle as coreParseTokenBundle,
-  refreshTokenGrant as coreRefreshTokenGrant,
   type FetchLike,
   OAuthFlowError,
   type OAuthProviderProfile,
   OAuthReauthRequiredError,
   type OAuthTokenBundle,
+  parseTokenBundle as coreParseTokenBundle,
+  refreshTokenGrant as coreRefreshTokenGrant,
 } from '../oauth/token-client';
 import {
   CHATGPT_AUTH_CLAIM,
@@ -66,8 +67,7 @@ export const chatGptOAuthProfile: OAuthProviderProfile<ChatGptIdentity> = {
 
   extractIdentity(accessClaims, idClaims) {
     const authClaim = (accessClaims?.[CHATGPT_AUTH_CLAIM] ?? idClaims?.[CHATGPT_AUTH_CLAIM]) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     const accountId =
       typeof authClaim?.chatgpt_account_id === 'string' ? authClaim.chatgpt_account_id : '';
     if (!accountId) {

@@ -1,6 +1,8 @@
 import { writeFileSync } from 'node:fs';
+
 import { decodeTerminalClientMessage } from '@mangostudio/shared/terminal';
 import { expect, test } from '@playwright/test';
+
 import { dismissWorkdirPicker } from './support/workdir-picker';
 
 /**

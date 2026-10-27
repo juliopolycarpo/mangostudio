@@ -36,6 +36,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -230,7 +231,7 @@ export function RunnerSelector({
   const availabilityId = useId();
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Escape is handled for the trigger and the panel it owns, both inside this wrapper.
     <div ref={containerRef} onKeyDown={onKeyDown} className="relative">
       <Button
         ref={triggerRef}
@@ -259,6 +260,7 @@ export function RunnerSelector({
 
       {open ? (
         <div
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox renders rich options a native select cannot contain.
           role="listbox"
           aria-label={labels.label}
           className="dropdown-panel app-scrollbar absolute top-full left-0 mt-1 max-h-[70vh] w-80 overflow-y-auto p-1"
@@ -385,6 +387,7 @@ function RunnerRow({
   return (
     <button
       type="button"
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox option carries rich content and selection behavior.
       role="option"
       aria-selected={active}
       onClick={onSelect}
@@ -509,6 +512,7 @@ function ExternalRow({
       <div className="flex w-full items-start gap-1">
         <button
           type="button"
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox option carries rich content and selection behavior.
           role="option"
           aria-selected={active}
           aria-labelledby={forkHint ? `${nameId} ${forkId}` : nameId}

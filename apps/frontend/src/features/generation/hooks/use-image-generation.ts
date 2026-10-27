@@ -3,6 +3,7 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
+
 import type { useChats } from '@/features/chat/hooks/use-chats';
 import { galleryKeys } from '@/features/gallery/queries';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';

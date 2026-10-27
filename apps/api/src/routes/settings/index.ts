@@ -5,6 +5,7 @@
  */
 
 import type { Elysia } from 'elysia';
+
 import { agentRoutes } from '../../modules/agents/http/agent-routes';
 import { appSettingsRoutes } from '../../modules/app-settings/http/app-settings-routes';
 import { chatGptOAuthRoutes } from '../../modules/connectors/http/chatgpt-oauth-routes';

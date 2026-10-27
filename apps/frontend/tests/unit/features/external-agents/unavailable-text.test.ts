@@ -7,7 +7,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { externalUnavailableText } from '@/features/external-agents/useExternalAgents';
 
 describe('externalUnavailableText', () => {

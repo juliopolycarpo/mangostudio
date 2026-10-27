@@ -3,6 +3,7 @@ import { AnimatePresence } from 'motion/react';
 import * as motion from 'motion/react-m';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
+
 import { ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 
@@ -76,7 +77,7 @@ export function Menu({
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: roving focus is delegated from the wrapper to the trigger and items it contains.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- roving focus is delegated from the wrapper to the trigger and items it contains.
     <div ref={containerRef} className="relative" onKeyDown={handleKeyDown}>
       {trigger({
         onClick: () => onOpenChange(!open),

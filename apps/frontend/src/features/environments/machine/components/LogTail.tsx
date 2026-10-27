@@ -6,10 +6,12 @@
 
 import type { MachineLogTail } from '@mangostudio/shared/machine';
 import { RefreshCw } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import { machineGuardReasonLabel } from '../format';
 import { useMachineLogs } from '../queries';

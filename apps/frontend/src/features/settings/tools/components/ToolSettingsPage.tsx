@@ -5,6 +5,7 @@
 import type { ToolSettingsCategory } from '@mangostudio/shared/tool-settings';
 import { Wrench } from 'lucide-react';
 import { useMemo } from 'react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
@@ -15,6 +16,7 @@ import { Input } from '@/components/ui/Input';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
+
 import { useToolSettings } from '../hooks/use-tool-settings';
 import { ToolSettingsRow } from './ToolSettingsRow';
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+
 import { RemoteError } from '@mangostudio/protocol';
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
 import type {
@@ -14,6 +15,7 @@ import {
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { Kysely } from 'kysely';
+
 import { getDb } from '../../../../src/db/database';
 import type { Database } from '../../../../src/db/types';
 import { getChatMessagesUseCase } from '../../../../src/modules/chats/application/get-chat-messages';

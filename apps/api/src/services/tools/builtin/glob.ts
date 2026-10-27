@@ -11,10 +11,10 @@ import {
   createResultPathReporter,
   normalizePathValidationSettings,
   PathAccessError,
-  type PathValidationSettings,
   pathPolicyParameterDescriptors,
-  type ResolvePathOptions,
+  type PathValidationSettings,
   resolveAndValidatePath,
+  type ResolvePathOptions,
   runtimePathPolicy,
 } from './_fs-utils';
 

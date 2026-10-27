@@ -255,8 +255,10 @@ export function resolveRuntimeSource(options: ResolveRuntimeSourceOptions): Runt
     if (fileExists(path)) return { kind: 'prebuilt', path };
     throw new Error(
       `Missing prebuilt runtime for ${target.arch}: expected ${path}. ` +
-        `A runtime directory holds <dir>/<platform-id>/${name} for every requested target. ` +
-        runtimeBuildHint(target.arch, runtimeDir)
+        `A runtime directory holds <dir>/<platform-id>/${name} for every requested target. ${runtimeBuildHint(
+          target.arch,
+          runtimeDir
+        )}`
     );
   }
 

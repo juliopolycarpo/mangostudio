@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import { useClipboard } from '../../../src/hooks/use-clipboard';
 import { stubClipboard } from '../../support/harness/clipboard';
 import { act, renderHook } from '../../support/harness/render';

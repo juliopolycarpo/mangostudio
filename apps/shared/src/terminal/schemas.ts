@@ -11,6 +11,7 @@
 
 import type { Static } from 'typebox';
 import Type from 'typebox';
+
 import {
   HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES,
   HUB_WEBSOCKET_MAX_PAYLOAD_BYTES,

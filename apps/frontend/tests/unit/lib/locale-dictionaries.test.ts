@@ -4,7 +4,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { en, type Locale, ptBR } from '@mangostudio/shared/i18n';
+
 import {
   createLocaleDictionaryStore,
   detectLocale,

@@ -1,4 +1,5 @@
 import type { Connector } from '@mangostudio/shared/connectors';
+
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Badge } from '@/components/ui/Badge';
 import { ChatGptResetCreditAction } from '@/features/settings/connectors/components/ChatGptResetCreditAction';

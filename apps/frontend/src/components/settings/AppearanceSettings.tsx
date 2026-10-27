@@ -1,5 +1,6 @@
 import type { DiffPreviewMode } from '@mangostudio/shared/app-settings';
 import { Check } from 'lucide-react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
@@ -13,6 +14,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { ThemePreviewSample } from './ThemePreviewSample';
 
 type AppTheme = ThemeConfig['appTheme'];

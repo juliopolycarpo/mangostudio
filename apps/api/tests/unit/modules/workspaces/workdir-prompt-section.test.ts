@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   appendWorkdirPromptSection,
   WORKDIR_RESTRICTED_PROMPT_LINE,

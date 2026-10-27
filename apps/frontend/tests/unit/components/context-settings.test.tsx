@@ -1,5 +1,7 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import { fireEvent, screen } from '@testing-library/react';
+
 import { ContextSettings } from '../../../src/components/settings/ContextSettings';
 import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';

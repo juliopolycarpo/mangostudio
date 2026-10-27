@@ -58,9 +58,7 @@ split_commits = false
 # `e39d1f8` states its breaking surface as "Breaking pre-1.0:", which the
 # conventional parser does not recognise. Rewrite it to the footer token so the
 # surface reaches the changelog and the generated release notes.
-commit_preprocessors = [
-  { pattern = '(?m)^Breaking pre-1\.0: ', replace = "BREAKING CHANGE: " },
-]
+commit_preprocessors = [{ pattern = '(?m)^Breaking pre-1\.0: ', replace = "BREAKING CHANGE: " }]
 commit_parsers = [
   { message = "^chore\\(release\\)", skip = true },
   { message = "^chore\\(deps\\)", group = "<!-- 8 -->⬆️ Dependencies" },

@@ -8,6 +8,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import {
   McpElicitationActionSchema,
   McpElicitationFieldSchema,

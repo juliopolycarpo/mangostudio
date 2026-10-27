@@ -8,7 +8,7 @@
  * connection, and a restarted hub has none.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID, type ToolchainSelection } from '@mangostudio/shared/environments';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import {
@@ -24,6 +24,7 @@ import {
   type TerminalRenameBody,
   type TerminalSession,
 } from '@mangostudio/shared/terminal';
+
 import { getDb } from '../../../db/database';
 import { getConfig as getApiConfig, type MangoConfig } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
@@ -604,14 +605,14 @@ export function createTerminalSessionService(
 
     rename(userId, id, body) {
       const entry = sessions.get(id);
-      if (!entry || entry.ownerUserId !== userId) throw new TerminalSessionNotFoundError(id);
+      if (entry?.ownerUserId !== userId) throw new TerminalSessionNotFoundError(id);
       entry.session.title = body.title;
       return entry.session;
     },
 
     async close(userId, id) {
       const entry = sessions.get(id);
-      if (!entry || entry.ownerUserId !== userId) throw new TerminalSessionNotFoundError(id);
+      if (entry?.ownerUserId !== userId) throw new TerminalSessionNotFoundError(id);
       try {
         await entry.client.terminal.close(
           { sessionId: id },
@@ -669,12 +670,7 @@ export function createTerminalSessionService(
 
     getForAttach(userId, sessionId) {
       const entry = sessions.get(sessionId);
-      if (
-        !entry ||
-        entry.ownerUserId !== userId ||
-        entry.cleanupPending ||
-        reaping.has(sessionId)
-      ) {
+      if (entry?.ownerUserId !== userId || entry.cleanupPending || reaping.has(sessionId)) {
         return null;
       }
       return { session: entry.session, client: entry.client };
@@ -696,7 +692,7 @@ export function createTerminalSessionService(
 
     detachViewer(sessionId, viewer) {
       const entry = sessions.get(sessionId);
-      if (!entry || entry.viewer !== viewer) return false;
+      if (entry?.viewer !== viewer) return false;
       entry.viewer = null;
       entry.session.attached = false;
       entry.session.lastActivityAt = d.now();

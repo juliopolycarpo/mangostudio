@@ -15,7 +15,7 @@
  */
 
 import { ROOT_DIR } from '../lib/config';
-import { exitWithResults, type RunResult, runCommand, runSequential } from '../lib/runner';
+import { exitWithResults, runCommand, type RunResult, runSequential } from '../lib/runner';
 import { protocolTestTasks } from './tasks';
 
 const separator = process.argv.indexOf('--');

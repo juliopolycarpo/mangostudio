@@ -7,9 +7,12 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import { createMockChat } from '@mangostudio/shared/test-utils';
+
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
+
 import type * as ApiClient from '../../../src/lib/api-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 import { setTestSession } from '../../support/setup/auth-client-stub';
@@ -22,7 +25,7 @@ interface Subscription {
 let subscriptions: Subscription[] = [];
 
 // The seam is the client module, not the WebSocket global.
-mock.module('@/lib/realtime/realtime-client', () => ({
+void mock.module('@/lib/realtime/realtime-client', () => ({
   bindRealtimeClientToUser: jest.fn(),
   getRealtimeClient: () => ({
     subscribe: (topic: string, listener: RealtimeTopicListener) => {
@@ -36,7 +39,7 @@ const mockGet = jest.fn();
 
 // Eden Treaty's generic types are too strict for jest.fn() mocks, so the
 // factory is cast via unknown.
-mock.module('../../../src/lib/api-client', () => ({
+void mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: { chats: Object.assign(jest.fn(), { get: mockGet }) },
   } as unknown as typeof ApiClient.client,

@@ -5,6 +5,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type {
   MachineDoctorReport,
@@ -13,6 +14,7 @@ import type {
 } from '@mangostudio/shared/machine';
 import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import userEvent from '@testing-library/user-event';
+
 import { MachinePage } from '../../../../src/features/environments/machine/components/MachinePage';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -321,11 +323,13 @@ describe('MachinePage', () => {
 
     await waitFor(() => {
       const posts = scenario.fetchMock.mock.calls.filter(([input]) =>
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
         String(input).includes('/api/machine/upgrade')
       );
       expect(posts.length).toBeGreaterThan(0);
     });
     const upgradeCall = scenario.fetchMock.mock.calls.find(([input]) =>
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
       String(input).includes('/api/machine/upgrade')
     );
     const body = JSON.parse((upgradeCall?.[1]?.body as string) ?? '{}') as Record<string, unknown>;

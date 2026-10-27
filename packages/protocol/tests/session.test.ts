@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { CLOSE_CODES } from '../src/close';
-import { CodecError, RESERVED_ERROR_CODES, RemoteError } from '../src/errors';
+import { CodecError, RemoteError, RESERVED_ERROR_CODES } from '../src/errors';
 import type { Port, PortClosure } from '../src/port';
 import type { Frame, HelloFrame } from '../src/schemas/frames';
 import { isSessionClosedRequestError, Session, type SessionOptions } from '../src/session';
@@ -204,14 +205,14 @@ describe('Session handshake', () => {
     expect(fromRuntime.peer).toEqual(HUB);
     expect(fromRuntime.capabilities).toEqual({ audit: true });
     expect(hub.remote.effectiveMinor).toBe(PROTOCOL_MINOR);
-    hub.close();
+    hub.closeNow();
   });
 
   it('throws from remote before the handshake completes', () => {
     const ports = createInProcessPortPair();
     const session = new Session(ports.a, { peer: HUB, livenessIntervalMs: false });
     expect(() => session.remote).toThrow(RemoteError);
-    session.close();
+    session.closeNow();
   });
 
   it('times out when the peer never says hello', async () => {
@@ -246,7 +247,7 @@ describe('Session handshake', () => {
     const ids = recorder.frames.filter((frame) => frame.type === 'req').map((frame) => frame.id);
     expect(ids).toHaveLength(4);
     expect(new Set(ids).size).toBe(ids.length);
-    hub.close();
+    hub.closeNow();
   });
 
   it('answers a request that arrives before the handshake with UNAVAILABLE', async () => {
@@ -260,7 +261,7 @@ describe('Session handshake', () => {
       id: 'early',
       error: { code: RESERVED_ERROR_CODES.UNAVAILABLE },
     });
-    session.close();
+    session.closeNow();
   });
 
   it('closes with 4400 on a duplicate hello', async () => {
@@ -289,7 +290,7 @@ describe('Session handshake', () => {
     ports.b.send({ ...rawHello(), limits: { maxFrameBytes: 4096 } });
     await session.ready;
     expect(session.sendLimitBytes).toBe(4096);
-    session.close();
+    session.closeNow();
   });
 
   it('announces the lower of its own ceiling and the one the port decodes', async () => {
@@ -308,7 +309,7 @@ describe('Session handshake', () => {
     ports.b.send(rawHello());
     await session.ready;
     expect(session.sendLimitBytes).toBe(4096);
-    session.close();
+    session.closeNow();
   });
 
   it('refuses a frame ceiling below the floor of the wire', () => {
@@ -356,7 +357,7 @@ describe('Session handshake', () => {
     ports.b.send({ ...rawHello(), limits: { maxFrameBytes: 32 * 1024 * 1024 } });
     await session.ready;
     expect(session.sendLimitBytes).toBe(32 * 1024 * 1024);
-    session.close();
+    session.closeNow();
   });
 });
 
@@ -489,7 +490,7 @@ describe('Session requests', () => {
     await expect(hub.request('rpc.nowhere', {})).rejects.toMatchObject({
       code: RESERVED_ERROR_CODES.INVALID_REQUEST,
     });
-    hub.close();
+    hub.closeNow();
   });
 
   it('maps a handler that throws RemoteError, Error and AbortError onto the wire', async () => {
@@ -524,8 +525,8 @@ describe('Session requests', () => {
       code: RESERVED_ERROR_CODES.CANCELLED,
     });
     expect(await requester.request('test.void', {})).toBeNull();
-    requester.close();
-    responder.close();
+    requester.closeNow();
+    responder.closeNow();
   });
 
   it('answers a duplicate in-flight id with INVALID_REQUEST and keeps the first running', async () => {
@@ -552,7 +553,7 @@ describe('Session requests', () => {
     release();
     const answered = await recorder.until((frame) => frame.type === 'res');
     expect(answered).toMatchObject({ id: 'dup', result: 'done' });
-    session.close();
+    session.closeNow();
   });
 
   it('ignores a response for an unknown id', async () => {
@@ -563,17 +564,17 @@ describe('Session requests', () => {
     ports.b.send({ type: 'res', id: 'nobody', result: 1 });
     await tick();
     expect(session.state).toBe('ready');
-    session.close();
+    session.closeNow();
   });
 
   it('fails a request sent after close with UNAVAILABLE', async () => {
     const { hub, runtime } = pair();
     await hub.ready;
-    hub.close();
+    hub.closeNow();
     await expect(hub.request('test.echo', {})).rejects.toMatchObject({
       code: RESERVED_ERROR_CODES.UNAVAILABLE,
     });
-    runtime.close();
+    runtime.closeNow();
   });
 
   it('aborts the handler signal when the session closes', async () => {
@@ -595,7 +596,7 @@ describe('Session requests', () => {
     const requester = new Session(ports.a, { peer: HUB, livenessIntervalMs: false });
     const pending = requester.request('test.hang', {});
     await tick();
-    responder.close();
+    responder.closeNow();
     await expect(pending).rejects.toMatchObject({ code: RESERVED_ERROR_CODES.UNAVAILABLE });
     expect(aborted).toBe(true);
   });
@@ -609,7 +610,7 @@ describe('Session events and liveness', () => {
     ports.b.send(rawHello());
     await session.ready;
     expect(session.emit({ topic: 'test.ok', payload: 1 })).toBe(true);
-    session.close();
+    session.closeNow();
     expect(session.emit({ topic: 'test.late', payload: 1 })).toBe(false);
   });
 
@@ -654,7 +655,7 @@ describe('Session events and liveness', () => {
     await session.ready;
     await tick(60);
     expect(session.state).toBe('ready');
-    session.close();
+    session.closeNow();
   });
 
   it('tears down on a received close frame with its code', async () => {
@@ -678,13 +679,13 @@ describe('Session events and liveness', () => {
     hub.onClose(() => {
       count += 1;
     });
-    hub.close();
-    hub.close();
+    hub.closeNow();
+    hub.closeNow();
     await tick();
     expect(count).toBe(1);
     const late = new Promise((resolve) => hub.onClose(resolve));
     expect(await late).toMatchObject({ code: CLOSE_CODES.RELEASED });
-    runtime.close();
+    runtime.closeNow();
   });
 });
 

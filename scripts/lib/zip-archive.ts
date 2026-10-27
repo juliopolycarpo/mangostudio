@@ -1,5 +1,5 @@
 import type { ArchiveReader } from './archive';
-import { type CaptureResult, captureCommand } from './exec';
+import { captureCommand, type CaptureResult } from './exec';
 
 interface ArchiveCommands {
   readonly list: readonly string[];

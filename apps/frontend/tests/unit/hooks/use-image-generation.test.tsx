@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type * as GenerationService from '../../../src/services/generation-service';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
@@ -7,25 +8,24 @@ import { act, renderHook, waitFor } from '../../support/harness/render';
 const mockUpload = jest.fn();
 const mockGenerate = jest.fn();
 
-mock.module('../../../src/services/generation-service', () => ({
+void mock.module('../../../src/services/generation-service', () => ({
   uploadReferenceImage: mockUpload,
   generateImage: mockGenerate,
 }));
 
 // Suppress React Query retries and console noise in tests
-mock.module('../../../src/features/chat/queries', () => ({
+void mock.module('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
 }));
 
-mock.module('../../../src/features/gallery/queries', () => ({
+void mock.module('../../../src/features/gallery/queries', () => ({
   galleryKeys: { lists: () => ['gallery'] },
 }));
 
 // Static imports are evaluated before any statement above runs, so the hook
 // has to come in afterwards or it binds the real generation service.
-const { useImageGeneration } = await import(
-  '../../../src/features/generation/hooks/use-image-generation'
-);
+const { useImageGeneration } =
+  await import('../../../src/features/generation/hooks/use-image-generation');
 
 type ImageGenProps = Parameters<typeof useImageGeneration>[0];
 

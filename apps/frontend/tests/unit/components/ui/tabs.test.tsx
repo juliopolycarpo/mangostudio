@@ -5,9 +5,11 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
+
 import { TAB_CLASSES, type TabItem, Tabs } from '../../../../src/components/ui/Tabs';
 import { render } from '../../../support/harness/render';
 

@@ -1,4 +1,5 @@
 import { Check, CircleX } from 'lucide-react';
+
 import { Spinner } from '@/components/ui/Spinner';
 import { useAppSettingsSaveStatus } from '@/features/settings/app/use-app-settings-save-status';
 import { useI18n } from '@/hooks/use-i18n';
@@ -23,6 +24,7 @@ export function SettingsSaveIndicator() {
         'inline-flex items-center gap-1.5 text-xs',
         status === 'error' ? 'text-danger' : 'text-fg-muted'
       )}
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
       role="status"
       aria-live="polite"
     >

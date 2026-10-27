@@ -5,10 +5,12 @@
  */
 
 import { mkdirSync } from 'node:fs';
+
 import { cors } from '@elysia/cors';
 import { openapi } from '@elysia/openapi';
 import { Elysia, NotFound } from 'elysia';
 import { websocket } from 'elysia/websocket';
+
 import { getConfig } from './lib/config';
 import { createDiagnosticLogger } from './lib/logger';
 import { activityRoutes } from './modules/activity/http/activity-routes';

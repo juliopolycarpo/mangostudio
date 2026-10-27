@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+
 import { RUNTIME_CONTRACT } from '@mangostudio/shared/runtime-contract';
 import Type from 'typebox';
 import Value from 'typebox/value';
+
 import {
   buildCorpus,
   buildFixturesForSubject,

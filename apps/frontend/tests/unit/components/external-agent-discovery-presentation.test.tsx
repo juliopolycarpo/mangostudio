@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+
 import { render, screen, within } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
-mock.module('@tanstack/react-router', await routerWithLinkStub());
+void mock.module('@tanstack/react-router', await routerWithLinkStub());
 const appState = { currentEnvironmentId: null };
-mock.module('@/lib/app-context', () => ({ useApp: () => appState }));
+void mock.module('@/lib/app-context', () => ({ useApp: () => appState }));
 
 import { AgentsCard } from '../../../src/features/home/widgets/AgentsCard';
 import { ExternalAgentDiscoveryLog } from '../../../src/features/settings/observability/components/ExternalAgentDiscoveryLog';

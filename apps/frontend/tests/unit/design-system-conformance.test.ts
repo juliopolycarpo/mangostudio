@@ -16,6 +16,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { join, relative } from 'node:path';
+
 import { Glob } from 'bun';
 
 const SRC = join(import.meta.dir, '../../src');

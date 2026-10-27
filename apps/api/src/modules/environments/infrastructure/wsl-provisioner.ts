@@ -24,15 +24,17 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import {
   isUnreachableFailure,
+  safeFetchBytes,
   type SafeFetchDeps,
   SafeFetchError,
-  safeFetchBytes,
 } from '../../../lib/safe-fetch';
 import {
   pushRuntimeBinary,
@@ -44,33 +46,33 @@ import {
 } from '../domain/runtime-push';
 import {
   pruneRuntimeCache,
-  RUNTIME_CACHE_DIR_NAME,
-  type RuntimeCacheFs,
   readOfflineCacheEntry,
   rememberReleaseChecksums,
+  RUNTIME_CACHE_DIR_NAME,
+  type RuntimeCacheFs,
   runtimeDigestSidecarPath,
   type VerifiedAsset,
 } from '../domain/runtime-release-fetch';
 import {
-  type RuntimeReleaseResolution,
   resolveRuntimeRelease,
+  type RuntimeReleaseResolution,
 } from '../domain/runtime-release-resolution';
 import {
   CONFIG_LOCK_BUSY_EXIT,
   DISTRO_RUNTIME_PATH,
-  type DistroSlotProbe,
   distroRuntimeConfigAfterInstall,
+  type DistroSlotProbe,
   findReleaseChecksum,
   LEGACY_DISTRO_RUNTIME_PATH,
   type LinuxPlatformId,
   localRuntimeBuildCommand,
   localRuntimeBuildPath,
-  PROBE_SLOT_SCRIPT,
   parseDistroSlotProbe,
+  PROBE_SLOT_SCRIPT,
   prunedCanaryHint,
-  REMOVE_LEGACY_RUNTIME_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
+  REMOVE_LEGACY_RUNTIME_SCRIPT,
   resolveLinuxPlatformId,
   SETUP_FULL_SCRIPT,
   VERSION_SCRIPT,

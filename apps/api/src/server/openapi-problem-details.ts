@@ -25,6 +25,7 @@ import {
   ProblemDetailsSchema,
 } from '@mangostudio/shared/errors';
 import { Elysia, type ElysiaStatus, NotFound, status } from 'elysia';
+
 import { negotiateErrorRepresentation, resolveStatus } from '../plugins/error-negotiation';
 
 /** Where the OpenAPI UI and its document are mounted. */

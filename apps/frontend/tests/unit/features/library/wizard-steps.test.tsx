@@ -7,8 +7,10 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { ConflictStep } from '../../../../src/features/library/components/ConflictStep';
 import { DestinationStep } from '../../../../src/features/library/components/DestinationStep';
 import { ReviewStep } from '../../../../src/features/library/components/ReviewStep';

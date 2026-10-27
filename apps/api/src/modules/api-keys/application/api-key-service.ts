@@ -7,6 +7,7 @@ import {
 } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import { isAPIError } from 'better-auth/api';
+
 import {
   type ApiKeyPluginApi,
   type ApiKeyPluginRecord,

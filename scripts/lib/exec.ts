@@ -6,12 +6,12 @@
 
 import { availableParallelism } from 'node:os';
 
-import { ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
+import { ROOT_DIR, type WorkspaceName, WORKSPACES } from './config';
 import { dim, error } from './log';
 import {
   bindDescendantsToRunner,
-  ChildSupervisor,
   childLimit,
+  ChildSupervisor,
   isNestedRunner,
   processHost,
   RUNNER_GROUP_ENV,
@@ -157,7 +157,6 @@ async function spawnAndWait(
 }
 
 /** Run `bun run --filter <pkg> <script>` for a workspace. */
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function runWorkspaceScript(
   workspace: WorkspaceName,
   script: string,
@@ -175,7 +174,7 @@ export async function runWorkspaceScript(
  * runParallel this is for tasks that write to the same tree — formatters, or a
  * test suite whose two halves share a build directory — where concurrent runs
  * would race each other rather than just interleave output.
- * // Usage: await runSequential([() => fmt('biome'), () => fmt('dprint')]);
+ * // Usage: await runSequential([() => fmt('source'), () => fmt('docs')]);
  */
 export async function runSequential(tasks: Array<() => Promise<RunResult>>): Promise<RunResult[]> {
   const results: RunResult[] = [];
@@ -184,7 +183,6 @@ export async function runSequential(tasks: Array<() => Promise<RunResult>>): Pro
 }
 
 /** Run task thunks concurrently and collect every result. */
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function runParallel(tasks: Array<() => Promise<RunResult>>): Promise<RunResult[]> {
   return Promise.all(tasks.map((t) => t()));
 }

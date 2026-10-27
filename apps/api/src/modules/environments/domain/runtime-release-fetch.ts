@@ -15,14 +15,15 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import {
   isUnreachableFailure,
+  safeFetchBytes,
   type SafeFetchDeps,
   SafeFetchError,
-  safeFetchBytes,
 } from '../../../lib/safe-fetch';
 import { resolveRuntimeRelease } from './runtime-release-resolution';
 import {
@@ -504,8 +505,9 @@ async function fetchExpectedChecksum(load: AssetLoad, versionDir: string): Promi
   ).catch((error: unknown) => {
     if (!(error instanceof RuntimeAssetMissingError)) throw error;
     throw new RuntimeAssetMissingError(
-      `Release v${tagVersion} publishes no checksums, so ${assetName} cannot be verified.` +
-        prunedCanaryHint(tagVersion)
+      `Release v${tagVersion} publishes no checksums, so ${assetName} cannot be verified.${prunedCanaryHint(
+        tagVersion
+      )}`
     );
   });
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);

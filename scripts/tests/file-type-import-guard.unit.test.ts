@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+
 import ts from '@typescript/typescript6';
+
 import { ROOT_DIR as REPO_ROOT } from '../lib/config';
 import { collectModuleSpecifiers } from '../lib/import-specifiers';
 

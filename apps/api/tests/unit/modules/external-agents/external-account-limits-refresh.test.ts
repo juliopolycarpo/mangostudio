@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+
 import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents';
 
 const refreshAccountUsage = mock(() => Promise.resolve({ limits: undefined }));
@@ -19,13 +20,13 @@ await mock.module(
   '../../../../src/modules/external-agents/infrastructure/external-account-limits-cache',
   () => ({
     writeExternalAccountLimitsCache,
+    // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
     readExternalAccountLimitsCache: async () => undefined,
   })
 );
 
-const { cacheExternalAccountLimitsBestEffort, refreshExternalAccountLimits } = await import(
-  '../../../../src/modules/external-agents/application/external-account-limits'
-);
+const { cacheExternalAccountLimitsBestEffort, refreshExternalAccountLimits } =
+  await import('../../../../src/modules/external-agents/application/external-account-limits');
 
 const LIMITS: ExternalAccountLimits = {
   targetId: 'codex',

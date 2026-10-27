@@ -25,6 +25,7 @@ const server = Bun.serve({
   fetch: () => new Response('healthy but not JSON'),
 });
 
+// eslint-disable-next-line @typescript-eslint/no-misused-promises -- The signal handler owns asynchronous shutdown before the fixture exits.
 process.on('SIGTERM', async () => {
   record('sigterm');
   await server.stop(true);

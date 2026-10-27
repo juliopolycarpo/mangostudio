@@ -33,6 +33,7 @@ import {
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import { Elysia, t } from 'elysia';
 import type { Static } from 'typebox';
+
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {

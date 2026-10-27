@@ -6,12 +6,13 @@
  */
 
 import type { UpdateChannel, UpgradeRefusalReason } from '@mangostudio/shared/updates';
+
 import {
   detectInstallOrigin,
   type InstallOrigin,
   type InstallOriginProbe,
 } from '../domain/install-origin';
-import { planUpgrade, type UpgradePlan, upgradeCommandFor } from '../domain/upgrade-plan';
+import { planUpgrade, upgradeCommandFor, type UpgradePlan } from '../domain/upgrade-plan';
 
 export interface InstallStatus {
   readonly installedVia: InstallOrigin;

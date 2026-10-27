@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
 import { walkRuntimeImports } from './support/runtime-imports';
@@ -108,9 +109,8 @@ describe('root tooling workspace exports', () => {
   });
 
   test('runs the exported named fake through real HTTP and awaits listener cleanup', async () => {
-    const { FakeChatGptServer, startFakeChatGptServer } = await import(
-      '@mangostudio/api/test-support/chatgpt/fake-server'
-    );
+    const { FakeChatGptServer, startFakeChatGptServer } =
+      await import('@mangostudio/api/test-support/chatgpt/fake-server');
     const fakeChatGpt = startFakeChatGptServer({ models: ['root-smoke-model'] });
     try {
       expect(fakeChatGpt).toBeInstanceOf(FakeChatGptServer);

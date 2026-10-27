@@ -1,7 +1,9 @@
 import { SETTINGS_SCOPES, SETTINGS_TOPIC, type SettingsScope } from '@mangostudio/shared/realtime';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { type RefObject, useEffect, useRef } from 'react';
+
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
+
 import {
   appSettingsLocalWriteWindowRemainingMs,
   hasRecentAppSettingsLocalWrite,

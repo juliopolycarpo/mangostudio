@@ -7,8 +7,10 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { MatrixFilters } from '../../../../src/features/library/components/MatrixFilters';
 import { DEFAULT_LIBRARY_FILTERS } from '../../../../src/features/library/format';
 import { render, screen } from '../../../support/harness/render';

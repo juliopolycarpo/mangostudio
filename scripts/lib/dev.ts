@@ -1,4 +1,4 @@
-import { ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
+import { ROOT_DIR, type WorkspaceName, WORKSPACES } from './config';
 
 // The API serves the frontend directly in dev: `apps/api/src/dev.ts` builds
 // `apps/frontend/dist` with `Bun.build()` and Elysia serves it from disk (there

@@ -8,8 +8,9 @@
  * environment routes already return for that code — neither is logged.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+
 import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
 
 export function handleLibraryError(

@@ -6,6 +6,7 @@ import type {
   ToolSettingsDescriptor,
   UpdateToolSettingsBody,
 } from '@mangostudio/shared/tool-settings';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

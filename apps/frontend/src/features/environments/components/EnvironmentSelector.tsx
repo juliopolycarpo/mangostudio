@@ -1,11 +1,13 @@
 import { Server } from 'lucide-react';
 import { useId, useState } from 'react';
+
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { LockedChip } from '@/components/ui/LockedChip';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useEnvironmentEntitiesQuery } from '../queries';
 import { ENVIRONMENT_STATE_TONE } from './environment-status-tone';
 

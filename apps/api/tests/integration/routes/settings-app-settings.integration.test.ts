@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import {
   type AppSettings,
   type AppSettingsResponse,
@@ -8,6 +9,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import { DEFAULT_ONBOARDING_STATE } from '@mangostudio/shared/onboarding';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { makeTestIdentity, type UserFixture } from '../../support/factories';

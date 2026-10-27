@@ -39,6 +39,7 @@ import {
   ResultFrameSchema,
   TopicSchema,
 } from '@mangostudio/protocol';
+
 import catalogSchema from '../../spec/schema/1/catalog.json';
 import protocolSchema from '../../spec/schema/1/protocol.json';
 import { ROOT_DIR } from '../lib/config';

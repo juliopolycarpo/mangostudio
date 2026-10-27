@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { DURATION_BASE, DURATION_QUICK, EASE_STANDARD } from '@/lib/motion/tokens';
 import { CARD_ENTER, CARD_REST, motionPresets, staggerBy } from '@/lib/motion/variants';
 

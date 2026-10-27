@@ -11,11 +11,13 @@ import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environm
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home/values';
 import { Link } from '@tanstack/react-router';
 import { LibraryBig } from 'lucide-react';
+
 import { buttonClassName } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { StepActions } from './StepActions';
 
 interface LibraryStepProps {

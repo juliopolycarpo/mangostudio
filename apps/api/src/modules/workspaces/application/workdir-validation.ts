@@ -6,6 +6,7 @@
 import { RemoteError } from '@mangostudio/protocol';
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import type { WorkdirValidationReason } from '@mangostudio/shared/workspaces';
+
 import { getRuntimeClient } from '../../../services/runtime-client';
 
 export class WorkdirValidationError extends Error {
@@ -18,8 +19,7 @@ export class WorkdirValidationError extends Error {
 }
 
 export type WorkdirValidationResult =
-  | { ok: true; resolvedPath: string }
-  | { ok: false; reason: WorkdirValidationReason };
+  { ok: true; resolvedPath: string } | { ok: false; reason: WorkdirValidationReason };
 
 export interface RuntimeSelection {
   readonly userId: string;

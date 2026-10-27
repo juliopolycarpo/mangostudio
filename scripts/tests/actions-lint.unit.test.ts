@@ -17,8 +17,8 @@ import {
   type PlatformKey,
   resolvePlatformKey,
   TOOL_MANIFEST,
-  type ToolManifestEntry,
   toolAssetUrl,
+  type ToolManifestEntry,
 } from '../lib/actions-lint/manifest';
 import {
   type ActionsLintDeps,

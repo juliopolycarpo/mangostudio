@@ -11,11 +11,13 @@
 import type { RemovalPreview } from '@mangostudio/shared/library';
 import { TriangleAlert } from 'lucide-react';
 import { useMemo } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { hashPrefix, resourceKeyLabel } from '../format';
 import { eliminatedGroups, lastCopyEntries, plannedRemovals, type RemovalDraft } from '../removal';
 

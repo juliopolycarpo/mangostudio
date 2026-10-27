@@ -1,4 +1,5 @@
 import { type RefObject, useCallback, useEffect, useRef } from 'react';
+
 import {
   READ_AHEAD_IDLE_PAGES,
   READ_AHEAD_IDLE_TIMEOUT_MS,

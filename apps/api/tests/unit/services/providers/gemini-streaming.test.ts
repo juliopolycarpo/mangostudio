@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+
 import { restoreGoogleGenAI } from '../../../support/mocks/google-genai';
 
 /**
@@ -31,9 +32,8 @@ function mockGeminiSecretModule() {
 
 describe('GeminiProvider.generateTextStream', () => {
   afterEach(async () => {
-    const { resetGeminiClientCache } = await import(
-      '../../../../src/services/providers/gemini/client'
-    );
+    const { resetGeminiClientCache } =
+      await import('../../../../src/services/providers/gemini/client');
     resetGeminiClientCache();
     // `mock.restore()` cannot undo `mock.module()`, so re-register the real SDK
     // instead. This covers `@google/genai` only: the `providers/gemini/secret`
@@ -54,9 +54,8 @@ describe('GeminiProvider.generateTextStream', () => {
     // Also mock the secret resolution so we don't need real API keys
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateGeminiTextStream } = await import(
-      '../../../../src/services/providers/gemini/text'
-    );
+    const { generateGeminiTextStream } =
+      await import('../../../../src/services/providers/gemini/text');
 
     const chunks: Array<{ type?: string; text?: string; done: boolean }> = [];
     for await (const chunk of generateGeminiTextStream(
@@ -99,9 +98,8 @@ describe('GeminiProvider.generateTextStream', () => {
 
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateGeminiTextStream } = await import(
-      '../../../../src/services/providers/gemini/text'
-    );
+    const { generateGeminiTextStream } =
+      await import('../../../../src/services/providers/gemini/text');
 
     await (expect(async () => {
       for await (const _chunk of generateGeminiTextStream(
@@ -117,9 +115,8 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('throws when no modelName is provided', async () => {
-    const { generateGeminiTextStream } = await import(
-      '../../../../src/services/providers/gemini/text'
-    );
+    const { generateGeminiTextStream } =
+      await import('../../../../src/services/providers/gemini/text');
 
     await (expect(async () => {
       for await (const _chunk of generateGeminiTextStream(
@@ -162,9 +159,8 @@ describe('GeminiProvider.generateTextStream', () => {
 
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateGeminiTextStream } = await import(
-      '../../../../src/services/providers/gemini/text'
-    );
+    const { generateGeminiTextStream } =
+      await import('../../../../src/services/providers/gemini/text');
 
     const chunks = [];
     for await (const chunk of generateGeminiTextStream(
@@ -204,9 +200,8 @@ describe('GeminiProvider.generateTextStream', () => {
 
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateGeminiTextStream } = await import(
-      '../../../../src/services/providers/gemini/text'
-    );
+    const { generateGeminiTextStream } =
+      await import('../../../../src/services/providers/gemini/text');
 
     for await (const _chunk of generateGeminiTextStream(
       'user-1',
@@ -243,9 +238,8 @@ describe('GeminiProvider.generateTextStream', () => {
 
     await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
-    const { generateGeminiTextStream } = await import(
-      '../../../../src/services/providers/gemini/text'
-    );
+    const { generateGeminiTextStream } =
+      await import('../../../../src/services/providers/gemini/text');
 
     const chunks = [];
     for await (const chunk of generateGeminiTextStream(

@@ -8,9 +8,11 @@
 
 import type { InstallRecipePreview } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
+
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { guardReasonLabel, runtimeNameList } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { CopyLine } from './CopyLine';

@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+
 import { isCommandPaletteShortcut } from '@/lib/keyboard';
 
 export interface CommandPaletteState {

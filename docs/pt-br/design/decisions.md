@@ -57,8 +57,7 @@ um canto reto em vez de manter um tamanho em silêncio, e o teste de conformidad
 
 Três famílias (Manrope para títulos, Inter para o corpo, JetBrains Mono) viraram duas. A
 Inter é a base da Adwaita Sans e convive com a Segoe UI Variable sem destoar, então uma build
-nativa pode trocar pela fonte do sistema mantendo a mesma escala. Os títulos usam Inter em
-600. Isso também tira um arquivo de fonte do bundle e um preload do `index.html`.
+nativa pode trocar pela fonte do sistema mantendo a mesma escala. Os títulos usam Inter em 600. Isso também tira um arquivo de fonte do bundle e um preload do `index.html`.
 
 ## 5. Um controle de 32px, um cabeçalho de 48px
 
@@ -87,7 +86,7 @@ não texto corrido, e são uma exceção explícita e documentada.
 
 **Status:** aceita · **Substitui:** um botão de envio com a cor do runner.
 
-O compositor usava a cor do runner na moldura *e* no botão Send, o que exigia escurecer com
+O compositor usava a cor do runner na moldura _e_ no botão Send, o que exigia escurecer com
 um `color-mix` por tema para passar de 4.5:1 com texto branco. A identidade do runner
 (`--composer-accent`, definida a partir de `features/chat/lib/composer-accent.ts`) continua
 aparecendo na borda em foco, na marca do prompt, no cursor de texto, no chip do runner e no
@@ -122,7 +121,7 @@ sublinhado. O sublinhado agora é a única marca da aba atual (`SelectorBar` /
 Um botão principal desabilitado era a manga esmaecida a 50%, que parece uma outra cor de
 marca, mais apagada. Botões desabilitados são neutros (`fill-selected` + `fg-subtle`) em
 todas as variantes, como os controles nativos são desenhados. Um botão que está apenas
-*carregando* mantém a cor e mostra um spinner.
+_carregando_ mantém a cor e mostra um spinner.
 
 ## 11. Um anel de foco
 
@@ -207,7 +206,7 @@ timeline.
 punha quatro botões manga na tela ao mesmo tempo, dois por arquivo de regra, e no diálogo Add
 server o segmento `stdio` e o Save eram do mesmo laranja, então o verdadeiro botão principal
 deixava de se destacar. A decisão 8 já diz que o destaque aparece só no botão principal, no
-item atual, em controles marcados e no foco; um segmento selecionado é o *item atual*, não um
+item atual, em controles marcados e no foco; um segmento selecionado é o _item atual_, não um
 chamado à ação.
 
 **Consequência:** o segmento selecionado é `fill-selected` com borda `stroke-strong` e `fg`,
@@ -327,8 +326,7 @@ no foco por teclado (`focus-visible`, não `focus`, para que um clique de mouse 
 linha tingida) e ao pressionar, o texto passa para `danger` sobre um preenchimento
 `danger-subtle`. É o único hover que muda de matiz, uma exceção tanto ao item Hover (um hover
 muda o preenchimento e, no máximo, sobe o texto esmaecido até `fg`) quanto ao hover neutro da
-decisão 8: a cor aparece quando a ação está prestes a acontecer. Desabilitado, ele segue a
-14. Um ponto de uso nunca o monta a partir de `subtle` mais `text-danger`.
+decisão 8: a cor aparece quando a ação está prestes a acontecer. Desabilitado, ele segue a 14. Um ponto de uso nunca o monta a partir de `subtle` mais `text-danger`.
 
 ## 23. Controles sobre uma imagem usam tokens sem tema
 

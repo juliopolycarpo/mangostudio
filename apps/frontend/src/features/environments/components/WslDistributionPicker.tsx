@@ -14,6 +14,7 @@
 import type { WslDistribution } from '@mangostudio/shared/environments';
 import { SquareTerminal } from 'lucide-react';
 import { useId } from 'react';
+
 import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';

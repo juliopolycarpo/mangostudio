@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
+
 import {
   CONTAINER_MAX_MOUNTS,
   CONTAINER_RUNTIME_MOUNT_PATH,
-  type ContainerEnvironmentConfig,
-  ContainerEnvironmentConfigSchema,
   containerConfigRefusal,
   containerEngineOf,
   containerEngineVersionCommand,
+  type ContainerEnvironmentConfig,
+  ContainerEnvironmentConfigSchema,
   containerImageInspectCommand,
   containerKillCommand,
   containerLaunchCommand,

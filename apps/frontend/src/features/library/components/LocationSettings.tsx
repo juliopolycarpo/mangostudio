@@ -10,6 +10,7 @@
 
 import type { LibraryLocationStatus } from '@mangostudio/shared/library';
 import { Lock } from 'lucide-react';
+
 import { Badge } from '@/components/ui/Badge';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { Toggle } from '@/components/ui/Toggle';
@@ -18,6 +19,7 @@ import { useEnvironmentScope } from '@/features/environments/use-environment-sco
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { type LocationSetting, useLocationSettings } from '../hooks/use-location-settings';
 import { LibraryPageState } from './LibraryPageState';
 

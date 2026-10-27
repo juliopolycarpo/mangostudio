@@ -21,6 +21,7 @@ import type {
   OnboardingState,
 } from '@mangostudio/shared/onboarding';
 import { useQuery } from '@tanstack/react-query';
+
 import { useMessagesQuery } from '@/features/chat/queries';
 import { useMachineStatus } from '@/features/environments/machine/queries';
 import {

@@ -1,11 +1,12 @@
 import type { GithubContext, GithubPr } from '@mangostudio/shared/github';
 import { GithubPrSchema } from '@mangostudio/shared/github';
+
 import { readGhOutput } from '../domain/gh-output';
 import {
+  ghCli,
   GhCliError,
   type GhRuntimeSelection,
   type GithubCli,
-  ghCli,
 } from '../infrastructure/gh-cli';
 import { createGithubRepoResolver, type ResolveGithubRepo } from './github-repo-resolver';
 

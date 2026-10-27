@@ -1,7 +1,5 @@
 {
   "recommendations": [
-    "biomejs.biome",
-    "dprint.dprint",
     "TypeScriptTeam.native-preview",
     "ms-playwright.playwright",
     "oven.bun-vscode",

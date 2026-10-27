@@ -21,6 +21,7 @@ import type {
   GithubPrThreadsResponse,
 } from '@mangostudio/shared/github';
 import { queryOptions } from '@tanstack/react-query';
+
 import { client } from '@/lib/api-client';
 import { throwApiError } from '@/lib/utils';
 

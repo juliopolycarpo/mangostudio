@@ -5,6 +5,7 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';

@@ -10,9 +10,11 @@
 import { describe, expect, it } from 'bun:test';
 import { createServer, type Server as HttpServer } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+
 import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 import {
   type McpClientHandle,

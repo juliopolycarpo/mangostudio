@@ -34,9 +34,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+
 import { sanitizedEnv } from '@mangostudio/protocol/spawn';
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
+
 import { getDb } from '../../../src/db/database';
 import { createRuntimePairingService } from '../../../src/modules/environments/application/runtime-pairing-service';
 import { createRuntimeSocketRoutes } from '../../../src/modules/environments/http/runtime-socket-routes';

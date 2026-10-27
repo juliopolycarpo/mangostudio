@@ -4,8 +4,10 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { MachineCard, MachineFact, type MachineFactPart, MachineFacts } from './MachineCard';
 
 interface InstallFactsCardProps {

@@ -1,6 +1,8 @@
 import type { ApiKeySummary } from '@mangostudio/shared/api-keys';
+
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { displayKeyName } from '../format';
 
 interface RevokeApiKeyDialogProps {

@@ -15,6 +15,7 @@ import { GENERATION_PROMPT_MAX_LENGTH } from '@mangostudio/shared/generation/val
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -31,6 +32,7 @@ import { sendWithExternalConsent } from '@/features/external-agents/send-with-co
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { respondTextStream } from '@/services/generation-service';
+
 import { StepFrame } from '../StepFrame';
 
 interface FirstChatStepProps {

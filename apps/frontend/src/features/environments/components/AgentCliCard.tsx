@@ -5,9 +5,11 @@
 
 import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import {
   findInstallRecipe,
   prefixedVersionLabel,

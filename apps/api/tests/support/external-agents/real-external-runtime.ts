@@ -21,6 +21,7 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import type { RuntimeMethod } from '@mangostudio/shared/runtime-contract';
+
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import { connectTestRuntime, type TestHandler } from '../runtime-fixture';
 

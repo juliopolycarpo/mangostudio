@@ -4,6 +4,7 @@
  */
 
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
+
 import { noteUncheckpointedSource } from '../../modules/file-checkpoints/application/note-uncheckpointed-source';
 import {
   getSafeEffectiveToolSettings,

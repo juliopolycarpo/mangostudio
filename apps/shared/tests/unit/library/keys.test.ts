@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
+
 import {
   isValidResourceSlug,
   LIBRARY_RESOURCE_SLUG_MAX_LENGTH,
   LibraryResourceRefSchema,
   LibraryResourceSchema,
   parseResourceKey,
-  type ResourceKind,
   resourceKey,
+  type ResourceKind,
   SKILL_SOURCE_TO_LOCATION_ID,
 } from '../../../src/library';
 import { SkillSourceSchema } from '../../../src/skills';

@@ -3,6 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import {
   DEFAULT_APP_SETTINGS,
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
@@ -10,6 +11,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import userEvent from '@testing-library/user-event';
+
 import { SkillsSettingsPage } from '../../../src/features/settings/skills/components/SkillsSettingsPage';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';

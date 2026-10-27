@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { AppSettingsPutBody } from '../../src/app-settings';
 import {
   appSettingsPatchExcludingProfiles,

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { type RunResult, runSequential } from '../lib/exec';
 
 // `runSequential` exists because some task pairs share a tree — formatters, or

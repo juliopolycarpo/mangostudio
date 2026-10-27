@@ -3,6 +3,7 @@ import type {
   PromptSendFrequency,
   PromptSettings,
 } from '@mangostudio/shared/prompt-rules';
+
 import { loadRuleFileContent } from './rule-file-resolver';
 
 interface AppliedRuleFile {
@@ -59,13 +60,9 @@ function composeSystemPrompt(
     const content = loadRuleFileContent(rule.path);
     if (content === null) continue;
 
-    result +=
-      '\n\n' +
-      buildRuleDelimiter(rule.label, rule.path, true) +
-      '\n' +
-      content +
-      '\n' +
-      buildRuleDelimiter(rule.label, rule.path, false);
+    result += `\n\n${buildRuleDelimiter(rule.label, rule.path, true)}\n${
+      content
+    }\n${buildRuleDelimiter(rule.label, rule.path, false)}`;
 
     applied.push({ label: rule.label, path: rule.path, role: 'system' });
   }
@@ -87,11 +84,11 @@ function composeUserPrompt(
     if (content === null) continue;
 
     parts.push(
-      buildRuleDelimiter(rule.label, rule.path, true) +
-        '\n' +
-        content +
-        '\n' +
-        buildRuleDelimiter(rule.label, rule.path, false)
+      `${buildRuleDelimiter(rule.label, rule.path, true)}\n${content}\n${buildRuleDelimiter(
+        rule.label,
+        rule.path,
+        false
+      )}`
     );
 
     applied.push({ label: rule.label, path: rule.path, role: 'user' });

@@ -1,10 +1,12 @@
 import { isAbsolute, relative, resolve } from 'node:path';
+
 import type { ExternalAgentAttachment } from '@mangostudio/shared/external-agents';
 import {
   EXTERNAL_ATTACHMENT_MAX_BYTES,
   EXTERNAL_TURN_MAX_ATTACHMENTS,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
+
 import type { ChatAttachmentSelect, Database } from '../../../db/types';
 import { getConfig } from '../../../lib/config';
 import { attachmentToBase64 } from '../../../services/providers/core/attachment-content';

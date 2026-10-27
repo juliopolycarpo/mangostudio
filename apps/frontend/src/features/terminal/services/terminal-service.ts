@@ -21,6 +21,7 @@ import type {
   TerminalSessionResponse,
 } from '@mangostudio/shared/terminal';
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { scheduleLoginRedirect } from '@/lib/auth-navigate';
 import { ApiError } from '@/lib/utils';

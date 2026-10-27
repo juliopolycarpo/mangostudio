@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
 const mockGetImages = jest.fn();
 
-mock.module('../../../src/lib/api-client', () => ({
+void mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       messages: {
@@ -16,9 +16,8 @@ mock.module('../../../src/lib/api-client', () => ({
 
 // Static imports are evaluated before any statement above runs, so the module
 // under test has to come in afterwards or it binds the real api-client.
-const { galleryKeys, galleryListQueryOptions } = await import(
-  '../../../src/features/gallery/queries'
-);
+const { galleryKeys, galleryListQueryOptions } =
+  await import('../../../src/features/gallery/queries');
 
 function getQueryFn() {
   const queryFn = galleryListQueryOptions().queryFn;

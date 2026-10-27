@@ -10,7 +10,7 @@ import {
   RUNNER_GROUP_ENV,
   supervisionMode,
 } from '../../lib/process-tree';
-import { type Measurement, measured, unavailable } from '../model/states';
+import { measured, type Measurement, unavailable } from '../model/states';
 
 /** Write a namespaced diagnostic line to stderr (keeps stdout pure JSON). */
 export const stderrLog = (message: string): void => {

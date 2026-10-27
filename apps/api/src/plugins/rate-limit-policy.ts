@@ -23,6 +23,7 @@
  */
 
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
+
 import type { RateLimitBucket } from './rate-limit-types';
 
 const ONE_MINUTE_MS = 60_000;
@@ -147,7 +148,7 @@ export function isTerminalPath(path: string): boolean {
 }
 
 function isPostMethod(method: string | undefined): boolean {
-  return method !== undefined && method.toUpperCase() === 'POST';
+  return method?.toUpperCase() === 'POST';
 }
 
 function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined): string | null {

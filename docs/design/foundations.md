@@ -146,7 +146,7 @@ canvas          the window, the chat, a settings page
   surface-raised  a menu, dialog, toast, popover      (+ stroke border + elevation)
 ```
 
-Hover, press and selection on anything *without* its own fill use the neutral
+Hover, press and selection on anything _without_ its own fill use the neutral
 `fill-hover` / `fill-pressed` / `fill-selected` washes. They are translucent, so
 they work on `canvas`, `sidebar` and `surface` alike. Hover never tints toward the
 accent: the accent says "primary" or "current", not "pointer is here".
@@ -198,18 +198,18 @@ compiles to nothing. The conformance test rejects it, and an arbitrary size such
 
 A 4px grid. Tailwind's own scale already is one; the system narrows it.
 
-| Step  | px | Typical use                                                      |
-| ----- | -- | ---------------------------------------------------------------- |
-| `0.5` | 2  | Optical nudges only (a `mt-0.5` under a two-line label).         |
-| `1`   | 4  | Menu padding; the gap inside a chip.                             |
-| `1.5` | 6  | The gap between an icon and its label in a dense row.            |
-| `2`   | 8  | Gap between neighbouring controls; icon-to-label in buttons.     |
-| `3`   | 12 | Horizontal padding of buttons and fields; gap between form rows. |
-| `4`   | 16 | Card padding; sidebar and header gutters.                        |
-| `5`   | 20 | Gap between groups inside a card.                                |
-| `6`   | 24 | Dialog and page padding; gap between cards.                      |
-| `8`   | 32 | Gap between page sections.                                       |
-| `12`  | 48 | Breathing room above empty states and greetings.                 |
+| Step  | px  | Typical use                                                      |
+| ----- | --- | ---------------------------------------------------------------- |
+| `0.5` | 2   | Optical nudges only (a `mt-0.5` under a two-line label).         |
+| `1`   | 4   | Menu padding; the gap inside a chip.                             |
+| `1.5` | 6   | The gap between an icon and its label in a dense row.            |
+| `2`   | 8   | Gap between neighbouring controls; icon-to-label in buttons.     |
+| `3`   | 12  | Horizontal padding of buttons and fields; gap between form rows. |
+| `4`   | 16  | Card padding; sidebar and header gutters.                        |
+| `5`   | 20  | Gap between groups inside a card.                                |
+| `6`   | 24  | Dialog and page padding; gap between cards.                      |
+| `8`   | 32  | Gap between page sections.                                       |
+| `12`  | 48  | Breathing room above empty states and greetings.                 |
 
 `2.5` and `3.5` (10px, 14px) are off the grid. The conformance test rejects them as
 padding, margin, gap and `space-*` steps (`px-2.5`, `gap-3.5`, `-mt-2.5`). A size is
@@ -223,15 +223,15 @@ between turns (`--chat-message-gap`) and between a turn's steps
 
 ### Heights
 
-| Utility | px | Use                                                                                                    |
-| ------- | -- | ------------------------------------------------------------------------------------------------------ |
-| `h-5`   | 20 | Badges, keycaps (`KbdHint`), the switch track.                                                         |
-| `h-6`   | 24 | The `key: value` chips (`.terminal-chip`, `.composer-chip`, which set it in CSS).                      |
-| `h-7`   | 28 | Compact controls: `sm` and `icon-sm` buttons, the composer's tool chips, the code block's copy button. |
-| `h-8`   | 32 | The default: `md` and `icon` buttons, fields, Select triggers, menu items, nav rows, segments.         |
-| `h-9`   | 36 | Underline tabs (`Tabs`, `TabNav`).                                                                     |
-| `h-10`  | 40 | `lg` buttons: the actions of the login, sign-up and onboarding screens.                                |
-| `h-12`  | 48 | The header and the sidebar's brand row, so they share a baseline.                                      |
+| Utility | px  | Use                                                                                                    |
+| ------- | --- | ------------------------------------------------------------------------------------------------------ |
+| `h-5`   | 20  | Badges, keycaps (`KbdHint`), the switch track.                                                         |
+| `h-6`   | 24  | The `key: value` chips (`.terminal-chip`, `.composer-chip`, which set it in CSS).                      |
+| `h-7`   | 28  | Compact controls: `sm` and `icon-sm` buttons, the composer's tool chips, the code block's copy button. |
+| `h-8`   | 32  | The default: `md` and `icon` buttons, fields, Select triggers, menu items, nav rows, segments.         |
+| `h-9`   | 36  | Underline tabs (`Tabs`, `TabNav`).                                                                     |
+| `h-10`  | 40  | `lg` buttons: the actions of the login, sign-up and onboarding screens.                                |
+| `h-12`  | 48  | The header and the sidebar's brand row, so they share a baseline.                                      |
 
 32px is WinUI's own control height and is within two pixels of libadwaita's.
 
@@ -267,13 +267,13 @@ Four radii by role, plus the pill. The theme empties Tailwind's own scale, so
 `rounded-xl` and larger compile to nothing. The conformance test rejects them, and a
 bare `rounded` with no size too.
 
-| Utility        | px | Applies to                                                                                                                                                        |
-| -------------- | -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rounded-xs`   | 4  | Checkboxes, keycaps, inline code, thumbnails, skeletons.                                                                                                          |
-| `rounded-sm`   | 6  | **Everything clickable**: buttons, fields, Select, chips, menu items, nav rows, segments.                                                                         |
-| `rounded-md`   | 8  | Containers: cards, tool blocks, menus, toasts, code blocks, callouts.                                                                                             |
-| `rounded-lg`   | 12 | Large surfaces: dialogs, the composer, the command palette, the user's message, the login and sign-up cards.                                                      |
-| `rounded-full` | —  | Status marks and round glyphs: badges, status dots, spinners, progress bars, the accent bars, the radio, the switch and slider. No button, chip or row is a pill. |
+| Utility        | px  | Applies to                                                                                                                                                        |
+| -------------- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rounded-xs`   | 4   | Checkboxes, keycaps, inline code, thumbnails, skeletons.                                                                                                          |
+| `rounded-sm`   | 6   | **Everything clickable**: buttons, fields, Select, chips, menu items, nav rows, segments.                                                                         |
+| `rounded-md`   | 8   | Containers: cards, tool blocks, menus, toasts, code blocks, callouts.                                                                                             |
+| `rounded-lg`   | 12  | Large surfaces: dialogs, the composer, the command palette, the user's message, the login and sign-up cards.                                                      |
+| `rounded-full` | —   | Status marks and round glyphs: badges, status dots, spinners, progress bars, the accent bars, the radio, the switch and slider. No button, chip or row is a pill. |
 
 A control and the container it sits in differ by one step (a `rounded-sm` button
 in a `rounded-md` card) so the corners never look like they were guessed.
@@ -306,7 +306,7 @@ class bundles all of it for menus and listboxes; `DIALOG_SURFACE_CLASS` in
 - **Focus**: a 2px solid `focus` outline, offset 2px, applied globally to
   `:focus-visible`. Components do not draw their own ring. Text fields and Select
   triggers replace it with a border change (`focus:outline-none focus:border-focus
-  focus:ring-1 focus:ring-focus`). A few controls move the same ring: underline tabs
+focus:ring-1 focus:ring-focus`). A few controls move the same ring: underline tabs
   pull it inward (`-outline-offset-2`) so the scrolling strip does not clip it, a
   slider draws it on its thumb, the switch on its track (the input itself is
   visually hidden), a composer chip around the `<label>` that wraps its `<select>`
@@ -329,7 +329,7 @@ class bundles all of it for menus and listboxes; `DIALOG_SURFACE_CLASS` in
   filled variants (`primary`, `secondary`, `danger`); the quiet ones (`subtle`,
   `subtle-danger`) have no fill to begin with and only turn their text `fg-subtle`,
   because a tile would read as the hovered or selected row
-  ([decisions 10 and 14](./decisions.md)). A button that is merely *loading* keeps its
+  ([decisions 10 and 14](./decisions.md)). A button that is merely _loading_ keeps its
   colour and shows the spinner; `aria-busy` tells the two apart. Other disabled
   controls (fields, Select, checkbox, switch, slider, chips, menu items) drop to 50%
   opacity. The test is whether the disabled thing carries information
@@ -341,7 +341,7 @@ class bundles all of it for menus and listboxes; `DIALOG_SURFACE_CLASS` in
     its name steps from `fg` to `fg-muted`. It
     loses its hover and shows `cursor-not-allowed`; the reason sits beside it or at the
     head of the list ([decisions 17 and 21](./decisions.md)).
-  - A composer chip *locked* because the chat has turns (the agent, the environment)
+  - A composer chip _locked_ because the chat has turns (the agent, the environment)
     is a `LockedChip`: full-strength text, no chevron ([decision 18](./decisions.md)).
     Only a chip that is loading or failed fades.
 - **Selected** is a neutral `fill-selected` plus an accent mark. In a vertical list
@@ -398,11 +398,11 @@ JavaScript animation.
 Lucide (`lucide-react`), at its default 2px stroke with round caps. Sizes are
 constants in `@/lib/icon-sizes`:
 
-| Constant  | px | Use                                                                                |
-| --------- | -- | ---------------------------------------------------------------------------------- |
-| `ICON_SM` | 14 | Inside chips, badges and compact rows; inline status glyphs.                       |
-| `ICON_MD` | 16 | Buttons, menu items, navigation rows, callout glyphs.                              |
-| `ICON_LG` | 20 | The mobile navigation tiles, the header's menu button, toast glyphs, empty states. |
+| Constant  | px  | Use                                                                                |
+| --------- | --- | ---------------------------------------------------------------------------------- |
+| `ICON_SM` | 14  | Inside chips, badges and compact rows; inline status glyphs.                       |
+| `ICON_MD` | 16  | Buttons, menu items, navigation rows, callout glyphs.                              |
+| `ICON_LG` | 20  | The mobile navigation tiles, the header's menu button, toast glyphs, empty states. |
 
 Pick one of the three; do not write a literal `size`. The one exception is a tick
 drawn inside a 16px box (`Checkbox`, `ChoiceButton`), which is 12px. The conformance

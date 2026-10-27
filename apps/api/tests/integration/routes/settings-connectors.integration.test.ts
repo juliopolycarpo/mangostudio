@@ -1,9 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { writeFileSync } from 'node:fs';
+
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { TEST_MANAGED_CONFIG_PATH } from '../../../src/lib/config';
 import { ConnectorNotFoundError } from '../../../src/modules/connectors/application/connector-errors';
@@ -21,9 +23,9 @@ import {
   type ConnectorPayload,
   ConnectorResponseSchema,
   type ErrorPayload,
-  type ModelCatalogPayload,
   makeModelsEndpointFetch,
   makeOpenAISuccessFetch,
+  type ModelCatalogPayload,
   restoreConnectorProviderMocks,
   type SuccessPayload,
   withFetch,
@@ -636,7 +638,7 @@ describe('openai connector routes', () => {
 
   it('POST /settings/connectors with provider deepseek stores default baseUrl metadata', async () => {
     const realFetch = globalThis.fetch;
-    // biome-ignore lint/suspicious/useAwait: matches the fetch signature
+    // matches the fetch signature
     const deepseekModelsFetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url === 'https://api.deepseek.com/models') {

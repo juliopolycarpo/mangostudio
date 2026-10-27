@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+
 import { renderScoopManifest, SCOOP_MANIFEST_TEMPLATE_PATH } from '../release/update-scoop';
 
 const SHAS = {

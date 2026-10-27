@@ -26,6 +26,7 @@ import type {
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import type { MachineConfigWriteResponse } from '@mangostudio/shared/machine';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 
@@ -50,12 +51,10 @@ interface InstallRefusal {
 }
 
 export type InstallPrepareResult =
-  | { readonly outcome: 'prepared'; readonly preparation: InstallPreparation }
-  | InstallRefusal;
+  { readonly outcome: 'prepared'; readonly preparation: InstallPreparation } | InstallRefusal;
 
 export type InstallStartResult =
-  | { readonly outcome: 'started'; readonly run: InstallStartResponse }
-  | InstallRefusal;
+  { readonly outcome: 'started'; readonly run: InstallStartResponse } | InstallRefusal;
 
 interface EdenErrorLike {
   readonly status?: number;

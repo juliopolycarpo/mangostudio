@@ -4,6 +4,7 @@
  */
 
 import { useI18n } from '@/hooks/use-i18n';
+
 import { useAgentCliStatuses, useInstallRecipes } from '../hooks/use-runtime-status';
 import { useEnvironmentScope } from '../use-environment-scope';
 import { AgentCliCard } from './AgentCliCard';

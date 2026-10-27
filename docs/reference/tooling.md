@@ -90,7 +90,7 @@ Current task definitions:
 | ------------------------- | ----- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `dev`                     | off   | —                                                                                                           | Persistent — runs dev servers                                                                                                         |
 | `build`                   | on    | `dist/**`                                                                                                   | Depends on upstream `^build`; `apps/frontend` overrides `env` to `MANGO_API_URL`, `VITE_*` and adds `dist-metafile.json` to `outputs` |
-| `check:quick`             | on    | —                                                                                                           | Biome lint / format; hashes workspace and root lint configuration inputs plus upstream workspace sources through `transit`            |
+| `check:quick`             | on    | —                                                                                                           | Bun lint / format; hashes workspace and root lint configuration inputs plus upstream workspace sources through `transit`              |
 | `check:cycles`            | off   | —                                                                                                           | TS/JS cycle scan, including generated and ignored files absent from VCS cache inputs                                                  |
 | `transit`                 | —     | —                                                                                                           | Script-less. Hashes upstream sources into a dependent's key without ordering it; opt in with `dependsOn: ["transit"]`                 |
 | `typecheck`               | on    | —                                                                                                           | Inputs scoped to root `tsconfig.json`; depends on `transit`, so workspaces check at once                                              |
@@ -172,7 +172,7 @@ binaries; see `scripts/README.md`.
 Startup is not spent in Elysia. It goes to migrations, opening SQLite, Better
 Auth initialization, and evaluating a ~111 MB bundle. Route compilation is a
 small enough slice that removing it entirely stays inside run-to-run noise —
-which is also why the AOT binary measured marginally *slower*: it carries a
+which is also why the AOT binary measured marginally _slower_: it carries a
 larger manifest to load.
 
 ### What the evaluation did establish
@@ -203,8 +203,8 @@ is unavailable rather than merely slower.
 
 ## `Bun.Archive` — adopted for reading, rejected for writing
 
-Every archive this repository *reads* is read in-process by `Bun.Archive`
-(`scripts/lib/archive.ts`). Every archive it *writes* still shells out to `tar`
+Every archive this repository _reads_ is read in-process by `Bun.Archive`
+(`scripts/lib/archive.ts`). Every archive it _writes_ still shells out to `tar`
 or `zip`. Release asset creation on Windows uses the system's native bsdtar and
 PowerShell ZIP support rather than MSYS tar or an external zip utility. Tar
 commands write a local filename from the output directory, so Windows drive
@@ -241,13 +241,13 @@ shape of a real platform archive:
 
 | Operation      |           GNU tar |                                       Bun.Archive |
 | -------------- | ----------------: | ------------------------------------------------: |
-| create, gzip 6 | 9755 ms → 73.3 MB | 3634 ms → 72.8 MB — *faster and smaller, blocked* |
+| create, gzip 6 | 9755 ms → 73.3 MB | 3634 ms → 72.8 MB — _faster and smaller, blocked_ |
 | create, gzip 1 |                 — |                                 2313 ms → 77.3 MB |
 | extract        |   1352 ms–1419 ms |                                     617 ms–993 ms |
 | list           |           1299 ms |                                           1203 ms |
 
 So the adopted half is worth roughly 1.8× on extraction, and the rejected half —
-the larger prize, 2.7× on creation *with* a smaller artifact — stays on the
+the larger prize, 2.7× on creation _with_ a smaller artifact — stays on the
 table until upstream stores modes.
 
 ### Other limits found while probing

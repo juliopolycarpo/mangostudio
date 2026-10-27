@@ -5,6 +5,7 @@
  */
 
 import { lookup } from 'node:dns/promises';
+
 import { isPrivateOrLocal, parseIpAddress } from '../../../lib/ip-address';
 
 // The resolver's stated family is not part of the contract: every address is

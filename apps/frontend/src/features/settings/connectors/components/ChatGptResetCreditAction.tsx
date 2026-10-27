@@ -1,12 +1,14 @@
 import type { Connector } from '@mangostudio/shared/connectors';
 import { Zap } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { useChatGptResetRedeem } from '../hooks/use-chatgpt-reset-redeem';
 
 interface ChatGptResetCreditActionProps {

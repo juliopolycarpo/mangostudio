@@ -1,11 +1,13 @@
 import type { GalleryItem } from '@mangostudio/shared/types';
 import { LayoutGrid } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
+
 import { GalleryLightbox } from './components/GalleryLightbox';
 import { GalleryTile } from './components/GalleryTile';
 import { useGalleryQuery } from './queries';
@@ -51,7 +53,7 @@ export function GalleryPage() {
       {status === 'pending' ? (
         <div className={GALLERY_GRID}>
           {Array.from({ length: 8 }, (_, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: static placeholder list
+            // static placeholder list
             <Skeleton key={index} className="aspect-square rounded-md" />
           ))}
         </div>

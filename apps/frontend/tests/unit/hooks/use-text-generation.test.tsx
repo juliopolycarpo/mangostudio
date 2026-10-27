@@ -4,9 +4,11 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock, spyOn } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
+
 import {
   getComposerDraft,
   setComposerDraft,
@@ -29,28 +31,28 @@ const mockDismissInterruptedTurn = jest.fn();
 const mockGenerateChatTitle = jest.fn();
 const mockInvalidateGitState = jest.fn().mockResolvedValue(undefined);
 
-mock.module('../../../src/services/generation-service', () => ({
+void mock.module('../../../src/services/generation-service', () => ({
   respondTextStream: mockStream,
   startExternalReviewStream: mockReviewStream,
   cancelInterruptedTurn: mockCancelInterruptedTurn,
   dismissInterruptedTurn: mockDismissInterruptedTurn,
 }));
 
-mock.module('../../../src/features/chat/services/chat-title', () => ({
+void mock.module('../../../src/features/chat/services/chat-title', () => ({
   generateChatTitleSuggestion: mockGenerateChatTitle,
 }));
 
-mock.module('../../../src/features/chat/services/context-compaction', () => ({
+void mock.module('../../../src/features/chat/services/context-compaction', () => ({
   compactChat: jest.fn(),
   summarizeToNewChat: jest.fn(),
 }));
 
-mock.module('../../../src/features/chat/queries', () => ({
+void mock.module('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
   chatKeys: { lists: () => ['chats', 'list'] },
 }));
 
-mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
+void mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   invalidateGitState: mockInvalidateGitState,
 }));
 
@@ -84,7 +86,7 @@ class FakeRealtimeInvalidations {
 
 const fakeRealtime = new FakeRealtimeInvalidations();
 
-mock.module('../../../src/lib/realtime/use-realtime-invalidation', () => ({
+void mock.module('../../../src/lib/realtime/use-realtime-invalidation', () => ({
   useRealtimeInvalidation: (
     topic: string | null,
     concern: string,
@@ -96,9 +98,8 @@ mock.module('../../../src/lib/realtime/use-realtime-invalidation', () => ({
 
 // Static imports are evaluated before any statement above runs, so the hook
 // has to come in afterwards or it binds the real services.
-const { useTextGeneration } = await import(
-  '../../../src/features/generation/hooks/use-text-generation'
-);
+const { useTextGeneration } =
+  await import('../../../src/features/generation/hooks/use-text-generation');
 
 /**
  * Builds a fake respondTextStream implementation that delivers a sequence of

@@ -13,6 +13,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+
 import { toPlainJsonSchema } from '../core/tool-mapper';
 import type { ToolDefinition } from '../types';
 

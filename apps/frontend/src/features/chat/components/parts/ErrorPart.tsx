@@ -6,12 +6,14 @@ import {
   EXTERNAL_AGENT_CAPACITY_CODE,
   isExternalAgentKindCode,
 } from '@mangostudio/shared/external-agents/values';
+
 import { Callout } from '@/components/ui/Callout';
-import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
+import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
+
 import { toolLoopRounds } from '../../lib/tool-loop-detail';
 
 interface ErrorPartProps {

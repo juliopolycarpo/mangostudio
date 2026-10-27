@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, it } from 'bun:test';
+
 import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
+
 import { type Message, MessageSchema, MessagesPageSchema } from '../../src/chat';
 
 /** Fails with the schema's own error list instead of a bare `false`. */

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { registerTools } from '../../../../src/services/tools/register-tools';
 import { clearRegistry, getAllTools, getTool } from '../../../../src/services/tools/registry';
 import { expectedToolNames } from '../../../support/registration-expectations';

@@ -4,7 +4,9 @@ import {
   type TerminalRefusalReason,
   TerminalRefusalReasonSchema,
 } from '@mangostudio/shared/terminal';
+
 import { ApiError } from '@/lib/utils';
+
 import { unavailableMessage } from './unavailable-message';
 
 const REFUSAL_REASONS: ReadonlySet<string> = new Set(

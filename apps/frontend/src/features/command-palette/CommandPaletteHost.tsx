@@ -8,6 +8,7 @@
  */
 
 import { AnimatePresence } from 'motion/react';
+
 import { CommandPalette } from './CommandPalette';
 import { useCommandRegistry } from './use-command-registry';
 

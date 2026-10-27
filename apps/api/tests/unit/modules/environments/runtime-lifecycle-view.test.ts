@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { RuntimeStagedAsset } from '@mangostudio/shared/environments';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
+
 import {
   buildRuntimeLifecycleView,
   lifecycleActions,

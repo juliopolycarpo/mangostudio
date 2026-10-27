@@ -12,6 +12,7 @@
 
 import { CLOSE_CODES } from '@mangostudio/protocol';
 import { Ajv2020 } from 'ajv/dist/2020';
+
 import chunks from '../../spec/fixtures/1/chunks.json';
 import frames from '../../spec/fixtures/1/frames.json';
 import legacyHello from '../../spec/fixtures/1/legacy-hello.json';

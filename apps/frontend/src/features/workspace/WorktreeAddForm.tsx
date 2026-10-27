@@ -1,10 +1,12 @@
 import type { AddWorktreeBody } from '@mangostudio/shared/git';
 import { type FormEvent, useId, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { Radio } from '@/components/ui/Radio';
 import { useI18n } from '@/hooks/use-i18n';
+
 import type { AddWorktreeInput } from './hooks/use-git-state';
 
 type WorktreeMode = AddWorktreeBody['mode'];
@@ -71,7 +73,7 @@ export function WorktreeAddForm({
         <fieldset className="space-y-1">
           <legend className="mb-1 text-sm font-medium text-fg">{labels.modeLabel}</legend>
           {MODES.map((option) => (
-            // biome-ignore lint/a11y/noLabelWithoutControl: the radio is a child of this label.
+            // the radio is a child of this label.
             <label key={option} className="flex cursor-pointer items-center gap-2 text-sm text-fg">
               <Radio
                 name="worktree-branch-mode"

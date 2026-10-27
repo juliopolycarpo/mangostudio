@@ -15,9 +15,11 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
+
 import { render } from '../../../support/harness/render';
 
 const BASE_DESCRIPTOR: ExternalAgentDescriptor = {
@@ -64,16 +66,15 @@ const messagesQuery: { data: { pages: { messages: unknown[] }[] } | undefined } 
 
 const actualEnvironmentQueries = await import('@/features/environments/queries');
 const actualExternalAgentService = await import('@/services/external-agent-service');
-const actualUseExternalAgents = await import(
-  '../../../../src/features/external-agents/useExternalAgents'
-);
+const actualUseExternalAgents =
+  await import('../../../../src/features/external-agents/useExternalAgents');
 
-mock.module('@/lib/app-context', () => ({ useApp: () => appState }));
-mock.module('@/features/chat/queries', () => ({ useMessagesQuery: () => messagesQuery }));
+void mock.module('@/lib/app-context', () => ({ useApp: () => appState }));
+void mock.module('@/features/chat/queries', () => ({ useMessagesQuery: () => messagesQuery }));
 // Partially mocked: `capability-invalidation` reads the real `environmentKeys`
 // at import time, so replacing the whole module breaks the shared harness. The
 // real namespace is imported first because `mock.module` is not hoisted.
-mock.module('@/features/environments/queries', () => ({
+void mock.module('@/features/environments/queries', () => ({
   ...actualEnvironmentQueries,
   useEnvironmentEntitiesQuery: () =>
     ({
@@ -85,14 +86,14 @@ mock.module('@/features/environments/queries', () => ({
 // Spread rather than replaced: `bun test` resolves the whole namespace, so a
 // factory that returns only the one function breaks every other consumer of the
 // module with `Export named 'getExternalAccountLimits' not found`.
-mock.module('@/services/external-agent-service', () => ({
+void mock.module('@/services/external-agent-service', () => ({
   ...actualExternalAgentService,
   forkChatWithRunner: (chatId: string, runner: unknown) => forkChatWithRunner(chatId, runner),
 }));
 // Spread for the same reason as the service above: the container also imports
 // `externalUnavailableText` from here, and a factory listing only the hook
 // breaks that import rather than the assertion.
-mock.module('../../../../src/features/external-agents/useExternalAgents', () => ({
+void mock.module('../../../../src/features/external-agents/useExternalAgents', () => ({
   ...actualUseExternalAgents,
   useExternalAgents: () => ({
     agents: [descriptorState.current],
@@ -101,7 +102,7 @@ mock.module('../../../../src/features/external-agents/useExternalAgents', () => 
   }),
   externalAgentSelectable: () => true,
 }));
-mock.module('../../../../src/features/external-agents/useExternalDisclosures', () => ({
+void mock.module('../../../../src/features/external-agents/useExternalDisclosures', () => ({
   useExternalDisclosures: () => ({
     records: [],
     isLoading: false,
@@ -113,9 +114,8 @@ mock.module('../../../../src/features/external-agents/useExternalDisclosures', (
 
 // Below every mock, never as a static import: those are evaluated first and the
 // container would bind the real hooks.
-const { RunnerSelectorContainer } = await import(
-  '../../../../src/features/external-agents/RunnerSelectorContainer'
-);
+const { RunnerSelectorContainer } =
+  await import('../../../../src/features/external-agents/RunnerSelectorContainer');
 
 function openSelector() {
   render(<RunnerSelectorContainer />);

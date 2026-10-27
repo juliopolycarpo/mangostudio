@@ -14,10 +14,12 @@
 import type { LibraryLocationId, ResourceKind } from '@mangostudio/shared/library';
 import { useQueries } from '@tanstack/react-query';
 import { useMemo } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
-import { FileChangePreviewBody } from '@/features/chat/components/FileChangePreview';
 import { diffTextLines } from '@/features/chat/components/file-change-preview';
+import { FileChangePreviewBody } from '@/features/chat/components/FileChangePreview';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { hashPrefix } from '../format';
 import { libraryContentQueryOptions } from '../queries';
 import { LibraryPageState } from './LibraryPageState';

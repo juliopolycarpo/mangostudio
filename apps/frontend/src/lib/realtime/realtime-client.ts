@@ -3,13 +3,14 @@ import {
   type RealtimeClientMessage,
   type RealtimeInvalidateMessage,
 } from '@mangostudio/shared/realtime';
+
 import { getWebSocketBaseUrl } from '../api-base-url';
 import { scheduleLoginRedirect } from '../auth-navigate';
 import { parseServerMessage } from './parse-server-message';
 import {
+  nextReconnectDelay as sharedReconnectDelay,
   RECONNECT_MAX_FAILURES,
   SOCKET_HEARTBEAT_MS,
-  nextReconnectDelay as sharedReconnectDelay,
 } from './reconnect-backoff';
 
 const REALTIME_PATH = '/api/ws';

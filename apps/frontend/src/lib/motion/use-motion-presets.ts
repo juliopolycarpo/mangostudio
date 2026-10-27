@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+
 import { type MotionPresets, motionPresets } from './variants';
 
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';

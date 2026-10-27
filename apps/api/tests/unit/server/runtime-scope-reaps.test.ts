@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { LogMetadata } from '../../../src/lib/logger';
 import type { EnvironmentWithdrawnListener } from '../../../src/modules/environments/application/environment-service';
 import {

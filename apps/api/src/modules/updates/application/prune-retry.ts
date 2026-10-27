@@ -8,6 +8,7 @@
 
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRunDir } from '../../../lib/mango-paths';
 import { currentInstallOriginProbe } from '../../machine/application/hub-service';

@@ -5,9 +5,11 @@
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
 import type { UserServiceErrorCode } from '@mangostudio/shared/runtime-home';
+
 import { Badge } from '@/components/ui/Badge';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { supervisorLabel } from '../format';
 import { MachineActionButton } from './MachineActionButton';
 import { MachineCard, MachineFact, MachineFacts } from './MachineCard';

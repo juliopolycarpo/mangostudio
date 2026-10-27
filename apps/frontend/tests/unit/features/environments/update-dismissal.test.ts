@@ -5,6 +5,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   dismissUpdateVersion,
   readDismissedUpdateVersion,

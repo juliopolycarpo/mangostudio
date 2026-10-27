@@ -5,11 +5,13 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import type { ExternalTurnTerminalReason } from '@mangostudio/shared/external-agents';
 import { createMockMessage } from '@mangostudio/shared/test-utils';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { screen } from '@testing-library/react';
+
 import { AssistantMessageBlock } from '../../../../src/features/chat/components/AssistantMessageBlock';
 import { render } from '../../../support/harness/render';
 import { ToolIdentitiesProbe } from '../../../support/mocks/tool-identities';

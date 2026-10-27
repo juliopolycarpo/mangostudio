@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   ToolSettingsDescriptorSchema,
   type ToolSettingsListResponse,
   ToolSettingsListResponseSchema,
 } from '@mangostudio/shared/tool-settings';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';

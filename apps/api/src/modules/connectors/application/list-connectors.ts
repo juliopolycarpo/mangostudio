@@ -3,6 +3,7 @@
  */
 
 import type { Connector, ConnectorStatus } from '@mangostudio/shared/connectors';
+
 import { getChatGptUsage } from '../../../services/providers/chatgpt/usage-fetch';
 import {
   getProvider,

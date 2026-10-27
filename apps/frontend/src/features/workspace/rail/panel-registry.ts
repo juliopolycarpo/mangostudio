@@ -8,8 +8,10 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
+
 import { GithubPanel } from '@/features/github/components/GithubPanel';
 import { TerminalRailPanel } from '@/features/terminal/TerminalRailPanel';
+
 import { GitPanel } from '../GitPanel';
 import { TodoRailPanel } from './TodoRailPanel';
 

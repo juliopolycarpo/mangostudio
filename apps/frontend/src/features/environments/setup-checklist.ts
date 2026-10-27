@@ -17,7 +17,9 @@ import type {
 } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { MachineStatus } from '@mangostudio/shared/machine';
+
 import { formatMessage } from '@/lib/i18n-format';
+
 import {
   displayName,
   effectiveInstallation,

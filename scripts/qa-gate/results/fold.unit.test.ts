@@ -6,7 +6,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { laneById } from '../../lib/test-lanes';
 import { presentValue } from '../model/states';
-import { type FixtureCase, fakeFiles, junitXml, receiptJson } from '../testing/junit-fixture';
+import { fakeFiles, type FixtureCase, junitXml, receiptJson } from '../testing/junit-fixture';
 import { readJobEvidence } from './evidence';
 import type { ExpectedJob } from './expected-jobs';
 import { foldLane } from './fold';

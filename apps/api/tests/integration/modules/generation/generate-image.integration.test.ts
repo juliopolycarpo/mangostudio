@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+
 import { getDb } from '../../../../src/db/database';
 import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
 import { createChat } from '../../../../src/modules/chats/infrastructure/chat-repository';

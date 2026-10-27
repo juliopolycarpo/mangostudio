@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   createMemoryHistory,
   createRootRoute,
@@ -6,6 +7,7 @@ import {
   Outlet,
   RouterProvider,
 } from '@tanstack/react-router';
+
 import { NotFound } from '../../../src/components/layout/NotFound';
 import { act, render, screen } from '../../support/harness/render';
 
@@ -20,7 +22,7 @@ async function renderUnmatched(path: string) {
     routeTree: rootRoute,
     history: createMemoryHistory({ initialEntries: [path] }),
   });
-  // biome-ignore lint/suspicious/noExplicitAny: unregistered test-only route tree
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- unregistered test-only route tree
   render(<RouterProvider router={router as any} />);
   await act(async () => {
     await router.load();

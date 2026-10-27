@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
+
 import type { ToolDefinition } from '../services/providers/types';
 
 /** Computes a SHA-256 hex digest of the given string. */

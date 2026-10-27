@@ -1,5 +1,6 @@
 import { fixtures } from '@mangostudio/shared/test-utils';
 import type { SecretSource } from '@mangostudio/shared/types';
+
 import { getDb } from '../../../src/db/database';
 
 export interface UserFixture {

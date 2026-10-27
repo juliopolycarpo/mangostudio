@@ -40,6 +40,7 @@ import {
   type ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
+
 import { getDb } from '../../../db/database';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
@@ -715,9 +716,9 @@ export function createExternalSessionManager(
     if (startsFresh) await releaseAdoptionLease(input.chatId, db);
     const resumable = startsFresh ? undefined : matching;
 
-    const client = await (input.existingConnectionOnly
-      ? resolveExistingRuntimeClient
-      : resolveRuntimeClient)(input.userId, input.environmentId);
+    const client = await (
+      input.existingConnectionOnly ? resolveExistingRuntimeClient : resolveRuntimeClient
+    )(input.userId, input.environmentId);
     const toolchain = await resolveToolchainParams(client.manifest, () =>
       resolveToolchain(input.userId, input.environmentId)
     );

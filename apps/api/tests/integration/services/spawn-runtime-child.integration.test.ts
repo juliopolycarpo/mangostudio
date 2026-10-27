@@ -11,8 +11,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
+
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { LEGACY_HELLO_1_0_1_NDJSON_LINE } from '../../fixtures/legacy-hello-1-0-1';

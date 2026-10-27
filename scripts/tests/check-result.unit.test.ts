@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import {
   CHECK_RESULT_MAX_BYTES,
   type CheckResult,
@@ -17,7 +18,7 @@ describe('Check result validator', () => {
   test('success keeps every labeled executed task and command exit', () => {
     const fixture = completedCheckFixture([
       executedCheckTask('workspaces:check'),
-      executedCheckTask('root:biome'),
+      executedCheckTask('root:lint'),
     ]);
     expect(parseCheckResult(serializeCheckResult(fixture), expected)).toEqual(fixture);
   });
@@ -25,8 +26,8 @@ describe('Check result validator', () => {
   test('multiple task failures retain each failing label and nonzero task exit', () => {
     const fixture = completedCheckFixture([
       executedCheckTask('workspaces:check', 2),
-      executedCheckTask('root:biome', 7),
-      executedCheckTask('root:dprint'),
+      executedCheckTask('root:lint', 7),
+      executedCheckTask('root:fmt'),
     ]);
     expect(parseCheckResult(JSON.stringify(fixture), { ...expected, exitCode: 1 })).toEqual(
       fixture
@@ -84,7 +85,7 @@ describe('Check result validator', () => {
   test('interrupted report retains finished tasks and marks unfinished labels unavailable', () => {
     const fixture: CheckResult = {
       ...completedCheckFixture([
-        executedCheckTask('root:biome', 1),
+        executedCheckTask('root:lint', 1),
         {
           label: 'workspaces:check',
           state: 'unavailable',
@@ -113,11 +114,11 @@ describe('Check result validator', () => {
     ['report', { ...completedCheckFixture(), unexpected: true }],
     [
       'task',
-      completedCheckFixture([{ ...executedCheckTask('root:biome'), unexpected: true } as never]),
+      completedCheckFixture([{ ...executedCheckTask('root:lint'), unexpected: true } as never]),
     ],
     ['version', { ...completedCheckFixture(), schemaVersion: 2 }],
     ['producer', { ...completedCheckFixture(), kind: 'another-report' }],
-    ['duration', completedCheckFixture([{ ...executedCheckTask('root:biome'), durationMs: -1 }])],
+    ['duration', completedCheckFixture([{ ...executedCheckTask('root:lint'), durationMs: -1 }])],
     ['missing exit', { ...completedCheckFixture(), exitCode: undefined }],
   ])('rejects unexpected or invalid %s fields', (_name, fixture) => {
     expect(() => parseCheckResult(JSON.stringify(fixture), expected)).toThrow('schema validation');
@@ -125,12 +126,12 @@ describe('Check result validator', () => {
 
   test('duplicate and reordered task identities are rejected', () => {
     const duplicate = completedCheckFixture([
-      executedCheckTask('root:biome'),
-      executedCheckTask('root:biome'),
+      executedCheckTask('root:lint'),
+      executedCheckTask('root:lint'),
     ]);
     expect(() => parseCheckResult(JSON.stringify(duplicate), expected)).toThrow('exactly once');
     const reordered = completedCheckFixture([
-      executedCheckTask('root:biome'),
+      executedCheckTask('root:lint'),
       executedCheckTask('workspaces:check'),
     ]);
     reordered.tasks.reverse();

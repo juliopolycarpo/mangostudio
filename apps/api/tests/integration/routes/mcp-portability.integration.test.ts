@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { ApiErrorResponseSchema } from '@mangostudio/shared/errors';
 import type {
@@ -18,6 +19,7 @@ import {
 } from '@mangostudio/shared/mcp';
 import { sql } from 'kysely';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import { mcpServerRoutes } from '../../../src/modules/mcp-servers/http/mcp-server-routes';
@@ -497,7 +499,8 @@ describe('mcp portability routes', () => {
     const plan = await preview(app, source);
     const db = getDb();
     await sql
-      .raw(`
+      .raw(
+        `
       CREATE TRIGGER mcp_portability_slug_race
       BEFORE INSERT ON mcp_servers
       WHEN NEW.slug = 'race'
@@ -510,7 +513,8 @@ describe('mcp portability routes', () => {
           'stdio', 'bun', '[]', '{}', NULL, 1, NULL, NEW.createdAt, NEW.updatedAt
         );
       END;
-    `)
+    `
+      )
       .execute(db);
 
     let applyResponse: Response;

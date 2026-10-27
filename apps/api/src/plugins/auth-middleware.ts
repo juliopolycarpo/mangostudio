@@ -2,6 +2,7 @@ import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { isAPIError } from 'better-auth/api';
 import { Elysia, status } from 'elysia';
+
 import { getAuth } from '../auth';
 
 /**

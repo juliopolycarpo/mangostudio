@@ -1,5 +1,6 @@
 import { useMutationState } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+
 import { appSettingsKeys } from './queries';
 
 export type AppSettingsSaveStatus = 'idle' | 'saving' | 'saved' | 'error';

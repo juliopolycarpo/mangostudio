@@ -16,6 +16,7 @@ import {
   type HubWorkspaceAuthorizeParams,
   type HubWorkspaceAuthorizeResult,
 } from '@mangostudio/shared/runtime-contract';
+
 import { getDb } from '../../db/database';
 import { raceAgainstAbort } from '../../lib/abort-race';
 

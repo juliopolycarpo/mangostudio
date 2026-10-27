@@ -21,11 +21,11 @@
 
 import type { TSchema } from 'typebox';
 import Value from 'typebox/value';
+
 import { type ContractViolation, describeContractViolation } from './contract-violation';
 
 export type ContractCheckResult =
-  | { readonly ok: true }
-  | { readonly ok: false; readonly violation: ContractViolation };
+  { readonly ok: true } | { readonly ok: false; readonly violation: ContractViolation };
 
 /**
  * `value` against `schema`, exactly as the contract declares it — no

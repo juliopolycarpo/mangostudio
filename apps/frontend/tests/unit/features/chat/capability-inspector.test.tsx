@@ -6,12 +6,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
+
 import { useUpdateToolSetting } from '../../../../src/features/settings/tools/hooks/use-tool-settings';
 import { toolSettingsKeys } from '../../../../src/features/settings/tools/queries';
 import { render } from '../../../support/harness/render';
@@ -23,11 +25,10 @@ import { LinkStub } from '../../../support/mocks/router';
 // import the subject. `mock.module` is not hoisted and static imports are.
 const actualRouter = await import('@tanstack/react-router');
 
-mock.module('@tanstack/react-router', () => ({ ...actualRouter, Link: LinkStub }));
+void mock.module('@tanstack/react-router', () => ({ ...actualRouter, Link: LinkStub }));
 
-const { CapabilityInspector } = await import(
-  '../../../../src/features/chat/components/CapabilityInspector'
-);
+const { CapabilityInspector } =
+  await import('../../../../src/features/chat/components/CapabilityInspector');
 
 const RESPONSE: ChatCapabilitiesResponse = {
   chatId: 'chat-1',

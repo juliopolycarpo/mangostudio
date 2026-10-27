@@ -2,8 +2,10 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 import { type AnyElysia, Elysia, NotFound } from 'elysia';
+
 import type { App } from '../../../src/app';
 import { clearFrontendFallback, frontendNotFound } from '../../../src/server/frontend-fallback';
 
@@ -62,7 +64,7 @@ beforeEach(async () => {
   ] as const) {
     fixtureInodes.set(originalFs.realpathSync(path), inode);
   }
-  mock.module('node:fs', fakeLargeInodeFs);
+  await mock.module('node:fs', fakeLargeInodeFs);
   const { registerFrontend } = await import('../../../src/server/frontend-static');
   app = new Elysia().onError(NotFound, ({ request }) => frontendNotFound(request));
   registerFrontend(app as unknown as App, frontendDir);
@@ -73,7 +75,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (app?.server) await app.stop();
-  mock.module('node:fs', originalFsModule);
+  await mock.module('node:fs', originalFsModule);
   fixtureInodes.clear();
   clearFrontendFallback();
   originalFs.rmSync(frontendDir, { recursive: true, force: true });

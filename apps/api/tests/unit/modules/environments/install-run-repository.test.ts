@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+
 import { getDb } from '../../../../src/db/database';
 import { createInstallRunRepository } from '../../../../src/modules/environments/infrastructure/install-run-repository';
 import { insertTestUser } from '../../../support/factories';

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { UserServiceStatus } from '@mangostudio/shared/runtime-home';
+
 import {
-  type MachineActionsInput,
   machineActions,
+  type MachineActionsInput,
 } from '../../../../src/modules/machine/domain/machine-actions';
 import { evaluateMachineActionGuard } from '../../../../src/modules/machine/domain/machine-guard';
 

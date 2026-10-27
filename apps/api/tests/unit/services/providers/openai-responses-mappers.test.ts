@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { Responses } from 'openai/resources/responses/responses';
+
 import type { ResponseStreamEvent } from '../../../../src/services/providers/openai/normalizers';
 import { createResponsesAgentAccumulator } from '../../../../src/services/providers/openai/responses-agent-accumulator';
 import { createResponsesReasoningTracker } from '../../../../src/services/providers/openai/responses-reasoning-tracker';

@@ -12,8 +12,10 @@ import type { Messages } from '@mangostudio/shared/i18n';
 import { Link, type LinkProps } from '@tanstack/react-router';
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { EnvironmentPageState } from './EnvironmentPageState';
 
 interface OverviewSectionProps {

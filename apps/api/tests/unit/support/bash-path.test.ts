@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+
 import { bashPath } from '../../support/bash-path';
 
 describe('bashPath', () => {

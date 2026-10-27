@@ -286,7 +286,7 @@ Retorna 422 com `ToolSettingsError` se os parâmetros forem inválidos ou se a t
 | Gemini Interactions | `toolDefsToGeminiInteractions()` | `{ name, description, parameters }`                           |
 | OpenAI-compatible   | `toolDefsToChatCompletions()`    | `ChatCompletionTool[]`                                        |
 
-A API OpenAI Responses aplica `strict: true` quando o schema *derivado* satisfaz os requisitos
+A API OpenAI Responses aplica `strict: true` quando o schema _derivado_ satisfaz os requisitos
 do strict mode (`type: object`, `additionalProperties: false`, todas as propriedades
 obrigatórias **em qualquer nível de aninhamento**, sem `oneOf`/`anyOf`/`allOf`/`not`/`$ref`/`minLength`/`maxLength`).
 `toStrictSchema` produz esse dialeto no limite do Responses; os schemas de origem permanecem

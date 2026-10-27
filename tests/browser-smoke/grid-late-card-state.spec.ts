@@ -1,5 +1,6 @@
 import type { GithubInboxResponse } from '@mangostudio/shared/github';
 import { expect, test } from '@playwright/test';
+
 import { observeMotionNodes, readMotionObservations } from './support/motion-observer';
 
 const SELECTORS = { card: '[data-testid="home-dashboard"] section' };

@@ -7,10 +7,12 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import {
   ExternalComposerControls,
   hasExternalComposerControls,

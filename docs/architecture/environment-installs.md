@@ -111,7 +111,7 @@ PowerShell and the installers need (`SystemRoot`, `ComSpec`, `PATHEXT`, `USERPRO
 
 Two facts about the winget Node package are accepted on purpose: it is a per-machine MSI declared
 `elevatesSelf`, so Windows shows a UAC prompt no flag suppresses, and the `.LTS` package tracks
-the current LTS *line*, so an upgrade crosses majors when Node promotes a new one. What has **not**
+the current LTS _line_, so an upgrade crosses majors when Node promotes a new one. What has **not**
 been verified on a real host: whether the UAC prompt reaches the user when the installer is
 spawned from the runtime's hidden window, what happens from a service session with no
 interactive desktop, and whether `winget install` over a nodejs.org MSI takes its "found an
@@ -142,7 +142,7 @@ MangoStudio never pipes a live network response into a shell.
 
 ## Where Execution Happens
 
-The hub decides *whether*; the runtime does the spawning. `install.run` carries an argv the hub
+The hub decides _whether_; the runtime does the spawning. `install.run` carries an argv the hub
 already built from a code-defined recipe — nothing is interpolated on the far side — and the child's
 output travels back on the `install.output` `evt` stream keyed by the run id. The hub relays those
 frames onto the SSE stream a browser reads, so the browser contract is unchanged in shape; only the
@@ -161,7 +161,7 @@ offerable from a Windows hub when the environment is a WSL distribution; that is
 The runtime uses `Bun.spawn(argv)` with stdin disabled and stdout/stderr piped. It forwards only
 the runtime path/home/temp/XDG variables, proxy variables, the version-manager roots, and the
 small set of code-owned recipe overrides (nvm's `PROFILE`, Codex's `CODEX_NON_INTERACTIVE`) —
-read from *its* environment, not the hub's. The `PATH` it starts from is the spawn environment
+read from _its_ environment, not the hub's. The `PATH` it starts from is the spawn environment
 described in [`environments.md`](../features/environments.md), so an installer sees the same Node
 and Bun every other spawned process does. Connector tokens, API keys, GitHub tokens, and other
 credential variables are withheld.

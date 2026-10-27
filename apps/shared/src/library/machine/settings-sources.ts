@@ -13,6 +13,7 @@
 
 import { type Dirent, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
 import type { PathEnv } from '../../runtime-env';
 import { getLibraryLocation, LIBRARY_TARGET_DEFINITIONS, type LocationDefinition } from '../host';
 import type {

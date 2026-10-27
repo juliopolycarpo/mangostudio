@@ -23,18 +23,20 @@ import { GIT_SCOPES, type GitScope, gitTopic } from '@mangostudio/shared/realtim
 import {
   type QueryClient,
   queryOptions,
-  type UseQueryResult,
   useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
   useQueryClient,
+  type UseQueryResult,
 } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo } from 'react';
+
 import { githubKeys } from '@/features/github/queries';
 import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
+
 import { githubContextKeys } from './use-github-context';
 
 const gitStateKeys = {

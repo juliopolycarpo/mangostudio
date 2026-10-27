@@ -36,7 +36,7 @@ handshake timeout closes the transport with code `4400` and reason `handshake ti
 
 A limit below the floor §11 sets is a `RangeError` from the call that sets it — the
 constructor, or the transport's own options — not a `hello` the peer's schema refuses. The
-schema's *maximum* is not checked yet; a ceiling above `2147483647` still builds a `hello` the
+schema's _maximum_ is not checked yet; a ceiling above `2147483647` still builds a `hello` the
 peer refuses.
 
 Options worth knowing:
@@ -106,7 +106,7 @@ destroys what the dial opened and rejects with a `TimeoutError`; an abort reject
 reason the caller gave.
 
 On POSIX the socket is owner-only from the moment it exists. A socket file at the address is
-*stale* when a connection to it is refused — the listener that made it is gone — and `listenIpc`
+_stale_ when a connection to it is refused — the listener that made it is gone — and `listenIpc`
 removes a stale file before binding; a file a connection succeeds against, or one the dial
 cannot judge either way, is a live listener's address, and `listenIpc` refuses to bind over it
 with `EADDRINUSE` instead of silently taking it over. On Windows the named pipe is **not**
@@ -116,7 +116,7 @@ trust there.
 
 One residual race is outside what a probe can close: libuv's `uv__pipe_close` unlinks a Unix
 socket path unconditionally on `close()`, with no way from JavaScript to make it check first. A
-listener that crashes, gets replaced at the same address, and *then* runs its delayed `close()`
+listener that crashes, gets replaced at the same address, and _then_ runs its delayed `close()`
 will unlink the replacement's socket file out from under it — the replacement keeps running on
 an inode nothing can reach. The probe above closes the far more common case, a stale file with
 no process behind it at all; this one needs a crash landing inside that exact window.

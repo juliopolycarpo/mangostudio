@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { queryClient } from '@/lib/query-client';
 
 describe('queryClient defaults', () => {

@@ -15,6 +15,7 @@
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+
 import type {
   ContainerDetection,
   ContainerEngine,
@@ -34,10 +35,11 @@ import {
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import type { LinuxPlatformId } from '@mangostudio/shared/runtime-home';
 import {
-  PLATFORM_PROBE_SCRIPT,
   parsePlatformProbe,
+  PLATFORM_PROBE_SCRIPT,
   resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
+
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { throwIfAborted } from '../domain/cancellation';
 import { classifyContainerFailure, describeContainerFailure } from '../domain/container-failure';

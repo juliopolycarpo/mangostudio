@@ -56,8 +56,7 @@ square corner instead of quietly keeping a size, and the conformance test reject
 
 Three families (Manrope for headings, Inter for body, JetBrains Mono) became two. Inter
 is the basis of Adwaita Sans and sits next to Segoe UI Variable without clashing, so a
-native build can swap in the system font with the same scale. Headings use Inter at
-600. This also drops a font file from the bundle and a preload from `index.html`.
+native build can swap in the system font with the same scale. Headings use Inter at 600. This also drops a font file from the bundle and a preload from `index.html`.
 
 ## 5. A 32px control, a 48px header
 
@@ -85,7 +84,7 @@ running text and are an explicit, documented exception.
 
 **Status:** accepted · **Replaces:** a send button coloured by the runner.
 
-The composer wore the runner's colour on its frame *and* its Send button, which needed
+The composer wore the runner's colour on its frame _and_ its Send button, which needed
 a per-theme `color-mix` darkening to clear 4.5:1 with white text. The runner's identity
 (`--composer-accent`, set from `features/chat/lib/composer-accent.ts`) still shows on
 the focused border, the prompt mark, the caret, the runner chip and the leading glyph of
@@ -119,7 +118,7 @@ for `primary`, `secondary` and `danger`.
 
 A disabled primary button was the mango faded to 50%, which reads as a different,
 dimmer brand colour. Disabled buttons are neutral (`fill-selected` + `fg-subtle`) in
-every variant, as native controls draw them. A button that is only *loading* keeps its
+every variant, as native controls draw them. A button that is only _loading_ keeps its
 colour and shows a spinner.
 
 ## 11. One focus ring
@@ -205,7 +204,7 @@ page that put four mango buttons on screen at once, two per rule file, and in th
 server dialog the `stdio` segment and Save were the same orange, so the real primary
 no longer stood out. Decision 8 already says the accent appears only on the primary
 button, the current item, checked controls and focus; a selected segment is the
-*current item*, not a call to action.
+_current item_, not a call to action.
 
 **Consequence:** the selected segment is `fill-selected` with a `stroke-strong` border
 and `fg`, and the accent is a 2px bar on its bottom edge, the same mark as the

@@ -9,13 +9,34 @@ function extractPreCommitCommand(config: string, command: string): string {
 }
 
 describe('lefthook pre-commit config', () => {
-  test('lets dprint skip staged files excluded by dprint config', () => {
+  test('runs Bun lint and format in sequence for staged files without Dockerfiles', () => {
     const lefthook = readText('lefthook.yml');
-    const dprintConfig = JSON.parse(readText('dprint.json')) as { excludes?: string[] };
-    const dprintHook = extractPreCommitCommand(lefthook, 'dprint');
+    const lintHook = extractPreCommitCommand(lefthook, 'bun-lint');
+    const formatHook = extractPreCommitCommand(lefthook, 'bun-fmt');
 
-    expect(dprintConfig.excludes).toContain('**/CHANGELOG.md');
-    expect(dprintHook).toContain('run: bunx dprint fmt --allow-no-files {staged_files}');
+    expect(lefthook).toContain('parallel: false');
+    expect(lintHook).toContain('run: bun lint --staged --fix --no-script --no-warn-ignored');
+    expect(formatHook).toContain('run: bun fmt --staged');
+    expect(formatHook).toContain(
+      '*.{ts,tsx,js,jsx,mts,cts,mjs,cjs,json,jsonc,css,html,md,mdc,mdx,toml,yml,yaml}'
+    );
+    expect(lefthook).not.toContain('dprint');
+    expect(lefthook).not.toContain('Dockerfile');
+    expect(lefthook.indexOf('    bun-lint:')).toBeLessThan(lefthook.indexOf('    bun-fmt:'));
+  });
+
+  test('configures OpenCode to use Bun fmt for code and documentation files', () => {
+    const config = JSON.parse(readText('opencode.json')) as {
+      formatter: Record<string, { command: string[]; extensions: string[] }>;
+    };
+    const formatter = config.formatter['bun-fmt'];
+
+    expect(formatter.command).toEqual(['bun', 'fmt', '$FILE']);
+    expect(formatter.extensions).toContain('.ts');
+    expect(formatter.extensions).toContain('.jsonc');
+    expect(formatter.extensions).toContain('.mdc');
+    expect(formatter.extensions).toContain('.yaml');
+    expect(readText('opencode.json')).not.toContain('Dockerfile');
   });
 
   test('runs affected workspace and code-health checks for staged files', () => {

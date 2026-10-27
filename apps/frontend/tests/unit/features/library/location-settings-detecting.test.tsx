@@ -8,6 +8,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import {
   type AppSettings,
   type AppSettingsResponse,
@@ -18,7 +19,9 @@ import {
 import { en } from '@mangostudio/shared/i18n';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { SETTINGS_TOPIC } from '@mangostudio/shared/realtime';
+
 import { resetRealtimeInvalidations } from '@/lib/realtime/use-realtime-invalidation';
+
 import { act, renderHook, screen, waitFor } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -28,19 +31,17 @@ import { location } from './fixtures';
 
 const realtime = new FakeRealtimeClient();
 
-mock.module('@/lib/realtime/realtime-client', () => ({
+void mock.module('@/lib/realtime/realtime-client', () => ({
   bindRealtimeClientToUser: () => undefined,
   resetRealtimeClient: () => undefined,
   getRealtimeClient: () => realtime,
 }));
 
 // Imported after the mock so the hooks bind the fake socket, not a real one.
-const { LocationSettings } = await import(
-  '../../../../src/features/library/components/LocationSettings'
-);
-const { useCandidateLocations } = await import(
-  '../../../../src/features/library/hooks/use-candidate-locations'
-);
+const { LocationSettings } =
+  await import('../../../../src/features/library/components/LocationSettings');
+const { useCandidateLocations } =
+  await import('../../../../src/features/library/hooks/use-candidate-locations');
 
 const l = en.library.locationSettings;
 

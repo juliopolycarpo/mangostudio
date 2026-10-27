@@ -1,5 +1,6 @@
 import type { Pointer } from 'bun:ffi';
 import { expect, test } from 'bun:test';
+
 import { FixtureHandles, FixtureJobCoverage } from './support/fixture-windows-job';
 
 class BirthDuringTermination {

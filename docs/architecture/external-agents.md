@@ -19,7 +19,7 @@ and what a chat still carrying a `cursor/*` model does.
 > **External agents never own MangoStudio tools. They use their own tools, and MangoStudio only
 > surfaces them in the interface.**
 
-External tool activity is *observational*. It is rendered and persisted; it never enters
+External tool activity is _observational_. It is rendered and persisted; it never enters
 MangoStudio's tool registry, executor, permission engine, workdir policy or budget accounting.
 This is why the event contract calls them `activity` rather than `tool` — the name is the same at
 every call site, so nothing reads as executable that is not.
@@ -99,7 +99,7 @@ An external agent is not an `AgentProfile` and not an `AIProvider`.
 
 - An **`AgentProfile`** configures MangoStudio's own loop: a system prompt, a tool list, a model.
   Every field of it presumes MangoStudio decides what runs. None of those decisions exist here.
-- An **`AIProvider`** serves *models* through MangoStudio's agent loop — MangoStudio still owns
+- An **`AIProvider`** serves _models_ through MangoStudio's agent loop — MangoStudio still owns
   the tools, the permissions and the turn. A vendor CLI owns all three itself.
 
 Modelling either way would mean adding "…except when it is external" to every field, and the
@@ -122,8 +122,8 @@ The model would inherit "I did X" from a third-party process, with no record of 
 
 ## Discovery
 
-Answering *which external agents exist here, are they installed, are they signed in, and what can
-each one do* takes two tiers, in this order:
+Answering _which external agents exist here, are they installed, are they signed in, and what can
+each one do_ takes two tiers, in this order:
 
 1. **The cheap pass** — the environment scanner that already runs for the Environments UI
    (`probing.agentClis`). It looks for the binary and its credential-adjacent files, is already
@@ -201,7 +201,7 @@ uses — verified against live binaries, not inferred from the fact that a termi
 in the prompt path escapes, wraps or rewrites a leading slash, and nothing needs to: the text
 arrives as the user typed it and the CLI resolves the name against directories it read itself.
 
-Two of them also *announce* what they will expand, and the adapter forwards that as
+Two of them also _announce_ what they will expand, and the adapter forwards that as
 `commands_available`:
 
 | Target | Where the catalog comes from                        | When                         | Descriptions |
@@ -245,7 +245,7 @@ Two orthogonal product axes:
 
 They are separate because in at least one vendor they genuinely are. Codex sets what the agent may
 do with a sandbox plus an approval policy, while a separate field decides who reviews the prompts,
-and that reviewer applies at *any* sandbox level. A flat list of four choices could not express
+and that reviewer applies at _any_ sandbox level. A flat list of four choices could not express
 "read-only **and** auto-reviewed".
 
 ### Presets
@@ -273,7 +273,7 @@ that cannot work reads as a MangoStudio fault instead of as something this vendo
 matrix opens expanded when the stored pair matches no preset, so a user who already chose a custom
 combination is not told it vanished.
 
-The unattended warning follows the axis the preset *resolved* to, not the preset. `autonomous`
+The unattended warning follows the axis the preset _resolved_ to, not the preset. `autonomous`
 falling back to `default × auto-review` cannot leave the workspace, so the level warning would be
 false there — the true statement is that its approvals are answered without the user.
 
@@ -288,7 +288,7 @@ This is pinning rather than a fix. On 2.1.260, with the flag's default of `host`
 after the prompt, an unmatched `Write` under `--permission-mode default` already produces
 `system/permission_denied`, a `tool_result` marked in error, exit 0 and no file. Nothing hangs.
 What the flag buys is that the property survives another default change: a future build honouring
-`host` by *waiting* would park every approval-needing turn until the idle timeout.
+`host` by _waiting_ would park every approval-needing turn until the idle timeout.
 
 Roughly, per vendor:
 
@@ -366,7 +366,7 @@ writes markdown because it assumes a terminal renders it, so rendering it litera
 and `**` raw rather than hiding anything. The safety property is not the caller's choice of
 renderer, it is what the renderer emits: `MarkdownContentRenderer` escapes raw HTML instead of
 parsing it, resolves every link and image target through a scheme allowlist
-(`http`/`https`/`mailto`, everything else becomes `#`), escapes link *label* text so markup cannot
+(`http`/`https`/`mailto`, everything else becomes `#`), escapes link _label_ text so markup cannot
 be smuggled past a safe href, and downgrades an image to an anchor so no vendor-named URL is ever
 fetched. A renderer that leaked any of those would leak them for MangoStudio's own model output
 too — which is equally model-written — so the boundary belongs there and not at a per-caller flag.
@@ -379,7 +379,7 @@ It **may** read a bounded, non-secret CLI config to test whether a key is presen
 publishes sign-in state that way, and `probe_config_key` in
 `crates/mangostudio-runtime/src/probing/detection/auth_signal.rs` does exactly that: a length-capped read, a
 parse, one boolean out. The parsed value is never retained and no part of it reaches a result, a
-log or a diagnostic. Credential *files*, by contrast, are stat-only: `probe_auth_file` never opens
+log or a diagnostic. Credential _files_, by contrast, are stat-only: `probe_auth_file` never opens
 one.
 
 This is a fallback. All three vendors now answer authoritatively through their own status command,
@@ -412,7 +412,7 @@ The **runtime** attests what it can establish about itself, in
 | `os-account`       | This process has its own uid and its own credential home               | Local, ssh, wsl, and a hub-launched stdio runtime |
 | `container`        | A container whose credential home is genuinely its own                 | Container environments                            |
 
-`container` is a *check*, not a label. Containerization alone proves nothing: a
+`container` is a _check_, not a label. Containerization alone proves nothing: a
 `-v ~/.claude:/root/.claude` bind mount puts the host's vendor logins inside a container whose uid
 namespace and filesystem both still say "isolated". So the mount table is read and any mount at the
 credential home — or at `~/.claude`, `~/.codex`, `~/.cursor` and their XDG equivalents — withdraws
@@ -559,7 +559,7 @@ tool the executor can re-run, an elicitation its MCP client owns — and a vendo
 any of them is the failure this whole context exists to prevent.
 
 The projection from a neutral event to a chunk lives in `apps/shared/src/streaming/external-events.ts`.
-The hub builds the durable transcript from the *same* events, through a second projection —
+The hub builds the durable transcript from the _same_ events, through a second projection —
 `ExternalTurnTranscript` — so there are two of them, not one: the live render and the reloaded one
 each have their own path from the same source. `apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts`
 drives both from one event sequence and compares the results, which is what keeps them from
@@ -588,7 +588,7 @@ of, so both the hub and the adapter answer `turn-not-steerable` locally, before 
 a steer would otherwise leave behind.
 
 **Persistence order is the whole feature.** The hub writes the steered text into the running
-turn's transcript — optimistically, as accepted — *before* calling the runtime, not after. A vendor
+turn's transcript — optimistically, as accepted — _before_ calling the runtime, not after. A vendor
 call that succeeds but whose acknowledgement is lost must never make the user's own words
 disappear from what they see on reload; writing first and correcting the record in place on an
 actual rejection is what keeps that true. The five rejection reasons —
@@ -649,7 +649,7 @@ beats guessing which conversation somebody meant.
 The two listings differ more than a neutral schema suggests, and the differences are where the bugs
 live:
 
-- Codex's `Thread.id` is the thread; `Thread.sessionId` is a *different* required field naming the
+- Codex's `Thread.id` is the thread; `Thread.sessionId` is a _different_ required field naming the
   whole thread tree. `thread/resume` takes the first. Its `name` is nullable and `preview` — "usually
   the first user message" — is required, so a null title falls back to the preview. Timestamps are
   Unix **seconds**. `turns` is documented as empty at list time and there is no `messageCount`
@@ -690,7 +690,7 @@ template, and the `nativeReview` capability comes from whether the adapter imple
 `startReview` member.
 
 **It is not auto-review.** The permissions dropdown's `auto-review` routing decides whether a
-subagent answers the *agent's own tool calls*; this reviews the *user's code*. Same word, opposite
+subagent answers the _agent's own tool calls_; this reviews the _user's code_. Same word, opposite
 subjects, so each surface's copy states its subject explicitly and the two never appear adjacent:
 the action lives in the repository panel, next to the changes it reviews.
 
@@ -754,6 +754,7 @@ protocol archaeology:
   binding, fail-closed behaviour and a threat model, i.e. its own security feature rather than a
   flag in an adapter. It is also absent from printed `--help`, so no capability could honestly be
   derived by probing for it.
+
 - **Claude's `--safe-mode`.** Disables the machine's own hooks, plugins, MCP servers and `CLAUDE.md`
   while auth, model selection and permissions keep working. It would close the inheritance limit
   above, at the cost of silently dropping the project memory and skills a workspace depends on, so
@@ -774,7 +775,7 @@ arrived in stages, because a selectable runner that could block on an approval n
 worse than no runner at all. Its removal was the release-unit boundary.
 
 `installed-but-unusable` is the one reason no adapter reports. It is inferred hub-side from a
-matrix an adapter *did* answer with: every adapter already states, per cell, why that cell is
+matrix an adapter _did_ answer with: every adapter already states, per cell, why that cell is
 refused, and this is what "every cell" adds up to. An **empty** matrix is a cold cache rather than
 a finding, so it does not trigger it — reading one as a verdict would grey out a working target on
 the first render after a restart.
@@ -794,7 +795,7 @@ something the interface can render as a control rather than as prose.
 | `environment-unreachable` | `contact-admin`     | Who to ask                                       |
 | `isolation-unproven`      | `contact-admin`     | Who to ask, plus the transport-specific guidance |
 | `installed-but-unusable`  | `contact-admin`     | Who to ask                                       |
-| `runtime-unsupported`     | `none`              | Nothing — the *runtime* lacks the adapter        |
+| `runtime-unsupported`     | `none`              | Nothing — the _runtime_ lacks the adapter        |
 
 The map is `satisfies Record<ExternalAgentUnavailableReason, ExternalAgentRemedyKind>`, so a reason
 added later cannot ship without someone deciding what to do about it. That is why it is data rather
@@ -832,7 +833,7 @@ the prompt with ACP's authentication-required error, and the SDK ends the turn w
 - **Drift.** Runtime tests compare the hub's code literal with the SDK's `AUTH_REQUIRED_CODE` and
   the hub's Cursor command with the SDK profile's login text, so a change on either side fails CI.
 
-The refusal a *send* produces carries the reason as a field rather than interpolated into an English
+The refusal a _send_ produces carries the reason as a field rather than interpolated into an English
 sentence. `version-unsupported` is developer vocabulary; the client translates it from the catalog
 it already has, and the English message stays as the fallback an External API consumer sees when it
 renders nothing itself.
@@ -949,7 +950,7 @@ cache rather than paid per selector render.
 | ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | codex  | `codex --version` against the pin                                               | `version-unsupported`, with the required version                                           |
 | cursor | `cursor-agent acp` answers `protocolVersion: 1` with the keys the reducer reads | unavailable; **never a silent fall back to print mode**                                    |
-| claude | `claude --help` declares every flag the turn's argv names                       | `version-unsupported`; a missing *mode* makes only the combinations needing it unsupported |
+| claude | `claude --help` declares every flag the turn's argv names                       | `version-unsupported`; a missing _mode_ makes only the combinations needing it unsupported |
 
 A version number alone never makes a target unavailable where a probe can answer instead. The pin
 records what was verified, and a build older than it whose surface is intact keeps working —
@@ -1402,7 +1403,7 @@ runtime supports that layout as follows:
 - **Launch.** A `.ps1` cannot be started by `CreateProcessW`. The Windows Job spawner
   (`crates/mangostudio-runtime/src/subprocess/powershell_script.rs`) rewrites it to
   `<SystemRoot>\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile
-  -NonInteractive -ExecutionPolicy RemoteSigned -File <script> <args...>`. The interpreter is
+-NonInteractive -ExecutionPolicy RemoteSigned -File <script> <args...>`. The interpreter is
   named by full path, never searched for. The script path must be absolute, and a verbatim
   `\\?\` path (the canonical form the launch receives) is passed in its Win32 spelling, the same
   form the probe runs. `-File` passes every argument as a literal string, but Windows PowerShell

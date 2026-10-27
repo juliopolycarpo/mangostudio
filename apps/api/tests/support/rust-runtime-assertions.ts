@@ -19,6 +19,7 @@ import { expect } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+
 import type { RemoteError } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
@@ -38,6 +39,7 @@ import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
+
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 import { ToolArgumentError } from '../../src/services/tools/arg-parsing';
 

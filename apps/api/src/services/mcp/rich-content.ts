@@ -8,6 +8,7 @@
 import type { ChatAttachment, ChatAttachmentKind } from '@mangostudio/shared/chat';
 import type { McpMediaPart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../db/types';
 import { createDiagnosticLogger } from '../../lib/logger';
 import {
@@ -203,7 +204,7 @@ function createDefaultMcpMediaStorage(
     },
     async saveFile({ data, mimeType, originalName, extension, kind }) {
       const chat = await getChatById(ctx.chatId, ctx.db);
-      if (!chat || chat.userId !== ctx.userId) {
+      if (chat?.userId !== ctx.userId) {
         throw new Error('Chat not found for MCP media attachment.');
       }
       const attachment = await storeMcpResourceAttachment(

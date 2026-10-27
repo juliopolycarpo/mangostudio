@@ -1,7 +1,9 @@
 import type { Message } from '@mangostudio/shared/chat';
+
 import { Spinner } from '@/components/ui/Spinner';
 import { WorkspaceHub, type WorkspaceHubProps } from '@/features/home/WorkspaceHub';
 import { useI18n } from '@/hooks/use-i18n';
+
 import type { OlderMessages } from '../hooks/use-chat-page-state';
 import { ChatFeed } from './ChatFeed';
 

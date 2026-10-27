@@ -6,8 +6,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ActivityEvent } from '@mangostudio/shared/activity';
 import { en, ptBR } from '@mangostudio/shared/i18n';
+
 import { describeActivity } from '@/features/activity/lib/describe-activity';
 
 const BASE = {

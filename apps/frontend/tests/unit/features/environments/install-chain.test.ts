@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { resolveInstallChain } from '../../../../src/features/environments/install-chain';
 import { installRecipe } from './fixtures';
 

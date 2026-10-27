@@ -7,6 +7,7 @@
  */
 
 import type OpenAI from 'openai';
+
 import type { ToolDefinition } from '../types';
 
 /**

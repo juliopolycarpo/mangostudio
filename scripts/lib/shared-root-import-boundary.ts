@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import { ROOT_DIR } from './config';
 import { listCheckoutFiles } from './git';
 import { collectModuleSpecifiers } from './import-specifiers';

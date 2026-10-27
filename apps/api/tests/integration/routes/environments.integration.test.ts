@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   type AgentCliStatus,
   AgentCliStatusListSchema,
@@ -11,6 +12,7 @@ import {
   VersionManagerStatusSchema,
 } from '@mangostudio/shared/environments';
 import Value from 'typebox/value';
+
 import type {
   EnvironmentProbingService,
   ProbeScope,

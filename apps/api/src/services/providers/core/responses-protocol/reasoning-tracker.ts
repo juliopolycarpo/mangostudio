@@ -10,6 +10,7 @@
  */
 
 import type { Responses } from 'openai/resources/responses/responses';
+
 import type { ResponseStreamEvent } from './normalizers';
 import { extractReasoningFromCompleted } from './normalizers';
 

@@ -1,7 +1,9 @@
 import { lazy, Suspense } from 'react';
+
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
+
 import type { DiffSelection } from './DiffViewer';
 
 const DiffViewerRenderer = lazy(() =>

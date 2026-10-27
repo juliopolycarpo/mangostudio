@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { getDb } from '../../../../../src/db/database';
 import { createMessageUseCase } from '../../../../../src/modules/messages/application/create-message';
 import { generateId } from '../../../../../src/utils/id';

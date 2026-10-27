@@ -22,7 +22,9 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { startFakeChatGptServer } from '@mangostudio/api/test-support/chatgpt/fake-server';
+
 import { extractTarArchive } from './lib/archive';
 import { pumpStream } from './lib/child-streams';
 import { collectContentEncodingProblems } from './lib/content-encoding-smoke';
@@ -577,7 +579,8 @@ function canBindChatGptCallbackPort(): boolean {
   } catch {
     return false;
   } finally {
-    server?.stop(true);
+    // Forced stop closes the probe immediately; this synchronous availability check owns no requests.
+    void server?.stop(true);
   }
 }
 

@@ -1,4 +1,5 @@
 import { createRouter } from '@tanstack/react-router';
+
 import type { AuthContext } from './lib/auth-context';
 import { queryClient } from './lib/query-client';
 import { routeTree } from './routeTree.gen';

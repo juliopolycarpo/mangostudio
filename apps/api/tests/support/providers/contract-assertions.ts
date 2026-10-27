@@ -1,5 +1,7 @@
 import { expect } from 'bun:test';
+
 import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
+
 import {
   type ContinuationEnvelope,
   type ContinuationMode,

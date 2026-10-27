@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import ts from '@typescript/typescript6';
+
 import {
   collectModuleSpecifiers,
   isRequire,
@@ -41,6 +43,7 @@ describe('import specifier helpers', () => {
     );
   });
 
+  // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
   it.each(['load(name)', "load('a' + 'b')", 'load(`pkg/${name}`)', 'load()'])(
     'has no literal text for %s',
     (source) => {

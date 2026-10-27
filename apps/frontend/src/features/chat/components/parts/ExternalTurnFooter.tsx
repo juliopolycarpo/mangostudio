@@ -1,8 +1,9 @@
 import type { ExternalTurnPart } from '@mangostudio/shared/types';
+
 import { Callout } from '@/components/ui/Callout';
 import { Chip } from '@/components/ui/Chip';
-import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { externalUnavailableText } from '@/features/external-agents/external-unavailable-text';
+import { ExternalRemedyLink } from '@/features/external-agents/ExternalRemedyLink';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatTokensCompact } from '@/lib/format-tokens';
@@ -53,7 +54,12 @@ export function ExternalTurnFooter({ part }: ExternalTurnFooterProps) {
   return (
     <div className="mt-2 max-w-2xl space-y-1.5 pl-4">
       {part.conversationReset ? (
-        <Callout tone="warning" role="status" data-conversation-reset={part.conversationReset}>
+        <Callout
+          tone="warning"
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+          role="status"
+          data-conversation-reset={part.conversationReset}
+        >
           {labels.conversationReset[part.conversationReset]}
         </Callout>
       ) : null}

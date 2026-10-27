@@ -6,6 +6,7 @@ import { API_KEY_MAX_PER_USER, type ApiKeySummary } from '@mangostudio/shared/ap
 import type { ExternalApiSettings } from '@mangostudio/shared/app-settings';
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingToggle } from '@/components/settings/SettingToggle';
@@ -19,6 +20,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
+
 import {
   displayKeyName,
   formatApiKeyDate,
@@ -103,7 +105,11 @@ export function ExternalApiSettingsPage({
         }
       >
         {isLoading ? (
-          <div role="status" className="space-y-2">
+          <div
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+            role="status"
+            className="space-y-2"
+          >
             <Skeleton className="h-8 w-full" />
             <Skeleton className="h-8 w-full" />
             <span className="sr-only">{t.common.loading}</span>

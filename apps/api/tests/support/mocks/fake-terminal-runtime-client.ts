@@ -19,6 +19,7 @@ import type {
   RuntimeTerminalSessionSummary,
   RuntimeTerminalWriteParams,
 } from '@mangostudio/shared/runtime-contract';
+
 import type {
   TerminalRuntimeClient,
   TerminalRuntimeTerminalClient,

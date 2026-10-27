@@ -6,7 +6,9 @@
  */
 
 import { afterEach, describe, expect, it, jest } from 'bun:test';
+
 import { act, renderHook } from '@testing-library/react';
+
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { motionPresets } from '@/lib/motion/variants';
 

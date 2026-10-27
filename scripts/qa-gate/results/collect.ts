@@ -6,8 +6,8 @@ import type { TestLane } from '../../lib/test-lanes';
 import type { LaneOutcome } from '../junit-results';
 import type { LaneResult } from '../model/lanes';
 import type { TestSuiteStats } from '../model/metrics';
-import { type Measurement, measured, partial } from '../model/states';
-import { type ReadText, type ReceiptEvidence, readJobEvidence } from './evidence';
+import { measured, type Measurement, partial } from '../model/states';
+import { readJobEvidence, type ReadText, type ReceiptEvidence } from './evidence';
 import type { ExpectedJobSet } from './expected-jobs';
 import { foldLanes } from './fold';
 

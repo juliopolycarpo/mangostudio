@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   addConnector,
   ConnectorValidationError,
@@ -74,7 +75,9 @@ describe('exchangeAuthorizationCode', () => {
       codeVerifier: 'verifier-1',
       authBaseUrl: AUTH_BASE_URL,
       fetchImpl: (input, init) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         expect(String(input)).toBe(`${AUTH_BASE_URL}/oauth/token`);
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         capturedBody = String(init?.body);
         return Promise.resolve(jsonResponse(makeTokenEndpointResponse()));
       },
@@ -98,6 +101,7 @@ describe('exchangeAuthorizationCode', () => {
       code: 'auth-code-1',
       codeVerifier: 'verifier-1',
       authBaseUrl: AUTH_BASE_URL,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       fetchImpl: async () =>
         jsonResponse(
           makeTokenEndpointResponse({
@@ -115,6 +119,7 @@ describe('exchangeAuthorizationCode', () => {
       code: 'auth-code-1',
       codeVerifier: 'verifier-1',
       authBaseUrl: AUTH_BASE_URL,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       fetchImpl: async () => new Response('server error', { status: 500 }),
     });
 
@@ -128,6 +133,7 @@ describe('refreshTokenGrant', () => {
     const rotated = await refreshTokenGrant({
       bundle: previous,
       authBaseUrl: AUTH_BASE_URL,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       fetchImpl: async () => jsonResponse(makeTokenEndpointResponse({ refresh_token: undefined })),
     });
 
@@ -138,6 +144,7 @@ describe('refreshTokenGrant', () => {
     const refresh = refreshTokenGrant({
       bundle: makeTokenBundle(),
       authBaseUrl: AUTH_BASE_URL,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       fetchImpl: async () => jsonResponse({ error: 'invalid_grant' }, 400),
     });
 
@@ -148,6 +155,7 @@ describe('refreshTokenGrant', () => {
     const refresh = refreshTokenGrant({
       bundle: makeTokenBundle(),
       authBaseUrl: AUTH_BASE_URL,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       fetchImpl: async () => new Response('unauthorized', { status: 401 }),
     });
 

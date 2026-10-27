@@ -1,6 +1,8 @@
 import { useState } from 'react';
+
 import { useGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { useGithubInbox } from '../hooks/use-github-inbox';
 import {
   type GithubPanelPrefs,

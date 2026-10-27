@@ -22,6 +22,7 @@
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+
 import { assertNoUnexpectedArguments, parseArgs } from '../lib/args';
 import { error, info, success } from '../lib/log';
 import { ARTIFACT_DIR, renderArtifacts } from './artifacts';

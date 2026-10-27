@@ -164,7 +164,7 @@ const geminiProvider: AIProvider = {
     await validateGeminiApiKey(apiKey);
   },
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   async resolveApiKey(userId: string, modelName?: string): Promise<string> {
     return getResolvedGeminiApiKey(userId, modelName);
   },

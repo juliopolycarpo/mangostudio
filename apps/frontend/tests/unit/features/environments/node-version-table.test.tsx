@@ -6,8 +6,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import type { LtsStatus, ManagedVersion } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
+
 import { NodeVersionTable } from '../../../../src/features/environments/components/NodeVersionTable';
 import { render, screen } from '../../../support/harness/render';
 import { installRecipe, versionManagerStatus } from './fixtures';

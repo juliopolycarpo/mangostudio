@@ -9,6 +9,7 @@
 import type { Environment } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { MonitorCog } from 'lucide-react';
+
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 
 export interface EnvironmentCommandParams {

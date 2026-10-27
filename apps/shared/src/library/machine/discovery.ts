@@ -17,7 +17,7 @@ import {
   type ResourceKind,
 } from '../index';
 import { type LibraryCache, libraryCache } from './cache';
-import { type ReadLocationInstancesResult, readLocationInstances } from './instance-reader';
+import { readLocationInstances, type ReadLocationInstancesResult } from './instance-reader';
 
 export interface LibraryScanOptions {
   readonly locationSettings: LibraryLocationSettings;

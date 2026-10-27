@@ -7,8 +7,10 @@
 
 import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { upgradeRefusalReasonLabel } from '../format';
 import { RefusalNotice } from './RefusalNotice';
 import { UpgradeDialog } from './UpgradeDialog';

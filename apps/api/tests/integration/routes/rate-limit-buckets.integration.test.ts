@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
+
 import { errorHandler } from '../../../src/plugins/error-handler';
 import { rateLimit } from '../../../src/plugins/rate-limit';
 import { classifyRateLimit, RATE_LIMIT_BUCKETS } from '../../../src/plugins/rate-limit-policy';

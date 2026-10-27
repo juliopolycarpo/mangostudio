@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
@@ -14,6 +15,7 @@ import type {
 } from '@mangostudio/shared/library';
 import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+
 import { getDb } from '../../../src/db/database';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import { LibraryFeatureUnavailableError } from '../../../src/modules/library/domain/library-feature-error';

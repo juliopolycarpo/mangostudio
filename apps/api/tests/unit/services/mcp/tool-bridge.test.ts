@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpToolDescriptor } from '@mangostudio/shared/mcp';
+
 import { getDb } from '../../../../src/db/database';
 import {
   closeAllMcpClients,
@@ -347,11 +349,11 @@ describe('executeMcpTool', () => {
     await insertServer(userId, 'off', { enabled: 0 });
     setMcpClientConnectorForTest(() => Promise.resolve(makeHandle()));
 
-    expect(executeMcpTool(getDb(), userId, 'mcp____x', {})).rejects.toThrow('Unknown tool');
-    expect(executeMcpTool(getDb(), userId, 'mcp__missing__ping', {})).rejects.toThrow(
+    await expect(executeMcpTool(getDb(), userId, 'mcp____x', {})).rejects.toThrow('Unknown tool');
+    await expect(executeMcpTool(getDb(), userId, 'mcp__missing__ping', {})).rejects.toThrow(
       'not configured'
     );
-    expect(executeMcpTool(getDb(), userId, 'mcp__off__ping', {})).rejects.toThrow('disabled');
+    await expect(executeMcpTool(getDb(), userId, 'mcp__off__ping', {})).rejects.toThrow('disabled');
   });
 
   it('never resolves another user’s server through the same slug', async () => {
@@ -360,7 +362,7 @@ describe('executeMcpTool', () => {
     await insertServer(owner, 'shared-slug');
     setMcpClientConnectorForTest(() => Promise.resolve(makeHandle()));
 
-    expect(executeMcpTool(getDb(), intruder, 'mcp__shared-slug__ping', {})).rejects.toThrow(
+    await expect(executeMcpTool(getDb(), intruder, 'mcp__shared-slug__ping', {})).rejects.toThrow(
       'not configured'
     );
   });

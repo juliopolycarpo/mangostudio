@@ -15,8 +15,10 @@ import { existsSync, renameSync, rmSync, statSync } from 'node:fs';
 import { chmod, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import type { TailwindInputs } from '@mangostudio/shared/frontend-build/host';
 import { BUILD_STATE_FILE, listDistFiles } from '@mangostudio/shared/utils/dist-files';
+
 import { updateRouteTree } from './scripts/routes';
 import { createTailwindPlugin } from './scripts/tailwind';
 
@@ -302,6 +304,7 @@ async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> 
     });
 
     if (!result.success) {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Bun build diagnostics define their own string representation.
       for (const log of result.logs) console.error(String(log));
       throw new Error('Frontend build failed');
     }

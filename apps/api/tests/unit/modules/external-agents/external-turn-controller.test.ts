@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from 'bun:test';
+
 import { RemoteError } from '@mangostudio/protocol';
 import type {
   ExternalAgentAttachment,
@@ -14,6 +15,7 @@ import type {
   MessagePart,
 } from '@mangostudio/shared/types';
 import { UpdateQueryBuilder } from 'kysely';
+
 import { getDb } from '../../../../src/db/database';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
 import { createExternalCommandCatalogCache } from '../../../../src/modules/external-agents/application/external-command-catalog-cache';

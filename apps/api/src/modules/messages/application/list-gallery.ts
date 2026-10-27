@@ -1,6 +1,7 @@
 import type { GalleryPage } from '@mangostudio/shared/chat';
 import type { GalleryItem } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { listGeneratedImagesForGallery } from '../../generated-images/infrastructure/generated-image-repository';
 import {

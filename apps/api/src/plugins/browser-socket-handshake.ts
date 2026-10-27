@@ -13,6 +13,7 @@
  */
 
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
+
 import { getAuth } from '../auth';
 import { getConfig } from '../lib/config';
 

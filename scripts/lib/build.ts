@@ -1,7 +1,7 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { WORKSPACES, type WorkspaceName } from './config';
+import { type WorkspaceName, WORKSPACES } from './config';
 
 const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
 

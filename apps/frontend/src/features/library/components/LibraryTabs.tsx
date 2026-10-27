@@ -9,9 +9,11 @@
 
 import { parseResourceKey } from '@mangostudio/shared/library/values';
 import { useParams } from '@tanstack/react-router';
+
 import { TabNav } from '@/components/ui/TabNav';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { libraryKindPath } from '../format';
 import { libraryEnvironmentSearch } from '../queries';
 

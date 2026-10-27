@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
@@ -19,6 +20,7 @@ import type {
 import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudio/shared/library';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { RuntimeLibraryApplyParams } from '@mangostudio/shared/runtime-contract';
+
 import { getDb } from '../../../src/db/database';
 import { listDivergenceAcks } from '../../../src/modules/library/application/conflict-resolution';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
@@ -146,6 +148,7 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
       ),
       directoryHashDomain: directoryHashDomainVersion(),
     }),
+    // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
     enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
   });
 }
@@ -432,6 +435,7 @@ describe('propagation apply — request validation', () => {
           ),
           directoryHashDomain: directoryHashDomainVersion(),
         }),
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         enabledLocationIds: async () =>
           enabledLibraryLocations(libraryLocationsFor(settings(['claude-instructions'])), 'home'),
       }
@@ -773,6 +777,7 @@ function previewRemoteMachines(
   const env = pathEnv();
   const enabled = settings(SKILL_LOCATIONS);
   return previewLibraryPropagation(userId(), request, {
+    // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
     snapshot: async (_userId, environmentId) => ({
       environmentId,
       ...(machines.offline?.includes(environmentId) && {
@@ -786,6 +791,7 @@ function previewRemoteMachines(
       ),
       directoryHashDomain: machines.hashDomains?.[environmentId] ?? directoryHashDomainVersion(),
     }),
+    // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
     enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
   });
 }

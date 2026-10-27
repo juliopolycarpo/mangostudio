@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import {
   DISTRO_RUNTIME_PATH,
   distroRuntimeConfigAfterInstall,
@@ -8,12 +9,12 @@ import {
   INSTALL_BINARY_SCRIPT,
   localRuntimeBuildCommand,
   localRuntimeBuildPath,
-  PROBE_SLOT_SCRIPT,
   parseDistroSlotProbe,
-  REMOVE_LEGACY_RUNTIME_SCRIPT,
+  PROBE_SLOT_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
   releaseRuntimeBinaryName,
+  REMOVE_LEGACY_RUNTIME_SCRIPT,
   resolveLinuxPlatformId,
   SETUP_FULL_SCRIPT,
   VERSION_SCRIPT,

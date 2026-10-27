@@ -4,7 +4,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { enabledLibraryLocations } from '@mangostudio/shared/library';
+
 import { propagationCandidateLocationIds } from '../../../../src/features/library/format';
 import { location } from './fixtures';
 

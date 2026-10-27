@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { MachineStatus } from '@mangostudio/shared/machine';
+
 import {
   actionRefusalLines,
   machineGuardReasonLabel,

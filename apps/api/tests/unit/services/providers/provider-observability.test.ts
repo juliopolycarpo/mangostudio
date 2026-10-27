@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+
 import { getDb } from '../../../../src/db/database';
 import {
   flushObservabilitySnapshot,

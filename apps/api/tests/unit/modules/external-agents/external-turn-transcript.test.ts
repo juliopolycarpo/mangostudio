@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   type ExternalAgentEvent,
   type ExternalTurnTerminalReason,
   MAX_EXTERNAL_NOTICES_PER_TURN,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalActivityPart, ExternalApprovalPart } from '@mangostudio/shared/types';
+
 import { ExternalTurnTranscript } from '../../../../src/modules/external-agents/domain/external-turn-transcript';
 
 function transcript(overrides: { maxBytes?: number; maxEvents?: number } = {}) {

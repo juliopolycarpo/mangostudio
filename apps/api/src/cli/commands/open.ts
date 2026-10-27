@@ -3,6 +3,7 @@
  */
 
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+
 import { isStateLive, readState, removeState } from '../../lib/server-state';
 import { hubUrl } from '../../modules/machine/domain/hub-process';
 import { CliError } from '../errors';

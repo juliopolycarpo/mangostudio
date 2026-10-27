@@ -1,5 +1,6 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Kysely } from 'kysely';
+
 import type {
   Database,
   McpServerInsert,

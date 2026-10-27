@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type {
   ExternalAgentDescriptor,
   ExternalAgentSettings,
@@ -7,6 +8,7 @@ import {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
+
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalTurnConfigurationResolver } from '../../../../src/modules/external-agents/application/external-turn-configuration';
 

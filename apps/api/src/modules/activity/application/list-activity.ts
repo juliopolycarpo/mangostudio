@@ -8,6 +8,7 @@ import {
 } from '@mangostudio/shared/activity';
 import type { Kysely } from 'kysely';
 import Value from 'typebox/value';
+
 import type { ActivityEventSelect, Database } from '../../../db/types';
 import { decodeActivityCursor, encodeActivityCursor } from '../domain/activity-cursor';
 import {

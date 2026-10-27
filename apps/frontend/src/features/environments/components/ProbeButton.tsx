@@ -5,6 +5,7 @@
  */
 
 import { RefreshCw } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -22,7 +23,12 @@ export function ProbeButton({ isPending, isError, onProbe }: ProbeButtonProps) {
   return (
     <>
       {isError && (
-        <p role="status" className="text-xs text-danger" data-testid="probe-error">
+        <p
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+          role="status"
+          className="text-xs text-danger"
+          data-testid="probe-error"
+        >
           {e.actions.refreshFailed}
         </p>
       )}

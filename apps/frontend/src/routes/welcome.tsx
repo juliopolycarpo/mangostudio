@@ -1,4 +1,5 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
+
 import { BootstrapErrorPanel } from '@/components/layout/BootstrapErrorPanel';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { safeRedirect } from '@/lib/safe-redirect';

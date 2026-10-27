@@ -15,6 +15,7 @@
 
 import { expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
+
 import { createInstallRunner } from '../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../src/services/runtime-client/runtime-client';
 import type { FakeInstaller } from './controlled-installer';

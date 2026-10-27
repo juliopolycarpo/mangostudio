@@ -102,6 +102,7 @@ let stopping = false;
 
 // Every delivery is recorded; only the first starts the shutdown, so a smoke
 // that signals twice shows up as two events instead of being absorbed.
+// eslint-disable-next-line @typescript-eslint/no-misused-promises -- The signal handler owns asynchronous shutdown before the fixture exits.
 process.on('SIGTERM', async () => {
   record('sigterm');
   if (stopping) return;

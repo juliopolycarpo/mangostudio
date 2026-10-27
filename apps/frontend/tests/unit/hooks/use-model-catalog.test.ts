@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { useQueryClient } from '@tanstack/react-query';
+
 import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import { EMPTY_MODEL_CATALOG, LOADING_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { act, renderHook, waitFor } from '../../support/harness/render';
@@ -8,7 +10,7 @@ import { act, renderHook, waitFor } from '../../support/harness/render';
 // what the factory below hands back, so keep it instead.
 const mockGet = jest.fn();
 
-mock.module('../../../src/lib/api-client', () => ({
+void mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       settings: {

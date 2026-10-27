@@ -15,6 +15,7 @@ import {
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import Type from 'typebox';
 import Value from 'typebox/value';
+
 import { discoverLibraryResourcesFromSettings } from '../../modules/library/application/library-discovery';
 import {
   createLibraryPathEnv,

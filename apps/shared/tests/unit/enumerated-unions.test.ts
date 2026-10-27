@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { TSchema } from 'typebox';
 
 import type {

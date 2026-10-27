@@ -4,6 +4,7 @@ import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
 import type { ListDirectoryResponse, ValidatePathResponse } from '@mangostudio/shared/workspaces';
 import { ListDirectoryQuerySchema, ValidatePathBodySchema } from '@mangostudio/shared/workspaces';
 import { Elysia } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';

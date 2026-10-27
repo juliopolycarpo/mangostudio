@@ -8,9 +8,11 @@
 
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import type { ReactNode } from 'react';
+
 import { ToolAvatar, type ToolAvatarSize } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';
+
 import { displayName } from '../format';
 import { ToolIdentityMenu } from './ToolIdentityMenu';
 import { useToolIdentities } from './use-tool-identities';

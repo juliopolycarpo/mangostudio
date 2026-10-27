@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { externalSessionManager } from '../../external-agents/application/external-session-manager';
 import {

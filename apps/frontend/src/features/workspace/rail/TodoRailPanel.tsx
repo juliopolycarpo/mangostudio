@@ -1,4 +1,5 @@
 import { summarizeTodos, type TodoList } from '@mangostudio/shared/todos';
+
 import { Card } from '@/components/ui/Card';
 import { TodoItemRow } from '@/features/chat/components/TodoItemRow';
 import { useI18n } from '@/hooks/use-i18n';
@@ -38,6 +39,7 @@ export function TodoRailPanel({ todos }: TodoRailPanelProps) {
           <span className="font-mono text-xs text-fg-muted">{progress}%</span>
         </div>
         <div
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom progress indicator exposes its value through ARIA.
           role="progressbar"
           aria-label={summaryLabel}
           aria-valuemin={0}
@@ -54,7 +56,7 @@ export function TodoRailPanel({ todos }: TodoRailPanelProps) {
 
       <ul className="space-y-3 text-sm">
         {todos.map((todo, index) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: todo items do not expose stable ids
+          // eslint-disable-next-line react/no-array-index-key -- todo items do not expose stable ids
           <TodoItemRow key={`rail-todo-${index}`} todo={todo} />
         ))}
       </ul>

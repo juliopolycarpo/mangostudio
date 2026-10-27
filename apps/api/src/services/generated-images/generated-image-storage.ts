@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+
 import { getConfig } from '../../lib/config';
 
 const MIME_TO_EXTENSION = {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
@@ -15,6 +16,7 @@ import type {
 } from '@mangostudio/shared/library';
 import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudio/shared/library';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+
 import { getDb } from '../../../src/db/database';
 import {
   acknowledgeDivergence,
@@ -114,6 +116,7 @@ function previewSkills(
         ),
         directoryHashDomain: directoryHashDomainVersion(),
       }),
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       enabledLocationIds: async () =>
         enabledLibraryLocations(libraryLocationsFor(skillLocationSettings()), 'home'),
     }

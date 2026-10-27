@@ -6,6 +6,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   createUserServiceManager,
   type UserServiceDefinition,
@@ -13,6 +14,7 @@ import {
   type UserServiceManager,
 } from '@mangostudio/shared/machine/service';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
+
 import {
   getConfig,
   getConfigEnvFilePath,
@@ -285,8 +287,7 @@ export function isAuthSecretPersisted(config: MangoConfig = getConfig()): boolea
     // still reads as an empty document, so there is no exists-then-read window
     // in which a throw is mistaken for "no secret persisted".
     const auth = readTomlDocument(realPathOrSelf(tomlPath)).auth as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     return typeof auth?.secret === 'string' && auth.secret.trim().length > 0;
   } catch {
     // Malformed TOML still throws out of the parser.

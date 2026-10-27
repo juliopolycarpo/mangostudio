@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import { buildChatCompletionsReplay } from '../core/replay-builder';
 import { toolDefsToChatCompletions } from '../core/tool-mapper';

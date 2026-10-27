@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
+
 import { MessageSchema } from '../../../src/chat/message';
 import { ChatSchema, GeneratedImageArtifactSchema } from '../../../src/chat/schemas';
 import {

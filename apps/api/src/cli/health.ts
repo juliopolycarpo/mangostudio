@@ -3,6 +3,7 @@
  */
 
 import type { HubHealth } from '@mangostudio/shared/machine';
+
 import { formatHostForUrl, isLoopback } from '../lib/ip-address';
 
 const DEFAULT_TIMEOUT_MS = 1000;

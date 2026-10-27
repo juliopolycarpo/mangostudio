@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
+
 import { ROOT_DIR } from '../../lib/config';
 import { SLOW_MARKER, TYPE_ERROR_MARKER } from './fake-typecheck';
 import { readWorkspaceManifests, type WorkspaceManifest } from './typecheck-closure';
@@ -17,7 +18,7 @@ import { readWorkspaceManifests, type WorkspaceManifest } from './typecheck-clos
 const FAKE_TYPECHECK = join(import.meta.dir, 'fake-typecheck.ts').replace(/\\/g, '/');
 
 /** The pristine content of a fixture source file; every edit is this plus extra lines. */
-const PRISTINE_SOURCE = 'export const value: number = 1;\n';
+const PRISTINE_SOURCE = 'export const value = 1;\n';
 
 /**
  * A throwaway monorepo with the real workspace layout, the real root

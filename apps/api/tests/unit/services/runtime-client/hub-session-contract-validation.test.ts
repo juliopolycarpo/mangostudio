@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { CLOSE_CODES } from '@mangostudio/protocol';
 import {
   RUNTIME_EXTERNAL_AGENT_TOPIC,
@@ -6,6 +7,7 @@ import {
   RUNTIME_INSTALL_OUTPUT_TOPIC,
   RUNTIME_TERMINAL_OUTPUT_TOPIC,
 } from '@mangostudio/shared/runtime-contract';
+
 import { openHubSession } from '../../../../src/services/runtime-client/hub-session';
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import { FakeHostileRuntimePeer } from '../../../support/mocks/fake-hostile-runtime-peer';

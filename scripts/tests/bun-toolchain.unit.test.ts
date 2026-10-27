@@ -84,6 +84,7 @@ describe('Bun toolchain pins', () => {
           index === 0 &&
           (file === 'workflows/release.yml' || file === 'workflows/protocol-release.yml')
         ) {
+          // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
           expected = '${{ runner.temp }}/release-trust/.bun-version';
         }
         // Native qualification runs its producer against a separate source

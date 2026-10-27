@@ -4,8 +4,8 @@ import { findModuleResolutionFailure } from '../lib/module-resolution';
 import {
   DEFAULT_HANDSHAKE_BUDGET_MS,
   probeRuntimeHandshake,
-  type RuntimeHandshakeChild,
   resolveHandshakeBudgetMs,
+  type RuntimeHandshakeChild,
   WIN32_HANDSHAKE_BUDGET_MS,
 } from '../lib/runtime-handshake';
 import { BUN_ORPHAN_POLICY_ENV, fixtureChildEnvironment } from './support/child-supervision';
@@ -201,8 +201,7 @@ describe('scripts/lib/runtime-handshake', () => {
       const probe = await probeRuntimeHandshake({
         command: standIn(
           `await Bun.write(Bun.stderr, 'warming up\\n');` +
-            `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});` +
-            NEVER_RESOLVES
+            `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});${NEVER_RESOLVES}`
         ),
         timeoutMs: ANSWERING_TIMEOUT_MS,
       });
@@ -226,8 +225,7 @@ describe('scripts/lib/runtime-handshake', () => {
           command: standIn(
             `process.on('SIGTERM', () => {});` +
               `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});` +
-              `setTimeout(() => process.exit(0), 1_200);` +
-              NEVER_RESOLVES
+              `setTimeout(() => process.exit(0), 1_200);${NEVER_RESOLVES}`
           ),
           timeoutMs: ANSWERING_TIMEOUT_MS,
           exitGraceMs: 800,
@@ -313,8 +311,7 @@ describe('scripts/lib/runtime-handshake', () => {
       const probe = await probeRuntimeHandshake({
         command: standIn(
           `await Bun.write(Bun.stderr, 'error: Cannot find module "./642.js"\\n');` +
-            `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});` +
-            NEVER_RESOLVES
+            `await Bun.write(Bun.stdout, ${JSON.stringify(`${HELLO_FRAME}\n`)});${NEVER_RESOLVES}`
         ),
         timeoutMs: ANSWERING_TIMEOUT_MS,
       });
@@ -346,8 +343,7 @@ describe('scripts/lib/runtime-handshake', () => {
       const probe = await probeRuntimeHandshake({
         command: standIn(
           `(await import('node:fs')).closeSync(1);` +
-            `await Bun.write(Bun.stderr, 'orphaned\\n');` +
-            NEVER_RESOLVES
+            `await Bun.write(Bun.stderr, 'orphaned\\n');${NEVER_RESOLVES}`
         ),
         timeoutMs: ANSWERING_TIMEOUT_MS,
         exitGraceMs: 200,

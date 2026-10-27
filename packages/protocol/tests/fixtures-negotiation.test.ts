@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import negotiation from '../../../spec/fixtures/1/negotiation.json';
 import {
   DEFAULT_HANDSHAKE_TIMEOUT_MS,

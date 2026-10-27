@@ -26,9 +26,10 @@
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { EnsureQueryDataOptions, QueryClient, QueryKey } from '@tanstack/react-query';
+
 import {
-  type ChatWithContext,
   chatListQueryOptions,
+  type ChatWithContext,
   messagesQueryOptions,
 } from '@/features/chat/queries';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
@@ -47,8 +48,7 @@ export const SHELL_RESPONSIBILITIES: readonly ShellResponsibility[] = [
 
 /** How one responsibility settled: its data, or the error that refused it. */
 export type ShellSettlement<TData> =
-  | { readonly ok: true; readonly data: TData }
-  | { readonly ok: false; readonly error: unknown };
+  { readonly ok: true; readonly data: TData } | { readonly ok: false; readonly error: unknown };
 
 /** What the layout loader learned from the data the first screen waits for. */
 export interface ShellBootstrapOutcome {

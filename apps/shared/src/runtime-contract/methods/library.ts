@@ -11,6 +11,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import { LibraryLocationSettingsSchema } from '../../app-settings/schemas';
 import {
   LibraryBackupSetSchema,

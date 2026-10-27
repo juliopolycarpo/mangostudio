@@ -8,9 +8,11 @@
  */
 
 import { useEffect, useRef } from 'react';
+
 import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';
+
 import type { SlashCommandEntry } from '../lib/slash-commands';
 
 interface Props {
@@ -72,6 +74,7 @@ export function SlashCommandMenu({
       // through `aria-activedescendant` on the textarea. `tabIndex={-1}` makes
       // it a legal listbox without ever putting it in the tab order — nothing
       // here is reachable by Tab, which the composer spends on completion.
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox renders rich options a native select cannot contain.
       role="listbox"
       tabIndex={-1}
       aria-label={labels.slashMenuLabel}
@@ -101,6 +104,7 @@ export function SlashCommandMenu({
           key={entry.name}
           ref={index === activeIndex ? activeRef : undefined}
           id={`${listId}-${index}`}
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox option carries rich content and selection behavior.
           role="option"
           tabIndex={-1}
           aria-selected={index === activeIndex}

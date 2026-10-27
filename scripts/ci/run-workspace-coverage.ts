@@ -40,7 +40,7 @@
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { ROOT_DIR, WORKSPACES, type WorkspaceName } from '../lib/config';
+import { ROOT_DIR, type WorkspaceName, WORKSPACES } from '../lib/config';
 import { runCommand } from '../lib/exec';
 import { SHARDED_LCOV_PATHS, TEST_LANES } from '../lib/test-lanes';
 import { mergeLcovFiles } from '../qa-gate/merge-lcov-shards';

@@ -31,12 +31,13 @@ import {
   InstallRecipeIdSchema,
   LOCAL_ENVIRONMENT_ID,
   NodeVersionSpecSchema,
-  RuntimeStatusListSchema,
   renderShellCommand,
+  RuntimeStatusListSchema,
   VersionManagerStatusListSchema,
 } from '@mangostudio/shared/environments';
 import Type from 'typebox';
 import Value from 'typebox/value';
+
 import { getDb } from '../../db/database';
 import { getConfig } from '../../lib/config';
 import {

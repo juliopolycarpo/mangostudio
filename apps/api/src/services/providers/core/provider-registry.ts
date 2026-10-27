@@ -4,6 +4,7 @@
  */
 
 import type { ProviderType } from '@mangostudio/shared/types';
+
 import { getDb } from '../../../db/database';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { parseStringArray } from '../../../utils/json';
@@ -228,7 +229,7 @@ export function clearRegistry(): void {
  * object would either succeed pointlessly or throw for the wrong reason.
  * // Usage: const provider = await resolveProviderTypeForModel('cursor/auto', userId)
  */
-// biome-ignore lint/suspicious/useAwait: matches the registry's async surface
+// matches the registry's async surface
 export async function resolveProviderTypeForModel(
   modelName: string,
   userId: string
@@ -240,7 +241,7 @@ export async function resolveProviderTypeForModel(
  * Resolves the provider responsible for a given model by looking up the
  * connector that has the model enabled in secret_metadata.
  */
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 export async function getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
   return providerRegistry.getProviderForModel(modelName, userId);
 }

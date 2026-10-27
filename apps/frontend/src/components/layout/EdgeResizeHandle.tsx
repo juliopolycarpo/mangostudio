@@ -40,7 +40,7 @@ export function EdgeResizeHandle({
 
   const handlePointerMove = (event: PointerEvent<HTMLHRElement>) => {
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (drag?.pointerId !== event.pointerId) return;
     const delta = event.clientX - drag.startX;
     // A right-edge handle grows when dragged right; a left-edge handle grows when dragged left.
     onResize(clamp(drag.startWidth + (edge === 'right' ? delta : -delta)));

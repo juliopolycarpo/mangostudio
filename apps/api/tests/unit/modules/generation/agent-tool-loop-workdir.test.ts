@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+
 import type { StreamTextTurnSession } from '../../../../src/modules/generation/application/stream-text-turn-stages';
 import type { AgentTurnRequest } from '../../../../src/services/providers/types';
 
@@ -33,9 +34,8 @@ describe('runAgentToolLoop', () => {
 
   it('forwards workdir and workdirPolicy on AgentTurnRequest', async () => {
     await mockMessageRepository();
-    const { runAgentToolLoop } = await import(
-      '../../../../src/modules/generation/application/stream-text-turn-stages'
-    );
+    const { runAgentToolLoop } =
+      await import('../../../../src/modules/generation/application/stream-text-turn-stages');
 
     let captured: AgentTurnRequest | undefined;
     const workdir = '/tmp/chat-workdir';
@@ -68,7 +68,7 @@ describe('runAgentToolLoop', () => {
       },
       provider: {
         providerType: 'cursor',
-        // biome-ignore lint/correctness/useYield: capture-only fake provider stream
+        // eslint-disable-next-line require-yield -- capture-only fake provider stream
         generateAgentTurnStream: function* (req: AgentTurnRequest) {
           captured = req;
         },

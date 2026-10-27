@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { runScript } from '../../../../src/modules/updates/infrastructure/run-script';
 
 async function collect(argv: string[], env: Record<string, string> = {}) {

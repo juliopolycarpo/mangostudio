@@ -11,11 +11,13 @@
 import { Link } from '@tanstack/react-router';
 import { X } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { useMachineUpdate } from '../queries';
 import { dismissUpdateVersion, readDismissedUpdateVersion } from '../update-dismissal';
 import { UpdateAction } from './UpdateAction';

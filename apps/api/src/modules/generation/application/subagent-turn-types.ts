@@ -2,6 +2,7 @@ import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import type { SubagentTracePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import type { WorkdirPolicy } from '../../../services/tools/types';
 

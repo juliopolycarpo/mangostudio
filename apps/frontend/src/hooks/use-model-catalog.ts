@@ -1,6 +1,7 @@
 import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
+
 import { client } from '../lib/api-client';
 import { ApiError } from '../lib/utils';
 import { EMPTY_MODEL_CATALOG, LOADING_MODEL_CATALOG } from '../utils/model-utils';

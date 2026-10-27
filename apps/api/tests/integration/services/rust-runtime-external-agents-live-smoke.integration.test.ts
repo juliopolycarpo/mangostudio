@@ -25,6 +25,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+
 import { RemoteError } from '@mangostudio/protocol';
 import { spawnPort } from '@mangostudio/protocol/spawn';
 import {
@@ -32,6 +33,7 @@ import {
   type ExternalAgentRemedy,
   type ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
+
 import { getDb } from '../../../src/db/database';
 import { createDiagnosticLogger } from '../../../src/lib/logger';
 import { getChatMessagesUseCase } from '../../../src/modules/chats/application/get-chat-messages';
@@ -58,8 +60,8 @@ import { openHubSession } from '../../../src/services/runtime-client/hub-session
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
-  CheapPassFake,
   cachedBeforeRefusal,
+  CheapPassFake,
   executableDirectory,
   isOlderVersion,
   LIVE_REFUSAL_CASES,
@@ -77,10 +79,10 @@ import {
   createRustTurnHarness,
   grantRuntimeConsent,
   openRustSmokeHub,
-  type RustTurnHarness,
   runRustAgentSmoke,
   rustSmokeConfiguration,
   rustSmokeRuntimeEnv,
+  type RustTurnHarness,
   turnPartOf,
   within,
 } from '../../support/external-agents/rust-agent-turns';
@@ -823,6 +825,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
 
         const text = frames
           .filter((frame) => frame.type === 'external_text')
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
           .map((frame) => String(frame.text ?? ''))
           .join('');
         const sessions = frames.filter((frame) => frame.type === 'external_session_started');
@@ -914,6 +917,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
 
         const text = frames
           .filter((frame) => frame.type === 'external_text')
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
           .map((frame) => String(frame.text ?? ''))
           .join('');
         const sessions = frames.filter((frame) => frame.type === 'external_session_started');
@@ -1012,6 +1016,7 @@ describe('Authenticated smoke: real vendor CLIs through the Rust runtime', () =>
         const assistant = frames.find((frame) => frame.type === 'assistant_message_id');
         const text = frames
           .filter((frame) => frame.type === 'external_text')
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
           .map((frame) => String(frame.text ?? ''))
           .join('');
         expect({

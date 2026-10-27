@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useMemo, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
@@ -25,6 +26,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
 import { ApiError, cn, resolveApiErrorMessage } from '@/lib/utils';
+
 import { IconButton } from './components/IconButton';
 import { useDirectoryListing, validateWorkspacePath } from './use-directory-listing';
 
@@ -341,7 +343,11 @@ export function WorkdirPickerDialog({
             {/* Hoisted above the list branches: hidden entries can consume the whole
                 cap, leaving a visibly empty folder that is nonetheless truncated. */}
             {listing.data?.truncated ? (
-              <Callout tone="info" role="status">
+              <Callout
+                tone="info"
+                // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+                role="status"
+              >
                 {s.truncatedNotice.replace('{count}', String(listing.data.entries.length))}
               </Callout>
             ) : null}

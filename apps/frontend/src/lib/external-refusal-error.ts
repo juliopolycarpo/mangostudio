@@ -2,6 +2,7 @@ import type {
   ExternalAgentRemedy,
   ExternalAgentUnavailableReason,
 } from '@mangostudio/shared/external-agents';
+
 import { ApiError } from './utils';
 
 /** What a terminal `error` chunk carries beyond its sentence and code. */

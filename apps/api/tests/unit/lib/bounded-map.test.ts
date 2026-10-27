@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { setBounded } from '../../../src/lib/bounded-map';
 
 /**

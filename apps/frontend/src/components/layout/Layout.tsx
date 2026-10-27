@@ -2,6 +2,7 @@ import type { Chat } from '@mangostudio/shared/chat';
 import type { GitSummary } from '@mangostudio/shared/git';
 import { CHAT_SIDEBAR_WIDTH_DEFAULT } from '@mangostudio/shared/workspaces';
 import { type ReactNode, useEffect, useState } from 'react';
+
 import type { ContextInfo } from '@/features/generation/types';
 import { Sidebar } from '@/features/sidebar/components/Sidebar';
 import type { AppPage } from '@/hooks/use-chat-route-actions';

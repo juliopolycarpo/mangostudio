@@ -354,7 +354,7 @@ arrives from loopback. With `TRUST_PROXY=true` the forwarded client answers
 instead, so a remote signed-in session is correctly refused.
 
 The two read different hops of `X-Forwarded-For`, because they are asking
-different questions. The header is a list, and a proxy *appends* the address it
+different questions. The header is a list, and a proxy _appends_ the address it
 saw rather than replacing the list — both `$proxy_add_x_forwarded_for` above and
 Caddy's `reverse_proxy` do. The limiter takes the **first** hop, the origin
 client, which is what a counter should be keyed on. The guard takes the **last**

@@ -9,6 +9,7 @@
 
 import Type, { type Static } from 'typebox';
 import Value from 'typebox/value';
+
 import { CodecError } from '../errors';
 import {
   CLOSE_REASON_MAX_LENGTH,

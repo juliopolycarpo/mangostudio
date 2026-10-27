@@ -8,8 +8,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type { PropagationUndo, RemovalApply } from '@mangostudio/shared/library';
+
 import { RemovalResultPanel } from '../../../../src/features/library/components/RemovalResultPanel';
 import { render, screen } from '../../../support/harness/render';
 

@@ -14,11 +14,13 @@
  */
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+
 import type { Port } from '@mangostudio/protocol';
 import { connectWebSocket } from '@mangostudio/protocol/ws';
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import type { HubExternalAgentIsolation } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import {
   type HubSession,
   openHubSession,

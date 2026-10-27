@@ -17,6 +17,7 @@
  */
 
 import { jest } from 'bun:test';
+
 import { act } from '@testing-library/react';
 
 let fakeTimersInstalled = false;

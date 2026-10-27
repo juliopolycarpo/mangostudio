@@ -3,15 +3,16 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Plus, TerminalSquare } from 'lucide-react';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
+
 import { CloseTerminalDialog } from './CloseTerminalDialog';
 import { LazyTerminalView } from './LazyTerminalView';
 import { openFailureMessage } from './open-failure-message';
-import { SessionTabs } from './SessionTabs';
 import {
   terminalKeys,
   useCloseTerminalMutation,
@@ -19,8 +20,9 @@ import {
   useRenameTerminalMutation,
   useTerminalSessionsQuery,
 } from './services/terminal-service';
-import { TerminalUnavailableNotice } from './TerminalUnavailableNotice';
+import { SessionTabs } from './SessionTabs';
 import { onNewTerminalSessionRequest } from './terminal-panel-request';
+import { TerminalUnavailableNotice } from './TerminalUnavailableNotice';
 import { useTerminalAvailability } from './use-terminal-availability';
 
 export interface TerminalRailPanelProps {
@@ -64,6 +66,7 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
   const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
 
   const openMutation = useOpenTerminalMutation();
+  const openTerminal = openMutation.mutate;
   const renameMutation = useRenameTerminalMutation();
   const closeMutation = useCloseTerminalMutation();
 
@@ -72,20 +75,17 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
     setActiveId(sessions[0]?.id ?? null);
   }, [activeId, sessions]);
 
-  // `openMutation` is a fresh object every render (`useMutation`'s own
-  // contract), so depending on it here would redefine `openSession` — and
-  // resubscribe the effect below — on every render.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above.
+  // The mutation object changes each render; its mutate function is stable.
   const openSession = useCallback(() => {
     if (!environmentId || unavailable) return;
-    openMutation.mutate(
+    openTerminal(
       { environmentId, chatId },
       {
         onSuccess: (session) => setActiveId(session.id),
         onError: (error) => toast(openFailureMessage(t, error), 'error'),
       }
     );
-  }, [environmentId, chatId, unavailable, t, toast]);
+  }, [environmentId, chatId, unavailable, t, toast, openTerminal]);
 
   // The command palette's "New terminal session" row: fires whether or not
   // this panel happened to be mounted yet. Subscribing is deferred until the

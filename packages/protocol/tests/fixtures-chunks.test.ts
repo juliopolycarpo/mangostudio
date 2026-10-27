@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import chunks from '../../../spec/fixtures/1/chunks.json';
 import {
   CHUNK_HEADER_BYTES,

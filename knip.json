@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreDependencies": ["@dprint/markdown", "@dprint/toml", "@dprint/dockerfile", "jscpd"],
+  "ignoreDependencies": ["jscpd"],
   "treatConfigHintsAsErrors": true,
   "workspaces": {
     ".": {
@@ -34,7 +34,8 @@
         "scripts/tests/support/split-utf8-fixture-command.ts",
         "scripts/tests/support/push-dist-repo-fixture.ts"
       ],
-      "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"]
+      "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"],
+      "ignoreBinaries": ["lint", "fmt"]
     },
     "apps/api": {
       "entry": [

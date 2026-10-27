@@ -8,6 +8,7 @@ import type {
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import { environmentDisplayNamesEn } from '@mangostudio/shared/environments';
+
 import {
   environmentProbingService,
   LOCAL_PROBE_SCOPE,

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import { getDb } from '../../src/db/database';
 import { getConfig } from '../../src/lib/config';
 import {
@@ -244,6 +246,7 @@ describe('ChatGPT connector lifecycle E2E', () => {
 
     const chat = await insertTestChat(harness.user.id);
     const consoleError = spyOn(console, 'error').mockImplementation(() => undefined);
+    // eslint-disable-next-line no-useless-assignment -- The initial value is retained across asynchronous control flow and failure paths.
     let events: Array<Record<string, unknown>> = [];
     try {
       events = await withTimeout(

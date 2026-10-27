@@ -9,11 +9,13 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { LibraryResource, LibraryScanResult } from '@mangostudio/shared/library';
 import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { waitFor } from '@testing-library/react';
+
 import { useSlashCommands } from '../../../../src/features/chat/hooks/use-slash-commands';
 import { renderHook } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';

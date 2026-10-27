@@ -1,11 +1,13 @@
 import type { GalleryItem } from '@mangostudio/shared/types';
 import { Download } from 'lucide-react';
+
 import { buttonClassName } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { MEDIA_CONTROL_CLASS } from './media-control';
 
 interface GalleryTileProps {

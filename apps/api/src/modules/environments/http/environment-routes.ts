@@ -27,6 +27,7 @@ import {
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import { LibraryTargetIdSchema } from '@mangostudio/shared/library';
 import { Elysia, t } from 'elysia';
+
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { type EnvironmentService, environmentService } from '../application/environment-service';
 import { type InstallService, installService } from '../application/install-service';

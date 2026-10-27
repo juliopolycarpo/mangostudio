@@ -277,7 +277,7 @@
  * highlighted source, next to the copy button, and after a table's scroll box it
  * would hang on a line of its own. */
 .markdown-content--streaming
-> :is(ul, ol, blockquote, pre, .markdown-table-scroll):last-child::after {
+  > :is(ul, ol, blockquote, pre, .markdown-table-scroll):last-child::after {
   content: none;
 }
 

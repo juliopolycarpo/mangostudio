@@ -20,6 +20,7 @@ import {
   type TerminalExit,
 } from '@mangostudio/shared/terminal';
 import { Elysia, t } from 'elysia';
+
 import { createDiagnosticLogger } from '../../../lib/logger';
 import {
   type BrowserSocketRejection,
@@ -27,8 +28,8 @@ import {
 } from '../../../plugins/browser-socket-handshake';
 import {
   type TerminalSessionService,
-  type TerminalSessionViewer,
   terminalSessionService,
+  type TerminalSessionViewer,
 } from '../application/terminal-session-service';
 import {
   createTerminalSocketRelay,

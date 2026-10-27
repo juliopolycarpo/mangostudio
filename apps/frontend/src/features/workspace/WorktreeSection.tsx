@@ -2,6 +2,7 @@ import type { GitWorktree } from '@mangostudio/shared/git';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -15,6 +16,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { GroupHeading } from './components/GroupHeading';
 import { IconButton } from './components/IconButton';
 import { RowList } from './components/RowList';

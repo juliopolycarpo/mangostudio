@@ -1,5 +1,5 @@
 import { ROOT_DIR } from './lib/config';
-import { exitWithResults, header, info, type RunResult, runCommand } from './lib/runner';
+import { exitWithResults, header, info, runCommand, type RunResult } from './lib/runner';
 
 function printHelp(): never {
   console.log(`Usage: bun run verify

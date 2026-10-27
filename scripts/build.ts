@@ -2,6 +2,7 @@
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { basename, isAbsolute, join } from 'node:path';
+
 import { frontendBuildCacheArguments } from '@mangostudio/shared/frontend-build/host';
 
 import {
@@ -40,9 +41,9 @@ import {
   cargoRuntimeOutputPath,
   cargoTargetDir,
   hostPlatformId,
+  resolveRuntimeSource,
   RUNTIME_RELEASE_VERSION_ENV,
   type RuntimeSource,
-  resolveRuntimeSource,
   verifyRuntimeBinary,
 } from './lib/runtime-build';
 

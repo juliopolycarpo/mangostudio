@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
-  type ContainerFormFields,
   containerConfigToForm,
+  type ContainerFormFields,
   containerFormToConfig,
   defaultContainerForm,
   isContainerFormUsable,

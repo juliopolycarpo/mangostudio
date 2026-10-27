@@ -17,6 +17,7 @@ import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents'
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents/values';
 import { ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
@@ -59,7 +60,11 @@ export function ExternalAgentSettingsPage() {
           consents are gone every time the page opens.
         */}
         {disclosures.isLoading ? (
-          <div role="status" className="px-4 py-3">
+          <div
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+            role="status"
+            className="px-4 py-3"
+          >
             <Skeleton className="h-8 w-full" />
             <span className="sr-only">{t.common.loading}</span>
           </div>

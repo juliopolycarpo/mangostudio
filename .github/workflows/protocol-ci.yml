@@ -290,15 +290,7 @@ jobs:
     # instead of tracking job names and matrix shapes. Every lane skip is
     # accepted only when the `changes` job proved no protocol path changed.
     name: Gate
-    needs: [
-      changes,
-      typescript,
-      rust,
-      interop,
-      deny,
-      semver-checks,
-      schema-equality,
-    ]
+    needs: [changes, typescript, rust, interop, deny, semver-checks, schema-equality]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -324,15 +316,7 @@ jobs:
     # Additive compatibility check for the future ruleset cutover. Keep the
     # legacy Gate and evaluate the same direct needs and allowed skips here.
     name: Protocol Gate
-    needs: [
-      changes,
-      typescript,
-      rust,
-      interop,
-      deny,
-      semver-checks,
-      schema-equality,
-    ]
+    needs: [changes, typescript, rust, interop, deny, semver-checks, schema-equality]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

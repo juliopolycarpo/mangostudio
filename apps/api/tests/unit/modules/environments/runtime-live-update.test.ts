@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+
 import type {
   RuntimeUpdateBeginParams,
   RuntimeUpdateChunkParams,
   RuntimeUpdateCommitParams,
 } from '@mangostudio/shared/runtime-contract';
+
 import {
   type RuntimeUpdateProtocol,
   streamRuntimeUpdate,

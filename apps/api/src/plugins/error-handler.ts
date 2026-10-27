@@ -12,6 +12,7 @@
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia, type ElysiaStatus, NotFound, status, ValidationError } from 'elysia';
+
 import { negotiateErrorRepresentation } from './error-negotiation';
 
 /**
@@ -67,11 +68,8 @@ export const errorHandler = new Elysia({ name: 'error-handler' })
       return status(422, { error: 'Invalid request body', code: ERROR_CODES.VALIDATION });
     }
   )
-  .onError(
-    'global',
-    NotFound,
-    (): ElysiaStatus<404, ApiErrorResponse> =>
-      status(404, { error: 'Not found', code: ERROR_CODES.NOT_FOUND })
+  .onError('global', NotFound, (): ElysiaStatus<404, ApiErrorResponse> =>
+    status(404, { error: 'Not found', code: ERROR_CODES.NOT_FOUND })
   )
   .onError('global', ({ error }): ElysiaStatus<500, ApiErrorResponse> => {
     // The raw error is deliberately logged server-side — it is the only record

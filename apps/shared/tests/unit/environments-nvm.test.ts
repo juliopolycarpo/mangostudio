@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { posix } from 'node:path';
+
 import {
   detectNvm,
   NODE_RELEASE_SCHEDULE,

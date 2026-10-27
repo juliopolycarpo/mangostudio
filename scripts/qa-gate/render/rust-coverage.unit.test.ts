@@ -4,10 +4,11 @@
 // `incomplete`, while a lane that was due and delivered nothing must.
 
 import { describe, expect, it } from 'bun:test';
+
 import type { CoverageSummary } from '../collect/types';
 import {
-  type Measurement,
   measured,
+  type Measurement,
   partial,
   stale,
   unavailable,

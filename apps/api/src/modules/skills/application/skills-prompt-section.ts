@@ -7,6 +7,7 @@
 
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { SKILL_TOOL_NAME } from '../domain/skill';
 import { listUsableSkills } from './skill-discovery';

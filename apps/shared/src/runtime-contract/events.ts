@@ -8,6 +8,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import { ExternalAgentEventEnvelopeSchema } from '../external-agents/schemas';
 import { RuntimeMcpElicitationEventSchema, RuntimeMcpSessionEventSchema } from './methods/mcp';
 

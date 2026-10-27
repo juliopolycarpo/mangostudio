@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+
 import type {
   PropagationApplied,
   PropagationPreview,
   PropagationPreviewEntry,
 } from '@mangostudio/shared/library';
+
 import { summarizeAppliedResources } from '../../../../src/modules/library/domain/applied-resource-summary';
 
 function entry(overrides: Partial<PropagationPreviewEntry> = {}): PropagationPreviewEntry {

@@ -6,6 +6,7 @@
 
 import type { ExternalAgentTurnParams } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+
 import type { ExternalSessionHandle } from '../../../src/modules/external-agents/application/external-session-manager';
 
 export interface ScriptedSessionHandle extends ExternalSessionHandle {

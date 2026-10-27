@@ -11,6 +11,7 @@ import {
   TOOL_IMAGE_MIME_TYPES,
   type ToolImageMimeType,
 } from '@mangostudio/shared/tool-identity';
+
 import { detectFileType } from '../../../lib/file-type-detector';
 
 export class InvalidToolImageError extends Error {

@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { StreamingChunk, TextGenerationRequest, TextGenerationResult } from '../types';
 import { buildDeepSeekRequestBody } from './message-mapper';

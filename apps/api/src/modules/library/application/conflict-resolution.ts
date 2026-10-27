@@ -9,12 +9,14 @@
  */
 
 import { createHash } from 'node:crypto';
+
 import {
   type LibraryDivergenceAck,
   type LibraryDivergenceAckRequest,
   type LibraryResource,
   parseResourceKey,
 } from '@mangostudio/shared/library';
+
 import { getDb } from '../../../db/database';
 import {
   assertRequestedProfileId,

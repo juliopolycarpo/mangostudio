@@ -5,8 +5,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
+
 import { HealthPage } from '../../../../src/features/environments/components/HealthPage';
 import { screen, waitFor, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';

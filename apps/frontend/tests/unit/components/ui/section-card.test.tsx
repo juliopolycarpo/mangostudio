@@ -6,7 +6,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { SectionCard } from '@/components/ui/SectionCard';
+
 import { render, screen } from '../../../support/harness/render';
 
 describe('SectionCard', () => {

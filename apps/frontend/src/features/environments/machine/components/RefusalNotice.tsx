@@ -7,6 +7,7 @@
  */
 
 import { useI18n } from '@/hooks/use-i18n';
+
 import { CopyLine } from '../../components/CopyLine';
 
 interface RefusalNoticeProps {

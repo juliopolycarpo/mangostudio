@@ -1,4 +1,5 @@
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
+
 import { getRealtimeBus } from './realtime-bus';
 
 /**

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import { Elysia, t } from 'elysia';
 import Type from 'typebox';
+
 import { registerFileTypeDetector } from '../../../src/lib/file-type-detector';
 
 // TypeBox 1.3.24 removed Validator.buildResult. Elysia beta.19 read it while

@@ -8,7 +8,7 @@
  * never needed — the tag "latest" resolves to right now, for each channel.
  */
 
-import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
+import { safeFetchBytes, type SafeFetchDeps, SafeFetchError } from '../../../lib/safe-fetch';
 import {
   CANARY_MANIFEST_ASSET,
   type CanaryManifest,

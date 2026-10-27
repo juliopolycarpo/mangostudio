@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { GitStatus } from '@mangostudio/shared/git';
 import { GIT_SCOPES } from '@mangostudio/shared/realtime';
 import { useQuery } from '@tanstack/react-query';
+
 import type * as ApiClient from '@/lib/api-client';
+
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
 const {
@@ -39,7 +42,7 @@ const {
   mockWorktreeRemove: jest.fn(),
 };
 
-mock.module('@/lib/api-client', () => ({
+void mock.module('@/lib/api-client', () => ({
   client: {
     api: {
       git: {
@@ -95,7 +98,7 @@ const status: GitStatus = {
 
 const repoState = { state: 'repo' as const, root: '/repo', workdir: '/repo', status };
 
-const noop = async () => null;
+const noop = () => Promise.resolve(null);
 
 type QuerySpy = () => Promise<unknown>;
 

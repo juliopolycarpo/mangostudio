@@ -15,12 +15,14 @@
 import type { AgentCliStatus, Environment, RuntimeStatus } from '@mangostudio/shared/environments';
 import { useQueries } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { agentCliStatusesQueryOptions, runtimeStatusesQueryOptions } from '../queries';
 import { EnvironmentPageState } from './EnvironmentPageState';

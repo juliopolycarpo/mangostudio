@@ -1,4 +1,5 @@
 import { createLazyFileRoute, Outlet } from '@tanstack/react-router';
+
 import { EnvironmentTabs } from '@/features/environments/components/EnvironmentTabs';
 import { useI18n } from '@/hooks/use-i18n';
 

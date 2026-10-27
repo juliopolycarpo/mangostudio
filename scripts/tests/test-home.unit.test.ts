@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+
 import { assertTemporaryHome, type TemporaryHomeHost } from '../lib/temp-home';
 import {
   launcherHost,
@@ -128,30 +129,6 @@ describe('testHomeEnv', () => {
     expect(env.RUSTUP_HOME).toBe('/opt/rustup');
     expect(env.BUN_INSTALL).toBe('/opt/bun');
     expect(env.BUN_INSTALL_CACHE_DIR).toBe('/var/cache/bun');
-  });
-
-  test('pins the dprint plugin cache to the real home, so a check started by a test does not recompile plugins', () => {
-    const linux = testHomeEnv(root, {}, host, 'linux').DPRINT_CACHE_DIR;
-    const macos = testHomeEnv(root, {}, host, 'darwin').DPRINT_CACHE_DIR;
-    const xdg = testHomeEnv(root, { XDG_CACHE_HOME: '/var/cache/me' }, host, 'linux');
-    const exported = testHomeEnv(root, { DPRINT_CACHE_DIR: '/opt/dprint' }, host, 'linux');
-
-    expect(
-      linux,
-      `expected DPRINT_CACHE_DIR: ${join(host.realHome, '.cache', 'dprint', 'cache')} | received: ${linux}`
-    ).toBe(join(host.realHome, '.cache', 'dprint', 'cache'));
-    expect(macos).toBe(join(host.realHome, 'Library', 'Caches', 'dprint', 'cache'));
-    expect(xdg.DPRINT_CACHE_DIR).toBe(join('/var/cache/me', 'dprint', 'cache'));
-    expect(exported.DPRINT_CACHE_DIR).toBe('/opt/dprint');
-  });
-
-  test('leaves the dprint cache alone on Windows, where it does not follow the home directory', () => {
-    const env = testHomeEnv(root, {}, host, 'win32');
-
-    expect(
-      'DPRINT_CACHE_DIR' in env,
-      `expected no DPRINT_CACHE_DIR on win32 | received: ${env.DPRINT_CACHE_DIR}`
-    ).toBe(false);
   });
 
   test('derives the Bun cache from an exported BUN_INSTALL', () => {

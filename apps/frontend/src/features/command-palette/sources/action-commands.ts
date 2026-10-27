@@ -24,6 +24,7 @@ import {
   Sun,
   TerminalSquare,
 } from 'lucide-react';
+
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { formatMessage } from '@/lib/i18n-format';
 

@@ -3,6 +3,7 @@ import type {
   FileCheckpointOp,
 } from '@mangostudio/shared/file-checkpoints';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { listActiveCheckpointsForChat } from '../infrastructure/checkpoint-repository';
 import { listUncheckpointedSourcesByMessage } from '../infrastructure/uncheckpointed-source-repository';

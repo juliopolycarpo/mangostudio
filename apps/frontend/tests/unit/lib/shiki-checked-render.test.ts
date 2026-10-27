@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, spyOn } from 'bun:test';
+
 import { CODE_THEMES, initHighlighter, preloadCodeLanguages } from '@/lib/shiki';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 

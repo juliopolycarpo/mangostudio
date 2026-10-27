@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import { ExternalAgentEventSchema } from '@mangostudio/shared/external-agents';
 import { RuntimeTerminalOutputEventSchema } from '@mangostudio/shared/runtime-contract';
 import { Type } from 'typebox';
+
 import {
   checkAgainstContract,
   schemaByDiscriminant,

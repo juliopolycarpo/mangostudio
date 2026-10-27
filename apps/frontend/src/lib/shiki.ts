@@ -1,5 +1,6 @@
 import { createBundledHighlighter, type HighlighterGeneric } from '@shikijs/core';
 import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
+
 import { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 

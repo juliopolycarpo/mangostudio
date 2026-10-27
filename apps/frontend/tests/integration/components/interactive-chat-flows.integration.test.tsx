@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
@@ -16,12 +18,12 @@ const respondStreamMock = jest.fn();
 // subjects — `mock.module` is not hoisted and static imports are.
 const actualGenerationService = await import('../../../src/services/generation-service');
 
-mock.module('../../../src/services/generation-service', () => ({
+void mock.module('../../../src/services/generation-service', () => ({
   ...actualGenerationService,
   respondTextStream: respondStreamMock,
 }));
 
-mock.module('@tanstack/react-virtual', () => ({
+void mock.module('@tanstack/react-virtual', () => ({
   useVirtualizer: (options: { count: number }) => ({
     getTotalSize: () => options.count * 200,
     getVirtualItems: () =>
@@ -36,9 +38,8 @@ mock.module('@tanstack/react-virtual', () => ({
 
 const { ChatFeed } = await import('../../../src/features/chat/components/ChatFeed');
 const { useChatTodos } = await import('../../../src/features/chat/hooks/use-chat-todos');
-const { useTextGeneration } = await import(
-  '../../../src/features/generation/hooks/use-text-generation'
-);
+const { useTextGeneration } =
+  await import('../../../src/features/generation/hooks/use-text-generation');
 
 type ElicitationPart = Extract<MessagePart, { type: 'mcp_elicitation' }>;
 

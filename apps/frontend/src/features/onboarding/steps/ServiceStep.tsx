@@ -13,6 +13,7 @@
  */
 
 import type { MachineStatus } from '@mangostudio/shared/machine';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Spinner } from '@/components/ui/Spinner';
@@ -22,6 +23,7 @@ import {
   useMachineStatus,
 } from '@/features/environments/machine/queries';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { StepFrame } from '../StepFrame';
 
 /**

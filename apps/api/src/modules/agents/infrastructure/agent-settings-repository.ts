@@ -2,6 +2,7 @@ import type { AgentProfile, BuiltInAgentId } from '@mangostudio/shared/agents';
 import { AgentProfileSchema, isAgentId } from '@mangostudio/shared/agents';
 import type { Kysely } from 'kysely';
 import Value from 'typebox/value';
+
 import type { Database, UserAgentSettingsSelect } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { generateId } from '../../../utils/id';

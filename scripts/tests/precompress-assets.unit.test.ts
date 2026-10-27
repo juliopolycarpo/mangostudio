@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
+
 import { listDistFiles } from '@mangostudio/shared/utils/dist-files';
+
 import {
   compress,
   isCompressible,

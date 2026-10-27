@@ -1,6 +1,7 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { FileText, Image, ImageOff } from 'lucide-react';
 import { useState } from 'react';
+
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -8,6 +9,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatClockTime } from '@/lib/i18n-format';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { MessageBubble } from './MessageBubble';
 import { ReservedAspectImage } from './ReservedAspectImage';
 

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { COLLAPSE_THRESHOLD, collapseWhenLong } from '../lib/collapsible';
 
 describe('collapseWhenLong', () => {

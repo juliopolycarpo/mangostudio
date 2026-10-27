@@ -262,23 +262,24 @@ jobs:
     # only when the changes job proved no distribution-relevant path changed,
     # and the Rust coverage skip only when it proved no Rust-relevant path did.
     name: Gate
-    needs: [
-      distribution-identity,
-      changes,
-      distribution,
-      cross-runtimes,
-      release-dry-run,
-      check,
-      dependency-audit,
-      local-runtime,
-      test,
-      build,
-      rust-coverage,
-      browser-smoke,
-      qa-metrics,
-      smoke,
-      smoke-container,
-    ]
+    needs:
+      [
+        distribution-identity,
+        changes,
+        distribution,
+        cross-runtimes,
+        release-dry-run,
+        check,
+        dependency-audit,
+        local-runtime,
+        test,
+        build,
+        rust-coverage,
+        browser-smoke,
+        qa-metrics,
+        smoke,
+        smoke-container,
+      ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -323,23 +324,24 @@ jobs:
     # Additive compatibility check for the future ruleset cutover. Keep the
     # legacy Gate and evaluate the same direct needs and allowed skips here.
     name: CI Gate
-    needs: [
-      distribution-identity,
-      changes,
-      distribution,
-      cross-runtimes,
-      release-dry-run,
-      check,
-      dependency-audit,
-      local-runtime,
-      test,
-      build,
-      rust-coverage,
-      browser-smoke,
-      qa-metrics,
-      smoke,
-      smoke-container,
-    ]
+    needs:
+      [
+        distribution-identity,
+        changes,
+        distribution,
+        cross-runtimes,
+        release-dry-run,
+        check,
+        dependency-audit,
+        local-runtime,
+        test,
+        build,
+        rust-coverage,
+        browser-smoke,
+        qa-metrics,
+        smoke,
+        smoke-container,
+      ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import { type Frame, type Port, type PortClosure, RemoteError } from '@mangostudio/protocol';
 import { createInProcessPortPair } from '@mangostudio/protocol/in-process';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import { openHubSession } from '../../../../src/services/runtime-client/hub-session';
 import {
   isRequestNotSent,
@@ -158,7 +160,7 @@ describe('RuntimeRequestNotSentError', () => {
       expect(unavailable).toBe(0);
     } finally {
       hub.close();
-      peer.close();
+      void peer.close();
     }
   });
 

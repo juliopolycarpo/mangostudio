@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
 import { laneById, SHARDED_LCOV_PATHS } from '../lib/test-lanes';
-import { type EnforceDeps, enforceCoverageThresholds } from './enforce-coverage-thresholds';
-import { type CoverageSummary, coverageBucket } from './parse-lcov';
+import { enforceCoverageThresholds, type EnforceDeps } from './enforce-coverage-thresholds';
+import { coverageBucket, type CoverageSummary } from './parse-lcov';
 
 const COMPLETE_LCOV = 'TN:\nSF:src/a.ts\nFNF:1\nFNH:1\nDA:1,1\nLF:1\nLH:1\nend_of_record\n';
 const FRONTEND_LCOV = SHARDED_LCOV_PATHS.frontend as string;

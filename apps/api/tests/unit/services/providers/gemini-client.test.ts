@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { GoogleGenAI } from '@google/genai/web';
+
 import {
   getProviderObservabilityMetrics,
   resetProviderObservability,

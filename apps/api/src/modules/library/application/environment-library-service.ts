@@ -21,6 +21,7 @@ import type {
 import { libraryContentPath, MAX_LIBRARY_CONTENT_BYTES } from '@mangostudio/shared/library/machine';
 import type { RuntimeLibraryScanEntry } from '@mangostudio/shared/runtime-contract';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { setBounded } from '../../../lib/bounded-map';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
@@ -175,7 +176,7 @@ export function createEnvironmentLibraryService(
 
     if (!force) {
       const cached = cache.get(signature);
-      if (cached && cached.client === client && now() - cached.scannedAtMs < cacheTtlMs) {
+      if (cached?.client === client && now() - cached.scannedAtMs < cacheTtlMs) {
         return cached.scan;
       }
     } else {

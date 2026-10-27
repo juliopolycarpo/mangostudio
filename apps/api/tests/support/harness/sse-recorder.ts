@@ -73,6 +73,7 @@ export class SseRecorder {
   }
 
   private describeEvents(): string {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
     return this.events.map((event) => String(event.type ?? 'unknown')).join(', ');
   }
 }

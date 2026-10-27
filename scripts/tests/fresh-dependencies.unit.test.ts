@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   buildReceipt,
   classifyFreshRun,
@@ -543,6 +544,7 @@ describe('fresh dependency workflow', () => {
 
   test('serializes issue writers across refs without canceling an active update', () => {
     const report = extractJobBlock(workflow, 'report');
+    // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(report).toContain('group: rust-fresh-dependencies-report-${{ github.repository }}');
     expect(report).toContain('cancel-in-progress: false');
     const groups = report.split('\n').filter((line) => line.trimStart().startsWith('group: '));

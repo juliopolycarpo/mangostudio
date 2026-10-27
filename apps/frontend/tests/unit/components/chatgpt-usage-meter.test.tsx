@@ -1,10 +1,12 @@
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
+
 import { render, screen } from '../../support/harness/render';
 
 const actual = await import('@/hooks/use-i18n');
 
-mock.module('@/hooks/use-i18n', () => {
+void mock.module('@/hooks/use-i18n', () => {
   return {
     ...actual,
     useI18n: () => ({
@@ -36,9 +38,8 @@ mock.module('@/hooks/use-i18n', () => {
 
 // After the mock, never before: a static import is evaluated first and would
 // bind the meter to the real i18n hook.
-const { ChatGptUsageMeter, formatCompactDuration } = await import(
-  '@/features/settings/connectors/components/ChatGptUsageMeter'
-);
+const { ChatGptUsageMeter, formatCompactDuration } =
+  await import('@/features/settings/connectors/components/ChatGptUsageMeter');
 
 function freshSnapshot(overrides: Partial<ChatGptUsageSnapshot> = {}): ChatGptUsageSnapshot {
   return {

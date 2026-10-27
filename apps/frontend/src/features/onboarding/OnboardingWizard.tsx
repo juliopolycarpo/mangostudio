@@ -21,25 +21,27 @@ import {
   resumeOnboarding,
 } from '@mangostudio/shared/onboarding';
 import { useState } from 'react';
+
 import { BrandLockup } from '@/components/layout/BrandLockup';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
-import { Spinner } from '@/components/ui/Spinner';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
+import { Spinner } from '@/components/ui/Spinner';
 import { ExternalDisclosureGate } from '@/features/external-agents/ExternalDisclosureGate';
 import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
 import { useI18n } from '@/hooks/use-i18n';
 import { useSignOut } from '@/hooks/use-sign-out';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
-import { StepStatusChip } from './StepStatusChip';
+
 import { AgentsStep } from './steps/AgentsStep';
 import { FirstChatStep } from './steps/FirstChatStep';
 import { FolderStep } from './steps/FolderStep';
 import { ServiceStep } from './steps/ServiceStep';
 import { ToolchainStep } from './steps/ToolchainStep';
 import { WelcomeStep } from './steps/WelcomeStep';
+import { StepStatusChip } from './StepStatusChip';
 import { useOnboardingFacts } from './use-onboarding-facts';
 import { useOnboardingProgress } from './use-onboarding-progress';
 

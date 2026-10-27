@@ -6,13 +6,15 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { UpdateChannel, UpdateCheck } from '@mangostudio/shared/updates';
+
 import type { MangoConfig } from '../../../../src/lib/config';
 import {
   createUpdateChecker,
   parseUpdateCheckFile,
-  type UpdateCheckerDeps,
   updateChecker,
+  type UpdateCheckerDeps,
   updateCheckSkipReason,
 } from '../../../../src/modules/updates/application/update-check';
 
@@ -42,6 +44,7 @@ class FakeFetch {
   constructor(private readonly responses: Record<string, () => Response>) {}
 
   readonly fetch = ((input: Parameters<typeof fetch>[0]) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
     const url = String(input);
     this.calls.push(url);
     const make = this.responses[url];
@@ -576,6 +579,7 @@ describe('createUpdateChecker', () => {
       });
       const calls: string[] = [];
       const fetchOnePendingResponse = ((input: Parameters<typeof fetch>[0]) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         calls.push(String(input));
         return pending;
       }) as unknown as typeof fetch;

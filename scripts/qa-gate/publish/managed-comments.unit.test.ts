@@ -8,8 +8,8 @@ import { type CommitEntry, renderCommitsSection } from '../commit-log';
 import { QA_METRICS_MARKER as TS_METRICS_MARKER } from '../render/document';
 import {
   composeCommitsReport,
-  renderChangelogForComment,
   QA_COMMITS_MARKER as TS_COMMITS_MARKER,
+  renderChangelogForComment,
 } from '../report-document';
 import {
   COMMITS_FALLBACK_BODY,

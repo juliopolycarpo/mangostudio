@@ -4,9 +4,11 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { RuntimeCard } from '../../../../src/features/environments/components/RuntimeCard';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -483,6 +485,7 @@ describe('RuntimeCard', () => {
       await user.click(buttons[1] as HTMLElement);
 
       await waitFor(() => expect(putCalls()).toHaveLength(1));
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
       expect(JSON.parse(String(putCalls()[0]?.body))).toEqual({ node: '/opt/node/bin/node' });
     });
 
@@ -501,6 +504,7 @@ describe('RuntimeCard', () => {
       await user.click(resetButton);
 
       await waitFor(() => expect(putCalls()).toHaveLength(1));
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
       expect(JSON.parse(String(putCalls()[0]?.body))).toEqual({ node: 'auto' });
     });
 

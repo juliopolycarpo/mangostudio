@@ -8,8 +8,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { GithubReviewThread } from '@mangostudio/shared/github';
 import { en } from '@mangostudio/shared/i18n';
+
 import {
   openReviewThreads,
   reviewThreadsToTask,

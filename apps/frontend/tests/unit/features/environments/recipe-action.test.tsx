@@ -6,8 +6,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { InstallRecipePreview } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
+
 import { RecipeAction } from '../../../../src/features/environments/components/RecipeAction';
 import { render, screen } from '../../../support/harness/render';
 import { installRecipe } from './fixtures';

@@ -9,6 +9,7 @@
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
+
 import { getDb } from '../../../db/database';
 import type {
   Database,

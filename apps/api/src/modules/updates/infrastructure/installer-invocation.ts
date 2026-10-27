@@ -8,6 +8,7 @@
 
 import { writeFile } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
+
 import { POWERSHELL_HOST_FLAGS, WINDOWS_SYSTEM_ENV_KEYS } from '../../../cli/detach';
 import type { InstallOrigin } from '../domain/install-origin';
 import {

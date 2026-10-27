@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { runVersion } from '../../../../src/cli/commands/version';
 
 class CapturingVersionOutput {

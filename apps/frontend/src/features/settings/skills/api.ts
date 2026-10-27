@@ -3,6 +3,7 @@
  */
 
 import type { SkillDescriptor, UpdateSkillSettingsBody } from '@mangostudio/shared/skills';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

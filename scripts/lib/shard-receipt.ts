@@ -45,7 +45,8 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const found = (value: unknown): string =>
   typeof value === 'number' || value === undefined
     ? String(value)
-    : (JSON.stringify(value) ?? String(value));
+    : // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Diagnostics intentionally describe arbitrary invalid input, including non-scalar values.
+      (JSON.stringify(value) ?? String(value));
 
 /**
  * A process exit status a receipt may carry: an integer from 0 to 255.

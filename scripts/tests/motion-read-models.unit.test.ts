@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { ListActivityResponseSchema } from '@mangostudio/shared/activity';
 import { AgentProfileListResponseSchema } from '@mangostudio/shared/agents';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
@@ -14,6 +15,7 @@ import { LibraryScanResultSchema } from '@mangostudio/shared/library';
 import { MachineUpdateStatusSchema } from '@mangostudio/shared/updates';
 import type { Page, Route } from '@playwright/test';
 import { Value } from 'typebox/value';
+
 import { installMotionReadModels } from '../../tests/browser-smoke/support/motion-read-models';
 
 class FakeRequest {

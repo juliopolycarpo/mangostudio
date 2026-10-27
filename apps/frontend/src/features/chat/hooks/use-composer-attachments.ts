@@ -9,6 +9,7 @@
 
 import type { ChatAttachment } from '@mangostudio/shared/chat';
 import { useCallback, useRef, useState } from 'react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { uploadChatAttachment } from '@/services/attachment-service';

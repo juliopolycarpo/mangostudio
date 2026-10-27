@@ -1,6 +1,7 @@
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { AgentSettingsError } from '../../agents/domain/agent-profile';

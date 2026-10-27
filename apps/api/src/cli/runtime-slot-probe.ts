@@ -18,16 +18,18 @@
  */
 
 import { readFile, stat } from 'node:fs/promises';
+
 import {
   type ResolvedRuntimeSlotConfig,
+  resolveRuntimeSlotConfig,
   RUNTIME_SLOTS,
   type RuntimeSlot,
-  RuntimeSlotConfigSchema,
-  resolveRuntimeSlotConfig,
   runtimeSlotConfigPath,
+  RuntimeSlotConfigSchema,
   runtimeSlotDir,
 } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
+
 import { getRuntimeHomeMangoDir } from '../lib/config';
 
 export interface RuntimeSlotProbe {

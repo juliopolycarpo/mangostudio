@@ -9,6 +9,7 @@
  */
 
 import type { LibraryLocationStatus, LibraryUnreadableEntry } from '@mangostudio/shared/library';
+
 import { useI18n } from '@/hooks/use-i18n';
 
 interface UnrecognisedEntriesProps {

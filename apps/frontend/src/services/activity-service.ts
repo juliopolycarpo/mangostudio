@@ -9,6 +9,7 @@
  */
 
 import type { ListActivityQuery, ListActivityResponse } from '@mangostudio/shared/activity';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

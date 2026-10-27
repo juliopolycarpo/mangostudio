@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import {
   createMemoryHistory,
@@ -17,8 +18,9 @@ import {
 } from '@tanstack/react-router';
 import { screen, within } from '@testing-library/react';
 import type { FunctionComponent } from 'react';
-import { Route as LibraryRoute } from '../../../src/routes/_authenticated/environments/library.lazy';
+
 import { Route as EnvironmentsRoute } from '../../../src/routes/_authenticated/environments.lazy';
+import { Route as LibraryRoute } from '../../../src/routes/_authenticated/environments/library.lazy';
 import { act, flushAsyncRender, render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
@@ -66,7 +68,7 @@ async function renderUmbrellaAt(path: string) {
 
   // The test router is deliberately not the app's registered route tree, so its
   // type does not line up with the provider's registered one.
-  // biome-ignore lint/suspicious/noExplicitAny: unregistered test-only route tree
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- unregistered test-only route tree
   const result = render(<RouterProvider router={router as any} />);
   await act(async () => {
     await router.load();

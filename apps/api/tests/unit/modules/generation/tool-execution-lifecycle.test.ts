@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
+
 import { SubagentDelegationError } from '../../../../src/modules/generation/application/subagent-turn-types';
 import {
   classifyToolExecutionFailure,

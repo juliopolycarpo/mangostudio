@@ -4,7 +4,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { RuntimeFinding } from '@mangostudio/shared/environments';
+
 import { FindingList } from '../../../../src/features/environments/components/FindingList';
 import { render, screen } from '../../../support/harness/render';
 

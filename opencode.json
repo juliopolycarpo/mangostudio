@@ -3,15 +3,8 @@
   "lsp": true,
   "formatter": {
     "prettier": { "disabled": true },
-    "biome-fix": {
-      "command": [
-        "./node_modules/.bin/biome",
-        "check",
-        "--write",
-        "--no-errors-on-unmatched",
-        "--files-ignore-unknown=true",
-        "$FILE"
-      ],
+    "bun-fmt": {
+      "command": ["bun", "fmt", "$FILE"],
       "extensions": [
         ".js",
         ".jsx",
@@ -24,12 +17,14 @@
         ".json",
         ".jsonc",
         ".css",
-        ".html"
+        ".html",
+        ".md",
+        ".mdc",
+        ".mdx",
+        ".toml",
+        ".yml",
+        ".yaml"
       ]
-    },
-    "dprint-fmt": {
-      "command": ["./node_modules/.bin/dprint", "fmt", "--allow-no-files", "$FILE"],
-      "extensions": [".md", ".mdx", ".toml", ".yml", ".yaml"]
     }
   }
 }

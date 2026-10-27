@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
-  MDC_DESCRIPTION_MAX_LENGTH,
   markdownToMdcAdapter,
+  MDC_DESCRIPTION_MAX_LENGTH,
   mdcToMarkdownAdapter,
 } from '../../../../../src/modules/library/application/adapters/markdown-mdc';
 

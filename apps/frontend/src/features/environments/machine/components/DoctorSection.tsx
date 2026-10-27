@@ -9,10 +9,12 @@ import type {
   MachineDoctorReport,
 } from '@mangostudio/shared/machine';
 import { CircleCheck } from 'lucide-react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { EnvironmentPageState } from '../../components/EnvironmentPageState';
 import { FindingIcon } from '../../components/FindingList';
 import { useMachineDoctor } from '../queries';
@@ -75,6 +77,7 @@ export function DoctorSection() {
               every fetch, so there is no identity to preserve across renders. */}
           {sortChecks(doctor.data?.checks ?? []).map((check, index) => (
             <li
+              // eslint-disable-next-line react/no-array-index-key -- Checks can have duplicate labels and are replaced as a list.
               key={`${index}:${check.label}`}
               className="flex items-start gap-2 text-sm"
               data-check-status={check.status}

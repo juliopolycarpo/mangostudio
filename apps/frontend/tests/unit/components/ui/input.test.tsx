@@ -5,8 +5,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { screen } from '@testing-library/react';
+
 import { Input } from '@/components/ui/Input';
+
 import { render } from '../../../support/harness/render';
 
 describe('Input', () => {

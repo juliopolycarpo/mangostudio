@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
 const mockStartChatGptOAuth = jest.fn();
 const mockGetChatGptOAuthStatus = jest.fn();
 const mockCancelChatGptOAuth = jest.fn();
 
-mock.module('../../../src/features/settings/connectors/api', () => {
+void mock.module('../../../src/features/settings/connectors/api', () => {
   class ConnectorApiError extends Error {
     readonly code?: string;
 
@@ -25,9 +27,8 @@ mock.module('../../../src/features/settings/connectors/api', () => {
   };
 });
 
-const { useChatGptOAuth } = await import(
-  '../../../src/features/settings/connectors/hooks/use-chatgpt-oauth'
-);
+const { useChatGptOAuth } =
+  await import('../../../src/features/settings/connectors/hooks/use-chatgpt-oauth');
 
 function makePopup() {
   return {

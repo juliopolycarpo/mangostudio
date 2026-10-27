@@ -8,12 +8,14 @@
 
 import { MoreVertical, RotateCcw, Tag } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import { IdentityEditDialog } from './IdentityEditDialog';
 import type { ResolvedToolIdentity } from './resolve';
 import { useResetToolIdentity } from './use-tool-identities';

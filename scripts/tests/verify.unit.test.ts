@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { ROOT_DIR } from '../lib/config';
 
 describe('verify usage', () => {

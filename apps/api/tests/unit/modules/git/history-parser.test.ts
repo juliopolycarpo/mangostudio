@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   GIT_LOG_FORMAT,
   parseCommitFiles,

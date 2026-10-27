@@ -11,7 +11,7 @@ const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'coverage', '.turbo
 /**
  * Keep frontend runtime imports out of hub internals, except the test comparing
  * the live reducer with the real hub transcript. Covers deferred imports that
- * Biome's import rule does not recognize and ignores erased type-only imports.
+ * The source guard also covers literal loaders and ignores erased type-only imports.
  * Transparent expression wrappers preserve the same literal dependency edge;
  * generated directories are excluded only at the frontend workspace root.
  *
@@ -39,7 +39,8 @@ export function assertFrontendApiImportBoundary(rootDir: string = ROOT_DIR): voi
 
   throw new Error(
     `Frontend value imports of ${API_INTERNAL_PREFIX}* are allowed only in ${PARITY_TEST} ` +
-      'to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere.\n' +
-      violations.join('\n')
+      `to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere.\n${violations.join(
+        '\n'
+      )}`
   );
 }

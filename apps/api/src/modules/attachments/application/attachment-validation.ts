@@ -1,5 +1,7 @@
 import { extname } from 'node:path';
+
 import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
+
 import { detectFileType } from '../../../lib/file-type-detector';
 
 const IMAGE_MIME_EXTENSIONS = {
@@ -41,9 +43,7 @@ interface ValidatedAttachmentFile {
 }
 
 type SupportedMime =
-  | keyof typeof IMAGE_MIME_EXTENSIONS
-  | keyof typeof TEXT_MIME_EXTENSIONS
-  | typeof PDF_MIME;
+  keyof typeof IMAGE_MIME_EXTENSIONS | keyof typeof TEXT_MIME_EXTENSIONS | typeof PDF_MIME;
 
 export async function validateChatAttachmentFile(file: File): Promise<ValidatedAttachmentFile> {
   const buffer = await file.arrayBuffer();

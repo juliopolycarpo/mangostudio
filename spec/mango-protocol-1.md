@@ -337,7 +337,7 @@ The frame limit bounds one frame. It does not bound how many a peer may have in 
 hostile or broken peer does not need an oversized frame to make the other side hold state for
 ever: a request it never cancels and a stream key it never ends both cost the receiver memory
 that no rule above reclaims. Each ceiling below is one a peer enforces on itself, about what the
-*other* side may make it hold.
+_other_ side may make it hold.
 
 - **Requests in flight.** `maxInFlight` is the number of requests a responder will hold open for
   the other side at once. The default is `256`. A peer MAY announce its own value in
@@ -349,7 +349,7 @@ that no rule above reclaims. Each ceiling below is one a peer enforces on itself
   treats `METHOD_UNSUPPORTED`, and SHOULD retry once one of its own requests has settled. It is
   the one reserved code whose meaning depends on `details.kind`, which is why the member is
   named there rather than left to the application.
-- The count is of requests this side is *answering*, not of requests it sent. A peer that both
+- The count is of requests this side is _answering_, not of requests it sent. A peer that both
   requests and responds has two independent budgets, and neither side's `maxInFlight` bounds
   what the announcing peer may send.
 - **Open stream keys.** A peer bounds how many stream keys ([§8](#8-events-and-streams)) it

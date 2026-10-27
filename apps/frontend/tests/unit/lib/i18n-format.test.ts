@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { formatClockTime, formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 
 const NOW = Date.UTC(2026, 7, 24, 12, 0, 0);

@@ -1,5 +1,6 @@
 import type { ReasoningEffort } from '@mangostudio/shared/types';
 import type OpenAI from 'openai';
+
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import type { TextGenerationRequest } from '../types';
 

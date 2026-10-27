@@ -5,7 +5,9 @@
  */
 
 import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
+
 import { useI18n } from '@/hooks/use-i18n';
+
 import { installedViaManagerLabel, updateLatestLabel } from '../format';
 import { MachineCard, MachineFact, MachineFacts } from './MachineCard';
 import { UpdateAction } from './UpdateAction';

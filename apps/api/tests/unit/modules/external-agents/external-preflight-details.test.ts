@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { externalPreflightDetails } from '../../../../src/modules/external-agents/http/external-preflight';
 
 describe('externalPreflightDetails', () => {

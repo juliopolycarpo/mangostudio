@@ -1,6 +1,7 @@
 import type { ProviderProbeOperation } from '@mangostudio/shared/observability';
 import { useQuery } from '@tanstack/react-query';
 import { ScrollText } from 'lucide-react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { Badge } from '@/components/ui/Badge';
@@ -12,6 +13,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
+
 import { observabilityLogsQueryOptions } from '../queries';
 import { formatTimestamp } from '../utils';
 import { ExternalAgentDiscoveryLog } from './ExternalAgentDiscoveryLog';
@@ -48,7 +50,11 @@ export function LogsSettingsPage() {
           an unreachable metrics endpoint says nothing about how the agents were
           discovered, and gating it behind that request only delays it. */}
       {isLoading ? (
-        <div role="status" className="space-y-3">
+        <div
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+          role="status"
+          className="space-y-3"
+        >
           <Skeleton className="h-20 w-full rounded-md" />
           <span className="sr-only">{t.common.loading}</span>
         </div>

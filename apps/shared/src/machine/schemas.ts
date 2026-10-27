@@ -7,6 +7,7 @@
 
 import type { Static } from 'typebox';
 import Type from 'typebox';
+
 import { InstallGuardSchema } from '../environments/schemas';
 import { RuntimeConsentProfileSchema, UserServiceStatusSchema } from '../runtime-home/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';

@@ -1,5 +1,7 @@
 import { expect, it } from 'bun:test';
+
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+
 import { openHubSession } from '../../../../src/services/runtime-client/hub-session';
 import { FakeHostileRuntimePeer } from '../../../support/mocks/fake-hostile-runtime-peer';
 

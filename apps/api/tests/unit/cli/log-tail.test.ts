@@ -2,13 +2,14 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import {
   type FollowDeps,
   followFile,
+  latestHubLogFile,
   LOG_LINE_MAX_CHARS,
   LOG_TAIL_BYTES_PER_LINE,
   type LogTailSource,
-  latestHubLogFile,
   readLogTail,
   resolveHubLogFile,
   tailLines,

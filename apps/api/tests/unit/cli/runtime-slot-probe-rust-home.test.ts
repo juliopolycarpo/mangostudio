@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+
 import { probeRuntimeSlots, type RuntimeSlotProbe } from '../../../src/cli/runtime-slot-probe';
 
 const RUST_HOME = join(

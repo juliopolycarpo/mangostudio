@@ -15,6 +15,7 @@
 
 import type { ExternalSteerPart } from '@mangostudio/shared/types';
 import { CornerDownRight } from 'lucide-react';
+
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';

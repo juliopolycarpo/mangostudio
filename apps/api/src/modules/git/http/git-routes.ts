@@ -48,6 +48,7 @@ import {
   UnstagePathsBodySchema,
 } from '@mangostudio/shared/git';
 import { Elysia } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';

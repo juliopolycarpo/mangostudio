@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { normalizeAppSettings } from '@mangostudio/shared/app-settings';
 import {
   EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES,

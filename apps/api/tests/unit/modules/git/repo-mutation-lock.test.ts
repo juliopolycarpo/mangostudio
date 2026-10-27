@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { createRepoMutationLock } from '../../../../src/modules/git/application/git-mutation-lock';
 import type { runGit } from '../../../../src/modules/git/infrastructure/git-cli';
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';

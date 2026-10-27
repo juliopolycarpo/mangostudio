@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { useForceRefresh } from '../../../../src/features/github/hooks/use-force-refresh';
 import { act, renderHook } from '../../../support/harness/render';
 

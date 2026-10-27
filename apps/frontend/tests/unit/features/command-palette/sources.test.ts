@@ -4,11 +4,13 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { Chat } from '@mangostudio/shared/chat';
 import type { Environment } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { en } from '@mangostudio/shared/i18n';
+
 import { scoreCommand } from '../../../../src/features/command-palette/lib/match';
 import { actionCommands } from '../../../../src/features/command-palette/sources/action-commands';
 import { environmentCommands } from '../../../../src/features/command-palette/sources/environment-commands';
@@ -90,9 +92,9 @@ describe('sessionCommands', () => {
     expect(labels.join('\n')).not.toContain('[2026-10-21');
   });
 
-  it('runs the selection callback with the chat id', () => {
+  it('runs the selection callback with the chat id', async () => {
     const onSelect = jest.fn();
-    buildSessions(onSelect)[0].run();
+    await buildSessions(onSelect)[0].run();
     expect(onSelect).toHaveBeenCalledWith('c-new');
   });
 
@@ -144,12 +146,12 @@ describe('navigateCommands', () => {
     expect(mcp && scoreCommand(mcp, '/settings/mcp')).not.toBeNull();
   });
 
-  it('navigates to the row it was built from', () => {
+  it('navigates to the row it was built from', async () => {
     const navigate = jest.fn();
     const gallery = navigateCommands({ t: en, navigate }).find(
       (item) => item.id === 'navigate:/gallery'
     );
-    gallery?.run();
+    await gallery?.run();
     expect(navigate).toHaveBeenCalledWith('/gallery');
   });
 });
@@ -232,9 +234,9 @@ describe('actionCommands', () => {
     expect(labels).toContain('New chat with Codex CLI');
   });
 
-  it('starts the new chat on the runner the row names, and on its machine', () => {
+  it('starts the new chat on the runner the row names, and on its machine', async () => {
     const onNewChatWithRunner = jest.fn();
-    build({ onNewChatWithRunner })
+    await build({ onNewChatWithRunner })
       .find((item) => item.id === 'action:new-chat-external:codex')
       ?.run();
     expect(onNewChatWithRunner).toHaveBeenCalledWith(
@@ -250,9 +252,9 @@ describe('actionCommands', () => {
   });
 
   /** Agent profiles are the hub's own, so pinning one to a machine would be a lie. */
-  it('leaves an agent profile row unscoped', () => {
+  it('leaves an agent profile row unscoped', async () => {
     const onNewChatWithRunner = jest.fn();
-    build({ onNewChatWithRunner })
+    await build({ onNewChatWithRunner })
       .find((item) => item.id === 'action:new-chat-agent:explore')
       ?.run();
     expect(onNewChatWithRunner).toHaveBeenCalledWith({ kind: 'mangostudio', agentId: 'explore' });
@@ -300,12 +302,12 @@ describe('actionCommands', () => {
    * has to run the affordance its own label promises, not the generic one a
    * sibling row already offers.
    */
-  it('runs the create-pull-request action from the row of that name, not the generic open', () => {
+  it('runs the create-pull-request action from the row of that name, not the generic open', async () => {
     const onOpenGithubPanel = jest.fn();
     const onCreateGithubPr = jest.fn();
     const items = build({ onOpenGithubPanel, onCreateGithubPr });
 
-    items.find((item) => item.id === 'action:github-create-pr')?.run();
+    await items.find((item) => item.id === 'action:github-create-pr')?.run();
 
     expect(onCreateGithubPr).toHaveBeenCalledTimes(1);
     expect(onOpenGithubPanel).not.toHaveBeenCalled();
@@ -323,13 +325,13 @@ describe('actionCommands', () => {
     expect(ids).not.toContain('action:github-review-requests');
   });
 
-  it('offers the Terminal rows and runs each from the row of that name', () => {
+  it('offers the Terminal rows and runs each from the row of that name', async () => {
     const onOpenTerminalPanel = jest.fn();
     const onNewTerminalSession = jest.fn();
     const items = build({ onOpenTerminalPanel, onNewTerminalSession });
 
-    items.find((item) => item.id === 'action:terminal-panel')?.run();
-    items.find((item) => item.id === 'action:terminal-new-session')?.run();
+    await items.find((item) => item.id === 'action:terminal-panel')?.run();
+    await items.find((item) => item.id === 'action:terminal-new-session')?.run();
 
     expect(onOpenTerminalPanel).toHaveBeenCalledTimes(1);
     expect(onNewTerminalSession).toHaveBeenCalledTimes(1);

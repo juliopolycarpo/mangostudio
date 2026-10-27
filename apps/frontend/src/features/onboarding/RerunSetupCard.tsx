@@ -9,11 +9,13 @@
 
 import { useNavigate } from '@tanstack/react-router';
 import { RotateCcw } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { useOnboardingProgress } from './use-onboarding-progress';
 
 export function RerunSetupCard() {

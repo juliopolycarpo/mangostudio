@@ -9,8 +9,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { DEFAULT_ONBOARDING_STATE, type OnboardingState } from '@mangostudio/shared/onboarding';
 import { waitFor } from '@testing-library/react';
+
 import { useOnboardingFacts } from '../../../../src/features/onboarding/use-onboarding-facts';
 import { flushAsyncRender, renderHook } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -36,6 +38,7 @@ const CHOSE_CODEX: OnboardingState = {
 async function discoverySettled(): Promise<void> {
   await waitFor(() =>
     expect(
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
       scenario.fetchMock.mock.calls.some((call) => String(call[0]).includes('/api/external-agents'))
     ).toBe(true)
   );

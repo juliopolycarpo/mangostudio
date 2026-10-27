@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { RuntimeServiceManagementError } from '@mangostudio/shared/runtime-contract';
+
 import { runService, type ServiceDeps } from '../../../../src/cli/commands/service';
 import { CliError } from '../../../../src/cli/errors';
 import type { ServerState } from '../../../../src/lib/server-state';

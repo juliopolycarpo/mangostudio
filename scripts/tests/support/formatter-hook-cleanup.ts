@@ -1,4 +1,5 @@
 import { writeFile } from 'node:fs/promises';
+
 import { stopPath } from './fake-rustfmt-markers';
 
 interface FormatterHook {

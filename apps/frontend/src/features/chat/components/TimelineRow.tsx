@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
+
 import { cn } from '@/lib/utils';
+
 import { DisclosureChevron } from './DisclosureChevron';
 
 interface TimelineRowProps {

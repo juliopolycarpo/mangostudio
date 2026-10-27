@@ -48,7 +48,7 @@ the runtime client for execution that belongs to the runtime.
 `runtime-module-allow-list.test.ts` walks `apps/api` to keep any in-process runtime out.
 Everything the two ends share is a contract in `@mangostudio/shared`, which is what lets the
 runtime be a process that is not a TypeScript module at all. Code that is not a
-contract but that *both machines genuinely run* — the library engine, the service
+contract but that _both machines genuinely run_ — the library engine, the service
 supervisor, path containment — lives in shared too, behind a host-only subpath: the hub runs
 it on the hub's disk, a runtime runs it on the runtime's, and neither borrows the other's
 copy.
@@ -155,7 +155,7 @@ independent of the protocol version, and neither has to move for an additive met
   not already asserting: a bound added at the boundary is a new rejection, and a peer
   generated from the catalog inherits it everywhere. `terminal.open`'s `cols`/`rows` are the
   exception that shows the rule, mirroring `assertTerminalSize` rather than inventing a
-  limit. A bound the method's *result* already carries is not a new one either: a parameter
+  limit. A bound the method's _result_ already carries is not a new one either: a parameter
   looser than the value it ends up in accepts a call the method then cannot answer, and
   under result validation that reads as an `INTERNAL` fault rather than the bad argument it
   was. `library.apply`/`library.remove` take `environmentId` on the same
@@ -167,7 +167,7 @@ independent of the protocol version, and neither has to move for an additive met
 - **Tolerant manifest.** Feature keys beyond the original six are optional. An absent value
   means the peer predates the key and should be treated as granted (`true`) so an older
   runtime is not silently stripped of tools the hub already trusted. Top-level keys that
-  describe what the peer's *build* can do read the other way — `enforcesPathPolicy` and
+  describe what the peer's _build_ can do read the other way — `enforcesPathPolicy` and
   `publishesWindowsSlot` are false when absent, because assuming a capability nobody
   claimed is what they exist to prevent. Those arrive only on `hello`, so a
   `runtime.health` refresh carries them forward rather than recomputing them.
@@ -265,7 +265,7 @@ Which one to reach for:
   environment card can push the runtime binary and run `setup` over the same ssh channel.
 - **This machine, but the agent must not reach the rest of it** — Container. Tools run inside a
   disposable container started from an image you already have. This is the one transport whose
-  purpose is what the agent *cannot* do, rather than where it runs.
+  purpose is what the agent _cannot_ do, rather than where it runs.
 
 ## The Runtime Home
 
@@ -297,7 +297,7 @@ On Windows the same slot is spelled with a directory junction and an `.exe`:
 ```
 
 A **slot** names who put the runtime there, not which transport talks to it. One machine
-reachable by ssh *and* a dialled-in WebSocket shares one slot, one consent file, and one
+reachable by ssh _and_ a dialled-in WebSocket shares one slot, one consent file, and one
 binary. Config lives at the slot root and bytes under `<version>/`, so an upgrade replaces
 bytes and never consent. `current` is what keeps an ssh launch argument and a service
 unit's `ExecStart` from embedding a version that dangles after the next upgrade.
@@ -345,7 +345,7 @@ Who answers depends on who installed:
   records that by running the runtime's own `setup`, never by the hub writing an `allow`
   block itself.
 - `remote` is pending until somebody at that machine answers. A slot with no config at all
-  is *also* pending: the thing that installs a remote runtime is somebody else's hub, and
+  is _also_ pending: the thing that installs a remote runtime is somebody else's hub, and
   a gate that only exists once that hub writes it is a gate that hub can decline to write.
 - `connect` and `serve` are the exception, because a person is standing at the machine
   holding a token their hub printed. The invocation is the answer, and it is recorded and
@@ -453,15 +453,15 @@ connecting and reports the refusal at the server level, naming the machine. Atte
 listing would spend the per-server budget to rediscover what the manifest already said, and
 would surface as `server-unavailable` — a connection failure the user cannot act on.
 
-Some methods need two capabilities. `library.apply` is a library operation *and* a write to
+Some methods need two capabilities. `library.apply` is a library operation _and_ a write to
 somebody's files; `readonly` grants the first and refuses the second, so listing only
 `library` would have let the profile whose whole promise is "no writes" write files. The
 split runs through the backup methods too: `library.backups` lists a machine's retained
-sets under `library` alone, because a machine downgraded to readonly still *has* a history
+sets under `library` alone, because a machine downgraded to readonly still _has_ a history
 and hiding it would say the backups are gone rather than that this hub may no longer write.
 `library.gc`, which deletes, needs `fsWrite`.
 
-A readonly machine is therefore a perfectly good propagation *source*: it is scanned, its
+A readonly machine is therefore a perfectly good propagation _source_: it is scanned, its
 copies compete to be the winner, and only writing to it is refused. The wizard says so while
 the user is still choosing, rather than letting them reach an apply that would be denied.
 
@@ -473,7 +473,7 @@ runtime there, and narrowing that slot gives a read-only Local.
 
 Library backups are the one exception to "the runtime holds no durable user data" (006).
 They stay on the machine that owned the file, under `~/.mango/library-backups` resolved
-against *that* machine's home — for Local, the configured `library.backup_dir`, which stays
+against _that_ machine's home — for Local, the configured `library.backup_dir`, which stays
 user-overridable and test-redirectable. Retention bounds are hub policy and apply to each
 store separately: the bytes are on different disks, and one machine filling the budget must
 never evict another machine's history.
@@ -486,7 +486,7 @@ without a hub.
 
 Because of that, listing backups by reading manifests only works for machines the hub can
 reach — so an offline machine's sets would silently vanish from the page that promises them.
-A hub-side index (`library_backups`) says *that* a set exists; the manifest on the machine
+A hub-side index (`library_backups`) says _that_ a set exists; the manifest on the machine
 says what is in it and remains the only thing a restore ever reads. Rows for a reachable
 machine are reconciled against it on every listing; rows for a machine that is away render
 with restore disabled and the reason stated.
@@ -513,7 +513,7 @@ duration. Consent denials are logged the same way as successful calls.
 What never reaches the line is structural: file contents, shell output, and the `env`,
 `headers` and `secrets` members of a request are omitted because the summariser reads an
 allowlist of identifying keys rather than skipping a denylist. Credential-shaped text
-*inside* a command line or argv — `--token=…`, `--token …`, `KEY_SECRET=…`,
+_inside_ a command line or argv — `--token=…`, `--token …`, `KEY_SECRET=…`,
 `scheme://user:pw@host`, `Bearer …`, `X-Api-Key: …` — is scrubbed on a best-effort basis.
 Best-effort is the honest word there: a shell command is arbitrary text, and it is the
 structural omission, not the pattern set, that keeps known secrets off disk.
@@ -802,7 +802,7 @@ and a `Get-FileHash` line instead — the POSIX pipe assumes tools a stock Windo
 not have.
 
 Staging deliberately survives both push gates. `allow.update` is an answer about what a hub
-may write to *that* machine, and a custom `remoteRuntimePath` is a statement that the push
+may write to _that_ machine, and a custom `remoteRuntimePath` is a statement that the push
 helper cannot target it — neither is a reason to withhold bytes that only ever reach the hub,
 and both are exactly when somebody needs them. It is offered only for WSL and SSH: a dial-in
 machine the hub cannot reach gets copyable commands instead, because a copy in the hub's
@@ -1036,7 +1036,7 @@ of its own for that machine.
 
 The option list is the SDK's hardened `ssh` preset
 ([spawn](../../spec/transports/spawn.md),
-*SSH preset*) rather than one this repository maintains: `BatchMode=yes`, so a connection
+_SSH preset_) rather than one this repository maintains: `BatchMode=yes`, so a connection
 that would prompt fails rather than hanging until the handshake times out; a bounded
 `ConnectTimeout` and server keepalives;
 `StrictHostKeyChecking=yes` set explicitly, so an unknown host key is refused rather than
@@ -1054,8 +1054,8 @@ stdio spawn appends its own `--stdio` afterwards, exactly as it does for WSL.
 
 `remoteRuntimePath` defaults to `~/.mango/runtime/remote/current/mangostudio-runtime`, whose
 last directory is a symlink an installer swaps, so the default never embeds a version. Targets
-are Linux and macOS: a Windows ssh *target* is not supported, since path style, quoting, and
-`.exe` resolution all differ. A Windows *hub* is — `ssh` resolves from PATH, and `mango doctor`
+are Linux and macOS: a Windows ssh _target_ is not supported, since path style, quoting, and
+`.exe` resolution all differ. A Windows _hub_ is — `ssh` resolves from PATH, and `mango doctor`
 reports whether it is there, because OpenSSH is an optional feature on Windows.
 
 ### Failures are read out of stderr
@@ -1135,7 +1135,7 @@ An image that satisfies all three is the difference between "the sandbox works" 
 sandbox works and agents can use a terminal in it". `alpine:3` plus
 `apk add --no-cache bash libstdc++` is the smallest image that does.
 
-The probe result is cached against the image *id* the engine reported, not the image name. A
+The probe result is cached against the image _id_ the engine reported, not the image name. A
 tag is a moving target, so keying on identity means a re-pulled image misses the cache by
 construction rather than by an invalidation rule.
 
@@ -1194,7 +1194,7 @@ bind mount has nothing to write to.
 
 An environment need not run the operating system the hub runs on, and there is no path
 translation layer: a path inside a WSL distro is a native Linux path from end to end, and
-nothing rewrites it on the way. What the hub does instead is *resolve* in the target's
+nothing rewrites it on the way. What the hub does instead is _resolve_ in the target's
 terms.
 
 Tools take absolute paths, `~` paths, and paths relative to the chat working directory, and
@@ -1248,7 +1248,7 @@ Add a runtime operation as one coherent change:
    numeric range or string length the handler was not already asserting.
 2. Add the row to the method table in `apps/shared/src/runtime-contract/contract.ts` with the
    capabilities it needs. A row without a capability list is a compile error, and so is a
-   capability the consent file cannot grant. The answer is a *set*: a method that both reads
+   capability the consent file cannot grant. The answer is a _set_: a method that both reads
    a domain and causes effects names both capabilities, or the profile that refuses the
    second still runs it. The method's list defines the base requirements. Filesystem mutations
    with `captureSnapshot: true` additionally require `fsRead` and `checkpoints`, since their

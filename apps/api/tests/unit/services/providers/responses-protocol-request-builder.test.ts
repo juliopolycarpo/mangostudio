@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   parseResponsesLoopState,
   serializeResponsesTurnState,
@@ -8,8 +9,8 @@ import {
   buildResponsesCreateParams,
   buildResponsesRequestOptions,
   normalizeResponsesReasoningEffort,
-  type ResponsesRequestPolicy,
   resolveResponsesInstructions,
+  type ResponsesRequestPolicy,
 } from '../../../../src/services/providers/core/responses-protocol/request-builder';
 import type { AgentTurnRequest } from '../../../../src/services/providers/types';
 

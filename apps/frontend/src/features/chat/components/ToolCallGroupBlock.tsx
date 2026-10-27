@@ -4,14 +4,18 @@ import {
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
 import { useEffect, useMemo, useState } from 'react';
+
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
+
 import { isFileChangeTool } from './file-change-preview';
 import { TimelineDisclosure } from './TimelineDisclosure';
 import { TimelineItem } from './TimelineItem';
 import { TimelineRow } from './TimelineRow';
+import type { ToolCallEntry } from './tool-call-grouping';
+import { formatToolSummary, getToolGroupSummary } from './tool-result-summary';
 import { ToolCallBlock } from './ToolCallBlock';
 import {
   formatToolDuration,
@@ -20,8 +24,6 @@ import {
   toneTextClass,
   toolStatusTone,
 } from './ToolCallVisuals';
-import type { ToolCallEntry } from './tool-call-grouping';
-import { formatToolSummary, getToolGroupSummary } from './tool-result-summary';
 
 interface ToolCallGroupBlockProps {
   calls: ToolCallEntry[];
@@ -82,9 +84,9 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
   const callSignature = calls
     .map((call) => `${call.toolCallId}:${call.status}:${call.result?.length ?? 0}`)
     .join('|');
-  // biome-ignore lint/correctness/useExhaustiveDependencies: callSignature stands in for the per-frame identity of `calls`
   const summary = useMemo(
     () => (isActive ? null : getToolGroupSummary(name, calls)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- callSignature tracks the relevant per-frame changes to calls.
     [isActive, name, callSignature]
   );
   // Wall-clock is not recoverable from a group (the calls may have overlapped),

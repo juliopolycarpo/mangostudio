@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { realpathSync } from 'node:fs';
+
 import {
   decodeTerminalServerMessage,
   encodeTerminalClientMessage,
@@ -9,6 +10,7 @@ import {
 } from '@mangostudio/shared/terminal';
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
+
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import {
   createTerminalSessionService,

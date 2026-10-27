@@ -5,6 +5,7 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
 import { MAIN_PACKAGE } from '../lib/npm-pack';
 import {
@@ -14,8 +15,8 @@ import {
   type NpmPublishPackage,
   type NpmRunner,
   orderNpmPackageDirs,
-  type ProvenancePolicy,
   parseProvenancePolicy,
+  type ProvenancePolicy,
   publishPackages,
 } from '../lib/npm-publish';
 import { error, header, log, success, warn } from '../lib/runner';

@@ -18,12 +18,14 @@
 import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { RuntimeConsentDialog } from '../components/RuntimeConsentDialog';
 import { useRuntimeSetupMutation } from '../queries';
 import { StepActions } from './StepActions';

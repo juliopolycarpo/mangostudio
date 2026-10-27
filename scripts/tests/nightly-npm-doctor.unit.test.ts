@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { assessDoctorReport } from '../ci/verify-distribution-doctor.mjs';
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';

@@ -28,7 +28,7 @@ seven files drifts from what the TypeBox definitions would produce. That is what
 crate below safe to embed them.
 
 `crates/mangostudio-runtime-contract` is the Rust half. It owns nothing about the contract's
-*shape* — it embeds the seven artifacts above with `include_str!` and never copies their JSON
+_shape_ — it embeds the seven artifacts above with `include_str!` and never copies their JSON
 into `crates/`. What it does own: parsing `catalog.json` into `mango_protocol::Catalog`,
 compiling a `jsonschema` validator for every method, event, and standalone document, and
 giving the dispatcher in `crates/mangostudio-runtime` a typed, documented home for the
@@ -56,7 +56,7 @@ second copy of the type system that a code generator must keep faithful to the f
 ## The conformance corpus
 
 Two sides reading the same `catalog.json` text proves the file is shared. It proves nothing
-about whether TypeBox and `jsonschema` *agree on what the text means* — two JSON Schema
+about whether TypeBox and `jsonschema` _agree on what the text means_ — two JSON Schema
 implementations can both be spec-compliant and still validate a real-world value differently,
 particularly at the edges (recursive `$ref`, `format`, ambiguous `anyOf`). Textual equality is
 the wrong gate for that question; a behavioural one is.

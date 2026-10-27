@@ -1,17 +1,17 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { render, screen } from '../../support/harness/render';
 
 const mockGetChatGptUsageHistory = jest.fn();
 
-mock.module('@/features/settings/connectors/api', () => ({
+void mock.module('@/features/settings/connectors/api', () => ({
   getChatGptUsageHistory: (...args: unknown[]) => mockGetChatGptUsageHistory(...args),
 }));
 
 // After the mock, never before: a static import is evaluated first and would
 // bind the panel to the real connectors API.
-const { ChatGptUsageHistoryPanel } = await import(
-  '@/features/settings/connectors/components/ChatGptUsageHistoryPanel'
-);
+const { ChatGptUsageHistoryPanel } =
+  await import('@/features/settings/connectors/components/ChatGptUsageHistoryPanel');
 
 describe('ChatGptUsageHistoryPanel', () => {
   beforeEach(() => {

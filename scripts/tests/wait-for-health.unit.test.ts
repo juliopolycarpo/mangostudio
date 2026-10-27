@@ -6,8 +6,8 @@ import {
   DEFAULT_READY_BUDGET_MS,
   POLL_INTERVAL_MS,
   resolveReadyBudgetMs,
-  WIN32_READY_BUDGET_MS,
   waitForServerReady,
+  WIN32_READY_BUDGET_MS,
 } from '../lib/wait-for-health';
 import { stubProcessPlatform } from './support/process-platform';
 

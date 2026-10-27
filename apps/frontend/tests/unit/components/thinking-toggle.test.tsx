@@ -9,8 +9,10 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { ThinkingToggle } from '../../../src/components/layout/ThinkingToggle';
 import { render } from '../../support/harness/render';
 

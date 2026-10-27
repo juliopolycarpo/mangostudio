@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type {
   AgentCliStatus,
   RuntimeId,
@@ -10,6 +11,7 @@ import type {
 import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+
 import type {
   EnvironmentProbingService,
   ProbeOptions,

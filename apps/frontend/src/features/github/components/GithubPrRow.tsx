@@ -1,10 +1,12 @@
 import type { GithubPrSummary } from '@mangostudio/shared/github';
 import { GitBranch } from 'lucide-react';
+
 import { MenuItem } from '@/components/ui/Menu';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { checkChipStatus } from '../lib/check-status';
 import { GithubPrBadge } from './GithubPrBadge';
 import { GithubRowMenu } from './GithubRowMenu';

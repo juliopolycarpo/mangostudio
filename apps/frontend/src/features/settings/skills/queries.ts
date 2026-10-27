@@ -4,6 +4,7 @@
 
 import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { queryOptions } from '@tanstack/react-query';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

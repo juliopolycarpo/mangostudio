@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import {
   applySummary,
   buildDecisions,
@@ -18,8 +19,8 @@ import {
   plannedWrite,
   plannedWrites,
   unresolvedEntries,
-  type WizardDraft,
   winnerGroup,
+  type WizardDraft,
 } from '../../../../src/features/library/propagation';
 import { destination, preview, previewEntry, sourceGroup } from './fixtures';
 
@@ -331,9 +332,8 @@ describe('model-drafted conversions', () => {
   });
 
   it('reports the write as awaiting a sign-off until one is given', async () => {
-    const { pendingAcknowledgements } = await import(
-      '../../../../src/features/library/propagation'
-    );
+    const { pendingAcknowledgements } =
+      await import('../../../../src/features/library/propagation');
     const draft = withDestinations(initialDraft(agentAdaptation), 'cursor-skills');
 
     // `requiresReview` is always true for the agent strategy, so the draft can
@@ -348,9 +348,8 @@ describe('model-drafted conversions', () => {
   });
 
   it('does not demand a sign-off for a mechanical conversion', async () => {
-    const { pendingAcknowledgements } = await import(
-      '../../../../src/features/library/propagation'
-    );
+    const { pendingAcknowledgements } =
+      await import('../../../../src/features/library/propagation');
     const mechanical = preview([
       previewEntry({
         destinations: [

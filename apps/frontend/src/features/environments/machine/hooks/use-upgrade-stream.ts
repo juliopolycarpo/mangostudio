@@ -18,9 +18,11 @@ import type {
   UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { readSseChunks } from '@/lib/sse';
 import { ApiError } from '@/lib/utils';
+
 import { type MachineActionRefusal, refusalOrThrow } from '../api';
 
 /** Same budget as `INSTALL_CONSOLE_MAX_LINES`; kept local, the two consoles are unrelated features. */

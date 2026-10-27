@@ -17,6 +17,7 @@
  * tsconfig having to know about it.
  */
 
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- The ambient declaration must be visible when this module is compiled standalone.
 /// <reference path="../../../types/text-imports.d.ts" />
 
 import installPs1 from '../../../../../../scripts/install/install.ps1' with { type: 'text' };

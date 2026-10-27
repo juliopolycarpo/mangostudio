@@ -9,7 +9,9 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+
 import {
   closeAllMcpClients,
   getMcpClient,
@@ -104,6 +106,7 @@ describe('mcp stdio transport', () => {
   it('merges write-only stdio env secrets into the child without process inheritance', async () => {
     const handle = await connectMcpClient(stdioConfig('secret-env-test', { PUBLIC_FLAG: 'yes' }), {
       userId: USER_ID,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       resolveSecretEnv: async () => ({ MCP_SECRET_FLAG: 'write-only-value' }),
     });
 

@@ -91,13 +91,13 @@ to `main` after the release.
 | `NPM_TOKEN`                 | `npm-publish` (optional env), `npm-canary` (repo)            | Legacy npm token only when `workflow_dispatch` sets `allow_legacy_npm_token=true`; repository secret for canary      |
 | `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                          | `release` environment secret — fine-grained PAT with contents read/write on the Homebrew tap and Scoop bucket        |
 | `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (optional)                                   | Legacy crates.io token used only when `workflow_dispatch` sets `allow_legacy_cargo_token=true`                       |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR and `id-token: write` for crates.io and npm OIDC auth |
+| _(built-in `GITHUB_TOKEN`)_ | `github-release`, `docker`, the canary channel, attestations | No extra setup — tag releases grant `packages: write` for GHCR and `id-token: write` for crates.io and npm OIDC auth |
 
 ### Pre-release tags
 
 A tag carrying a semver pre-release identifier — `v0.2.0-rc.1`, `v1.0.0-beta.3`,
 anything with a `-` — takes the same train and builds the same artifacts, but is
-never published as *the current version*. `prepare` resolves the classification
+never published as _the current version_. `prepare` resolves the classification
 once, and every channel reads that one output; nothing re-derives it.
 
 | Channel         | Stable tag (`v0.2.0`)                           | Pre-release tag (`v0.2.0-rc.1`)                         |
@@ -141,8 +141,8 @@ but as a restatement rather than the thing doing the work: `make_latest`'s own
 contract is that "drafts and prereleases cannot be set as latest", so the
 `prerelease` flag alone already keeps the release off `/releases/latest` — on
 the create POST and on the draft→publish PATCH alike. Spelling both out keeps
-the two questions — *how is this release labelled* and *what does
-`/releases/latest` resolve to* — visible at the one call site that answers them.
+the two questions — _how is this release labelled_ and _what does
+`/releases/latest` resolve to_ — visible at the one call site that answers them.
 
 Install a pre-release explicitly:
 
@@ -384,13 +384,13 @@ Two consequences worth knowing:
 
   Deleting the tag is possible only because the `release tags` ruleset excludes
   `refs/tags/v*-canary.*`. Every other `v*` tag stays undeletable and unmovable,
-  the frozen `v<root>-canary` one included — it carries no dot. The tag's *name*
+  the frozen `v<root>-canary` one included — it carries no dot. The tag's _name_
   is reserved forever once an immutable release has used it either way, so
   pruning frees the ref, never the name.
 
 `canary-manifest.json` ships beside the assets, is listed in `SHA256SUMS` like
 everything else, and records the source commit, the build time, and the digest
-of both halves of every published pair. It is what names the *commit* behind a
+of both halves of every published pair. It is what names the _commit_ behind a
 version: an install records it in the target's `runtime.json` next to the
 digest, and `runtime health` prints it. A release that publishes no manifest is
 tolerated, and so is one whose `schemaVersion` this hub does not know, which
@@ -1036,7 +1036,7 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
   Publishing OIDC (`release.yml`, environment `release`) once configured on
   npmjs.com. A repository-scoped copy remains required for `npm-canary`:
   `.github/workflows/canary.yml` always passes it with `allow-legacy-token:
-  true` and never attempts OIDC, so it stays required even after a second
+true` and never attempts OIDC, so it stays required even after a second
   Trusted Publishing row is registered for its caller workflow, `ci.yml` (see
   the [one-time setup checklist](#one-time-setup-checklist)) — only migrating
   that workflow itself would remove the need for it.

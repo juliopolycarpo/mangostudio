@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
+
 import { splitNameWithOwner } from '../../../../src/modules/github/application/github-repo-resolver';
 import {
   readCurrentBranch,
@@ -46,7 +48,7 @@ class FakePullRequestRuntime {
   readonly readFileParams: ReadFileParams[] = [];
 
   constructor(
-    private readonly gitStdout: string = 'feat/panel\n',
+    private readonly gitStdout = 'feat/panel\n',
     private readonly readFile: (params: ReadFileParams) => Promise<{ content: string }> = () =>
       Promise.resolve({ content: '## Summary' }),
     private readonly manifest: RuntimeCapabilityManifest = POSIX_MANIFEST

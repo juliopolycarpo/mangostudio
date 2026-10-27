@@ -14,7 +14,9 @@
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
 import type { UpgradeVerification } from '@mangostudio/shared/updates';
+
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
 import { safeFetchBytes } from '../../../lib/safe-fetch';
 import { findReleaseChecksum } from '../../environments/domain/wsl-runtime-release';

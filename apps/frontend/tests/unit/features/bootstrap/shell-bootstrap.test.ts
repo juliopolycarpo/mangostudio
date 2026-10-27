@@ -7,9 +7,11 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { QueryClient } from '@tanstack/react-query';
 import { waitFor } from '@testing-library/react';
+
 import {
   isAuthFailure,
   isRateLimited,

@@ -7,6 +7,7 @@
 
 import type { McpToolDescriptor } from '@mangostudio/shared/mcp';
 import type { Kysely } from 'kysely';
+
 import type { Database, McpServerSelect } from '../../db/types';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { ToolDefinition } from '../providers/types';
@@ -71,8 +72,7 @@ export interface McpBridgeServerSnapshot {
  * offer the model tools that run on a machine it is not talking to.
  */
 export type McpBridgeScope =
-  | { readonly environmentId: string }
-  | { readonly allEnvironments: true };
+  { readonly environmentId: string } | { readonly allEnvironments: true };
 
 /**
  * Resolves the tools of the user's enabled MCP servers in scope, one snapshot

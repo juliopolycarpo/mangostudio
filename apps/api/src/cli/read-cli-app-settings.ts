@@ -5,11 +5,13 @@
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { existsSync } from 'node:fs';
+
 import {
   type AppSettings,
   DEFAULT_APP_SETTINGS,
   normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
+
 import { loadConfig, type MangoConfig } from '../lib/config';
 import { safeJsonParse } from '../lib/safe-parse';
 

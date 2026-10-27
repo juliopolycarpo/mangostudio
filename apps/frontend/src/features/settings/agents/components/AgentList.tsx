@@ -1,5 +1,6 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { Bot, User } from 'lucide-react';
+
 import { PickOneRow } from '@/components/settings/PickOneRow';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { ICON_MD } from '@/lib/icon-sizes';

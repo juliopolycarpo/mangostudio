@@ -4,7 +4,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { environmentNavEntries } from '../../../src/features/environments/environments-nav';
 import { MachinePage } from '../../../src/features/environments/machine/components/MachinePage';
 import { Route as MachineRoute } from '../../../src/routes/_authenticated/environments/machine';

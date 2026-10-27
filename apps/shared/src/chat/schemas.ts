@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import { AgentIdSchema } from '../agents/schemas';
 import {
   ExternalAgentTargetIdSchema,

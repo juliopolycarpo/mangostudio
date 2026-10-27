@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
-  DEFAULT_MAX_FRAME_BYTES,
   decodeLine,
+  DEFAULT_MAX_FRAME_BYTES,
   encodeFrameBytes,
   encodeLine,
   LineDecoder,
-  MIN_MAX_FRAME_BYTES,
   measureFrameBytes,
+  MIN_MAX_FRAME_BYTES,
 } from '../src/codec/ndjson';
 import type { CodecError } from '../src/errors';
 import type { Frame } from '../src/schemas/frames';

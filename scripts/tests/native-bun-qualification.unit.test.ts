@@ -26,13 +26,13 @@ import type {
 } from '../lib/native-bun-qualification-process';
 import {
   collectNativeTestEvidence,
-  type NativeTestLane,
   nativeTestInventory,
+  type NativeTestLane,
 } from '../lib/native-bun-qualification-results';
 import {
   NATIVE_BUILDS,
-  type NativeCompilerArtifact,
   nativeBuildTarget,
+  type NativeCompilerArtifact,
   nativeCompilerArtifacts,
   nativeSourceChanged,
   requireNativeBuildFeatures,

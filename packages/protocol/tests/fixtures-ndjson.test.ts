@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import ndjson from '../../../spec/fixtures/1/ndjson.json';
 import { type FrameLimitOptions, LineDecoder } from '../src/codec/ndjson';
 import type { CodecError, CodecErrorKind } from '../src/errors';

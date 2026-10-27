@@ -20,9 +20,9 @@ import {
   type PlatformKey,
   resolvePlatformKey,
   TOOL_MANIFEST,
+  toolAssetUrl,
   type ToolManifestEntry,
   type ToolName,
-  toolAssetUrl,
 } from './manifest';
 
 const TOOL_CACHE_DIR = join(ROOT_DIR, '.mango', 'artifacts', 'tools');

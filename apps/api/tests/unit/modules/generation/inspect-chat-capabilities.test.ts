@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { candidateState } from '../../../../src/modules/generation/application/inspect-chat-capabilities';
 
 describe('candidateState', () => {

@@ -10,6 +10,7 @@
  */
 
 import { en, type Locale, type Messages, ptBR } from '@mangostudio/shared/i18n';
+
 import type {
   LocaleDictionaryStore,
   ResolvedDictionary,

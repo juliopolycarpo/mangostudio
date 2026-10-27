@@ -6,8 +6,10 @@
  */
 
 import { afterEach, describe, expect, it, jest } from 'bun:test';
+
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { McpComposerMenu } from '../../../../src/features/chat/components/McpComposerMenu';
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';

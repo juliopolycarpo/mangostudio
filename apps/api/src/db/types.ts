@@ -535,11 +535,7 @@ interface EnvironmentToolchainsTable {
 
 /** Where one submission of an external turn stands; see migration 056. */
 export type ExternalTurnAttemptState =
-  | 'acceptance-unknown'
-  | 'not-submitted'
-  | 'accepted'
-  | 'terminal'
-  | 'unresolved';
+  'acceptance-unknown' | 'not-submitted' | 'accepted' | 'terminal' | 'unresolved';
 
 /**
  * The hub's receipt for one submission of an external turn, written before

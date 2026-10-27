@@ -26,6 +26,7 @@ import type { ExternalApprovalOption } from '@mangostudio/shared/external-agents
 import type { ExternalApprovalPart } from '@mangostudio/shared/types';
 import { AlertTriangle, Check } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { SectionCard } from '@/components/ui/SectionCard';

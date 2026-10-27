@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { generateRoutes } from '../../../src/modules/generation/http/generate-routes';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 

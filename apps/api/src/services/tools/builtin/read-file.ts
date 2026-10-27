@@ -11,6 +11,7 @@ import {
   RUNTIME_READ_FILE_VIEWS,
   type RuntimeReadFileView,
 } from '@mangostudio/shared/runtime-contract';
+
 import { getRuntimeClient } from '../../runtime-client';
 import { getBoundedOptionalInteger, getOptionalEnum, ToolArgumentError } from '../arg-parsing';
 import { registerTool } from '../registry';
@@ -18,8 +19,8 @@ import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
   normalizePathValidationSettings,
-  type PathValidationSettings,
   pathPolicyParameterDescriptors,
+  type PathValidationSettings,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';

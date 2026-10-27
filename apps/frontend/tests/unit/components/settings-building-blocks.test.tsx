@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { fireEvent, screen } from '@testing-library/react';
+
 import { PickOneRow } from '../../../src/components/settings/PickOneRow';
 import { SettingsPage } from '../../../src/components/settings/SettingsPage';
 import { SettingsRow } from '../../../src/components/settings/SettingsRow';

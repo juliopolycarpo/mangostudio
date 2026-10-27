@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import type {
   ExternalAgentCapabilities,
   ExternalAgentCommandCatalogResponse,
@@ -11,6 +12,7 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import Value from 'typebox/value';
+
 import type { ProbeScope } from '../../../src/modules/environments/application/probing-service';
 import type {
   DescribeExternalAgentsOptions,

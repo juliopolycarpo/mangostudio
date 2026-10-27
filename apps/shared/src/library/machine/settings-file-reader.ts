@@ -1,4 +1,5 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+
 import type { RuntimeSettingsReadFailure } from '../index';
 
 /** Ceiling for one settings source, matching the pre-relocation hub reader. */

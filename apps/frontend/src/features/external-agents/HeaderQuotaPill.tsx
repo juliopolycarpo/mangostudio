@@ -12,10 +12,12 @@ import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents'
 import { interpretExternalAccountLimits } from '@mangostudio/shared/external-agents/values';
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { describeAccountLimits, nextAccountLimitsCopyChangeMs } from './account-limits-copy';
 import { useExternalAccountLimits } from './use-external-account-limits';
 import { useExternalAgents } from './useExternalAgents';

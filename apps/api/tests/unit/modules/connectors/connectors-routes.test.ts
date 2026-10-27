@@ -1,5 +1,7 @@
 import { describe, expect, it, spyOn } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+
 import { ConnectorValidationError } from '../../../../src/modules/connectors/application/add-connector';
 import {
   ConnectorNotFoundError,

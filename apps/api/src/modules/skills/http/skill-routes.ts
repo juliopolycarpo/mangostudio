@@ -2,6 +2,7 @@ import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import type { SkillDescriptor, SkillListResponse } from '@mangostudio/shared/skills';
 import { UpdateSkillSettingsBodySchema } from '@mangostudio/shared/skills';
 import { Elysia, t } from 'elysia';
+
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { listSkillSettings, updateSkillSetting } from '../application/skill-settings-service';

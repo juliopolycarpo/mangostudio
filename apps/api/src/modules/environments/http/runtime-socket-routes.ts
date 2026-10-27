@@ -22,6 +22,7 @@ import {
   RUNTIME_HEARTBEAT_TOPIC,
 } from '@mangostudio/shared/runtime-contract';
 import { Elysia } from 'elysia';
+
 import { getConfig, getVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { extractClientIp } from '../../../plugins/rate-limit';

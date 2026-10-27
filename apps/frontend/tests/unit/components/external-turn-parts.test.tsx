@@ -5,6 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import type {
   ExternalActivityPart,
@@ -12,6 +13,7 @@ import type {
   MessagePart,
 } from '@mangostudio/shared/types';
 import { fireEvent, screen } from '@testing-library/react';
+
 import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
 import { stubClipboard } from '../../support/harness/clipboard';
 import { render, waitFor } from '../../support/harness/render';
@@ -20,12 +22,12 @@ import { ToolIdentitiesProbe } from '../../support/mocks/tool-identities';
 
 // The install and update remedies link into the environments surface, so the parts render a router
 // `Link`. Stubbed here, not in a preload: a module mock in a shared graph leaks into other files.
-mock.module('@tanstack/react-router', await routerWithLinkStub());
+void mock.module('@tanstack/react-router', await routerWithLinkStub());
 
 const answerExternalApproval =
   jest.fn<(chatId: string, body: { requestId: string; optionId: string }) => Promise<unknown>>();
 
-mock.module('../../../src/services/external-agent-service', () => ({
+void mock.module('../../../src/services/external-agent-service', () => ({
   answerExternalApproval: (chatId: string, body: { requestId: string; optionId: string }) =>
     answerExternalApproval(chatId, body),
 }));

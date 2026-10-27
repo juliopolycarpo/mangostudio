@@ -41,6 +41,7 @@
 
 import { defineContract, type MethodParams, type MethodResult } from '@mangostudio/protocol';
 import type { TSchema } from 'typebox';
+
 import {
   ExternalAgentAckResultSchema,
   ExternalAgentCancelParamsSchema,

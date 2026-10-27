@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
 import type { Environment } from '@mangostudio/shared/environments';
 import type { GitRepoState, GitSummary } from '@mangostudio/shared/git';
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import type { LibraryCoverage, LibraryResource } from '@mangostudio/shared/library';
 import { createMockChat } from '@mangostudio/shared/test-utils';
+
 import { environmentAlerts } from '../../../../src/features/home/lib/environment-health';
 import { greetingSlot } from '../../../../src/features/home/lib/greeting';
 import { summarizeLibraryDivergence } from '../../../../src/features/home/lib/library-divergence';

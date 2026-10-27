@@ -16,6 +16,7 @@
 import type { LibraryLocationStatus, LibraryTargetDescriptor } from '@mangostudio/shared/library';
 import { Search, SlidersHorizontal } from 'lucide-react';
 import { type ReactNode, useId, useMemo, useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -24,6 +25,7 @@ import { Select, type SelectOption } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import {
   DEFAULT_LIBRARY_FILTERS,
   type LibraryFilters,

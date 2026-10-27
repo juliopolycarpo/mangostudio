@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import {
   DEFAULT_TOOLCHAIN_SELECTION,
   LOCAL_ENVIRONMENT_ID,
@@ -8,6 +9,7 @@ import {
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { TERMINAL_SOCKET_CLOSE_CODES, type TerminalExit } from '@mangostudio/shared/terminal';
+
 import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
 import {
   createTerminalSessionService,

@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'bun:test';
+
 import type {
   RuntimeCapabilityManifest,
   RuntimeDiscoverResult,
 } from '@mangostudio/shared/runtime-contract';
+
 import type { DiagnosticLogger } from '../../../../src/lib/logger';
 import {
   RUNTIME_DISCOVER_TIMEOUT_MS,
   RuntimeDiscoveryCache,
-  type RuntimeDiscoverySource,
   runtimeDiscoveryKey,
+  type RuntimeDiscoverySource,
 } from '../../../../src/services/runtime-client/runtime-discovery-cache';
 
 const FEATURES = {

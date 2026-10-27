@@ -3,7 +3,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
+
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
 import { act, fireEvent, render, screen, waitFor, within } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';

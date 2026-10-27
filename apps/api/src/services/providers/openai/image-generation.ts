@@ -3,6 +3,7 @@
  */
 
 import type OpenAI from 'openai';
+
 import {
   normalizeGeneratedImageMimeType,
   saveGeneratedImage,

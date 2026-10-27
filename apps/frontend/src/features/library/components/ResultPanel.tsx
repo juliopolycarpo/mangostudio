@@ -13,11 +13,13 @@
 
 import type { PropagationApply, PropagationUndo } from '@mangostudio/shared/library';
 import { Undo2 } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { resourceKeyLabel } from '../format';
 import { InlineNote } from './InlineNote';
 import { ResultRow, ResultSection } from './ResultList';

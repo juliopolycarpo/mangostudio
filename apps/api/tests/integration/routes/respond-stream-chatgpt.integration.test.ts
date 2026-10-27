@@ -6,7 +6,9 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { getConfig } from '../../../src/lib/config';
 import { setChatGptTokenServiceForTests } from '../../../src/modules/connectors/infrastructure/chatgpt/token-service';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
@@ -105,9 +107,9 @@ beforeAll(async () => {
   });
 });
 
-afterAll(() => {
+afterAll(async () => {
   setChatGptTokenServiceForTests(null);
-  server.stop(true);
+  await server.stop(true);
 });
 
 // The shared test environment re-installs a fresh config before every test,

@@ -5,7 +5,9 @@
 import type { Connector } from '@mangostudio/shared/connectors';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { useState } from 'react';
+
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { addConnector } from '../api';
 
 interface ConnectorFormState {

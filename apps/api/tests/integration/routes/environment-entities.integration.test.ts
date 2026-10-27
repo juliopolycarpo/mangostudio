@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import type {
   CreateEnvironmentBody,
   Environment,
@@ -23,6 +24,7 @@ import {
   runtimeSlotVersionBinaryPath,
 } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
 import {
@@ -125,6 +127,7 @@ function createTestApp(
   const service = createEnvironmentService(repository, manager, undefined, undefined, {
     hasActiveInstall: () => false,
     cancelActiveRun: () => false,
+    // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
     removeRuntimeBytes: async () => undefined,
     ...runtimeEffects,
   });
@@ -138,8 +141,11 @@ function createTestApp(
         createRuntimeLifecycleService({
           manager,
           provisioner: {
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             ensure: async () => undefined,
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             removeSlotBytes: async () => undefined,
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             slotBytes: async () => null,
           },
         })
@@ -897,7 +903,9 @@ describe('environment entity routes', () => {
             ensured = true;
             await Promise.resolve();
           },
+          // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
           removeSlotBytes: async () => undefined,
+          // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
           slotBytes: async () => null,
         },
       })
@@ -950,7 +958,9 @@ describe('environment entity routes', () => {
               ensured = true;
               return Promise.resolve();
             },
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             removeSlotBytes: async () => undefined,
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             slotBytes: async () => null,
           },
           loadRuntimeAsset: () => {
@@ -1015,7 +1025,9 @@ describe('environment entity routes', () => {
                 ensured = true;
                 return Promise.resolve();
               },
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               removeSlotBytes: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               slotBytes: async () => null,
             },
             loadRuntimeAsset: (platformId) => {
@@ -1098,8 +1110,11 @@ describe('environment entity routes', () => {
           createRuntimeLifecycleService({
             manager: runtimeManager,
             provisioner: {
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               ensure: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               removeSlotBytes: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               slotBytes: async () => null,
             },
             // What a release that publishes no standalone runtime for this
@@ -1198,8 +1213,11 @@ describe('environment entity routes', () => {
           createRuntimeLifecycleService({
             manager: runtimeManager,
             provisioner: {
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               ensure: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               removeSlotBytes: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               slotBytes: async () => null,
             },
             loadRuntimeAsset: () =>
@@ -1271,8 +1289,11 @@ describe('environment entity routes', () => {
           lifecycle = createRuntimeLifecycleService({
             manager: runtimeManager,
             provisioner: {
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               ensure: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               removeSlotBytes: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               slotBytes: async () => null,
             },
             loadRuntimeAsset: (_platformId, options) => {
@@ -1358,8 +1379,11 @@ describe('environment entity routes', () => {
           lifecycle = createRuntimeLifecycleService({
             manager: runtimeManager,
             provisioner: {
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               ensure: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               removeSlotBytes: async () => undefined,
+              // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
               slotBytes: async () => null,
             },
             loadRuntimeAsset: (_platformId, options) => {
@@ -1459,7 +1483,9 @@ describe('environment entity routes', () => {
                   once: true,
                 });
               }),
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             removeSlotBytes: async () => undefined,
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             slotBytes: async () => null,
           },
         });
@@ -2214,7 +2240,9 @@ describe('environment entity routes', () => {
               });
             });
           },
+          // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
           removeSlotBytes: async () => undefined,
+          // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
           slotBytes: async () => null,
         },
       });

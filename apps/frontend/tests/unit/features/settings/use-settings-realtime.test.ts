@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { useQuery } from '@tanstack/react-query';
+
 import {
   markAppSettingsLocalWrite,
   resetAppSettingsLocalWriteWindow,
 } from '@/features/settings/app/local-write-window';
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
+
 import { act, renderHook, waitFor } from '../../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
 import { setTestSession } from '../../../support/setup/auth-client-stub';
@@ -17,7 +20,7 @@ const mocks = {
   subscribe: jest.fn(),
 };
 
-mock.module('@/lib/realtime/realtime-client', () => ({
+void mock.module('@/lib/realtime/realtime-client', () => ({
   bindRealtimeClientToUser: mocks.bindRealtimeClientToUser,
   getRealtimeClient: () => ({ subscribe: mocks.subscribe }),
 }));
@@ -25,9 +28,8 @@ mock.module('@/lib/realtime/realtime-client', () => ({
 // Static imports are evaluated before any statement above runs, so the hook has
 // to come in afterwards or it binds the real realtime client. The signed-in
 // session it reads comes from the aliased auth-client stub, set in `beforeEach`.
-const { useSettingsRealtimeInvalidation } = await import(
-  '@/features/settings/hooks/use-settings-realtime'
-);
+const { useSettingsRealtimeInvalidation } =
+  await import('@/features/settings/hooks/use-settings-realtime');
 
 /** Mounts one query per settings section so each family is observably stale. */
 function mountSettingsSections() {

@@ -9,20 +9,20 @@
  */
 
 import { describe, expect, it, mock } from 'bun:test';
+
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen } from '@testing-library/react';
+
 import { render } from '../../../support/harness/render';
 import { routerWithLinkStub } from '../../../support/mocks/router';
 
-mock.module('@tanstack/react-router', await routerWithLinkStub());
+void mock.module('@tanstack/react-router', await routerWithLinkStub());
 
-const { ExternalRunnerBlockedCallout } = await import(
-  '../../../../src/features/chat/components/ExternalRunnerBlockedCallout'
-);
-const { onExternalDisclosurePrompt, settleExternalDisclosure } = await import(
-  '../../../../src/features/external-agents/disclosure-prompt'
-);
+const { ExternalRunnerBlockedCallout } =
+  await import('../../../../src/features/chat/components/ExternalRunnerBlockedCallout');
+const { onExternalDisclosurePrompt, settleExternalDisclosure } =
+  await import('../../../../src/features/external-agents/disclosure-prompt');
 
 function descriptor(overrides: Partial<ExternalAgentDescriptor> = {}): ExternalAgentDescriptor {
   return {

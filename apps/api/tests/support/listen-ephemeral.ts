@@ -25,6 +25,7 @@ const PUBLISH_TIMEOUT_MS = 5_000;
  */
 export function listenOnEphemeralPort(app: ListenableApp): Promise<number> {
   return new Promise((resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This callback intentionally tests or owns the asynchronous operation described here.
     const timer = setTimeout(async () => {
       // Elysia may have bound the socket even though its publish callback did not run.
       try {

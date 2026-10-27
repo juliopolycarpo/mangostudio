@@ -15,6 +15,7 @@ import {
   type ToolIdentityUpdate,
 } from '@mangostudio/shared/tool-identity';
 import type { Kysely } from 'kysely';
+
 import type { Database, ToolIdentitySelect } from '../../../db/types';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
 import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';

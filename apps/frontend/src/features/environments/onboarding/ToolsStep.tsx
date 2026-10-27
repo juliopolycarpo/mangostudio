@@ -10,11 +10,13 @@
 
 import type { Environment, RuntimeStatus } from '@mangostudio/shared/environments';
 import { useQuery } from '@tanstack/react-query';
+
 import { Callout } from '@/components/ui/Callout';
 import { Chip } from '@/components/ui/Chip';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { InstallTrustToggle } from '../components/InstallTrustToggle';
 import { effectiveInstallation, versionLabel } from '../format';
 import { agentCliStatusesQueryOptions, runtimeStatusesQueryOptions } from '../queries';

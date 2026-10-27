@@ -8,6 +8,7 @@
  */
 
 import { Elysia } from 'elysia';
+
 import { type GuardIpPolicy, resolveGuardClientIp } from '../lib/client-ip';
 import { getConfig } from '../lib/config';
 

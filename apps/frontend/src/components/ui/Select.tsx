@@ -26,6 +26,7 @@ import { AnimatePresence } from 'motion/react';
 import * as motion from 'motion/react-m';
 import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
+
 import { useAnchoredPosition } from '@/hooks/use-anchored-position';
 import { type ListboxOption, useListboxSelect } from '@/hooks/use-listbox-select';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -96,7 +97,7 @@ export function Select({
   }, [open, activeIndex, listId]);
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- the keys are handled for the combobox trigger and the options it owns, both inside this wrapper.
     <div
       ref={containerRef}
       className={cn('relative', className)}
@@ -107,6 +108,7 @@ export function Select({
         ref={triggerRef}
         type="button"
         id={id}
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom combobox controls a rich listbox.
         role="combobox"
         disabled={disabled}
         onClick={toggle}
@@ -146,7 +148,12 @@ export function Select({
               }}
               className="app-scrollbar dropdown-panel overflow-y-auto p-1"
             >
-              <div id={listId} role="listbox" aria-label={ariaLabel}>
+              <div
+                id={listId}
+                // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox renders rich options a native select cannot contain.
+                role="listbox"
+                aria-label={ariaLabel}
+              >
                 {options.map((option, index) => {
                   const isSelected = option.value === value;
                   return (
@@ -154,6 +161,7 @@ export function Select({
                       key={option.value}
                       id={`${listId}-${index}`}
                       type="button"
+                      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox option carries rich content and selection behavior.
                       role="option"
                       aria-selected={isSelected}
                       // Focus stays on the trigger and the cursor travels by

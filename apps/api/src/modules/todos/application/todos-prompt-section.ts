@@ -6,6 +6,7 @@
 
 import { renderTodoPromptSection, TODO_WRITE_TOOL_NAME } from '@mangostudio/shared/todos';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { getChatTodos } from '../infrastructure/todo-repository';
 

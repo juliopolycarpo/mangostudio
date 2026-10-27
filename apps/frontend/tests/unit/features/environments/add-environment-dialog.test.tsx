@@ -6,9 +6,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { EnvironmentEntitiesOverview } from '../../../../src/features/environments/components/EnvironmentEntitiesOverview';
 import { render, screen, waitFor, within } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -70,6 +72,7 @@ function createdRequestBody(): Record<string, unknown> {
     ([, init]) => (init as RequestInit | undefined)?.method?.toUpperCase() === 'POST'
   );
   const body = (call?.[1] as RequestInit | undefined)?.body;
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
   return JSON.parse(String(body)) as Record<string, unknown>;
 }
 

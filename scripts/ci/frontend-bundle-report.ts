@@ -22,7 +22,9 @@
 // Usage: bun ./scripts/ci/frontend-bundle-report.ts [--dist <dir>] [--baseline <file>] [--builder <name>] [--metafile <file>] [--json] [--out <file>]
 
 import { dirname, join, posix } from 'node:path';
+
 import { listDistFiles } from '@mangostudio/shared/utils/dist-files';
+
 import { ROOT_DIR } from '../lib/config';
 
 const DEFAULT_DIST_DIR = join(ROOT_DIR, 'apps/frontend/dist');
@@ -188,7 +190,7 @@ function traverseEagerSet(contents: ReadonlyMap<string, Uint8Array>): Set<string
 
   while (queue.length > 0) {
     const path = queue.shift();
-    if (path === undefined || !path.endsWith('.js')) continue;
+    if (!path?.endsWith('.js')) continue;
     const source = contents.get(path);
     if (source === undefined) continue;
     for (const ref of staticImportRefs(decoder.decode(source))) add(resolveAssetRef(ref, path));

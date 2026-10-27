@@ -13,6 +13,7 @@ import type {
   InstallStreamEvent,
 } from '@mangostudio/shared/environments';
 import { useEffect, useEffectEvent, useState } from 'react';
+
 import { getApiBaseUrl } from '@/lib/api-base-url';
 import { readSseChunks } from '@/lib/sse';
 

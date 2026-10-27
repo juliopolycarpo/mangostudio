@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { decideRestart } from '../../../../src/modules/updates/domain/decide-restart';
 
 describe('decideRestart', () => {

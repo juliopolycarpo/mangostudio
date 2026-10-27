@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { createChatCompletionsAccumulator } from '../../../../src/services/providers/core/chat-completions-accumulator';
 
 describe('createChatCompletionsAccumulator', () => {

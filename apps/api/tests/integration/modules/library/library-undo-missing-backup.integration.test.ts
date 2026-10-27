@@ -12,8 +12,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import { createBackupStoreDeps } from '@mangostudio/shared/library/machine';
+
 import { undoLibraryPropagation } from '../../../../src/modules/library/application/propagation-apply';
 import {
   resolveRustRuntimeBinary,

@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { join, sep } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
 import { runProtocolTasks, unsettledPartitions } from '../protocol/run-tasks';
-import { type ProtocolTask, protocolCheckTasks, type ToolchainProbe } from '../protocol/tasks';
+import { protocolCheckTasks, type ProtocolTask, type ToolchainProbe } from '../protocol/tasks';
 import { hasCargoHack } from '../protocol/toolchain';
 import {
   coverageProblems,

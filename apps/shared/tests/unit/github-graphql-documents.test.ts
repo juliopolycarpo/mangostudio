@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   GITHUB_PR_REVIEW_THREADS_QUERY,
   PINNED_GITHUB_GRAPHQL_DOCUMENTS,

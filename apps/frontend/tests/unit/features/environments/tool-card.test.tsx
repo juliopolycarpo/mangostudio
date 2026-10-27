@@ -7,8 +7,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { AgentCliCard } from '../../../../src/features/environments/components/AgentCliCard';
 import { RuntimeCard } from '../../../../src/features/environments/components/RuntimeCard';
 import { render, screen, within } from '../../../support/harness/render';

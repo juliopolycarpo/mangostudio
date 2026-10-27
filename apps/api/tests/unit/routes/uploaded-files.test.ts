@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+
 import {
   createUploadedFileRoutes,
   resolveUploadedFile,
@@ -208,6 +209,7 @@ describe('resolveUploadedFile', () => {
 
     for (const requested of ['', 'a//photo.png', 'photo.png\0.txt', 'a\\photo.png', '../x']) {
       expect(
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         `${JSON.stringify(requested)} -> ${await resolveUploadedFile(uploadsDir, requested)}`
       ).toBe(`${JSON.stringify(requested)} -> null`);
     }

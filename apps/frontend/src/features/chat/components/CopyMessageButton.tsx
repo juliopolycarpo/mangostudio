@@ -1,8 +1,10 @@
 import type { Message } from '@mangostudio/shared/chat';
 import { Check, Copy } from 'lucide-react';
+
 import { useClipboard } from '@/hooks/use-clipboard';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { TURN_ACTION_REVEAL } from '../lib/turn-action-reveal';
 import { extractRawMarkdown } from './message-content';
 

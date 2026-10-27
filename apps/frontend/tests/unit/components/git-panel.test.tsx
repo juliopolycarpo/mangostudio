@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type {
   GitBranchesResponse,
   GitCommitDetailsResponse,
@@ -11,6 +12,7 @@ import type {
 import type { GithubContext } from '@mangostudio/shared/github';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { RailPanel } from '../../../src/features/workspace/rail/RailPanel';
 import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
@@ -62,7 +64,7 @@ const hooks = {
   worktreeRemove: jest.fn(),
 };
 
-mock.module('../../../src/features/workspace/hooks/use-github-context', () => ({
+void mock.module('../../../src/features/workspace/hooks/use-github-context', () => ({
   useGithubContext: () => ({
     data: hooks.githubData,
     error: hooks.githubError,
@@ -72,7 +74,7 @@ mock.module('../../../src/features/workspace/hooks/use-github-context', () => ({
   }),
 }));
 
-mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
+void mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   useGitRealtimeInvalidation: () => undefined,
   useGitState: () => ({
     data: hooks.data,

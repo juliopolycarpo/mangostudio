@@ -79,7 +79,7 @@ publica cada canal de forma independente. A tag carrega o próprio
 | `NPM_TOKEN`                 | `npm-publish` (env opcional), `npm-canary` (repo)        | Token legado só quando `workflow_dispatch` define `allow_legacy_npm_token=true`; secret do repositório para canary          |
 | `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | Secret do environment `release` — PAT fine-grained com contents read/write no tap Homebrew e no bucket Scoop                |
 | `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (opcional)                               | Token legado do crates.io usado só quando `workflow_dispatch` define `allow_legacy_cargo_token=true`                        |
-| *(built-in `GITHUB_TOKEN`)* | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — releases por tag concedem `packages: write` para GHCR e `id-token: write` para OIDC do crates.io e do npm |
+| _(built-in `GITHUB_TOKEN`)_ | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — releases por tag concedem `packages: write` para GHCR e `id-token: write` para OIDC do crates.io e do npm |
 
 ### Environment `release`
 

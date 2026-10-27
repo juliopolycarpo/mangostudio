@@ -16,11 +16,13 @@
 
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { sshArgv } from '@mangostudio/protocol/spawn';
 import type { SshEnvironmentConfig, SshFailureReason } from '@mangostudio/shared/environments';
 import { expandUserPath, sshRuntimePath } from '@mangostudio/shared/environments';
 import { narrowRuntimeErrorCode } from '@mangostudio/shared/runtime-contract';
+
 import { getVersion } from '../../lib/config';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
@@ -32,8 +34,8 @@ import { resolveRemoteHandshakeTimeoutMs } from './handshake-budget';
 import { RuntimeClient } from './runtime-client';
 import {
   type RuntimeLaunchFailure,
-  type SpawnRuntimeChildDeps,
   spawnRuntimeChild,
+  type SpawnRuntimeChildDeps,
 } from './spawn-runtime-child';
 
 /** How long `ssh` may spend reaching the host before it gives up. */

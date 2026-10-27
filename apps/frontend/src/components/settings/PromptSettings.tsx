@@ -4,6 +4,7 @@ import type {
 } from '@mangostudio/shared/prompt-rules';
 import { FileText, Plus } from 'lucide-react';
 import { useCallback } from 'react';
+
 import { RuleFileRows } from '@/components/settings/RuleFileRows';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsRow } from '@/components/settings/SettingsRow';

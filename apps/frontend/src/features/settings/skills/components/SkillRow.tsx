@@ -6,11 +6,13 @@
 
 import type { SkillDescriptor } from '@mangostudio/shared/skills';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { StatusNote } from '@/components/settings/StatusNote';
 import { Badge } from '@/components/ui/Badge';
 import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { useUpdateSkillSetting } from '../hooks/use-skill-settings';
 
 interface SkillRowProps {

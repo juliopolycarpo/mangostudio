@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { MessagePart } from '@mangostudio/shared/types';
+
 import {
   decodeMessageParts,
   readMessageParts,

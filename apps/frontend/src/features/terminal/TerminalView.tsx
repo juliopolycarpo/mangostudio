@@ -6,10 +6,12 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
 import { useEffect, useRef } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { createAckAccounting } from './ack-accounting';
 import { clampTerminalSize } from './terminal-fit';
 import { buildTerminalTheme, fontSizePx } from './terminal-theme';
@@ -128,7 +130,6 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
   // `resolvedTheme` once: `sessionId` changing remounts this component from
   // the caller's side (`key={sessionId}` on `TerminalView`), and the effects
   // below keep theme and font size live without forcing a remount.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-once by design; see comment above.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -199,6 +200,7 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
       termRef.current = null;
       fitAddonRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Theme and font size update in the effects below without remounting.
   }, []);
 
   useEffect(() => {

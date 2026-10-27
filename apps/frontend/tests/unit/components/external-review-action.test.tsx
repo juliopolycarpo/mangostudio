@@ -9,11 +9,13 @@
  */
 
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { AppContext } from '../../../src/lib/app-context';
 import { ExternalRefusalError } from '../../../src/lib/external-refusal-error';
 import { ApiError } from '../../../src/lib/utils';
@@ -21,7 +23,7 @@ import { render, screen, waitFor } from '../../support/harness/render';
 
 const descriptors: ExternalAgentDescriptor[] = [];
 
-mock.module('../../../src/features/external-agents/useExternalAgents', () => ({
+void mock.module('../../../src/features/external-agents/useExternalAgents', () => ({
   useExternalAgents: () => ({
     agents: descriptors,
     isLoading: false,
@@ -31,9 +33,8 @@ mock.module('../../../src/features/external-agents/useExternalAgents', () => ({
 
 // After the mock, never before: a static import is evaluated first and would
 // bind the action to the real useExternalAgents hook.
-const { ExternalReviewAction } = await import(
-  '../../../src/features/external-agents/ExternalReviewAction'
-);
+const { ExternalReviewAction } =
+  await import('../../../src/features/external-agents/ExternalReviewAction');
 
 function descriptor(nativeReview: boolean): ExternalAgentDescriptor {
   return {

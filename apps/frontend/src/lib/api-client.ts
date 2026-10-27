@@ -1,6 +1,7 @@
 import { treaty } from '@elysia/eden';
 import type { App } from '@mangostudio/api';
 import { PROBLEM_JSON_ACCEPT } from '@mangostudio/shared/errors';
+
 import { getApiBaseUrl } from './api-base-url';
 import { scheduleLoginRedirect } from './auth-navigate';
 

@@ -5,11 +5,7 @@ coverageSkipTestFiles = true
 # Mirrors the retired Vitest lane's `coverage.exclude`: the support tree is
 # always loaded through the preload, so without this it pads every run with
 # harness lines that no test asserts on.
-coveragePathIgnorePatterns = [
-  "tests/**",
-  "**/*.d.ts",
-  "**/*.config.*",
-]
+coveragePathIgnorePatterns = ["tests/**", "**/*.d.ts", "**/*.config.*"]
 # No `coverageThreshold` here, deliberately. On Bun 1.4.2 it is still enforced
 # per *file* — every file must individually clear the bar, so a workspace with
 # a legitimately uncovered file cannot express a total gate through it — and a

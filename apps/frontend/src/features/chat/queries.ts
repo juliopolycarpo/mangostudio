@@ -4,18 +4,20 @@ import {
   infiniteQueryOptions,
   type Query,
   type QueryClient,
-  type QueryPersister,
   queryOptions,
+  type QueryPersister,
   useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+
 import type { ContextInfo } from '@/features/generation/types';
 import { invalidateAllGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
+
 import { invalidateChatCapabilities } from './hooks/capability-invalidation';
 import { catchUpNewestPages, loadOlderPage, type MessagesCache } from './transcript-pages';
 import { takeBackgroundRun } from './transcript-read-ahead';

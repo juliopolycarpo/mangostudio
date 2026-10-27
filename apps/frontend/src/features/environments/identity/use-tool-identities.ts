@@ -16,8 +16,10 @@ import type {
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
+
 import { displayName, type ToolNameLookup } from '../format';
 import { resetToolIdentity, updateToolIdentity, uploadToolIdentityImage } from './api';
 import { toolIdentitiesQueryOptions, toolIdentityKeys } from './queries';

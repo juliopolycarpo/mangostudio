@@ -7,8 +7,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import type { InstallStreamEvent } from '@mangostudio/shared/environments';
 import { act } from '@testing-library/react';
+
 import {
   INSTALL_CONSOLE_MAX_LINES,
   useInstallStream,

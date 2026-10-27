@@ -10,7 +10,7 @@
 import { basename, extname } from 'node:path/posix';
 
 import { LOC_CLASSES, type LocBucket, type LocClass, type LocStats } from '../model/metrics';
-import { type Measurement, measured, partial } from '../model/states';
+import { measured, type Measurement, partial } from '../model/states';
 import { stderrLog } from './support';
 
 /** Source languages with `//` and `/* *\/` comments; lines are split three ways. */

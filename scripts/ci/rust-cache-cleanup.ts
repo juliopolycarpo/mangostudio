@@ -50,7 +50,6 @@ async function main(): Promise<void> {
       `Invalid arguments ${JSON.stringify(args)}; expected --fixture <listing.json>, --dry-run or --delete`
     );
   }
-  // biome-ignore lint/suspicious/noUndeclaredEnvVars: this workflow_run entrypoint executes directly, outside Turbo.
   const eventPath = process.env.GITHUB_EVENT_PATH;
   if (!eventPath)
     throw new Error(

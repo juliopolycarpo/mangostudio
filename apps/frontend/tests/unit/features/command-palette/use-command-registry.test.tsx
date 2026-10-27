@@ -11,12 +11,15 @@
  */
 
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { Chat } from '@mangostudio/shared/chat';
+
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import type { useAppState } from '@/hooks/use-app-state';
 import { AppContext } from '@/lib/app-context';
+
 import { act, flushAsyncRender, render, waitFor } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../../support/mocks/router';
@@ -24,11 +27,13 @@ import { routerWithLinkStub } from '../../../support/mocks/router';
 // One instance for the file: the real `useNavigate` is stable across renders,
 // and a fresh mock per call would churn the memo this test is about.
 const navigate = jest.fn();
-mock.module('@tanstack/react-router', await routerWithLinkStub({ useNavigate: () => navigate }));
-
-const { useCommandRegistry } = await import(
-  '../../../../src/features/command-palette/use-command-registry'
+void mock.module(
+  '@tanstack/react-router',
+  await routerWithLinkStub({ useNavigate: () => navigate })
 );
+
+const { useCommandRegistry } =
+  await import('../../../../src/features/command-palette/use-command-registry');
 
 type AppState = ReturnType<typeof useAppState>;
 
@@ -137,7 +142,7 @@ describe('useCommandRegistry', () => {
       rerender(<Probe app={replacement} onRun={onRun} seen={seen} />);
     });
 
-    seen.items.find((item) => item.id === 'session:c1')?.run();
+    await seen.items.find((item) => item.id === 'session:c1')?.run();
 
     expect(replacement.handleSelectChat).toHaveBeenCalledWith('c1');
     expect(onRun).toHaveBeenCalledTimes(1);
@@ -221,8 +226,8 @@ describe('useCommandRegistry', () => {
     const refreshRow = seen.items.find((item) => item.id === 'action:refresh-quota');
     expect(refreshRow).toBeTruthy();
 
-    act(() => {
-      refreshRow?.run();
+    await act(async () => {
+      await refreshRow?.run();
     });
     // `useIsMutating` announces the pending write through React Query's own
     // cache-change notification, a macrotask after `mutate()` starts.

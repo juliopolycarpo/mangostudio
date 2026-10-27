@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { RemoteError, Session } from '@mangostudio/protocol';
 import { createInProcessPortPair } from '@mangostudio/protocol/in-process';
 import { HUB_WORKSPACE_AUTHORIZE_METHOD } from '@mangostudio/shared/runtime-contract';
+
 import { getDb } from '../../../../src/db/database';
 import {
   type EnvironmentWorkspacePolicy,
   type HubWorkspaceBinding,
   isAuthorizedEnvironmentWorkspace,
-  STAND_IN_USER_ID,
   serveHubContract,
+  STAND_IN_USER_ID,
 } from '../../../../src/services/runtime-client/hub-workspace-authority';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
 
@@ -38,7 +40,7 @@ class RecordingPolicy {
 const sessions: Session[] = [];
 
 afterEach(() => {
-  for (const session of sessions.splice(0)) session.close(1000, 'test');
+  for (const session of sessions.splice(0)) void session.close(1000, 'test');
 });
 
 /** A hub session serving the hub contract, and the runtime session that asks it. */

@@ -15,6 +15,7 @@ import type {
   ExternalNativeSession,
   ExternalNativeSessionListResponse,
 } from '@mangostudio/shared/external-agents';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 
@@ -49,9 +50,8 @@ export async function answerExternalApproval(
   chatId: string,
   body: AnswerExternalApprovalBody
 ): Promise<AnswerExternalApprovalResult> {
-  const { data, error } = await client.api
-    .chats({ id: chatId })
-    ['external-agent'].respond.post(body);
+  const chat = client.api.chats({ id: chatId });
+  const { data, error } = await chat['external-agent'].respond.post(body);
   if (error) {
     const value = error.value as AnswerExternalApprovalResult | { error?: string } | null;
     if (value && 'status' in value && value.status === 'rejected') return value;
@@ -92,9 +92,8 @@ export async function forkChatWithRunner(
   chatId: string,
   runner: ChatRunnerConfiguration
 ): Promise<Chat> {
-  const { data, error } = await client.api
-    .chats({ id: chatId })
-    ['fork-with-runner'].post({ runner });
+  const chat = client.api.chats({ id: chatId });
+  const { data, error } = await chat['fork-with-runner'].post({ runner });
   if (error) throw new ApiError(error.value);
   return (data as { chat: Chat }).chat;
 }
@@ -116,9 +115,8 @@ export async function trustExternalWorkspace(
     readonly environmentId: string;
   }
 ): Promise<string> {
-  const { data, error } = await client.api
-    .chats({ id: chatId })
-    ['external-agent']['trust-workspace'].post(scope);
+  const chat = client.api.chats({ id: chatId });
+  const { data, error } = await chat['external-agent']['trust-workspace'].post(scope);
   if (error) throw new ApiError(error.value);
   return (data as { workspacePath: string }).workspacePath;
 }

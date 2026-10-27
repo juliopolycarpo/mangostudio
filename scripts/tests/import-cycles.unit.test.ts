@@ -20,18 +20,9 @@ import { canonicalPath } from './support/canonical-path';
 import { readText } from './support/read-text';
 
 const WORKSPACES = ['apps/api', 'apps/frontend', 'apps/shared', 'packages/protocol'];
-const NO_IMPORT_CYCLES = 'lint/suspicious/noImportCycles';
-const NO_SELF_IMPORT = 'lint/nursery/noSelfImport';
-const DEPENDENCY_LINKS = [
-  '.bin',
-  '@biomejs',
-  '@typescript',
-  '@dprint',
-  'turbo',
-  'dprint',
-  'typescript',
-  'typebox',
-];
+const NO_IMPORT_CYCLES = 'import/no-cycle';
+const NO_SELF_IMPORT = 'import/no-self-import';
+const DEPENDENCY_LINKS = ['.bin', '@typescript', 'turbo', 'typescript', 'typebox'];
 const VALUE_CYCLE = {
   'a.ts': "import { b } from './b';\n\nexport function a(): number {\n  return b();\n}\n",
   'b.ts': "import { a } from './a';\n\nexport function b(): number {\n  return a();\n}\n",
@@ -52,7 +43,7 @@ interface CycleCase {
   /** Workspace-relative directory the files are written to; unique per case. */
   readonly dir: string;
   readonly files: Readonly<Record<string, string>>;
-  /** The rule Biome must report on one of the case's files. */
+  /** The rule the scanner must report on one of the case's files. */
   readonly rule: string;
 }
 
@@ -62,7 +53,6 @@ interface CheckRun {
 }
 
 let baseFixture = '';
-let dprintCache = '';
 const fixtures: string[] = [];
 
 /**
@@ -81,9 +71,8 @@ function buildBaseFixture(): string {
     'package.json',
     'bun.lock',
     'turbo.jsonc',
-    'dprint.json',
-    'biome.json',
-    'biome.cycles.json',
+    'bunfig.toml',
+    'tsconfig.json',
     '.gitignore',
   ]) {
     writeFileSync(join(root, file), readText(file));
@@ -111,12 +100,6 @@ function buildBaseFixture(): string {
       }
     }
   }
-  // These checks format only Markdown and TOML. Keep installed formatters so
-  // a fresh fixture cache never needs the unused remote YAML plugin.
-  const formatter = JSON.parse(readText('dprint.json'));
-  formatter.plugins = formatter.plugins.filter((plugin: string) => plugin.startsWith('./'));
-  formatter.yaml = undefined;
-  writeFileSync(join(root, 'dprint.json'), `${JSON.stringify(formatter, null, 2)}\n`);
   return root;
 }
 
@@ -184,7 +167,6 @@ function runCheck(root: string, workspace: string): CheckRun {
     : ['bunx', ...(protocolTask?.cmd ?? [])];
   const result = Bun.spawnSync(command, {
     cwd: root,
-    env: { ...process.env, DPRINT_CACHE_DIR: dprintCache },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -195,8 +177,8 @@ function runCheck(root: string, workspace: string): CheckRun {
 }
 
 /**
- * Count cycles the way the QA gate does and keep every Biome output the count
- * was built from, so a batch can check which of its cases Biome named.
+ * Count cycles the way the QA gate does and keep the scanner output, so a
+ * batch can check which of its cases the scanner named.
  * @example
  * const { circularDeps } = await scanCycles(root, ['apps/api']);
  */
@@ -235,7 +217,7 @@ async function scanCheckedCycles(
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
-      `${workspace}: expected a complete direct Biome scan | received: ${detail}\nRequired check exit: ${required.exitCode}\nRequired check output:\n${required.output}`,
+      `${workspace}: expected a complete direct cycle scan | received: ${detail}\nRequired check exit: ${required.exitCode}\nRequired check output:\n${required.output}`,
       { cause }
     );
   }
@@ -270,16 +252,16 @@ const posix = (text: string): string => text.replaceAll('\\', '/');
 /** Whole path segments only, so `self/a.ts` never matches `type-self/a.ts`. */
 const isFile = (path: string, file: string): boolean => `/${path}`.endsWith(`/${file}`);
 
-/** Biome diagnostic headers, `<path>:<line>:<column> <rule>`, from a check or lint output. */
+/** Cycle diagnostic headers, `<path>:<line>:<column> <rule>`, from a check or lint output. */
 function diagnosticHeaders(output: string): Array<{ file: string; rule: string }> {
-  return [...posix(output).matchAll(/(\S+):\d+:\d+ (lint\/\S+)/g)].map(([, file, rule]) => ({
+  return [...posix(output).matchAll(/(\S+):\d+:\d+ (import\/\S+)/g)].map(([, file, rule]) => ({
     file,
     rule,
   }));
 }
 
 test('keeps a diagnostic header separate from the other output stream', () => {
-  const diagnostic = 'apps/frontend/dist/self-js/a.js:1:1 lint/nursery/noSelfImport';
+  const diagnostic = `apps/frontend/dist/self-js/a.js:1:1 ${NO_SELF_IMPORT}`;
   const summary = 'Checked 18 files in 7ms. No fixes applied.';
   for (const [stdout, stderr] of [
     [diagnostic, summary],
@@ -292,7 +274,7 @@ test('keeps a diagnostic header separate from the other output stream', () => {
 });
 
 /**
- * Assert direct Biome output flagged this case and named every one of its files.
+ * Assert direct scanner output flagged this case and named every one of its files.
  * Scoped to the case's own files so another case's diagnostics cannot satisfy it.
  * @example
  * expectCaseReported(scan.output, IGNORED_CASES['apps/api'][0], scan.required.output);
@@ -348,8 +330,7 @@ function defineBatch<Scan extends { readonly output: string; readonly required?:
   });
 }
 
-// Cycles under paths Biome's own config ignores. Only the dedicated cycle scan sees
-// them, and `biome check .` must stay clean or it short-circuits that scan.
+// Cycles under paths the ordinary lint and format checks ignore.
 const IGNORED_CASES: Record<string, CycleCase[]> = {
   'apps/api': [
     { name: 'dist type cycle', dir: 'dist', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES },
@@ -455,6 +436,24 @@ const KIND_CASES: CycleCase[] = [
     rule: NO_IMPORT_CYCLES,
   },
   {
+    name: 'import type expression cycle',
+    dir: 'import-type-expression',
+    files: {
+      'a.ts': "export type A = { b?: import('./b').B };\n",
+      'b.ts': "export type B = { a?: import('./a').A };\n",
+    },
+    rule: NO_IMPORT_CYCLES,
+  },
+  {
+    name: 'import equals cycle',
+    dir: 'import-equals',
+    files: {
+      'a.ts': "import b = require('./b');\nexport const a = () => b.b();\n",
+      'b.ts': "import a = require('./a');\nexport const b = () => a.a();\n",
+    },
+    rule: NO_IMPORT_CYCLES,
+  },
+  {
     name: 'self cycle',
     dir: 'self',
     files: { 'a.ts': "import { a as self } from './a';\nexport const a = () => self();\n" },
@@ -534,13 +533,14 @@ async function scanExtensionCases(cases: readonly CycleCase[]) {
   }
   writeFileSync(join(root, 'apps/frontend/package.json'), readText('apps/frontend/package.json'));
   writeFileSync(join(root, 'apps/frontend/tsconfig.json'), FRONTEND_TSCONFIG);
-  const formatConfig = Bun.spawnSync(
-    ['bunx', 'biome', 'format', '--write', 'apps/frontend/tsconfig.json'],
-    { cwd: root, stdout: 'pipe', stderr: 'pipe' }
-  );
+  const formatConfig = Bun.spawnSync(['bun', 'fmt', 'apps/frontend/tsconfig.json'], {
+    cwd: root,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   expect(
     formatConfig.exitCode,
-    `biome format of apps/frontend/tsconfig.json: expected exit 0 | received ${formatConfig.exitCode}: ${formatConfig.stderr.toString()}`
+    `bun fmt of apps/frontend/tsconfig.json: expected exit 0 | received ${formatConfig.exitCode}: ${formatConfig.stderr.toString()}`
   ).toBe(0);
   const typecheck = Bun.spawnSync(['bun', 'run', 'typecheck'], {
     cwd: join(root, 'apps/frontend'),
@@ -577,7 +577,7 @@ const DIRECT_SELF_IMPORT = `apps/frontend/dist/self-jsx/a.jsx:1:1 ${NO_SELF_IMPO
 const MANGLED_REQUIRED_OUTPUT =
   'apps/frontend/dist/self-jsx/a.jsx:1:1 lint/nursery/no' +
   'Checked 18 files in 7ms. No fixes applied.\n' +
-  'SelfImport ━━━━━\n';
+  'self-import ━━━━━\n';
 
 const CONTROLLED_PRESENTATIONS = [
   {
@@ -703,7 +703,7 @@ describe('checked cycle evidence', () => {
   });
 
   test('retains required exit and output when the direct scan rejects', async () => {
-    const failure = new Error('Biome output {"diagnostics":[]} expected at least one checked file');
+    const failure = new Error('Scanner output {} expected a cycles array');
     const commands = new FakeCycleCommands(1, DIRECT_SELF_IMPORT, 1, undefined, failure);
     const error = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands).catch(
       (caught) => caught
@@ -748,35 +748,17 @@ describe('checked cycle evidence', () => {
 });
 
 beforeAll(() => {
-  // Own the cache instead of relying on the host's platform-specific cache
-  // discovery. Warm it once outside case deadlines and share it across copies.
-  dprintCache = mkdtempSync(join(tmpdir(), 'mango-import-cycles-dprint-'));
   baseFixture = buildBaseFixture();
-  const warm = Bun.spawnSync(['bunx', 'dprint', 'check', 'apps/api/AGENTS.md'], {
-    cwd: createFixture(),
-    env: { ...process.env, DPRINT_CACHE_DIR: dprintCache },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  expectCheck(
-    {
-      exitCode: warm.exitCode,
-      output: joinOutputStreams(warm.stdout.toString(), warm.stderr.toString()),
-    },
-    'pass',
-    'dprint cache warmup'
-  );
-}, 60_000);
+});
 
 afterEach(removeFixtures);
 
 afterAll(() => {
   removeFixtures();
   rmSync(baseFixture, { recursive: true, force: true });
-  rmSync(dprintCache, { recursive: true, force: true });
 });
 
-describe('Biome import cycle checks', () => {
+describe('import cycle checks', () => {
   defineBatch(
     'TS-imported JS-family cycles with real typechecking',
     EXTENSION_CASES,
@@ -822,7 +804,7 @@ describe('Biome import cycle checks', () => {
   }
 
   defineBatch(
-    'apps/api cycle kinds counted from actual Biome output',
+    'apps/api cycle kinds counted from cycle scanner output',
     KIND_CASES,
     () => scanKinds(KIND_CASES),
     (scan) => expectCycleCount(scan.circularDeps, KIND_CASES.length, 'apps/api cycle kinds')
@@ -843,16 +825,6 @@ describe('Biome import cycle checks', () => {
     expectCycleCount(rejected.circularDeps, 1, 'new ignored type cycle', rejected.required.output);
   });
 
-  test('rejects workspace formatting drift with the actual dprint check', () => {
-    const root = createFixture();
-    writeFileSync(join(root, 'apps/api/AGENTS.md'), '#    Unformatted fixture\n');
-    const rejected = runCheck(root, 'apps/api');
-    expectCheck(rejected, 'fail', 'apps/api with unformatted AGENTS.md');
-    expect(rejected.output).toContain('root:dprint:api');
-    expect(rejected.output).toContain('AGENTS.md');
-    expect(Bun.stripANSI(rejected.output)).toContain('Found 1 not formatted file');
-  });
-
   test('keeps node_modules and git internals outside the TS/JS scan', async () => {
     const root = createFixture();
     const files = {
@@ -869,45 +841,22 @@ describe('Biome import cycle checks', () => {
     );
   });
 
-  test.each([
-    ['biome.json', '.mango/artifacts/tools/.shellcheck-staging'],
-    ['biome.json', '.mango/out/staging'],
-    ['biome.cycles.json', '.mango/artifacts/tools/.shellcheck-staging'],
-    ['biome.cycles.json', '.mango/out/staging'],
-  ])('%s excludes root cache metadata at %s from discovery', async (config, path) => {
-    const root = createFixture();
-    injectCycle(root, path, { 'biome.json': '{ "files": { "includes": 42 } }' });
-    // Disable the primary config's VCS safety net to test its own exclusions
-    // rather than let .gitignore hide missing cache exclusions.
-    const command =
-      config === 'biome.cycles.json'
-        ? createImportCycleCommand(['.'])
-        : [
-            'bunx',
-            'biome',
-            'lint',
-            `--config-path=${config}`,
-            '--only=suspicious/noImportCycles',
-            '--only=nursery/noSelfImport',
-            '--vcs-enabled=false',
-            '.',
-          ];
-    const clean = Bun.spawnSync(command, { cwd: root, stdout: 'pipe', stderr: 'pipe' });
-    const output = joinOutputStreams(clean.stdout.toString(), clean.stderr.toString());
-    expectCheck(
-      { exitCode: clean.exitCode, output },
-      'pass',
-      `${config}: invalid ${path}/biome.json expected excluded cache metadata`
-    );
-    injectCycle(root, 'apps/api/src', TYPE_CYCLE);
-    expectCycleCount(
-      await countCycles(root, ['apps/api']),
-      1,
-      'API source remains checked beside excluded cache metadata'
-    );
-  });
+  test.each(['.mango/artifacts/tools/staging', '.mango/out/staging'])(
+    'excludes repository cache cycles at %s',
+    async (path) => {
+      const root = createFixture();
+      injectCycle(root, path, TYPE_CYCLE);
+      expectCycleCount(await countCycles(root, ['.']), 0, `${path} cache cycles`);
+      injectCycle(root, 'apps/api/src', TYPE_CYCLE);
+      expectCycleCount(
+        await countCycles(root, ['apps/api']),
+        1,
+        'source beside excluded cache cycles'
+      );
+    }
+  );
 
-  test('ignores witness-like source comments in actual Biome diagnostics', async () => {
+  test('ignores witness-like source comments in cycle diagnostics', async () => {
     const root = createFixture();
     injectCycle(root, 'apps/api', {
       ...VALUE_CYCLE,
@@ -945,6 +894,46 @@ describe('Biome import cycle checks', () => {
       'c.ts': "import { a } from '@cycle/a'; export const c = () => a();\n",
     });
     expectCycleCount(await countCycles(root, ['apps/api']), 2, 'apps/api tsconfig alias cycles');
+  });
+
+  test('accepts a single file root and reports the actual import location', async () => {
+    const root = createFixture();
+    injectCycle(root, 'apps/api/src', {
+      'a.ts': "// heading\n\nimport type { B } from './b';\nexport type A = { b?: B };\n",
+      'b.ts': TYPE_CYCLE['b.ts'],
+    });
+    const result = await runCapture(createImportCycleCommand(['apps/api/src/a.ts']), { cwd: root });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/apps\/api\/src\/a\.ts:3:\d+ import\/no-cycle/);
+    expect(result.stderr).toContain('apps/api/src/b.ts');
+  });
+
+  test('rejects an invalid tsconfig instead of reporting a clean graph', async () => {
+    const root = createFixture();
+    writeFileSync(join(root, 'apps/api/tsconfig.json'), '{ invalid json');
+    const result = await runCapture(createImportCycleCommand(['apps/api']), { cwd: root });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('Cannot read');
+    expect(result.stderr).toContain('apps/api/tsconfig.json');
+  });
+
+  test('cycle scanner rejects malformed source with its location and parse error', async () => {
+    const root = createFixture();
+    injectCycle(root, 'apps/api/src', { 'malformed.ts': 'export const n = ;\n' });
+    const result = await runCapture(createImportCycleCommand(['apps/api']), { cwd: root });
+    expect(result.exitCode, 'malformed.ts: expected a failing scanner exit').not.toBe(0);
+    expect(result.stderr).toContain('apps/api/src/malformed.ts:1:18');
+    expect(result.stderr).toContain('Expression expected');
+  });
+
+  test('cycle scanner ignores import-like text inside a regular expression', async () => {
+    const root = createFixture();
+    injectCycle(root, 'apps/api/src', {
+      'self.ts': 'export const pattern = /import(".\\/self")/;\n',
+    });
+    const result = await runCapture(createImportCycleCommand(['apps/api']), { cwd: root });
+    expect(result.exitCode, `regex literal: expected no cycle | received ${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain('Found 0 import cycles.');
   });
 
   test('keeps every cycle beyond the default twenty-diagnostic limit', async () => {

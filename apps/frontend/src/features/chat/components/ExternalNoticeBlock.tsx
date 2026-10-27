@@ -11,6 +11,7 @@
  */
 
 import type { ExternalNoticePart } from '@mangostudio/shared/types';
+
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -31,6 +32,7 @@ export function ExternalNoticeBlock({ part }: ExternalNoticeBlockProps) {
 
   return (
     <Callout
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
       role="status"
       data-severity={part.severity}
       tone={TONE[part.severity]}

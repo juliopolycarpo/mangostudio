@@ -5,6 +5,7 @@
 
 import type { Model } from '@google/genai/web';
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
+
 import { parseStringArray } from '../../../utils/json';
 import { GEMINI_PROVIDER, listSecretMetadata } from '../../secret-store/metadata';
 import { isImageModelId } from '../core/capability-detector';
@@ -147,7 +148,7 @@ export function createGeminiModelCatalogService(
     return getResolvedGeminiApiKey(userId);
   };
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   const fetchModels = async (apiKey: string): Promise<Model[]> => {
     return withPromiseTimeout(
       async () => {
@@ -172,7 +173,7 @@ export function createGeminiModelCatalogService(
   };
 
   return {
-    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+    // Migrated from ESLint
     async refreshGeminiModelCatalog(
       userId: string,
       _reason: GeminiModelCatalogRefreshReason

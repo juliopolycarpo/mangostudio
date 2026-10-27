@@ -6,6 +6,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { createInterface } from 'node:readline/promises';
+
 import {
   getAuthSecretValidationMessage,
   getConfig,

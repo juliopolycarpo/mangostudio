@@ -6,9 +6,11 @@
 import type { ProviderSettingsDescriptor } from '@mangostudio/shared/provider-settings';
 import { Link } from '@tanstack/react-router';
 import { ChevronRight } from 'lucide-react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { EFFORT_LABEL_KEYS } from '../constants';
 
 interface ProviderSettingsRowProps {

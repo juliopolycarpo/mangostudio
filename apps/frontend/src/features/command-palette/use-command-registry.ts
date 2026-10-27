@@ -11,6 +11,7 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useNavigate } from '@tanstack/react-router';
 import { useMemo, useRef, useState } from 'react';
+
 import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { actionCommands } from '@/features/command-palette/sources/action-commands';
@@ -84,7 +85,8 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   const activeDescriptor =
     (app.runner.kind === 'external' && external.find(app.runner.targetId)) || null;
   const quotaDescriptor = activeDescriptor?.capabilities.accountUsage ? activeDescriptor : null;
-  const quota = useExternalAccountLimits(quotaDescriptor);
+  const { refresh: refreshQuota, refreshing: quotaRefreshing } =
+    useExternalAccountLimits(quotaDescriptor);
 
   // Read once for the palette's whole (short) lifetime. Reading it per render
   // would give every row a different anchor *and* invalidate the memo below on
@@ -138,13 +140,13 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       // subprocess instead of joining the one in flight — the same reason
       // the quota pill and the selector chip disable their own controls.
       quotaRefresh:
-        quotaDescriptor && !quota.refreshing
+        quotaDescriptor && !quotaRefreshing
           ? {
               runnerLabel:
                 t.externalAgents.target[quotaDescriptor.targetId] ?? quotaDescriptor.targetId,
               run: () => {
                 onRun();
-                quota.refresh();
+                refreshQuota();
               },
             }
           : null,
@@ -232,8 +234,8 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     navigate,
     nowMs,
     onRun,
-    quota.refresh,
-    quota.refreshing,
+    refreshQuota,
+    quotaRefreshing,
     quotaDescriptor,
     resolvedTheme,
     setConfig,

@@ -7,7 +7,9 @@ import type {
   UpdateToolSettingsBody,
 } from '@mangostudio/shared/tool-settings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
 import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-invalidation';
+
 import { updateToolSetting } from '../api';
 import { toolSettingsKeys, toolSettingsListQueryOptions } from '../queries';
 
@@ -36,7 +38,7 @@ export function useUpdateToolSetting() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+    // Migrated from ESLint
     mutationFn: async ({ toolName, body }: { toolName: string; body: UpdateToolSettingsBody }) => {
       return updateToolSetting(toolName, body);
     },

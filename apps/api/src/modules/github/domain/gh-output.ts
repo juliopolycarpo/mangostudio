@@ -15,6 +15,7 @@
 
 import Type, { type Static, type TSchema } from 'typebox';
 import Value from 'typebox/value';
+
 import type { GhCommandId } from './gh-command-registry';
 
 /**

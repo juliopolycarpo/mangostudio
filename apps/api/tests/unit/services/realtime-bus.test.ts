@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import { type RealtimeInvalidateEvent, SETTINGS_TOPIC } from '@mangostudio/shared/realtime';
+
 import {
   createRealtimeBus,
   getRealtimeBus,
@@ -76,6 +78,7 @@ describe('createRealtimeBus', () => {
     const ok = mock(() => {
       okCalls += 1;
     });
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This callback intentionally tests or owns the asynchronous operation described here.
     bus.subscribe('user-1', async () => {
       await Promise.resolve();
       throw new Error('async boom');

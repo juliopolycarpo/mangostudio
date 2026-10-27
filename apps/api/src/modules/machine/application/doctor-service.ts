@@ -9,15 +9,16 @@
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+
 import { normalizeLibraryLocationSettings } from '@mangostudio/shared/app-settings';
 import type { MachineDoctorSection } from '@mangostudio/shared/machine';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import type { DoctorArgs } from '../../../cli/args';
 import { DEFAULT_DOCTOR_ARGS } from '../../../cli/args';
 import { collectChatGptDoctorChecks } from '../../../cli/chatgpt-doctor-checks';
 import {
-  type CheckResult,
   checkAuthSecret,
   checkConfig,
   checkDatabase,
@@ -25,6 +26,7 @@ import {
   checkEmbeddedFrontend,
   checkFrontend,
   checkInstance,
+  type CheckResult,
   checkRuntime,
   checkRuntimeBinary,
   checkRuntimeCache,

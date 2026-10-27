@@ -5,8 +5,10 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { ChipSelect, type ChipSelectOption } from '../../../../src/components/ui/ChipSelect';
 import { render } from '../../../support/harness/render';
 

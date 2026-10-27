@@ -3,12 +3,14 @@
  */
 
 import { SlidersHorizontal } from 'lucide-react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
+
 import { useProviderSettingsList } from '../hooks/use-provider-settings';
 import { ProviderSettingsRow } from './ProviderSettingsRow';
 

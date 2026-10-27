@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import {
   APP_VERSIONED_CRATES,
   assertVersionsInLockstep,
@@ -13,13 +14,13 @@ import {
   LAUNCHER_MANIFEST,
   LOCKSTEP_PACKAGES,
   normalizeVersion,
-  RUNTIME_CRATE,
-  RUNTIME_MANIFEST,
   readCargoLockVersion,
   readCargoManifestVersion,
   readPackageVersion,
   resolveReleaseVersion,
   rootReleaseVersion,
+  RUNTIME_CRATE,
+  RUNTIME_MANIFEST,
   WORKSPACE_CARGO_LOCKFILE,
 } from '../lib/release-version';
 

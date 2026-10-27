@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseStyleParams } from '../../../src/db/serializers';
 
 describe('parseStyleParams', () => {

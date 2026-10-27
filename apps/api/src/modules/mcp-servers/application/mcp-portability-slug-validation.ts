@@ -3,6 +3,7 @@ import type {
   McpPortabilityConflictCandidate,
   McpPortabilityDecisionInput,
 } from '@mangostudio/shared/mcp';
+
 import { McpServerError } from '../domain/mcp-server';
 
 export interface McpPortabilitySlugOwner {

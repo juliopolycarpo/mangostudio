@@ -7,8 +7,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
+
 import { CoverageMatrix } from '../../../../src/features/library/components/CoverageMatrix';
 import { render, screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
@@ -249,9 +251,8 @@ describe('CoverageMatrix', () => {
   });
 
   it('explains every glyph in the legend', async () => {
-    const { MatrixLegend } = await import(
-      '../../../../src/features/library/components/CoverageMatrix'
-    );
+    const { MatrixLegend } =
+      await import('../../../../src/features/library/components/CoverageMatrix');
     render(<MatrixLegend />);
 
     // The words the cells print themselves: the key is only drawn where the cells

@@ -5,7 +5,9 @@
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test';
+
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
+
 import { getDb } from '../../../../src/db/database';
 import { updateChatUseCase } from '../../../../src/modules/chats/application/update-chat';
 import {

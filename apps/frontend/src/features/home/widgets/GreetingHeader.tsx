@@ -1,6 +1,8 @@
 import type { Messages } from '@mangostudio/shared/i18n';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { type GreetingSlot, greetingSlot } from '../lib/greeting';
 
 interface GreetingHeaderProps {

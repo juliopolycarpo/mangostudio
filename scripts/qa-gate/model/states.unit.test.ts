@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import Type from 'typebox';
 import Value from 'typebox/value';
 

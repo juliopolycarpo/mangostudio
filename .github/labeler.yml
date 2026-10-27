@@ -135,8 +135,7 @@
           # Lint, format, git-hook, editor, and repo-meta configuration.
           # Split from "area: build" so DevX tooling is not conflated with
           # product/binary build work; see issue #381.
-          - "biome.json"
-          - "dprint.json"
+          - "bunfig.toml"
           - "lefthook.yml"
           - "opencode.json"
           - ".editorconfig"

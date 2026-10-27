@@ -1,6 +1,7 @@
 import { type GitDiffLine, parseGitDiff } from '@mangostudio/shared/git';
 import { ArrowLeft, FileDiff } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
@@ -9,6 +10,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { highlightLineTokens, preloadCodeLanguages } from '@/lib/shiki';
 import { cn } from '@/lib/utils';
+
 import { FilePathLabel } from './components/FilePathLabel';
 import { IconButton } from './components/IconButton';
 import type { GitDiffInput } from './hooks/use-git-state';

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+
 import type {
   LibraryInstance,
   LibraryLocationId,
   LibraryResource,
 } from '@mangostudio/shared/library';
+
 import {
   acknowledgeDivergence,
   acknowledgedResourceKeys,

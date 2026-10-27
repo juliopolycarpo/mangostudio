@@ -11,8 +11,8 @@ import {
   getRequiredPathArg,
   normalizePathValidationSettings,
   PathAccessError,
-  type PathValidationSettings,
   pathPolicyParameterDescriptors,
+  type PathValidationSettings,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';

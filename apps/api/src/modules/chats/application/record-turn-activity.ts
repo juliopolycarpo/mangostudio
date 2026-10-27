@@ -1,4 +1,5 @@
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { recordActivity } from '../../activity/application/record-activity';

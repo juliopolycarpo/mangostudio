@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+
 import {
   RuntimeServiceError,
   RuntimeServiceManagementError,
 } from '@mangostudio/shared/runtime-contract';
+
 import { CliError, isOperatorError } from '../../../src/cli/errors';
 
 // `dispatch` prints these plainly and exits 1; anything else keeps its stack

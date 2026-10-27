@@ -1,9 +1,11 @@
 import { summarizeTodos } from '@mangostudio/shared/todos';
 import type { TodoPart } from '@mangostudio/shared/types';
 import { ListTodo } from 'lucide-react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { TodoItemRow } from './TodoItemRow';
 
 interface TodoListPartProps {
@@ -32,7 +34,7 @@ export function TodoListPart({ part }: TodoListPartProps) {
       {part.todos.length > 0 && (
         <ul className="mt-3 space-y-1.5">
           {part.todos.map((todo, idx) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: todo items do not expose stable ids
+            // eslint-disable-next-line react/no-array-index-key -- todo items do not expose stable ids
             <TodoItemRow key={`${part.toolCallId}-todo-${idx}`} todo={todo} />
           ))}
         </ul>

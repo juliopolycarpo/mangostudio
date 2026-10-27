@@ -5,9 +5,11 @@
 
 import { mkdirSync } from 'node:fs';
 import { extname, join } from 'node:path';
+
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { type Elysia, t } from 'elysia';
+
 import { getDb } from '../db/database';
 import { getConfig } from '../lib/config';
 import { detectFileType, registerFileTypeDetector } from '../lib/file-type-detector';
@@ -144,7 +146,7 @@ export const uploadRoutes = (app: Elysia) =>
           const chat = await getById(body.chatId, db);
           const userId = user?.id ?? '';
 
-          if (!chat || chat.userId !== userId) {
+          if (chat?.userId !== userId) {
             set.status = 404;
             return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }

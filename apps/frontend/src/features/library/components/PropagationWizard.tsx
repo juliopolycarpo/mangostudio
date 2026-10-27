@@ -19,11 +19,13 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type { LibraryLocationId, PropagationPreviewRequest } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { resourceTitle } from '../format';
 import { usePropagation } from '../hooks/use-propagation';
 import {
@@ -40,6 +42,8 @@ import { LibraryPageState } from './LibraryPageState';
 import { ResultPanel } from './ResultPanel';
 import { ReviewStep } from './ReviewStep';
 import { WizardFrame } from './WizardFrame';
+
+const EMPTY_ENVIRONMENTS = [] as const;
 
 interface PropagationWizardProps {
   readonly resourceKeys: readonly string[];
@@ -66,7 +70,7 @@ export function PropagationWizard({
   const { t } = useI18n();
   const l = t.library;
   const environmentsQuery = useEnvironmentEntitiesQuery();
-  const environments = environmentsQuery.data ?? [];
+  const environments = environmentsQuery.data ?? EMPTY_ENVIRONMENTS;
   const scopeEnvironmentId = environmentId ?? LOCAL_ENVIRONMENT_ID;
 
   /**

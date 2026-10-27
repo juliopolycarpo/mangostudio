@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { SetupChecklist } from '../../../../src/features/environments/components/SetupChecklist';
 import { screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';

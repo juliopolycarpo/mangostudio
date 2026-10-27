@@ -6,6 +6,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import {
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
   type LibraryLocationSettings,
@@ -17,6 +18,7 @@ import {
   SETTINGS_TOPIC,
   type SettingsScope,
 } from '@mangostudio/shared/realtime';
+
 import { getDb } from '../../../../src/db/database';
 import {
   getAppSettings,
@@ -29,8 +31,8 @@ import {
 } from '../../../../src/modules/app-settings/application/app-settings-service';
 import {
   createDetectedLibraryDefaults,
-  DETECTED_DEFAULTS_TTL_MS,
   defaultsForDetectedAgents,
+  DETECTED_DEFAULTS_TTL_MS,
 } from '../../../../src/modules/app-settings/application/detected-library-defaults';
 import { LOCAL_PROBE_SCOPE } from '../../../../src/modules/environments/application/probing-service';
 import {

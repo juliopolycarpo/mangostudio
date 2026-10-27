@@ -1,4 +1,5 @@
 import { EXTERNAL_AGENTS_TOPIC } from '@mangostudio/shared/realtime';
+
 import { getRealtimeBus } from './realtime-bus';
 
 /**

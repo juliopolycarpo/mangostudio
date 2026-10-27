@@ -15,20 +15,22 @@
  */
 
 import { dirname, join } from 'node:path';
+
 import {
   type LinuxPlatformId,
   mangoHomeDir,
+  resolveLinuxPlatformId as resolveLinuxPlatformIdShared,
   RUNTIME_BINARY_BASENAME,
   RUNTIME_CONFIG_FILE_NAME,
   RUNTIME_CONFIG_LOCK_FILE_NAME,
   RUNTIME_CURRENT_LINK_NAME,
   type RuntimeSlotConfig,
   RuntimeSlotConfigSchema,
-  resolveLinuxPlatformId as resolveLinuxPlatformIdShared,
   runtimeSlotCurrentBinaryPath,
   runtimeSlotVersionBinaryPath,
 } from '@mangostudio/shared/runtime-home';
 import Value from 'typebox/value';
+
 import type { RuntimeLaunchCommand } from '../../../lib/runtime-paths';
 import {
   runtimePushArchiveScript,

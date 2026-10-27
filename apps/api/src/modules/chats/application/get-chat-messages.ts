@@ -1,5 +1,6 @@
 import type { ContextInfo, MessagesOrder } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { decodeTranscriptCursor } from '../../messages/domain/transcript-cursor';
 import { listByChatId } from '../../messages/infrastructure/message-repository';

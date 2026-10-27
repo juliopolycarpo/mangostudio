@@ -21,7 +21,7 @@ matters: it uses the user's own Cursor login instead of an API key MangoStudio s
 their rules and MCP configuration, and it ships none of Cursor's bytes in the MangoStudio binary.
 
 **This says nothing about the ChatGPT connector.** The two look parallel and are not: the ChatGPT
-connector serves ChatGPT *models* through MangoStudio's own agent loop, which is an internal
+connector serves ChatGPT _models_ through MangoStudio's own agent loop, which is an internal
 provider with no external twin. Codex CLI is the external agent. Different products, different
 ownership, no duplication.
 

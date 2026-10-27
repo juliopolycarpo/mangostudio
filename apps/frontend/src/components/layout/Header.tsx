@@ -1,5 +1,6 @@
 import { LogOut, Menu as MenuIcon, Plus, Search, Settings, UserRound } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { KbdHint } from '@/components/ui/KbdHint';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';

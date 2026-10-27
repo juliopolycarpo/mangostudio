@@ -68,7 +68,7 @@ export function bridgeEmitter<T, R>(
     try {
       for (;;) {
         if (queue.length > 0) {
-          // biome-ignore lint/style/noNonNullAssertion: length just checked under single-threaded JS; nothing else drains this queue between the check and the shift.
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length just checked under single-threaded JS; nothing else drains this queue between the check and the shift.
           yield queue.shift()!;
           continue;
         }

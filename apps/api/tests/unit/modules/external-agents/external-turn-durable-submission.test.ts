@@ -7,10 +7,12 @@
  */
 
 import { beforeEach, describe, expect, it, setSystemTime, spyOn } from 'bun:test';
+
 import { RemoteError } from '@mangostudio/protocol';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnPart, MessagePart } from '@mangostudio/shared/types';
 import { InsertQueryBuilder, sql } from 'kysely';
+
 import { getDb } from '../../../../src/db/database';
 import { getChatMessagesUseCase } from '../../../../src/modules/chats/application/get-chat-messages';
 import { createEnvironmentService } from '../../../../src/modules/environments/application/environment-service';
@@ -176,6 +178,7 @@ function harness(
   const submission = async (): Promise<SubmissionOutcome> => {
     await waitFor(() => submissions.length === 1, 'the submission loop to start');
     const outcome = submissions[0];
+    // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This callback intentionally tests or owns the asynchronous operation described here.
     if (!outcome) throw new Error('expected a submission | received: none');
     return await outcome;
   };

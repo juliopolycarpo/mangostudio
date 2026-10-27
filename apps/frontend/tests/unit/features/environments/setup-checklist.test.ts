@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type {
   AgentCliStatus,
   InstallRecipePreview,
@@ -11,6 +12,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import type { MachineStatus } from '@mangostudio/shared/machine';
+
 import { buildSetupRows } from '../../../../src/features/environments/setup-checklist';
 import { agentCliStatus, installation, installRecipe, runtimeStatus } from './fixtures';
 

@@ -9,12 +9,14 @@
 
 import { CircleCheck, CircleX, TriangleAlert } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { formatDuration } from '../format';
 import type { InstallStreamState } from '../hooks/use-install-stream';
 

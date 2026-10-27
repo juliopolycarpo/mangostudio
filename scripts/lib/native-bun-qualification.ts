@@ -7,7 +7,6 @@ import {
   type NativeMsvcInventory,
   parseNativeMsvcInventory,
 } from './native-bun-qualification-msvc';
-
 import {
   type NativeCommandOptions,
   type NativeCommandReceipt,
@@ -21,8 +20,8 @@ import {
 import {
   collectNativeTestEvidence,
   type NativeTestEvidence,
-  type NativeTestLane,
   nativeTestInventory,
+  type NativeTestLane,
 } from './native-bun-qualification-results';
 import {
   type ArtifactSeal,
@@ -31,9 +30,9 @@ import {
   nativeCompilerArtifacts,
   nativeSourceChanged,
   requireNativeBuildFeatures,
-  type SourceSeal,
   sealNativeArtifact,
   sealNativeSource,
+  type SourceSeal,
 } from './native-bun-qualification-source';
 import {
   type NativeWindowsJobContext,
@@ -446,7 +445,7 @@ export async function runNativeQualification(
       const sealedHelper = receipt.toolingBefore.files.find(
         (file) => file.path === 'scripts/lib/native-windows-job.ps1'
       );
-      if (!sealedHelper || sealedHelper.sha256 !== helper.sha256)
+      if (sealedHelper?.sha256 !== helper.sha256)
         throw new Error(
           `Unsealed Windows helper ${helperPath}; expected tracked bytes matching tooling identity`
         );

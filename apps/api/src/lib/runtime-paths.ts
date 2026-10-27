@@ -4,6 +4,7 @@
 
 import { realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
+
 import { getCargoTargetDir, getRuntimeBinaryOverride } from './config';
 
 function isBunBinary(execPath: string): boolean {

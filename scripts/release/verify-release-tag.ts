@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
 import { isValidSemver, normalizeVersion } from '../lib/release-version';
 

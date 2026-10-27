@@ -8,8 +8,10 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import type { SettingsSnapshot } from '@mangostudio/shared/library';
+
 import { SettingsSourcePanel } from '../../../../src/features/library/components/SettingsComparison';
 import { render, screen, within } from '../../../support/harness/render';
 

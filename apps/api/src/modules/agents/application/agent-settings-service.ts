@@ -9,6 +9,7 @@ import type {
 } from '@mangostudio/shared/agents';
 import { BUILT_IN_DEFAULT_AGENT, BUILT_IN_EXPLORE_AGENT } from '@mangostudio/shared/agents';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { listToolSettingsDescriptors } from '../../tool-settings/application/tool-settings-service';
@@ -43,7 +44,7 @@ export async function listAgentProfiles(
   return { agents: [...builtIns, ...listMarkdownAgentProfiles()] };
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 export async function getAgentProfile(
   db: Kysely<Database>,
   userId: string,
@@ -58,7 +59,7 @@ export async function getAgentProfile(
   return readMarkdownAgent(agentId).profile;
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 export async function updateAgentProfile(
   db: Kysely<Database>,
   userId: string,

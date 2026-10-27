@@ -8,8 +8,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
+
 import { render, screen, waitFor, within } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../support/mocks/router';
@@ -18,7 +20,7 @@ function TerminalViewStub({ sessionId }: { sessionId: string }) {
   return <div data-testid="terminal-view-stub">{sessionId}</div>;
 }
 
-mock.module('../../../src/features/terminal/TerminalView', () => ({
+void mock.module('../../../src/features/terminal/TerminalView', () => ({
   TerminalView: TerminalViewStub,
 }));
 
@@ -28,7 +30,7 @@ const { mockNavigate, searchState, paramsState } = {
   paramsState: { current: { sessionId: 'term-1' } },
 };
 
-mock.module(
+void mock.module(
   '@tanstack/react-router',
   await routerWithLinkStub({
     createLazyFileRoute: () => (config: Record<string, unknown>) => ({
@@ -45,9 +47,8 @@ mock.module(
 // statement above runs, so the routes have to come in afterwards or they
 // bind the real router.
 const { Route: TerminalRoute } = await import('../../../src/routes/_authenticated/terminal.lazy');
-const { Route: TerminalSessionRoute } = await import(
-  '../../../src/routes/_authenticated/terminal_.$sessionId.lazy'
-);
+const { Route: TerminalSessionRoute } =
+  await import('../../../src/routes/_authenticated/terminal_.$sessionId.lazy');
 
 const TerminalIndexPage = (TerminalRoute as unknown as { options: { component: ComponentType } })
   .options.component;

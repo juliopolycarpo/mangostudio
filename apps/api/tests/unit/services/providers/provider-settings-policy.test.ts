@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   MAX_TOOL_ITERATIONS_DEFAULT,
   MAX_TOOL_ITERATIONS_MAX,
 } from '@mangostudio/shared/app-settings';
+
 import {
   buildProviderSettingsDescriptor,
   mergeProviderRuntimeSettings,

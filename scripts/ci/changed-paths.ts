@@ -3,6 +3,7 @@
 // collect <base-sha> <head-sha> <file> keeps both rename sides and writes only
 // a successful, nonempty NUL diff. distribution/release <file> emit outputs.
 import { writeFileSync } from 'node:fs';
+
 import { decodeChangedPaths, readChangedPaths } from '../lib/changed-paths';
 import { distributionRelevant, releaseRelevance } from '../lib/ci-lanes';
 

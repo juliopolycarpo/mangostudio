@@ -13,14 +13,14 @@ import {
   forceKillGroup,
   isAlive,
   processGroupOf,
-  RELEASE_FILE,
-  type ReadyPids,
   readGrandchildPid,
   readReadyPids,
   readWorkerPids,
+  type ReadyPids,
+  RELEASE_FILE,
   SIGNALS_LOG,
-  WORKERS_LOG,
   waitFor,
+  WORKERS_LOG,
 } from './support/process-tree';
 
 // A cancelled runner has to take everything it started with it. These tests run

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+
 import {
   createGeneratedImageRoutes,
   resolveGeneratedImagePath,

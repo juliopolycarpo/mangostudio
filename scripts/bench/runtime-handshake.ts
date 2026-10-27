@@ -30,6 +30,7 @@
 import { copyFile, mkdtemp, rm, stat } from 'node:fs/promises';
 import { arch, cpus, platform, release, tmpdir, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
+
 import { Session } from '@mangostudio/protocol';
 import { spawnPort } from '@mangostudio/protocol/spawn';
 import {

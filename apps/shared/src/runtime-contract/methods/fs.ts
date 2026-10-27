@@ -7,6 +7,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import { ReadonlyArraySchema } from '../../schema-helpers';
 import { RuntimePathPolicyParamsSchema } from '../path-policy';
 import { RuntimeMutationParamsSchema } from './common';

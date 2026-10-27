@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
 
 import { ChatRunnerConfigurationSchema } from '../../src/chat';
@@ -34,9 +35,9 @@ import {
   ExternalAgentTurnParamsSchema,
   ExternalAgentTurnResultSchema,
   ExternalIdentityIsolationSchema,
-  ExternalSteerRejectionReasonSchema,
   externalRemedyFor,
   externalRemedyForError,
+  ExternalSteerRejectionReasonSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,

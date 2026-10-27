@@ -22,6 +22,7 @@
 import type { ExternalTurnTerminalReason } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnPart, MessagePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
+
 import type { Database, ExternalTurnAttemptSelect } from '../../../db/types';
 import { endLeavesConversationUnresumable } from '../domain/external-resume-policy';
 import { setContinuationUnresumable } from '../infrastructure/external-session-continuation-repository';

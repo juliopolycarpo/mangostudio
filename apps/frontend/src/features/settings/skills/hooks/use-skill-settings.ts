@@ -10,9 +10,11 @@ import {
 import type { LibraryLocationId } from '@mangostudio/shared/library';
 import type { SkillDescriptor, SkillListResponse } from '@mangostudio/shared/skills';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+
 import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-invalidation';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { appSettingsForLocationWrite, appSettingsKeys } from '@/features/settings/app/queries';
+
 import { rescanLibrary, updateSkillSetting } from '../api';
 import { skillSettingsKeys, skillSettingsListQueryOptions } from '../queries';
 
@@ -52,7 +54,7 @@ export function useUpdateSkillSetting() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    // biome-ignore lint/suspicious/useAwait: mirrors the tool-settings mutation shape
+    // mirrors the tool-settings mutation shape
     mutationFn: async ({ skillKey, enabled }: { skillKey: string; enabled: boolean }) => {
       return updateSkillSetting(skillKey, { enabled });
     },

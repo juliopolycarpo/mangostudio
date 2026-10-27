@@ -5,6 +5,7 @@
  * them disagreed, a live turn and its reloaded self would disagree.
  */
 import { describe, expect, it } from 'bun:test';
+
 import { mergeMessageParts } from '../../../src/generation';
 import type { MessagePart } from '../../../src/types/agent-events';
 

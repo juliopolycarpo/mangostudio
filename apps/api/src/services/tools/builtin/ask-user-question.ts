@@ -16,6 +16,7 @@ import {
   QUESTION_MIN_OPTIONS,
 } from '@mangostudio/shared/questions';
 import Value from 'typebox/value';
+
 import { stripNullOptionals, ToolArgumentError } from '../arg-parsing';
 import { registerTool } from '../registry';
 
@@ -94,7 +95,7 @@ const definition = {
   },
 };
 
-// biome-ignore lint/suspicious/useAwait: tool executors are async by contract
+// eslint-disable-next-line @typescript-eslint/require-await -- tool executors are async by contract
 async function execute(args: Record<string, unknown>): Promise<AskUserQuestionResult> {
   const validated = parseAskUserQuestionArgs(args);
   return {

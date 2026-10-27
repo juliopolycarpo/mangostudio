@@ -1,6 +1,7 @@
 import type { GithubContext } from '@mangostudio/shared/github';
 import { useQuery } from '@tanstack/react-query';
 import { GitPullRequest } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { GithubPrBadge } from '@/features/github/components/GithubPrBadge';
@@ -9,6 +10,7 @@ import { githubPrChecksQueryOptions } from '@/features/github/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { requestRailPanel } from './rail/rail-panel-request';
 
 interface BranchPrChipProps {

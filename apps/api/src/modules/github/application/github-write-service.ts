@@ -19,15 +19,16 @@ import type {
   GithubPrActionResponse,
   GithubPrSummary,
 } from '@mangostudio/shared/github';
+
 import { withRepoMutationLock as withRepoMutationLockDefault } from '../../git/application/git-mutation-lock';
 import { requireRepoRoot as requireRepoRootDefault } from '../../git/application/git-write-service';
 import { GhPrSummaryOutputSchema, GithubOutputError, readGhOutput } from '../domain/gh-output';
 import { toPrSummary } from '../domain/github-normalizers';
 import {
+  ghCli,
   type GhCommandTarget,
   type GhRuntimeSelection,
   type GithubCli,
-  ghCli,
 } from '../infrastructure/gh-cli';
 import { readCurrentBranch, readPullRequestTemplate } from '../infrastructure/pull-request-inputs';
 import { type GithubCache, githubCache } from './github-cache';

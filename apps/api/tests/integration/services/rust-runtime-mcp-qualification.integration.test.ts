@@ -16,9 +16,11 @@
 
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { fileURLToPath } from 'node:url';
+
 import type { EventFrame } from '@mangostudio/protocol';
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import { MCP_RESULT_TRUNCATION_MARKER } from '@mangostudio/shared/mcp/content-mapping';
+
 import { getDb } from '../../../src/db/database';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
@@ -381,6 +383,7 @@ describe('Real Rust runtime MCP qualification', () => {
           stops.push(server.stop);
           const handle = await connectMcpClient(httpConfig(`qual-${mode}`, server.url), {
             userId: TEST_USER.id,
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             resolveHeaders: async () => ({ Authorization: 'Bearer qualification-secret' }),
           });
           try {
@@ -420,7 +423,9 @@ describe('Real Rust runtime MCP qualification', () => {
         const refused = await rejectionOf(
           connectMcpClient(httpConfig('qual-public', server.url), {
             userId: TEST_USER.id,
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             resolveHeaders: async () => ({ Authorization: 'Bearer never-sent' }),
+            // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
             resolveTransport: async () => ({
               transportKind: 'http',
               config: { baseUrl: 'http://203.0.113.7:4000' },

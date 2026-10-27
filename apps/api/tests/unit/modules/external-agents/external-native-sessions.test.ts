@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+
 import type {
   ExternalAgentDescriptor,
   ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+
 import { getDb } from '../../../../src/db/database';
 import type { ExternalAgentDiscoveryService } from '../../../../src/modules/external-agents/application/external-agent-discovery';
 import { createExternalIdentityIsolationRegistry } from '../../../../src/modules/external-agents/application/external-identity-isolation';

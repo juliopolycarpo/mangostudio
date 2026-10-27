@@ -10,6 +10,7 @@ import {
 } from '@mangostudio/shared/connectors';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
+
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   GeminiValidationUnavailableError,
@@ -106,7 +107,7 @@ export function handleConnectorError(
 export const connectorRoutes = new Elysia()
   .use(requireAuth)
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   .get('/connectors', async ({ user }): Promise<ConnectorStatus> => {
     return listConnectors(user?.id ?? '');
   })

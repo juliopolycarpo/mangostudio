@@ -2,6 +2,7 @@
 
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+
 import { ROOT_DIR } from '../../lib/config';
 import { runCapture } from './support';
 import type { DuplicationStats } from './types';

@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
@@ -132,8 +133,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           workspace panel's file list, and since a toast holds while the
           pointer is over it, reaching for Send kept it there. The top-right of
           a page is margin or a panel's heading, never its primary action. */}
-      {/* biome-ignore lint/a11y/useSemanticElements: a fixed overlay outside the page's outline. `section` is the page's own element for its content (the transcript is one), and a floating stack of notices is not another of its sections. */}
+      {/* a fixed overlay outside the page's outline. `section` is the page's own element for its content (the transcript is one), and a floating stack of notices is not another of its sections. */}
       <div
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The floating live notice region is separate from the page outline.
         role="region"
         aria-label={t.common.notifications}
         aria-live="polite"

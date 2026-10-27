@@ -43,7 +43,7 @@ const motionComponentCache = new Map<string, ComponentType<MotionProps>>();
 function resolveMotionComponent(tag: string): ComponentType<MotionProps> {
   const cached = motionComponentCache.get(tag);
   if (cached) return cached;
-  // biome-ignore lint/nursery/noComponentHookFactories: cached per tag, so identity is stable across renders and no subtree remounts.
+  // cached per tag, so identity is stable across renders and no subtree remounts.
   const Component = (props: MotionProps) => createElement(tag, withoutAnimationProps(props));
   Component.displayName = `motion.${tag}`;
   motionComponentCache.set(tag, Component);

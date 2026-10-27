@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { DELEGATION_MAX_RETRIES } from '@mangostudio/shared/generation';
+
 import { ensureDelegationResult } from '../../../../src/modules/generation/application/delegation-retry';
 import { clearSubagentCache } from '../../../../src/modules/generation/application/subagent-response-cache';
 import type {

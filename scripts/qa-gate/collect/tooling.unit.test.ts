@@ -78,6 +78,7 @@ describe('bounded Check report descriptor', () => {
     let closes = 0;
     try {
       await expect(
+        // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
         readCheckReport(path, async () => ({
           stat: async () => {
             const info = await file.stat();
@@ -113,6 +114,7 @@ describe('bounded Check report descriptor', () => {
     let reads = 0;
     try {
       expect(
+        // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
         await readCheckReport(path, async () => ({
           stat: file.stat.bind(file),
           read: (buffer, offset, length, position) => {
@@ -134,6 +136,7 @@ describe('bounded Check report descriptor', () => {
     let read = false;
     let closed = false;
     await expect(
+      // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
       readCheckReport('nonregular', async () => ({
         stat: () => Promise.resolve({ size: 0, isFile: () => false }),
         read: () => {
@@ -154,6 +157,7 @@ describe('bounded Check report descriptor', () => {
     const failure = new Error('descriptor read failed');
     let closed = false;
     await expect(
+      // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
       readCheckReport('read-failure', async () => ({
         stat: () => Promise.resolve({ size: 1, isFile: () => true }),
         read: () => Promise.reject(failure),
@@ -173,14 +177,14 @@ describe('collectToolingStats', () => {
       ...fixture,
       ...completedCheckFixture([
         executedCheckTask('workspaces:check', 2),
-        executedCheckTask('root:biome', 7),
-        executedCheckTask('root:dprint'),
+        executedCheckTask('root:lint', 7),
+        executedCheckTask('root:fmt'),
       ]),
       invocationId: fixture.invocationId,
     }));
     expect(await collectToolingStats(check.run)).toEqual({
       checkExitCode: 1,
-      failedTasks: ['workspaces:check', 'root:biome'],
+      failedTasks: ['workspaces:check', 'root:lint'],
     });
     expect(check.commands[0].slice(0, 5)).toEqual([
       'bun',

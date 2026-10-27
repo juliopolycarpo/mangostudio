@@ -11,7 +11,7 @@
   // Env vars read by the root build/release/CI scripts (scripts/build.ts,
   // scripts/test-build.ts, scripts/release/*, scripts/lib/release-version.ts,
   // scripts/ci/*), which run via `bun run` outside turbo tasks. Declared as pass-through so
-  // biome's noUndeclaredEnvVars accepts them without affecting task cache keys.
+  // these entrypoints can inherit them without affecting task cache keys.
   "globalPassThroughEnv": [
     "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
     "ACTIONS_ID_TOKEN_REQUEST_URL",
@@ -51,35 +51,35 @@
     "RUNTIME_DIR",
     "SKIP_BUILD",
     "SOURCE_SHA",
-    "VERSION"
+    "VERSION",
   ],
   "tasks": {
     "dev": {
       "cache": false,
       "persistent": true,
-      "interruptible": true
+      "interruptible": true,
     },
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
     },
     "check:quick": {
-      // Biome resolves imports in upstream workspaces. Hash their sources
+      // Bun lint resolves imports in upstream workspaces. Hash their sources
       // without waiting for another lint or typecheck to finish.
       "dependsOn": ["transit"],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/biome.json",
+        "$TURBO_ROOT$/bunfig.toml",
         "$TURBO_ROOT$/.editorconfig",
         "$TURBO_ROOT$/.gitignore",
         "$TURBO_ROOT$/tsconfig.json",
-        "$TURBO_ROOT$/turbo.jsonc"
-      ]
+        "$TURBO_ROOT$/turbo.jsonc",
+      ],
     },
     "check:cycles": {
       // Cycles include generated and gitignored TS/TSX files, which are absent
       // from Turbo's VCS inputs. Always scan them instead of replaying a cache.
-      "cache": false
+      "cache": false,
     },
     // Script-less: no workspace defines a `transit` script, so it runs nothing
     // and orders nothing. It exists for its hash. Turbo folds the hash of each
@@ -90,13 +90,13 @@
     // `test:unit` do). It must declare no `inputs`: the default set is what
     // carries an upstream `package.json` or tsconfig edit downstream.
     "transit": {
-      "dependsOn": ["^transit"]
+      "dependsOn": ["^transit"],
     },
     "typecheck": {
       "dependsOn": ["transit"],
       // No outputs: `incremental` is off, so tsc leaves no build info to cache
       // (scripts/tests/typescript-incremental.unit.test.ts pins that).
-      "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"]
+      "inputs": ["$TURBO_ROOT$/tsconfig.json", "$TURBO_DEFAULT$"],
     },
     // Script-less, and the task `bun run check` requests. `transit` selects
     // nothing, so `typecheck` alone would drop the upstream workspaces from a
@@ -106,7 +106,7 @@
     // instead: Turbo stops a `with` task when the task that lists it exits, so a
     // slower workspace's type error is lost and its cache entry never written.
     "typecheck:with-deps": {
-      "dependsOn": ["typecheck", "^typecheck:with-deps"]
+      "dependsOn": ["typecheck", "^typecheck:with-deps"],
     },
     // A unit test runs the sources of the workspaces it imports, not only its
     // own: a frontend test drives API code, an API test drives `shared`. With
@@ -117,11 +117,11 @@
       "dependsOn": ["transit"],
       // Bun selects ignored test files too; the default VCS inputs omit them.
       "inputs": ["$TURBO_DEFAULT$", "tests/unit/**"],
-      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
+      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"],
     },
     "test:integration": {
       "cache": false,
-      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
+      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"],
     },
     // The JUnit reports these lanes write are deliberately not declared as
     // outputs. The task is uncached, so there is nothing to restore, and every
@@ -131,7 +131,7 @@
     "test:coverage": {
       "cache": false,
       "outputs": ["$TURBO_ROOT$/.mango/artifacts/coverage/**"],
-      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
+      "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"],
     },
     // This one is cached, so both keys below are load-bearing.
     // `MANGOSTUDIO_BUN_TEST_ARGS` carries `--shard`: without it in the key,
@@ -145,7 +145,7 @@
     "//#test:scripts": {
       "inputs": ["$TURBO_DEFAULT$", "scripts/**"],
       "outputs": ["$TURBO_ROOT$/.mango/artifacts/junit/root.xml"],
-      "env": ["CI", "MANGOSTUDIO_*"]
+      "env": ["CI", "MANGOSTUDIO_*"],
     },
     // The same tests as `//#test:scripts`, split across worker processes by
     // scripts/run-test-workers.ts (the `bun run test` unit phase; the coverage
@@ -165,8 +165,8 @@
         "RUSTUP_HOME",
         "BUN_INSTALL",
         "BUN_INSTALL_CACHE_DIR",
-        "MANGO_TEST_WORKERS"
-      ]
-    }
-  }
+        "MANGO_TEST_WORKERS",
+      ],
+    },
+  },
 }

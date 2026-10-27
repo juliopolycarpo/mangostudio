@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
+
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { ICON_LG, ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';

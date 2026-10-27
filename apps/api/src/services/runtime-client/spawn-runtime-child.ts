@@ -16,7 +16,8 @@
  */
 
 import { statSync } from 'node:fs';
-import { RESERVED_ERROR_CODES, RemoteError, type SessionClosure } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES, type SessionClosure } from '@mangostudio/protocol';
 import {
   type LaunchedPeer,
   type SpawnedPeer,
@@ -25,6 +26,7 @@ import {
 } from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/shared/process';
 import type { HubExternalAgentIsolation } from '@mangostudio/shared/runtime-contract';
+
 import { raceAgainstAbort } from '../../lib/abort-race';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';

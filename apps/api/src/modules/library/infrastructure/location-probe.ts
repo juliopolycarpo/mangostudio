@@ -9,6 +9,7 @@
 
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   LibraryLocationId,
@@ -21,6 +22,7 @@ import {
   describeTargetLocations as describeTargetLocationsWith,
 } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
+
 import { getConfig } from '../../../lib/config';
 
 const nodeLocationFsProbe: LocationFsProbe = {

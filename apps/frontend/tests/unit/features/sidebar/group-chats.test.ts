@@ -5,7 +5,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
+
 import {
   chatGroupLabel,
   groupChatsByDate,

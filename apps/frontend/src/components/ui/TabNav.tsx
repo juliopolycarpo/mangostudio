@@ -1,5 +1,6 @@
 import { Link, type LinkProps } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
+
 import { TAB_CLASSES, TabLabel } from './Tabs';
 
 interface Tab {

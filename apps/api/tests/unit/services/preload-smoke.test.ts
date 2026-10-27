@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { listRegisteredProviderTypes } from '../../../src/services/providers/core/provider-registry';
 import { getAllTools } from '../../../src/services/tools/registry';
 import { expectedProviderTypes, expectedToolNames } from '../../support/registration-expectations';

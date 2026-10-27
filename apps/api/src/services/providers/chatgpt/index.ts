@@ -11,6 +11,7 @@
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import type OpenAI from 'openai';
 import { APIError as OpenAIAPIError } from 'openai';
+
 import { getConfig } from '../../../lib/config';
 import {
   ChatGptReauthRequiredError,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-tool';
 import {
   migrateLegacyToolParameters,
@@ -58,6 +59,7 @@ describe('resolveEffectiveToolTimeoutMs', () => {
         defaultParameters: {},
         parameterDescriptors: [],
       },
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       execute: async () => ({}),
     };
     expect(toolSupportsExecutionTimeout(datetimeTool)).toBe(false);

@@ -40,7 +40,7 @@ Useful docs:
 - Shared contracts are schema-first: the TypeBox schema in `apps/shared/src/<module>/schemas.ts` is the single source of truth, and public types are derived with `Static<>`. Never hand-write a duplicate interface for a shape that already has a schema. `apps/shared/src/contracts/index.ts` is a compatibility barrel only — import from the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`).
 - API error responses must use `ApiErrorResponse` from `@mangostudio/shared/errors` or `SSEErrorEvent` from `@mangostudio/shared/streaming`. `ProblemDetails` (RFC 9457) is a third wire shape, but not a third thing to build: it is rendered from an `ApiErrorResponse` by the negotiation boundary in `apps/api/src/plugins/error-negotiation.ts` when the caller asks for `application/problem+json`. Never construct or return one from a route.
 - The Mango Protocol (`spec/`, `packages/protocol/`, `crates/mango-protocol/`, `docs/protocol/`, `scripts/protocol/`) is one wire contract on its own `protocol-v*` release line. Any change under those paths follows `packages/protocol/AGENTS.md` and runs `bun run protocol:check && bun run protocol:test` — the repository gate runs only its TypeScript half.
-- One parsing point per host for *configuration* — the environment variables that select a mode,
+- One parsing point per host for _configuration_ — the environment variables that select a mode,
   a token, or a path the host trusts — never scattered: hub configuration parsing lives only in
   `apps/api/src/lib/config.ts`; the Rust runtime host's, only in
   `crates/mangostudio-runtime/src/config.rs`. Each host owns its own single parser — a second host

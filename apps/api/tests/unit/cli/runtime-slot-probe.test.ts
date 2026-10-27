@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import { checkRuntimeSlot } from '../../../src/cli/doctor-checks';
 import { probeRuntimeSlots } from '../../../src/cli/runtime-slot-probe';
 import { getHomeMangoDir, getRuntimeHomeMangoDir } from '../../../src/lib/config';

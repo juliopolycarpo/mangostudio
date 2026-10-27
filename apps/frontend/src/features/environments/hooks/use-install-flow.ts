@@ -19,6 +19,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
+
 import { cancelInstall, prepareInstall, startInstall } from '../api';
 import type { InstallChainStep } from '../install-chain';
 import { environmentKeys } from '../queries';

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import type { RuntimePairingIssue, RuntimePairingStatus } from '@mangostudio/shared/environments';
+
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import { createRuntimePairingService } from '../../../src/modules/environments/application/runtime-pairing-service';

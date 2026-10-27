@@ -6,6 +6,7 @@
  */
 
 import { type ContextSeverity, getContextSeverity } from '@mangostudio/shared/chat';
+
 import { parseJsonWith } from '../../../lib/safe-parse';
 import type { ChatTurnContext, ToolDefinition } from '../types';
 
@@ -25,11 +26,7 @@ export { type ContextSeverity, getContextSeverity };
  * - `degraded`      — legacy placeholder, kept for backward-compat display
  */
 export type ContinuationDisplayMode =
-  | 'stateful'
-  | 'stateless-loop'
-  | 'replay'
-  | 'compacted'
-  | 'degraded';
+  'stateful' | 'stateless-loop' | 'replay' | 'compacted' | 'degraded';
 
 const CONTINUATION_DISPLAY_MODES = new Set<string>([
   'stateful',

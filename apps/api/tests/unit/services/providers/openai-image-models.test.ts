@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { includeKnownOpenAIImageModels } from '../../../../src/services/providers/openai/model-catalog';
 import type { ModelInfo } from '../../../../src/services/providers/types';
 

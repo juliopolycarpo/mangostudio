@@ -19,6 +19,7 @@ import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { DEFAULT_ONBOARDING_STATE } from '@mangostudio/shared/onboarding';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
+
 import { updateAppSettings } from '@/features/settings/app/api';
 import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
 import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';

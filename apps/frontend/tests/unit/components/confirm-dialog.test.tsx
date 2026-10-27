@@ -1,6 +1,8 @@
 import { describe, expect, it, jest } from 'bun:test';
+
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { CommandPalette } from '@/features/command-palette/CommandPalette';
+
 import { fireEvent, render, screen } from '../../support/harness/render';
 
 describe('ConfirmDialog', () => {

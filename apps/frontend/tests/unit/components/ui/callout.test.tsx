@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { Callout } from '@/components/ui/Callout';
+
 import { render, screen } from '../../../support/harness/render';
 
 describe('Callout', () => {

@@ -4,6 +4,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import { getConfig } from '../../../lib/config';
 import { throwIfAborted } from '../../../modules/environments/domain/cancellation';
 import {
@@ -56,7 +57,7 @@ function findGeminiInlineImage(
   return parts.find((part) => part.inlineData?.data)?.inlineData ?? null;
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+// Migrated from ESLint
 export async function saveGeminiGeneratedImageFromResponse(
   response: GeminiImageResponse
 ): Promise<string> {

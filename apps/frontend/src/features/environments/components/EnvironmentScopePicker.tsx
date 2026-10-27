@@ -9,6 +9,7 @@
 
 import type { Environment } from '@mangostudio/shared/environments';
 import { Server } from 'lucide-react';
+
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';

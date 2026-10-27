@@ -7,8 +7,8 @@ import { Writable } from 'node:stream';
 import {
   captureSnapshot,
   type NativeProcess,
-  POSIX_CENSUS_TIMEOUT_MS,
   parseNativeProcesses,
+  POSIX_CENSUS_TIMEOUT_MS,
   readLinuxProcessIdentity,
   runNativeCommand,
   scopeNativeProcesses,

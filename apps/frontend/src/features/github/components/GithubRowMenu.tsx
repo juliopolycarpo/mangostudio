@@ -1,10 +1,12 @@
 import { ClipboardCopy, CornerDownLeft, ExternalLink, Hash, MoreHorizontal } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
+
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { IconButton } from '@/features/workspace/components/IconButton';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import type { GithubReferenceTarget } from '../hooks/use-github-quick-actions';
 import { useGithubQuickActions } from '../hooks/use-github-quick-actions';
 

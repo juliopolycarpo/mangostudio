@@ -5,6 +5,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
@@ -109,12 +110,10 @@ function buildMessages(req: TextGenerationRequest): Anthropic.MessageCreateParam
   const prompt = appendAttachmentFallbackNotes(req.prompt, req.attachments, req.modelCapabilities);
 
   return [
-    ...req.history.map(
-      (msg): Anthropic.MessageParam => ({
-        role: msg.role === 'ai' ? 'assistant' : 'user',
-        content: msg.text,
-      })
-    ),
+    ...req.history.map((msg): Anthropic.MessageParam => ({
+      role: msg.role === 'ai' ? 'assistant' : 'user',
+      content: msg.text,
+    })),
     { role: 'user' as const, content: prompt },
   ];
 }
@@ -286,7 +285,7 @@ const anthropicProvider: AIProvider = {
     await secretService.validateApiKey(apiKey);
   },
 
-  // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+  // Migrated from ESLint
   async resolveApiKey(userId: string, modelName?: string): Promise<string> {
     return secretService.resolveApiKey(userId, modelName);
   },

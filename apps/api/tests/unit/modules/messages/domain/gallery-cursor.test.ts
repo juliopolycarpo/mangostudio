@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseCursorPosition } from '../../../../../src/modules/messages/domain/cursor-position';
 import {
   compareGalleryOrder,

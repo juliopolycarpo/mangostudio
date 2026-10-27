@@ -14,9 +14,11 @@
 import type { Environment } from '@mangostudio/shared/environments';
 import { DEFAULT_SSH_RUNTIME_PATH } from '@mangostudio/shared/environments/values';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
+
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { CopyLine } from '../components/CopyLine';
 import { useRuntimeLifecycleQuery } from '../queries';
 import { StepActions } from './StepActions';

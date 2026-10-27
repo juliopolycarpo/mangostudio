@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
+
 import { act, renderHook } from '../../support/harness/render';
 
 const mockRedeemChatGptResetCredit = jest.fn();
 
-mock.module('../../../src/features/settings/connectors/api', () => ({
+void mock.module('../../../src/features/settings/connectors/api', () => ({
   redeemChatGptResetCredit: (...args: unknown[]) => mockRedeemChatGptResetCredit(...args),
 }));
 
-const { useChatGptResetRedeem } = await import(
-  '../../../src/features/settings/connectors/hooks/use-chatgpt-reset-redeem'
-);
+const { useChatGptResetRedeem } =
+  await import('../../../src/features/settings/connectors/hooks/use-chatgpt-reset-redeem');
 
 const messages = en.settings.connectors;
 

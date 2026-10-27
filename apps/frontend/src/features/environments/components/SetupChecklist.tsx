@@ -13,10 +13,12 @@ import type {
 import type { MachineStatus } from '@mangostudio/shared/machine';
 import { Link } from '@tanstack/react-router';
 import { ChevronRight } from 'lucide-react';
+
 import { Badge } from '@/components/ui/Badge';
 import { buttonClassName } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { buildSetupRows, type SetupRow, type SetupRowStatus } from '../setup-checklist';
 import { CopyLine } from './CopyLine';
 import { InstallAction } from './InstallAction';

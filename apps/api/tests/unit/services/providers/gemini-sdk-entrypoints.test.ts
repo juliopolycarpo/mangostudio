@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+
 import { GoogleGenAI as NodeGoogleGenAI } from '@google/genai/node';
 import { GoogleGenAI } from '@google/genai/web';
+
 import { FakeGeminiHttp } from '../../../support/providers/fake-gemini-http';
 
 type Entry = 'node' | 'web';

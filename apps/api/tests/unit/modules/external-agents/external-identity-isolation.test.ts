@@ -10,7 +10,9 @@
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test';
+
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
+
 import { createExternalIdentityIsolationRegistry } from '../../../../src/modules/external-agents/application/external-identity-isolation';
 
 const ATTESTED: ExternalIdentityIsolation = {

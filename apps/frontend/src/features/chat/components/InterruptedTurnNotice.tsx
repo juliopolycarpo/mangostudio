@@ -5,6 +5,7 @@ import type {
 } from '@mangostudio/shared/turn-recovery';
 import { RotateCcw, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -12,6 +13,7 @@ import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { ChatDockNotice } from './ChatPageNotices';
 import { StatusGlyph } from './ToolCallVisuals';
 
@@ -76,7 +78,11 @@ export function InterruptedTurnNotice({
   };
 
   return (
-    <ChatDockNotice role="status" aria-live="polite">
+    <ChatDockNotice
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+      role="status"
+      aria-live="polite"
+    >
       <Callout tone="warning" title={t.chat.recovery.title} className="p-4">
         <div className="space-y-4">
           <div className="min-w-0 space-y-1">

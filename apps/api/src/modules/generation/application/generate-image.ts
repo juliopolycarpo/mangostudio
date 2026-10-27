@@ -1,6 +1,7 @@
 import type { GeneratedImageArtifact } from '@mangostudio/shared/chat';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { recordProviderTurn } from '../../../services/providers/core/provider-observability';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';

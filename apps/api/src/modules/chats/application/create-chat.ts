@@ -1,8 +1,9 @@
 import type { Chat } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { recordActivity } from '../../activity/application/record-activity';
-import { type CreateChatData, createChat } from '../infrastructure/chat-repository';
+import { createChat, type CreateChatData } from '../infrastructure/chat-repository';
 import { toPublicChat } from './public-chat';
 
 export interface CreateChatInput {

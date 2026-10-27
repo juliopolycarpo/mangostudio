@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+
 import { ROOT_DIR } from '../../lib/config';
 
 /** Keeps a throwaway Turbo run from reporting telemetry or checking for updates. */

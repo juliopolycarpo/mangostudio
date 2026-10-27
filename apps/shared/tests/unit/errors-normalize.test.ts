@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { normalizeApiErrorBody, toProblemDetails } from '@mangostudio/shared/errors';
 
 describe('normalizeApiErrorBody', () => {

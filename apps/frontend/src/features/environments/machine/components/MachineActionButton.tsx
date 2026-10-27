@@ -10,9 +10,11 @@
 
 import type { MachineActionReason, MachineStatus } from '@mangostudio/shared/machine';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { CopyLine } from '../../components/CopyLine';
 import { actionRefusalLines } from '../format';
 

@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-
 import {
   PROTOCOL_CHANGELOG,
   PROTOCOL_CHANGELOG_GLOBS,

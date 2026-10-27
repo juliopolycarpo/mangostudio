@@ -20,6 +20,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import { ReadonlyArraySchema } from '../schema-helpers';
 import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from './choices';
 import type { ExternalAgentCapabilities, ExternalAgentTargetId } from './schemas';
@@ -196,7 +197,7 @@ export function needsWorkspaceTrust(
 ): boolean {
   if (!EXTERNAL_WORKSPACE_TRUST_TARGETS.includes(key.targetId)) return false;
   const accepted = entries.find((entry) => matchesKey(entry, key));
-  return !accepted || accepted.version !== EXTERNAL_WORKSPACE_TRUST_VERSION;
+  return accepted?.version !== EXTERNAL_WORKSPACE_TRUST_VERSION;
 }
 
 /**

@@ -3,9 +3,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { Message, MessagesPage } from '@mangostudio/shared/chat';
 import type { InfiniteData } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
+
 import { messageKeys } from '../../../src/features/chat/queries';
 import { useOptimisticMessages } from '../../../src/features/generation/hooks/use-optimistic-messages';
 import { act, renderHook } from '../../support/harness/render';

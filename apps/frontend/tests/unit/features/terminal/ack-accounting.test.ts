@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   TERMINAL_CHUNK_MAX_BYTES,
   TERMINAL_INFLIGHT_WINDOW_BYTES,
 } from '@mangostudio/shared/terminal';
+
 import {
   createAckAccounting,
   DEFAULT_FLUSH_BYTES,

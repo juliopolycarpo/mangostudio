@@ -15,14 +15,15 @@
 
 import { mkdir, rm } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
+
 import type { HubLaunchMode } from '@mangostudio/shared/machine';
 import {
   SOURCE_SHA_MAX,
   UPDATE_ERROR_MAX,
   UPDATE_VERSION_MAX,
+  type UpdateChannel,
   UPGRADE_COMMAND_MAX,
   UPGRADE_OUTPUT_LINE_MAX,
-  type UpdateChannel,
   type UpgradeOutcome,
   type UpgradeRefusalReason,
   type UpgradeReport,
@@ -31,13 +32,14 @@ import {
   type UpgradeStreamEvent,
   type UpgradeTarget,
 } from '@mangostudio/shared/updates';
+
 import {
   DETACH_ENV_ALLOWLIST,
   pickAllowedEnv,
   restartExecutableOptions,
-  type SpawnDetachedWaiterInput,
   spawnDetached,
   spawnDetachedWaiter,
+  type SpawnDetachedWaiterInput,
 } from '../../../cli/detach';
 import {
   createProcessController,

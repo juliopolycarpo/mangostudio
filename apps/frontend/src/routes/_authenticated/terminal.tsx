@@ -1,5 +1,6 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { createFileRoute } from '@tanstack/react-router';
+
 import { validateEnvironmentSearch } from '@/features/environments/use-environment-scope';
 import {
   terminalAvailabilityQueryOptions,

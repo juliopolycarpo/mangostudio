@@ -8,7 +8,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import { act } from '@testing-library/react';
+
 import { TerminalView } from '../../../../src/features/terminal/TerminalView';
 import { render } from '../../../support/harness/render';
 import { FakeTerminalSocket } from './fake-terminal-socket';
@@ -31,7 +33,7 @@ class FakeWebglAddon {
   }
 }
 
-mock.module('@xterm/addon-webgl', () => ({ WebglAddon: FakeWebglAddon }));
+void mock.module('@xterm/addon-webgl', () => ({ WebglAddon: FakeWebglAddon }));
 
 /**
  * happy-dom answers `null` for every context, so the probe would short-circuit

@@ -5,6 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import {
   type AppSettingsResponse,
   DEFAULT_APP_SETTINGS,
@@ -14,6 +15,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { QueryClient } from '@tanstack/react-query';
+
 import {
   appSettingsForLocationWrite,
   appSettingsKeys,

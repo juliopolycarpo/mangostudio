@@ -9,22 +9,21 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
+
 import { act, fireEvent, renderHook, waitFor } from '../../../support/harness/render';
 import { FakeIdleScheduler } from '../../../support/mocks/fake-idle-scheduler';
 import { FakeTranscriptApi } from '../../../support/mocks/fake-transcript-api';
 
-const { useChatPageMessages } = await import(
-  '../../../../src/features/chat/hooks/use-chat-page-state'
-);
-const { useTranscriptReadAhead } = await import(
-  '../../../../src/features/chat/hooks/use-transcript-read-ahead'
-);
-const { useOptimisticMessages } = await import(
-  '../../../../src/features/generation/hooks/use-optimistic-messages'
-);
+const { useChatPageMessages } =
+  await import('../../../../src/features/chat/hooks/use-chat-page-state');
+const { useTranscriptReadAhead } =
+  await import('../../../../src/features/chat/hooks/use-transcript-read-ahead');
+const { useOptimisticMessages } =
+  await import('../../../../src/features/generation/hooks/use-optimistic-messages');
 const { messageKeys } = await import('../../../../src/features/chat/queries');
 
 const CHAT_ID = 'chat-1';

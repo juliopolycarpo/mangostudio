@@ -19,6 +19,7 @@ import type {
   StashSaveBody,
   UnstagePathsBody,
 } from '@mangostudio/shared/git';
+
 import { recordActivity } from '../../activity/application/record-activity';
 import {
   parseBranchList,
@@ -32,8 +33,8 @@ import {
   GitCliError,
   type GitRuntimeSelection,
   isGitAvailable,
-  type RunGitOptions,
   runGit,
+  type RunGitOptions,
 } from '../infrastructure/git-cli';
 import { withMutationLock, withRepoMutationLock } from './git-mutation-lock';
 import {

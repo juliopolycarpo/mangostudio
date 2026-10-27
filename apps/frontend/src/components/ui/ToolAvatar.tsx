@@ -16,6 +16,7 @@
  */
 
 import { type CSSProperties, useState } from 'react';
+
 import { toolAvatarPalette } from './tool-avatar-palette';
 
 export type ToolAvatarSize = '2xs' | 'xs' | 'sm' | 'md' | 'lg';

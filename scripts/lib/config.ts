@@ -30,21 +30,25 @@ export const WORKSPACES: Record<WorkspaceName, WorkspaceConfig> = {
 
 export const ALL_WORKSPACE_NAMES: WorkspaceName[] = ['frontend', 'api', 'shared'];
 
-// End of config
-
-// Paths Biome checks at root level. Biome receives directories instead of
-// shell-only globs so the runner can spawn it without shell expansion.
-export const ROOT_BIOME_PATHS: string[] = [
+// Root-owned paths shared by Bun lint and fmt. Workspaces run the same tools
+// from this root so nested test-only bunfig.toml files cannot hide lint policy.
+export const ROOT_TOOLING_PATHS: string[] = [
   'package.json',
-  'biome.json',
-  'biome.cycles.json',
+  'bunfig.toml',
   'turbo.jsonc',
   '.zed',
   '.vscode',
-  '.claude/settings.json',
-  '.claude/hooks',
-  '.codex/hooks',
+  '.claude',
+  '.codex',
+  '.cursor/rules',
+  '.github',
+  '.mango',
+  'AGENTS.md',
+  'README.md',
+  'docs',
   'lefthook.yml',
+  'opencode.json',
+  'knip.json',
   'playwright.config.ts',
   'scripts',
   'packages',
@@ -55,31 +59,6 @@ export const ROOT_BIOME_PATHS: string[] = [
   'apps/shared/package.json',
   'tests/browser-smoke',
   'apps/frontend/build.ts',
-  // The normative JSON Schema documents under spec/schema; the conformance
-  // corpus under spec/fixtures is data and is excluded from the formatter in
-  // biome.json, because both SDKs assert on its exact bytes.
-  'spec',
-  'apps/api/tests',
-  'apps/frontend/tests',
-  'apps/shared/tests',
-];
-
-export const ROOT_DPRINT_PATHS: string[] = [
-  'AGENTS.md',
-  '.cursor/rules',
-  'README.md',
-  'Dockerfile',
-  'Dockerfile.alpine',
-  'docs',
-  '.github',
-  '.mango',
-  '.codex/config.toml',
-  'packages',
-  'lefthook.yml',
-  'dprint.json',
-  'bunfig.toml',
-  // The Mango Protocol tree: the normative spec prose, the Rust crate's own
-  // markdown, and the four TOML files its workspace needs at the root.
   'spec',
   'crates',
   'Cargo.toml',
@@ -88,8 +67,13 @@ export const ROOT_DPRINT_PATHS: string[] = [
   'rust-toolchain.toml',
 ];
 
-export const WORKSPACE_DPRINT_PATHS: Record<WorkspaceName, string[]> = {
-  frontend: ['apps/frontend/AGENTS.md', 'apps/frontend/bunfig.toml'],
-  api: ['apps/api/AGENTS.md', 'apps/api/bunfig.toml'],
-  shared: ['apps/shared/AGENTS.md', 'apps/shared/bunfig.toml'],
-};
+// Lint accepts only source directories; JSON-only directories are errors.
+export const ROOT_LINT_PATHS: string[] = [
+  '.claude/hooks',
+  '.codex/hooks',
+  'scripts',
+  'packages',
+  'tests/browser-smoke',
+  'playwright.config.ts',
+  'apps/frontend/build.ts',
+];

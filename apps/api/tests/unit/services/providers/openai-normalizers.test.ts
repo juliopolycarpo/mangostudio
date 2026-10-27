@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { Responses } from 'openai/resources/responses/responses';
+
 import { extractResponsesUsage } from '../../../../src/services/providers/openai/normalizers';
 
 /** Cast partial mock to the full SDK type for test purposes. */

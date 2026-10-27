@@ -20,7 +20,9 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+
 import type { LinuxPlatformId } from '@mangostudio/shared/runtime-home';
+
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { throwIfAborted } from './cancellation';

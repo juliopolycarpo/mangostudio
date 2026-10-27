@@ -6,12 +6,14 @@
  */
 
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import { screen } from '@testing-library/react';
+
 import { flushAsyncRender, render } from '../../../support/harness/render';
 
 // The virtualizer depends on DOM layout measurements not available in happy-dom.
-mock.module('@tanstack/react-virtual', () => ({
+void mock.module('@tanstack/react-virtual', () => ({
   useVirtualizer: (opts: { count: number }) => ({
     getTotalSize: () => opts.count * 200,
     getVirtualItems: () =>
@@ -24,9 +26,8 @@ mock.module('@tanstack/react-virtual', () => ({
 // bind ChatFeed to the real virtualizer.
 const { ChatFeed } = await import('../../../../src/features/chat/components/ChatFeed');
 const { InputBar } = await import('../../../../src/features/chat/components/InputBar');
-const { CHAT_COLUMN_CLASS, CHAT_GUTTER_X_CLASS } = await import(
-  '../../../../src/features/chat/lib/chat-column'
-);
+const { CHAT_COLUMN_CLASS, CHAT_GUTTER_X_CLASS } =
+  await import('../../../../src/features/chat/lib/chat-column');
 
 const MESSAGE: Message = {
   id: 'msg-1',

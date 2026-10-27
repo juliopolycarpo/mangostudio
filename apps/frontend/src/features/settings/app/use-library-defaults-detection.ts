@@ -17,12 +17,14 @@ import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { SETTINGS_TOPIC, type SettingsScope } from '@mangostudio/shared/realtime';
 import {
   type QueryClient,
-  type UseQueryResult,
   useQuery,
   useQueryClient,
+  type UseQueryResult,
 } from '@tanstack/react-query';
+
 import type { RealtimeSignal } from '@/lib/realtime/realtime-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
+
 import { hasRecentAppSettingsLocalWrite } from './local-write-window';
 import {
   appSettingsKeys,

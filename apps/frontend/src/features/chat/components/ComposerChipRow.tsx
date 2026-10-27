@@ -31,6 +31,7 @@ import type {
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
 import { ChevronDown } from 'lucide-react';
 import { Fragment, type ReactNode, useState } from 'react';
+
 import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { ChipSelect } from '@/components/ui/ChipSelect';
@@ -45,6 +46,7 @@ import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
+
 import { ContextBadge } from './ContextBadge';
 
 /** Shared empty list, so an absent catalog does not allocate per render. */

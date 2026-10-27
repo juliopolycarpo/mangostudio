@@ -13,11 +13,13 @@ import {
   Trash2,
   TriangleAlert,
 } from 'lucide-react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import { formatPlan } from '../lib/format-plan';
 import { isReadOnlySharedConnector } from '../lib/shared-connector';

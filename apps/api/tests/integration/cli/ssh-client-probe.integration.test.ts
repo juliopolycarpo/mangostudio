@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { probeSshClient } from '../../../src/cli/ssh-client-probe';
 
 describe('probeSshClient with the installed OpenSSH client', () => {

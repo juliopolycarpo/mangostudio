@@ -8,17 +8,17 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import { useQueryClient } from '@tanstack/react-query';
+
 import { act, renderHook, waitFor } from '../../../support/harness/render';
 import { FakeTranscriptApi } from '../../../support/mocks/fake-transcript-api';
 
-const { useChatPageMessages } = await import(
-  '../../../../src/features/chat/hooks/use-chat-page-state'
-);
-const { useOptimisticMessages } = await import(
-  '../../../../src/features/generation/hooks/use-optimistic-messages'
-);
+const { useChatPageMessages } =
+  await import('../../../../src/features/chat/hooks/use-chat-page-state');
+const { useOptimisticMessages } =
+  await import('../../../../src/features/generation/hooks/use-optimistic-messages');
 const { messageKeys, messagesQueryOptions } = await import('../../../../src/features/chat/queries');
 
 const CHAT_ID = 'chat-1';

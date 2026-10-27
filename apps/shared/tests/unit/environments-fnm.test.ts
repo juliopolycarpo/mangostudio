@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { posix, win32 } from 'node:path';
+
 import {
   detectFnm,
   type FnmDetectionDeps,

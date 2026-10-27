@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
 
 import type { StreamChunk } from '../../src/streaming';

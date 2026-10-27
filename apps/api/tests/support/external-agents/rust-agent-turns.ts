@@ -17,7 +17,8 @@
 import { existsSync } from 'node:fs';
 import { chmod, copyFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type SpawnedPeer, sanitizedEnv } from '@mangostudio/protocol/spawn';
+
+import { sanitizedEnv, type SpawnedPeer } from '@mangostudio/protocol/spawn';
 import type {
   ExternalAgentConfiguration,
   ExternalAgentRuntimeDescriptor,
@@ -27,6 +28,7 @@ import type {
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
+
 import { getDb } from '../../../src/db/database';
 import { workspaceCargoTargetDir } from '../../../src/lib/runtime-paths';
 import { createExternalApprovalRegistry } from '../../../src/modules/external-agents/application/external-approval-registry';
@@ -216,6 +218,7 @@ export async function openRustSmokeHub<T extends { close(): void }>(
   connect: () => Promise<T>,
   registerCleanup: (cleanup: () => Promise<void>) => void
 ): Promise<T> {
+  // eslint-disable-next-line prefer-const -- The cleanup callback captures the connection assigned later.
   let hub: T | undefined;
   registerCleanup(async () => {
     try {

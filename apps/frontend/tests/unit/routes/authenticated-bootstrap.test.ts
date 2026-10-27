@@ -10,7 +10,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { QueryClient } from '@tanstack/react-query';
+
 import { catalogQueryOptions } from '../../../src/hooks/use-model-catalog';
 import { Route as AuthenticatedRoute } from '../../../src/routes/_authenticated';
 import {

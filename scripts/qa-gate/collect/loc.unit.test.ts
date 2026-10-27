@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { LocClass } from '../model/metrics';
 import { makeFakeRepository } from '../testing/fake-repository';
 import { expectState } from '../testing/measurement-assertions';
@@ -167,6 +168,7 @@ describe('measureComponentLoc', () => {
 
   it('reports a component with no countable files as measured zeros, not as a failure', async () => {
     const cell = expectState(
+      // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
       await measureComponentLoc(['apps/x/logo.png'], async () => 'x'),
       'measured'
     );

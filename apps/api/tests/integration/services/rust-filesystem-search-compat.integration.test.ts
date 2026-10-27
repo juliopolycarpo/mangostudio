@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+
 import { rejectionOf } from '@mangostudio/protocol/testing';
 import {
   GrepPatternError,
@@ -14,6 +15,7 @@ import {
   type RuntimeGlobResult,
   type RuntimeGrepResult,
 } from '@mangostudio/shared/runtime-contract';
+
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   RECORDED_GLOBS,

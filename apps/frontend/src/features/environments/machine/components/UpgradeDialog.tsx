@@ -15,6 +15,7 @@
 import type { MachineUpdateStatus } from '@mangostudio/shared/updates';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -23,8 +24,9 @@ import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
+
 import { machineGuardReasonLabel, upgradeRefusalReasonLabel } from '../format';
-import { type UseUpgradeStreamResult, useUpgradeStream } from '../hooks/use-upgrade-stream';
+import { useUpgradeStream, type UseUpgradeStreamResult } from '../hooks/use-upgrade-stream';
 import { invalidateMachineUpdate } from '../queries';
 import { RefusalNotice } from './RefusalNotice';
 

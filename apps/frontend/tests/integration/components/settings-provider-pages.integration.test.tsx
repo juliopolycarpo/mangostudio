@@ -3,21 +3,22 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
+
 import { flushAsyncRender, render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../support/mocks/router';
 
 // Registered before the subject is imported: `mock.module` is not hoisted and
 // static imports are.
-mock.module(
+void mock.module(
   '@tanstack/react-router',
   await routerWithLinkStub({ useParams: () => ({ provider: 'deepseek' }) })
 );
 
-const { ProviderSettingsPage } = await import(
-  '../../../src/features/settings/providers/components/ProviderSettingsPage'
-);
+const { ProviderSettingsPage } =
+  await import('../../../src/features/settings/providers/components/ProviderSettingsPage');
 
 const DEEPSEEK_DESCRIPTOR = {
   provider: 'deepseek',

@@ -6,8 +6,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents';
 import { EXTERNAL_ACCOUNT_LIMITS_STALE_MS } from '@mangostudio/shared/external-agents';
+
 import { nextAccountLimitsCopyChangeMs } from '@/features/external-agents/account-limits-copy';
 
 const NOW = 1_787_000_000_000;

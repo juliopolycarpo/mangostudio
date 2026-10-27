@@ -4,9 +4,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import userEvent from '@testing-library/user-event';
+
 import { McpSettingsPage } from '../../../src/features/settings/mcp/components/McpSettingsPage';
 import { fireEvent, render, screen, waitFor, within } from '../../support/harness/render';
 import { chooseOption } from '../../support/harness/select';

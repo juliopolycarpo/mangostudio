@@ -261,7 +261,7 @@ What the CLI registers:
   re-entered after a password change.
 - **Settings** no execution time limit, `-MultipleInstances IgnoreNew`,
   `-StartWhenAvailable`, the battery flags, and `-RestartCount 3
-  -RestartInterval 1 minute` for unexpected failures.
+-RestartInterval 1 minute` for unexpected failures.
 - **Action** a hidden `powershell.exe` wrapper that sets `MANGO_HOME`, invokes
   the shim, and immediately launches it again after update exit code `75`.
   The task command contains no credentials.

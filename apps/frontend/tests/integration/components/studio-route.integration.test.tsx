@@ -7,9 +7,11 @@
  */
 
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { GalleryItem } from '@mangostudio/shared/types';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { AppContext } from '../../../src/lib/app-context';
 import { render } from '../../support/harness/render';
 import { routerWithLinkStub } from '../../support/mocks/router';
@@ -25,11 +27,11 @@ const galleryState = { items: [] as GalleryItem[], status: 'success' as GalleryS
 // `mock.module` mutates a module graph that `bun test` shares across files and
 // survives `mock.restore()`, so this lane runs under `--isolate`. Without it,
 // every later file in the run would get this `Link` too.
-mock.module(
+void mock.module(
   '@tanstack/react-router',
   await routerWithLinkStub({ useNavigate: () => navigateMock })
 );
-mock.module('../../../src/features/gallery/queries', () => ({
+void mock.module('../../../src/features/gallery/queries', () => ({
   useGalleryQuery: () => ({
     data: { pages: [{ items: galleryState.items, nextCursor: null }], pageParams: [null] },
     status: galleryState.status,

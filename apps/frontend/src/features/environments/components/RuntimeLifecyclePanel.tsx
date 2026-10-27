@@ -12,6 +12,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { Download, HardDriveDownload, RefreshCw, RotateCcw, Shield } from 'lucide-react';
 import { useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -20,6 +21,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useInstallStream } from '../hooks/use-install-stream';
 import {
   useCancelRuntimeInstallMutation,
@@ -257,7 +259,12 @@ function UnenforcedContainment({ view }: { view: RuntimeLifecycleView }) {
   if (view.enforcesPathPolicy !== false) return null;
 
   return (
-    <Callout tone="warning" role="status" data-testid="runtime-unenforced-containment">
+    <Callout
+      tone="warning"
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+      role="status"
+      data-testid="runtime-unenforced-containment"
+    >
       {t.environments.entities.runtime.unenforcedContainment}
     </Callout>
   );

@@ -9,7 +9,9 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { GoogleGenAI } from '@google/genai/web';
+
 import type { createGeminiClient } from '../../../src/services/providers/gemini/client';
 import { streamGeminiAgentTurn } from '../../../src/services/providers/gemini/interactions-stream';
 import type { AgentEvent, AgentTurnRequest } from '../../../src/services/providers/types';

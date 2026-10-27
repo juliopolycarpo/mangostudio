@@ -1,13 +1,7 @@
 import type { CodeThemeId } from '@/lib/code-themes';
 
 type TokenType =
-  | 'keyword'
-  | 'identifier'
-  | 'operator'
-  | 'string'
-  | 'punctuation'
-  | 'functionName'
-  | 'parameter';
+  'keyword' | 'identifier' | 'operator' | 'string' | 'punctuation' | 'functionName' | 'parameter';
 
 const THEME_BACKGROUND: Record<CodeThemeId, string> = {
   'one-dark-pro': '#282c34',
@@ -84,6 +78,7 @@ export function ThemePreviewSample({ themeId }: { readonly themeId: CodeThemeId 
         <span style={{ color: c.punctuation }}>{')'}</span>{' '}
         <span style={{ color: c.punctuation }}>{'{'}</span>
         {'\n'} <span style={{ color: c.keyword }}>return</span>{' '}
+        {/* eslint-disable-next-line no-template-curly-in-string -- Displayed code contains a literal template expression. */}
         <span style={{ color: c.string }}>{'\u0060\u0024{greeting}, \u0024{name}\u0060'}</span>
         <span style={{ color: c.punctuation }}>;</span>
         {'\n'}

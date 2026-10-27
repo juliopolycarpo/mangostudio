@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { RUNTIME_EXTERNAL_AGENT_TOPIC } from '@mangostudio/shared/runtime-contract';
+
 import { openHubSession } from '../../../../src/services/runtime-client/hub-session';
 import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 import { FakeHostileRuntimePeer } from '../../../support/mocks/fake-hostile-runtime-peer';

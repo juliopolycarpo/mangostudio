@@ -6,7 +6,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { ActivityEvent } from '@mangostudio/shared/activity';
+
 import {
   activityDayGroupLabel,
   countNewSince,

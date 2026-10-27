@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import {
   CHATGPT_REAUTH_REQUIRED_CODE,
   ChatGptOAuthError,

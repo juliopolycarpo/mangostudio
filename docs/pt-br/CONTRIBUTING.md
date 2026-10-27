@@ -90,7 +90,7 @@ bun run test --e2e
 bun run check
 ```
 
-Inclui Biome, dprint, verificação de dependências circulares e verificação de tipos TypeScript em todos os workspaces. Veja `bun run check --help` e [`scripts/check.ts`](../../scripts/check.ts) para o contrato completo do comando, incluindo verificações de código não utilizado, contratos gerados, lockfile e protocolo.
+Inclui Bun lint/fmt, verificação de ciclos de importação e verificação de tipos TypeScript em todos os workspaces. Veja `bun run check --help` e [`scripts/check.ts`](../../scripts/check.ts) para o contrato completo do comando, incluindo verificações de código não utilizado, contratos gerados, lockfile e protocolo. O lint usa regras e exclusões em `bunfig.toml`; o scan de ciclos continua separado para incluir imports de tipos e arquivos gerados ou ignorados pelo Git.
 
 ## Build
 

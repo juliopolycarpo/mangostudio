@@ -32,9 +32,11 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+
 import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
+
 import { enableInstalls } from './api';
 
 const STALE_TIME_MS = 30_000;

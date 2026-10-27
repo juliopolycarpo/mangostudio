@@ -3,12 +3,14 @@ import type { Locale, Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, RefreshCw } from 'lucide-react';
 import { useMemo } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { getChatGptUsageStats } from '../api';
 
 type ConnectorMessages = Messages['settings']['connectors'];
@@ -92,6 +94,7 @@ function UsageStatsChart({
       {/* The bars are the accent's text variant, the one that clears 3:1 on a
           white surface; the baseline is the plot's only frame. */}
       <div
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The accessible image role labels rendered chart content.
         role="img"
         aria-label={s.chatgptStatsChartTitle}
         className="flex h-20 items-end gap-1 border-b border-stroke"
@@ -197,7 +200,11 @@ export function ChatGptUsageStatsPanel({ connectorId }: { connectorId: string })
       </MicroLabel>
 
       {statsQuery.isLoading ? (
-        <div role="status" className="flex items-center gap-2 text-xs text-fg-muted">
+        <div
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+          role="status"
+          className="flex items-center gap-2 text-xs text-fg-muted"
+        >
           <Spinner size="sm" />
           {s.chatgptStatsLoading}
         </div>

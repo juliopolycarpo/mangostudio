@@ -6,6 +6,7 @@
 
 import { TabNav } from '@/components/ui/TabNav';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { environmentNavEntries } from '../environments-nav';
 
 export function EnvironmentTabs() {

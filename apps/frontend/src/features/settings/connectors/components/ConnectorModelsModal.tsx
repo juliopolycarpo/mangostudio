@@ -1,10 +1,12 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared/catalog';
 import type { Connector } from '@mangostudio/shared/connectors';
+
 import { Button } from '@/components/ui/Button';
 import { Dialog } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { ModelToggleList } from './ModelToggleList';
 
 interface ConnectorModelsModalProps {

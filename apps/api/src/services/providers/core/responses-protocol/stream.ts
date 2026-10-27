@@ -6,8 +6,9 @@
  */
 
 import type OpenAI from 'openai';
-import { type APIPromise, APIError as OpenAIAPIError } from 'openai';
+import { APIError as OpenAIAPIError, type APIPromise } from 'openai';
 import type { Stream } from 'openai/streaming';
+
 import { parseJsonWith } from '../../../../lib/safe-parse';
 import type {
   AgentEvent,
@@ -37,9 +38,9 @@ import {
   buildResponsesTextInput,
   buildStructuredTextFormat,
   normalizeResponsesReasoningEffort,
-  type ResponsesRequestPolicy,
   resolveResponsesContextLimit,
   resolveResponsesInstructions,
+  type ResponsesRequestPolicy,
 } from './request-builder';
 
 // ---------------------------------------------------------------------------

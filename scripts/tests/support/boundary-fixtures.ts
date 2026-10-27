@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import { ROOT_DIR } from '../../lib/config';
 
 const tempRoots: string[] = [];
@@ -50,34 +51,56 @@ export function removeSourceTrees(): void {
 }
 
 /**
- * Lint one fixture file with the repository's `noRestrictedImports` options.
+ * Lint one fixture file with the repository's restricted-import and syntax options.
  *
  * @example
  * expect(lintSource('apps/frontend/src/a.ts', "import '@mangostudio/shared';").exitCode).toBe(1);
  */
 export function lintSource(path: string, source: string): { exitCode: number; output: string } {
   const root = createSourceTree(path, source);
-  const config = JSON.parse(readFileSync(join(ROOT_DIR, 'biome.json'), 'utf8')) as {
-    vcs: { enabled: boolean };
+  const config = Bun.TOML.parse(readFileSync(join(ROOT_DIR, 'bunfig.toml'), 'utf8')) as {
+    lint: {
+      rules: Record<string, unknown>;
+      overrides: { files: string[]; excludeFiles?: string[]; rules: Record<string, unknown> }[];
+    };
   };
-  // The isolated fixture has no Git checkout; all rule options and overrides
-  // remain the repository's real configuration.
-  config.vcs.enabled = false;
-  writeFileSync(join(root, 'biome.json'), JSON.stringify(config));
-  const result = Bun.spawnSync(
-    [
-      process.execPath,
-      'x',
-      '--no-install',
-      'biome',
-      'lint',
-      '--config-path',
-      root,
-      '--only=style/noRestrictedImports',
-      join(root, path),
-    ],
-    { cwd: ROOT_DIR, stdout: 'pipe', stderr: 'pipe' }
-  );
+  const onlyBoundary = (rules: Record<string, unknown>) =>
+    Object.fromEntries(
+      Object.entries(rules).filter(([rule]) =>
+        ['no-restricted-imports', 'no-restricted-syntax'].includes(rule)
+      )
+    );
+  const blocks = [
+    { files: ['**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}'], rules: onlyBoundary(config.lint.rules) },
+    ...config.lint.overrides.map(({ files, excludeFiles, rules }) => ({
+      files,
+      ...(excludeFiles ? { ignores: excludeFiles } : {}),
+      rules: onlyBoundary(rules),
+    })),
+  ];
+  writeFileSync(join(root, 'eslint.config.mjs'), `export default ${JSON.stringify(blocks)};\n`);
+  const result = Bun.spawnSync([process.execPath, 'lint', '--no-script', path], {
+    cwd: root,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  return { exitCode: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
+}
+
+/** Lint a fixture with the full repository Bun configuration.
+ * @example lintConfiguredSource('src/a.ts', "import '@mangostudio/shared';");
+ */
+export function lintConfiguredSource(
+  path: string,
+  source: string
+): { exitCode: number; output: string } {
+  const root = createSourceTree(path, source);
+  writeFileSync(join(root, 'bunfig.toml'), readFileSync(join(ROOT_DIR, 'bunfig.toml')));
+  const result = Bun.spawnSync([process.execPath, 'lint', '--no-script', path], {
+    cwd: root,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   return { exitCode: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
 }
 

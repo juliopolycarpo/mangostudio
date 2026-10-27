@@ -14,12 +14,14 @@
  */
 
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+
 import type {
   ExternalAccountLimits,
   ExternalAgentDescriptor,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
+
 import { externalAccountLimitsKey } from '../../../../src/features/external-agents/queries';
 import { useExternalAccountLimits } from '../../../../src/features/external-agents/use-external-account-limits';
 import { act, flushAsyncRender, renderHook } from '../../../support/harness/render';
@@ -45,7 +47,7 @@ function deferred(): Deferred {
 const pendingLoads: Deferred[] = [];
 const pendingRefreshes: Deferred[] = [];
 
-mock.module('@/services/external-agent-service', () => ({
+void mock.module('@/services/external-agent-service', () => ({
   ...actualExternalAgentService,
   getExternalAccountLimits: () => {
     const next = deferred();

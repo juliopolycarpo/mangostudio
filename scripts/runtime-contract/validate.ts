@@ -18,6 +18,7 @@
  */
 
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
+
 import { ARTIFACT_DIR, CATALOG_SCHEMA_URL } from './artifacts';
 
 /** Every catalog the emitter writes: the runtime's contract and the hub's. */

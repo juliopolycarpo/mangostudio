@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { collectLibraryDoctorSection } from '../../../src/cli/library-doctor-checks';
 
 describe('collectLibraryDoctorSection', () => {

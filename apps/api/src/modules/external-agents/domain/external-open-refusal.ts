@@ -21,6 +21,7 @@ import {
   isExternalAgentKindCode,
 } from '@mangostudio/shared/external-agents';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+
 import { productDescriptorFor } from './adapter-descriptors';
 
 /** The runtime's open-time error kinds that name an existing unavailable reason. */

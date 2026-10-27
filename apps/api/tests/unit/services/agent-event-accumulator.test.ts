@@ -3,6 +3,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test';
+
 import type { GetCurrentDatetimeResult } from '../../../src/services/tools/builtin/get-current-datetime';
 import { register as registerGetCurrentDatetime } from '../../../src/services/tools/builtin/get-current-datetime';
 import { executeTool, getTool } from '../../../src/services/tools/registry';

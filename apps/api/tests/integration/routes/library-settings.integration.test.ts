@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type {
   ConceptComparison,
   LibraryTargetId,
   SettingsSnapshot,
 } from '@mangostudio/shared/library';
+
 import type { LibraryScope } from '../../../src/modules/library/application/environment-library-service';
 import {
   createSettingsRoutes,

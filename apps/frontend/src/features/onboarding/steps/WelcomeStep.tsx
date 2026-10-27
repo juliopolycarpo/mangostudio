@@ -6,8 +6,10 @@
  */
 
 import { FolderTree, ShieldCheck, Sparkles } from 'lucide-react';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { StepFrame } from '../StepFrame';
 
 export function WelcomeStep() {

@@ -13,9 +13,11 @@ import type {
   PropagationOperation,
   PropagationPreview,
 } from '@mangostudio/shared/library';
+
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { hashPrefix } from '../format';
 import {
   applySummary,

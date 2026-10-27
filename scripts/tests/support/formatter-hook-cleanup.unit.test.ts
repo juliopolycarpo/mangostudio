@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { stopPath } from './fake-rustfmt-markers';
 import { withFormatterHookCleanup } from './formatter-hook-cleanup';
 

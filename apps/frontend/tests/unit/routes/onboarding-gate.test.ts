@@ -10,10 +10,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { DEFAULT_APP_SETTINGS, withOnboarding } from '@mangostudio/shared/app-settings';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { DEFAULT_ONBOARDING_STATE } from '@mangostudio/shared/onboarding';
+
 import { ApiError } from '../../../src/lib/utils';
 import { Route as AuthenticatedRoute } from '../../../src/routes/_authenticated';
 

@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import { fireEvent, screen, within } from '@testing-library/react';
-import { ToolCallGroupBlock } from '@/features/chat/components/ToolCallGroupBlock';
+
 import type { ToolCallEntry } from '@/features/chat/components/tool-call-grouping';
+import { ToolCallGroupBlock } from '@/features/chat/components/ToolCallGroupBlock';
+
 import { render } from '../../support/harness/render';
 
 function executionSnapshot(durationMs: number): ToolExecutionSnapshot {

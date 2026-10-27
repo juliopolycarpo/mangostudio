@@ -1,4 +1,5 @@
 import { ToggleSwitch } from '@/components/ui/Toggle';
+
 import { SettingsRow } from './SettingsRow';
 
 interface SettingToggleProps {

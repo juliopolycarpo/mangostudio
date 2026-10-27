@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import {
   extractClientIp,
   type GuardIpPolicy,

@@ -10,9 +10,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import type { ToolIdentityListResponse } from '@mangostudio/shared/tool-identity';
+
 import { AgentCliCard } from '../../../../src/features/environments/components/AgentCliCard';
 import { CoverageMatrix } from '../../../../src/features/library/components/CoverageMatrix';
 import { McpServerCard } from '../../../../src/features/settings/mcp/components/McpServerCard';

@@ -10,6 +10,7 @@
  */
 
 import { delimiter, dirname, join } from 'node:path';
+
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import {
   type ExternalAgentDescriptor,
@@ -17,6 +18,7 @@ import {
   type ExternalAgentUnavailableReason,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
+
 import type { EnvironmentProbingService } from '../../../src/modules/environments/application/probing-service';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 

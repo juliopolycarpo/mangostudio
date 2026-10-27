@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   type MachineConfigWriteBody,
   type MachineConfigWriteResponse,
@@ -17,6 +18,7 @@ import {
   type UpgradeStreamEvent,
 } from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
+
 import type { GuardIpPolicy } from '../../../src/lib/client-ip';
 import {
   MachineActionBlockedError,

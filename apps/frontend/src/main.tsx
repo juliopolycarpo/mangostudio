@@ -4,6 +4,7 @@ import { RouterProvider } from '@tanstack/react-router';
 import { domAnimation, LazyMotion } from 'motion/react';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+
 import { StartupSpinner } from './components/layout/StartupSpinner';
 import { authClient } from './lib/auth-client';
 import { setAuthNavigate } from './lib/auth-navigate';
@@ -22,7 +23,9 @@ import '@xterm/xterm/css/xterm.css';
 void preloadStartupLocale();
 
 setAuthNavigate(() => {
-  router.navigate({ to: '/login' });
+  void router.navigate({ to: '/login' }).catch((error) => {
+    console.error('Failed to navigate to login:', error);
+  });
 });
 
 function App() {

@@ -12,7 +12,7 @@ frame limit enforced per line, refused line ends the session with `4400`.
 
 - POSIX: a filesystem path. Applications choose it; a runtime directory scoped to the user
   (`$XDG_RUNTIME_DIR`, `~/.mango/run/`) is the reference location. The listener creates the
-  socket with owner-only permissions (`0600`). A socket file at the address is *stale* when a
+  socket with owner-only permissions (`0600`). A socket file at the address is _stale_ when a
   connection to it is refused: the listener removes a stale file before binding, and refuses to
   bind — the address is in use — when a connection to it succeeds or cannot be judged. Anything
   at the address that is not a socket is never removed.

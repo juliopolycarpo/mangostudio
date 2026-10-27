@@ -1,4 +1,5 @@
 import { posix } from 'node:path';
+
 import type { PathEnv } from '../../runtime-env';
 import type { ManagedVersion, VersionManagerStatus } from '../schemas';
 import { type NodeReleaseSchedule, normalizeNodeVersion } from './lts-policy';

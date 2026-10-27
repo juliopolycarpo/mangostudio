@@ -1,5 +1,6 @@
 import type { ExternalThreadUsage } from '@mangostudio/shared/external-agents';
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 
 interface UseChatStreamOptions {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { raceAgainstAbort } from '../../../src/lib/abort-race';
 
 class Cancelled extends Error {}

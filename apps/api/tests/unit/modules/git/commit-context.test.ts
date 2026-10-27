@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { GitStatus } from '@mangostudio/shared/git';
+
 import {
   buildCommitContextWithMetadata,
   DIFF_TRUNCATED_MARKER,

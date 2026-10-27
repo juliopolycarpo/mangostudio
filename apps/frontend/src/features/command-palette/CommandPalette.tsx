@@ -30,6 +30,7 @@ import {
   useRef,
   useState,
 } from 'react';
+
 import { DIALOG_SURFACE_CLASS } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { KbdHint, ReturnKey } from '@/components/ui/KbdHint';
@@ -42,6 +43,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
+
 import type { CommandItem } from './lib/command-item';
 import { activeCommandIndex, rankCommands } from './lib/match';
 
@@ -229,7 +231,7 @@ export const CommandPalette = memo(function CommandPalette({
   const showEmpty = !isLoading && flat.length === 0;
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop only dismisses; Escape on the dialog is its keyboard equivalent.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- the backdrop only dismisses; Escape on the dialog is its keyboard equivalent.
     <div
       className="fixed inset-0 z-[60] flex items-start justify-center bg-scrim px-4 pt-[10vh]"
       onMouseDown={(event) => {
@@ -237,6 +239,7 @@ export const CommandPalette = memo(function CommandPalette({
       }}
     >
       <motion.div
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- This custom dialog owns its focus and dismissal behavior.
         role="dialog"
         aria-modal="true"
         aria-label={labels.title}
@@ -281,9 +284,14 @@ export const CommandPalette = memo(function CommandPalette({
         </div>
 
         <div className="app-scrollbar max-h-[55vh] min-h-0 overflow-y-auto py-2">
-          <div id={listId} role="listbox" aria-label={labels.title}>
+          <div
+            id={listId}
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox renders rich options a native select cannot contain.
+            role="listbox"
+            aria-label={labels.title}
+          >
             {groups.map((group, groupIndex) => (
-              // biome-ignore lint/a11y/useSemanticElements: `group` is the role ARIA defines for a listbox's own sections; `<fieldset>` groups form controls and is not a valid listbox child.
+              // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- `group` is the role ARIA defines for a listbox's own sections; `<fieldset>` groups form controls and is not a valid listbox child.
               <div key={group.section} role="group" aria-labelledby={`${listId}-${group.section}`}>
                 <MicroLabel as="div" id={`${listId}-${group.section}`} className="px-4 pb-1 pt-2">
                   {labels.sections[group.section]}
@@ -378,9 +386,10 @@ function CommandRow({
 }) {
   const Icon = item.icon;
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: options are driven from the combobox input, where every key path is handled.
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- options are driven from the combobox input, where every key path is handled.
     <div
       id={id}
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox option carries rich content and selection behavior.
       role="option"
       aria-selected={active}
       // Script-focusable, never tab-focusable: the input keeps DOM focus and

@@ -7,6 +7,7 @@
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
 import { queryOptions } from '@tanstack/react-query';
+
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 

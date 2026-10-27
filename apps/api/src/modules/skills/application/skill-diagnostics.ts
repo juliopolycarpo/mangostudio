@@ -9,7 +9,9 @@
 
 import { type Dirent, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
 import type { SkillSource } from '@mangostudio/shared/skills';
+
 import { describeSkill, resolveWinnersBySlug, type ScannedSkill } from './skill-discovery';
 
 /** Provenance of the effective `skills.dir`, mirroring config resolution order. */

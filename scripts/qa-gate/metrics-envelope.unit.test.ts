@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { TestSuiteStats } from './collect/types';
 import {
   type ExpectedEnvelope,
@@ -12,9 +13,9 @@ import {
 import {
   absentFromProducer,
   type DataState,
-  type Measurement,
   measured,
   measuredValue,
+  type Measurement,
   partial,
   stale,
   unavailable,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+
 import {
   createInstallerDownloader,
   InstallerDownloadError,
@@ -159,6 +160,7 @@ describe('installer download', () => {
       new Response(SCRIPT, { status: 200 }),
     ];
     const redirected = createDownloaderWithFetch(((input: Parameters<typeof fetch>[0]) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
       calls.push(String(input));
       const response = responses.shift();
       if (!response) throw new Error('Unexpected fetch.');
@@ -180,6 +182,7 @@ describe('installer download', () => {
 
     const downgradedCalls: string[] = [];
     const downgraded = createDownloaderWithFetch(((input: Parameters<typeof fetch>[0]) => {
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
       downgradedCalls.push(String(input));
       return Promise.resolve(
         new Response(null, {
@@ -211,6 +214,7 @@ describe('installer download', () => {
     for (const testCase of cases) {
       const calls: string[] = [];
       const fixture = createDownloaderWithFetch(((input: Parameters<typeof fetch>[0]) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         calls.push(String(input));
         return Promise.resolve(
           new Response(null, { status: 302, headers: { location: testCase.location } })

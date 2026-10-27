@@ -1,4 +1,5 @@
 import Type, { type Static } from 'typebox';
+
 import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
 import {
   LibraryLocationStatusSchema,

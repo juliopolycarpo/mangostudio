@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { connect as connectSocket, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import legacyHello from '../../../../spec/fixtures/1/legacy-hello.json';
 import { CLOSE_CODES } from '../../src/close';
 import { LineDecoder } from '../../src/codec/ndjson';
@@ -54,7 +55,7 @@ describeInterop('interop: local socket (Rust serves, TypeScript dials)', () => {
     } catch (cause) {
       throw new Error(`${String(cause)}\npeer said:\n${peer.diagnostics()}`, { cause });
     } finally {
-      session.close(CLOSE_CODES.RELEASED, 'interop done');
+      await session.close(CLOSE_CODES.RELEASED, 'interop done');
     }
   }, 60_000);
 
@@ -96,7 +97,7 @@ describeInterop('interop: local socket (TypeScript serves, Rust dials)', () => {
     } catch (cause) {
       throw new Error(`${String(cause)}\npeer said:\n${peer.diagnostics()}`, { cause });
     } finally {
-      session.close(CLOSE_CODES.RELEASED, 'interop done');
+      await session.close(CLOSE_CODES.RELEASED, 'interop done');
     }
     // The peer's own session ends with the socket, so it exits on its own.
     // Asserted after the block, not inside it: a throw in `finally` replaces

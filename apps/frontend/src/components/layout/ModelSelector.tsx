@@ -3,6 +3,7 @@ import type { ProviderType } from '@mangostudio/shared/types';
 import { Check, ChevronDown, Lock } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import { useState } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -11,6 +12,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { getModelSelectorPlaceholder } from '../../utils/model-utils';
 
 interface ModelSelectorProps {
@@ -76,7 +78,7 @@ export function ModelSelector({
       : null;
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Escape is handled for the trigger and the panel it owns, both inside this wrapper.
     <div className="flex items-center" ref={containerRef} onKeyDown={onKeyDown}>
       <button
         ref={triggerRef}

@@ -9,7 +9,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { RuntimePairedBootstrapBody } from '@mangostudio/shared/environments';
+
 import { runPairedBootstrap } from '../../../../src/modules/environments/application/runtime-lifecycle-service';
 import type { RuntimePairingService } from '../../../../src/modules/environments/application/runtime-pairing-service';
 import type {

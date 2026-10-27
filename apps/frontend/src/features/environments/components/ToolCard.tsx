@@ -10,8 +10,10 @@
 
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import type { ReactNode } from 'react';
+
 import type { ToolAvatarSize } from '@/components/ui/ToolAvatar';
 import { cn } from '@/lib/utils';
+
 import { ToolIdentityHeader } from '../identity/ToolIdentityHeader';
 
 /**

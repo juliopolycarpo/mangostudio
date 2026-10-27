@@ -7,6 +7,7 @@ import {
 } from '@mangostudio/shared/api-keys';
 import { Check, Copy, KeyRound } from 'lucide-react';
 import { useState } from 'react';
+
 import { SettingsField } from '@/components/settings/SettingsField';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -18,6 +19,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { scopeHint, scopeLabel } from '../format';
 import { useCreateApiKey } from '../hooks/use-api-key-mutations';
 

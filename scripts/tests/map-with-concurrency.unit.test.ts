@@ -9,6 +9,7 @@ const delay = (ms: number): Promise<void> =>
 
 describe('mapWithConcurrency', () => {
   test('returns an empty array for empty input', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
     await expect(mapWithConcurrency([], 4, async () => 1)).resolves.toEqual([]);
   });
 
@@ -24,10 +25,12 @@ describe('mapWithConcurrency', () => {
   });
 
   test('runs every item when the limit is fractional or infinite', async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
     await expect(mapWithConcurrency([1, 2, 3], 2.7, async (v) => v * 2)).resolves.toEqual([
       2, 4, 6,
     ]);
     await expect(
+      // eslint-disable-next-line @typescript-eslint/require-await -- This fake implements an asynchronous test dependency without external I/O.
       mapWithConcurrency([1, 2, 3], Number.POSITIVE_INFINITY, async (v) => v * 2)
     ).resolves.toEqual([2, 4, 6]);
   });

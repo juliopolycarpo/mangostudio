@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   InstallBlockedResponseSchema,
   InstallCancelResponseSchema,
@@ -10,6 +11,7 @@ import {
   type InstallStreamEvent,
 } from '@mangostudio/shared/environments';
 import Value from 'typebox/value';
+
 import { assertRequestedProfileId } from '../../../src/lib/profile-context';
 import {
   InstallBlockedError,
@@ -64,6 +66,7 @@ afterEach(() => {
 
 function streamEvents(events: readonly InstallStreamEvent[]): AsyncIterable<InstallStreamEvent> {
   return {
+    // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
     async *[Symbol.asyncIterator]() {
       yield* events;
     },

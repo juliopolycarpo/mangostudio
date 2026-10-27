@@ -5,7 +5,9 @@
  */
 
 import { existsSync } from 'node:fs';
+
 import type { ProviderType, SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { getConfig } from '../../../lib/config';
 import { readTomlStringSections } from '../../../lib/toml';
 import { parseStringArray } from '../../../utils/json';
@@ -283,7 +285,7 @@ export function createProviderSecretService(
       await config.validateFn(apiKey, fetchImpl);
     },
 
-    // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
+    // Migrated from ESLint
     async syncConfigFileConnectors(userId: string): Promise<void> {
       return syncConfigFileConnectors(userId);
     },

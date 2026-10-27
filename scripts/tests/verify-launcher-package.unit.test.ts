@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
 
 const SCRIPT = join(ROOT_DIR, 'scripts/release/verify-launcher-package.sh');

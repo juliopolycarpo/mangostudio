@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import {
   decodeTerminalClientMessage,
   TERMINAL_SOCKET_CLOSE_CODES,
 } from '@mangostudio/shared/terminal';
+
 import {
   createTerminalSocket,
   type TerminalSocket,

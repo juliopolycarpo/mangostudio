@@ -8,9 +8,11 @@
 
 import { RefreshCw } from 'lucide-react';
 import type { ReactNode } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import type { EnvironmentScope } from '../use-environment-scope';
 import { EnvironmentScopePicker } from './EnvironmentScopePicker';
 

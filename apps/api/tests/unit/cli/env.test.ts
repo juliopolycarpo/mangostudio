@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import type {
   AgentCliStatus,
   InstallPreparation,
@@ -14,6 +15,7 @@ import type {
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import Value from 'typebox/value';
+
 import type { EnvArgs } from '../../../src/cli/args';
 import { parseEnvArgs } from '../../../src/cli/args';
 import {
@@ -261,8 +263,11 @@ describe('runEnv', () => {
     await runEnv(
       { subcommand: null, json: true },
       {
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listRuntimes: async () => [runtimeStatus],
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listVersionManagers: async () => [versionManagerStatus],
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listAgents: async () => [agentStatus],
         log: (line) => lines.push(line),
       }
@@ -278,8 +283,11 @@ describe('runEnv', () => {
     await runEnv(
       { subcommand: null, json: false },
       {
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listRuntimes: async () => [runtimeStatus],
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listVersionManagers: async () => [versionManagerStatus],
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listAgents: async () => [agentStatus],
         log: (line) => lines.push(line),
       }
@@ -296,8 +304,11 @@ describe('runEnv', () => {
     await runEnv(
       { subcommand: 'agents', json: false },
       {
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listRuntimes: async () => [],
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listVersionManagers: async () => [],
+        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
         listAgents: async () => [agentStatus],
         log: (line) => lines.push(line),
       }

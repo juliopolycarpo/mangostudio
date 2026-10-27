@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { readText } from './support/read-text';
 import {
   extractJobBlock,
@@ -185,7 +186,7 @@ describe('workflow hygiene', () => {
     );
 
     // Split for the same reason release-workflows.unit.test.ts splits its own
-    // shell expansions: biome reads `${...}` in a plain string as a template
+    // shell expansions: Bun lint reads `${...}` in a plain string as a template
     // literal someone forgot to tag.
     const shellTag = 'tag="v$' + '{VERSION}"';
     const release = runScriptLines(readText('.github/workflows/release.yml'));

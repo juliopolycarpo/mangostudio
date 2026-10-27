@@ -9,9 +9,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import { screen, waitFor } from '@testing-library/react';
+
 import { ServiceStep } from '@/features/onboarding/steps/ServiceStep';
+
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 

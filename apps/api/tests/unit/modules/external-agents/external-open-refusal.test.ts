@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+
 import { RemoteError } from '@mangostudio/protocol';
 import {
   EXTERNAL_AGENT_CAPACITY_CODE,
   EXTERNAL_AGENT_TARGET_IDS,
 } from '@mangostudio/shared/external-agents';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+
 import { productDescriptorFor } from '../../../../src/modules/external-agents/domain/adapter-descriptors';
 import {
   openFailureCodeFor,

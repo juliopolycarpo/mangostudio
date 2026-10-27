@@ -6,11 +6,13 @@ import type {
   ReasoningPolicy,
   UpdateProviderRuntimeSettingsBody,
 } from '@mangostudio/shared/provider-settings';
+
 import { SettingsRow } from '@/components/settings/SettingsRow';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { SettingToggle } from '@/components/settings/SettingToggle';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { EFFORT_DISPLAY_ORDER, EFFORT_LABEL_KEYS } from '../constants';
 
 interface ReasoningSettingsSectionProps {

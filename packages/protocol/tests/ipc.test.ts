@@ -8,6 +8,7 @@ import {
   type IpcSocketConnectOpts,
   type Socket,
 } from 'node:net';
+
 import { CLOSE_CODES } from '../src/close';
 import { RESERVED_ERROR_CODES } from '../src/errors';
 import type { Port } from '../src/port';
@@ -83,8 +84,7 @@ const fixture: ConformanceFixture = {
         clientSocket.destroy();
       },
       close: async () => {
-        a.close();
-        b.close();
+        await Promise.all([a.close(), b.close()]);
         await server.close();
       },
     };
@@ -106,7 +106,7 @@ const fixture: ConformanceFixture = {
         socket.write(line);
       },
       close: async () => {
-        a.close();
+        await a.close();
         socket.destroy();
         await server.close();
       },
@@ -367,7 +367,7 @@ describe('local socket transport', () => {
       expect(await client.request('test.echo', { text: 'still here' })).toEqual({
         text: 'still here',
       });
-      client.close(CLOSE_CODES.RELEASED);
+      await client.close(CLOSE_CODES.RELEASED);
     } finally {
       await server.close();
     }

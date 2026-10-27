@@ -4,6 +4,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
+
 import { attachWebglRenderer } from '../../src/features/terminal/terminal-webgl';
 
 function createTerminal() {

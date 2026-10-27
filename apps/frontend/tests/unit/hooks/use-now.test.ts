@@ -8,6 +8,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { renderHook } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 

@@ -3,6 +3,7 @@
  */
 
 import { Sparkles } from 'lucide-react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
@@ -11,6 +12,7 @@ import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
+
 import { useSkillSettings } from '../hooks/use-skill-settings';
 import { SkillRow } from './SkillRow';
 import { SkillSourceToggles } from './SkillSourceToggles';

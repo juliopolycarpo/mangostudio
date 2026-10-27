@@ -15,7 +15,9 @@
 import type { Stats } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { sep } from 'node:path';
+
 import { Elysia, NotFound } from 'elysia';
+
 import { fileEtag, isNotModified } from '../lib/http-cache';
 import { resolveContainedPath } from '../utils/paths';
 

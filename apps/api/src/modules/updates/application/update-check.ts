@@ -14,6 +14,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+
 import {
   SOURCE_SHA_MAX,
   UPDATE_ERROR_MAX,
@@ -23,11 +24,12 @@ import {
   UpdateCheckSchema,
 } from '@mangostudio/shared/updates';
 import Value from 'typebox/value';
+
 import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
 import { getConfig, getVersion, isDevelopmentVersion, type MangoConfig } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getUpdateCheckPath } from '../../../lib/mango-paths';
-import { type SafeFetchDeps, safeFetchBytes } from '../../../lib/safe-fetch';
+import { safeFetchBytes, type SafeFetchDeps } from '../../../lib/safe-fetch';
 import {
   CANARY_MANIFEST_ASSET,
   parseCanaryManifest,

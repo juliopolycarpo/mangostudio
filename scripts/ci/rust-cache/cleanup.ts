@@ -9,8 +9,7 @@ export interface RustCacheCleanupResult {
 
 function unchangedEntry(expected: RustCacheEntry, actual: RustCacheEntry | undefined): boolean {
   return (
-    actual !== undefined &&
-    expected.id === actual.id &&
+    expected.id === actual?.id &&
     expected.key === actual.key &&
     expected.ref === actual.ref &&
     expected.version === actual.version &&

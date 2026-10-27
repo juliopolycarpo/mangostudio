@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import {
   type ExternalAgentDescriptor,
@@ -6,11 +7,12 @@ import {
 } from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { setTestSession } from '../../support/setup/auth-client-stub';
 
 const actualQueries = await import('../../../src/features/chat/queries');
 
-mock.module('../../../src/features/chat/queries', () => ({
+void mock.module('../../../src/features/chat/queries', () => ({
   ...actualQueries,
   useMessagesQuery: () => ({
     data: { pages: [{ messages: [], contextInfo: null }] },
@@ -22,7 +24,7 @@ function WorkspaceRailStub({ chatId }: { chatId: string }) {
   return <div data-testid="workspace-rail">{chatId}</div>;
 }
 
-mock.module('../../../src/features/workspace/rail/WorkspaceRail', () => ({
+void mock.module('../../../src/features/workspace/rail/WorkspaceRail', () => ({
   WorkspaceRail: WorkspaceRailStub,
 }));
 
@@ -30,7 +32,7 @@ function PinnedTodoPanelStub({ chatId }: { chatId: string | null }) {
   return <div data-testid="pinned-todos">{chatId}</div>;
 }
 
-mock.module('../../../src/features/chat/components/PinnedTodoPanel', () => ({
+void mock.module('../../../src/features/chat/components/PinnedTodoPanel', () => ({
   PinnedTodoPanel: PinnedTodoPanelStub,
 }));
 
@@ -41,7 +43,7 @@ function WorkspaceHubStub({ chatId }: { chatId: string | null }) {
 // The empty-state hub links into the library and the environments umbrella, so
 // the real one needs a router. Stubbed for the same reason the rail is: this
 // file is about the context warning, not about what an empty chat shows.
-mock.module('../../../src/features/home/WorkspaceHub', () => ({
+void mock.module('../../../src/features/home/WorkspaceHub', () => ({
   WorkspaceHub: WorkspaceHubStub,
 }));
 

@@ -6,7 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
+
 import { ToolSettingsRow } from '../../../src/features/settings/tools/components/ToolSettingsRow';
 import { act, fireEvent, render, screen } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';

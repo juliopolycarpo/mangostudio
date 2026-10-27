@@ -1,5 +1,6 @@
 import type { ContextInfo } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import {
   getContextSeverity,

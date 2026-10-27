@@ -3,13 +3,14 @@
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { extractTarArchive } from '../lib/archive';
 import { ROOT_DIR } from '../lib/config';
 import {
   createDockerStagePlan,
+  dockerReleaseAssetName,
   type DockerStagePlan,
   type DockerStageTarget,
-  dockerReleaseAssetName,
   parseDockerArchFilter,
   parseDockerVariantFilter,
 } from '../lib/docker-stage';

@@ -19,8 +19,10 @@
 
 import type { LibraryLocationId, LibraryResource } from '@mangostudio/shared/library';
 import { Fragment } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { coverageCell, type ShadowedCopyComparison, shadowedCopyComparison } from '../format';
 import { CoverageGlyph } from './CoverageCell';
 

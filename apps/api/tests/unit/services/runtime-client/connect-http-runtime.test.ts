@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { Port } from '@mangostudio/protocol';
+
 import {
   openRuntimeSession,
   type RuntimeSessionOpeners,

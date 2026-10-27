@@ -110,7 +110,7 @@ const testEvidenceGaps = (head: Metrics): string[] => {
  */
 const testSuiteItem = (head: Metrics | null): string | null => {
   const stats = getTestSuiteEvidence(head);
-  if (!stats || stats.exitCode === null || stats.exitCode === 0) return null;
+  if (!stats?.exitCode) return null;
   if (stats.parseMiss) {
     return `tests failing (exit ${stats.exitCode}; no failure counts could be parsed from the log)`;
   }

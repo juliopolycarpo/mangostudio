@@ -12,8 +12,8 @@ import { CliError } from '../errors';
 import {
   type FollowDeps,
   followFile,
-  type LogTail,
   latestHubLogFile,
+  type LogTail,
   readLogTail,
   realFollowDeps,
   resolveHubLogFile,

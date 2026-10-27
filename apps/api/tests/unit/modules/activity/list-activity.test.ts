@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { ACTIVITY_PAGE_LIMIT_DEFAULT, ACTIVITY_PAGE_LIMIT_MAX } from '@mangostudio/shared/activity';
+
 import type { ActivityEventSelect } from '../../../../src/db/types';
 import { listActivity } from '../../../../src/modules/activity/application/list-activity';
 import { encodeActivityCursor } from '../../../../src/modules/activity/domain/activity-cursor';

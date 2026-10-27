@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
+
 import { getConfig, loadConfigForTest } from '../../../../src/lib/config';
 import {
   createProviderSecretService,

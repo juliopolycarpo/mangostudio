@@ -114,6 +114,7 @@ class NativeGlLedger {
   ): void {
     const original = Reflect.get(target, name);
     if (typeof original !== 'function') throw new Error(`GL ${name}: expected native function`);
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- The callback needs its own this, while the alias retains the enclosing instance.
     const owner = this;
     Reflect.set(
       target,
@@ -231,6 +232,7 @@ async function webglResourceProbe(failure: ResourceFailure) {
     next.addon.dispose();
     return {
       host,
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture records the original diagnostic using JavaScript string conversion.
       error: error === undefined ? null : String(error),
       primaryIdentity: error === ledger.primary,
       cleanupFaults: ledger.cleanupFaults,

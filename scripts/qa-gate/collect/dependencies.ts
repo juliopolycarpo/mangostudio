@@ -2,6 +2,7 @@
 // (dev)dependencies, and total locked packages.
 
 import { join } from 'node:path';
+
 import { ROOT_DIR } from '../../lib/config';
 import type { DependencyStats } from './types';
 

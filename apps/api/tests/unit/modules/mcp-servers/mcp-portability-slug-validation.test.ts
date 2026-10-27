@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { McpPortabilityDecisionInput } from '@mangostudio/shared/mcp';
+
 import {
   assertUniquePostApplySlugs,
   findReplacementSlugBlocker,

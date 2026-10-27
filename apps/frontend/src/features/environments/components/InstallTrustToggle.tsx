@@ -12,11 +12,13 @@
 import type { Environment } from '@mangostudio/shared/environments';
 import { ShieldCheck } from 'lucide-react';
 import { useId, useState } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
 import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useUpdateEnvironmentMutation } from '../queries';
 
 interface InstallTrustToggleProps {

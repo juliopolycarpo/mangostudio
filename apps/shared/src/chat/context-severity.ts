@@ -9,6 +9,7 @@
  */
 
 import type { Static } from 'typebox';
+
 import type { ContextSeveritySchema } from './schemas';
 
 /**

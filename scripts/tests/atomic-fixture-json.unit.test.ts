@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import { type FixtureJsonFiles, publishFixtureJson } from './support/atomic-fixture-json';
 
 /** Keeps exact documents and exposes interruption before publication. */

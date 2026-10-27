@@ -4,6 +4,7 @@ import {
   DEFAULT_CHAT_DISPLAY_SETTINGS,
 } from '@mangostudio/shared/app-settings';
 import { useQuery } from '@tanstack/react-query';
+
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 
 /**

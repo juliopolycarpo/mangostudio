@@ -6,9 +6,12 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+
 import { TAB_CLASSES } from '@/components/ui/Tabs';
+
 import { render } from '../../../support/harness/render';
 import { LinkStub, routerWithLinkStub } from '../../../support/mocks/router';
 
@@ -47,7 +50,7 @@ function CurrentAwareLink({
   );
 }
 
-mock.module('@tanstack/react-router', await routerWithLinkStub({ Link: CurrentAwareLink }));
+void mock.module('@tanstack/react-router', await routerWithLinkStub({ Link: CurrentAwareLink }));
 
 const TABS = [
   { to: '/environments', label: 'Overview', exact: true },

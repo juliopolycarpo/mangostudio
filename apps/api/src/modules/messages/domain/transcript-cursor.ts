@@ -1,4 +1,5 @@
 import type { MessagesOrder } from '@mangostudio/shared/chat';
+
 import { parseCursorPosition } from './cursor-position';
 
 /**

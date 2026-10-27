@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { requestRailPanel } from '../../../src/features/workspace/rail/rail-panel-request';
 import { railCollapsedStorageKey } from '../../../src/features/workspace/rail/rail-state';
 import { act, render, screen } from '../../support/harness/render';
@@ -15,17 +17,17 @@ const mocks = {
   ],
 };
 
-mock.module('../../../src/features/chat/hooks/use-chat-todos', () => ({
+void mock.module('../../../src/features/chat/hooks/use-chat-todos', () => ({
   useChatTodos: () => ({ data: { todos: mocks.todos, updatedAt: Date.now() } }),
 }));
 
-// Declared at module level rather than inline in the factory: biome's
+// Declared at module level rather than inline in the factory: Bun lint's
 // `noComponentHookFactories` rejects a component defined inside a function.
 function GitPanelStub({ chatId }: { chatId: string }) {
   return <div data-testid="git-panel-content">{chatId}</div>;
 }
 
-mock.module('../../../src/features/workspace/GitPanel', () => ({ GitPanel: GitPanelStub }));
+void mock.module('../../../src/features/workspace/GitPanel', () => ({ GitPanel: GitPanelStub }));
 
 // Stubbed for the same reason as the Git panel: the registry imports it
 // eagerly, so without this every rail test would mount the real GitHub panel
@@ -34,7 +36,7 @@ function GithubPanelStub({ chatId }: { chatId: string }) {
   return <div data-testid="github-panel-content">{chatId}</div>;
 }
 
-mock.module('../../../src/features/github/components/GithubPanel', () => ({
+void mock.module('../../../src/features/github/components/GithubPanel', () => ({
   GithubPanel: GithubPanelStub,
 }));
 

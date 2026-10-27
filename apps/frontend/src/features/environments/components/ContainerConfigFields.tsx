@@ -10,6 +10,7 @@
 import type { ContainerDetection, ContainerEngine } from '@mangostudio/shared/environments';
 import { CONTAINER_MAX_MOUNTS } from '@mangostudio/shared/environments/values';
 import { Container, Plus, X } from 'lucide-react';
+
 import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Checkbox';
@@ -17,6 +18,7 @@ import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import {
   type ContainerFormError,
   type ContainerFormFields,
@@ -160,7 +162,7 @@ export function ContainerConfigFields({
           <div
             // Rows are positional and can be identical while being typed, so the
             // index is the only stable identity a row has here.
-            // biome-ignore lint/suspicious/noArrayIndexKey: positional rows with no id of their own
+            // eslint-disable-next-line react/no-array-index-key -- positional rows with no id of their own
             key={index}
             className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]"
           >

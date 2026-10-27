@@ -8,6 +8,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { getDb } from '../../../../src/db/database';
 import { createLibraryBackupIndex } from '../../../../src/modules/library/infrastructure/backup-index-repository';
 import { insertTestUser } from '../../../support/factories';

@@ -10,10 +10,12 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+
 import {
   StaleLineNumbersError,
   UnobservedLineNumbersError,
 } from '@mangostudio/shared/runtime-contract';
+
 import { executeDeleteFile } from '../../../../src/services/tools/builtin/delete-file';
 import { executeGlob } from '../../../../src/services/tools/builtin/glob';
 import { executeGrep } from '../../../../src/services/tools/builtin/grep';

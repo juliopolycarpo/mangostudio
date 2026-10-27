@@ -100,7 +100,7 @@ export class FakeChatGptServer {
   }
 
   stop(): void {
-    this.server.stop(true);
+    void this.server.stop(true);
   }
 
   queueTokenFailure(failure: QueuedTokenFailure): void {

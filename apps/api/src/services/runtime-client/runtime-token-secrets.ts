@@ -7,7 +7,8 @@
  * only hide a misconfigured machine.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
+
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { SecretDescriptor, SecretStore } from '../secret-store/store';
 import { bunSecretStore, SecretStorageUnavailableError } from '../secret-store/store';

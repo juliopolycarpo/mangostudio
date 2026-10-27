@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
+
 import type { SecretSource } from '@mangostudio/shared/types';
+
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {

@@ -15,7 +15,6 @@
 import { join } from 'node:path';
 
 import { readChangedPaths } from '../lib/changed-paths';
-
 import {
   API_DIR,
   classifyChangedPaths,

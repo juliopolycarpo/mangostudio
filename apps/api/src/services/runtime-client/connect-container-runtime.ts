@@ -19,7 +19,8 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type { ContainerEngine, ContainerFailureReason } from '@mangostudio/shared/environments';
 import {
   containerConfigRefusal,
@@ -29,6 +30,7 @@ import {
   describeContainerMountRefusal,
 } from '@mangostudio/shared/environments';
 import { narrowRuntimeErrorCode } from '@mangostudio/shared/runtime-contract';
+
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { throwIfAborted } from '../../modules/environments/domain/cancellation';

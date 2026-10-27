@@ -11,11 +11,13 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type { Chat } from '@mangostudio/shared/chat';
 import type { Environment } from '@mangostudio/shared/environments';
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { HomePage, type HomePageProps } from '../../../src/features/home/HomePage';
 import { flushAsyncRender } from '../../support/harness/render';
 import { renderWithRouter } from '../../support/harness/render-with-router';
@@ -243,6 +245,7 @@ describe('HomePage', () => {
     try {
       await screen.findAllByTestId('workspace-tile');
       const batched = scenario.fetchMock.mock.calls.filter(
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The mock records the request target using JavaScript string conversion.
         ([input, init]) => init?.method === 'POST' && String(input).includes('/api/git/state/batch')
       );
       expect(batched).toHaveLength(1);
@@ -251,6 +254,7 @@ describe('HomePage', () => {
       // Every chat with a folder, in one request — the same ids the sidebar and
       // the uncommitted-work card ask for, so the three share one cache entry
       // instead of splitting into a request each.
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
       const body = JSON.parse(String(batched[0][1]?.body)) as { chatIds: string[] };
       expect([...body.chatIds].sort()).toEqual(['chat-1', 'chat-2', 'chat-3']);
     } finally {

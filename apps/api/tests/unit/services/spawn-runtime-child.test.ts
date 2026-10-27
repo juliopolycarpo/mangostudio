@@ -6,9 +6,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { RemoteError } from '@mangostudio/protocol';
 import type { SpawnOptions } from '@mangostudio/protocol/spawn';
 import { HUB_WORKSPACE_AUTHORIZE_METHOD } from '@mangostudio/shared/runtime-contract';
+
 import { getDb } from '../../../src/db/database';
 import type { HubWorkspaceBinding } from '../../../src/services/runtime-client/hub-workspace-authority';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';

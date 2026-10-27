@@ -13,7 +13,7 @@
  * login shell would for an ssh launch. Shared with the `setup` invocation so a
  * custom path is expanded identically by every command the hub sends.
  */
-// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion on the target, not a JS placeholder
+// eslint-disable-next-line no-template-curly-in-string -- shell parameter expansion on the target, not a JS placeholder
 export const RESOLVE_RUNTIME_PATH = 'p="$1"; case "$p" in "~/"*) p="$HOME/${p#"~/"}" ;; esac; ';
 
 /**

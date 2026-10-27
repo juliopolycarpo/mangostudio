@@ -144,11 +144,11 @@ export function sectionKeys(sectionBody: string): string[] {
  * Parse a job block's flow-sequence `needs: [a, b]` list. Returns [] when
  * absent.
  *
- * Matches across newlines, not just one line: dprint's YAML plugin wraps a
+ * Matches across newlines, not just one line: Bun's YAML formatter wraps a
  * flow sequence onto its own indented lines once it passes the repo's
  * 100-column `lineWidth` (`needs:\n  [\n    a,\n    b,\n  ]`), and a job's
  * `needs` list grows over time — a parser that only recognised the single-
- * line form would quietly go back to reporting `[]` the next time dprint
+ * line form would quietly go back to reporting `[]` the next time the formatter
  * reformats a list that has grown past the width, exactly as it already did
  * once.
  */

@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { branchLabel } from '../../../src/lib/git-branch';
 
 describe('branchLabel', () => {

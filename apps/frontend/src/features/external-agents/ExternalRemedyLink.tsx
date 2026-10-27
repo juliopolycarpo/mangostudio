@@ -1,5 +1,6 @@
 import type { ExternalAgentRemedy } from '@mangostudio/shared/external-agents';
 import { Link } from '@tanstack/react-router';
+
 import { buttonClassName } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';

@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import { tarCreationCommand } from '../lib/archive-creation';
 
 const INSTALL_SH = join(import.meta.dir, '..', 'install', 'install.sh');

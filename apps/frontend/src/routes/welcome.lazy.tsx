@@ -1,4 +1,5 @@
 import { createLazyFileRoute, useRouter } from '@tanstack/react-router';
+
 import { OnboardingWizard } from '@/features/onboarding/OnboardingWizard';
 
 export const Route = createLazyFileRoute('/welcome')({

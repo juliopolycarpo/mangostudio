@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 import type { TerminalAvailability, TerminalSessionResponse } from '@mangostudio/shared/terminal';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import {

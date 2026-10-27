@@ -14,7 +14,9 @@
  */
 
 import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
+
 import { useI18n } from '@/hooks/use-i18n';
+
 import { useTerminalAvailabilityQuery } from './services/terminal-service';
 import { unavailableMessage, unavailableTone } from './unavailable-message';
 

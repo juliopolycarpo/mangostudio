@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   ACTIVITY_PAGE_LIMIT_DEFAULT,
   type ListActivityResponse,
@@ -6,6 +7,7 @@ import {
 } from '@mangostudio/shared/activity';
 import { ACTIVITY_TOPIC, type RealtimeInvalidateEvent } from '@mangostudio/shared/realtime';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { recordActivity } from '../../../src/modules/activity/application/record-activity';
 import { activityRoutes } from '../../../src/modules/activity/http/activity-routes';

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import { isNotModified } from '../../../src/lib/http-cache';
 
 const ETAG = '"9-18f0a1b2c3d"';

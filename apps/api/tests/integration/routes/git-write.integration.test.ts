@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import {
   type CommitResponse,
@@ -18,6 +19,7 @@ import {
   type RealtimeInvalidateEvent,
 } from '@mangostudio/shared/realtime';
 import Value from 'typebox/value';
+
 import { getDb } from '../../../src/db/database';
 import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import {

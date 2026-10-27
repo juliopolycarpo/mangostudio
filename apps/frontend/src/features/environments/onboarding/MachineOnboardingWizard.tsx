@@ -23,6 +23,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { useEnvironmentEntitiesQuery, useRuntimeLifecycleQuery } from '../queries';
 import type { SshFormFields } from '../ssh-form';
 import { emptySshForm } from '../ssh-form';
@@ -31,7 +32,6 @@ import { LibraryStep } from './LibraryStep';
 import { PermissionsStep } from './PermissionsStep';
 import { ProvisionStep } from './ProvisionStep';
 import { ReachStep } from './ReachStep';
-import { SummaryStep } from './SummaryStep';
 import {
   deriveOnboardingStep,
   endStateOf,
@@ -39,6 +39,7 @@ import {
   type OnboardingStepId,
   onboardingSteps,
 } from './steps';
+import { SummaryStep } from './SummaryStep';
 import { ToolsStep } from './ToolsStep';
 
 interface MachineOnboardingWizardProps {

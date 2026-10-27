@@ -12,6 +12,7 @@ import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agent
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQuery } from '@tanstack/react-query';
 import { useId } from 'react';
+
 import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Badge } from '@/components/ui/Badge';
 import { Callout } from '@/components/ui/Callout';
@@ -26,6 +27,7 @@ import {
 import { useI18n } from '@/hooks/use-i18n';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { agentIdentityTokens, MANGO_IDENTITY } from '@/lib/agent-identity';
+
 import { StepFrame } from '../StepFrame';
 
 interface AgentsStepProps {
@@ -53,7 +55,7 @@ function isolationWithdrawn(agents: readonly ExternalAgentDescriptor[]): boolean
 }
 
 function sameRunner(a: ChatRunnerConfiguration | undefined, b: ChatRunnerConfiguration): boolean {
-  if (!a || a.kind !== b.kind) return false;
+  if (a?.kind !== b.kind) return false;
   return a.kind === 'mangostudio' ? true : a.targetId === (b as { targetId: string }).targetId;
 }
 

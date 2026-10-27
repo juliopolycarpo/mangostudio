@@ -13,11 +13,13 @@
 import { Link } from '@tanstack/react-router';
 import { ChevronRight, Columns2 } from 'lucide-react';
 import { useId, useState } from 'react';
+
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { describeFinding } from '../format';
 import {
   type HealthEntry,

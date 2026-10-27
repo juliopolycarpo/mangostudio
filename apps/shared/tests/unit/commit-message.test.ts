@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseCommitMessageOutput, splitCommitMessage } from '../../src/git';
 
 describe('parseCommitMessageOutput', () => {

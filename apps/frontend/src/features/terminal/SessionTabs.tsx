@@ -1,6 +1,7 @@
 import type { TerminalSession } from '@mangostudio/shared/terminal';
 import { ExternalLink, Pencil, Plus, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { FIELD_CLASS } from '@/components/ui/Input';
 import { Tabs } from '@/components/ui/Tabs';

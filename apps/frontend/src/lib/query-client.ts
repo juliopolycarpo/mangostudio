@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
+
 import { registerCapabilityInvalidationSources } from '@/features/chat/hooks/capability-invalidation';
 
 export const queryClient = new QueryClient({

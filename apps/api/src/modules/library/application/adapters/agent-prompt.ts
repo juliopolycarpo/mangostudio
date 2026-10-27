@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+
 import type { ResourceFormat } from '@mangostudio/shared/library';
 
 export const LIBRARY_AGENT_ADAPTER_PROMPT_VERSION = 'library-format-adapter-v1';

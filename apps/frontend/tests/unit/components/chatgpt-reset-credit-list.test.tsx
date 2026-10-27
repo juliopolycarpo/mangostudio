@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ChatGptResetCredit } from '@mangostudio/shared/connectors';
+
 import { ChatGptResetCreditList } from '@/features/settings/connectors/components/ChatGptResetCreditList';
+
 import { render, screen } from '../../support/harness/render';
 
 const NOW = Date.now();

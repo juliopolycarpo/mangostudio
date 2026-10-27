@@ -36,10 +36,12 @@ import { externalAgentVendor } from '@mangostudio/shared/external-agents/values'
 import type { LibraryResource } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
+
 import { externalCommandKeys } from '@/features/external-agents/command-catalog';
 import { externalCommandCatalogQueryOptions } from '@/features/external-agents/queries';
 import { libraryResourcesQueryOptions } from '@/features/library/queries';
 import { skillSettingsListQueryOptions } from '@/features/settings/skills/queries';
+
 import { mergeSlashCommands, type SlashCommandEntry } from '../lib/slash-commands';
 import { chatCapabilitiesQueryOptions } from './use-chat-capabilities';
 

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import type { RealtimeSignal, RealtimeTopicListener } from '@/lib/realtime/realtime-client';
+
 import { act, renderHook } from '../../../support/harness/render';
 import { setTestSession } from '../../../support/setup/auth-client-stub';
 
@@ -17,16 +19,15 @@ const mocks = {
 };
 
 // The seam is the client module, not the WebSocket global.
-mock.module('@/lib/realtime/realtime-client', () => ({
+void mock.module('@/lib/realtime/realtime-client', () => ({
   bindRealtimeClientToUser: mocks.bindRealtimeClientToUser,
   getRealtimeClient: () => ({ subscribe: mocks.subscribe }),
 }));
 
 // Static imports run before the mock above, so the hook comes in afterwards or
 // it binds the real realtime client.
-const { useRealtimeInvalidation, resetRealtimeInvalidations } = await import(
-  '@/lib/realtime/use-realtime-invalidation'
-);
+const { useRealtimeInvalidation, resetRealtimeInvalidations } =
+  await import('@/lib/realtime/use-realtime-invalidation');
 
 describe('useRealtimeInvalidation', () => {
   let subscriptions: Subscription[] = [];

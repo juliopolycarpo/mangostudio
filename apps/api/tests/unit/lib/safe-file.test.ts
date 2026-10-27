@@ -17,12 +17,13 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+
 import {
+  readRegularFileUtf8,
+  readUtf8FileOrNull,
   RegularFileReadError,
   type RegularFileReadFailure,
   RegularFileWriteError,
-  readRegularFileUtf8,
-  readUtf8FileOrNull,
   SECRET_FILE_MODE,
   statRegularFile,
   writeFileAtomic,

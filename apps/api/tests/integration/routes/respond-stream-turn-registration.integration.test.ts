@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+
 import { isActiveTurn } from '../../../src/modules/generation/application/active-turn-registry';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { PersistTextTurnStartInput } from '../../../src/modules/generation/infrastructure/conversation-persistence';

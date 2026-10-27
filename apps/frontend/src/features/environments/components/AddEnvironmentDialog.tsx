@@ -17,6 +17,7 @@ import {
 } from '@mangostudio/shared/environments/values';
 import { Cable, Container, Globe, KeyRound, Laptop, SquareTerminal } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useState } from 'react';
+
 import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -26,6 +27,7 @@ import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import {
   type ContainerFormFields,
   containerFormToConfig,
@@ -339,6 +341,7 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
           id="add-environment-name"
           label={labels.nameLabel}
           value={name}
+          // eslint-disable-next-line jsx-a11y/no-autofocus -- Start in the name field when the dialog opens.
           autoFocus
           maxLength={ENVIRONMENT_NAME_MAX_LENGTH}
           // Only once something was typed: a blank untouched field is the

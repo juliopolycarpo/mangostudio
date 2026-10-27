@@ -1,4 +1,5 @@
 import { tmpdir } from 'node:os';
+
 import { expect, type Page, test } from '@playwright/test';
 
 /**

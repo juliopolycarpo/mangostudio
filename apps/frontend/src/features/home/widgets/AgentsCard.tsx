@@ -15,6 +15,7 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Link } from '@tanstack/react-router';
+
 import { Badge } from '@/components/ui/Badge';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { StatusDot } from '@/components/ui/StatusDot';
@@ -24,6 +25,7 @@ import { useExternalAgents } from '@/features/external-agents/useExternalAgents'
 import { useI18n } from '@/hooks/use-i18n';
 import { agentIdentityTokens } from '@/lib/agent-identity';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { CARD_LINK_CLASS } from './card-link';
 import { HubSkeletonLines } from './HubSkeletonLines';
 

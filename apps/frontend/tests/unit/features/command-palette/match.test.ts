@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { CommandItem } from '../../../../src/features/command-palette/lib/command-item';
 import {
   activeCommandIndex,

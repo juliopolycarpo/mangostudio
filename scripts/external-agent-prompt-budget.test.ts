@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+
 import {
   EXTERNAL_ATTACHMENT_MAX_BYTES,
   EXTERNAL_TURN_MAX_ATTACHMENTS,
@@ -12,6 +13,7 @@ import {
   RespondStreamBodySchema,
 } from '@mangostudio/shared/generation';
 import Value from 'typebox/value';
+
 import limits from '../crates/mangostudio-runtime/src/external_agents/adapter/fixtures/prompt-limits.json';
 
 const configuration = { level: 'default', routing: 'user', workspaceRoots: [] };

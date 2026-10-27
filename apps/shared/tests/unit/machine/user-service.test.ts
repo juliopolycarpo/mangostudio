@@ -2,7 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
+
 import Value from 'typebox/value';
+
 import {
   createUserServiceManager,
   currentUserName,
@@ -259,6 +261,9 @@ describe('Scheduled Task scripts', () => {
     );
     expect(parseScheduledTaskJson('{"installed":true,"state":"Ready","enabled":true}')?.state).toBe(
       'Ready'
+    );
+    expect(parseScheduledTaskJson('{"installed":true,"state":{"invalid":true}}')?.state).toBe(
+      '[object Object]'
     );
     expect(parseScheduledTaskJson('\r\n{"installed":false}\r\n')).toEqual({
       installed: false,

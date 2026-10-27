@@ -25,6 +25,7 @@ import {
   RUNTIME_CONTRACT_VERSION,
   type RuntimeCapabilityManifest,
 } from '@mangostudio/shared/runtime-contract';
+
 import { TEST_RUNTIME_MANIFEST } from '../runtime-fixture';
 
 export class FakeHostileRuntimePeer {
@@ -62,6 +63,6 @@ export class FakeHostileRuntimePeer {
   }
 
   close(code?: number, reason?: string): void {
-    this.session.close(code, reason);
+    void this.session.close(code, reason);
   }
 }

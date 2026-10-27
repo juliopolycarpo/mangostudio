@@ -6,9 +6,12 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps, FormEvent, ReactNode } from 'react';
+
 import { Dialog } from '@/components/ui/Dialog';
+
 import { fireEvent, render, screen, within } from '../../../support/harness/render';
 
 /** Every prop optional, so a case can drop the title or add a slot without a cast of its own. */
@@ -137,7 +140,7 @@ describe('Dialog keyboard contract', () => {
 
   it('leaves focus on a control that took it as it mounted', () => {
     renderDialog({
-      // biome-ignore lint/a11y/noAutofocus: the behaviour under test is how the frame treats a control that grabs focus on mount.
+      // eslint-disable-next-line jsx-a11y/no-autofocus -- the behaviour under test is how the frame treats a control that grabs focus on mount.
       children: <input aria-label="Name" autoFocus />,
     });
 
@@ -194,7 +197,7 @@ describe('Dialog keyboard contract', () => {
     trigger.focus();
 
     const { unmount } = renderDialog({
-      // biome-ignore lint/a11y/noAutofocus: focus already inside is exactly the case where the opener must still be remembered.
+      // eslint-disable-next-line jsx-a11y/no-autofocus -- focus already inside is exactly the case where the opener must still be remembered.
       children: <input aria-label="Name" autoFocus />,
     });
     unmount();

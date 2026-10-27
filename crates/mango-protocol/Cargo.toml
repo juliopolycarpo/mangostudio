@@ -33,13 +33,7 @@ testing = ["tokio"]
 # The spawn launcher and the ssh argv preset it is usually given.
 spawn = ["tokio", "tokio/process", "dep:nix"]
 # The WebSocket dialler and acceptor, with client-side TLS for wss://.
-websocket = [
-  "tokio",
-  "dep:futures-util",
-  "dep:tokio-tungstenite",
-  "dep:rustls",
-  "dep:webpki-roots",
-]
+websocket = ["tokio", "dep:futures-util", "dep:tokio-tungstenite", "dep:rustls", "dep:webpki-roots"]
 
 [dependencies]
 futures-util = { version = "0.3", optional = true, default-features = false, features = ["sink"] }

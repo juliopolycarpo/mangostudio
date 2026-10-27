@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseWorktreeList } from '../../../../src/modules/git/domain/worktree-parser';
 
 /** Builds the `-z` framing Git emits: NUL after every field, empty field ends the record. */

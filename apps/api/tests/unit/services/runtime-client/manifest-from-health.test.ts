@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { RuntimeImplementation } from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+
 import { capabilityManifestFromHealth } from '../../../../src/services/runtime-client/manifest-from-health';
 
 const baseReport = {

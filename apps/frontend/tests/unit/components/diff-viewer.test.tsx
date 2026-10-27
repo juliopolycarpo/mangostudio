@@ -1,18 +1,20 @@
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import type { GitDiffResponse } from '@mangostudio/shared/git';
+
 import { flushAsyncRender, render, screen, waitFor } from '../../support/harness/render';
 
 const hooks = {
   diff: undefined as GitDiffResponse | undefined,
 };
 
-mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
+void mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   useGitDiff: () => ({ data: hooks.diff, isLoading: false, error: null }),
 }));
 
 // Every token gets a known colour, so the style each line carries is the
 // viewer's doing and not the highlighter's.
-mock.module('@/lib/shiki', () => ({
+void mock.module('@/lib/shiki', () => ({
   CODE_THEMES: ['one-dark-pro', 'github-dark-dimmed', 'github-light', 'one-light'],
   highlightLineTokens: (line: string) => [{ content: line, offset: 0, color: '#d73a49' }],
   preloadCodeLanguages: jest.fn(() => Promise.resolve(true)),

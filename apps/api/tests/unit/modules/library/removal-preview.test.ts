@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   directoryHashDomainVersion,
@@ -12,6 +13,7 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
+
 import { previewLibraryRemoval } from '../../../../src/modules/library/application/removal-preview';
 import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
 

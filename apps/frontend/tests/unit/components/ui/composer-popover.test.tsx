@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { ComponentProps } from 'react';
+
 import { ComposerPopover } from '@/components/ui/ComposerPopover';
+
 import { render, screen } from '../../../support/harness/render';
 
 type PopoverProps = ComponentProps<typeof ComposerPopover>;
@@ -18,7 +21,13 @@ describe('ComposerPopover', () => {
 
   it('forwards native panel attributes and content', () => {
     render(
-      <ComposerPopover id="choices" role="listbox" aria-label="Choices" tabIndex={-1}>
+      <ComposerPopover
+        id="choices"
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox renders rich options a native select cannot contain.
+        role="listbox"
+        aria-label="Choices"
+        tabIndex={-1}
+      >
         panel content
       </ComposerPopover>
     );

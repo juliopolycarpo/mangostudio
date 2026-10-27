@@ -2,6 +2,7 @@ import { afterEach, beforeEach } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { clearRegistry } from '../../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../../src/services/tools/types';
 

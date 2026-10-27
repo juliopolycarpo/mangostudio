@@ -6,6 +6,7 @@
 
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
+
 import type { AgentCliDetection } from '../../../src/modules/app-settings/application/detected-library-defaults';
 import type { ProbeScope } from '../../../src/modules/environments/application/probing-service';
 

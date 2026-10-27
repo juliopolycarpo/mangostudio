@@ -143,6 +143,7 @@ export function stringifyTomlDocument(doc: Record<string, unknown>): string {
   const serialized = Bun.TOML.stringify(doc);
   if (serialized === undefined) {
     throw new TypeError(
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
       `Cannot stringify TOML document: received ${String(doc)}; expected a TOML table object.`
     );
   }

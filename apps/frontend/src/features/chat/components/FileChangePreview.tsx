@@ -1,9 +1,11 @@
 import { ArrowRight } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
+
 import { Badge } from '@/components/ui/Badge';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import {
   DIFF_PREVIEW_MAX_LINES,
   type DiffPreviewLine,
@@ -84,7 +86,7 @@ export function FileChangePreviewBody({ preview, action }: FileChangePreviewBody
           <FileSection
             // A patch may touch the same path twice, so only the position is
             // unique. Sections are position-stable for a given preview.
-            // biome-ignore lint/suspicious/noArrayIndexKey: op+path is not unique across a patch
+            // eslint-disable-next-line react/no-array-index-key -- op+path is not unique across a patch
             key={index}
             file={file}
             lines={lines}
@@ -157,7 +159,7 @@ function FileSection({
             <tbody>
               {lines.map((line, index) => (
                 <tr
-                  // biome-ignore lint/suspicious/noArrayIndexKey: diff lines are position-stable per render
+                  // eslint-disable-next-line react/no-array-index-key -- diff lines are position-stable per render
                   key={index}
                   className={`${LINE_STYLES[line.kind].row} leading-relaxed`}
                 >

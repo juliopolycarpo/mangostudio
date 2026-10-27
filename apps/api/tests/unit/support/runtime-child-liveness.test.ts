@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { expectRuntimeChildAlive } from '../../support/runtime-child-liveness';
 
 /** A runtime child whose exit the test triggers by hand. */

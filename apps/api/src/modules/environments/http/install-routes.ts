@@ -15,6 +15,7 @@ import {
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
+
 import type { GuardIpPolicy } from '../../../lib/client-ip';
 import { getConfig } from '../../../lib/config';
 import { ProfileMismatchError } from '../../../lib/profile-context';
@@ -27,8 +28,8 @@ import {
   InstallPreparationError,
   type InstallRequestContext,
   type InstallService,
-  InstallUnavailableError,
   installService,
+  InstallUnavailableError,
 } from '../application/install-service';
 import { RecipeInputError } from '../domain/recipe-input';
 import { InstallerDownloadError } from '../infrastructure/installer-download';

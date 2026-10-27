@@ -14,7 +14,7 @@
  * `RuntimeClient` still reports the connection as unavailable.
  */
 
-import { RESERVED_ERROR_CODES, RemoteError, type SessionClosure } from '@mangostudio/protocol';
+import { RemoteError, RESERVED_ERROR_CODES, type SessionClosure } from '@mangostudio/protocol';
 
 export class RuntimeRequestNotSentError extends RemoteError {
   constructor(method: string, closure: SessionClosure | undefined) {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { isSecretEnvKey, isSecretEnvValue, sanitizeShellEnv } from '../../../src/process/shell-env';
 
 describe('isSecretEnvKey', () => {

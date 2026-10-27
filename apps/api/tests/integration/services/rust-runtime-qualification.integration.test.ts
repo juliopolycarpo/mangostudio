@@ -58,6 +58,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+
 import { spawnPort } from '@mangostudio/protocol/spawn';
 import {
   RUNTIME_CONSENT_PRESETS,
@@ -65,6 +66,7 @@ import {
   runtimeSlotCurrentDir,
   runtimeSlotVersionBinaryPath,
 } from '@mangostudio/shared/runtime-home';
+
 import { getDb } from '../../../src/db/database';
 import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
@@ -370,8 +372,7 @@ describe('Real Rust runtime qualification', () => {
           expect(opened.pid).toBeGreaterThan(0);
           const output: string[] = [];
           let finishExit:
-            | ((exit: { exitCode: number | null; signal: string | null }) => void)
-            | undefined;
+            ((exit: { exitCode: number | null; signal: string | null }) => void) | undefined;
           const exited = new Promise<{ exitCode: number | null; signal: string | null }>(
             (resolve) => {
               finishExit = resolve;

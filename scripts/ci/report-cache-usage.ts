@@ -2,6 +2,7 @@
 // Read-only, advisory accounting after the mandatory Gate verdict. Keep this
 // script and its imports dependency-free: Gate does not run `bun install`.
 import { appendFileSync } from 'node:fs';
+
 import { cacheFamily } from './cache-families';
 import {
   BYTES_PER_GB,

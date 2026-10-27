@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import {
   CLOSE_CODES,
   RESERVED_ERROR_CODES,
@@ -17,6 +18,7 @@ import {
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
+
 import { getDb } from '../../../src/db/database';
 import { createRuntimePairingService } from '../../../src/modules/environments/application/runtime-pairing-service';
 import { createRuntimeSocketRoutes } from '../../../src/modules/environments/http/runtime-socket-routes';
@@ -229,7 +231,7 @@ async function dialRuntime(
     closed: new Promise<SessionClosure>((resolve) => session.onClose(resolve)),
     close() {
       dialed.delete(runtime);
-      session.close(CLOSE_CODES.RELEASED, 'test over');
+      void session.close(CLOSE_CODES.RELEASED, 'test over');
     },
   };
   dialed.add(runtime);

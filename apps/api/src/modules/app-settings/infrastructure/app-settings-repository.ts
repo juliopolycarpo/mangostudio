@@ -9,6 +9,7 @@ import {
   normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
+
 import type { Database, UserAppSettingsSelect } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { generateId } from '../../../utils/id';

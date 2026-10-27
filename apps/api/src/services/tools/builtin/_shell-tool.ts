@@ -6,9 +6,10 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
-  RuntimeShellResult as ShellCommandResult,
   RuntimeShellKind as ShellKind,
+  RuntimeShellResult as ShellCommandResult,
 } from '@mangostudio/shared/runtime-contract';
+
 import {
   resolveToolchainParams,
   toolchainService,

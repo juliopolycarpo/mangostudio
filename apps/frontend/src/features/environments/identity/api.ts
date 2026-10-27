@@ -2,6 +2,7 @@ import type {
   ToolIdentityUpdate,
   ToolIdentityUpdateResponse,
 } from '@mangostudio/shared/tool-identity';
+
 import { client } from '@/lib/api-client';
 import { throwApiError } from '@/lib/utils';
 

@@ -7,12 +7,14 @@ import type { Environment, HttpEnvironmentConfig } from '@mangostudio/shared/env
 import { shouldWarnPlaintextHttpRuntime } from '@mangostudio/shared/environments/values';
 import { KeyRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useRuntimeLifecycleQuery, useUpdateEnvironmentMutation } from '../queries';
 import { CopyLine } from './CopyLine';
 import { CommandGroup, EntityPanel } from './EntityPanel';

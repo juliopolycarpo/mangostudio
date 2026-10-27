@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import {
   BROWSER_SMOKE_BROWSER,
   BROWSER_SMOKE_SETUP_COMMAND,

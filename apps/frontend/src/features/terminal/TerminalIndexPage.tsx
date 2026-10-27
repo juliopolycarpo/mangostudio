@@ -2,6 +2,7 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Plus, TerminalSquare, X } from 'lucide-react';
 import { Suspense, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
@@ -11,6 +12,7 @@ import type { EnvironmentScopeSearch } from '@/features/environments/use-environ
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import { CloseTerminalDialog } from './CloseTerminalDialog';
 import { LazyTerminalView } from './LazyTerminalView';
 import { openFailureMessage } from './open-failure-message';

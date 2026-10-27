@@ -1,4 +1,5 @@
 import { createLazyFileRoute, Outlet } from '@tanstack/react-router';
+
 import { SettingsNav } from '@/components/settings/SettingsNav';
 import { useSettingsRealtimeInvalidation } from '@/features/settings/hooks/use-settings-realtime';
 import { useI18n } from '@/hooks/use-i18n';

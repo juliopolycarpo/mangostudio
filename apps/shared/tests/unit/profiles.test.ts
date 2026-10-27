@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import Value from 'typebox/value';
+
 import { DEFAULT_PROFILE_ID, ProfileIdSchema } from '../../src/profiles';
 
 describe('ProfileIdSchema', () => {

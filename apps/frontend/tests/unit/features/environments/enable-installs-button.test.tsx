@@ -6,8 +6,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
+
 import { CopyCommandBlock } from '../../../../src/features/environments/components/CopyCommandBlock';
 import { render, screen, waitFor } from '../../../support/harness/render';
 import { installRecipe } from './fixtures';
@@ -108,6 +110,7 @@ describe('CopyCommandBlock enable-installs affordance', () => {
       String(input).includes('/api/machine/config')
     );
     const init = configCall?.[1] as RequestInit | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
     expect(JSON.parse(String(init?.body))).toEqual({
       environments: { installsEnabled: true },
     });

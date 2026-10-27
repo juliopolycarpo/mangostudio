@@ -16,6 +16,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { openapi } from '@elysia/openapi';
 import {
   ApiErrorResponseSchema,
@@ -27,6 +28,7 @@ import {
 } from '@mangostudio/shared/errors';
 import { Elysia, status } from 'elysia';
 import Value from 'typebox/value';
+
 import { errorHandler } from '../../../src/plugins/error-handler';
 import {
   OPENAPI_PATH,
@@ -86,6 +88,8 @@ describe('a spec route that fails to generate', () => {
     const capture = (...args: unknown[]) => lines.push(args.map(String).join(' '));
     console.error = capture;
     console.warn = capture;
+    // Capture and restore log output to verify secret redaction.
+    // eslint-disable-next-line no-console
     console.log = capture;
 
     try {
@@ -102,6 +106,7 @@ describe('a spec route that fails to generate', () => {
     } finally {
       console.error = error;
       console.warn = warn;
+      // eslint-disable-next-line no-console -- Restore the captured console method.
       console.log = log;
     }
   }

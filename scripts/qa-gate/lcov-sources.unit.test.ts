@@ -51,9 +51,10 @@ describe('readCoveredSources', () => {
     await writeFile(lcovPath, records.join('\n'), 'utf8');
 
     await expect(readCoveredSources(lcovPath, dir)).rejects.toThrow(
-      `${lcovPath} references 7 source file(s) missing under ${dir}: ` +
-        Array.from({ length: 5 }, (_, i) => join('src', `missing-${i}.ts`)).join(', ') +
-        ' (+2 more)'
+      `${lcovPath} references 7 source file(s) missing under ${dir}: ${Array.from(
+        { length: 5 },
+        (_, i) => join('src', `missing-${i}.ts`)
+      ).join(', ')} (+2 more)`
     );
   });
 

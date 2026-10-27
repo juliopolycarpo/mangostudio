@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+
 import ts from '@typescript/typescript6';
 
 import { ROOT_DIR } from './config';
@@ -126,7 +127,8 @@ export function assertNoProductionNodeEnvBranches(rootDir: string = ROOT_DIR): v
     .map(({ path, line, column }) => `  - ${path}:${line}:${column}`)
     .join('\n');
   throw new Error(
-    'Production source must not branch on NODE_ENV. Inject an explicit test seam instead.\n' +
+    `Production source must not branch on NODE_ENV. Inject an explicit test seam instead.\n${
       details
+    }`
   );
 }

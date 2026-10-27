@@ -12,15 +12,17 @@
  */
 
 import { describe, expect, it, jest, mock } from 'bun:test';
+
 import type { Message } from '@mangostudio/shared/chat';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { useId } from 'react';
+
 import { flushAsyncRender, render } from '../../../support/harness/render';
 
 // The virtualizer depends on DOM layout measurements not available in happy-dom.
 // We mock it so every item in the messages array is rendered directly, the same
 // way `chat-feed-parts.test.tsx` does.
-mock.module('@tanstack/react-virtual', () => ({
+void mock.module('@tanstack/react-virtual', () => ({
   useVirtualizer: (opts: { count: number }) => ({
     getTotalSize: () => opts.count * 200,
     getVirtualItems: () =>
@@ -81,7 +83,7 @@ function useFakeToolIdentities() {
   };
 }
 
-mock.module('@/features/environments/identity/use-tool-identities', () => ({
+void mock.module('@/features/environments/identity/use-tool-identities', () => ({
   useToolIdentities: useFakeToolIdentities,
 }));
 

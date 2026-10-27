@@ -102,7 +102,7 @@ const EXECUTABLE_EXTENSION = process.platform === 'win32' ? '.exe' : '';
 const FAILING_GIT_DIRECTORY = 'failing-git';
 
 /**
- * Compiles the fake tools once: `turbo` and `bunx` for every CLI fixture's `PATH`, and `git`
+ * Compiles the fake tools once: `turbo` and `bun` for every CLI fixture's `PATH`, and `git`
  * in its own directory for the one test that fails Check's change scan.
  */
 const compileFakeCheckTools = async (directory: string) => {
@@ -118,12 +118,12 @@ const compileFakeCheckTools = async (directory: string) => {
   });
   expect(result.success, result.logs.map(String).join('\n')).toBe(true);
   // The fake reads its tool name from the path it was started by.
-  const bunx = join(directory, `bunx${EXECUTABLE_EXTENSION}`);
-  linkSync(turbo, bunx);
+  const bun = join(directory, `bun${EXECUTABLE_EXTENSION}`);
+  linkSync(turbo, bun);
   // Windows can spend seconds scanning a new executable on its first start. Pay that once
-  // here, outside every case's timeout, and confirm the linked name answers as `bunx`.
-  const started = Bun.spawnSync([bunx, 'dprint', 'check'], {
-    env: { ...process.env, CHECK_FIXTURE_DPRINT_EXIT: '0' },
+  // here, outside every case's timeout, and confirm the linked name answers as `bun`.
+  const started = Bun.spawnSync([bun, 'fmt', 'check'], {
+    env: { ...process.env, CHECK_FIXTURE_FMT_EXIT: '0' },
   });
   expect(started.exitCode, started.stderr.toString()).toBe(0);
   mkdirSync(join(directory, FAILING_GIT_DIRECTORY));
@@ -148,7 +148,7 @@ const makeCliFixture = (fakeToolDirectory: string) => {
       PATH: `${fakeToolDirectory}${delimiter}${process.env.PATH}`,
       MANGO_RUNNER_CONCURRENCY: '2',
       CHECK_FIXTURE_TURBO_EXIT: '0',
-      CHECK_FIXTURE_DPRINT_EXIT: '0',
+      CHECK_FIXTURE_FMT_EXIT: '0',
     },
   };
 };
@@ -172,13 +172,13 @@ describe('Check CLI result parity', () => {
     ['multiple task failures', '2', '7', 1],
   ])(
     '%s preserves human logs and exit with the report adapter enabled',
-    async (_name, turbo, dprint, exitCode) => {
+    async (_name, turbo, fmt, exitCode) => {
       const fixture = makeCliFixture(fakeToolDirectory);
       try {
         const env = {
           ...fixture.env,
           CHECK_FIXTURE_TURBO_EXIT: turbo,
-          CHECK_FIXTURE_DPRINT_EXIT: dprint,
+          CHECK_FIXTURE_FMT_EXIT: fmt,
         };
         const ordinary = await runCli(['--api'], env, fixture.directory);
         const reported = await runCli(
@@ -199,14 +199,14 @@ describe('Check CLI result parity', () => {
         expect(report.state).toBe('completed');
         expect(report.tasks.map((task) => task.label)).toEqual([
           'workspaces:check',
-          'root:dprint:api',
+          'root:fmt:api',
           'root:shared-import-boundary',
         ]);
         expect(
           report.tasks
             .filter((task) => task.state === 'executed' && task.exitCode !== 0)
             .map((task) => task.label)
-        ).toEqual(exitCode === 0 ? [] : ['workspaces:check', 'root:dprint:api']);
+        ).toEqual(exitCode === 0 ? [] : ['workspaces:check', 'root:fmt:api']);
       } finally {
         rmSync(fixture.directory, { recursive: true, force: true });
       }
@@ -230,7 +230,7 @@ describe('Check CLI result parity', () => {
       expect(report.state).toBe('unavailable');
       expect(report.tasks.map((task) => `${task.label}:${task.state}`)).toEqual([
         'workspaces:check:unavailable',
-        'root:dprint:api:unavailable',
+        'root:fmt:api:unavailable',
         'root:shared-import-boundary:executed',
       ]);
       expect(result.stderr).toContain('Invalid MANGO_RUNNER_CONCURRENCY');
@@ -243,7 +243,7 @@ describe('Check CLI result parity', () => {
   test('a failed snapshot never relabels a finished task', async () => {
     const fixture = makeCliFixture(fakeToolDirectory);
     try {
-      // Turbo blocks the report, so its snapshot fails. Dprint runs next and
+      // Turbo blocks the report, so its snapshot fails. Bun fmt runs next and
       // unblocks it, so the final write must record every task as executed.
       const result = await runCli(
         ['--api', '--report-file', fixture.path, '--report-id', CHECK_INVOCATION_ID],
@@ -265,7 +265,7 @@ describe('Check CLI result parity', () => {
       expect(report.state).toBe('completed');
       expect(report.tasks.map((task) => `${task.label}:${task.state}`)).toEqual([
         'workspaces:check:executed',
-        'root:dprint:api:executed',
+        'root:fmt:api:executed',
         'root:shared-import-boundary:executed',
       ]);
     } finally {

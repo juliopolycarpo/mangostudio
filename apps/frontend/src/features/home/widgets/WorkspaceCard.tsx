@@ -8,6 +8,7 @@
 
 import type { GitRepoState } from '@mangostudio/shared/git';
 import { FolderOpen, GitBranch } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { SectionCard } from '@/components/ui/SectionCard';
 import type { StatusDotTone } from '@/components/ui/StatusDot';
@@ -17,6 +18,7 @@ import { usePlural } from '@/hooks/use-plural';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
+
 import { HubSkeletonLines } from './HubSkeletonLines';
 
 interface WorkspaceCardProps {

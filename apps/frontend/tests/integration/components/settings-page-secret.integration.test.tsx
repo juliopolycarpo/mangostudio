@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest, spyOn } from 'bun:test';
+
 import userEvent from '@testing-library/user-event';
+
 import { ConnectorsSettings } from '../../../src/features/settings/connectors';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { render, screen, waitFor, within } from '../../support/harness/render';
@@ -57,6 +59,7 @@ async function readJsonBody(call: FetchCall) {
   const input = call[0];
   const init = call[1];
   const body = input instanceof Request ? await input.clone().text() : init?.body;
+  // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
   return JSON.parse(typeof body === 'string' ? body : String(body));
 }
 

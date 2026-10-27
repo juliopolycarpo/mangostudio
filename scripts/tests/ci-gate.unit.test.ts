@@ -34,7 +34,7 @@ const INTEGRATION_PR_WORKFLOWS = [
 ] as const;
 
 // GitHub expression opener, assembled out of band so the literal `${{` never
-// appears in a plain string — biome's noTemplateCurlyInString would flag it.
+// appears in a plain string — Bun's no-template-curly-in-string would flag it.
 // Interpolating it into a template literal is not flagged.
 const EXPR = '$' + '{{';
 

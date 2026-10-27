@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { isImageModelId, isReasoningModel } from '../../src/utils/model-detection';
 
 describe('isImageModelId', () => {

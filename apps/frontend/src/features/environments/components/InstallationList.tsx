@@ -7,8 +7,10 @@
  */
 
 import type { ToolchainChoice } from '@mangostudio/shared/environments';
+
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+
 import { type InstallationGroup, pathPosition, versionLabel } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { ToolchainAction } from './ToolchainAction';

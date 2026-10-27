@@ -6,8 +6,11 @@
  */
 
 import { describe, expect, it, mock } from 'bun:test';
+
 import type { ReactNode } from 'react';
+
 import { TAB_CLASSES } from '@/components/ui/Tabs';
+
 import { render, screen } from '../../../support/harness/render';
 import { LinkStub, routerWithLinkStub } from '../../../support/mocks/router';
 
@@ -41,13 +44,13 @@ function InactiveLink({
   );
 }
 
-mock.module(
+void mock.module(
   '@tanstack/react-router',
   await routerWithLinkStub({ Link: InactiveLink, useParams: () => params })
 );
 
 const scope = await import('@/features/environments/use-environment-scope');
-mock.module('@/features/environments/use-environment-scope', () => ({
+void mock.module('@/features/environments/use-environment-scope', () => ({
   ...scope,
   useEnvironmentScope: () => ({ environmentId: 'local' }),
 }));

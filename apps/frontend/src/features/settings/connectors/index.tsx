@@ -3,10 +3,12 @@
 import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
 import type { Connector } from '@mangostudio/shared/connectors';
 import { useState } from 'react';
+
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { deleteConnector } from './api';
 import { AddConnectorModal } from './components/AddConnectorModal';
 import { ConnectorList } from './components/ConnectorList';

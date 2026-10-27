@@ -4,8 +4,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type { MessagePart } from '@mangostudio/shared/types';
 import { screen } from '@testing-library/react';
+
 import { TurnStatusChip } from '../../../src/features/chat/components/TurnStatusChip';
 import { deriveTurnStatus } from '../../../src/features/chat/lib/turn-status';
 import { render } from '../../support/harness/render';

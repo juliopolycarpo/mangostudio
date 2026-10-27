@@ -299,7 +299,7 @@ proxy — todo chamador chega de loopback. Com `TRUST_PROXY=true` quem responde 
 cliente encaminhado, então uma sessão remota autenticada é corretamente recusada.
 
 Os dois leem hops diferentes do `X-Forwarded-For`, porque as perguntas são
-diferentes. O header é uma lista, e um proxy *acrescenta* o endereço que viu em
+diferentes. O header é uma lista, e um proxy _acrescenta_ o endereço que viu em
 vez de substituir a lista — tanto o `$proxy_add_x_forwarded_for` acima quanto o
 `reverse_proxy` do Caddy fazem isso. O limiter usa o **primeiro** hop, o cliente
 de origem, que é a chave certa para um contador. O guard usa o **último**, o que

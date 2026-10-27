@@ -1,6 +1,8 @@
 import type { GithubInboxResponse } from '@mangostudio/shared/github';
-import { type UseQueryResult, useQuery } from '@tanstack/react-query';
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+
 import { useApp } from '@/lib/app-context';
+
 import { githubInboxQueryOptions } from '../queries';
 import { useForceRefresh } from './use-force-refresh';
 

@@ -8,6 +8,7 @@
  */
 
 import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
+
 import { createDiagnosticLogger } from '../../../lib/logger';
 
 type LogMetadata = Record<string, string | number | boolean>;

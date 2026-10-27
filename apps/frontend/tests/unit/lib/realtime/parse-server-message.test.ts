@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { RealtimeServerMessage } from '@mangostudio/shared/realtime';
+
 import { parseServerMessage } from '@/lib/realtime/parse-server-message';
 
 const VALID_FRAMES: readonly RealtimeServerMessage[] = [

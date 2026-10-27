@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { createGeminiInteractionAccumulator } from '../../../../src/services/providers/gemini/interaction-accumulator';
 import type { InteractionSSEEvent } from '../../../../src/services/providers/gemini/normalizers';
 import type { AgentEvent } from '../../../../src/services/providers/types';

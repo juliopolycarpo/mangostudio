@@ -5,12 +5,13 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
+
 import { openTarArchive } from '../lib/archive';
 import { createReleaseAssetPlan, type ReleaseAssetPlan } from '../lib/release-assets';
 import {
   filterBinaryTargets,
-  type ReleasePlatformId,
   releaseArchiveFileName,
+  type ReleasePlatformId,
   runtimeBinaryName,
 } from '../lib/release-targets';
 import type { extractTargetArchive as extractTarget } from '../release/extract-target';

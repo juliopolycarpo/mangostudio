@@ -85,10 +85,11 @@ async function buildOne(
   }
   const { header: found, reportedVersion } = verification;
   log(
-    `  ${staged}: ${found?.format} ${found?.arch}` +
-      (found?.maxGlibc ? `, max GLIBC_${found.maxGlibc}` : '') +
-      (reportedVersion ? `, --version ${reportedVersion}` : ', not runnable here') +
-      `, ${statSync(staged).size} bytes`
+    `  ${staged}: ${found?.format} ${found?.arch}${
+      found?.maxGlibc ? `, max GLIBC_${found.maxGlibc}` : ''
+    }${
+      reportedVersion ? `, --version ${reportedVersion}` : ', not runnable here'
+    }, ${statSync(staged).size} bytes`
   );
 }
 

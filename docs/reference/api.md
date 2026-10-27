@@ -356,7 +356,7 @@ a shared cache cannot serve one client the other's body.
 
 Two things stay outside the negotiation. SSE keeps `SSEErrorEvent` — it is a
 stream of events, not an HTTP error response. And a handful of endpoints answer
-a 4xx with an error *plus* domain data, such as an install refusal carrying its
+a 4xx with an error _plus_ domain data, such as an install refusal carrying its
 `recipe`; those keep their documented shape under either `Accept`, because the
 conversion is defined only over bodies that are exactly an `ApiErrorResponse`.
 RFC 9457 would permit those fields as extension members — the same mechanism

@@ -3,16 +3,18 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import type {
   InstallRecipePreview,
   RuntimeFinding,
   RuntimeInstallation,
 } from '@mangostudio/shared/environments';
 import { en, ptBR } from '@mangostudio/shared/i18n';
+
 import {
   describeFinding,
-  findInstallRecipe,
   findingSeverity,
+  findInstallRecipe,
   formatBytes,
   formatDuration,
   groupInstallations,

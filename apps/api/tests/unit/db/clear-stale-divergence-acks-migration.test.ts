@@ -8,14 +8,16 @@
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { Kysely, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
+
 import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 
 const TARGET = '052_clear_stale_divergence_acks';
 
-// biome-ignore lint/suspicious/noExplicitAny: migrating incrementally through schemas `Database` does not describe.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- migrating incrementally through schemas `Database` does not describe.
 type AnyDb = Kysely<any>;
 
 let sqlite: SQLiteDatabase;
@@ -27,6 +29,7 @@ function migrator(): Migrator {
 
 async function migrateTo(name: string): Promise<void> {
   const { error } = await migrator().migrateTo(name);
+  // eslint-disable-next-line @typescript-eslint/only-throw-error -- The migration error is rethrown unchanged so the test observes the original failure.
   if (error) throw error;
 }
 

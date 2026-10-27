@@ -13,6 +13,7 @@ import type {
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { FIELD_CLASS } from '@/components/ui/Input';
@@ -20,6 +21,7 @@ import { SectionCard } from '@/components/ui/SectionCard';
 import { messageKeys } from '@/features/chat/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { McpElicitationGoneError, respondMcpElicitation } from '@/services/mcp-elicitation-service';
+
 import { ChoiceButton } from './ChoiceButton';
 
 type ElicitationPart = Extract<MessagePart, { type: 'mcp_elicitation' }>;

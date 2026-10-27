@@ -10,7 +10,9 @@
  */
 
 import { createHash } from 'node:crypto';
+
 import type { HubBindingKey } from '@mangostudio/shared/runtime-contract';
+
 import type { HubWorkspaceBinding } from './hub-workspace-authority';
 
 /** Versioned so a future change of derivation never collides with this one. */

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { parseGitStatus } from '../../../../src/modules/git/domain/status-parser';
 
 const HASH = '0123456789012345678901234567890123456789';

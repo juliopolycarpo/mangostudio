@@ -1,4 +1,5 @@
 import { lazy, Suspense } from 'react';
+
 import type { MarkdownContentProps } from './MarkdownContentRenderer';
 
 const LazyMarkdownContentRenderer = lazy(() =>

@@ -15,7 +15,7 @@ import {
 const workflow = readText('.github/workflows/test.yml');
 
 // Placeholder openers assembled out of band so the literal never appears in a
-// plain string — biome's noTemplateCurlyInString flags those. Same trick as
+// plain string — Bun's no-template-curly-in-string flags those. Same trick as
 // ci-gate.unit.test.ts.
 const EXPR = `$${'{{'}`;
 const SHELL = `$${'{'}`;

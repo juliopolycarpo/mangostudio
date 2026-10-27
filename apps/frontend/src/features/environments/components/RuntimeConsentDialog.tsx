@@ -16,6 +16,7 @@ import {
   RUNTIME_CONSENT_PRESETS,
 } from '@mangostudio/shared/runtime-home/values';
 import { useState } from 'react';
+
 import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';

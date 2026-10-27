@@ -28,6 +28,7 @@ import {
   type TerminalNotice,
 } from '@mangostudio/shared/terminal';
 import { useEffect, useRef, useState } from 'react';
+
 import { getWebSocketBaseUrl } from '@/lib/api-base-url';
 import { scheduleLoginRedirect } from '@/lib/auth-navigate';
 import {

@@ -8,7 +8,9 @@
  */
 
 import type { ToolIdentity, ToolIdentityMap, ToolImage } from '@mangostudio/shared/tool-identity';
+
 import type { ToolImageDisplay } from '@/components/ui/ToolAvatar';
+
 import { toolImageDisplay } from './image';
 
 export interface ResolvedToolIdentity {

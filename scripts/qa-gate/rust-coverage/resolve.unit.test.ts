@@ -9,9 +9,9 @@ import { measuredValue, presentValue } from '../model/states';
 import { expectState } from '../testing/measurement-assertions';
 import {
   exportJson,
+  receiptJson,
   RUST_ROOT,
   RUST_SHA,
-  receiptJson,
   TWO_CRATE_FILES,
   TWO_CRATE_ROOTS,
 } from '../testing/rust-coverage-fixture';

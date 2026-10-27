@@ -3,6 +3,7 @@ import type {
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
+
 import { getDb } from '../../../db/database';
 import type {
   Database,

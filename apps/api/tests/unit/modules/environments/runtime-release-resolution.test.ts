@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+
 import {
   CHECKSUMS_CACHE_NAME,
   loadRuntimeReleaseBytes,
@@ -107,6 +108,7 @@ describe('resolveRuntimeRelease', () => {
     const loaded = await loadFromRelease('linux-x64', {
       version: '1.2.3-canary.abcdef0',
       fetch: ((input: string | URL | Request) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         const url = String(input);
         calls.push(url);
         return Promise.resolve(
@@ -142,6 +144,7 @@ describe('resolveRuntimeRelease', () => {
     const loaded = await loadFromRelease('linux-x64', {
       version: '1.2.3-canary.abcdef0',
       fetch: ((input: string | URL | Request) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         const url = String(input);
         return Promise.resolve(
           url.endsWith('/SHA256SUMS') ? new Response(`${hash}  ${asset}\n`) : new Response(bytes)
@@ -176,6 +179,7 @@ describe('resolveRuntimeRelease', () => {
     const loaded = await loadFromRelease('linux-x64', {
       version: '1.2.3',
       fetch: ((input: string | URL | Request) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         const url = String(input);
         return Promise.resolve(
           url.endsWith('/SHA256SUMS') ? new Response(`${hash}  ${asset}\n`) : new Response(bytes)
@@ -278,7 +282,9 @@ describe('the runtime cache when the release cannot be reached', () => {
     const loaded = loadFromRelease('linux-x64', {
       version: VERSION,
       fetch: ((input: string | URL | Request) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         requested.push(String(input));
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         return (fetchImpl as (url: string) => Promise<Response>)(String(input));
       }) as unknown as typeof fetch,
       resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
@@ -419,6 +425,7 @@ describe('the runtime cache while the release is reachable', () => {
       version: '1.2.3',
       fetch: ((input: string | URL | Request) =>
         Promise.resolve(
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
           String(input).endsWith('/SHA256SUMS')
             ? new Response(`${hash}  ${ASSET}\n`)
             : new Response(fresh)
@@ -445,6 +452,7 @@ describe('the runtime cache while the release is reachable', () => {
       version: '1.2.3',
       fetch: ((input: string | URL | Request) =>
         Promise.resolve(
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
           String(input).endsWith('/SHA256SUMS')
             ? new Response(`${hash}  ${ASSET}\n`)
             : new Response(bytes)
@@ -472,6 +480,7 @@ describe('the runtime cache while the release is reachable', () => {
     await loadFromRelease('linux-x64', {
       version: '1.2.3-canary.abcdef0',
       fetch: ((input: string | URL | Request) => {
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
         const url = String(input);
         return Promise.resolve(
           url.endsWith('/SHA256SUMS') ? new Response(`${hash}  ${asset}\n`) : new Response(bytes)
@@ -502,6 +511,7 @@ describe('the runtime cache while the release is reachable', () => {
       version: '1.2.3',
       fetch: ((input: string | URL | Request) =>
         Promise.resolve(
+          // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
           String(input).endsWith('/SHA256SUMS')
             ? new Response(`${hash}  ${ASSET}\n`)
             : new Response(bytes)

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { LibraryInstance, LibraryLocationId } from '@mangostudio/shared/library';
+
 import { resolveLibraryCoverage } from '../../../../src/modules/library/application/coverage-resolver';
 
 function instance(locationId: LibraryLocationId): LibraryInstance {

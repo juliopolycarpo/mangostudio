@@ -1,6 +1,7 @@
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import { useToast } from '@/components/ui/Toast';
 import { messageKeys, useMessagesQuery } from '@/features/chat/queries';
 import {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+
 import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
@@ -10,8 +11,8 @@ import {
   findManifestDependencyViolations,
   findRetiredDependencies,
   formatDependencyPolicyViolation,
-  RETIRED_DEPENDENCIES,
   readAllManifests,
+  RETIRED_DEPENDENCIES,
 } from '../lib/dependency-policy';
 
 describe('dependency policy', () => {

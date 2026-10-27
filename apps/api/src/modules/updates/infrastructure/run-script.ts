@@ -12,6 +12,7 @@
  */
 
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+
 import { bridgeEmitter } from '../../../lib/emit-bridge';
 
 export interface ScriptOutputLine {

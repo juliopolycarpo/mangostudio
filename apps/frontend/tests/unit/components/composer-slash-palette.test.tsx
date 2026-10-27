@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it, jest } from 'bun:test';
+
 import type {
   ExternalAgentCommand,
   ExternalAgentDescriptor,
@@ -16,6 +17,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
+
 import { InputBar } from '../../../src/features/chat/components/InputBar';
 import { setComposerDraft } from '../../../src/features/chat/lib/composer-draft-store';
 import { publishExternalCommands } from '../../../src/features/external-agents/command-catalog';

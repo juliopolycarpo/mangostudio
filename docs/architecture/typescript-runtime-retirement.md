@@ -2,7 +2,7 @@
 
 The TypeScript runtime package (`apps/runtime`, `@mangostudio/runtime`) has been retired in favour
 of the compiled Rust runtime (`crates/mangostudio-runtime`) and is deleted. This page records what
-the hub's test suite used to prove *through* the TypeScript runtime, where each responsibility
+the hub's test suite used to prove _through_ the TypeScript runtime, where each responsibility
 lives now, the last result of the differential suites that compared the two runtimes before their
 TypeScript halves were removed, and the fixtures that still stand for what the TypeScript runtime
 wrote.

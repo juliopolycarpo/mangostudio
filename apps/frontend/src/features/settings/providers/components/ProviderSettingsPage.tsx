@@ -7,6 +7,7 @@ import type { UpdateProviderRuntimeSettingsBody } from '@mangostudio/shared/prov
 import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import { SettingsPage } from '@/components/settings/SettingsPage';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -16,6 +17,7 @@ import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
+
 import { useProviderSettings, useUpdateProviderSettings } from '../hooks/use-provider-settings';
 import { CacheSettingsSection } from './CacheSettingsSection';
 import { ReasoningSettingsSection } from './ReasoningSettingsSection';
@@ -65,7 +67,11 @@ export function ProviderSettingsPage() {
 
   if (isLoading) {
     return (
-      <div role="status" className="space-y-3">
+      <div
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+        role="status"
+        className="space-y-3"
+      >
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-40 w-full rounded-md" />
         <span className="sr-only">{t.common.loading}</span>
@@ -216,6 +222,7 @@ function ProviderSettingsEditor({
           updateMutation.isPending ? (
             <div
               className="inline-flex items-center gap-1.5 text-xs text-fg-muted"
+              // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
               role="status"
               aria-live="polite"
             >

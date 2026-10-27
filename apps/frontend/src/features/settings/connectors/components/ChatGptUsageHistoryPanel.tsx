@@ -2,12 +2,14 @@ import type { ChatGptUsageSample } from '@mangostudio/shared/connectors';
 import type { Locale, Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
 import { History, RefreshCw } from 'lucide-react';
+
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
+
 import { getChatGptUsageHistory } from '../api';
 
 type ConnectorMessages = Messages['settings']['connectors'];
@@ -85,6 +87,7 @@ function UsageHistoryChart({
           surface where the button fill does not; the area under the line is
           its translucent wash, so the series still reads against either theme. */}
       <svg
+        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The accessible image role labels rendered chart content.
         role="img"
         aria-label={title}
         viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
@@ -163,7 +166,11 @@ export function ChatGptUsageHistoryPanel({ connectorId }: { connectorId: string 
       </MicroLabel>
 
       {historyQuery.isLoading ? (
-        <div role="status" className="flex items-center gap-2 text-xs text-fg-muted">
+        <div
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+          role="status"
+          className="flex items-center gap-2 text-xs text-fg-muted"
+        >
           <Spinner size="sm" />
           {s.chatgptHistoryLoading}
         </div>

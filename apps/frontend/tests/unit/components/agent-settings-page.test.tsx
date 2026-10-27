@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
+
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useSyncExternalStore } from 'react';
+
 import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
 import { AgentSettingsPage } from '../../../src/features/settings/agents/components/AgentSettingsPage';
 import { AgentToolPicker } from '../../../src/features/settings/agents/components/AgentToolPicker';

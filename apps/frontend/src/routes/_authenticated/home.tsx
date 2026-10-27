@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
+
 import { settleShellQuery } from '@/features/bootstrap/shell-bootstrap';
 import { chatListQueryOptions } from '@/features/chat/queries';
 

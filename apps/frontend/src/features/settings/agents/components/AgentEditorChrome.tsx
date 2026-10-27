@@ -1,9 +1,11 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { CircleAlert, RotateCcw, Save, Trash2 } from 'lucide-react';
+
 import { SettingsSegmented } from '@/components/settings/SettingsSegmented';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+
 import type { AgentEditorLabels, AgentEditorMode, EditableAgentProfile } from './AgentEditor.types';
 
 interface AgentEditorHeaderProps {

@@ -7,15 +7,17 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+
 import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
 const navigate = jest.fn();
 
-mock.module('@tanstack/react-router', () => ({
+void mock.module('@tanstack/react-router', () => ({
   useNavigate: () => navigate,
 }));
 

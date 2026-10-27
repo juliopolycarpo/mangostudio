@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+
 import { Elysia } from 'elysia';
 import type { Updateable } from 'kysely';
+
 import { getDb } from '../../../src/db/database';
 import type { Database } from '../../../src/db/types';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';

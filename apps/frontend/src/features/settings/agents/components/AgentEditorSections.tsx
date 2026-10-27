@@ -3,6 +3,7 @@ import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/s
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
 import { Eye } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
+
 import { CheckboxRow } from '@/components/settings/CheckboxRow';
 import { SettingsField } from '@/components/settings/SettingsField';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +13,7 @@ import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import type {
   AgentEditorLabels,
   EditableAgentProfile,

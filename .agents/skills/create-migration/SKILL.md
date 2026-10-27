@@ -31,10 +31,10 @@ it as the living example for current idioms when it differs from this skill.
    and the `'NNN_<snake_description>': <namedExport>` entry in numeric order.
 4. **Update `apps/api/src/db/types.ts`:**
    - Add the hand-written table interface, named `<TableNamePascal>Table` after the
-     *plural* `snake_case` table (e.g. `chat_todos` → `ChatTodosTable`).
+     _plural_ `snake_case` table (e.g. `chat_todos` → `ChatTodosTable`).
    - Add the table to the `Database` interface using its `snake_case` name.
    - Derive only the Kysely aliases the owning module uses, named from the
-     *singular* entity: `export type <Entity>Select = Selectable<<TableNamePascal>Table>`,
+     _singular_ entity: `export type <Entity>Select = Selectable<<TableNamePascal>Table>`,
      and likewise `<Entity>Insert = Insertable<…>` / `<Entity>Update = Updateable<…>`.
      Match nearby entries rather than emitting all three.
 5. **Apply repository conventions:**

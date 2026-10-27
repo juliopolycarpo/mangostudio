@@ -8,10 +8,11 @@
  * distribution.
  */
 
-import { CLOSE_CODES, type Port, RESERVED_ERROR_CODES, RemoteError } from '@mangostudio/protocol';
+import { CLOSE_CODES, type Port, RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { connectWebSocket } from '@mangostudio/protocol/ws';
 import { HUB_BINDING_KEY_HEADER } from '@mangostudio/shared/runtime-contract';
 import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
+
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';

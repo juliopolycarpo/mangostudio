@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { getToolHint } from '@/features/chat/components/ToolCallVisuals';
 
 describe('getToolHint', () => {

@@ -3,6 +3,7 @@ import { Download, X } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import * as motion from 'motion/react-m';
 import { useCallback, useRef } from 'react';
+
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { useFocusTrap } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
@@ -10,6 +11,7 @@ import { buildGeneratedImageFilename } from '@/lib/download-filenames';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
+
 import { MEDIA_CONTROL_CLASS } from './media-control';
 
 interface GalleryLightboxProps {
@@ -65,6 +67,7 @@ export function GalleryLightbox({ item, onClose }: GalleryLightboxProps) {
       {item && (
         <motion.div
           ref={dialogRef}
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- This custom dialog owns its focus and dismissal behavior.
           role="dialog"
           aria-modal="true"
           aria-label={t.gallery.lightboxLabel}

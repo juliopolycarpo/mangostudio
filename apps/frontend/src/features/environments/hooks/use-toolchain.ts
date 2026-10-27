@@ -13,6 +13,7 @@
 import type { ToolchainChoice, ToolchainRuntimeId } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+
 import { updateToolchain } from '../api';
 import { environmentKeys } from '../queries';
 

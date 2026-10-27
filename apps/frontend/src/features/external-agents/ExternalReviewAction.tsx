@@ -21,6 +21,7 @@ import {
 import type { Messages } from '@mangostudio/shared/i18n';
 import { ScanSearch } from 'lucide-react';
 import { useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
@@ -28,6 +29,7 @@ import { useApp } from '@/lib/app-context';
 import { ExternalRefusalError } from '@/lib/external-refusal-error';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
+
 import { externalRefusalLine } from './external-unavailable-text';
 import { useExternalAgents } from './useExternalAgents';
 

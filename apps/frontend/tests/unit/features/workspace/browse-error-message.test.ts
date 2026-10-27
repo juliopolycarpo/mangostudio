@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+
 import { browseErrorMessage } from '@/features/workspace/WorkdirPickerDialog';
 import { ApiError } from '@/lib/utils';
 

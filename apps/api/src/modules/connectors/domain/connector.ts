@@ -4,6 +4,7 @@
 
 import type { Connector } from '@mangostudio/shared/connectors';
 import type { ProviderType, SecretMetadataRow, SecretSource } from '@mangostudio/shared/types';
+
 import { parseStringArray } from '../../../utils/json';
 
 /** Per-provider configuration for secret storage paths. */

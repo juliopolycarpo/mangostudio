@@ -15,8 +15,10 @@
  */
 
 import type { ReactNode } from 'react';
+
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { cn } from '@/lib/utils';
+
 import { FindingIcon } from '../../components/FindingList';
 import { TOOL_CARD_SURFACE } from '../../components/ToolCard';
 
@@ -131,7 +133,7 @@ export function MachineFact({ label, value, mono, severity, title, children }: M
           ) : (
             <span className="break-words text-fg tabular-nums" title={title}>
               {value.map((part, index) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: positional runs that never reorder
+                // eslint-disable-next-line react/no-array-index-key -- positional runs that never reorder
                 <span key={index} className={part.code ? CODE_TEXT : undefined}>
                   {part.text}
                 </span>

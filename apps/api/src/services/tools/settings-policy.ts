@@ -2,6 +2,7 @@ import type {
   ToolParameterDescriptor,
   ToolSettingsDescriptor,
 } from '@mangostudio/shared/tool-settings';
+
 import { migrateLegacyToolParameters } from './execution-timeout';
 import {
   normalizePathItemArray,

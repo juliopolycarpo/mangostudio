@@ -48,6 +48,8 @@ function repairCheckpointAgentIds(parts: string): string | null {
     const candidate = part as CheckpointCandidatePart | null;
     if (
       typeof candidate !== 'object' ||
+      // Explicit null validation is needed before the discriminated fields below.
+      // eslint-disable-next-line @typescript-eslint/prefer-optional-chain -- This guard rejects null before reading the object discriminant.
       candidate === null ||
       candidate.type !== 'turn_checkpoint' ||
       candidate.agentId !== 'chat'

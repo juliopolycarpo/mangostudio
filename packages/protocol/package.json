@@ -13,7 +13,15 @@
   "bugs": {
     "url": "https://github.com/juliopolycarpo/mangostudio/issues"
   },
-  "keywords": ["mangostudio", "protocol", "rpc", "json-schema", "websocket", "stdio", "ipc"],
+  "keywords": [
+    "mangostudio",
+    "protocol",
+    "rpc",
+    "json-schema",
+    "websocket",
+    "stdio",
+    "ipc"
+  ],
   "type": "module",
   "sideEffects": false,
   "engines": {
@@ -30,7 +38,12 @@
     "./testing": "./src/testing.ts",
     "./package.json": "./package.json"
   },
-  "files": ["dist", "schema", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "schema",
+    "README.md",
+    "LICENSE"
+  ],
   "publishConfig": {
     "access": "public",
     "exports": {
@@ -69,7 +82,7 @@
   "scripts": {
     "build": "bun ./build.ts",
     "check": "bun run check:quick && bun run check:cycles && bun run typecheck",
-    "check:quick": "biome check .",
+    "check:quick": "bun --cwd ../.. lint packages/protocol && bun --cwd ../.. fmt --check packages/protocol",
     "check:cycles": "bun ../../scripts/check-import-cycles.ts .",
     "typecheck": "tsc --noEmit",
     "prepack": "bun ./build.ts"

@@ -7,7 +7,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { isUnreachableFailure, SafeFetchError, safeFetchBytes } from '../../../src/lib/safe-fetch';
+
+import { isUnreachableFailure, safeFetchBytes, SafeFetchError } from '../../../src/lib/safe-fetch';
 
 const PUBLIC_ADDRESS = { address: '93.184.216.34', family: 4 as const };
 
@@ -23,6 +24,7 @@ function respondWith(...responses: Response[]) {
   const inits: (RequestInit | undefined)[] = [];
   const queue = [...responses];
   const fetchImpl = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
     calls.push(String(input));
     inits.push(init);
     const next = queue.shift();

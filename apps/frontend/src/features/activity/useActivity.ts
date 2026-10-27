@@ -11,7 +11,9 @@ import type { ListActivityQuery } from '@mangostudio/shared/activity';
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
+
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
+
 import { activityKeys, activityQueryOptions } from './queries';
 
 export interface UseActivityOptions {

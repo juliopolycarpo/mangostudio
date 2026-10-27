@@ -1,6 +1,7 @@
 import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { Database, Eye, EyeOff, FileCode, LogIn, ShieldCheck } from 'lucide-react';
+
 import { PickOneRow } from '@/components/settings/PickOneRow';
 import { SettingsField } from '@/components/settings/SettingsField';
 import { Button } from '@/components/ui/Button';
@@ -10,6 +11,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
+
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import type { useConnectorForm } from '../hooks/use-connector-form';
 

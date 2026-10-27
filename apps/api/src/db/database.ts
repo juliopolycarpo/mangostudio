@@ -5,7 +5,9 @@
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+
 import { Kysely } from 'kysely';
+
 import { getConfig } from '../lib/config';
 import { createDiagnosticLogger } from '../lib/logger';
 import { createBunSqliteDialect } from './bun-sqlite-dialect';

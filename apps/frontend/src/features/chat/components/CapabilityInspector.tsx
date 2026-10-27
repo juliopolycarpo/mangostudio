@@ -25,6 +25,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ListChecks, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
+
 import { Callout } from '@/components/ui/Callout';
 import { ComposerPopover } from '@/components/ui/ComposerPopover';
 import { MicroLabel } from '@/components/ui/MicroLabel';
@@ -36,6 +37,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
+
 import type { ChatCapabilitiesSelection } from '../hooks/use-chat-capabilities';
 import { chatCapabilitiesQueryOptions } from '../hooks/use-chat-capabilities';
 import { DisclosureChevron } from './DisclosureChevron';
@@ -122,7 +124,7 @@ export function CapabilityInspector({
 
   return (
     // Not `relative`: the panel is anchored to the composer, not to this chip.
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is handled for the trigger and the panel it owns, both inside this wrapper.
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Escape is handled for the trigger and the panel it owns, both inside this wrapper.
     <div ref={containerRef} onKeyDown={onKeyDown}>
       <button
         ref={triggerRef}

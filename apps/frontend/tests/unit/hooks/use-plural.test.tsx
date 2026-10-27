@@ -8,8 +8,11 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+
 import { en, ptBR } from '@mangostudio/shared/i18n';
+
 import { pluralMessage, usePlural } from '@/hooks/use-plural';
+
 import { renderHook } from '../../support/harness/render';
 
 const FILES = { one: '{count} file changed', other: '{count} files changed' } as const;

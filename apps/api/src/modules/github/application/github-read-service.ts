@@ -25,6 +25,7 @@ import type {
   GithubRepo,
   GithubUnavailableState,
 } from '@mangostudio/shared/github';
+
 import { summarizeCheckBuckets } from '../domain/check-rollup';
 import {
   GhCheckRunListSchema,
@@ -45,9 +46,9 @@ import {
   toReviewThreads,
 } from '../domain/github-normalizers';
 import {
+  ghCli,
   type GhRuntimeSelection,
   type GithubCli,
-  ghCli,
   resolveGhHomeCwd,
 } from '../infrastructure/gh-cli';
 import { type GithubCache, githubCache } from './github-cache';

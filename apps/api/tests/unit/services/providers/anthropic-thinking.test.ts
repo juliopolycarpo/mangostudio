@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { buildAnthropicThinkingConfig } from '../../../../src/services/providers/anthropic/thinking-config';
 
 /**

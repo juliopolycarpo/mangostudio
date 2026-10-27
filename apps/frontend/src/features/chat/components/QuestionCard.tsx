@@ -1,11 +1,13 @@
 import { formatQuestionAnswers, type QuestionAnswer } from '@mangostudio/shared/questions';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { useId, useState } from 'react';
+
 import { Button } from '@/components/ui/Button';
 import { Chip } from '@/components/ui/Chip';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { Textarea } from '@/components/ui/Textarea';
 import { useI18n } from '@/hooks/use-i18n';
+
 import { ChoiceButton } from './ChoiceButton';
 
 type QuestionPart = Extract<MessagePart, { type: 'question' }>;
@@ -87,7 +89,7 @@ export function QuestionCard({ part, onSubmit }: QuestionCardProps) {
           <div
             // Questions are position-stable within a card, so the index is a
             // valid identity and avoids collisions on duplicate question text.
-            // biome-ignore lint/suspicious/noArrayIndexKey: no per-question id exists
+            // eslint-disable-next-line react/no-array-index-key -- no per-question id exists
             key={`${part.toolCallId}-q-${questionIndex}`}
             className="space-y-2"
           >

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { ROOT_DIR } from '../lib/config';
 
 const SCRIPT = join(ROOT_DIR, 'scripts/release/publish-summary.sh');

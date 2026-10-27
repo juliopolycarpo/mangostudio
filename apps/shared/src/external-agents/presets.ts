@@ -25,6 +25,7 @@
  */
 
 import Type, { type Static } from 'typebox';
+
 import type {
   ExternalApprovalRouting,
   ExternalPermissionLevel,

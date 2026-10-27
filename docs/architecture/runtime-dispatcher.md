@@ -26,11 +26,11 @@ distinction, and this crate never invents a second code for it.
 
 `mango_protocol::contract::ServeOptions` has a `validate_results` flag, but `Contract::serve`'s
 pipeline (`check_params` → `Guard::check` → the handler → the optional result check) runs that
-check *after* the handler has already settled. Once an audit port records a handler's outcome,
+check _after_ the handler has already settled. Once an audit port records a handler's outcome,
 that ordering means an `outcome: ok` line could already be written before a malformed result is
 ever caught — the hub would see `INTERNAL`, while the runtime's own audit trail says the call
 succeeded. The retired TypeScript runtime's `result-check.ts` existed for exactly this reason: it
-wrapped a handler's result check *inside* the audit-recording wrapper
+wrapped a handler's result check _inside_ the audit-recording wrapper
 (`gateHandlers(checkResults(handlers), deps)`), not through the SDK's own post-handler option.
 
 `crates/mangostudio-runtime::registry::Registry::implement` does the same thing: the closure it
@@ -83,7 +83,7 @@ token, or an absolute path.
 an ordinary `Err` carrying a bounded, redacted `INTERNAL` error instead of unwinding — implemented
 as a hand-rolled `Future` (`AssertUnwindSafe` plus `std::panic::catch_unwind` around each poll),
 not a synchronous `catch_unwind` around building the future, since the panic happens while the
-future is *running*, not while it is constructed. The wrapper stores the inner future as
+future is _running_, not while it is constructed. The wrapper stores the inner future as
 `Pin<Box<F>>`, which makes the wrapper itself `Unpin` regardless of `F` — no `unsafe` code needed
 to poll it.
 
@@ -107,7 +107,7 @@ framework, and every default refuses or does nothing — none of them ever grant
 fabricates a successful outcome on its own.
 
 - **`authorization::Authorization`** — which of a method's declared capabilities are missing.
-  Adapts *into* `mango_protocol::contract::Guard` via `AuthorizationGuard`, rather than building a
+  Adapts _into_ `mango_protocol::contract::Guard` via `AuthorizationGuard`, rather than building a
   second gate in front of it (`mango_protocol`'s `Guard` already runs after `check_params`, unlike
   the TypeScript SDK's own guard, which the TypeScript runtime's `consent-gate.ts` avoided for
   exactly that reason — the Rust seam does not have the problem the TypeScript one does). The default,
@@ -117,7 +117,7 @@ fabricates a successful outcome on its own.
   `DENIED` error `AuthorizationGuard` builds mirrors `consent-gate.ts`'s `consentDenial` byte for
   byte: message, and details `{ kind: "consent_denied", method, missing, slot, capability }` where
   `capability` is `missing[0]` and is omitted from the wire when nothing is missing.
-- **`audit::Audit`** — records one call's outcome, after the fact. Wraps *outside* the guard and
+- **`audit::Audit`** — records one call's outcome, after the fact. Wraps _outside_ the guard and
   outside the handler, in the same order `consent-gate.ts`'s `gateHandlers` recorded them: a denial
   is recorded before the handler ever runs (from inside `AuthorizationGuard`); `ok`/`error` is
   recorded only once the handler — and this crate's own result check — have settled (from inside
@@ -147,7 +147,7 @@ during it — so a handler panicking cannot leave a port's own `Mutex` mid-mutat
 into_inner)`), mirroring `mango_protocol::session::shared::lock` (private to that crate, so this is
 a deliberate re-derivation): recovering avoids turning one handler's panic into a second, unrelated
 panic in a port that had nothing to do with the first one. A future port whose critical section
-*can* legitimately span a handler's own work — and so can be left genuinely torn by a panic — must
+_can_ legitimately span a handler's own work — and so can be left genuinely torn by a panic — must
 not reuse this helper; it should repair the specific invariant, discard the state, or close the
 affected service outright, whichever fits that port's own data.
 

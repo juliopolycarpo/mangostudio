@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+
 import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import {
   type RealtimeInvalidateEvent,
   SETTINGS_TOPIC,
   type SettingsScope,
 } from '@mangostudio/shared/realtime';
+
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
   createRealtimeBus,

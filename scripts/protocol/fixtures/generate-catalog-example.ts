@@ -15,6 +15,7 @@
  */
 
 import { fileURLToPath } from 'node:url';
+
 import { defineContract } from '@mangostudio/protocol';
 import Type from 'typebox';
 

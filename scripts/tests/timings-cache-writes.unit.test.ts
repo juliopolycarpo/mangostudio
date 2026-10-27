@@ -56,7 +56,10 @@ test('the complete reader inventory cannot restore an old PR timing snapshot', (
   }
   // The resolver's primary lacks the saved run suffix; every fallback is main-scoped.
   const action = readText('.github/actions/cache-scoped/action.yml');
+  // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
   expect(action).toContain('primary_key="${prefix}-${WRITE_SCOPE}-${VALIDITY}"');
+  // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
   expect(action).toContain('restore_key="${prefix}-main-${VALIDITY}"');
+  // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
   expect(action).toContain('loose_prefix="${prefix}-main-${RESTORE_PREFIX}"');
 });

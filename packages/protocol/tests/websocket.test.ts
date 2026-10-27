@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+
 import type { Server, ServerWebSocket } from 'bun';
+
 import { CLOSE_CODES } from '../src/close';
 import { CHUNK_HEADER_BYTES } from '../src/codec/chunk';
 import { Session, type SessionOptions } from '../src/session';
@@ -140,8 +142,7 @@ function fixture(portOptions: WebSocketPortOptions): ConformanceFixture {
         b,
         drop: () => server.sever(),
         close: async () => {
-          a.close();
-          b.close();
+          await Promise.all([a.close(), b.close()]);
           await server.stop();
         },
       };
@@ -156,7 +157,7 @@ function fixture(portOptions: WebSocketPortOptions): ConformanceFixture {
         write: (line: string) => raw.send(chunkOf(line)),
         close: async () => {
           raw.close(CLOSE_CODES.RELEASED, 'raw peer done');
-          a.close();
+          await a.close();
           await server.stop();
         },
       };

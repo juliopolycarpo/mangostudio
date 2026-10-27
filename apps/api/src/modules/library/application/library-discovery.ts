@@ -4,8 +4,8 @@ import {
   type LibraryLocationId,
   type LibraryResource,
   type LibraryScanResult,
-  type ResourceKind,
   resourceKey,
+  type ResourceKind,
 } from '@mangostudio/shared/library';
 import {
   type LibraryCache,
@@ -15,6 +15,7 @@ import {
 } from '@mangostudio/shared/library/machine';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import type { Kysely } from 'kysely';
+
 import type { Database } from '../../../db/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { hubLibraryDiscoveryCache } from '../infrastructure/library-cache';

@@ -6,6 +6,7 @@
  */
 
 import type OpenAI from 'openai';
+
 import { parseJsonWith } from '../../../lib/safe-parse';
 import { streamChatCompletionsAgentTurnLoop } from '../core/agent-turn-stream-loop';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
@@ -163,13 +164,11 @@ function buildCurrentOAICompatLoopMessages(
   providerPrompt: string | undefined
 ): OpenAI.ChatCompletionMessageParam[] {
   if (req.toolResults && req.toolResults.length > 0) {
-    return req.toolResults.map(
-      (tr): OpenAI.ChatCompletionMessageParam => ({
-        role: 'tool',
-        tool_call_id: tr.callId,
-        content: tr.result,
-      })
-    );
+    return req.toolResults.map((tr): OpenAI.ChatCompletionMessageParam => ({
+      role: 'tool',
+      tool_call_id: tr.callId,
+      content: tr.result,
+    }));
   }
 
   return providerPrompt !== undefined ? [{ role: 'user' as const, content: providerPrompt }] : [];

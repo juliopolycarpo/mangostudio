@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
   buildPersistedContextSnapshot,
-  type ContextSnapshot,
   computeContextSnapshot,
+  type ContextSnapshot,
   estimateTokenCount,
   getContextSeverity,
   getModelContextLimit,

@@ -8,11 +8,13 @@
  */
 
 import { randomUUID } from 'node:crypto';
+
 import type {
   ChatGptOAuthStatus,
   StartChatGptOAuthBody,
   StartChatGptOAuthResponse,
 } from '@mangostudio/shared/connectors';
+
 import { getConfig } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
@@ -22,8 +24,8 @@ import { parseStringArray } from '../../../utils/json';
 import { maskSecret } from '../../../utils/secrets';
 import { startChatGptLoopbackServer } from '../infrastructure/chatgpt/loopback-server';
 import {
-  type ChatGptTokenBundle,
   chatGptOAuthProfile,
+  type ChatGptTokenBundle,
   exchangeAuthorizationCode,
 } from '../infrastructure/chatgpt/oauth-client';
 import { chatGptRedirectUri } from '../infrastructure/chatgpt/oauth-constants';

@@ -5,7 +5,7 @@
 // ASCII control characters. Browsers and the URL parser strip these, so a
 // redirect like "/\n/evil.com" would otherwise pass the protocol-relative
 // guard below yet resolve to "//evil.com" once the newline is removed.
-// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
+// eslint-disable-next-line no-control-regex -- stripping control chars is the intent
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/g;
 
 export function safeRedirect(raw: string | undefined | null): string {

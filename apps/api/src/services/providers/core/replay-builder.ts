@@ -16,6 +16,7 @@
 
 import type { MessagePart } from '@mangostudio/shared/types';
 import type OpenAI from 'openai';
+
 import type { ChatTurnContext } from '../types';
 
 // ---------------------------------------------------------------------------
