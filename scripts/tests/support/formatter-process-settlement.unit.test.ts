@@ -2,6 +2,11 @@ import { describe, expect, it } from 'bun:test';
 
 import { FormatterQueryExpiry } from './formatter-owned-query';
 import {
+  type FormatterStatHost,
+  FormatterStatReadExpiry,
+  readOwnedFormatterStat,
+} from './formatter-owned-stat';
+import {
   type FormatterNativeQueries,
   type FormatterSettlementHost,
   type NativeFormatterProcess,
@@ -170,6 +175,91 @@ class MixedExpirySettlementClock extends NativeSettlementClock {
   };
 }
 
+/** A real owned-stat adapter driven by a named private-abort transcript. */
+class ExpiringStatHost implements FormatterStatHost {
+  readonly controller = new AbortController();
+  readonly reason = new Error('controlled stat deadline');
+  readonly failure = Object.assign(new Error('The operation was aborted', { cause: this.reason }), {
+    name: 'AbortError',
+    code: 'ABORT_ERR',
+  });
+  timeout(): AbortSignal {
+    return this.controller.signal;
+  }
+  read(): Promise<string> {
+    this.controller.abort(this.reason);
+    return Promise.reject(this.failure);
+  }
+  watchdog(): () => void {
+    return () => {};
+  }
+}
+
+/** Route a controlled stat through the real native identity reader. */
+class ExpiringStatNativeQueries implements FormatterNativeQueries {
+  readonly platform = 'linux' as const;
+  constructor(
+    readonly host: ExpiringStatHost,
+    readonly wrongPid = false,
+    readonly wrongBudget = false
+  ) {}
+  readStat(pid: number, budget: number): Promise<string | undefined> {
+    return readOwnedFormatterStat(
+      this.wrongPid ? pid + 1 : pid,
+      this.wrongBudget ? budget - 1 : budget,
+      this.host
+    );
+  }
+  query(): Promise<NativeQueryReply> {
+    throw new Error('unexpected POSIX ps query for Linux stat');
+  }
+}
+
+class OwnedStatExpirySettlementClock extends NativeSettlementClock {
+  readonly stat = new ExpiringStatHost();
+  firstReadExpires = false;
+  wrongPid = false;
+  wrongBudget = false;
+  expiry: unknown;
+  override read = (pid: number, budget: number): Promise<NativeFormatterProcess | undefined> => {
+    this.reads.push([pid, budget]);
+    if (!this.firstReadExpires && this.reads.length === 1) return Promise.resolve(native);
+    this.time += budget;
+    return readNativeFormatterProcess(
+      pid,
+      budget,
+      new ExpiringStatNativeQueries(this.stat, this.wrongPid, this.wrongBudget)
+    ).then(
+      () => {
+        throw new Error('expected owned stat expiry');
+      },
+      (error: unknown) => {
+        this.expiry = error;
+        throw error;
+      }
+    );
+  };
+}
+
+class MixedStatExpirySettlementClock extends NativeSettlementClock {
+  readonly stat = new ExpiringStatHost();
+  readonly independentFailure = new Error('controlled second stat refusal');
+  expiry: unknown;
+  override read = (pid: number, budget: number): Promise<NativeFormatterProcess | undefined> => {
+    this.reads.push([pid, budget]);
+    if (pid !== 1234) return Promise.reject(this.independentFailure);
+    return readNativeFormatterProcess(pid, budget, new ExpiringStatNativeQueries(this.stat)).then(
+      () => {
+        throw new Error('expected owned stat expiry');
+      },
+      (error: unknown) => {
+        this.expiry = error;
+        throw error;
+      }
+    );
+  };
+}
+
 describe('native formatter identity queries', () => {
   it('captures Linux birth/state/lineage from one native document', async () => {
     const queries = new NativeQueryTranscript('linux');
@@ -267,6 +357,64 @@ describe('native formatter identity queries', () => {
 });
 
 describe('native formatter settlement', () => {
+  it('retains the complete live census when the next owned stat read expires', async () => {
+    const clock = new OwnedStatExpirySettlementClock();
+    const error = await waitForFormatterSettlement(owned, clock).catch(
+      (failure: unknown) => failure
+    );
+    expect((error as Error).message).toContain('expected live owned processes: 0 within 300ms');
+    const snapshot = JSON.parse(
+      (error as Error).message.split('received last native observation: ')[1] ?? 'null'
+    );
+    expect(snapshot).toEqual({ elapsedMs: 0, live: [{ who: owned[0].who, current: native }] });
+    expect(clock.expiry).toBeInstanceOf(FormatterStatReadExpiry);
+    expect((clock.expiry as Error).cause).toBe(clock.stat.failure);
+    expect(((error as Error).cause as AggregateError).errors).toEqual([clock.expiry]);
+    expect(clock.reads).toEqual([
+      [1234, 300],
+      [1234, 290],
+    ]);
+  });
+
+  it('does not use a fixture identity when its first owned stat read expires', async () => {
+    const clock = new OwnedStatExpirySettlementClock();
+    clock.firstReadExpires = true;
+    const error = await waitForFormatterSettlement(owned, clock).catch(
+      (failure: unknown) => failure
+    );
+    expect((error as Error).message).toContain('received: no in-budget observation');
+    expect(((error as Error).cause as AggregateError).errors).toEqual([clock.expiry]);
+    expect(clock.reads).toEqual([[1234, 300]]);
+  });
+
+  it.each(['PID', 'budget'] as const)(
+    'keeps a stat expiry for another %s as a query failure',
+    async (mismatch) => {
+      const clock = new OwnedStatExpirySettlementClock();
+      clock.firstReadExpires = true;
+      clock.wrongPid = mismatch === 'PID';
+      clock.wrongBudget = mismatch === 'budget';
+      const error = await waitForFormatterSettlement(owned, clock).catch(
+        (failure: unknown) => failure
+      );
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).message).toContain('native observation failed');
+      expect((error as AggregateError).errors).toEqual([clock.expiry]);
+    }
+  );
+
+  it('keeps a concurrent stat expiry and independent failure as a failed census', async () => {
+    const clock = new MixedStatExpirySettlementClock();
+    const second = { who: 'second controlled formatter', native: { ...native, pid: 5678 } };
+    const error = await waitForFormatterSettlement([...owned, second], clock).catch(
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).message).toContain('native observation failed');
+    expect((error as AggregateError).errors).toEqual([clock.expiry, clock.independentFailure]);
+    expect((error as AggregateError).cause).toBe(clock.expiry);
+  });
+
   it.each(['absent', 'replaced birth', 'zombie'] as const)(
     'accepts owned settlement: %s',
     async (mode) => {

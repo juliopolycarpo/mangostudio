@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises';
-
 import {
   type NativeProcess,
   parseNativeProcesses,
@@ -11,6 +9,7 @@ import {
   type FormatterQueryResult,
   queryOwnedFormatterProcess,
 } from './formatter-owned-query';
+import { FormatterStatReadExpiry, readOwnedFormatterStat } from './formatter-owned-stat';
 import { isAlive } from './process-liveness';
 
 export interface NativeFormatterProcess extends NativeProcess {
@@ -26,18 +25,7 @@ export interface FormatterNativeQueries {
 
 const NATIVE_QUERIES: FormatterNativeQueries = {
   platform: process.platform,
-  async readStat(pid, timeoutMs) {
-    try {
-      return await readFile(`/proc/${pid}/stat`, {
-        encoding: 'utf8',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (error) {
-      if (['ENOENT', 'ESRCH'].includes((error as NodeJS.ErrnoException).code ?? ''))
-        return undefined;
-      throw error;
-    }
-  },
+  readStat: readOwnedFormatterStat,
   query: queryOwnedFormatterProcess,
 };
 
@@ -186,7 +174,8 @@ export async function waitForFormatterSettlement(
         if (read.status === 'fulfilled') return true;
         const attempt = attempts[index];
         return (
-          read.reason instanceof FormatterQueryExpiry &&
+          (read.reason instanceof FormatterQueryExpiry ||
+            read.reason instanceof FormatterStatReadExpiry) &&
           read.reason.pid === attempt?.pid &&
           read.reason.timeoutMs === attempt.budgetMs
         );
