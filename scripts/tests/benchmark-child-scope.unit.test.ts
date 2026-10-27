@@ -14,6 +14,7 @@ import {
   type NativeProcess,
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
+import { fixtureChildEnvironment } from './support/child-supervision';
 
 const root: NativeProcess = {
   pid: 42,
@@ -146,6 +147,7 @@ class FakeReparentedChild {
       ],
       {
         detached: true,
+        env: fixtureChildEnvironment(),
         stdin: 'ignore',
         stdout: 'ignore',
         stderr: 'ignore',

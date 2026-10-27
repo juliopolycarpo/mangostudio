@@ -6,10 +6,12 @@ import { join } from 'node:path';
 import { settleBenchmarkWork } from '../bench/benchmark-child-scope';
 import { assertBenchmarkPlatform } from '../bench/benchmark-platform';
 import { runtimeVersion, RuntimeVersionError } from '../bench/runtime-version';
-import type {
-  NativeCommandReceipt,
-  NativeProcessCommandOptions,
+import {
+  type NativeCommandReceipt,
+  type NativeProcessCommandOptions,
+  runNativeCommand,
 } from '../lib/native-bun-qualification-process';
+import { fixtureChildEnvironment } from './support/child-supervision';
 
 async function retainedFailure(promise: Promise<string>): Promise<RuntimeVersionError> {
   try {
@@ -250,6 +252,11 @@ test('cancellation during version read retains home and preserves abort reason',
   }
 });
 
+class FixtureVersionRunner {
+  readonly run = (options: NativeProcessCommandOptions): Promise<NativeCommandReceipt> =>
+    runNativeCommand({ ...options, env: fixtureChildEnvironment(options.env) });
+}
+
 test.skipIf(process.platform === 'win32')(
   'real fast child with a live same-group descendant retains its home',
   async () => {
@@ -262,7 +269,9 @@ test.skipIf(process.platform === 'win32')(
     await chmod(path, 0o755);
     let error: RuntimeVersionError | undefined;
     try {
-      error = await retainedFailure(runtimeVersion(path, new AbortController().signal));
+      error = await retainedFailure(
+        runtimeVersion(path, new AbortController().signal, { run: new FixtureVersionRunner().run })
+      );
       expect(error.commandReceipt?.settlement.rootObserved).toBe(true);
       const pid = Number(await Bun.file(join(error.home, 'descendant-pid')).text());
       expect(pid).toBeGreaterThan(0);

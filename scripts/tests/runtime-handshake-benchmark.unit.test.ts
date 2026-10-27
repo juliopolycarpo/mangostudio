@@ -10,6 +10,7 @@ import {
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
 import { FakeBenchmarkCancelBarrier } from './support/benchmark-cancel-barrier';
+import { fixtureChildEnvironment } from './support/child-supervision';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const scratch: string[] = [];
@@ -144,7 +145,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
       ],
       root: ROOT,
       out: root,
-      env: { ...process.env, BENCHMARK_FIXTURE_ROOT: root },
+      env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: root }),
       timeoutSeconds: 15,
       pollIntervalMs: 20,
       settleMs: 500,
@@ -227,7 +228,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
       command: [process.execPath, 'scripts/bench/runtime-handshake.ts', binary, '--runs', '1'],
       root: ROOT,
       out: root,
-      env: { ...process.env, BENCHMARK_FIXTURE_ROOT: root },
+      env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: root }),
       timeoutSeconds: 8,
       pollIntervalMs: 20,
       settleMs: 500,
@@ -307,7 +308,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
       ],
       root: ROOT,
       out: root,
-      env: { ...process.env, ...fixture.environment },
+      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
       timeoutSeconds: 20,
       pollIntervalMs: 20,
       stream: new DiscardedHandshakeOutput(),
@@ -364,7 +365,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
       ],
       root: ROOT,
       out: root,
-      env: { ...process.env, ...fixture.environment },
+      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
       timeoutSeconds: 8,
       pollIntervalMs: 20,
       stream: new DiscardedHandshakeOutput(),
@@ -404,7 +405,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
       ],
       root: ROOT,
       out: root,
-      env: { ...process.env, ...fixture.environment },
+      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
       timeoutSeconds: 8,
       pollIntervalMs: 20,
       stream: new DiscardedHandshakeOutput(),
