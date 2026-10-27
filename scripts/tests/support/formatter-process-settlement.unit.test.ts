@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
+import { FormatterQueryExpiry } from './formatter-owned-query';
 import {
   type FormatterNativeQueries,
   type FormatterSettlementHost,
@@ -8,11 +9,17 @@ import {
   waitForFormatterSettlement,
 } from './formatter-process-settlement';
 
+type NativeQueryReply = Awaited<ReturnType<FormatterNativeQueries['query']>>;
+
 /** A native query transcript with no process signaling capability. */
 class NativeQueryTranscript implements FormatterNativeQueries {
   readonly calls: Array<[string, number, number]> = [];
   stat: string | undefined;
-  result = { exitCode: 0, stdout: '', stderr: '' };
+  result: { -readonly [Field in keyof NativeQueryReply]: NativeQueryReply[Field] } = {
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+  };
   failure: Error | undefined;
   constructor(readonly platform: NodeJS.Platform) {}
   readStat(pid: number, timeout: number): Promise<string | undefined> {
@@ -107,6 +114,62 @@ class LateNativeFulfillmentTranscript extends NativeSettlementClock {
   };
 }
 
+/** A complete census followed by the private query budget event, never a new sample. */
+class OwnedExpirySettlementClock extends NativeSettlementClock {
+  readonly expiryReason = new Error('controlled private query expiry');
+  readonly expiries: FormatterQueryExpiry[] = [];
+  firstReadExpires = false;
+  expiryDuration = 300;
+  wrongPid = false;
+  wrongBudget = false;
+  pauseFailure: Error | undefined;
+  readonly pauseDurations: number[] = [];
+  readonly negativePauseFailure = new Error('controlled negative remaining wait');
+  expiryNowCalls = 0;
+  advanceOnExpiryNowCall = Number.POSITIVE_INFINITY;
+  override now = (): number => {
+    const current = this.time;
+    if (this.expiries.length && ++this.expiryNowCalls === this.advanceOnExpiryNowCall)
+      this.time += 1;
+    return current;
+  };
+  override read = (pid: number, budget: number): Promise<NativeFormatterProcess | undefined> => {
+    this.reads.push([pid, budget]);
+    if (!this.firstReadExpires && this.reads.length === 1) return Promise.resolve(native);
+    this.time += this.expiryDuration;
+    const error = new FormatterQueryExpiry(
+      this.wrongPid ? pid + 1 : pid,
+      this.wrongBudget ? budget + 1 : budget,
+      { exitCode: 143, stdout: '', stderr: '', signalCode: 'SIGTERM' },
+      this.expiryReason
+    );
+    this.expiries.push(error);
+    return Promise.reject(error);
+  };
+  override pause = (ms: number): Promise<void> => {
+    this.pauseDurations.push(ms);
+    if (ms < 0) return Promise.reject(this.negativePauseFailure);
+    if (this.expiries.length && this.pauseFailure) return Promise.reject(this.pauseFailure);
+    this.time += ms;
+    return Promise.resolve();
+  };
+}
+
+/** An independent second query refusal must prevent the expiry-only verdict. */
+class MixedExpirySettlementClock extends NativeSettlementClock {
+  readonly independentFailure = new Error('controlled second native query refusal');
+  readonly expiry = new FormatterQueryExpiry(
+    1234,
+    300,
+    { exitCode: 143, stdout: '', stderr: '', signalCode: 'SIGTERM' },
+    new Error('controlled private query expiry')
+  );
+  override read = (pid: number, budget: number): Promise<NativeFormatterProcess | undefined> => {
+    this.reads.push([pid, budget]);
+    return Promise.reject(pid === 1234 ? this.expiry : this.independentFailure);
+  };
+}
+
 describe('native formatter identity queries', () => {
   it('captures Linux birth/state/lineage from one native document', async () => {
     const queries = new NativeQueryTranscript('linux');
@@ -163,6 +226,27 @@ describe('native formatter identity queries', () => {
     const queries = new NativeQueryTranscript('darwin');
     queries.result.exitCode = 1;
     expect(await readNativeFormatterProcess(1234, 300, queries)).toBeUndefined();
+  });
+  it('retains termination metadata without treating a signaled query as absence', async () => {
+    const queries = new NativeQueryTranscript('darwin');
+    queries.result = {
+      exitCode: 143,
+      stdout: '',
+      stderr: '',
+      signalCode: 'SIGTERM',
+      killed: true,
+    };
+    const failure = await readNativeFormatterProcess(1234, 1, queries).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain('expected native PID/parent/group/state/birth');
+    const details = JSON.parse(message.split(' | received: ')[1] ?? 'null');
+    expect(details).toMatchObject({ ...queries.result, timeoutMs: 1 });
+    expect(details.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(queries.calls).toEqual([['ps', 1234, 1]]);
   });
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid PID %s', async (pid) => {
     await expect(readNativeFormatterProcess(pid)).rejects.toThrow('positive safe integer');
@@ -306,7 +390,24 @@ describe('native formatter settlement', () => {
     expect(aggregate.message).toContain('"budgetMs":10');
     expect(aggregate.message).toContain('"elapsedMs":300');
     expect(aggregate.message).toContain(clock.queryFailure.message);
+    expect(aggregate.message).toContain(
+      `"previousCompleteObservation":${JSON.stringify({ elapsedMs: 280, live: [{ who: owned[0].who, current: native }] })}`
+    );
     expect(clock.admissions.at(-1)).toEqual({ at: 290, budget: 10 });
+  });
+  it('reports no previous complete census when the first native query fails', async () => {
+    const clock = new TimedNativeSettlementTranscript();
+    clock.rejectFrom = 0;
+    const failure = await waitForFormatterSettlement(owned, clock).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    expect(failure).toBeInstanceOf(AggregateError);
+    const aggregate = failure as AggregateError;
+    expect(aggregate.message).toContain('"previousCompleteObservation":null');
+    expect(aggregate.errors).toEqual([clock.queryFailure]);
+    expect(aggregate.cause).toBe(clock.queryFailure);
+    expect(clock.admissions).toEqual([{ at: 0, budget: 300 }]);
   });
   it('uses the fractional remainder without rounding up a new query budget', async () => {
     const clock = new TimedNativeSettlementTranscript();
@@ -362,6 +463,104 @@ describe('native formatter settlement', () => {
       [1234, 300],
       [5678, 300],
     ]);
+  });
+  it('rejects the same previous complete witness after its owned query budget expires', async () => {
+    const clock = new OwnedExpirySettlementClock();
+    const error = await waitForFormatterSettlement(owned, clock).catch(
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('expected live owned processes: 0 within 300ms');
+    const snapshot = JSON.parse(
+      (error as Error).message.split('received last native observation: ')[1] ?? 'null'
+    );
+    expect(snapshot).toEqual({ elapsedMs: 0, live: [{ who: owned[0].who, current: native }] });
+    expect((error as Error).cause).toBeInstanceOf(AggregateError);
+    expect(((error as Error).cause as AggregateError).errors).toEqual(clock.expiries);
+    expect(clock.expiries[0]?.cause).toBe(clock.expiryReason);
+    expect(clock.reads).toEqual([
+      [1234, 300],
+      [1234, 290],
+    ]);
+  });
+  it('does not use the fixture initial identity when the first owned query expires', async () => {
+    const clock = new OwnedExpirySettlementClock();
+    clock.firstReadExpires = true;
+    const error = await waitForFormatterSettlement(owned, clock).catch(
+      (failure: unknown) => failure
+    );
+    expect((error as Error).message).toContain('received: no in-budget observation');
+    expect((error as Error).message).not.toContain('received last native observation');
+    expect(((error as Error).cause as AggregateError).errors).toEqual(clock.expiries);
+    expect(clock.reads).toEqual([[1234, 300]]);
+  });
+  it('waits only the fractional remainder after an owned expiry without polling again', async () => {
+    const clock = new OwnedExpirySettlementClock();
+    clock.expiryDuration = 289.5;
+    const error = await waitForFormatterSettlement(owned, clock).catch(
+      (failure: unknown) => failure
+    );
+    expect((error as Error).message).toContain('expected live owned processes: 0 within 300ms');
+    expect(clock.time).toBe(300);
+    expect(clock.reads).toEqual([
+      [1234, 300],
+      [1234, 290],
+    ]);
+    expect(((error as Error).cause as AggregateError).errors).toEqual(clock.expiries);
+  });
+  it('captures a positive remaining wait once when native time crosses the deadline', async () => {
+    const clock = new OwnedExpirySettlementClock();
+    clock.expiryDuration = 289.5;
+    clock.advanceOnExpiryNowCall = 2;
+    const error = await waitForFormatterSettlement(owned, clock).catch(
+      (failure: unknown) => failure
+    );
+    expect((error as Error).message).toContain('expected live owned processes: 0 within 300ms');
+    expect(clock.pauseDurations).toEqual([10, 0.5]);
+    expect(clock.pauseDurations.every((duration) => duration > 0)).toBe(true);
+    expect(clock.reads).toEqual([
+      [1234, 300],
+      [1234, 290],
+    ]);
+    expect(((error as Error).cause as AggregateError).errors).toEqual(clock.expiries);
+  });
+  it.each(['PID', 'budget'] as const)(
+    'keeps a typed expiry for another %s as a query failure',
+    async (mismatch) => {
+      const clock = new OwnedExpirySettlementClock();
+      clock.firstReadExpires = true;
+      clock.wrongPid = mismatch === 'PID';
+      clock.wrongBudget = mismatch === 'budget';
+      const error = await waitForFormatterSettlement(owned, clock).catch(
+        (failure: unknown) => failure
+      );
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).message).toContain('native observation failed');
+      expect((error as AggregateError).errors).toEqual(clock.expiries);
+      expect((error as AggregateError).cause).toBe(clock.expiries[0]);
+    }
+  );
+  it('retains the original expiry and a failure waiting for the remaining deadline', async () => {
+    const clock = new OwnedExpirySettlementClock();
+    clock.expiryDuration = 289.5;
+    clock.pauseFailure = new Error('controlled remaining deadline wait refusal');
+    const error = await waitForFormatterSettlement(owned, clock).catch(
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([...clock.expiries, clock.pauseFailure]);
+    expect((error as AggregateError).cause).toBe(clock.expiries[0]);
+  });
+  it('keeps mixed owned expiry and independent errors as a generic failed census', async () => {
+    const clock = new MixedExpirySettlementClock();
+    const second = { who: 'second controlled formatter', native: { ...native, pid: 5678 } };
+    const error = await waitForFormatterSettlement([...owned, second], clock).catch(
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).message).toContain('native observation failed');
+    expect((error as AggregateError).errors).toEqual([clock.expiry, clock.independentFailure]);
+    expect((error as AggregateError).cause).toBe(clock.expiry);
   });
   it('accepts an empty ownership set without making native queries', async () => {
     const clock = new TimedNativeSettlementTranscript();

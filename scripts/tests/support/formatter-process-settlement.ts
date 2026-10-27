@@ -6,23 +6,22 @@ import {
   readLinuxProcessIdentity,
 } from '../../lib/native-bun-qualification-process';
 import { HEARTBEAT_MS } from './fake-rustfmt-markers';
+import {
+  FormatterQueryExpiry,
+  type FormatterQueryResult,
+  queryOwnedFormatterProcess,
+} from './formatter-owned-query';
 import { isAlive } from './process-liveness';
 
 export interface NativeFormatterProcess extends NativeProcess {
   readonly state: string;
 }
 
-interface NativeQueryResult {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
-
 /** Native query seams; tests supply named query fakes without signaling PIDs. */
 export interface FormatterNativeQueries {
   readonly platform: NodeJS.Platform;
   readStat(pid: number, timeoutMs: number): Promise<string | undefined>;
-  query(pid: number, timeoutMs: number): Promise<NativeQueryResult>;
+  query(pid: number, timeoutMs: number): Promise<FormatterQueryResult>;
 }
 
 const NATIVE_QUERIES: FormatterNativeQueries = {
@@ -39,23 +38,7 @@ const NATIVE_QUERIES: FormatterNativeQueries = {
       throw error;
     }
   },
-  async query(pid, timeoutMs) {
-    const proc = Bun.spawn(
-      ['ps', '-p', String(pid), '-o', 'pid=,ppid=,pgid=,stat=,lstart=,args='],
-      {
-        env: { ...process.env, LC_ALL: 'C' },
-        stdout: 'pipe',
-        stderr: 'pipe',
-        timeout: timeoutMs,
-      }
-    );
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { stdout, stderr, exitCode };
-  },
+  query: queryOwnedFormatterProcess,
 };
 
 function checkedNativeFormatter(identity: NativeProcess, state: string): NativeFormatterProcess {
@@ -110,12 +93,13 @@ export async function readNativeFormatterProcess(
     return checkedNativeFormatter(identity, state);
   }
 
+  const queryStartedAt = performance.now();
   const result = await queries.query(pid, timeoutMs);
   if (result.exitCode === 1 && !result.stdout.trim() && !result.stderr.trim()) return undefined;
   const match = /^(\s*\d+\s+\d+\s+\d+)\s+(\S+)\s+(.+)$/.exec(result.stdout.trim());
   if (result.exitCode !== 0 || !match) {
     throw new Error(
-      `formatter ${pid}: expected native PID/parent/group/state/birth | received: ${JSON.stringify(result)}`
+      `formatter ${pid}: expected native PID/parent/group/state/birth | received: ${JSON.stringify({ ...result, timeoutMs, elapsedMs: performance.now() - queryStartedAt })}`
     );
   }
   const identity = parseNativeProcesses(`${match[1]} ${match[3]}`, queries.platform)[0];
@@ -164,9 +148,10 @@ export async function waitForFormatterSettlement(
   const deadline = started + budget;
   let lastLive: Array<{ who: string; current: NativeFormatterProcess }> = [];
   let lastObservedMs: number | undefined;
-  const rejectLastObservation = (): never => {
+  const rejectLastObservation = (cause?: unknown): never => {
     throw new Error(
-      `formatter cancellation: expected live owned processes: 0 within ${budget}ms | received last native observation: ${JSON.stringify({ elapsedMs: lastObservedMs, live: lastLive })}`
+      `formatter cancellation: expected live owned processes: 0 within ${budget}ms | received last native observation: ${JSON.stringify({ elapsedMs: lastObservedMs, live: lastLive })}`,
+      { cause }
     );
   };
   while (true) {
@@ -197,6 +182,38 @@ export async function waitForFormatterSettlement(
     const completedAt = host.now();
     const failures = reads.flatMap((read) => (read.status === 'rejected' ? [read.reason] : []));
     if (failures.length) {
+      const ownedExpiriesOnly = reads.every((read, index) => {
+        if (read.status === 'fulfilled') return true;
+        const attempt = attempts[index];
+        return (
+          read.reason instanceof FormatterQueryExpiry &&
+          read.reason.pid === attempt?.pid &&
+          read.reason.timeoutMs === attempt.budgetMs
+        );
+      });
+      if (ownedExpiriesOnly) {
+        const cause = new AggregateError(failures, 'formatter owned native query budget expired', {
+          cause: failures[0],
+        });
+        try {
+          while (true) {
+            const remaining = deadline - host.now();
+            if (remaining <= 0) break;
+            await host.pause(remaining);
+          }
+        } catch (error) {
+          throw new AggregateError(
+            [...failures, error],
+            'formatter owned query expiry: expected remaining deadline wait',
+            { cause: failures[0] }
+          );
+        }
+        if (lastObservedMs !== undefined) rejectLastObservation(cause);
+        throw new Error(
+          `formatter cancellation: expected native observation before the ${budget}ms deadline | received: no in-budget observation`,
+          { cause }
+        );
+      }
       const details = reads.flatMap((read, index) =>
         read.status === 'rejected'
           ? [
@@ -213,7 +230,7 @@ export async function waitForFormatterSettlement(
       );
       throw new AggregateError(
         failures,
-        `formatter native observation failed | received: ${JSON.stringify(details)}`,
+        `formatter native observation failed | received: ${JSON.stringify({ attempts: details, previousCompleteObservation: lastObservedMs === undefined ? null : { elapsedMs: lastObservedMs, live: lastLive } })}`,
         { cause: failures[0] }
       );
     }
