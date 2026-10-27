@@ -37,6 +37,11 @@ import {
 } from './support/process-liveness';
 import { fakeLane } from './support/test-worker-fakes';
 import {
+  assertDrainPipeHolder,
+  DrainFixtureScope,
+  withOwnedDrainFixture,
+} from './support/worker-drain-fixture';
+import {
   settleWorkerLanesBeforeRemoval,
   trackWorkerHandle,
   trackWorkerStream,
@@ -509,45 +514,61 @@ describe('cancellation fixture readiness', () => {
 
 describe('a worker that leaks a process holding its pipes', () => {
   it('does not hold the lane open past the drain grace, and still passes', async () => {
-    const pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
-    workspaces.push(pidDir);
-    const began = Date.now();
-
-    const { verdict } = await runLane(
-      2,
-      { 1: 'grandchild' },
-      {
-        pidDir,
-        drainGraceMs: 300,
-        env: fixtureChildEnvironment(),
-      }
-    );
-    const elapsed = Date.now() - began;
-
-    const leaked = Number(readFileSync(join(pidDir, 'grandchild-1.pid'), 'utf8'));
-    try {
-      expect(verdict.failures).toEqual([]);
-      if (process.platform !== 'win32') {
-        expect(isAlive(leaked), 'expected the named orphan fixture to keep the pipes open').toBe(
-          true
-        );
-        expect(
-          elapsed,
-          'expected the inherited pipes to require the drain grace'
-        ).toBeGreaterThanOrEqual(300);
-      }
-      expect(
-        elapsed,
-        `expected the lane to end soon after the drain grace | received ${elapsed} ms with a leaked process holding the pipes`
-      ).toBeLessThan(10_000);
-    } finally {
-      // Best effort: Windows ends a worker's children with the worker, leaving nothing to kill.
-      try {
-        process.kill(leaked, 'SIGKILL');
-      } catch {
-        // already gone
-      }
-    }
+    const controller = new AbortController();
+    const lane = ownLane(controller);
+    const scope = new DrainFixtureScope(controller.signal);
+    lane.track(scope.closed);
+    await lane.run(async () => {
+      const owner = await scope.allocate();
+      let pidDir = '';
+      await withOwnedDrainFixture(scope, {
+        async start() {
+          controller.signal.throwIfAborted();
+          pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
+          workspaces.push(pidDir);
+          const began = Date.now();
+          scope.markLaneStarted();
+          const result = await lane.start(() =>
+            runLane(
+              2,
+              { 1: 'grandchild' },
+              {
+                pidDir,
+                drainGraceMs: 300,
+                env: fixtureChildEnvironment({ ...process.env, ...owner.env }),
+                signal: controller.signal,
+                owner: lane,
+              }
+            )
+          );
+          controller.signal.throwIfAborted();
+          return { ...result, elapsed: Date.now() - began };
+        },
+        readPid: () => {
+          controller.signal.throwIfAborted();
+          return Number(readFileSync(join(pidDir, 'grandchild-1.pid'), 'utf8'));
+        },
+        async check({ verdict, elapsed }, observedPid) {
+          expect(verdict.failures).toEqual([]);
+          if (process.platform !== 'win32') {
+            expect(await owner.ready()).toBe(observedPid);
+            controller.signal.throwIfAborted();
+            assertDrainPipeHolder(observedPid, owner.holdingPipes, isAlive);
+            expect(
+              elapsed,
+              'expected the inherited pipes to require the drain grace'
+            ).toBeGreaterThanOrEqual(300);
+          }
+          expect(
+            elapsed,
+            `expected the lane to end soon after the drain grace | received ${elapsed} ms with a leaked process holding the pipes`
+          ).toBeLessThan(10_000);
+        },
+      });
+      expect(owner.settled, 'expected the retained drain connection and listener to close').toBe(
+        true
+      );
+    });
   });
 });
 
