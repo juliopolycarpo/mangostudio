@@ -16,10 +16,10 @@ const PROFILE_SELECTION = `${EXPR} github.event_name == 'pull_request' && 'light
 const RUNTIME_WORKFLOW = '.github/workflows/runtime-build.yml';
 const DISTRIBUTION_WORKFLOW = '.github/workflows/distribution-build.yml';
 
-// Swatinem/rust-cache v2.9.2 src/config.ts lines 104-133: SHA1 of rustVersions followed by
+// Swatinem/rust-cache v2.9.3 src/config.ts lines 104-133: SHA1 of rustVersions followed by
 // sorted, nonempty variables matching these prefixes. restoreKey is assigned before the lock
 // hash is appended.
-// Source: https://github.com/Swatinem/rust-cache/blob/6323deb102c322ba6fcbdcafc7e3dddab59af2b6/src/config.ts#L104-L133
+// Source: https://github.com/Swatinem/rust-cache/blob/d1527c8f67ef9af357290475d4af4b0fab8f12e0/src/config.ts#L104-L133
 const RUST_VERSIONS = '1.99.0 x86_64-unknown-linux-gnu fixture';
 
 function hashEnv(overrides: Record<string, string>): string {
@@ -376,7 +376,7 @@ describe('runtime profile callers and cache isolation', () => {
     expect(cache).toContain('shared-key: runtime-build-');
     expect(cache).toContain(`save-if: ${EXPR} github.ref == 'refs/heads/main' }}`);
     expect(cache).toContain(`lookup-only: ${EXPR} github.ref == 'refs/heads/main' }}`);
-    // rust-cache v2.9.2 hashes CARGO* at job scope into both exact/fallback keys.
+    // rust-cache v2.9.3 hashes CARGO* at job scope into both exact/fallback keys.
     expect(cache).not.toContain('env-vars:');
     expect(cache).not.toContain('restore-keys:');
   });
