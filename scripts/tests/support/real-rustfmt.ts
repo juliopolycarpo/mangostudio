@@ -45,6 +45,13 @@ function validateFormatter(path: string, discovery: RustfmtDiscovery): string {
   return path;
 }
 
+function boundedDiagnostic(value: string): string {
+  const limit = 2048;
+  return value.length <= limit
+    ? value
+    : `${value.slice(0, limit)}...[truncated, ${value.length} characters]`;
+}
+
 /**
  * Resolve the installed formatter itself rather than the ambient rustup proxy.
  * @example const formatter = discoverRealRustfmt();
@@ -68,8 +75,27 @@ export function discoverRealRustfmt(
   const command = [rustup, 'which', 'rustfmt'];
   const result = discovery.query(command);
   const selection = { source: 'rustup' as const, command, ...result };
-  if (result.exitCode !== 0)
-    return { ...selection, unavailable: 'the pinned rustfmt component is unavailable' };
+  if (result.exitCode !== 0) {
+    // Rustup identifies a missing component explicitly. Any other failure,
+    // including a timeout or malformed output, must not hide this test.
+    const missing =
+      result.exitCode === 1 &&
+      result.stdout === '' &&
+      /^error: 'rustfmt(?:\.exe)?' is not installed for the toolchain '[^'\r\n]+'\.(?:\r?\nhelp: [^\r\n]+)*(?:\r?\n)?$/.test(
+        result.stderr
+      );
+    if (missing)
+      return { ...selection, unavailable: 'the pinned rustfmt component is unavailable' };
+    const diagnostic = {
+      command: command.map(boundedDiagnostic),
+      exitCode: result.exitCode,
+      stdout: boundedDiagnostic(result.stdout),
+      stderr: boundedDiagnostic(result.stderr),
+    };
+    throw new Error(
+      `real rustfmt discovery: expected a successful rustfmt lookup or confirmed missing component | received: ${JSON.stringify(diagnostic)}`
+    );
+  }
   return { ...selection, path: validateFormatter(result.stdout.trim(), discovery) };
 }
 

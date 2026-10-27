@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+
 import { discoverRealRustfmt, realRustfmtEnvironment } from './real-rustfmt';
 
 const executable = join(
@@ -55,9 +56,14 @@ describe('real formatter discovery', () => {
     expect(discovery.files).toEqual([executable]);
   });
 
-  it('retains failed component discovery without accepting its stdout as a path', () => {
+  it('reports a confirmed missing rustfmt component without accepting an output path', () => {
     const discovery = new FormatterDiscovery();
-    discovery.result = { exitCode: 1, stdout: executable, stderr: 'component not installed' };
+    discovery.result = {
+      exitCode: 1,
+      stdout: '',
+      stderr:
+        "error: 'rustfmt' is not installed for the toolchain 'fixture'.\nhelp: run `rustup component add rustfmt` to install it\n",
+    };
     expect(discoverRealRustfmt(discovery)).toEqual({
       source: 'rustup',
       command: [rustup, 'which', 'rustfmt'],
@@ -65,6 +71,78 @@ describe('real formatter discovery', () => {
       unavailable: 'the pinned rustfmt component is unavailable',
     });
     expect(discovery.files).toEqual([]);
+    expect(discovery.commands).toEqual([[rustup, 'which', 'rustfmt']]);
+  });
+
+  it('reports a timed-out lookup instead of skipping', () => {
+    const discovery = new FormatterDiscovery();
+    discovery.result = { exitCode: 124, stdout: '', stderr: 'lookup timed out' };
+    expect(() => discoverRealRustfmt(discovery)).toThrow(
+      `expected a successful rustfmt lookup or confirmed missing component | received: ${JSON.stringify({ command: [rustup, 'which', 'rustfmt'], ...discovery.result })}`
+    );
+    expect(discovery.files).toEqual([]);
+  });
+
+  it('reports a permission failure rather than declaring a component missing', () => {
+    const discovery = new FormatterDiscovery();
+    discovery.result = { exitCode: 1, stdout: '', stderr: 'permission denied' };
+    expect(() => discoverRealRustfmt(discovery)).toThrow('permission denied');
+  });
+
+  it('bounds discovery output while retaining the command and failure status', () => {
+    const discovery = new FormatterDiscovery();
+    discovery.result = { exitCode: 1, stdout: 'a'.repeat(5000), stderr: 'b'.repeat(5000) };
+    let message = '';
+    try {
+      discoverRealRustfmt(discovery);
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
+      message = error.message;
+    }
+    expect(message).toContain(JSON.stringify([rustup, 'which', 'rustfmt']));
+    expect(message).toContain('"exitCode":1');
+    expect(message).toContain('[truncated, 5000 characters]');
+    expect(message.length).toBeLessThan(5000);
+  });
+
+  it('recognizes the confirmed missing component diagnostic with Windows line endings', () => {
+    const discovery = new FormatterDiscovery();
+    discovery.result = {
+      exitCode: 1,
+      stdout: '',
+      stderr:
+        "error: 'rustfmt' is not installed for the toolchain 'fixture'.\r\nhelp: run `rustup component add rustfmt` to install it\r\n",
+    };
+    expect(discoverRealRustfmt(discovery).unavailable).toBe(
+      'the pinned rustfmt component is unavailable'
+    );
+  });
+
+  it('does not classify a timed-out missing-component diagnostic as absence', () => {
+    const discovery = new FormatterDiscovery();
+    discovery.result = {
+      exitCode: 124,
+      stdout: '',
+      stderr: "error: 'rustfmt' is not installed for the toolchain 'fixture'.\n",
+    };
+    expect(() => discoverRealRustfmt(discovery)).toThrow('confirmed missing component');
+  });
+
+  it.each([
+    {
+      stdout: executable,
+      stderr: "error: 'rustfmt' is not installed for the toolchain 'fixture'.\n",
+    },
+    {
+      stdout: '',
+      stderr:
+        "error: 'rustfmt' is not installed for the toolchain 'fixture'.\nerror: permission denied\n",
+    },
+    { stdout: '', stderr: "error: 'cargo' is not installed for the toolchain 'fixture'.\n" },
+  ])('rejects ambiguous component lookup output %#', ({ stdout, stderr }) => {
+    const discovery = new FormatterDiscovery();
+    discovery.result = { exitCode: 1, stdout, stderr };
+    expect(() => discoverRealRustfmt(discovery)).toThrow('confirmed missing component');
   });
 
   it('preserves a discovery execution error instead of declaring a formatter available', () => {
