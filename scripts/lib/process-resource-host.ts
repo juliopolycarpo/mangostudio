@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { type ProcessResourceRow, parseLinuxProcessResourceStat } from './process-resource-sample';
+
+import { parseLinuxProcessResourceStat, type ProcessResourceRow } from './process-resource-sample';
 
 export interface ProcessResourceUnits {
   readonly pageBytes: number;

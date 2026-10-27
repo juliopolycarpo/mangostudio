@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
+
 import { appendBenchmarkJournal, writeBenchmarkProgress } from '../lib/benchmark-journal';
 import { runNativeCommand } from '../lib/native-bun-qualification-process';
 

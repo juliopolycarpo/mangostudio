@@ -8,6 +8,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import { arch, cpus, homedir, platform, release, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
+
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
 import { benchmarkCancellation } from '../lib/benchmark-cancellation';
 import { appendBenchmarkJournal, writeBenchmarkProgress } from '../lib/benchmark-journal';

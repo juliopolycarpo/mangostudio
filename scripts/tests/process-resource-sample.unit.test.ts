@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+
 import {
+  parseLinuxProcessResourceStat,
   type ProcessResourceFrame,
   type ProcessResourceRow,
   ProcessResourceTracker,
-  parseLinuxProcessResourceStat,
   summarizeProcessResources,
 } from '../lib/process-resource-sample';
 

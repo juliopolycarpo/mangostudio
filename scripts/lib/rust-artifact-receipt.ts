@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+
 import { sha256File } from '../release/verify-checksum';
 import { parseArtifactSections, qualifiesTextAttribution } from './rust-cost-receipt';
 

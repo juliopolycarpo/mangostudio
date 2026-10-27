@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+
 import { qualifiesRustStudyCommand } from '../bench/rust-costs';
 import type { NativeCommandReceipt } from '../lib/native-bun-qualification-process';
 
