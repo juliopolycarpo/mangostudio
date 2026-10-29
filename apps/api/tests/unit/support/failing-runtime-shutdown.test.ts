@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
-import { mkdir } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
+import { mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -75,9 +76,11 @@ it('reports the last reached stage when the shutdown fixture stalls', async () =
 it('preserves source metadata and runs the bundled entry once', async () => {
   const fixture = await createManagedProcessFixture({ tempPrefix: 'mango-shutdown-bundle-' });
   try {
-    const first = join(fixture.tempDir, 'first');
+    const firstSource = join(fixture.tempDir, 'first');
+    const first = join(fixture.tempDir, 'first-alias');
     const second = join(fixture.tempDir, 'second');
-    await Promise.all([mkdir(first), mkdir(second)]);
+    await Promise.all([mkdir(firstSource), mkdir(second)]);
+    await symlink(firstSource, first, process.platform === 'win32' ? 'junction' : 'dir');
     const moduleA = join(first, 'module.ts');
     const moduleB = join(second, 'module.ts');
     const entry = join(first, 'entry.ts');
@@ -102,8 +105,8 @@ console.log(JSON.stringify([a, b]));`
     expect(await fixture.waitForExit()).toBe(0);
     expect(fixture.diagnostics()).toContain(
       JSON.stringify([
-        [first, pathToFileURL(moduleA).href, false],
-        [second, pathToFileURL(moduleB).href, false],
+        [realpathSync.native(first), pathToFileURL(realpathSync.native(moduleA)).href, false],
+        [realpathSync.native(second), pathToFileURL(realpathSync.native(moduleB)).href, false],
       ])
     );
     expect(fixture.diagnostics().match(/stdout:/g)).toHaveLength(1);
