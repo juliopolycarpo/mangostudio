@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -26,12 +35,16 @@ describe('standalone runner scripts', () => {
     { callerDirectory: 'unrelated caller', relativeInvocation: false },
     { callerDirectory: '.', relativeInvocation: false },
     { callerDirectory: '.', relativeInvocation: true },
+    { callerDirectory: '.', relativeInvocation: true, alias: true },
   ])(
     'launches the Unix bundle from $callerDirectory with relativeInvocation=$relativeInvocation without dot in PATH',
-    ({ callerDirectory, relativeInvocation }) => {
+    ({ callerDirectory, relativeInvocation, alias }) => {
       const root = mkdtempSync(join(tmpdir(), 'standalone runners '));
-      const bundle = join(root, '.mango', 'out');
-      const caller = join(root, callerDirectory);
+      const aliasPath = `${root}-alias`;
+      if (alias) symlinkSync(root, aliasPath);
+      const fixtureRoot = alias ? aliasPath : root;
+      const bundle = join(fixtureRoot, '.mango', 'out');
+      const caller = join(fixtureRoot, callerDirectory);
       const platformDir = join(bundle, 'linux-x64');
       mkdirSync(caller, { recursive: true });
       writeFakeUnixExecutable(platformDir);
@@ -43,9 +56,12 @@ describe('standalone runner scripts', () => {
           env: { ...process.env, PATH: '/usr/bin:/bin', CDPATH: '.' },
         });
         const output = child.stdout.toString();
-        expect(output, child.stderr.toString()).toContain(`FAKE:${platformDir}:serve:4123`);
+        const observedDirectory = output.match(/^FAKE:(.*):serve:4123$/m)?.[1];
+        expect(observedDirectory, child.stderr.toString()).toBeDefined();
+        expect(realpathSync(observedDirectory as string)).toBe(realpathSync(platformDir));
         expect(child.exitCode, 'expected the runner to propagate executable exit 37').toBe(37);
       } finally {
+        rmSync(aliasPath, { force: true });
         rmSync(root, { recursive: true, force: true });
       }
     }
