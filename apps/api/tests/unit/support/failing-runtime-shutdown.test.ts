@@ -24,6 +24,7 @@ it('awaits a cancelled warmup opener and its late close before injecting shutdow
         HOME: fixture.tempDir,
         USERPROFILE: fixture.tempDir,
         MANGO_SHUTDOWN_TRACE: '1',
+        MANGO_SHUTDOWN_STALL: undefined,
       },
     });
     const exitCode = await fixture.waitForExit();
@@ -72,7 +73,9 @@ it('reports the last reached stage when the shutdown fixture stalls', async () =
       label: 'shutdown fixture opener',
       timeoutMs: 5000,
     });
-    await expect(fixture.waitForExit(50)).rejects.toThrow('opener-started');
+    await expect(fixture.waitForExit(50)).rejects.toThrow(
+      /Child process did not exit within 50ms\.[\s\S]*opener-started/
+    );
     expect(fixture.diagnostics()).not.toContain('opener-cancelled');
   } finally {
     await fixture.cleanup();
