@@ -209,6 +209,7 @@ export async function captureSnapshot(
     stdout: 'pipe',
     stderr: 'pipe',
     timeout: timeoutMs,
+    windowsHide: process.platform === 'win32',
     env: { ...process.env, LC_ALL: 'C' },
   });
   const [out, error, code] = await Promise.all([

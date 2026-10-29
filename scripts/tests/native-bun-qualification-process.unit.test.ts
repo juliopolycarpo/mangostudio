@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,6 +40,16 @@ function processRow(
   group: number | null = 10
 ): NativeProcess {
   return { pid, parentPid, identity, group, command: `process-${pid}` };
+}
+
+class CensusSpawnRecorder {
+  readonly requests: boolean[] = [];
+  private readonly spawn = Bun.spawn;
+
+  run = ((command, options) => {
+    this.requests.push(options?.windowsHide as boolean);
+    return this.spawn(command, options);
+  }) as typeof Bun.spawn;
 }
 
 class LinuxStatFile {
@@ -379,6 +389,23 @@ describe('native process census budget', () => {
         timeoutMs: POSIX_CENSUS_TIMEOUT_MS,
       },
     ]);
+  });
+
+  test('requests a hidden background census on Windows', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    if (!platform) throw new Error('Missing process.platform descriptor');
+    const recorder = new CensusSpawnRecorder();
+    const spy = spyOn(Bun, 'spawn').mockImplementation(recorder.run);
+    try {
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      expect(
+        await captureSnapshot([process.execPath, '-e', 'process.stdout.write("rows")'], 10_000)
+      ).toBe('rows');
+      expect(recorder.requests).toEqual([true]);
+    } finally {
+      spy.mockRestore();
+      Object.defineProperty(process, 'platform', platform);
+    }
   });
 
   test('returns the stdout of a census that finishes inside its budget', async () => {
