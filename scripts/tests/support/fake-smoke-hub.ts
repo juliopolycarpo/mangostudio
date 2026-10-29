@@ -70,6 +70,7 @@ export class FakeSmokeHub {
   nullExitCodeOnSignal = false;
   holdStderr = false;
   reusedGroup = false;
+  groupStillAlive = false;
   root: SmokeHubChild | undefined;
   private finish: (() => void) | undefined;
   private finishStderr: (() => void) | undefined;
@@ -191,7 +192,7 @@ export class FakeSmokeHub {
   /** Inject deterministic processes and transport failures. @example const hub = new SmokeHub(fake.options()); */
   options(): SmokeHubOptions {
     return {
-      groupAlive: () => false,
+      groupAlive: () => this.groupStillAlive,
       spawn: this.spawn,
       snapshot: this.snapshot,
       signalGroup: this.signalGroup,

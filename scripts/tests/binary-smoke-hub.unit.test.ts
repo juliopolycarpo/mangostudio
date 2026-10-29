@@ -72,6 +72,31 @@ describe('owned artifact hub', () => {
     await hub.stop();
     expect(fake.signalled).toEqual([]);
   });
+  test.each(['unobserved child', 'reused group'] as const)(
+    'a nonempty group without a live owned identity cannot prove cleanup (%s)',
+    async (scenario) => {
+      const fake = new FakeSmokeHub('leaked');
+      const hub = new SmokeHub(fake.options());
+      await hub.start();
+      fake.runtimeAlive = scenario === 'unobserved child';
+      fake.root?.kill('SIGTERM');
+      await Bun.sleep(0);
+      fake.reusedGroup = scenario === 'reused group';
+      fake.groupStillAlive = true;
+      await expect(hub.stop()).rejects.toThrow(
+        'expected verified empty or owned process group 900001 | received nonempty group without a live owned identity'
+      );
+      expect(fake.signalled).toEqual([]);
+      expect(fake.supervisorHost.handlersInstalled).toBe(0);
+      await expect(hub.start()).rejects.toThrow('expected previous child settled');
+      fake.runtimeAlive = false;
+      fake.reusedGroup = false;
+      fake.groupStillAlive = false;
+      await hub.stop();
+      await hub.start();
+      await hub.stop();
+    }
+  );
   test('Windows stops its exact hub handle after the runtime was disconnected', async () => {
     const fake = new FakeSmokeHub();
     const hub = new SmokeHub({ ...fake.options(), platform: 'win32' });

@@ -184,6 +184,10 @@ export class SmokeHub {
       censusError = error instanceof Error ? error : new Error(String(error));
     }
     const ownsGroup = !this.childExited || current.some((row) => row.group === child.pid);
+    if (this.platform !== 'win32' && !censusError && !ownsGroup) {
+      this.release?.();
+      this.release = undefined;
+    }
     if (this.platform !== 'win32' && ownsGroup) {
       try {
         (this.options.signalGroup ?? process.kill)(-child.pid, signal);
@@ -208,8 +212,16 @@ export class SmokeHub {
     const group =
       this.child &&
       this.platform !== 'win32' &&
-      (!this.childExited || current.some((row) => row.group === this.child?.pid)) &&
       (this.options.groupAlive ?? processHost().groupAlive)(this.child.pid);
+    if (group && this.childExited && !current.some((row) => row.group === this.child?.pid)) {
+      // An unseen orphan and a reused group cannot be distinguished safely.
+      // Retain the child for retry, but revoke the supervisor's group signal lease.
+      this.release?.();
+      this.release = undefined;
+      throw new Error(
+        `hub shutdown: expected verified empty or owned process group ${this.child?.pid} | received nonempty group without a live owned identity`
+      );
+    }
     return observed || Boolean(group);
   }
   /**
