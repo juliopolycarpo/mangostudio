@@ -46,6 +46,7 @@ import {
   type RuntimeSource,
   verifyRuntimeBinary,
 } from './lib/runtime-build';
+import { standaloneRunnerScripts } from './lib/standalone-runners';
 
 interface BinaryBuildOptions {
   buildType: 'production' | 'development';
@@ -453,118 +454,13 @@ meant to be launched by hand.
   await Bun.write(join(outDir, 'README.md'), readmeContent);
   console.log(`📖 README generated: ${join(outDir, 'README.md')}`);
 
-  const runScript = `#!/bin/bash
-# MangoStudio Runner
-# Usage: ./run.sh [port] [platform]
-
-PORT=\${1:-3001}
-PLATFORM=\${2:-auto}
-
-if [[ "$PLATFORM" == "auto" ]]; then
-  OS="$(uname -s)"
-  ARCH="$(uname -m)"
-
-  case "$OS" in
-    Linux)
-      if [[ "$ARCH" == "x86_64" ]]; then
-        PLATFORM="linux-x64"
-      elif [[ "$ARCH" == "aarch64" ]]; then
-        PLATFORM="linux-arm64"
-      else
-        echo "Unsupported architecture: $ARCH"
-        exit 1
-      fi
-      ;;
-    Darwin)
-      if [[ "$ARCH" == "x86_64" ]]; then
-        PLATFORM="darwin-x64"
-      elif [[ "$ARCH" == "arm64" ]]; then
-        PLATFORM="darwin-arm64"
-      else
-        echo "Unsupported architecture: $ARCH"
-        exit 1
-      fi
-      ;;
-    *)
-      echo "Unsupported OS: $OS"
-      echo "Please specify platform manually: linux-x64, linux-arm64, darwin-x64, darwin-arm64, windows-x64, windows-arm64"
-      exit 1
-      ;;
-  esac
-fi
-
-EXECUTABLE_DIR="\${PWD}/.mango/out/\${PLATFORM}"
-EXECUTABLE="\${EXECUTABLE_DIR}/mangostudio"
-
-if [[ "$PLATFORM" == windows* ]]; then
-  EXECUTABLE="\${EXECUTABLE}.exe"
-fi
-
-if [[ ! -d "$EXECUTABLE_DIR" ]]; then
-  echo "Platform directory not found: $EXECUTABLE_DIR"
-  echo "Available platforms:"
-  ls -d .mango/out/*/ 2>/dev/null | sed 's|.mango/out/||' | sed 's|/||' || echo "  (none built yet)"
-  exit 1
-fi
-
-if [[ ! -f "$EXECUTABLE" ]]; then
-  echo "Executable not found: $EXECUTABLE"
-  exit 1
-fi
-
-echo "Starting MangoStudio on port $PORT"
-echo "Platform: $PLATFORM"
-echo "Executable: $EXECUTABLE"
-
-cd "$EXECUTABLE_DIR"
-chmod +x "$(basename "$EXECUTABLE")" 2>/dev/null || true
-
-# The binary is a CLI; bare invocation prints help, so start the server explicitly.
-exec "$(basename "$EXECUTABLE")" serve "$PORT"
-`;
+  const { shell: runScript, batch: batchScript } = standaloneRunnerScripts();
 
   await Bun.write(join(outDir, 'run.sh'), runScript);
   if (process.platform !== 'win32') {
     await Bun.$`chmod +x ${join(outDir, 'run.sh')}`;
   }
   console.log(`🚀 Runner script created: ${join(outDir, 'run.sh')}`);
-
-  const batchScript = `@echo off
-REM MangoStudio Runner for Windows
-REM Usage: run.bat [port] [platform]
-
-set PORT=%1
-if "%PORT%"=="" set PORT=3001
-
-set PLATFORM=%2
-if "%PLATFORM%"=="" (
-  REM Auto-detect (simplified - assumes x64)
-  set PLATFORM=windows-x64
-)
-
-set EXECUTABLE_DIR=%~dp0.mango\\out\\%PLATFORM%
-set EXECUTABLE=%EXECUTABLE_DIR%\\mangostudio.exe
-
-if not exist "%EXECUTABLE_DIR%" (
-  echo Platform directory not found: %EXECUTABLE_DIR%
-  echo Available platforms:
-  dir /b "%~dp0.mango\\out" 2>nul || echo   (none built yet)
-  exit /b 1
-)
-
-if not exist "%EXECUTABLE%" (
-  echo Executable not found: %EXECUTABLE%
-  exit /b 1
-)
-
-echo Starting MangoStudio on port %PORT%
-echo Platform: %PLATFORM%
-echo Executable: %EXECUTABLE%
-
-cd /d "%EXECUTABLE_DIR%"
-REM The binary is a CLI; bare invocation prints help, so start the server explicitly.
-"%EXECUTABLE%" serve %PORT%
-`;
 
   await Bun.write(join(outDir, 'run.bat'), batchScript);
   console.log(`🚀 Windows runner script created: ${join(outDir, 'run.bat')}`);
