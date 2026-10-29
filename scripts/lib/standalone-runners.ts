@@ -97,7 +97,12 @@ set "EXECUTABLE=%EXECUTABLE_DIR%\\mangostudio.exe"
 if not exist "%EXECUTABLE_DIR%" (
   echo Platform directory not found: "%EXECUTABLE_DIR%"
   echo Available platforms:
-  dir /b /ad "%~dp0" 2>nul || echo   none built yet
+  set "FOUND_PLATFORM="
+  for /d %%D in ("%~dp0*") do (
+    echo %%~nxD
+    set "FOUND_PLATFORM=1"
+  )
+  if not defined FOUND_PLATFORM echo   none built yet
   exit /b 1
 )
 

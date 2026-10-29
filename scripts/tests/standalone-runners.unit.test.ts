@@ -79,4 +79,38 @@ describe('standalone runner scripts', () => {
       }
     }
   );
+
+  test.skipIf(process.platform !== 'win32').each([true, false])(
+    'lists Windows platform directories or the empty fallback with hasPlatform=%s',
+    (hasPlatform) => {
+      const root = mkdtempSync(join(tmpdir(), 'standalone runners '));
+      const bundle = join(root, 'bundle with spaces');
+      const caller = join(root, 'unrelated caller');
+      mkdirSync(bundle, { recursive: true });
+      mkdirSync(join(caller, 'caller-only-decoy'), { recursive: true });
+      if (hasPlatform) mkdirSync(join(bundle, 'windows-x64'));
+      const batch = join(bundle, 'run.bat');
+      writeFileSync(batch, standaloneRunnerScripts().batch);
+      try {
+        const child = Bun.spawnSync(
+          ['cmd.exe', '/d', '/s', '/c', `""${batch}" "4123" "windows-arm64""`],
+          { cwd: caller, windowsVerbatimArguments: true }
+        );
+        expect(child.exitCode).toBe(1);
+        expect(child.stderr.toString()).toBe('');
+        const lines = child.stdout
+          .toString()
+          .trim()
+          .split(/\r?\n/)
+          .map((line) => line.trim());
+        expect(lines).toEqual([
+          `Platform directory not found: "${join(bundle, 'windows-arm64')}"`,
+          'Available platforms:',
+          hasPlatform ? 'windows-x64' : 'none built yet',
+        ]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
 });
