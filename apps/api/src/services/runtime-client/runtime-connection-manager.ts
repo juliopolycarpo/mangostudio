@@ -53,7 +53,11 @@ import {
   runtimeDiscoveryCache,
   runtimeDiscoveryKey,
 } from './runtime-discovery-cache';
-import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
+import {
+  type RuntimeLaunchFailure,
+  RuntimeTerminationIncompleteError,
+  spawnRuntimeChild,
+} from './spawn-runtime-child';
 
 /** Last `runtime.health` retained across disconnect the way the manifest is. */
 export interface CachedRuntimeHealth {
@@ -1082,8 +1086,9 @@ export class RuntimeConnectionManager {
       },
       (error: unknown) => {
         finishOpening();
-        // A rejected open has already completed the connector's own teardown.
         ready.reject(error);
+        // An incomplete termination means the connector could not finish teardown.
+        if (error instanceof RuntimeTerminationIncompleteError) throw error;
       }
     );
     void this.#trackTeardown(entry, Promise.race([ownership, expired.promise]));
