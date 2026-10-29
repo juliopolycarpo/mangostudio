@@ -273,6 +273,8 @@ describe('release signature gates', () => {
 
   test('loads both protected-main archives when a streamed producer reports SIGPIPE', async () => {
     const fixture = await mkdtemp(join(tmpdir(), 'release-archive-producer-'));
+    const archive = process.platform === 'win32' ? fixture : join(directory, 'C:/release-archive');
+    await mkdir(archive, { recursive: true });
     const realGit = Bun.spawnSync(['bash', '-c', 'command -v git']).stdout.toString().trim();
     const realPath = Bun.spawnSync(['bash', '-c', 'printf %s "$PATH"']).stdout.toString();
     try {
@@ -301,16 +303,19 @@ describe('release signature gates', () => {
             PATH: `${fixture}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
             REAL_GIT: realGit,
             REAL_PATH: realPath,
-            RUNNER_TEMP: fixture.replaceAll('\\', '/'),
+            RUNNER_TEMP:
+              process.platform === 'win32' ? archive.replaceAll('\\', '/') : 'C:/release-archive',
           },
         });
         expect(result.exitCode, `${file}: ${result.stderr.toString()}`).toBe(0);
         expect(
-          await readFile(join(fixture, 'release-trust/.github/release-allowed-signers'), 'utf8')
+          await readFile(join(archive, 'release-trust/.github/release-allowed-signers'), 'utf8')
         ).toBe(await readFile(signers, 'utf8'));
       }
     } finally {
       await rm(fixture, { recursive: true, force: true });
+      if (process.platform !== 'win32')
+        await rm(join(directory, 'C:'), { recursive: true, force: true });
     }
   });
 
