@@ -58,7 +58,8 @@ export function assertSmokeSchema<S extends TSchema>(
 export async function smokeBinaryApplication(options: ApplicationSmokeOptions): Promise<void> {
   const budgetMs = options.budgetMs ?? resolveReadyBudgetMs();
   const request = options.request ?? fetch;
-  const canonicalPath = options.canonicalPath ?? realpathSync;
+  // The native resolver expands Windows 8.3 aliases from runner temp paths.
+  const canonicalPath = options.canonicalPath ?? realpathSync.native;
   const json = async (
     path: string,
     method = 'GET',

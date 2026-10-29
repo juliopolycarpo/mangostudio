@@ -14,6 +14,7 @@ export type ApplicationFault =
   | 'wrong-error'
   | 'lost-database'
   | 'wrong-runtime'
+  | 'wrong-home'
   | 'missing-pong'
   | 'wrong-activity'
   | 'bad-json'
@@ -66,6 +67,12 @@ export class FakeBinaryApplication {
   readonly events: string[] = [];
   chat: Chat | undefined;
   restarted = false;
+  runtimePath = '/artifact/runtime';
+  reportedRuntimePath = '/artifact/runtime';
+  home = '/isolated/home';
+  reportedHome = '/isolated/home';
+  readonly pathAliases = new Map<string, string>();
+  readonly canonicalPath = (path: string): string => this.pathAliases.get(path) ?? path;
   constructor(readonly fault: ApplicationFault = 'none') {
     this.socket = new FakeApplicationSocket(fault);
   }
@@ -140,8 +147,9 @@ export class FakeBinaryApplication {
           platform: process.platform,
           arch: process.arch,
           runtimeVersion: '1.2.3',
-          binaryPath: this.fault === 'wrong-runtime' ? '/checkout/runtime' : '/artifact/runtime',
-          homeDir: '/isolated/home',
+          binaryPath:
+            this.fault === 'wrong-runtime' ? '/checkout/runtime' : this.reportedRuntimePath,
+          homeDir: this.fault === 'wrong-home' ? '/checkout/home' : this.reportedHome,
         },
       });
     if (method === 'POST' && path === '/api/environments/local/disconnect') {
@@ -162,14 +170,14 @@ export class FakeBinaryApplication {
     return {
       baseUrl: 'http://127.0.0.1:12345',
       cookie: 'session=fake',
-      home: '/isolated/home',
-      runtimePath: '/artifact/runtime',
+      home: this.home,
+      runtimePath: this.runtimePath,
       version: '1.2.3',
       budgetMs: 30,
       request: this.request,
       socket: () => this.socket,
       restart: this.restart,
-      canonicalPath: (path) => path,
+      canonicalPath: this.canonicalPath,
       platform: 'linux',
       runtimeProcesses: {
         observe: () => {
