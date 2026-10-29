@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +11,34 @@ import { type ApplicationFault, FakeBinaryApplication } from './support/fake-bin
 
 const windowsAliases = process.platform === 'win32' ? windowsPathAliases() : undefined;
 
+class FakePollingClock {
+  elapsed = 0;
+  readonly now = (): number => this.elapsed;
+  readonly sleep = (): Promise<void> => {
+    this.elapsed += 10;
+    return Promise.resolve();
+  };
+}
+
 describe('built hub application qualification', () => {
+  let restoreClock: () => void;
+  beforeEach(() => {
+    const clock = new FakePollingClock();
+    const now = spyOn(performance, 'now').mockImplementation(clock.now);
+    const sleep = spyOn(Bun, 'sleep').mockImplementation(clock.sleep);
+    restoreClock = () => {
+      now.mockRestore();
+      sleep.mockRestore();
+    };
+  });
+  afterEach(() => restoreClock());
+
+  test('advances the polling clock by one interval per sleep', async () => {
+    expect(performance.now()).toBe(0);
+    await Bun.sleep(10);
+    await Bun.sleep(10);
+    expect(performance.now()).toBe(20);
+  });
   test('validates canonical CRUD, websocket activity, Local health and the same database after restart', async () => {
     const fake = new FakeBinaryApplication();
     await smokeBinaryApplication(fake.options());
