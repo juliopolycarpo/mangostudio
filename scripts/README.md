@@ -124,6 +124,23 @@ Run one scan from the repository root with
   started keep running. A group whose leader had already exited when the signal arrived is not
   tracked, so a member it left behind is not stopped.
 
+## Hub compiler and prepared frontend
+
+`bun run build:binary` uses the running Bun with `--aot --trim --format=esm
+--sourcemap=external` and production `--minify`. It does not enable Elysia AOT.
+`--compiler bytecode` uses `--bytecode --trim` with the same ESM, source maps and
+production minification, and retains all 8 cross-compilation targets.
+
+Native builds use the running compiler and its runtime, without downloading a
+cross-target Bun runtime; `--refresh-runtimes` has no effect on native builds.
+`.bun-version` remains the floating `canary` channel. Per-target compiler receipts
+record the executable version, revision and SHA-256 used by each producer.
+
+`--reuse-frontend` accepts a prepared `apps/frontend/dist/build-info.json` only
+for the same clean HEAD and build mode, with `gitDirty: false`. It keeps the
+original build time and regenerates absolute frontend embed paths on each host.
+Without this flag, the build prepares the frontend itself.
+
 ## The runtime binary: cargo, not Bun
 
 `bun run build --binary` compiles only the hub with Bun. The
@@ -136,12 +153,15 @@ Run one scan from the repository root with
 - Otherwise, the host's own target only, via
   `cargo build --release --locked -p mangostudio-runtime --target <triple>`.
 
-Any other target without a prebuilt file fails before anything compiles,
-naming the file it expected. `bun run build:runtime` produces that layout:
+Native compilation defaults to the running Bun's OS, architecture and libc; a foreign
+`--platform` fails before frontend or runtime work, even with prebuilt runtimes.
+`--compiler bytecode` explicitly enables cross-compilation and selects all 8 targets
+when `--platform` is omitted. Any foreign target without a prebuilt file fails
+before anything compiles, naming the file it expected. `bun run build:runtime` produces that layout:
 
 ```bash
 bun run build:runtime --platform linux-arm64,linux-x64-musl --zig --out .mango/runtime-prebuilt
-bun run build --binary --platform linux-arm64 --runtime-dir .mango/runtime-prebuilt
+bun run build:binary --compiler bytecode --platform linux-arm64 --runtime-dir .mango/runtime-prebuilt
 ```
 
 `--zig` links Linux targets through cargo-zigbuild (zig and cargo-zigbuild on
@@ -162,6 +182,16 @@ The publishing transaction is described in
 `scripts/test-build.ts` awaits the supervised `captureCommand` helper for its
 build, archive and installer probes. Await completion before checking output
 or exit status so the event loop remains available for child supervision.
+The executable smoke stages the hub and its sibling runtime outside the checkout, uses an
+isolated home and database, and keeps the existing auth, embedded assets, connector and
+runtime handshake checks. Authenticated application checks validate canonical chat/error
+schemas, WebSocket activity, Local runtime health and chat persistence across a restart
+of that same artifact and database. POSIX shutdown requires exit 0 and no owned descendants;
+Windows disconnects Local and awaits its child before terminating the hub, since Windows
+SIGTERM is a hard kill. Rebuilding requires a matching host platform/libc. With
+`SKIP_BUILD=1`, a manifest-backed prebuilt foreign target can receive layout and
+checksum checks; behavior checks are skipped when the target cannot execute here.
+
 See [Binary Smoke](../docs/reference/testing.md#binary-smoke).
 
 Keep each worktree's Cargo target separate; see

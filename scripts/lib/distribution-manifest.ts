@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
+import type { BinaryCompilerMode } from './build';
 import { NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import {
   ALL_BINARY_TARGETS,
@@ -13,11 +14,12 @@ import {
 /**
  * Version 2 added bunRevision and bunCompileRevision; version 3 replaced the
  * latter with per-target provenance, because one field cannot describe eight
- * independently fetched runtimes; version 4 added runtimeProfile. Manifests never
+ * independently fetched runtimes; version 4 added runtimeProfile; version 5 adds
+ * per-target hub compiler provenance. Manifests never
  * outlive the workflow run that wrote them, so no reader has to understand an
  * older shape: a version-3 manifest is rejected, not defaulted to shipping.
  */
-const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 4;
+const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 5;
 export const DISTRIBUTION_MANIFEST_FILE = 'distribution-manifest.json';
 
 /**
@@ -71,6 +73,14 @@ export interface BunRuntimeProvenance {
   readonly tagAdvanced: boolean;
 }
 
+/** The exact compiler executable that produced one target's hub. */
+export interface HubCompilerProvenance {
+  readonly mode: BinaryCompilerMode;
+  readonly version: string;
+  readonly revision: string;
+  readonly sha256: string;
+}
+
 interface DistributionFile {
   readonly path: string;
   readonly size: number;
@@ -90,6 +100,8 @@ interface DistributionTarget {
    * unbuilt, and claiming a runtime for one of those would be an invention.
    */
   readonly bunRuntime: BunRuntimeProvenance | null;
+  /** Compiler identity proven by a matching producer receipt, or unknown. */
+  readonly compiler: HubCompilerProvenance | null;
 }
 
 export interface DistributionManifest {
@@ -99,7 +111,7 @@ export interface DistributionManifest {
   readonly packageVersion: string;
   readonly channel: string;
   readonly bunVersion: string;
-  /** Bun.revision: the commit, which Bun.version's plain "1.4.0" cannot name. */
+  /** Packaging host's Bun.revision. Native compiler revisions are per target. */
   readonly bunRevision: string;
   /** The cargo profile every target's runtime was built with. */
   readonly runtimeProfile: RuntimeProfile;
@@ -118,6 +130,7 @@ export interface CreateDistributionManifestOptions {
   readonly runtimeProfile: RuntimeProfile;
   /** Provenance per target, for whichever targets this build resolved a runtime for. */
   readonly bunRuntimes: Partial<Record<ReleasePlatformId, BunRuntimeProvenance>>;
+  readonly hubCompilers?: Partial<Record<ReleasePlatformId, HubCompilerProvenance>>;
 }
 
 export interface ValidateDistributionManifestOptions {
@@ -162,6 +175,7 @@ export function createDistributionManifest(
           }
         : null,
       bunRuntime: options.bunRuntimes[target.arch] ?? null,
+      compiler: options.hubCompilers?.[target.arch] ?? null,
     } satisfies DistributionTarget;
   });
 
@@ -437,7 +451,35 @@ function parseTarget(value: unknown, index: number): DistributionTarget {
     throw new Error(`Distribution target ${index}.npmPackage is invalid.`);
   }
   assertBunRuntime(value.bunRuntime, index);
+  assertHubCompiler(value.compiler, index);
   return value as unknown as DistributionTarget;
+}
+
+/** Preserve exact compiler identity in every immutable target manifest. */
+function assertHubCompiler(value: unknown, index: number): void {
+  if (value === null) return;
+  if (!isRecord(value)) {
+    throw new Error(
+      `Distribution target ${index}.compiler expected object | null | received: ${JSON.stringify(value)}`
+    );
+  }
+  const compiler = value;
+  if (compiler.mode !== 'native' && compiler.mode !== 'bytecode') {
+    throw new Error(
+      `Distribution target ${index}.compiler.mode expected native | bytecode | received: ${String(compiler.mode)}`
+    );
+  }
+  for (const [field, pattern, shape] of [
+    ['version', /^.+$/, 'nonempty version'],
+    ['revision', /^[a-f\d]{40}$/, 'full Bun revision'],
+    ['sha256', /^[a-f\d]{64}$/, 'SHA256'],
+  ] as const) {
+    if (typeof compiler[field] !== 'string' || !pattern.test(compiler[field])) {
+      throw new Error(
+        `Distribution target ${index}.compiler.${field} expected ${shape} | received: ${String(compiler[field])}`
+      );
+    }
+  }
 }
 
 /**

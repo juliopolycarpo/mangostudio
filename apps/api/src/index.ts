@@ -9,11 +9,5 @@
 
 import { extractUserArgs } from './cli/argv';
 import { dispatch } from './cli/dispatch';
-import { wireTypeboxNamespaces } from './lib/typebox-runtime';
-
-// Before dispatch, because `serve` imports the routes that build the first
-// schemas. A statement rather than an import side effect so import sorting
-// cannot move it after the modules that depend on it.
-wireTypeboxNamespaces();
 
 await dispatch(extractUserArgs(process.argv));

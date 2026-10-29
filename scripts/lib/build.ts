@@ -2,8 +2,47 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { type WorkspaceName, WORKSPACES } from './config';
+import { type BinaryTarget, filterBinaryTargets, type ReleasePlatformId } from './release-targets';
 
 const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
+
+export type BinaryCompilerMode = 'native' | 'bytecode';
+
+/** Select the standalone compiler, naming invalid values. @example parseBinaryCompilerMode('native') */
+export function parseBinaryCompilerMode(value: unknown = 'native'): BinaryCompilerMode {
+  if (value === 'native' || value === 'bytecode') return value;
+  throw new Error(`expected binary compiler: native | bytecode | received: ${String(value)}`);
+}
+
+/**
+ * Native builds select the current platform and refuse cross-compilation before setup.
+ * Bytecode builds retain the complete release-target selection.
+ * @example binaryBuildTargets('native', 'linux-x64')
+ */
+export function binaryBuildTargets(
+  compiler: BinaryCompilerMode,
+  host: ReleasePlatformId | null,
+  platform?: string
+): BinaryTarget[] {
+  if (compiler === 'native' && !host) {
+    throw new Error('expected a supported native build host | received: unknown platform or libc');
+  }
+  const targets = filterBinaryTargets(
+    platform ?? (compiler === 'native' ? (host ?? undefined) : undefined)
+  );
+  if (targets.length === 0) {
+    throw new Error(`expected a release platform or Bun target | received: ${String(platform)}`);
+  }
+  const foreign =
+    compiler === 'native' ? targets.find((target) => target.arch !== host) : undefined;
+  if (foreign) {
+    throw new Error(
+      `expected native build target: ${host} | received: ${foreign.arch}. ` +
+        'Run on the target platform, or select --compiler bytecode for cross-compilation.'
+    );
+  }
+  return targets;
+}
 
 export interface BinaryCompileDefines {
   readonly buildTime: string;
@@ -49,15 +88,20 @@ export function binaryCompileDefines(context: BinaryCompileDefines): string[] {
 }
 
 /**
- * Output flags for every standalone hub compile. `--bytecode` ships JSC
- * bytecode beside the source so a cold start skips parsing the bundle (the
- * hub's `--version` went from 427 ms to 148 ms on linux-x64, median of 20), at the cost
- * of a larger binary. Bytecode defaults to CommonJS output, which rejects the
- * entry's top-level `await`, so `--format=esm` is required with it.
- * // Usage: binaryCompileFlags('production') // → ['--bytecode', '--format=esm', '--sourcemap=external', '--minify']
+ * Compile native machine code with unused runtime features trimmed. Bytecode is
+ * an explicit fallback that can cross-compile and retains ESM for top-level await.
+ * @example binaryCompileFlags('production', 'native')
  */
-export function binaryCompileFlags(buildType: string): string[] {
-  const flags = ['--bytecode', '--format=esm', '--sourcemap=external'];
+export function binaryCompileFlags(
+  buildType: string,
+  compiler: BinaryCompilerMode = 'native'
+): string[] {
+  const flags = [
+    compiler === 'native' ? '--aot' : '--bytecode',
+    '--trim',
+    '--format=esm',
+    '--sourcemap=external',
+  ];
   if (buildType === 'production') flags.push('--minify');
   return flags;
 }

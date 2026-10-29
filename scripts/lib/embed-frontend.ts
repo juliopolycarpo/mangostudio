@@ -53,7 +53,11 @@ export function renderFrontendManifestModule(
     const filePath = distFilePath(distDir, urlPath);
     return `import f${index} from ${JSON.stringify(filePath)} with { type: 'file' };`;
   });
-  const entries = urlPaths.map((urlPath, index) => `  ${JSON.stringify(urlPath)}: f${index},`);
+  // File-loader values are paths at runtime. Bun's native type checker still
+  // assigns HTMLBundle/CSS types from the extension, so narrow only this generated boundary.
+  const entries = urlPaths.map(
+    (urlPath, index) => `  ${JSON.stringify(urlPath)}: f${index} as unknown as string,`
+  );
   const variantImports = variants.map(
     (variant, index) =>
       `import v${index} from ${JSON.stringify(variant.filePath)} with { type: 'file' };`
@@ -81,7 +85,7 @@ function renderEncodingEntries(variants: readonly PrecompressedVariant[]): strin
   const byPath = new Map<string, string[]>();
   variants.forEach((variant, index) => {
     const codings = byPath.get(variant.urlPath) ?? [];
-    codings.push(`${JSON.stringify(variant.coding)}: v${index}`);
+    codings.push(`${JSON.stringify(variant.coding)}: v${index} as unknown as string`);
     byPath.set(variant.urlPath, codings);
   });
   return [...byPath].map(

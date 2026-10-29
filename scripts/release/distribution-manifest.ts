@@ -10,12 +10,14 @@ import {
   DISTRIBUTION_MANIFEST_FILE,
   type DistributionManifestExpectation,
   type DistributionManifestScope,
+  type HubCompilerProvenance,
   parseRuntimeProfile,
   readDistributionManifest,
   type RuntimeProfile,
   validateDistributionManifest,
 } from '../lib/distribution-manifest';
 import { captureCommand } from '../lib/exec';
+import { readHubBuildRecords } from '../lib/hub-build';
 import { error, header, requiredEnv, success } from '../lib/runner';
 
 interface Args {
@@ -132,6 +134,23 @@ async function main(): Promise<void> {
   }
 
   header('Create distribution manifest');
+  const records = readHubBuildRecords(ROOT_DIR);
+  const runtimes = await bunCompiledRuntimes(await bunCrossCompileChannel());
+  for (const record of records) {
+    if (record.sourceSha !== sourceSha || record.version !== packageVersion) {
+      throw new Error(
+        `expected ${record.target} source/version: ${sourceSha}/${packageVersion} | received: ${record.sourceSha}/${record.version}`
+      );
+    }
+    if (record.compilerMode === 'native') {
+      runtimes[record.target] = {
+        source: 'host',
+        revision: record.compilerRevision,
+        sha256: null,
+        tagAdvanced: false,
+      };
+    }
+  }
   const manifest = createDistributionManifest({
     rootDir: ROOT_DIR,
     sourceSha,
@@ -145,7 +164,18 @@ async function main(): Promise<void> {
     // a target it did not build — a `--platform`-limited run leaves most of them
     // unbuilt, and the honest answer for those is that this build produced no
     // runtime for them at all.
-    bunRuntimes: await bunCompiledRuntimes(await bunCrossCompileChannel()),
+    bunRuntimes: runtimes,
+    hubCompilers: Object.fromEntries(
+      records.map((record) => [
+        record.target,
+        {
+          mode: record.compilerMode,
+          version: record.compilerVersion,
+          revision: record.compilerRevision,
+          sha256: record.compilerSha256,
+        } satisfies HubCompilerProvenance,
+      ])
+    ),
   });
   writeFileSync(args.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 

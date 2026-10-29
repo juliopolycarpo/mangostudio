@@ -369,10 +369,9 @@ describe('same-run release dry-run runtime reuse', () => {
     expect(step).toContain('bun ./scripts/ci/dry-run-artifacts.ts >> "$GITHUB_OUTPUT"');
   });
 
-  test('preserves every pre-reuse validation command and its runner in original order', () => {
-    // Captured from acf8930f before the workflow interface changed. This pins
-    // the complete assertion inventory, including multiline installer and
-    // Docker scripts, instead of only a few representative commands.
+  test('preserves every validation command in its current native runner order', () => {
+    // Captured from acf8930f, with Windows build/archive commands moved to
+    // their native runner. Keep every multiline installer and Docker command.
     const inventory = JSON.parse(
       readText('scripts/tests/support/dry-run-command-inventory.json')
     ) as Record<

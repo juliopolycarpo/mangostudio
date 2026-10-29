@@ -57,6 +57,20 @@ function fixture(runtimeProfile: RuntimeProfile = 'shipping'): {
       bunVersion: '1.4.0',
       bunRevision: '32e87032b98b46d9c3c1d082c58cb390abf35e33',
       runtimeProfile,
+      hubCompilers: {
+        'linux-x64': {
+          mode: 'native',
+          version: '1.4.4',
+          revision: 'b'.repeat(40),
+          sha256: 'c'.repeat(64),
+        },
+        'darwin-arm64': {
+          mode: 'bytecode',
+          version: '1.4.4',
+          revision: 'd'.repeat(40),
+          sha256: 'e'.repeat(64),
+        },
+      },
       bunRuntimes: {
         'linux-x64': {
           source: 'host',
@@ -255,6 +269,57 @@ describe('distribution manifest', () => {
     });
     // Not built by this run: absent, rather than credited to the host's Bun.
     expect(byId.get('windows-x64')).toBeNull();
+  });
+
+  test('retains each native or bytecode compiler identity in the immutable manifest', () => {
+    const { manifest } = fixture();
+    const parsed = parseDistributionManifest(JSON.stringify(manifest));
+    const byId = new Map(parsed.targets.map((target) => [target.id, target.compiler]));
+    expect(byId.get('linux-x64')).toEqual({
+      mode: 'native',
+      version: '1.4.4',
+      revision: 'b'.repeat(40),
+      sha256: 'c'.repeat(64),
+    });
+    expect(byId.get('darwin-arm64')).toEqual({
+      mode: 'bytecode',
+      version: '1.4.4',
+      revision: 'd'.repeat(40),
+      sha256: 'e'.repeat(64),
+    });
+    expect(byId.get('windows-x64')).toBeNull();
+  });
+
+  test.each(['jit', undefined])('rejects invalid compiler mode %j', (mode) => {
+    const { manifest } = fixture();
+    const targets = manifest.targets.map((target, index) =>
+      index === 0 ? { ...target, compiler: { ...target.compiler, mode } } : target
+    );
+    expect(() => parseDistributionManifest(JSON.stringify({ ...manifest, targets }))).toThrow(
+      `compiler.mode expected native | bytecode | received: ${String(mode)}`
+    );
+  });
+
+  test.each([
+    ['version', '', 'nonempty version'],
+    ['revision', 'short', 'full Bun revision'],
+    ['sha256', 'short', 'SHA256'],
+  ])('rejects incomplete compiler %s', (field, value, shape) => {
+    const { manifest } = fixture();
+    const targets = manifest.targets.map((target, index) =>
+      index === 0 ? { ...target, compiler: { ...target.compiler, [field]: value } } : target
+    );
+    expect(() => parseDistributionManifest(JSON.stringify({ ...manifest, targets }))).toThrow(
+      `compiler.${field} expected ${shape} | received: ${value}`
+    );
+  });
+
+  test('rejects a missing compiler provenance field in schema version 5', () => {
+    const { manifest } = fixture();
+    const targets = manifest.targets.map(({ compiler: _removed, ...target }) => target);
+    expect(() => parseDistributionManifest(JSON.stringify({ ...manifest, targets }))).toThrow(
+      'compiler expected object | null | received: undefined'
+    );
   });
 
   test('rejects a half-written runtime record', () => {

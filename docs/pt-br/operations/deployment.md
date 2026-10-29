@@ -45,16 +45,25 @@ estão documentados em
 ## Build De Produção
 
 ```bash
-bun run build --binary --platform linux-x64                  # a plataforma desta máquina
-bun run build --binary --runtime-dir .mango/runtime-prebuilt # as 8, com runtimes pré-construídos
+bun run build:binary # build nativo para o SO, arquitetura e libc deste host
+# Fallback explícito de compilação cruzada em bytecode, com os 8 runtimes Rust prontos:
+bun run build:binary --compiler bytecode --runtime-dir .mango/runtime-prebuilt
 ```
 
-Isso compila o hub (com o frontend embarcado) em `.mango/out/<platform>/mangostudio` e coloca o
-`mangostudio-runtime` construído com cargo ao lado. Sem `--runtime-dir`, só a plataforma do
-próprio host pode ser construída, porque só o runtime dela é compilado localmente com
-`cargo build`. Qualquer outra plataforma precisa de um runtime pré-construído em
-`<dir>/<platform>/mangostudio-runtime[.exe]` (`bun run build:runtime` ou o artefato do CI); veja
-[releasing.md](../reference/releasing.md#como-o-binário-do-runtime-é-construído).
+O build nativo compila o hub com AOT do Bun, remoção de recursos não usados do runtime,
+minificação em produção, ESM e source maps externos. Ele embarca o frontend em
+`.mango/out/<platform>/mangostudio` e coloca o `mangostudio-runtime` construído com cargo ao
+lado. Um `--platform` diferente do host falha antes do trabalho de frontend ou runtime,
+mesmo com `--runtime-dir`.
+
+`--runtime-dir <dir>` fornece `<dir>/<platform>/mangostudio-runtime[.exe]`; sem ele, cargo
+constrói o runtime local. A compilação cruzada exige `--compiler bytecode` e um runtime
+pré-construído para cada alvo solicitado. Sem `--platform`, o modo bytecode seleciona os
+8 alvos. Veja [releasing.md](../reference/releasing.md#como-o-binário-do-runtime-é-construído).
+
+Para um frontend preparado, `--reuse-frontend` exige `apps/frontend/dist/build-info.json`
+do mesmo HEAD limpo e modo de build, com `gitDirty: false`. Ele preserva o horário original
+do build e regenera os caminhos absolutos de embed no host atual.
 
 ## Alvos De Plataforma
 
@@ -369,7 +378,12 @@ Valide o binário antes do deploy:
 PLATFORM=linux-x64 bun run scripts/test-build.ts
 ```
 
-Isso verifica:
+O rebuild exige SO, arquitetura e libc correspondentes ao host. Para um alvo
+pré-construído com manifesto, `SKIP_BUILD=1` também exige `SOURCE_SHA` e
+`DISTRIBUTION_CHANNEL`. Alvos de outra plataforma recebem verificações de layout
+e checksum; verificações de comportamento só executam quando o host suporta o alvo.
+
+Para alvos executáveis, isso verifica:
 
 - se o binário existe e é executável
 - se os assets do frontend estão presentes, como `index.html`, JS e CSS

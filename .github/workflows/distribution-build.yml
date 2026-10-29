@@ -66,9 +66,126 @@ jobs:
       profile: ${{ inputs.runtime_profile }}
       cache: ${{ inputs.cache }}
 
+  prepare:
+    name: Prepare frontend and binary smoke harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+      - name: Build frontend once
+        env:
+          VERSION: ${{ inputs.version }}
+        run: bun run build --frontend
+      - name: Bundle binary smoke harness
+        run: bun ./scripts/release/bundle-binary-smoke.ts
+      - name: Upload prepared build inputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hub-inputs-${{ inputs.source_sha }}
+          path: |
+            apps/frontend/dist
+            .mango/smoke
+          include-hidden-files: true
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+  hub:
+    name: Native hub ${{ matrix.platform }}
+    needs: [prepare, runtime]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-x64
+            runner: macos-15-intel
+          - platform: darwin-arm64
+            runner: macos-latest
+          - platform: windows-x64
+            runner: windows-latest
+          - platform: windows-arm64
+            runner: windows-11-arm
+          - platform: linux-x64-musl
+            runner: ubuntu-latest
+            musl: true
+          - platform: linux-arm64-musl
+            runner: ubuntu-24.04-arm
+            musl: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/setup-mango
+        if: ${{ !matrix.musl }}
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+      - name: Download prepared frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hub-inputs-${{ inputs.source_sha }}
+          path: .
+      - name: Download matching cargo runtime
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: runtime-${{ inputs.source_sha }}-${{ matrix.platform }}
+          path: .mango/runtime-prebuilt
+      - name: Build native hub
+        if: ${{ !matrix.musl }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run build --binary --platform "$PLATFORM" --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+      - name: Build native musl hub in Alpine
+        if: ${{ matrix.musl }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
+        # No glibc install runs in these legs. Bun and the frozen dependency
+        # install both run in Alpine on the matching host architecture.
+        run: |
+          set -euo pipefail
+          BUN_CHANNEL="$(tr -d '\r\n' < .bun-version)"
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            -e VERSION -e PLATFORM -e GITHUB_TOKEN \
+            "oven/bun:${BUN_CHANNEL}-alpine" sh -ec '
+              apk add --no-cache git bash libstdc++ libgcc
+              git config --global --add safe.directory /workspace
+              bun install --frozen-lockfile
+              bun run build --binary --platform "$PLATFORM" --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+            '
+      - name: Upload native hub and runtime pair
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-hub-${{ inputs.source_sha }}-${{ matrix.platform }}
+          path: |
+            .mango/out/${{ matrix.platform }}
+            .mango/hub-builds/${{ matrix.platform }}.json
+          include-hidden-files: true
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
   build:
     name: Build immutable distribution
-    needs: [runtime]
+    needs: [hub]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -102,21 +219,24 @@ jobs:
             exit 1
           fi
 
-      - name: Download cargo runtimes
+      - name: Download prepared frontend
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: runtime-${{ inputs.source_sha }}-*
-          merge-multiple: true
-          path: .mango/runtime-prebuilt
+          name: hub-inputs-${{ inputs.source_sha }}
+          path: .
 
-      - name: Build standalone binaries once
+      - name: Download native hub pairs and compiler records
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: native-hub-${{ inputs.source_sha }}-*
+          merge-multiple: true
+          path: .mango
+
+      - name: Assemble verified native hubs
         env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
           VERSION: ${{ inputs.version }}
-          GITHUB_TOKEN: ${{ github.token }}
-        # Every target's runtime is staged from the runtime job's output and
-        # checked against its target from the header; nothing is compiled here
-        # except the hub.
-        run: bun run build --binary --runtime-dir .mango/runtime-prebuilt
+        run: bun ./scripts/release/assemble-native-hubs.ts
 
       - name: Assemble npm distribution
         env:

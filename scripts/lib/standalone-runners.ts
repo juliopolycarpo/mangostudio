@@ -87,8 +87,10 @@ if "%PORT%"=="" set "PORT=3001"
 
 set "PLATFORM=%~2"
 if "%PLATFORM%"=="" (
-  REM Auto-detect (simplified - assumes x64)
   set "PLATFORM=windows-x64"
+  REM Prefer an available native ARM64 bundle, including an emulated shell.
+  if /i "%PROCESSOR_ARCHITECTURE%"=="ARM64" if exist "%~dp0windows-arm64\\mangostudio.exe" set "PLATFORM=windows-arm64"
+  if /i "%PROCESSOR_ARCHITEW6432%"=="ARM64" if exist "%~dp0windows-arm64\\mangostudio.exe" set "PLATFORM=windows-arm64"
 )
 
 set "EXECUTABLE_DIR=%~dp0%PLATFORM%"

@@ -61,10 +61,15 @@ async function stageBuildSmoke(executable = true): Promise<{
   const callbackPort = callbackReservation.port;
   await callbackReservation.stop(true);
   const original = readText('scripts/test-build.ts');
-  const source = original.replace(
-    'const CHATGPT_CALLBACK_PORT = 1455;',
-    `const CHATGPT_CALLBACK_PORT = ${callbackPort};`
-  );
+  const source = original
+    .replace(
+      'const CHATGPT_CALLBACK_PORT = 1455;',
+      `const CHATGPT_CALLBACK_PORT = ${callbackPort};`
+    )
+    .replace(
+      "import { ROOT_DIR } from './lib/config';",
+      `const ROOT_DIR = ${JSON.stringify(root)};`
+    );
   // An unmatched replace would leave the smoke probing the real callback port.
   expect(source, 'expected test-build.ts to declare CHATGPT_CALLBACK_PORT = 1455').not.toBe(
     original
@@ -87,7 +92,7 @@ async function stageBuildSmoke(executable = true): Promise<{
   const binary = join(target, 'mangostudio');
   writeFileSync(
     binary,
-    `#!${process.execPath}\n${readText('scripts/tests/support/fake-build-smoke-server.ts')}`
+    `#!${process.execPath}\n${readText('scripts/tests/support/fake-build-smoke-server.ts').replace('process.env.FAKE_BUILD_SMOKE_EVENTS', JSON.stringify(join(root, 'events.jsonl')))}`
   );
   chmodSync(binary, executable ? 0o755 : 0o644);
   return { script, eventsPath: join(root, 'events.jsonl'), tempDir };

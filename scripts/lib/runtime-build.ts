@@ -317,7 +317,8 @@ export function canRunOnHost(
 /**
  * Everything wrong with a runtime's header for a target, or `[]`. Checks the
  * container format and CPU, that a gnu build asks for the glibc loader and a
- * musl build is static, that a Windows build imports no Visual C++
+ * musl runtime is static (a Bun hub may explicitly permit its musl loader),
+ * that a Windows build imports no Visual C++
  * Redistributable DLL, and — when `enforceGlibcFloor` — that a gnu build
  * needs nothing newer than {@link GLIBC_FLOOR}.
  *
@@ -327,7 +328,10 @@ export function canRunOnHost(
 export function runtimeHeaderProblems(
   platform: ReleasePlatformId,
   header: ExecutableHeader,
-  options: { readonly enforceGlibcFloor: boolean }
+  options: {
+    readonly enforceGlibcFloor: boolean;
+    readonly muslLinkage?: 'static' | 'loader-or-static';
+  }
 ): string[] {
   const spec = RUNTIME_TARGETS[platform];
   const expectedFormat = FORMAT_BY_OS[spec.os];
@@ -337,9 +341,14 @@ export function runtimeHeaderProblems(
       `expected ${expectedFormat} ${spec.arch} | received: ${header.format} ${header.arch}`
     );
   }
-  if (spec.libc === 'musl' && header.interpreter !== null) {
+  const muslLoader = spec.arch === 'x64' ? '/lib/ld-musl-x86_64.so.1' : '/lib/ld-musl-aarch64.so.1';
+  const validMuslLoader =
+    options.muslLinkage === 'loader-or-static' && header.interpreter === muslLoader;
+  if (spec.libc === 'musl' && header.interpreter !== null && !validMuslLoader) {
     problems.push(
-      `expected a static musl executable (no PT_INTERP) | received interpreter: ${header.interpreter}`
+      options.muslLinkage === 'loader-or-static'
+        ? `expected musl loader ${muslLoader} or static executable | received interpreter: ${header.interpreter}`
+        : `expected a static musl executable (no PT_INTERP) | received interpreter: ${header.interpreter}`
     );
   }
   if (spec.libc === 'gnu' && header.interpreter !== GLIBC_LOADER[spec.arch]) {

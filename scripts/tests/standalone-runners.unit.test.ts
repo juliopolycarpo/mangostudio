@@ -80,6 +80,76 @@ describe('standalone runner scripts', () => {
     }
   );
 
+  test.skipIf(process.platform !== 'win32').each([
+    {
+      architecture: 'ARM64',
+      nativeArchitecture: '',
+      platforms: ['windows-arm64'],
+      expected: 'windows-arm64',
+    },
+    {
+      architecture: 'ARM64',
+      nativeArchitecture: '',
+      platforms: ['windows-x64', 'windows-arm64'],
+      expected: 'windows-arm64',
+    },
+    {
+      architecture: 'x86',
+      nativeArchitecture: 'ARM64',
+      platforms: ['windows-arm64'],
+      expected: 'windows-arm64',
+    },
+    {
+      architecture: 'ARM64',
+      nativeArchitecture: '',
+      platforms: ['windows-x64'],
+      expected: 'windows-x64',
+    },
+    {
+      architecture: 'AMD64',
+      nativeArchitecture: 'ARM64',
+      platforms: ['windows-x64'],
+      expected: 'windows-x64',
+    },
+    {
+      architecture: 'AMD64',
+      nativeArchitecture: '',
+      platforms: ['windows-x64', 'windows-arm64'],
+      expected: 'windows-x64',
+    },
+  ])(
+    'selects $expected from $platforms with architecture=$architecture nativeArchitecture=$nativeArchitecture',
+    ({ architecture, nativeArchitecture, platforms, expected }) => {
+      const root = mkdtempSync(join(tmpdir(), 'standalone runners '));
+      const bundle = join(root, 'bundle with spaces');
+      const caller = join(root, 'unrelated caller');
+      mkdirSync(caller, { recursive: true });
+      for (const platform of platforms) writeFakeWindowsExecutable(join(bundle, platform));
+      writeFileSync(join(bundle, 'run.bat'), standaloneRunnerScripts().batch);
+      const host = join(caller, 'fake-arm-host.bat');
+      // Set simulated hardware here because an empty inherited variable can alter its neighbor.
+      writeFileSync(
+        host,
+        `@echo off\nset "PROCESSOR_ARCHITECTURE=${architecture}"\nset "PROCESSOR_ARCHITEW6432=${nativeArchitecture}"\ncall "${join(bundle, 'run.bat')}"\nexit /b %errorlevel%\n`
+      );
+      try {
+        const child = Bun.spawnSync(['cmd.exe', '/d', '/s', '/c', `""${host}""`], {
+          cwd: caller,
+          windowsVerbatimArguments: true,
+        });
+        expect(child.stdout.toString(), child.stderr.toString()).toContain(
+          `FAKE:${join(bundle, expected)}:serve:3001`
+        );
+        expect(child.exitCode, 'expected the selected runner to propagate executable exit 37').toBe(
+          37
+        );
+        expect(child.stderr.toString()).toBe('');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   test.skipIf(process.platform !== 'win32').each([true, false])(
     'lists Windows platform directories or the empty fallback with hasPlatform=%s',
     (hasPlatform) => {

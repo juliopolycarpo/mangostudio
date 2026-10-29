@@ -237,6 +237,25 @@ describe('runtimeHeaderProblems', () => {
     ).toEqual(['expected glibc loader /lib64/ld-linux-x86-64.so.2 | received: none (static)']);
   });
 
+  test.each([
+    ['linux-x64-musl', 'x64', '/lib/ld-musl-x86_64.so.1'],
+    ['linux-arm64-musl', 'arm64', '/lib/ld-musl-aarch64.so.1'],
+  ] as const)(
+    'accepts the Bun hub loader for %s while keeping Rust static',
+    (platform, arch, interpreter) => {
+      const header = readExecutableHeader(fakeElf({ arch, interpreter }));
+      expect(
+        runtimeHeaderProblems(platform, header, {
+          enforceGlibcFloor: true,
+          muslLinkage: 'loader-or-static',
+        })
+      ).toEqual([]);
+      expect(runtimeHeaderProblems(platform, header, { enforceGlibcFloor: true })).toContain(
+        `expected a static musl executable (no PT_INTERP) | received interpreter: ${interpreter}`
+      );
+    }
+  );
+
   test('a Windows runtime may not depend on the Visual C++ Redistributable', () => {
     const options = { enforceGlibcFloor: true };
     const dynamicCrt = readExecutableHeader(

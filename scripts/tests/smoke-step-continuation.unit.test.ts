@@ -19,6 +19,7 @@ import {
   type SmokeJob,
   smokeMatrixCases,
   smokeStepEnv,
+  smokeStepRuns,
 } from './support/smoke-workflows';
 
 const scratchRoots: string[] = [];
@@ -33,6 +34,7 @@ interface CommandEvent {
   readonly runtime?: string;
   readonly platform?: string;
   readonly skipBuild?: string;
+  readonly buildCaller?: string;
 }
 
 function stageWorkflowRun(seededOutputPlatforms: readonly string[] = []) {
@@ -42,11 +44,14 @@ function stageWorkflowRun(seededOutputPlatforms: readonly string[] = []) {
   const stateDir = join(root, 'containers');
   mkdirSync(fakeBin);
   mkdirSync(stateDir);
+  const runnerTemp = mkdtempSync(join(tmpdir(), 'mango-smoke-runner-'));
+  scratchRoots.push(runnerTemp);
+  writeFileSync(join(root, '.bun-version'), 'canary\n');
   mkdirSync(join(root, 'apps', 'api'), { recursive: true });
   mkdirSync(join(root, 'scripts'));
   symlinkSync(join(ROOT_DIR, 'scripts', 'release'), join(root, 'scripts', 'release'), 'dir');
   const fakeSource = readText('scripts/tests/support/fake-smoke-workflow-command.ts');
-  for (const name of ['bun', 'docker', 'podman', 'curl', 'ss', 'sleep']) {
+  for (const name of ['bun', 'docker', 'podman', 'curl', 'ss', 'sleep', 'apk', 'git', 'chown']) {
     writeFileSync(join(fakeBin, name), `#!${process.execPath}\n${fakeSource}`, { mode: 0o755 });
   }
   for (const platform of ['linux-x64', 'linux-x64-musl']) {
@@ -62,7 +67,7 @@ function stageWorkflowRun(seededOutputPlatforms: readonly string[] = []) {
       writeFileSync(join(target, name), '#!/usr/bin/env true\n', { mode: 0o755 });
     }
   }
-  return { root, fakeBin, stateDir, eventsPath: join(root, 'commands.jsonl') };
+  return { root, fakeBin, stateDir, runnerTemp, eventsPath: join(root, 'commands.jsonl') };
 }
 
 async function runWorkflowSteps(
@@ -86,6 +91,9 @@ async function runWorkflowSteps(
   const resolveValue = (value: string) =>
     value
       .replaceAll('$' + '{{ github.workspace }}', fixture.root)
+      .replaceAll('$' + '{{ inputs.source_sha }}', 'a'.repeat(40))
+      .replaceAll('$' + '{{ inputs.version }}', '0.1.1-smoke')
+      .replaceAll('$' + '{{ inputs.channel }}', 'pr')
       .replaceAll('$' + '{{ inputs.rebuild }}', String(rebuild))
       .replaceAll('$' + "{{ inputs.rebuild && '0' || '1' }}", rebuild ? '0' : '1');
 
@@ -93,8 +101,8 @@ async function runWorkflowSteps(
   // GitHub's !cancelled() conditions and absence of continue-on-error. This
   // fixture proves command execution/teardown, not the hosted Actions runner.
   for (const step of job.steps ?? []) {
-    if (!step.run || (step.if?.includes('matrix.docker_arch') && !matrix.docker_arch)) continue;
-    if (step.if?.includes('!inputs.rebuild') && rebuild) continue;
+    if (!step.run || !smokeStepRuns(step, { name: 'fixture', matrix, inputs: { rebuild } }))
+      continue;
     const stepEnv = Object.fromEntries(
       Object.entries(smokeStepEnv(job, step, matrix)).map(([name, value]) => [
         name,
@@ -107,7 +115,9 @@ async function runWorkflowSteps(
         ...process.env,
         ...stepEnv,
         PATH: `${fixture.fakeBin}:${process.env.PATH}`,
-        RUNNER_TEMP: join(fixture.root, 'runner-temp'),
+        RUNNER_TEMP: fixture.runnerTemp,
+        GITHUB_RUN_ID: '1234',
+        GITHUB_RUN_ATTEMPT: '1',
         FAKE_SMOKE_WORKFLOW_EVENTS: fixture.eventsPath,
         FAKE_SMOKE_WORKFLOW_STATE: fixture.stateDir,
         FAKE_SMOKE_WORKFLOW_FAILURE: failure,
@@ -132,7 +142,7 @@ async function runWorkflowSteps(
 }
 
 describe.skipIf(process.platform === 'win32')('folded smoke command continuation', () => {
-  test('both Docker assertions report an occupied port before starting a container', async () => {
+  test('both Docker assertions report an occupied port before starting an image container', async () => {
     const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
     const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
     if (!matrix)
@@ -140,9 +150,20 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'ports');
     const dockerAssertions = outcomes.filter(({ name }) => name.includes('Docker smoke test'));
     expect(dockerAssertions.map(({ code }) => code)).toEqual([1, 1]);
-    expect(events.filter(({ command, args }) => command === 'docker' && args[0] === 'run')).toEqual(
-      []
-    );
+    expect(
+      events.filter(
+        ({ command, args }) => command === 'docker' && args[0] === 'run' && args.includes('-p')
+      )
+    ).toEqual([]);
+    expect(
+      events.filter(
+        ({ command, args, platform, skipBuild }) =>
+          command === 'bun' &&
+          args.includes('.mango/smoke/test-build.mjs') &&
+          platform === matrix.musl_platform &&
+          skipBuild === '1'
+      )
+    ).toHaveLength(1);
     expect(containers).toEqual([]);
   });
 
@@ -211,7 +232,9 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       );
     }
     expect(
-      events.filter(({ command, args }) => command === 'docker' && args[0] === 'run')
+      events.filter(
+        ({ command, args }) => command === 'docker' && args[0] === 'run' && args.includes('-p')
+      )
     ).toHaveLength(2);
   });
 
@@ -245,8 +268,19 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       const assertions = outcomes.filter(({ name }) => name.includes('smoke test'));
       expect(assertions.map(({ code }) => code)).toEqual([9, 0, 0]);
       expect(
-        events.filter(({ command, args }) => command === 'docker' && args[0] === 'run')
+        events.filter(
+          ({ command, args }) => command === 'docker' && args[0] === 'run' && args.includes('-p')
+        )
       ).toHaveLength(2);
+      const harnesses = events
+        .filter(
+          ({ command, args }) => command === 'bun' && args.includes('.mango/smoke/test-build.mjs')
+        )
+        .map(({ platform, skipBuild }) => ({ platform, skipBuild }));
+      expect(harnesses, 'both native and Alpine run the full prebuilt-artifact harness').toEqual([
+        { platform: matrix.platform, skipBuild: '1' },
+        { platform: matrix.musl_platform, skipBuild: '1' },
+      ]);
       expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
       expect(
         outcomes.filter(({ name }) => name.includes('teardown')).map(({ code }) => code)
@@ -265,8 +299,15 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       throw new Error('Missing linux-arm64 matrix case; expected a native Linux smoke leg');
     const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'none', true);
     expect(outcomes.every(({ code }) => code === 0)).toBe(true);
+    expect(
+      events
+        .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+        .map(({ args }) => args[args.indexOf('--platform') + 1]),
+      'the native and Alpine harnesses each build their target once'
+    ).toEqual([matrix.platform, matrix.musl_platform]);
     const builds = events.filter(
-      ({ command, args }) => command === 'bun' && args.includes('build:binary')
+      ({ command, args, buildCaller }) =>
+        command === 'bun' && args.includes('build:binary') && buildCaller !== 'native-harness'
     );
     // The binary smoke step already built the glibc target; only musl is new.
     const received = builds.map(({ args }) => args[args.indexOf('--platform') + 1]).join(', ');
@@ -277,7 +318,7 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     }
     expect(
       events.find(
-        ({ command, args }) => command === 'bun' && args.includes('scripts/test-build.ts')
+        ({ command, args }) => command === 'bun' && args.includes('.mango/smoke/test-build.mjs')
       )?.skipBuild
     ).toBe('0');
     expect(containers).toEqual([]);
@@ -297,7 +338,10 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       [matrix.musl_platform]
     );
     const builds = events
-      .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+      .filter(
+        ({ command, args, buildCaller }) =>
+          command === 'bun' && args.includes('build:binary') && buildCaller !== 'native-harness'
+      )
       .map(({ args }) => args[args.indexOf('--platform') + 1]);
     expect(builds, 'the native glibc completion marker cannot verify existing musl output').toEqual(
       [matrix.musl_platform]
@@ -305,7 +349,7 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
     expect(outcomes.every(({ code }) => code === 0)).toBe(true);
     expect(
       events.find(
-        ({ command, args }) => command === 'bun' && args.includes('scripts/test-build.ts')
+        ({ command, args }) => command === 'bun' && args.includes('.mango/smoke/test-build.mjs')
       )?.skipBuild
     ).toBe('0');
     expect(containers, 'both Docker EXIT traps remove their fixed-port containers').toEqual([]);
@@ -325,7 +369,10 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       // executables but no successful-build README marker.
       const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, failure, true);
       const builds = events
-        .filter(({ command, args }) => command === 'bun' && args.includes('build:binary'))
+        .filter(
+          ({ command, args, buildCaller }) =>
+            command === 'bun' && args.includes('build:binary') && buildCaller !== 'native-harness'
+        )
         .map(({ args }) => args[args.indexOf('--platform') + 1])
         .join(', ');
       const images = outcomes

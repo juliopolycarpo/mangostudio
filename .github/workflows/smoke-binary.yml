@@ -63,7 +63,8 @@ jobs:
     # default, consuming distribution artifacts); never after it failed.
     if: ${{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # Linux step deadlines total 31 minutes for artifacts, 33 for manual rebuilds.
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -104,6 +105,7 @@ jobs:
         timeout-minutes: 2
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_sha || github.sha }}
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         timeout-minutes: 2
@@ -136,6 +138,19 @@ jobs:
           channel: ${{ inputs.channel }}
           target: ${{ matrix.platform }}
 
+      - name: Download bundled binary smoke harness
+        if: ${{ !inputs.rebuild }}
+        timeout-minutes: 2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hub-inputs-${{ inputs.source_sha }}
+          path: .
+
+      - name: Bundle binary smoke harness (manual rebuild)
+        if: ${{ inputs.rebuild }}
+        timeout-minutes: 2
+        run: bun --no-install ./scripts/release/bundle-binary-smoke.ts
+
       # Default condition on purpose: this succeeds only when every setup step
       # above did. The assertions below read it, so failed setup fails once
       # instead of once more per assertion run against missing bytes.
@@ -148,13 +163,14 @@ jobs:
       # The step deadline fails a hung smoke before the job deadline cancels
       # the job, which would skip the Docker assertions and teardown checks.
       # Every step carries a deadline and each leg's total stays below the
-      # job's; the three Linux assertions take 12 minutes of it.
+      # job's; the Linux assertions take 14 minutes of it, including Alpine's
+      # complete artifact harness and Docker-image smoke.
       # macOS and Windows run nothing after this step, so `smoke_timeout`
       # gives them the whole 12: a manual rebuild compiles inside it.
       - name: Run binary smoke test
         if: ${{ !cancelled() && steps.ready.outcome == 'success' }}
         timeout-minutes: ${{ matrix.smoke_timeout }}
-        run: bun --no-install run scripts/test-build.ts
+        run: bun --no-install .mango/smoke/test-build.mjs
         env:
           # Read by the rebuild's `build:binary`; inert when SKIP_BUILD=1.
           RUNTIME_DIR: .mango/runtime-prebuilt
@@ -258,7 +274,7 @@ jobs:
       # Exactly one of the two musl downloads runs; Alpine needs that one.
       - name: Run Alpine Docker smoke test
         if: ${{ !cancelled() && steps.ready.outcome == 'success' && (steps.musl_runtime.outcome == 'success' || steps.musl_target.outcome == 'success') && matrix.docker_arch }}
-        timeout-minutes: 4
+        timeout-minutes: 6
         env:
           REBUILD: ${{ inputs.rebuild }}
           BINARY_PLATFORM: ${{ matrix.musl_platform }}
@@ -268,11 +284,39 @@ jobs:
           DOCKER_BUILDKIT: "1"
           BETTER_AUTH_SECRET: smoke-test-secret-at-least-32-characters-long
           GEMINI_API_KEY: dummy
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+          DISTRIBUTION_CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
+          BUN_CHANNEL="$(tr -d '\r\n' < .bun-version)"
+          musl_smoke_container="mangostudio-musl-smoke-${DOCKER_ARCH}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          musl_source=""
+          trap 'docker rm -f "$musl_smoke_container" >/dev/null 2>&1 || true; if [ -n "$musl_source" ]; then rm -rf "$musl_source"; fi' EXIT
           if [ "$REBUILD" = "true" ]; then
-            # The native glibc build's shared marker cannot verify musl output.
-            bun run build:binary --platform "$BINARY_PLATFORM" --runtime-dir .mango/runtime-prebuilt
+            # Isolate the Alpine install from the host's glibc dependencies.
+            musl_source="$(mktemp -d "$RUNNER_TEMP/native-musl.XXXXXX")"
+            tar --exclude=node_modules --exclude=.mango/out --exclude=.mango/artifacts -cf - . | tar -xf - -C "$musl_source"
+            docker run --rm --name "$musl_smoke_container" --platform "linux/${DOCKER_ARCH}" \
+              -v "$musl_source:/workspace" -w /workspace \
+              -e PLATFORM="$BINARY_PLATFORM" -e OWNER="$(id -u):$(id -g)" \
+              -e RUNTIME_DIR=.mango/runtime-prebuilt -e API_PORT=13003 -e SKIP_BUILD=0 -e VERSION \
+              "oven/bun:${BUN_CHANNEL}-alpine" sh -ec '
+                trap '\''chown -R "$OWNER" /workspace'\'' EXIT
+                apk add --no-cache git bash libstdc++ libgcc
+                git config --global --add safe.directory /workspace
+                bun install --frozen-lockfile
+                bun --no-install .mango/smoke/test-build.mjs
+              '
+            cp -R "$musl_source/.mango/out/$BINARY_PLATFORM" .mango/out/
+          else
+            # The same bundled assertions as the six host legs, running on musl.
+            # The artifact pair is staged outside this read-only checkout by the harness.
+            docker run --rm --name "$musl_smoke_container" --platform "linux/${DOCKER_ARCH}" \
+              -v "$PWD:/workspace:ro" -w /workspace \
+              -e PLATFORM="$BINARY_PLATFORM" -e API_PORT=13003 -e SKIP_BUILD=1 \
+              -e SOURCE_SHA -e VERSION -e DISTRIBUTION_CHANNEL \
+              "oven/bun:${BUN_CHANNEL}-alpine" bun --no-install .mango/smoke/test-build.mjs
           fi
           bun --no-install ./scripts/release/stage-docker-ctx.ts --arch "$DOCKER_ARCH" --variant "$VARIANT"
           docker build \
@@ -292,7 +336,10 @@ jobs:
           leftover=""
           listeners=""
           for _ in $(seq 1 20); do
-            leftover="$(docker ps -a --format '{{.Names}}' --filter "name=mangostudio-smoke-linux-${DOCKER_ARCH}-13002")"
+            leftover="$(
+              docker ps -a --format '{{.Names}}' --filter "name=mangostudio-smoke-linux-${DOCKER_ARCH}-13002"
+              docker ps -a --format '{{.Names}}' --filter "name=mangostudio-musl-smoke-${DOCKER_ARCH}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            )"
             listeners="$(ss -H -ltn '( sport = :13002 )')"
             if [ -z "$leftover$listeners" ]; then
               break

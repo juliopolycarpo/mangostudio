@@ -52,8 +52,8 @@ describe('cross-runtime metadata credentials', () => {
   test.each([
     [
       '.github/workflows/distribution-build.yml',
-      'build',
-      'Build standalone binaries once',
+      'hub',
+      'Build native hub',
       'bun run build --binary',
       'scripts/build.ts',
     ],
