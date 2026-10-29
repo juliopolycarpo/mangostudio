@@ -174,7 +174,9 @@ describe('root tooling workspace exports', () => {
       const manifestPath = output.match(/Missing distribution manifest: ([^\r\n]+)/)?.[1];
       expect(manifestPath, output).toBeDefined();
       expect(basename(manifestPath as string)).toBe('distribution-manifest.json');
-      expect(realpathSync(dirname(manifestPath as string))).toBe(realpathSync(fixtureRoot));
+      expect(realpathSync.native(dirname(manifestPath as string))).toBe(
+        realpathSync.native(fixtureRoot)
+      );
       expect(output).toContain('platform: linux-x64-musl');
       expect(output).not.toContain('Cannot find module');
       expect(output).not.toContain('Building binary');
