@@ -42,6 +42,8 @@ class PendingRuntimeOpener {
 
 /** Exercises the failure preload in its own process, preserving the parent test's prototype. */
 async function runPendingShutdown(): Promise<void> {
+  if (process.env.MANGO_SHUTDOWN_TRACE === '1')
+    process.stderr.write(`fixture-started ${Math.round(performance.now())}ms\n`);
   const opener = new PendingRuntimeOpener();
   const manager = new RuntimeConnectionManager({
     // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
@@ -60,6 +62,9 @@ async function runPendingShutdown(): Promise<void> {
   const connecting = manager.connect('fixture-user', 'pending-warmup').catch(() => undefined);
   try {
     await opener.started.promise;
+    if (process.env.MANGO_SHUTDOWN_TRACE === '1')
+      process.stderr.write(`opener-started ${Math.round(performance.now())}ms\n`);
+    if (process.env.MANGO_SHUTDOWN_STALL === 'opener-started') await Bun.sleep(60_000);
     const shutdown = manager.shutdown().then(
       () => ({ error: '<resolved>' }),
       (error: unknown) => {
@@ -76,6 +81,8 @@ async function runPendingShutdown(): Promise<void> {
       'expected pending opener cancellation before the fixture shutdown error'
     );
 
+    if (process.env.MANGO_SHUTDOWN_TRACE === '1')
+      process.stderr.write(`opener-cancelled ${Math.round(performance.now())}ms\n`);
     opener.opened.resolve(opener.connection);
     assert.equal(
       await Promise.race([
@@ -87,6 +94,8 @@ async function runPendingShutdown(): Promise<void> {
     );
     assert.deepEqual(opener.events, ['open-started', 'open-cancelled', 'close-started']);
 
+    if (process.env.MANGO_SHUTDOWN_TRACE === '1')
+      process.stderr.write(`close-started ${Math.round(performance.now())}ms\n`);
     opener.closed.resolve();
     assert.deepEqual(await shutdown, { error: 'fixture runtime teardown failed' });
     assert.deepEqual(opener.events, [
@@ -96,6 +105,8 @@ async function runPendingShutdown(): Promise<void> {
       'close-finished',
       'shutdown-rejected',
     ]);
+    if (process.env.MANGO_SHUTDOWN_TRACE === '1')
+      process.stderr.write(`shutdown-rejected ${Math.round(performance.now())}ms\n`);
     process.stdout.write(JSON.stringify({ events: opener.events }));
   } finally {
     // Even the intentionally red run releases every gate and its manager ownership.
