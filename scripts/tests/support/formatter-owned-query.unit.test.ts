@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   FormatterQueryExpiry,
   type FormatterQueryHost,
+  FormatterQueryObservationExpiry,
   queryOwnedFormatterProcess,
 } from './formatter-owned-query';
 import {
@@ -153,6 +154,41 @@ describe('owned formatter native query', () => {
     expect(host.budgets).toEqual([2]);
     expect(host.calls).toEqual([[1234, host.controller.signal]]);
     expect(host.listeners).toBe(0);
+  });
+
+  it('records private expiry when incomplete observation cleans up its child and readers', async () => {
+    const host = new ControlledQueryHost();
+    const result = queryOwnedFormatterProcess(1234, 10, host).catch((error: unknown) => error);
+    host.expire();
+    const deadline = Date.now() + 1000;
+    while (host.child.stopCalls === 0 && Date.now() < deadline) await Bun.sleep(5);
+    expect(host.child.stopCalls).toBe(1);
+    host.exit(137, 'SIGKILL');
+    const received = await result;
+    expect(received).toMatchObject({
+      name: 'FormatterQueryObservationExpiry',
+      pid: 1234,
+      timeoutMs: 10,
+      cause: host.reason,
+    });
+    expect(host.child.stopCalls).toBe(1);
+    expect(host.child.stdout.locked).toBe(false);
+    expect(host.child.stderr.locked).toBe(false);
+  });
+
+  it('retains cancellation failure after private expiry and confirmed exit', async () => {
+    const host = new ControlledQueryHost();
+    host.child.cancelFailure = new Error('controlled cancellation refusal');
+    const result = queryOwnedFormatterProcess(1234, 10, host).catch((error: unknown) => error);
+    host.expire();
+    const deadline = Date.now() + 1000;
+    while (host.child.stopCalls === 0 && Date.now() < deadline) await Bun.sleep(5);
+    expect(host.child.stopCalls).toBe(1);
+    host.exit(137, 'SIGKILL');
+    const received = await result;
+    expect(received).toBeInstanceOf(AggregateError);
+    expect(received).not.toBeInstanceOf(FormatterQueryObservationExpiry);
+    expect((received as AggregateError).errors).toContain(host.child.cancelFailure);
   });
 
   it('does not infer ownership from an arbitrary SIGTERM exit or killed flag', async () => {
@@ -390,6 +426,7 @@ describe('owned formatter native query', () => {
     try {
       const received = await result;
       expect(received).not.toBeInstanceOf(FormatterQueryExpiry);
+      expect(received).not.toBeInstanceOf(FormatterQueryObservationExpiry);
       expect(received).toBeInstanceOf(AggregateError);
       expect(
         (received as AggregateError).errors.some((error: unknown) =>

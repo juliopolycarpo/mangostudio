@@ -6,6 +6,7 @@ import {
 import { HEARTBEAT_MS } from './fake-rustfmt-markers';
 import {
   FormatterQueryExpiry,
+  FormatterQueryObservationExpiry,
   type FormatterQueryResult,
   queryOwnedFormatterProcess,
 } from './formatter-owned-query';
@@ -175,6 +176,7 @@ export async function waitForFormatterSettlement(
         const attempt = attempts[index];
         return (
           (read.reason instanceof FormatterQueryExpiry ||
+            read.reason instanceof FormatterQueryObservationExpiry ||
             read.reason instanceof FormatterStatReadExpiry) &&
           read.reason.pid === attempt?.pid &&
           read.reason.timeoutMs === attempt.budgetMs

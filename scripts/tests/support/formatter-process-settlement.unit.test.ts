@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { FormatterQueryExpiry } from './formatter-owned-query';
+import { FormatterQueryExpiry, FormatterQueryObservationExpiry } from './formatter-owned-query';
 import {
   type FormatterStatHost,
   FormatterStatReadExpiry,
@@ -157,6 +157,33 @@ class OwnedExpirySettlementClock extends NativeSettlementClock {
     if (this.expiries.length && this.pauseFailure) return Promise.reject(this.pauseFailure);
     this.time += ms;
     return Promise.resolve();
+  };
+}
+
+/** A late incomplete query after the last complete live observation. */
+class ObservationExpiryClock extends NativeSettlementClock {
+  readonly reason = new Error('controlled private deadline');
+  expiry: FormatterQueryObservationExpiry | undefined;
+  firstReadExpires = false;
+  wrongPid = false;
+  wrongBudget = false;
+  override pause = (_ms: number): Promise<void> => {
+    this.time = 290;
+    return Promise.resolve();
+  };
+  override read = (pid: number, budget: number): Promise<NativeFormatterProcess | undefined> => {
+    this.reads.push([pid, budget]);
+    if (!this.firstReadExpires && this.reads.length === 1) {
+      this.time = 276.982917;
+      return Promise.resolve(native);
+    }
+    this.time = 306.084417;
+    this.expiry = new FormatterQueryObservationExpiry(
+      this.wrongPid ? pid + 1 : pid,
+      this.wrongBudget ? budget + 1 : budget,
+      this.reason
+    );
+    return Promise.reject(this.expiry);
   };
 }
 
@@ -357,6 +384,62 @@ describe('native formatter identity queries', () => {
 });
 
 describe('native formatter settlement', () => {
+  it('retains the last complete live witness after a late incomplete owned query', async () => {
+    const clock = new ObservationExpiryClock();
+    const error = await waitForFormatterSettlement(owned, clock).catch(
+      (failure: unknown) => failure
+    );
+    expect((error as Error).message).toContain('expected live owned processes: 0 within 300ms');
+    const snapshot = JSON.parse(
+      (error as Error).message.split('received last native observation: ')[1] ?? 'null'
+    );
+    expect(snapshot).toEqual({
+      elapsedMs: 276.982917,
+      live: [{ who: owned[0].who, current: native }],
+    });
+    expect(clock.reads).toEqual([
+      [1234, 300],
+      [1234, 10],
+    ]);
+    expect(((error as Error).cause as AggregateError).errors).toEqual([clock.expiry]);
+    expect(clock.expiry?.cause).toBe(clock.reason);
+  });
+
+  it.each(['first', 'PID', 'budget'] as const)(
+    'fails closed for an incomplete query with %s provenance',
+    async (mode) => {
+      const clock = new ObservationExpiryClock();
+      clock.firstReadExpires = true;
+      clock.wrongPid = mode === 'PID';
+      clock.wrongBudget = mode === 'budget';
+      const error = await waitForFormatterSettlement(owned, clock).catch(
+        (failure: unknown) => failure
+      );
+      if (mode === 'first') {
+        expect((error as Error).message).toContain('no in-budget observation');
+        expect(((error as Error).cause as AggregateError).errors).toEqual([clock.expiry]);
+      } else {
+        expect(error).toBeInstanceOf(AggregateError);
+        expect((error as AggregateError).message).toContain('native observation failed');
+        expect((error as AggregateError).errors).toEqual([clock.expiry]);
+      }
+    }
+  );
+
+  it('keeps an incomplete expiry alongside an independent query failure', async () => {
+    const clock = new NativeSettlementClock();
+    const expiry = new FormatterQueryObservationExpiry(1234, 300, new Error('private deadline'));
+    const independent = new Error('independent query refusal');
+    clock.read = (pid) => Promise.reject(pid === 1234 ? expiry : independent);
+    const second = { who: 'second formatter', native: { ...native, pid: 5678 } };
+    const error = await waitForFormatterSettlement([...owned, second], clock).catch(
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).message).toContain('native observation failed');
+    expect((error as AggregateError).errors).toEqual([expiry, independent]);
+  });
+
   it('retains the complete live census when the next owned stat read expires', async () => {
     const clock = new OwnedStatExpirySettlementClock();
     const error = await waitForFormatterSettlement(owned, clock).catch(
