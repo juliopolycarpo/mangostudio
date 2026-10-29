@@ -1,13 +1,24 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 
-type HealthBehavior = 'no-headers' | 'unavailable' | 'streaming-ready';
+type HealthBehavior =
+  | 'no-headers'
+  | 'unavailable'
+  | 'streaming-ready'
+  | 'ready'
+  | 'eventually-ready'
+  | 'delayed-unavailable'
+  | 'delayed-unavailable-then-no-headers'
+  | 'delayed-unavailable-then-late-ready'
+  | 'streaming-json-ready';
 
 /** An owned HTTP endpoint that exposes stalled requests and open response bodies. */
 export class FakeHealthEndpoint {
   private readonly sockets = new Set<Socket>();
+  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly server: ReturnType<typeof createServer>;
   requests = 0;
+  responses = 0;
 
   constructor(private readonly behavior: HealthBehavior) {
     this.server = createServer(this.respond);
@@ -15,15 +26,63 @@ export class FakeHealthEndpoint {
 
   private readonly respond = (_request: IncomingMessage, response: ServerResponse): void => {
     this.requests += 1;
-    if (this.behavior === 'no-headers') return;
-    if (this.behavior === 'unavailable') {
+    response.once('finish', this.trackResponse);
+    if (
+      this.behavior === 'no-headers' ||
+      (this.behavior === 'delayed-unavailable-then-no-headers' && this.requests > 1)
+    )
+      return;
+    if (this.behavior === 'ready' || (this.behavior === 'eventually-ready' && this.requests > 1)) {
+      response.writeHead(200).end('{"status":"ok"}');
+      return;
+    }
+    if (this.behavior === 'delayed-unavailable') {
+      this.respondLater(response, 503, 'still starting', 1_250);
+      return;
+    }
+    if (this.behavior === 'delayed-unavailable-then-no-headers') {
+      this.respondLater(response, 503, 'still starting', 900);
+      return;
+    }
+    if (this.behavior === 'delayed-unavailable-then-late-ready') {
+      const first = this.requests === 1;
+      this.respondLater(
+        response,
+        first ? 503 : 200,
+        first ? 'still starting' : '{"status":"ok"}',
+        first ? 600 : 1_600
+      );
+      return;
+    }
+    if (this.behavior === 'unavailable' || this.behavior === 'eventually-ready') {
       response.writeHead(503).end('still starting');
       return;
     }
     response.writeHead(200);
     response.flushHeaders();
-    response.write('ready response that never ends');
+    response.write(
+      this.behavior === 'streaming-json-ready'
+        ? '{"status":"ok"}'
+        : 'ready response that never ends'
+    );
   };
+
+  private readonly trackResponse = (): void => {
+    this.responses += 1;
+  };
+
+  private respondLater(
+    response: ServerResponse,
+    status: number,
+    body: string,
+    delayMs: number
+  ): void {
+    const timer = setTimeout(() => {
+      this.timers.delete(timer);
+      response.writeHead(status).end(body);
+    }, delayMs);
+    this.timers.add(timer);
+  }
 
   /** Listen on an OS-selected loopback port. @example const url = await endpoint.listen(); */
   async listen(): Promise<string> {
@@ -55,6 +114,8 @@ export class FakeHealthEndpoint {
 
   /** Close only this fixture's connections and listener. @example await endpoint.stop(); */
   async stop(): Promise<void> {
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers.clear();
     for (const socket of this.sockets) socket.destroy();
     await new Promise<void>((resolve, reject) => {
       this.server.close((error) => (error ? reject(error) : resolve()));

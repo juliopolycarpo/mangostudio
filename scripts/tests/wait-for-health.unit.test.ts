@@ -14,7 +14,7 @@ import { stubProcessPlatform } from './support/process-platform';
 
 describe('scripts/lib/wait-for-health', () => {
   describe('budget constants', () => {
-    test('default budget matches scripts/release/wait-for-health.sh default retries × 1s sleep', () => {
+    test('default budget matches scripts/release/wait-for-health.sh nominal total seconds', () => {
       const shellPath = join(import.meta.dir, '../release/wait-for-health.sh');
       const shell = readFileSync(shellPath, 'utf8');
       const retriesMatch = shell.match(/local retries="\$\{HEALTH_RETRIES:-\$\{3:-(\d+)\}\}"/);
@@ -22,6 +22,7 @@ describe('scripts/lib/wait-for-health', () => {
         throw new Error(`Could not parse default retries from ${shellPath}`);
       }
       const defaultRetries = Number(retriesMatch[1]);
+      // Retry sleeps keep their one-second cadence inside the total budget.
       // Anchored: a bare /sleep 1/ would also accept `sleep 10`.
       expect(shell).toMatch(/^\s*sleep 1$/m);
       expect(defaultRetries).toBe(30);
