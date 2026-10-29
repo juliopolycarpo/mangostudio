@@ -487,7 +487,7 @@ try {
     $environment = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
     foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) { $environment.Add($entry.Key, [string]$entry.Value) }
     $closedPipeCode = @'
-namespace Mango.NativeJobProbe {
+namespace Mango.ClosedPipeFixture {
     /// <summary>Launch a suspended fixture with only independent NUL standard handles inherited.</summary>
     /// <example>using(var child = new ClosedPipeChild(bun)) { child.Resume(); }</example>
     public sealed class ClosedPipeChild : IDisposable {
@@ -558,7 +558,10 @@ namespace Mango.NativeJobProbe {
 }
 '@
     $closedPipeAssembly = Join-Path $OutDirectory 'closed-pipe-child.dll'
-    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $closedPipeCode) -OutputAssembly $closedPipeAssembly
+    $namespace = 'namespace Mango.NativeJobProbe {'
+    if (($script:NativeWindowsJobCode.Split([string[]]@($namespace), [StringSplitOptions]::None).Length - 1) -ne 1) { throw 'Invalid helper source namespace; expected exactly one Mango.NativeJobProbe declaration' }
+    $closedPipeHelper = $script:NativeWindowsJobCode.Replace($namespace, 'namespace Mango.ClosedPipeFixture {')
+    Add-Type -TypeDefinition ($closedPipeHelper + "`n" + $closedPipeCode) -OutputAssembly $closedPipeAssembly
     $closedPipeHash = (Get-FileHash -LiteralPath $closedPipeAssembly -Algorithm SHA256).Hash.ToLowerInvariant()
     $receipt.closedPipeAssemblySha256 = $closedPipeHash
     $descendantFixture = Join-Path $OutDirectory 'descendant.ps1'
@@ -578,7 +581,7 @@ if($BirthSignal) {
     if(-not (Test-Path -LiteralPath $BirthSignal)) { throw 'Missing birth signal after selection query' }
 }
 if($PipeMode -eq 'closed') {
-    $startedChild=[Mango.NativeJobProbe.ClosedPipeChild]::new($BunPath)
+    $startedChild=[Mango.ClosedPipeFixture.ClosedPipeChild]::new($BunPath)
     $startedChild.Resume()
     $created=$startedChild.Created; $childId=$startedChild.Pid
     $childEvidence=@{root=@{Pid=$childId;Created=$created;Identity=([string]$childId+':'+$created);CreationFileTime=$startedChild.CreationFileTime};live=$startedChild.Live;pipeMode=$PipeMode;handleListAttested=$true;authority='retained native process handle; exact job query independently proves membership'}
