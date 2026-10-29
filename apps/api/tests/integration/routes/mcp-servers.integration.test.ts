@@ -16,6 +16,7 @@ import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import { mcpServerRoutes } from '../../../src/modules/mcp-servers/http/mcp-server-routes';
 import { closeAllMcpClients } from '../../../src/services/mcp/connection-manager';
+import { startSilentMcpHttpEndpoint } from '../../support/fixtures/mcp/silent-mcp-http-endpoint';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
@@ -349,30 +350,38 @@ describe('mcp server routes', () => {
     });
   });
 
-  it('reports unreachable servers through the probe body and 502 on tools', async () => {
-    const app = authedApp();
-    const created = await app.handle(
-      jsonRequest('/mcp/servers', 'POST', {
-        name: 'Unreachable',
-        slug: 'unreachable',
-        transport: 'http',
-        url: 'http://127.0.0.1:9/',
-      })
-    );
-    const { id } = (await created.json()) as McpServer;
+  it('reports unresponsive servers through the probe body and 502 on tools', async () => {
+    const endpoint = await startSilentMcpHttpEndpoint();
+    try {
+      const app = authedApp();
+      const created = await app.handle(
+        jsonRequest('/mcp/servers', 'POST', {
+          name: 'Unreachable',
+          slug: 'unreachable',
+          transport: 'http',
+          url: endpoint.url,
+          timeoutMs: 250,
+        })
+      );
+      const { id } = (await created.json()) as McpServer;
 
-    const probe = await app.handle(jsonRequest(`/mcp/servers/${id}/test`, 'POST'));
-    const probePayload = (await probe.json()) as TestMcpServerResponse;
+      const probe = await app.handle(jsonRequest(`/mcp/servers/${id}/test`, 'POST'));
+      const probePayload = (await probe.json()) as TestMcpServerResponse;
 
-    expect(probe.status).toBe(200);
-    expect(Value.Check(TestMcpServerResponseSchema, probePayload)).toBe(true);
-    expect(probePayload.ok).toBe(false);
-    expect(probePayload.status).toBe('error');
-    expect(probePayload.error).toBeString();
+      expect(endpoint.requests).toEqual(['POST /']);
+      expect(probe.status).toBe(200);
+      expect(Value.Check(TestMcpServerResponseSchema, probePayload)).toBe(true);
+      expect(probePayload.ok).toBe(false);
+      expect(probePayload.status).toBe('error');
+      expect(probePayload.error).toBeString();
 
-    const tools = await app.handle(jsonRequest(`/mcp/servers/${id}/tools`, 'GET'));
-    expect(tools.status).toBe(502);
-    expect(await tools.json()).toMatchObject({ code: 'PROVIDER_ERROR' });
+      const tools = await app.handle(jsonRequest(`/mcp/servers/${id}/tools`, 'GET'));
+      expect(endpoint.requests).toEqual(['POST /', 'POST /']);
+      expect(tools.status).toBe(502);
+      expect(await tools.json()).toMatchObject({ code: 'PROVIDER_ERROR' });
+    } finally {
+      await endpoint.stop();
+    }
   });
 });
 
