@@ -152,7 +152,20 @@ Returns a named queued full-census fake for final-boundary tests.
 $rows = Get-FakeBoundaryCensus $context
 #>
 function Get-FakeBoundaryCensus([object]$Context) {
-    return ,$Context.censuses.Dequeue()
+    if ($null -eq $Context) { throw 'expected census context' }
+    $next = $Context.censuses.Dequeue()
+    if ($next -eq 'throw-census') { throw 'expected final census failure' }
+    return ,$next
+}
+
+<#
+.SYNOPSIS
+Supplies queued census rows while accepting the final boundary member allowlist.
+.EXAMPLE
+$rows = Get-FakeFinalCensus @() $context
+#>
+function Get-FakeFinalCensus([object[]]$Members, [object]$Context) {
+    return ,(Get-FakeBoundaryCensus $Context)
 }
 
 <#
@@ -162,9 +175,9 @@ Observes the exact status persisted before final containment in a named fake job
 $job = New-FakeBoundaryJob $snapshot $receipt
 #>
 function New-FakeBoundaryJob([object]$Snapshot, [object]$Receipt) {
-    $fake = [pscustomobject]@{ snapshot = $Snapshot; receipt = $Receipt; outcomeAtClose = $null; closed = $false }
+    $fake = [pscustomobject]@{ snapshot = $Snapshot; receipt = $Receipt; receiptPath = $null; persistedAtClose = $null; outcomeAtClose = $null; closed = $false }
     $fake | Add-Member -MemberType ScriptMethod -Name Query -Value { return $this.snapshot }
-    $fake | Add-Member -MemberType ScriptMethod -Name CloseJob -Value { $this.closed = $true; $this.outcomeAtClose = $this.receipt.status }
+    $fake | Add-Member -MemberType ScriptMethod -Name CloseJob -Value { $this.closed = $true; $this.outcomeAtClose = $this.receipt.status; if ($this.receiptPath) { $this.persistedAtClose = Get-Content -Raw $this.receiptPath | ConvertFrom-Json } }
     $fake | Add-Member -MemberType ScriptMethod -Name Dispose -Value { }
     return $fake
 }
@@ -669,6 +682,8 @@ $startedChild.Dispose()
         $liveChild = @($result.finalClose.preClose.Members | Where-Object { $_.Identity -eq $proof.root.Identity -and $_.IsMember -and $_.Alive })
         Assert-NativeProbe ($proof.live -and $proof.pipeMode -eq 'inherited' -and $liveChild.Count -eq 1) 'exact live child inherited the captured handles and remains after parent exit'
         Assert-NativeProbe ($result.exitCode -eq 0 -and $result.rootExitAt -and $result.status -eq 'failed' -and $result.timedOut -and -not $result.stdoutEof -and -not $result.stderrEof -and -not $result.cleanupActions.Count) 'root exit0 with open child pipes remains a timed-out failure'
+        $childCensus = @($result.finalClose.census | Where-Object identity -EQ $liveChild[0].CensusIdentity)
+        Assert-NativeProbe ($childCensus.Count -eq 1 -and $childCensus[0].command -and $childCensus[0].parentPid -eq $result.rootIdentity.Pid) 'final census records the live exact child command and parent PID before containment'
         return @{ receipt = (Join-Path $request.out 'job-receipt.json'); expectedFailure = 'root success but open pipes' }
     }
 
@@ -721,11 +736,29 @@ $startedChild.Dispose()
                 'missing-name' { $bad = [pscustomobject]@{ pid = $PID; identity = "${PID}:$date"; created = $date; name = $null }; $context.censuses.Enqueue(@($bad)); $context.censuses.Enqueue(@($observer)) }
             }
             $fake = New-FakeBoundaryJob $snapshot $state
-            Complete-NativeJobEvidence $state $fake @($observer) $dir ${function:Get-FakeBoundaryCensus} $context
+            Complete-NativeJobEvidence $state $fake @($observer) $dir ${function:Get-FakeFinalCensus} $context
             Assert-NativeProbe ($state.status -eq 'failed' -and $state.errors.Count -gt 0) "$case must invalidate completed settlement"
             if ($case -ne 'new-post-close-helper') { Assert-NativeProbe ($fake.outcomeAtClose -eq 'failed' -and $state.finalClose.outcomeBeforeClose -eq 'failed') "$case failure must be persisted before final containment" }
         }
         return @{ controlledBoundaryFailures = 5; nativeAPIInvocations = 0 }
+    }
+
+    Invoke-NativeProbe 'timeout and census failure persist before close' {
+        $date = '2026-10-09T00:00:00.0000000Z'
+        $observer = [pscustomobject]@{ pid = $PID; name = 'pwsh.exe'; identity = "${PID}:$date"; created = $date }
+        $member = [pscustomobject]@{ Identity = "42:$date"; CensusIdentity = "42:$date"; IsMember = $true; Alive = $true }
+        $snapshot = [pscustomobject]@{ Empty = $false; Stable = $true; Assigned = 1; Returned = 1; ActiveBefore = 1; ActiveAfter = 1; Members = @($member) }
+        $state = [ordered]@{ status = 'failed'; timedOut = $true; errors = @('original timeout'); finalClose = $null; postCloseCensus = @() }
+        $context = [pscustomobject]@{ censuses = [Collections.Generic.Queue[object]]::new() }
+        $context.censuses.Enqueue('throw-census'); $context.censuses.Enqueue(@($observer))
+        $dir = Join-Path $OutDirectory 'boundary-timeout-census'; [IO.Directory]::CreateDirectory($dir) | Out-Null
+        $fake = New-FakeBoundaryJob $snapshot $state
+        $fake.receiptPath = Join-Path $dir 'job-receipt.json'
+        Complete-NativeJobEvidence $state $fake @($observer) $dir ${function:Get-FakeFinalCensus} $context
+        $persisted = Get-Content -Raw (Join-Path $dir 'job-receipt.json') | ConvertFrom-Json
+        Assert-NativeProbe ($state.errors[0] -eq 'original timeout' -and $state.finalClose.censusError -match 'expected final census failure' -and $state.finalClose.queryError -match 'retained 1 members') 'timeout, census diagnostic and live member failure are retained'
+        Assert-NativeProbe ($fake.outcomeAtClose -eq 'failed' -and $fake.persistedAtClose.status -eq 'failed' -and $fake.persistedAtClose.timedOut -and $persisted.status -eq 'failed' -and -not $persisted.finalClose.successfulSettlementEvidence) 'failed timeout receipt precedes close and never claims settlement'
+        return @{ receipt = (Join-Path $dir 'job-receipt.json') }
     }
 
     Invoke-NativeProbe 'atomic proof publication and incomplete JSON cannot publish PID0' {
