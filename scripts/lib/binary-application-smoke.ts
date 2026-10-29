@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 
 import { type Chat, ChatListSchema, ChatSchema } from '@mangostudio/shared/chat';
+import { EnvironmentSchema, RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
 import { ApiErrorResponseSchema } from '@mangostudio/shared/errors';
 import { RealtimeServerMessageSchema } from '@mangostudio/shared/realtime';
 import { RuntimeHealthReportSchema } from '@mangostudio/shared/runtime-home';
@@ -171,14 +172,11 @@ export async function smokeBinaryApplication(options: ApplicationSmokeOptions): 
   };
   await requireStoredChat();
   await options.runtimeProcesses?.baseline();
-  const connected = (await json('/api/environments/local/connect', 'POST')) as {
-    id?: string;
-    status?: {
-      state?: string;
-      runtimeVersion?: string;
-      manifest?: { platform?: string; arch?: string; implementation?: { fingerprint?: string } };
-    };
-  };
+  const connected = assertSmokeSchema(
+    EnvironmentSchema,
+    await json('/api/environments/local/connect', 'POST'),
+    'Local connect'
+  );
   const manifest = connected?.status?.manifest;
   const fingerprint = manifest?.implementation?.fingerprint;
   if (
@@ -194,11 +192,11 @@ export async function smokeBinaryApplication(options: ApplicationSmokeOptions): 
       `Local connect: expected connected local ${process.platform}/${process.arch} v${options.version} with implementation fingerprint | received ${JSON.stringify(connected)}`
     );
   }
-  const runtime = (await json('/api/environments/local/runtime')) as {
-    health?: unknown;
-    stale?: boolean;
-    implementation?: { fingerprint?: string };
-  };
+  const runtime = assertSmokeSchema(
+    RuntimeLifecycleViewSchema,
+    await json('/api/environments/local/runtime'),
+    'Local runtime'
+  );
   const health = assertSmokeSchema(
     RuntimeHealthReportSchema,
     runtime?.health,
@@ -221,9 +219,11 @@ export async function smokeBinaryApplication(options: ApplicationSmokeOptions): 
   await options.runtimeProcesses?.observe();
   // Windows SIGTERM terminates the hub immediately; release its Local child over the API first.
   if ((options.platform ?? process.platform) === 'win32') {
-    const disconnected = (await json('/api/environments/local/disconnect', 'POST')) as {
-      status?: { state?: string };
-    };
+    const disconnected = assertSmokeSchema(
+      EnvironmentSchema,
+      await json('/api/environments/local/disconnect', 'POST'),
+      'Local disconnect'
+    );
     if (disconnected?.status?.state !== 'disconnected')
       throw new Error(
         `Local disconnect: expected disconnected | received ${JSON.stringify(disconnected)}`

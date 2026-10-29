@@ -1,4 +1,6 @@
 import { type Chat, ChatSchema } from '@mangostudio/shared/chat';
+import type { Environment, RuntimeLifecycleView } from '@mangostudio/shared/environments';
+import { RuntimeImplementationFeaturesSchema } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { Create } from 'typebox/value';
 
@@ -13,6 +15,9 @@ export type ApplicationFault =
   | 'bad-list'
   | 'wrong-error'
   | 'lost-database'
+  | 'bad-connect-envelope'
+  | 'bad-runtime-envelope'
+  | 'bad-disconnect-envelope'
   | 'wrong-runtime'
   | 'wrong-home'
   | 'missing-pong'
@@ -117,28 +122,63 @@ export class FakeBinaryApplication {
     if (method === 'GET' && path === '/api/chats/')
       return Response.json(this.fault === 'bad-list' ? {} : this.chat ? [this.chat] : []);
     const fingerprint = 'a'.repeat(64);
+    const implementation = {
+      schema: 1,
+      fingerprint,
+      features: Create(RuntimeImplementationFeaturesSchema),
+    };
+    const local: Environment = {
+      id: 'local',
+      name: 'Local',
+      transportKind: 'in-process',
+      config: {},
+      enabled: true,
+      allowInstalls: false,
+      virtual: true,
+      createdAt: null,
+      updatedAt: null,
+      status: { state: 'disconnected' },
+    };
     if (method === 'POST' && path === '/api/environments/local/connect') {
       if (!this.runtimeBaselineCaptured)
         throw new Error('expected runtime baseline immediately before Local connect');
       this.events.push('connect');
       this.localConnected = true;
-      return Response.json({
-        id: 'local',
+      const connected: Environment = {
+        ...local,
         status: {
           state: 'connected',
           runtimeVersion: '1.2.3',
           manifest: {
+            pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
+            homeDir: this.reportedHome,
+            shells: [],
+            git: { available: false },
+            features: {
+              tools: false,
+              git: false,
+              probing: false,
+              mcp: false,
+              library: false,
+              checkpoints: false,
+            },
             platform: process.platform,
             arch: process.arch,
-            implementation: { fingerprint },
+            implementation,
           },
         },
-      });
+      };
+      return Response.json(
+        this.fault === 'bad-connect-envelope' ? { ...connected, name: 123 } : connected
+      );
     }
-    if (method === 'GET' && path === '/api/environments/local/runtime')
-      return Response.json({
+    if (method === 'GET' && path === '/api/environments/local/runtime') {
+      const runtime: RuntimeLifecycleView = {
         stale: false,
-        implementation: { fingerprint },
+        readAt: 1,
+        slotBytes: null,
+        actions: [],
+        implementation: { ...implementation, methods: [] },
         health: {
           schemaVersion: 1,
           slot: 'host',
@@ -158,11 +198,17 @@ export class FakeBinaryApplication {
             this.fault === 'wrong-runtime' ? '/checkout/runtime' : this.reportedRuntimePath,
           homeDir: this.fault === 'wrong-home' ? '/checkout/home' : this.reportedHome,
         },
-      });
+      };
+      return Response.json(
+        this.fault === 'bad-runtime-envelope' ? { ...runtime, readAt: 'yesterday' } : runtime
+      );
+    }
     if (method === 'POST' && path === '/api/environments/local/disconnect') {
       this.events.push('disconnect');
       this.localConnected = false;
-      return Response.json({ status: { state: 'disconnected' } });
+      return Response.json(
+        this.fault === 'bad-disconnect-envelope' ? { ...local, enabled: 'yes' } : local
+      );
     }
     throw new Error(`unexpected fake API request: ${method} ${path}`);
   }

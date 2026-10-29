@@ -110,6 +110,18 @@ describe('built hub application qualification', () => {
       '"instancePath":"/title"'
     );
   });
+  test.each([
+    ['bad-connect-envelope', 'Local connect', '/name'],
+    ['bad-runtime-envelope', 'Local runtime', '/readAt'],
+    ['bad-disconnect-envelope', 'Local disconnect', '/enabled'],
+  ] as const)('rejects %s outside the canonical response schema', async (fault, label, path) => {
+    const fake = new FakeBinaryApplication(fault);
+    await expect(smokeBinaryApplication({ ...fake.options(), platform: 'win32' })).rejects.toThrow(
+      new RegExp(`${label}: expected canonical schema.*"instancePath":"${path}"`)
+    );
+    expect(fake.socket.isClosed).toBe(true);
+    expect(fake.restarted).toBe(false);
+  });
   const cases: [ApplicationFault, string][] = [
     ['bad-title', 'created chat: expected canonical schema'],
     ['bad-list', 'chat list: expected canonical schema'],
