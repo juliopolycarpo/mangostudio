@@ -186,7 +186,7 @@ jobs:
       # the release checksum from its own manifest. nextest runs each test in
       # its own process and does not run doctests, which stay on `cargo test
       # --doc` below.
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-nextest@0.9.144
         if: ${{ !cancelled() }}
@@ -278,7 +278,7 @@ jobs:
 
       # Pinned like the workspace job's install: the exact version through the
       # SHA-pinned action, which verifies the release checksum.
-      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-nextest@0.9.144
         if: ${{ !cancelled() }}
