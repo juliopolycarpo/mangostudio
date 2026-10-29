@@ -40,8 +40,13 @@ class PendingRuntimeOpener {
   };
 }
 
-/** Exercises the failure preload in its own process, preserving the parent test's prototype. */
-async function runPendingShutdown(): Promise<void> {
+/**
+ * Exercises the failure preload in its own process, preserving the parent test's prototype.
+ *
+ * @example
+ * await runPendingShutdown();
+ */
+export async function runPendingShutdown(): Promise<void> {
   if (process.env.MANGO_SHUTDOWN_TRACE === '1')
     process.stderr.write(`fixture-started ${Math.round(performance.now())}ms\n`);
   const opener = new PendingRuntimeOpener();
