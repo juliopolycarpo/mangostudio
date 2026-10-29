@@ -6,7 +6,7 @@ import {
   scopeNativeProcesses,
   snapshotNativeProcesses,
 } from './native-bun-qualification-process';
-import { ChildSupervisor, processHost } from './process-tree';
+import { ChildSupervisor, processHost, type SupervisorHost } from './process-tree';
 
 export interface SmokeHubChild {
   readonly pid: number;
@@ -26,6 +26,7 @@ export interface SmokeHubOptions {
   readonly groupAlive?: (pid: number) => boolean;
   readonly signalProcess?: (pid: number, signal: NodeJS.Signals) => void;
   readonly signalGroup?: (pid: number, signal: NodeJS.Signals) => void;
+  readonly supervisorHost?: SupervisorHost;
 }
 
 /**
@@ -35,21 +36,26 @@ export interface SmokeHubOptions {
  */
 export class SmokeHub {
   private child: SmokeHubChild | undefined;
+  private childExited = false;
   private stderr: ReturnType<typeof pumpStream> | undefined;
   private owned: NativeProcess[] = [];
   private rootIdentity: string | null = null;
+  private runtimeBaseline: Set<string> | undefined;
+  private runtimeAnchor: NativeProcess | undefined;
+  private runtimeOwned: NativeProcess[] = [];
   private release: (() => void) | undefined;
-  private readonly supervisor = new ChildSupervisor(processHost());
+  private readonly supervisor: ChildSupervisor;
   private readonly platform: NodeJS.Platform;
   private readonly snapshot: () => Promise<NativeProcess[]>;
   constructor(private readonly options: SmokeHubOptions) {
+    this.supervisor = new ChildSupervisor(options.supervisorHost ?? processHost());
     this.platform = options.platform ?? process.platform;
     this.snapshot =
       options.snapshot ??
       (this.platform === 'linux'
         ? () =>
             readLinuxSmokeProcesses([
-              ...(this.child && (this.child.exitCode === null || this.rootIdentity)
+              ...(this.child && (!this.childExited || this.rootIdentity)
                 ? [
                     {
                       pid: this.child.pid,
@@ -70,8 +76,16 @@ export class SmokeHub {
     if (this.child) throw new Error('hub start: expected previous child settled before restart');
     this.owned = [];
     this.rootIdentity = null;
+    this.runtimeBaseline = undefined;
+    this.runtimeAnchor = undefined;
+    this.runtimeOwned = [];
+    this.childExited = false;
     const child = this.options.spawn();
     this.child = child;
+    // A signalled Windows child resolves exited with 143 while exitCode stays null.
+    void child.exited.then(() => {
+      if (this.child === child) this.childExited = true;
+    });
     this.stderr = pumpStream(child.stderr);
     this.release = this.supervisor.adopt({
       label: 'artifact hub',
@@ -87,7 +101,7 @@ export class SmokeHub {
     if (!this.child) return [];
     const scoped = scopeNativeProcesses(await this.snapshot(), {
       rootPid: this.child.pid,
-      rootAlive: this.child.exitCode === null,
+      rootAlive: !this.childExited,
       rootIdentity: this.rootIdentity,
       observed: this.owned,
     });
@@ -95,25 +109,68 @@ export class SmokeHub {
     this.owned = scoped.observed;
     return scoped.current;
   }
-  /** Record the runtime's identity before disconnect/shutdown can reparent it. @example await hub.observeRuntime(); */
-  async observeRuntime(): Promise<void> {
-    const current = await this.census();
-    if (!current.some((row) => row.pid !== this.child?.pid))
-      throw new Error('Local runtime: expected an owned runtime child process');
+  /**
+   * Capture existing hub descendants immediately before an authenticated Local connection.
+   * They remain owned for shutdown, but belong to other hub lifetimes such as library warm-up.
+   * @example await hub.captureRuntimeBaseline(); await connectLocal(); await hub.observeRuntime();
+   */
+  async captureRuntimeBaseline(): Promise<void> {
+    if (!this.child || this.childExited)
+      throw new Error('Local runtime: expected a running hub before connection baseline');
+    await this.census();
+    this.runtimeBaseline = new Set(this.owned.map((row) => row.identity));
+    this.runtimeAnchor = undefined;
+    this.runtimeOwned = [];
   }
-  /** Await only recorded descendants, never unrelated processes. @example await hub.waitForRuntimeExit(); */
-  async waitForRuntimeExit(): Promise<void> {
-    const expected = new Set(
-      this.owned.filter((row) => row.pid !== this.child?.pid).map((row) => row.identity)
+  /**
+   * Record new connection roots and their descendants using process creation identities.
+   * Children of a baseline runtime cannot stand in for the authenticated user's runtime.
+   * @example await connectLocal(); await hub.observeRuntime();
+   */
+  async observeRuntime(): Promise<void> {
+    if (!this.runtimeBaseline)
+      throw new Error('Local runtime: expected connection baseline before observing runtime');
+    const current = await this.census();
+    const roots = current.filter(
+      (row) => row.parentPid === this.child?.pid && !this.runtimeBaseline?.has(row.identity)
     );
+    if (!roots.length)
+      throw new Error(
+        `Local runtime: expected a new owned connection child process | received ${JSON.stringify(current)}`
+      );
+    this.runtimeAnchor = roots[0];
+    this.runtimeOwned = roots;
+    this.runtimeCensus(current);
+  }
+  private runtimeCensus(current: NativeProcess[]): NativeProcess[] {
+    const anchor = this.runtimeAnchor;
+    if (!anchor) return [];
+    const scoped = scopeNativeProcesses(current, {
+      rootPid: anchor.pid,
+      rootAlive: current.some((row) => row.identity === anchor.identity),
+      rootIdentity: anchor.identity,
+      observed: this.runtimeOwned,
+    });
+    this.runtimeOwned = scoped.observed;
+    return scoped.current;
+  }
+  /**
+   * Await the recorded connection cohort, retaining baseline descendants for final hub shutdown.
+   * @example await disconnectLocal(); await hub.waitForRuntimeExit();
+   */
+  async waitForRuntimeExit(): Promise<void> {
+    if (!this.runtimeAnchor)
+      throw new Error('Local runtime: expected an observed connection cohort before exit wait');
     const budgetMs = this.options.budgetMs ?? 30_000;
     const deadline = performance.now() + budgetMs;
+    let remaining: NativeProcess[];
     do {
-      if (!(await this.snapshot()).some((row) => expected.has(row.identity))) return;
+      remaining = this.runtimeCensus(await this.census());
+      if (!remaining.length) return;
       await Bun.sleep(10);
     } while (performance.now() < deadline);
     throw new Error(
-      `Local runtime: expected disconnected child processes to exit within ${budgetMs}ms`
+      `Local runtime: expected disconnected child processes to exit within ${budgetMs}ms | received ${JSON.stringify(remaining)}`
     );
   }
   private async signal(signal: 'SIGTERM' | 'SIGKILL'): Promise<void> {
@@ -126,14 +183,14 @@ export class SmokeHub {
     } catch (error) {
       censusError = error instanceof Error ? error : new Error(String(error));
     }
-    const ownsGroup = child.exitCode === null || current.some((row) => row.group === child.pid);
+    const ownsGroup = !this.childExited || current.some((row) => row.group === child.pid);
     if (this.platform !== 'win32' && ownsGroup) {
       try {
         (this.options.signalGroup ?? process.kill)(-child.pid, signal);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
       }
-    } else if (child.exitCode === null) child.kill(signal);
+    } else if (!this.childExited) child.kill(signal);
     if (censusError) throw censusError;
     // A forced cleanup also reaches previously observed descendants that left the hub's group.
     if (signal === 'SIGKILL')
@@ -151,11 +208,14 @@ export class SmokeHub {
     const group =
       this.child &&
       this.platform !== 'win32' &&
-      (this.child.exitCode === null || current.some((row) => row.group === this.child?.pid)) &&
+      (!this.childExited || current.some((row) => row.group === this.child?.pid)) &&
       (this.options.groupAlive ?? processHost().groupAlive)(this.child.pid);
     return observed || Boolean(group);
   }
-  /** Stop, await exit and drain stderr before releasing ownership. @example await hub.stop(); */
+  /**
+   * Settle owned processes and release their signal lease, then drain stderr before restart.
+   * @example await hub.stop();
+   */
   async stop(): Promise<void> {
     const child = this.child;
     if (!child) return;
@@ -176,14 +236,15 @@ export class SmokeHub {
         }
       );
     } finally {
-      if (child.exitCode !== null && !(await this.alive())) {
+      if (this.childExited && !(await this.alive())) {
         this.release?.();
-        this.child = undefined;
+        this.release = undefined;
         await awaitSmokeCompletion(
           this.stderr?.done ?? Promise.resolve(),
           this.options.budgetMs ?? 30_000,
           'process stderr drain'
         );
+        this.child = undefined;
       }
     }
   }

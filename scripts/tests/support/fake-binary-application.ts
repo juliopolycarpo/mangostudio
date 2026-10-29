@@ -73,6 +73,8 @@ export class FakeBinaryApplication {
   reportedHome = '/isolated/home';
   readonly pathAliases = new Map<string, string>();
   readonly canonicalPath = (path: string): string => this.pathAliases.get(path) ?? path;
+  private runtimeBaselineCaptured = false;
+  private localConnected = false;
   constructor(readonly fault: ApplicationFault = 'none') {
     this.socket = new FakeApplicationSocket(fault);
   }
@@ -115,7 +117,11 @@ export class FakeBinaryApplication {
     if (method === 'GET' && path === '/api/chats/')
       return Response.json(this.fault === 'bad-list' ? {} : this.chat ? [this.chat] : []);
     const fingerprint = 'a'.repeat(64);
-    if (method === 'POST' && path === '/api/environments/local/connect')
+    if (method === 'POST' && path === '/api/environments/local/connect') {
+      if (!this.runtimeBaselineCaptured)
+        throw new Error('expected runtime baseline immediately before Local connect');
+      this.events.push('connect');
+      this.localConnected = true;
       return Response.json({
         id: 'local',
         status: {
@@ -128,6 +134,7 @@ export class FakeBinaryApplication {
           },
         },
       });
+    }
     if (method === 'GET' && path === '/api/environments/local/runtime')
       return Response.json({
         stale: false,
@@ -154,6 +161,7 @@ export class FakeBinaryApplication {
       });
     if (method === 'POST' && path === '/api/environments/local/disconnect') {
       this.events.push('disconnect');
+      this.localConnected = false;
       return Response.json({ status: { state: 'disconnected' } });
     }
     throw new Error(`unexpected fake API request: ${method} ${path}`);
@@ -180,11 +188,18 @@ export class FakeBinaryApplication {
       canonicalPath: this.canonicalPath,
       platform: 'linux',
       runtimeProcesses: {
+        baseline: () => {
+          this.events.push('baseline');
+          this.runtimeBaselineCaptured = true;
+          return Promise.resolve();
+        },
         observe: () => {
+          if (!this.localConnected) throw new Error('expected connected Local before observation');
           this.events.push('observe');
           return Promise.resolve();
         },
         waitForExit: () => {
+          if (this.localConnected) throw new Error('expected Local disconnect before exit wait');
           this.events.push('runtime-exited');
           return Promise.resolve();
         },

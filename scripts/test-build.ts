@@ -912,6 +912,7 @@ async function smokeTest(): Promise<void> {
           await runningHub.start();
         },
         runtimeProcesses: {
+          baseline: () => runningHub.captureRuntimeBaseline(),
           observe: () => runningHub.observeRuntime(),
           waitForExit: () => runningHub.waitForRuntimeExit(),
         },

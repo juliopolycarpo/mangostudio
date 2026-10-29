@@ -22,7 +22,11 @@ export interface ApplicationSmokeOptions {
   readonly budgetMs?: number;
   readonly canonicalPath?: (path: string) => string;
   readonly platform?: NodeJS.Platform;
-  readonly runtimeProcesses?: { observe(): Promise<void>; waitForExit(): Promise<void> };
+  readonly runtimeProcesses?: {
+    baseline(): Promise<void>;
+    observe(): Promise<void>;
+    waitForExit(): Promise<void>;
+  };
 }
 
 /** Minimal event transport, injectable without opening a real connection in unit tests. */
@@ -166,6 +170,7 @@ export async function smokeBinaryApplication(options: ApplicationSmokeOptions): 
     }
   };
   await requireStoredChat();
+  await options.runtimeProcesses?.baseline();
   const connected = (await json('/api/environments/local/connect', 'POST')) as {
     id?: string;
     status?: {

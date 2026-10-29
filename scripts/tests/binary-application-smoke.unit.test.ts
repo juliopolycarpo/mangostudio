@@ -33,7 +33,14 @@ describe('built hub application qualification', () => {
   test('Windows disconnects Local and awaits its exit before terminating the hub', async () => {
     const fake = new FakeBinaryApplication();
     await smokeBinaryApplication({ ...fake.options(), platform: 'win32' });
-    expect(fake.events).toEqual(['observe', 'disconnect', 'runtime-exited', 'restart']);
+    expect(fake.events).toEqual([
+      'baseline',
+      'connect',
+      'observe',
+      'disconnect',
+      'runtime-exited',
+      'restart',
+    ]);
   });
   test('compares both runtime and home through the injected canonical resolver', async () => {
     const fake = new FakeBinaryApplication();
