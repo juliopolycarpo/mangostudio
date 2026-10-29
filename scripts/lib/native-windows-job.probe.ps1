@@ -11,7 +11,7 @@ $OutDirectory = [IO.Path]::GetFullPath($OutDirectory)
 [IO.Directory]::CreateDirectory($OutDirectory) | Out-Null
 $results = [Collections.Generic.List[object]]::new()
 $receiptPath = Join-Path $OutDirectory 'probe-receipt.json'
-$receipt = [ordered]@{ status = 'running'; startedAt = [DateTime]::UtcNow.ToString('o'); powerShellVersion = $PSVersionTable.PSVersion.ToString(); helperSha256 = $null; tests = $results; errors = @() }
+$receipt = [ordered]@{ status = 'running'; startedAt = [DateTime]::UtcNow.ToString('o'); powerShellVersion = $PSVersionTable.PSVersion.ToString(); helperSha256 = $null; closedPipeAssemblySha256 = $null; tests = $results; errors = @() }
 [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
 
 <#
@@ -473,57 +473,118 @@ try {
     Initialize-NativeWindowsJob
     $environment = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
     foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) { $environment.Add($entry.Key, [string]$entry.Value) }
+    $closedPipeCode = @'
+namespace Mango.NativeJobProbe {
+    /// <summary>Launch a suspended fixture with only independent NUL standard handles inherited.</summary>
+    /// <example>using(var child = new ClosedPipeChild(bun)) { child.Resume(); }</example>
+    public sealed class ClosedPipeChild : IDisposable {
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode, SetLastError=true)]
+        private static extern System.IntPtr CreateFileW(string name,uint access,uint share,ref Win32.Security security,uint creation,uint flags,System.IntPtr template);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true)] private static extern uint GetFileType(System.IntPtr handle);
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true)] private static extern System.IntPtr GetCurrentProcess();
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError=true)] [return:System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        private static extern bool DuplicateHandle(System.IntPtr source,System.IntPtr handle,System.IntPtr target,out System.IntPtr copy,uint access,bool inherit,uint options);
+        [System.Runtime.InteropServices.DllImport("kernelbase.dll", SetLastError=true)] [return:System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        private static extern bool CompareObjectHandles(System.IntPtr first,System.IntPtr second);
+        private System.IntPtr process, thread;
+        public uint Pid { get; private set; }
+        public string Created { get; private set; }
+        public string CreationFileTime { get; private set; }
+        public bool Live { get { return Win32.WaitForSingleObject(process,0)==Win32.WaitTimeout; } }
+        /// <summary>Create and attest the child before it can execute.</summary>
+        /// <example>var child = new ClosedPipeChild(bun);</example>
+        public ClosedPipeChild(string bun) {
+            System.IntPtr[] handles=new System.IntPtr[3]; System.IntPtr list=System.IntPtr.Zero, values=System.IntPtr.Zero;
+            bool initialized=false, published=false;
+            try {
+                var security=new Win32.Security { Length=System.Runtime.InteropServices.Marshal.SizeOf(typeof(Win32.Security)), Inherit=1 };
+                for(int i=0;i<3;i++) {
+                    handles[i]=CreateFileW("NUL", i==0?0x80000000u:0x40000000u, 3, ref security, 3, 0, System.IntPtr.Zero);
+                    if(handles[i]==new System.IntPtr(-1)) { handles[i]=System.IntPtr.Zero; throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error(),"CreateFileW NUL"); }
+                    uint flags; Win32.Check(Win32.GetHandleInformation(handles[i],out flags) && (flags&1)!=0 && GetFileType(handles[i])==2,"inheritable NUL handle");
+                    for(int j=0;j<i;j++) if(CompareObjectHandles(handles[i],handles[j])) throw new System.InvalidOperationException("NUL handles must be independent");
+                }
+                System.UIntPtr size=System.UIntPtr.Zero; Win32.InitializeProcThreadAttributeList(System.IntPtr.Zero,1,0,ref size);
+                list=System.Runtime.InteropServices.Marshal.AllocHGlobal(checked((int)size.ToUInt64()));
+                Win32.Check(Win32.InitializeProcThreadAttributeList(list,1,0,ref size),"initialize handle list"); initialized=true;
+                values=System.Runtime.InteropServices.Marshal.AllocHGlobal(3*System.IntPtr.Size);
+                System.Runtime.InteropServices.Marshal.Copy(handles,0,values,3);
+                Win32.Check(Win32.UpdateProcThreadAttribute(list,0,new System.UIntPtr(0x20002),values,new System.UIntPtr((uint)(3*System.IntPtr.Size)),System.IntPtr.Zero,System.IntPtr.Zero),"set exact handle list");
+                var startup=new Win32.StartupEx(); startup.Startup.Size=(uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(Win32.StartupEx));
+                startup.Startup.Flags=0x100; startup.Startup.Stdin=handles[0]; startup.Startup.Stdout=handles[1]; startup.Startup.Stderr=handles[2]; startup.Attributes=list;
+                Win32.ProcessInfo info;
+                Win32.Check(Win32.CreateProcessW(bun,new System.Text.StringBuilder(JobProcess.CommandLine(new[]{"bun","-e","await Bun.sleep(60000)"})),System.IntPtr.Zero,System.IntPtr.Zero,true,0x80004,System.IntPtr.Zero,null,ref startup,out info),"create suspended child");
+                process=info.Process; thread=info.Thread; Pid=info.Pid;
+                for(int i=0;i<3;i++) {
+                    System.IntPtr copy=System.IntPtr.Zero;
+                    try { Win32.Check(DuplicateHandle(process,handles[i],GetCurrentProcess(),out copy,0,false,2),"duplicate child standard handle");
+                        if(GetFileType(copy)!=2 || !CompareObjectHandles(copy,handles[i])) throw new System.InvalidOperationException("Child standard handle must match independent NUL handle "+i);
+                    } finally { Win32.Close(ref copy); }
+                }
+                long creation,exit,kernel,user; Win32.Check(Win32.GetProcessTimes(process,out creation,out exit,out kernel,out user),"child birth identity");
+                Created=System.DateTime.FromFileTimeUtc(creation).ToString("o",System.Globalization.CultureInfo.InvariantCulture);
+                CreationFileTime=creation.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if(!Live) throw new System.InvalidOperationException("Suspended child must be live");
+                published=true;
+            } finally {
+                if(!published && process!=System.IntPtr.Zero) { Win32.TerminateProcess(process,1); Win32.WaitForSingleObject(process,5000); }
+                if(!published) { Win32.Close(ref thread); Win32.Close(ref process); }
+                if(initialized) Win32.DeleteProcThreadAttributeList(list);
+                if(list!=System.IntPtr.Zero) System.Runtime.InteropServices.Marshal.FreeHGlobal(list);
+                if(values!=System.IntPtr.Zero) System.Runtime.InteropServices.Marshal.FreeHGlobal(values);
+                for(int i=0;i<handles.Length;i++) Win32.Close(ref handles[i]);
+            }
+        }
+        /// <summary>Resume the already attested child.</summary>
+        /// <example>child.Resume();</example>
+        public void Resume() { if(Win32.ResumeThread(thread)==0xffffffff) throw new System.ComponentModel.Win32Exception(System.Runtime.InteropServices.Marshal.GetLastWin32Error(),"resume child"); }
+        /// <summary>Release retained handles without terminating the child.</summary>
+        /// <example>child.Dispose();</example>
+        public void Dispose() { Win32.Close(ref thread); Win32.Close(ref process); }
+    }
+}
+'@
+    $closedPipeAssembly = Join-Path $OutDirectory 'closed-pipe-child.dll'
+    Add-Type -TypeDefinition ($script:NativeWindowsJobCode + "`n" + $closedPipeCode) -OutputAssembly $closedPipeAssembly
+    $closedPipeHash = (Get-FileHash -LiteralPath $closedPipeAssembly -Algorithm SHA256).Hash.ToLowerInvariant()
+    $receipt.closedPipeAssemblySha256 = $closedPipeHash
     $descendantFixture = Join-Path $OutDirectory 'descendant.ps1'
     $descendantProgram = @'
 param($BunPath, $NativeHelper, $PipeMode = 'closed', $ChildProof, $BirthSignal, $BirthProof)
 $ErrorActionPreference = 'Stop'
 . $NativeHelper
 if($PipeMode -eq 'closed') {
-    # Redirecting a child alone does not exclude other inheritable parent handles.
-    # Clear only this fixture root's captured writer inheritance before direct child creation.
-    Add-Type -TypeDefinition @"
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-public static class NativeDescendantPipeFixture {
-    [DllImport("kernel32.dll",SetLastError=true)] private static extern IntPtr GetStdHandle(uint id);
-    [DllImport("kernel32.dll",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] private static extern bool SetHandleInformation(IntPtr handle,uint mask,uint flags);
-    [DllImport("kernel32.dll",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] private static extern bool GetHandleInformation(IntPtr handle,out uint flags);
-    /// <summary>Make only this fixture process's captured standard writers noninheritable without closing them.</summary>
-    /// <example>NativeDescendantPipeFixture.ClearParentWriterInheritance();</example>
-    public static void ClearParentWriterInheritance() {
-        foreach(int id in new[]{-11,-12}) {
-            IntPtr handle=GetStdHandle(unchecked((uint)id)); uint flags;
-            if(handle==IntPtr.Zero || handle==new IntPtr(-1) || !SetHandleInformation(handle,1,0) || !GetHandleInformation(handle,out flags)) throw new Win32Exception(Marshal.GetLastWin32Error(),"Invalid fixture standard writer "+id+"; expected valid handle and cleared inheritance");
-            if((flags&1)!=0) throw new InvalidOperationException("Fixture writer "+id+" retained inheritance; expected zero");
-        }
-    }
-}
-"@
-    [NativeDescendantPipeFixture]::ClearParentWriterInheritance()
+    $assembly = Join-Path $PSScriptRoot 'closed-pipe-child.dll'
+    $hash = (Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($hash -ne '__CLOSED_PIPE_SHA256__') { throw "Invalid closed-pipe assembly hash $hash; expected __CLOSED_PIPE_SHA256__" }
+    Add-Type -Path $assembly
 }
 if($BirthSignal) {
     $timer=[Diagnostics.Stopwatch]::StartNew()
     while(-not (Test-Path -LiteralPath $BirthSignal) -and $timer.ElapsedMilliseconds -lt 5000) { Start-Sleep -Milliseconds 10 }
     if(-not (Test-Path -LiteralPath $BirthSignal)) { throw 'Missing birth signal after selection query' }
 }
-$start=[Diagnostics.ProcessStartInfo]::new($BunPath, '-e "await Bun.sleep(60000)"')
-$start.UseShellExecute=$false
-$start.RedirectStandardInput=$true
-if($PipeMode -eq 'closed') { $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true }
-$startedChild=[Diagnostics.Process]::Start($start)
-$startedChild.StandardInput.Close()
-$created=$startedChild.StartTime.ToUniversalTime()
-$childEvidence=@{root=@{Pid=$startedChild.Id;Created=$created.ToString('o',[Globalization.CultureInfo]::InvariantCulture);Identity=([string]$startedChild.Id+':'+$created.ToString('o',[Globalization.CultureInfo]::InvariantCulture));CreationFileTime=$created.ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture)};live=(-not $startedChild.HasExited);pipeMode=$PipeMode;authority='retained .NET Process.Start object; exact job query independently proves membership'}
+if($PipeMode -eq 'closed') {
+    $startedChild=[Mango.NativeJobProbe.ClosedPipeChild]::new($BunPath)
+    $startedChild.Resume()
+    $created=$startedChild.Created; $childId=$startedChild.Pid
+    $childEvidence=@{root=@{Pid=$childId;Created=$created;Identity=([string]$childId+':'+$created);CreationFileTime=$startedChild.CreationFileTime};live=$startedChild.Live;pipeMode=$PipeMode;handleListAttested=$true;authority='retained native process handle; exact job query independently proves membership'}
+} else {
+    $start=[Diagnostics.ProcessStartInfo]::new($BunPath, '-e "await Bun.sleep(60000)"')
+    $start.UseShellExecute=$false; $start.RedirectStandardInput=$true
+    $startedChild=[Diagnostics.Process]::Start($start); $startedChild.StandardInput.Close()
+    $created=$startedChild.StartTime.ToUniversalTime(); $childId=$startedChild.Id
+    $childEvidence=@{root=@{Pid=$childId;Created=$created.ToString('o',[Globalization.CultureInfo]::InvariantCulture);Identity=([string]$childId+':'+$created.ToString('o',[Globalization.CultureInfo]::InvariantCulture));CreationFileTime=$created.ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture)};live=(-not $startedChild.HasExited);pipeMode=$PipeMode;authority='retained .NET Process.Start object; exact job query independently proves membership'}
+}
 if(-not $childEvidence.live) { throw 'Descendant exited before live creation proof' }
 if($ChildProof) { Write-NativeJobJson $ChildProof $childEvidence }
 if($BirthProof) { Write-NativeJobJson $BirthProof $childEvidence; Start-Sleep -Seconds 60 }
-[Console]::WriteLine((ConvertTo-Json -InputObject @{pid=$startedChild.Id} -Compress))
+[Console]::WriteLine((ConvertTo-Json -InputObject @{pid=$childId} -Compress))
 # Keep both objects live long enough for the independent exact-job query; the probe asserts that overlap.
 Start-Sleep -Seconds 1
-if($PipeMode -eq 'closed') { $startedChild.StandardOutput.Close(); $startedChild.StandardError.Close() }
 $startedChild.Dispose()
 '@
+    $descendantProgram = $descendantProgram.Replace('__CLOSED_PIPE_SHA256__', $closedPipeHash)
     [IO.File]::WriteAllText($descendantFixture, $descendantProgram, [Text.UTF8Encoding]::new($false))
 
     Invoke-NativeProbe 'UTF8 request decoding preserves Unicode with optional BOM and rejects malformed bytes' {
@@ -592,7 +653,7 @@ $startedChild.Dispose()
         $proof = Read-NativeProbeRootProof $childProof 100
         $childPid = $proof.root.Pid
         $overlap = @([IO.File]::ReadAllLines((Join-Path $request.out 'job-members.jsonl')) | ForEach-Object { ConvertFrom-Json -InputObject $_ } | Where-Object { $rootPresent = @($_.Members | Where-Object Identity -EQ $result.rootIdentity.Identity).Count; $childPresent = @($_.Members | Where-Object { $_.Identity -eq $proof.root.Identity -and $_.IsMember -and $_.Alive }).Count; $rootPresent -and $childPresent })
-        Assert-NativeProbe ($proof.live -and $overlap.Count) 'live child process-object identity and exact kernel membership are recorded before parent exit'
+        Assert-NativeProbe ($proof.live -and $proof.handleListAttested -and $overlap.Count) 'live child process-object identity and exact kernel membership are recorded before parent exit'
         Assert-NativeProbe ($result.exitCode -eq 0 -and $result.stdoutEof -and $result.stderrEof -and $result.status -eq 'failed') 'closed-pipe root success does not hide surviving grandchild'
         Assert-NativeProbe (@($result.preCleanup.Members | Where-Object Pid -EQ $childPid).Count -eq 1 -and -not $result.preCleanup.Empty) 'current kernel job membership includes the orphan after its parent is gone'
         Assert-NativeProbe ($result.finalClose.outcomeBeforeClose -eq 'failed' -and -not $result.cleanupActions.Count) 'strict settlement failure persisted before scoped failure containment'
