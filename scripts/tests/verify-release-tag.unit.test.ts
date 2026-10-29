@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -258,7 +258,7 @@ describe('release signature gates', () => {
       ['protocol-release.yml', 'verify'],
     ] as const) {
       const block = extractJobBlock(readText(`.github/workflows/${file}`), job);
-      expect(block).toContain('git archive refs/remotes/origin/main');
+      expect(block).toContain('refs/remotes/origin/main');
       // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
       expect(block).toContain('bun-version-file: ${{ runner.temp }}/release-trust/.bun-version');
       const verification = block.indexOf('bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/');
@@ -268,6 +268,49 @@ describe('release signature gates', () => {
           file === 'release.yml' ? 'uses: ./.github/actions/setup-mango' : 'bun install'
         )
       );
+    }
+  });
+
+  test('loads both protected-main archives when a streamed producer reports SIGPIPE', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'release-archive-producer-'));
+    const realGit = Bun.spawnSync(['bash', '-c', 'command -v git']).stdout.toString().trim();
+    const realPath = Bun.spawnSync(['bash', '-c', 'printf %s "$PATH"']).stdout.toString();
+    try {
+      const fakeGit = join(fixture, 'git');
+      await writeFile(
+        fakeGit,
+        '#!/usr/bin/env bash\nif [[ "$1" = archive && "$2" != --output=* ]]; then\n  PATH="$REAL_PATH" "$REAL_GIT" "$@" || exit $?\n  exit 141\nfi\nPATH="$REAL_PATH" exec "$REAL_GIT" "$@"\n'
+      );
+      await chmod(fakeGit, 0o755);
+      for (const [file, job] of [
+        ['release.yml', 'prepare'],
+        ['protocol-release.yml', 'verify'],
+      ] as const) {
+        const block = extractJobBlock(readText(`.github/workflows/${file}`), job);
+        const load = extractStepBlocks(block).find((step) =>
+          step.includes('name: Load the release verifier')
+        );
+        expect(load).toBeDefined();
+        const script = runScriptLines(load ?? '')
+          .map(({ text }) => text.trimStart())
+          .join('\n');
+        const result = Bun.spawnSync(['bash', '-euo', 'pipefail', '-c', script], {
+          cwd: directory,
+          env: {
+            ...process.env,
+            PATH: `${fixture}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
+            REAL_GIT: realGit,
+            REAL_PATH: realPath,
+            RUNNER_TEMP: fixture.replaceAll('\\', '/'),
+          },
+        });
+        expect(result.exitCode, `${file}: ${result.stderr.toString()}`).toBe(0);
+        expect(
+          await readFile(join(fixture, 'release-trust/.github/release-allowed-signers'), 'utf8')
+        ).toBe(await readFile(signers, 'utf8'));
+      }
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
     }
   });
 
