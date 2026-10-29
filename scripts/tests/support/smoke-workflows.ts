@@ -250,7 +250,11 @@ function assertionsForCase(
 }
 
 function assertionId(command: string, env: Record<string, string>): string | undefined {
-  if (command.includes('scripts/test-build.ts')) return `binary/${env.PLATFORM}`;
+  if (
+    env.PLATFORM &&
+    (command.includes('scripts/test-build.ts') || command.includes('.mango/smoke/test-build.mjs'))
+  )
+    return `binary/${env.PLATFORM}`;
   if (command.includes('scripts/release/smoke-docker-image.sh')) {
     return `docker/${env.VARIANT}/${env.DOCKER_ARCH}`;
   }

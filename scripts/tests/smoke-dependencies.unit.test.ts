@@ -5,7 +5,7 @@ import { walkRuntimeImports } from './support/runtime-imports';
 import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 const KNOWN_SMOKE_ENTRYPOINTS = [
-  'scripts/test-build.ts',
+  'scripts/release/bundle-binary-smoke.ts',
   'scripts/release/extract-distribution.ts',
   'scripts/release/extract-target.ts',
   'scripts/release/distribution-manifest.ts',
@@ -78,6 +78,38 @@ describe('smoke matrix runtime dependencies', () => {
       [...files].some((file) => file.replaceAll('\\', '/').endsWith('scripts/lib/process-tree.ts'))
     ).toBe(true);
     expect([...externalSpecifiers.keys()]).toEqual([]);
+  });
+
+  test('default binary smoke executes the prepared bundle with auto-install disabled', () => {
+    const workflow = readText('.github/workflows/smoke-binary.yml');
+    expect(workflow).toContain('run: bun --no-install .mango/smoke/test-build.mjs');
+    expect(workflow).not.toContain('run: bun --no-install run scripts/test-build.ts');
+    const download = extractStepBlocks(extractJobBlock(workflow, 'binary')).find((step) =>
+      step.includes('name: Download bundled binary smoke harness')
+    );
+    expect(download).toContain('if: $' + '{{ !inputs.rebuild }}');
+    expect(download).toContain('name: hub-inputs-$' + '{{ inputs.source_sha }}');
+  });
+
+  test('Alpine artifact consumers execute the full bundled smoke on their matching musl host', () => {
+    const workflow = readText('.github/workflows/smoke-binary.yml');
+    const alpine = extractStepBlocks(extractJobBlock(workflow, 'binary')).find((step) =>
+      step.includes('name: Run Alpine Docker smoke test')
+    );
+    const consumer = alpine?.match(/\n {10}else\n([\s\S]*?)\n {10}fi/)?.[1];
+    expect(consumer, 'expected an Alpine prebuilt-artifact smoke branch').toBeDefined();
+    expect(consumer).toContain('--platform "linux/$' + '{DOCKER_ARCH}"');
+    expect(consumer).toContain('-v "$PWD:/workspace:ro"');
+    expect(consumer).toContain('-e PLATFORM="$BINARY_PLATFORM"');
+    expect(consumer).toContain('-e SKIP_BUILD=1');
+    for (const name of ['SOURCE_SHA', 'VERSION', 'DISTRIBUTION_CHANNEL']) {
+      expect(consumer, name).toContain(`-e ${name}`);
+    }
+    expect(consumer).toContain('"oven/bun:$' + '{BUN_CHANNEL}-alpine"');
+    expect(consumer).toContain('bun --no-install .mango/smoke/test-build.mjs');
+    expect(consumer).not.toContain('bun install');
+    expect(alpine).toContain('docker rm -f "$musl_smoke_container"');
+    expect(alpine).toContain('scripts/release/smoke-docker-image.sh');
   });
 
   test('smoke jobs install dependencies only when rebuild is enabled', () => {

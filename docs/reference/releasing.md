@@ -247,15 +247,38 @@ vouches for a build that failed.
 
 ### How the runtime binary is built
 
-The hub is Bun-compiled; `mangostudio-runtime` is the cargo binary from
-`crates/mangostudio-runtime`. `distribution-build.yml` calls
-`.github/workflows/runtime-build.yml`, which builds each of the eight targets on
-a runner that can link it and uploads it as `runtime-<source-sha>-<platform-id>`.
-The packaging job downloads them into `.mango/runtime-prebuilt/` and runs
-`bun run build --binary --runtime-dir .mango/runtime-prebuilt`, which compiles
-only the hubs and copies each runtime beside its hub. Nothing downstream of
-`.mango/out/<platform>/` changed: archives, raw assets, `SHA256SUMS`, npm
-packages, Docker images and installers all see the same two files as before.
+The hub uses Bun native AOT; `mangostudio-runtime` is the cargo binary from
+`crates/mangostudio-runtime`. `distribution-build.yml` prepares the frontend and
+binary smoke harness once and calls `.github/workflows/runtime-build.yml` for
+the eight Rust targets. Each native hub producer downloads its matching runtime
+and the prepared frontend, then runs:
+
+```bash
+bun run build:binary --platform <matching-host> --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+```
+
+Six producers run directly on matching Linux glibc, macOS and Windows x64/arm64
+runners. Two more run in Alpine on matching Linux x64/arm64 runners for musl.
+Bun uses `--aot --trim --format=esm --sourcemap=external` and production
+`--minify`; Elysia AOT is not enabled. A foreign native target fails before
+frontend or runtime work. Shipping builds require native producer records;
+bytecode is an explicit fallback and is never silently substituted.
+
+`--reuse-frontend` accepts `apps/frontend/dist/build-info.json` only when both
+the prepared build and checkout are clean, name the same HEAD and use the same
+build mode. It retains the original build time and regenerates absolute embed
+paths on each native host. Each producer uses a frozen dependency install from
+the same source and lockfile. Native compilation uses the running Bun and its
+runtime; it downloads no cross-target Bun runtime, and `--refresh-runtimes` has
+no effect. `.bun-version` stays on the floating `canary` channel.
+
+The aggregation job verifies the complete target set, source SHA, clean state,
+release version, build mode, common build time, native compiler identity, pair
+checksums and executable headers before packaging. It restores Unix executable
+modes to `0755` after artifact transport and writes one common standalone
+README. The existing npm pack, archive, manifest, bundle and attestation steps
+then consume `.mango/out/<platform>/`; archive names and the two-binary layout
+stay the same. Rust toolchains remain:
 
 | Platforms                            | Runner           | Rust target / toolchain                                             |
 | ------------------------------------ | ---------------- | ------------------------------------------------------------------- |
@@ -316,8 +339,10 @@ packages, Docker images and installers all see the same two files as before.
 Locally, `bun run build --binary --platform <host>` runs
 `cargo build --release --locked -p mangostudio-runtime --target <triple>` for the
 host's own target (linked against the host's glibc, so not a distribution
-artifact). Any other target needs a prebuilt runtime:
-`--runtime-dir <dir>` (or `RUNTIME_DIR`) must hold
+artifact). Native compilation supports only the matching host platform/libc.
+For a foreign target, explicitly select `--compiler bytecode` and supply a
+prebuilt runtime. Bytecode mode supports all 8 targets and selects all of them
+when `--platform` is omitted. `--runtime-dir <dir>` (or `RUNTIME_DIR`) must hold
 `<dir>/<platform-id>/mangostudio-runtime[.exe]`, for example from
 `bun run build:runtime --platform linux-arm64 --zig --out <dir>` with zig and
 cargo-zigbuild on `PATH`. A missing file is an error naming it; the build never
@@ -651,10 +676,15 @@ canary pass `runtime-profile: shipping` to `download-distribution`, which makes
 published; PR smoke consumers pass nothing and accept whichever profile the
 bundle records. `distribution-build.yml` passes its `runtime_profile` input to
 both the runtime builder and the manifest step's `RUNTIME_PROFILE`, so PR bundles
-record `light` and release bundles record `shipping`. The manifest schema is
-version 4: a bundle written by an older
-workflow is rejected rather than read as `shipping`, because manifests never
-outlive the run that wrote them.
+record `light` and release bundles record `shipping`.
+
+Manifest schema version 5 records per-target `compiler` provenance (`mode`,
+`version`, `revision`, executable `sha256`) alongside `bunRuntime` provenance.
+The global `bunVersion` and `bunRevision` describe the packaging host; each
+target's compiler record identifies the Bun that compiled that hub. Source,
+lockfile and platform checks still apply when the floating canary resolves to
+different compiler revisions on different hosts. Bundles from an older schema
+are rejected, because manifests never outlive the run that wrote them.
 
 The public assets carry provenance too: `github-release` (stable) and
 `github-release-canary` attest `SHA256SUMS`, `install.sh` and `install.ps1`

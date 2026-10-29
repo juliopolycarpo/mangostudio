@@ -398,10 +398,69 @@ describe('release workflow binary gate', () => {
     expect(workflow).not.toContain('docker/setup-qemu-action');
   });
 
+  test('native hub producers reuse one frontend and compile every target on its matching host', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+    const prepare = extractJobBlock(workflow, 'prepare');
+    const hub = extractJobBlock(workflow, 'hub');
+    const build = extractJobBlock(workflow, 'build');
+    expect(prepare).toContain('bun run build --frontend');
+    expect(prepare).toContain('bun ./scripts/release/bundle-binary-smoke.ts');
+    expect(prepare).toContain('include-hidden-files: true');
+    const runners = {
+      'linux-x64': 'ubuntu-latest',
+      'linux-arm64': 'ubuntu-24.04-arm',
+      'darwin-x64': 'macos-15-intel',
+      'darwin-arm64': 'macos-latest',
+      'windows-x64': 'windows-latest',
+      'windows-arm64': 'windows-11-arm',
+      'linux-x64-musl': 'ubuntu-latest',
+      'linux-arm64-musl': 'ubuntu-24.04-arm',
+    };
+    expect(hub.match(/- platform:/g)).toHaveLength(ALL_BINARY_TARGETS.length);
+    for (const target of ALL_BINARY_TARGETS) {
+      expect(hub).toContain(
+        `platform: ${target.arch}\n            runner: ${runners[target.arch]}`
+      );
+    }
+    expect(workflow.match(/bun run build --frontend/g)).toHaveLength(1);
+    for (const job of [prepare, hub, build]) {
+      expect(job).toContain('ref: $' + '{{ inputs.source_sha }}');
+    }
+    expect(hub).toContain('needs: [prepare, runtime]');
+    expect(hub).toContain('include-hidden-files: true');
+    expect(hub).toContain('path: .mango/runtime-prebuilt');
+    expect(hub).toContain('.mango/hub-builds/$' + '{{ matrix.platform }}.json');
+    const install = extractStepBlocks(hub).find((step) => step.includes('actions/setup-mango'));
+    expect(install).toContain('if: $' + '{{ !matrix.musl }}');
+    expect(hub).toContain('runs-on: $' + '{{ matrix.runner }}');
+    expect(hub).toContain(
+      'name: runtime-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.platform }}'
+    );
+    expect(hub).toContain('--reuse-frontend');
+    expect(hub).toContain('oven/bun:$' + '{BUN_CHANNEL}-alpine');
+    expect(hub).toContain('bun install --frozen-lockfile');
+    expect(build).toContain('needs: [hub]');
+    const preparedInputs = extractStepBlocks(build).find((step) =>
+      step.includes('name: Download prepared frontend')
+    );
+    expect(
+      preparedInputs,
+      'aggregate build must download prepared frontend at repository root'
+    ).toBeDefined();
+    expect(preparedInputs).toContain('actions/download-artifact@');
+    expect(preparedInputs).toContain('name: hub-inputs-$' + '{{ inputs.source_sha }}');
+    expect(preparedInputs).toMatch(/\n {10}path: \.\n/);
+    expect(build.indexOf('name: Download prepared frontend')).toBeLessThan(
+      build.indexOf('name: Archive release assets')
+    );
+    expect(build).toContain('bun ./scripts/release/assemble-native-hubs.ts');
+    expect(build).not.toContain('bun run build --binary');
+  });
+
   test('one reusable builder creates manifest-backed target and packaged artifacts', () => {
     const workflow = readText('.github/workflows/distribution-build.yml');
 
-    expect(workflow.match(/bun run build --binary/g)).toHaveLength(1);
+    expect(workflow.match(/bun run build --binary/g)).toHaveLength(2);
     expect(workflow.match(/bun \.\/scripts\/release\/pack-npm\.ts/g)).toHaveLength(1);
     expect(workflow.match(/bun \.\/scripts\/release\/archive-assets\.ts/g)).toHaveLength(1);
     expect(workflow).toContain(
@@ -415,14 +474,14 @@ describe('release workflow binary gate', () => {
       workflow.indexOf('id: bundle')
     );
     expect(manifestStep).toContain('RUNTIME_PROFILE: $' + '{{ inputs.runtime_profile }}');
-    expect(workflow.match(/overwrite: false/g)).toHaveLength(11);
+    expect(workflow.match(/overwrite: false/g)).toHaveLength(13);
     expect(workflow).toContain('actions/attest-build-provenance@');
     expect(workflow).toMatch(
       /subject-path: \|\n\s+\.distribution-bundles\/\*\.tar\n\s+\.distribution-bundles\/\*\.tar\.gz/
     );
   });
 
-  test('the packaging job stages cargo runtimes built per target, never Bun-compiled ones', () => {
+  test('native producers stage matching cargo runtimes before one packaging job assembles pairs', () => {
     const workflow = readText('.github/workflows/distribution-build.yml');
     const build = extractJobBlock(workflow, 'build');
     const runtime = readText('.github/workflows/runtime-build.yml');
@@ -430,9 +489,14 @@ describe('release workflow binary gate', () => {
     expect(extractJobBlock(workflow, 'runtime')).toContain(
       'uses: ./.github/workflows/runtime-build.yml'
     );
-    expect(build).toMatch(/\n {4}needs: \[runtime\]\n/);
-    expect(build).toContain('pattern: runtime-$' + '{{ inputs.source_sha }}-*');
-    expect(build).toContain('bun run build --binary --runtime-dir .mango/runtime-prebuilt');
+    expect(build).toMatch(/\n {4}needs: \[hub\]\n/);
+    expect(build).toContain('pattern: native-hub-$' + '{{ inputs.source_sha }}-*');
+    expect(build).toContain('bun ./scripts/release/assemble-native-hubs.ts');
+    const hub = extractJobBlock(workflow, 'hub');
+    expect(hub).toContain(
+      'name: runtime-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.platform }}'
+    );
+    expect(hub).toContain('--runtime-dir .mango/runtime-prebuilt --reuse-frontend');
 
     // Every release target is in the default matrix, each leg builds exactly
     // one, and zig is fetched only against a pinned checksum.
@@ -488,6 +552,11 @@ describe('release workflow binary gate', () => {
         path,
         step,
         archive: uploadPaths(step).some((payload) => ARCHIVE_PAYLOAD.test(payload)),
+        preparedBinaryInputs:
+          path === '.github/workflows/distribution-build.yml' &&
+          uploadPaths(step).some(
+            (payload) => payload.startsWith('.mango/out/') || payload === 'apps/frontend/dist'
+          ),
       }))
     );
 
@@ -497,9 +566,9 @@ describe('release workflow binary gate', () => {
     // for the dry run, archive-assets.ts) already chose — or already chose to
     // skip.
     expect(uploads.filter((upload) => upload.archive)).toHaveLength(12);
-    for (const { path, step, archive } of uploads) {
+    for (const { path, step, archive, preparedBinaryInputs } of uploads) {
       // Anchored so a commented-out key can neither satisfy nor trip the policy.
-      if (archive) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
+      if (archive || preparedBinaryInputs) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
       else expect(step, path).not.toMatch(/^\s*compression-level:/m);
     }
   });
@@ -552,7 +621,16 @@ describe('release workflow binary gate', () => {
     for (const step of dockerAssertions) {
       expect(step).toContain('REBUILD: $' + '{{ inputs.rebuild }}');
       expect(step).toContain('if [ "$REBUILD" = "true" ]; then');
-      expect(step).toContain('bun run build:binary --platform "$BINARY_PLATFORM"');
+      if (step.includes('name: Run Alpine Docker smoke test')) {
+        expect(step).toContain('tar --exclude=node_modules');
+        expect(step).toContain('oven/bun:$' + '{BUN_CHANNEL}-alpine');
+        expect(step).toContain('bun install --frozen-lockfile');
+        expect(step).toContain('-e RUNTIME_DIR=.mango/runtime-prebuilt');
+        expect(step).toContain('-e SKIP_BUILD=0');
+        expect(step).toContain('bun --no-install .mango/smoke/test-build.mjs');
+      } else {
+        expect(step).toContain('bun run build:binary --platform "$BINARY_PLATFORM"');
+      }
     }
   });
 
@@ -875,21 +953,36 @@ describe('release workflow binary gate', () => {
     expect(windows).toContain('$report.installedVia.manager');
   });
 
-  test('release dry run builds and archives windows-x64 last, after the Linux archive is done with', () => {
+  test('release dry run builds and archives windows-x64 on its native Windows runner', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
-    const linuxBlock = extractJobBlock(workflow, 'dry-run-linux');
-
-    expect(linuxBlock).toContain('bun run build --binary --platform windows-x64');
-    expect(linuxBlock).toContain('bun ./scripts/release/archive-assets.ts --platform windows-x64');
-    expect(linuxBlock).toContain('name: Upload Windows release archive');
-
-    // archive-assets.ts rebuilds release-assets/ from scratch on every call
-    // (no --out flag), so running it any earlier would erase the Linux
-    // archive every step above it depends on.
-    const dockerHealthIndex = linuxBlock.indexOf('Verify Docker image serves health');
-    const windowsBuildIndex = linuxBlock.indexOf('Build Windows x64 binary');
-    expect(dockerHealthIndex).toBeGreaterThan(-1);
-    expect(windowsBuildIndex).toBeGreaterThan(dockerHealthIndex);
+    const linux = extractJobBlock(workflow, 'dry-run-linux');
+    const windows = extractJobBlock(workflow, 'dry-run-windows');
+    expect(linux).not.toContain('bun run build --binary --platform windows-x64');
+    expect(linux).not.toContain('bun ./scripts/release/archive-assets.ts --platform windows-x64');
+    expect(linux).toContain('name: Upload verified Windows runtime');
+    expect(linux).toContain('path: .mango/runtime-prebuilt/windows-x64');
+    expect(windows).toContain('runs-on: windows-latest');
+    expect(windows).toContain('uses: ./.github/actions/setup-mango');
+    expect(windows).toContain('name: dry-run-windows-runtime');
+    expect(windows).toContain('path: .mango/runtime-prebuilt/windows-x64');
+    expect(windows).toContain(
+      'bun run build --binary --platform windows-x64 --runtime-dir .mango/runtime-prebuilt'
+    );
+    expect(windows).not.toContain('--compile-mode bytecode');
+    expect(windows).toContain('bun ./scripts/release/archive-assets.ts --platform windows-x64');
+    expect(windows).toContain('name: Upload Windows release archive');
+    expect(windows).toContain(
+      'bun ./scripts/release/verify-checksum.ts release-assets/SHA256SUMS "$archive"'
+    );
+    const order = [
+      'name: Download verified Windows runtime',
+      'name: Build Windows x64 binary',
+      'name: Archive Windows release assets',
+      'name: Verify archive checksum',
+      'name: Install local archive',
+    ].map((step) => windows.indexOf(step));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
   test('release dry run exercises install.ps1 on a real Windows runner', () => {

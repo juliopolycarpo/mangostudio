@@ -438,7 +438,7 @@ Quando uma alteração relevante for feita em `docs/`, a versão correspondente 
 
 ## Notas de Build Standalone
 
-O comando `bun run build --binary` compila a API em binários específicos por plataforma em `.mango/out/<platform>/`, ao lado do `mangostudio-runtime` construído com cargo. Localmente ele constrói a plataforma do próprio host (`--platform <host>`); outras plataformas precisam de runtimes pré-construídos via `--runtime-dir <dir>` (veja [releasing](reference/releasing.md#como-o-binário-do-runtime-é-construído)).
+`bun run build:binary` compila o hub com AOT nativo do Bun e remoção de recursos não usados do runtime, embarca o frontend e coloca o `mangostudio-runtime` construído com cargo ao lado em `.mango/out/<platform>/`. O alvo padrão corresponde ao SO, arquitetura e libc do Bun em execução; um `--platform` diferente falha antes do trabalho de frontend ou runtime. Para compilação cruzada, selecione explicitamente `--compiler bytecode` e forneça runtimes Rust pré-construídos com `--runtime-dir <dir>` (veja [releasing](reference/releasing.md#como-o-binário-do-runtime-é-construído)).
 
 - O banco de dados é persistido em `~/.mango/database.sqlite` por padrão.
 - Os assets do frontend são embarcados no executável em tempo de compilação.

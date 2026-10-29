@@ -146,16 +146,39 @@ dois não divirjam.
 
 ### Como o binário do runtime é construído
 
-O hub é compilado com Bun; `mangostudio-runtime` é o binário cargo de
-`crates/mangostudio-runtime`. `distribution-build.yml` chama
-`.github/workflows/runtime-build.yml`, que constrói cada um dos oito alvos num
-runner capaz de linká-lo e o envia como artefato
-`runtime-<source-sha>-<platform-id>`. O job de empacotamento baixa esses
-artefatos em `.mango/runtime-prebuilt/` e roda
-`bun run build --binary --runtime-dir .mango/runtime-prebuilt`, que compila
-apenas os hubs e copia cada runtime ao lado do seu hub. Nada depois de
-`.mango/out/<platform>/` mudou: arquivos, assets crus, `SHA256SUMS`, pacotes npm,
-imagens Docker e instaladores veem os mesmos dois arquivos de antes.
+O hub usa AOT nativo do Bun; `mangostudio-runtime` é o binário cargo de
+`crates/mangostudio-runtime`. `distribution-build.yml` prepara o frontend e o
+harness de smoke binário uma vez e chama `.github/workflows/runtime-build.yml`
+para os oito alvos Rust. Cada produtor nativo baixa o runtime correspondente e
+o frontend preparado, então executa:
+
+```bash
+bun run build:binary --platform <host-correspondente> --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+```
+
+Seis produtores executam diretamente em runners Linux glibc, macOS e Windows
+x64/arm64 correspondentes. Outros dois executam em Alpine nos runners Linux
+x64/arm64 para musl. O Bun usa `--aot --trim --format=esm --sourcemap=external`
+e `--minify` em produção; o AOT do Elysia não é habilitado. Um alvo nativo
+diferente do host falha antes do trabalho de frontend ou runtime. Builds de
+distribuição exigem registros de produtores nativos; bytecode é um fallback
+explícito e nunca os substitui silenciosamente.
+
+`--reuse-frontend` aceita `apps/frontend/dist/build-info.json` somente quando
+o build preparado e o checkout estão limpos, apontam para o mesmo HEAD e usam
+o mesmo modo de build. Ele preserva o horário original e regenera os caminhos
+absolutos de embed em cada host nativo. Cada produtor instala as dependências
+com lockfile congelado da mesma fonte. A compilação nativa usa o Bun em execução
+e seu runtime; não baixa runtime Bun para outro alvo, e `--refresh-runtimes`
+não tem efeito. `.bun-version` mantém o canal flutuante `canary`.
+
+O job de agregação verifica o conjunto completo de alvos, SHA da fonte, estado
+limpo, versão da release, modo de build, horário comum, identidade do compilador
+nativo, checksums dos pares e cabeçalhos executáveis antes do empacotamento.
+Ele restaura as permissões Unix para `0755` após o transporte dos artefatos e
+escreve um único README standalone. As etapas existentes de pacote npm, arquivos,
+manifesto, bundles e atestação consomem `.mango/out/<platform>/`; os nomes dos
+arquivos e o layout de dois binários permanecem iguais. Os toolchains Rust são:
 
 | Plataformas                          | Runner           | Alvo Rust / toolchain                                           |
 | ------------------------------------ | ---------------- | --------------------------------------------------------------- |
@@ -197,11 +220,28 @@ imagens Docker e instaladores veem os mesmos dois arquivos de antes.
 
 Localmente, `bun run build --binary --platform <host>` roda
 `cargo build --release --locked -p mangostudio-runtime --target <triple>` para o
-alvo do próprio host. Qualquer outro alvo precisa de um runtime pré-construído em
-`--runtime-dir <dir>` (ou `RUNTIME_DIR`), no layout
+alvo do próprio host. A compilação nativa suporta apenas a plataforma/libc do
+host correspondente. Para outro alvo, selecione explicitamente `--compiler bytecode`
+e forneça um runtime pré-construído. O modo bytecode suporta os 8 alvos e seleciona
+todos quando `--platform` é omitido. `--runtime-dir <dir>` (ou `RUNTIME_DIR`) usa o layout
 `<dir>/<platform-id>/mangostudio-runtime[.exe]` — por exemplo, de
 `bun run build:runtime --platform linux-arm64 --zig --out <dir>`. Um arquivo
 ausente é um erro que o nomeia; o build nunca usa outro runtime no lugar.
+
+### Proveniência da distribuição
+
+O manifesto de distribuição usa schema versão 5. Cada alvo registra `compiler`
+(`mode`, `version`, `revision`, `sha256` do executável) junto da proveniência de
+`bunRuntime`. Os campos globais `bunVersion` e `bunRevision` descrevem o host de
+empacotamento; o registro de cada alvo identifica o Bun que compilou seu hub.
+As verificações de fonte, lockfile e plataforma continuam obrigatórias quando o
+canal canary flutuante resolve revisões diferentes entre hosts.
+
+Os perfis Rust continuam `light` para PRs e `shipping` para releases e canary.
+O consumidor valida `runtimeProfile` antes de publicar; bundles `light` são
+rejeitados quando se exige `shipping`. O schema não muda nomes nem layout dos
+arquivos, e bundles de schemas anteriores são rejeitados. A agregação mantém as
+etapas existentes de checksum e atestação dos bundles.
 
 ## Fonte da versão
 

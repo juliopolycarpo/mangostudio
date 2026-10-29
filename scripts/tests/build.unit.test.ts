@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, relative, sep } from 'node:path';
 
 import {
+  binaryBuildTargets,
   binaryCompileDefines,
   binaryCompileFlags,
   createTurboBuildCommand,
   discardStandaloneReadme,
   frontendDistAsidePath,
+  parseBinaryCompilerMode,
   selectBuildWorkspaces,
 } from '../lib/build';
 import { ROOT_DIR, WORKSPACES } from '../lib/config';
@@ -188,20 +190,31 @@ describe('build script', () => {
     expect(defines).toContain('process.env.BUILD_PLATFORM_ID="linux-x64-musl"');
   });
 
-  test('compiles every standalone binary to ESM bytecode with external sourcemaps', () => {
-    // Bytecode without `--format=esm` falls back to CommonJS, which rejects
-    // the hub entry's top-level `await` and fails the compile.
+  test('defaults to native AOT with trim, ESM and external sourcemaps', () => {
     expect(binaryCompileFlags('production')).toEqual([
-      '--bytecode',
+      '--aot',
+      '--trim',
       '--format=esm',
       '--sourcemap=external',
       '--minify',
     ]);
     expect(binaryCompileFlags('development')).toEqual([
-      '--bytecode',
+      '--aot',
+      '--trim',
       '--format=esm',
       '--sourcemap=external',
     ]);
+  });
+
+  test('keeps broad trimmed ESM bytecode as an explicit fallback', () => {
+    expect(binaryCompileFlags('production', 'bytecode')).toEqual([
+      '--bytecode',
+      '--trim',
+      '--format=esm',
+      '--sourcemap=external',
+      '--minify',
+    ]);
+    expect(binaryCompileFlags('development', 'bytecode')).not.toContain('--minify');
   });
 
   test('uses the binary alias for standalone smoke builds', () => {
@@ -229,6 +242,53 @@ describe('build script', () => {
     expect(output).toContain('Missing distribution manifest');
     expect(output).not.toContain('Building binary');
     expect(output).not.toContain('ReferenceError');
+  });
+});
+
+describe('binary compiler selection', () => {
+  test('selects native by default and accepts the explicit bytecode fallback', () => {
+    expect(parseBinaryCompilerMode()).toBe('native');
+    expect(parseBinaryCompilerMode('native')).toBe('native');
+    expect(parseBinaryCompilerMode('bytecode')).toBe('bytecode');
+  });
+
+  test.each(['jit', '', null, 3])('names invalid compiler %j and the expected modes', (value) => {
+    expect(() => parseBinaryCompilerMode(value)).toThrow(
+      `expected binary compiler: native | bytecode | received: ${String(value)}`
+    );
+  });
+
+  test('defaults native builds to the current target, including musl', () => {
+    expect(binaryBuildTargets('native', 'linux-x64').map((target) => target.arch)).toEqual([
+      'linux-x64',
+    ]);
+    expect(binaryBuildTargets('native', 'linux-arm64-musl').map((target) => target.arch)).toEqual([
+      'linux-arm64-musl',
+    ]);
+    expect(
+      binaryBuildTargets('native', 'windows-arm64', 'bun-windows-arm64').map(
+        (target) => target.arch
+      )
+    ).toEqual(['windows-arm64']);
+  });
+
+  test('refuses cross-native builds before frontend or runtime setup', () => {
+    expect(() => binaryBuildTargets('native', 'linux-x64', 'darwin-arm64')).toThrow(
+      'expected native build target: linux-x64 | received: darwin-arm64'
+    );
+    expect(() => binaryBuildTargets('native', null)).toThrow(
+      'expected a supported native build host | received: unknown platform or libc'
+    );
+    expect(() => binaryBuildTargets('bytecode', 'linux-x64', 'unknown')).toThrow(
+      'expected a release platform or Bun target | received: unknown'
+    );
+  });
+
+  test('retains all eight cross-build targets in bytecode mode', () => {
+    expect(binaryBuildTargets('bytecode', 'linux-x64')).toHaveLength(8);
+    expect(
+      binaryBuildTargets('bytecode', 'linux-x64', 'darwin-arm64').map((target) => target.arch)
+    ).toEqual(['darwin-arm64']);
   });
 });
 

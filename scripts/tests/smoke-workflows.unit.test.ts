@@ -219,7 +219,7 @@ describe('smoke workflow assertion inventory', () => {
 
   test('the binary job marks setup complete once, before its first assertion', () => {
     const steps = [...(readWorkflows().binary.jobs.binary.steps ?? [])];
-    const first = steps.findIndex(({ run }) => run?.includes('scripts/test-build.ts'));
+    const first = steps.findIndex(({ run }) => run?.includes('.mango/smoke/test-build.mjs'));
     const marker = steps[first - 1];
     // The default condition is what makes the marker fail-closed: it is
     // skipped as soon as any checkout, toolchain or download step fails.

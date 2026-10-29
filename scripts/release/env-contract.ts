@@ -14,6 +14,8 @@ export const RELEASE_SCRIPT_ENV_CONTRACTS = {
   'scripts/release/archive-assets.ts': {
     requiredEnv: ['VERSION'],
   },
+  'scripts/release/assemble-native-hubs.ts': { requiredEnv: ['SOURCE_SHA', 'VERSION'] },
+  'scripts/release/bundle-binary-smoke.ts': {},
   'scripts/release/bundle-distribution.ts': {},
   'scripts/release/distribution-manifest.ts': {
     requiredEnv: ['DISTRIBUTION_CHANNEL', 'SOURCE_SHA', 'VERSION'],

@@ -409,7 +409,7 @@ The `Messages` type is inferred directly from the `pt-BR.ts` dictionary (`as con
 
 ## Standalone Build Notes
 
-The `bun run build --binary` command compiles the API into platform-specific binaries under `.mango/out/<platform>/`, next to the cargo-built `mangostudio-runtime`. Locally it builds the host's own platform (`--platform <host>`); other platforms need prebuilt runtimes via `--runtime-dir <dir>` (see [releasing](docs/reference/releasing.md#how-the-runtime-binary-is-built)).
+`bun run build:binary` compiles the hub with Bun native AOT and runtime trimming, embeds the frontend, and stages the cargo-built `mangostudio-runtime` beside it under `.mango/out/<platform>/`. The default target matches the running Bun's OS, architecture and libc; a foreign `--platform` fails before frontend or runtime work. For cross-compilation, explicitly select `--compiler bytecode` and supply prebuilt Rust runtimes with `--runtime-dir <dir>` (see [releasing](docs/reference/releasing.md#how-the-runtime-binary-is-built)).
 
 - The database is persisted at `~/.mango/database.sqlite` by default.
 - Frontend assets are embedded into the executable at build time.

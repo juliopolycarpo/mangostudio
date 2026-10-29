@@ -119,16 +119,24 @@ Windows-only environment variable:
 ## Production Build
 
 ```bash
-bun run build --binary --platform linux-x64                  # this machine's platform
-bun run build --binary --runtime-dir .mango/runtime-prebuilt # all 8, with prebuilt runtimes
+bun run build:binary # native build for this host's OS, architecture and libc
+# Explicit bytecode cross-compilation fallback, with all 8 prebuilt Rust runtimes:
+bun run build:binary --compiler bytecode --runtime-dir .mango/runtime-prebuilt
 ```
 
-This compiles the hub (with the frontend embedded) into `.mango/out/<platform>/mangostudio`
-and places the cargo-built `mangostudio-runtime` beside it. Without `--runtime-dir`, only the
-host's own platform can be built, because only its runtime is built locally with `cargo build`.
-Any other platform needs a prebuilt runtime at `<dir>/<platform>/mangostudio-runtime[.exe]`
-(`bun run build:runtime`, or the CI artifact); see
-[releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built).
+The native build compiles the hub with Bun AOT, runtime trimming, production minification,
+ESM and external source maps. It embeds the frontend in `.mango/out/<platform>/mangostudio`
+and places the cargo-built `mangostudio-runtime` beside it. A foreign `--platform` fails
+before frontend or runtime work, even with `--runtime-dir`.
+
+`--runtime-dir <dir>` provides `<dir>/<platform>/mangostudio-runtime[.exe]`; otherwise cargo
+builds the host runtime locally. Cross-compilation requires both `--compiler bytecode`
+and a prebuilt runtime for each requested target. Without `--platform`, bytecode mode
+selects all 8 targets. See [releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built).
+
+For a prepared frontend, `--reuse-frontend` requires `apps/frontend/dist/build-info.json`
+from the same clean HEAD and build mode, with `gitDirty: false`. It preserves the original
+build time and regenerates absolute embed paths on the current host.
 
 ## Platform Targets
 
@@ -424,7 +432,12 @@ Validate the binary before deployment:
 PLATFORM=linux-x64 bun run scripts/test-build.ts
 ```
 
-This verifies:
+The rebuild requires a matching host OS, architecture and libc. For a manifest-backed
+prebuilt target, `SKIP_BUILD=1` also requires `SOURCE_SHA` and `DISTRIBUTION_CHANNEL`.
+Foreign targets receive layout and checksum checks; behavior checks run only when the
+host can execute the target.
+
+This verifies executable targets:
 
 - Binary exists and is executable.
 - Frontend assets are present (`index.html`, JS, CSS).

@@ -19,14 +19,18 @@
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { startFakeChatGptServer } from '@mangostudio/api/test-support/chatgpt/fake-server';
 
 import { extractTarArchive } from './lib/archive';
-import { pumpStream } from './lib/child-streams';
+import { smokeBinaryApplication } from './lib/binary-application-smoke';
+import { probeIsolatedRuntime } from './lib/binary-runtime-smoke';
+import { SmokeHub } from './lib/binary-smoke-hub';
+import { artifactSmokeEnvironment, canExecuteArtifact } from './lib/binary-smoke-process';
+import { ROOT_DIR } from './lib/config';
 import { collectContentEncodingProblems } from './lib/content-encoding-smoke';
 import {
   DISTRIBUTION_MANIFEST_FILE,
@@ -35,6 +39,7 @@ import {
 } from './lib/distribution-manifest';
 import { captureCommand } from './lib/exec';
 import { findModuleResolutionFailure } from './lib/module-resolution';
+import { bindDescendantsToRunner } from './lib/process-tree';
 import {
   type BinaryTarget,
   filterBinaryTargets,
@@ -44,7 +49,7 @@ import {
   runtimeBinaryName,
 } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
-import { probeRuntimeHandshake, type RuntimeHandshakeProbe } from './lib/runtime-handshake';
+import type { RuntimeHandshakeProbe } from './lib/runtime-handshake';
 import { waitForServerReady } from './lib/wait-for-health';
 import { findChecksum, sha256File } from './release/verify-checksum';
 
@@ -52,7 +57,6 @@ import { findChecksum, sha256File } from './release/verify-checksum';
 // Config
 // ---------------------------------------------------------------------------
 
-const ROOT_DIR = join(import.meta.dir, '..');
 const OUT_DIR = join(ROOT_DIR, '.mango', 'out');
 const REQUESTED_PLATFORM = process.env.PLATFORM;
 const SKIP_BUILD = process.env.SKIP_BUILD === '1';
@@ -65,22 +69,11 @@ const CHATGPT_CALLBACK_PORT = 1455;
 // archive-assets.ts produces (same VERSION override + semver validation).
 const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
 
-const hostRuntimeByPlatform: Partial<
-  Record<BinaryTarget['arch'], { platform: typeof process.platform; arch: typeof process.arch }>
-> = {
-  'linux-x64': { platform: 'linux', arch: 'x64' },
-  'linux-arm64': { platform: 'linux', arch: 'arm64' },
-  'windows-x64': { platform: 'win32', arch: 'x64' },
-  'windows-arm64': { platform: 'win32', arch: 'arm64' },
-  'darwin-x64': { platform: 'darwin', arch: 'x64' },
-  'darwin-arm64': { platform: 'darwin', arch: 'arm64' },
-};
-
 const PLATFORM = resolvePlatform(REQUESTED_PLATFORM);
 
 const BINARY_NAME = PLATFORM.name;
 const RUNTIME_BINARY_NAME = runtimeBinaryName(PLATFORM.name);
-const CAN_EXECUTE = canExecutePlatform(PLATFORM);
+const CAN_EXECUTE = canExecuteArtifact(PLATFORM.arch);
 const PLATFORM_DIR = join(OUT_DIR, PLATFORM.arch);
 const BINARY_PATH = join(PLATFORM_DIR, BINARY_NAME);
 const RUNTIME_BINARY_PATH = join(PLATFORM_DIR, RUNTIME_BINARY_NAME);
@@ -136,13 +129,6 @@ function resolvePlatform(platform: string | undefined): BinaryTarget {
     '   Set it via environment variable: PLATFORM=linux-x64 bun run scripts/test-build.ts'
   );
   process.exit(1);
-}
-
-function canExecutePlatform(platform: BinaryTarget): boolean {
-  if (platform.arch.endsWith('-musl')) return false;
-
-  const expected = hostRuntimeByPlatform[platform.arch];
-  return process.platform === expected?.platform && process.arch === expected.arch;
 }
 
 async function run(cmd: string[], cwd?: string, env?: Record<string, string>): Promise<void> {
@@ -339,19 +325,16 @@ async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Pro
   const label = binaryPath === RUNTIME_BINARY_PATH ? RUNTIME_BINARY_NAME : binaryPath;
   console.log(`\n🔌 Running runtime binary smoke (${label})...`);
 
-  const { stdout: versionOut, exitCode: versionExit } = await captureCommand([
-    binaryPath,
-    '--version',
-  ]);
+  const {
+    version: versionOut,
+    versionExit,
+    probe,
+  } = await probeIsolatedRuntime(binaryPath, ROOT_DIR);
   if (versionExit !== 0) fail(`${label} --version exited ${versionExit}`);
-  if (versionOut.trim() !== VERSION) {
-    fail(`${label} reported ${versionOut.trim()}, expected ${VERSION}`);
+  if (versionOut !== VERSION) {
+    fail(`${label} reported ${versionOut}, expected ${VERSION}`);
   }
   pass(`${label} --version → ${VERSION}`);
-
-  // No budget passed: the platform default is the policy, and Windows needs a
-  // different one than Linux and macOS do.
-  const probe = await probeRuntimeHandshake({ command: [binaryPath, '--stdio'] });
 
   // `=== null`, not falsy: a child whose first record is a bare newline greets
   // with an empty line, and that belongs in the JSON check below with a real
@@ -607,8 +590,9 @@ async function smokeTest(): Promise<void> {
 
   const tmpHome = makeTempDir();
   let fakeChatGpt: ReturnType<typeof startFakeChatGptServer> | null = null;
-  let proc: Bun.Subprocess<'ignore', 'ignore', 'pipe'> | null = null;
-  let serverStderr: ReturnType<typeof pumpStream> | null = null;
+  let hub: SmokeHub | undefined;
+  const runtimePath = join(tmpHome, RUNTIME_BINARY_NAME);
+  const binaryPath = join(tmpHome, BINARY_NAME);
 
   try {
     const dbPath = join(tmpHome, 'smoke.sqlite');
@@ -616,42 +600,50 @@ async function smokeTest(): Promise<void> {
     const chatGptSmokeEnabled = canBindChatGptCallbackPort();
     fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
 
-    // The binary is a CLI; bare invocation prints help, so start the server
-    // explicitly in the foreground (API_PORT is honored by `serve`).
-    proc = Bun.spawn({
-      cmd: [BINARY_PATH, 'serve'],
-      cwd: PLATFORM_DIR,
-      env: {
-        ...process.env,
-        NODE_ENV: 'production',
-        HOME: tmpHome,
-        DATABASE_PATH: dbPath,
-        API_HOST: '127.0.0.1',
-        API_PORT: String(PORT),
-        BETTER_AUTH_URL: authBaseUrl,
-        ...(fakeChatGpt
-          ? {
-              MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
-              MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
-              MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
-            }
-          : {}),
-        // Required since the auth-secret startup guard landed; a 32+ char
-        // random value satisfies the runtime check without exposing a real key.
-        BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
+    copyFileSync(BINARY_PATH, binaryPath);
+    // Some isolated cleanup fixtures deliberately omit the runtime; layout validation in main
+    // rejects that case before the production smoke starts.
+    if (existsSync(RUNTIME_BINARY_PATH)) copyFileSync(RUNTIME_BINARY_PATH, runtimePath);
+    await bindDescendantsToRunner();
+    hub = new SmokeHub({
+      spawn: () => {
+        // The binary is a CLI; bare invocation prints help, so start the server
+        // explicitly in the foreground (API_PORT is honored by `serve`).
+        return Bun.spawn({
+          cmd: [binaryPath, 'serve'],
+          cwd: tmpHome,
+          detached: process.platform !== 'win32',
+          env: {
+            ...artifactSmokeEnvironment(process.env, tmpHome, ROOT_DIR),
+            DATABASE_PATH: dbPath,
+            API_HOST: '127.0.0.1',
+            API_PORT: String(PORT),
+            BETTER_AUTH_URL: authBaseUrl,
+            ...(fakeChatGpt
+              ? {
+                  MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
+                  MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
+                  MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
+                }
+              : {}),
+            // Required since the auth-secret startup guard landed; a 32+ char
+            // random value satisfies the runtime check without exposing a real key.
+            BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
+          },
+          stdout: 'ignore',
+          stderr: 'pipe',
+        });
       },
-      stdout: 'ignore',
-      stderr: 'pipe',
+      ready: async () => {
+        console.log('   Waiting for server to be ready...');
+        try {
+          await waitForServerReady(`http://127.0.0.1:${PORT}/api/health`);
+        } catch (caught) {
+          fail(caught instanceof Error ? caught.message : String(caught));
+        }
+      },
     });
-
-    serverStderr = pumpStream(proc.stderr);
-
-    console.log('   Waiting for server to be ready...');
-    try {
-      await waitForServerReady(`http://127.0.0.1:${PORT}/api/health`);
-    } catch (caught) {
-      fail(caught instanceof Error ? caught.message : String(caught));
-    }
+    await hub.start();
 
     console.log('\n🔍 Running HTTP assertions...');
 
@@ -897,7 +889,7 @@ async function smokeTest(): Promise<void> {
       const sessionCookie = buildSessionCookieHeader(signupResponse);
 
       console.log('\n🔌 Running deprecated Cursor connector smoke...');
-      await smokeDeprecatedCursorConnector(PORT, sessionCookie, serverStderr.text());
+      await smokeDeprecatedCursorConnector(PORT, sessionCookie, hub.errorText());
 
       if (fakeChatGpt) {
         console.log('\n🔌 Running ChatGPT connector smoke...');
@@ -907,13 +899,35 @@ async function smokeTest(): Promise<void> {
           `\n⏭️  ChatGPT connector smoke skipped — port ${CHATGPT_CALLBACK_PORT} is already bound.`
         );
       }
+      const runningHub = hub;
+      await smokeBinaryApplication({
+        baseUrl: authBaseUrl,
+        cookie: sessionCookie,
+        runtimePath,
+        home: tmpHome,
+        version: VERSION,
+        restart: async () => {
+          await runningHub.stop();
+          assertNoModuleResolutionFailures(runningHub.errorText(), 'hub stderr');
+          await runningHub.start();
+        },
+        runtimeProcesses: {
+          observe: () => runningHub.observeRuntime(),
+          waitForExit: () => runningHub.waitForRuntimeExit(),
+        },
+      });
+      pass(
+        'Authenticated chat CRUD, WebSocket activity, Local runtime health and SQLite restart persistence'
+      );
     }
   } finally {
-    proc?.kill();
-    await proc?.exited.catch(() => undefined as undefined);
-    await serverStderr?.done.catch(() => undefined as undefined);
-    fakeChatGpt?.stop();
-    removeTempDir(tmpHome);
+    try {
+      await hub?.stop();
+      assertNoModuleResolutionFailures(hub?.errorText() ?? '', 'hub stderr');
+    } finally {
+      fakeChatGpt?.stop();
+      removeTempDir(tmpHome);
+    }
   }
 }
 

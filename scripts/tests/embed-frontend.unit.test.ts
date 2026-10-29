@@ -39,8 +39,8 @@ describe('renderFrontendManifestModule', () => {
       `import f0 from ${JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js'))} with { type: 'file' };`
     );
     expect(source).toContain('export const embeddedFrontend: Record<string, string> = {');
-    expect(source).toContain('"/index.html": f3,');
-    expect(source).toContain('"/assets/nested/font.woff2": f1,');
+    expect(source).toContain('"/index.html": f3 as unknown as string,');
+    expect(source).toContain('"/assets/nested/font.woff2": f1 as unknown as string,');
   });
 });
 
@@ -70,7 +70,9 @@ describe('renderFrontendManifestModule variants', () => {
     expect(source).toContain(
       `import v1 from "/out/variants/gzip/assets/index-AbCd1234.js.gz" with { type: 'file' };`
     );
-    expect(source).toContain('"/assets/index-AbCd1234.js": { "br": v0, "gzip": v1 },');
+    expect(source).toContain(
+      '"/assets/index-AbCd1234.js": { "br": v0 as unknown as string, "gzip": v1 as unknown as string },'
+    );
     const routes = source.slice(
       source.indexOf('export const embeddedFrontend:'),
       source.indexOf('export const embeddedFrontendEncodings')

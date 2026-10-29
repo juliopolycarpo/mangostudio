@@ -24,8 +24,9 @@ import { FIXTURE_DIR_PREFIX, pruneFixtureUserPath } from './support/windows-user
 //  - WINDOWS_BINARY: a real windows-x64 mangostudio.exe, needed by every case
 //    that goes through an install (fresh install, --use, --rollback, legacy
 //    migration, the npm tarball, the smoke mismatch). Produce one locally
-//    with `VERSION=0.1.0 bun run build --binary --platform windows-x64` and
-//    point MANGOSTUDIO_TEST_WINDOWS_BINARY at
+//    on Windows x64 with `VERSION=0.1.0 bun run build:binary`. For a cross-built
+//    fixture, use `--compiler bytecode --platform windows-x64 --runtime-dir <dir>`
+//    with a prebuilt Windows runtime. Point MANGOSTUDIO_TEST_WINDOWS_BINARY at
 //    .mango/out/windows-x64/mangostudio.exe to run those cases.
 // Cases that never smoke an exe (prune bookkeeping, unknown-line survival,
 // uninstall, the --rollback/--use failure paths) hand-craft the on-disk
@@ -700,7 +701,7 @@ describe('install.ps1 layout (real windows-x64 exe required)', () => {
   const reason = !POWERSHELL
     ? 'powershell.exe is not on PATH'
     : !WINDOWS_BINARY
-      ? 'MANGOSTUDIO_TEST_WINDOWS_BINARY is not set; build one with `VERSION=0.1.0 bun run build --binary --platform windows-x64`'
+      ? 'MANGOSTUDIO_TEST_WINDOWS_BINARY is not set; build on Windows with `bun run build:binary --platform windows-x64`, or cross-compile with `--compiler bytecode --runtime-dir <prebuilt-runtimes>`'
       : '';
   test.skipIf(!reason)(`skipped: ${reason}`, () => {
     // Body intentionally empty: this entry exists only to name the skip reason.

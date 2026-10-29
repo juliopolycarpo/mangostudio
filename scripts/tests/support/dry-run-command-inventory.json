@@ -69,7 +69,12 @@
       {
         "name": "Verify Docker image serves health",
         "run": "scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002"
-      },
+      }
+    ]
+  },
+  "dry-run-windows": {
+    "runner": "windows-latest",
+    "commands": [
       {
         "name": "Build Windows x64 binary",
         "run": "bun run build --binary --platform windows-x64 --runtime-dir .mango/runtime-prebuilt"
@@ -77,12 +82,11 @@
       {
         "name": "Archive Windows release assets",
         "run": "bun ./scripts/release/archive-assets.ts --platform windows-x64"
-      }
-    ]
-  },
-  "dry-run-windows": {
-    "runner": "windows-latest",
-    "commands": [
+      },
+      {
+        "name": "Verify archive checksum",
+        "run": "archive=\"release-assets/mangostudio-${DRY_RUN_VERSION}-windows-x64.zip\"\nbun ./scripts/release/verify-checksum.ts release-assets/SHA256SUMS \"$archive\""
+      },
       {
         "name": "Install local archive",
         "run": "$archive = \"release-assets\\mangostudio-$env:DRY_RUN_VERSION-windows-x64.zip\"\n& scripts\\install\\install.ps1 -Local $archive\n$actual = & \"$env:MANGOSTUDIO_BIN_DIR\\mangostudio.cmd\" --version\nif ($actual -ne $env:DRY_RUN_VERSION) {\n  Write-Error \"Expected $env:DRY_RUN_VERSION, got $actual\"\n  exit 1\n}"

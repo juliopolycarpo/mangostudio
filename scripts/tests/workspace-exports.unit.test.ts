@@ -13,6 +13,7 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { ROOT_DIR } from '../lib/config';
+import { bundleBinarySmoke } from '../release/bundle-binary-smoke';
 import { readText } from './support/read-text';
 import { walkRuntimeImports } from './support/runtime-imports';
 
@@ -131,28 +132,38 @@ describe('root tooling workspace exports', () => {
     }
   });
 
-  test('loads the real build-smoke script in a clean checkout with no install', () => {
-    const fixtureRoot = copySmokeFixture();
+  test('runs the bundled build-smoke with no packages or source tree and resolves the checkout root', async () => {
+    const bundle = await bundleBinarySmoke();
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'ci-native-hub-producers-bundle-'));
+    fixtureRoots.push(fixtureRoot);
+    const fixtureBundle = join(fixtureRoot, '.mango', 'smoke', 'test-build.mjs');
+    mkdirSync(dirname(fixtureBundle), { recursive: true });
+    copyFileSync(bundle, fixtureBundle);
+    writeFileSync(join(fixtureRoot, 'package.json'), JSON.stringify({ version: '8.7.6' }));
+    const env = { ...process.env };
+    delete env.VERSION;
+    delete env.DISTRIBUTION_MANIFEST_PATH;
     const result = Bun.spawnSync({
-      cmd: [process.execPath, '--no-install', 'run', 'scripts/test-build.ts'],
-      cwd: fixtureRoot,
+      cmd: [process.execPath, '--no-install', fixtureBundle],
+      cwd: tmpdir(),
       env: {
-        ...process.env,
+        ...env,
         PLATFORM: 'linux-x64-musl',
         SKIP_BUILD: '1',
         SOURCE_SHA: 'synthetic-source',
         DISTRIBUTION_CHANNEL: 'test',
-        DISTRIBUTION_MANIFEST_PATH: join(fixtureRoot, 'missing-distribution-manifest.json'),
       },
     });
     const output = `${result.stdout.toString()}${result.stderr.toString()}`;
-
     expect(existsSync(join(fixtureRoot, 'node_modules'))).toBe(false);
+    expect(existsSync(join(fixtureRoot, 'apps'))).toBe(false);
+    expect(existsSync(join(fixtureRoot, 'scripts'))).toBe(false);
     expect(result.exitCode, output).toBe(1);
     expect(
       output,
-      'expected the intended missing-artifact error after successful imports'
+      'expected intended artifact validation after successful bundled imports'
     ).toContain('Missing distribution manifest');
+    expect(output).toContain(join(fixtureRoot, 'distribution-manifest.json'));
     expect(output).toContain('platform: linux-x64-musl');
     expect(output).not.toContain('Cannot find module');
     expect(output).not.toContain('Building binary');

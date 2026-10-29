@@ -367,32 +367,20 @@ jobs:
       - name: Verify Docker image serves health
         run: scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002
 
-      # Last, because archive-assets.ts rebuilds release-assets/ from scratch
-      # on every invocation (no --out flag) — running this any earlier would
-      # wipe the Linux archive every step above depends on.
-      - name: Build Windows x64 binary
-        run: bun run build --binary --platform windows-x64 --runtime-dir .mango/runtime-prebuilt
-        env:
-          VERSION: ${{ env.DRY_RUN_VERSION }}
-
-      - name: Archive Windows release assets
-        run: bun ./scripts/release/archive-assets.ts --platform windows-x64
-        env:
-          VERSION: ${{ env.DRY_RUN_VERSION }}
-
-      - name: Upload Windows release archive
+      # Preserve the verified runtime bytes; Bun's shipping compiler runs on
+      # the Windows host that will install and exercise the resulting archive.
+      - name: Upload verified Windows runtime
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-x64-dry-run
-          path: release-assets/mangostudio-${{ env.DRY_RUN_VERSION }}-windows-x64.zip
+          name: dry-run-windows-runtime
+          path: .mango/runtime-prebuilt/windows-x64
           retention-days: 1
-          compression-level: 0
 
   dry-run-windows:
     name: Windows release dry run
     needs: [changes, dry-run-linux]
     # PR reuse skips the runtime ancestor. Override implicit success() while
-    # retaining the successful Linux archive as the Windows prerequisite.
+    # retaining the verified Windows runtime as the Windows prerequisite.
     if: ${{ !cancelled() && needs.changes.outputs.release == 'true' && needs['dry-run-linux'].result == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 20
@@ -407,10 +395,41 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
 
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Download verified Windows runtime
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dry-run-windows-runtime
+          path: .mango/runtime-prebuilt/windows-x64
+
+      - name: Build Windows x64 binary
+        shell: bash
+        run: bun run build --binary --platform windows-x64 --runtime-dir .mango/runtime-prebuilt
+        env:
+          VERSION: ${{ env.DRY_RUN_VERSION }}
+
+      - name: Archive Windows release assets
+        shell: bash
+        run: bun ./scripts/release/archive-assets.ts --platform windows-x64
+        env:
+          VERSION: ${{ env.DRY_RUN_VERSION }}
+
+      - name: Verify archive checksum
+        shell: bash
+        run: |
+          archive="release-assets/mangostudio-${DRY_RUN_VERSION}-windows-x64.zip"
+          bun ./scripts/release/verify-checksum.ts release-assets/SHA256SUMS "$archive"
+
+      - name: Upload Windows release archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-x64-dry-run
-          path: release-assets
+          path: release-assets/mangostudio-${{ env.DRY_RUN_VERSION }}-windows-x64.zip
+          retention-days: 1
+          compression-level: 0
 
       - name: Install local archive
         env:
@@ -522,10 +541,6 @@ jobs:
       # hosted runner is where the compiled and patched fake exes are safe to
       # run. The npm tarball case runs here too: it needs the Git GNU tar that
       # the runner puts ahead of System32 on PATH, which no Linux lane has.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
       - name: Verify the failed version probe diagnostics and the npm tarball extraction
         shell: bash
         env:
