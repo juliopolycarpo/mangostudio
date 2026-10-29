@@ -36,16 +36,19 @@ export interface WaitForServerReadyOptions {
  * budget; everything else gets the shared default that matches the bash helper.
  * Exported separately from `waitForServerReady` so unit tests can pin the value
  * without spinning up an HTTP loop.
+ * @example const budgetMs = resolveReadyBudgetMs();
  */
 export function resolveReadyBudgetMs(): number {
   return pickPlatformBudgetMs(DEFAULT_READY_BUDGET_MS, WIN32_READY_BUDGET_MS);
 }
 
 /**
- * Poll `url` until it responds with any 2xx status, the request errors, or
- * the configured budget is exhausted. Connection-level failures (refused,
+ * Poll `url` until it responds with any 2xx status or the configured budget
+ * is exhausted. Connection-level failures (refused,
  * reset) are treated as "not ready yet" and retried; the timeout path throws
  * with the URL and elapsed budget so the caller can surface a useful message.
+ * Requests, response bodies and poll intervals share the same deadline.
+ * @example await waitForServerReady('http://127.0.0.1:3001/api/health', { budgetMs: 30_000 });
  */
 export async function waitForServerReady(
   url: string,
@@ -53,17 +56,38 @@ export async function waitForServerReady(
 ): Promise<void> {
   const budgetMs = options.budgetMs ?? resolveReadyBudgetMs();
   const intervalMs = options.intervalMs ?? POLL_INTERVAL_MS;
-  const deadline = Date.now() + budgetMs;
+  const deadline = performance.now() + budgetMs;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), budgetMs);
 
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      // Connection refused / reset / EAI_AGAIN — server is not ready yet.
+  try {
+    while (performance.now() < deadline) {
+      if (await probeServerReady(url, controller.signal)) return;
+      const remainingMs = Math.max(0, deadline - performance.now());
+      await Bun.sleep(Math.min(intervalMs, remainingMs));
     }
-    await Bun.sleep(intervalMs);
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
   }
 
   throw new Error(`Server never became ready at ${url} within ${budgetMs}ms`);
+}
+
+/** Check status without retaining a response body or an unbounded request. */
+async function probeServerReady(url: string, signal: AbortSignal): Promise<boolean> {
+  let response: Response;
+  try {
+    response = await fetch(url, { signal });
+  } catch {
+    // Connection refused / reset / EAI_AGAIN — server is not ready yet.
+    return false;
+  }
+
+  try {
+    await response.body?.cancel();
+  } catch {
+    // An already-errored body must not override readiness from the headers.
+  }
+  return response.ok;
 }
