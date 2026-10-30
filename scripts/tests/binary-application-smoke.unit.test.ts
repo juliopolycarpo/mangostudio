@@ -8,8 +8,9 @@ import { Create } from 'typebox/value';
 
 import { assertSmokeSchema, smokeBinaryApplication } from '../lib/binary-application-smoke';
 import { type ApplicationFault, FakeBinaryApplication } from './support/fake-binary-application';
+import { discoverWindowsAliases, queryAliasPair, shortPath } from './support/windows-path-aliases';
 
-const windowsAliases = process.platform === 'win32' ? windowsPathAliases() : undefined;
+const windowsAliases = process.platform === 'win32' ? discoverWindowsAliases() : undefined;
 
 class FakePollingClock {
   elapsed = 0;
@@ -80,19 +81,23 @@ describe('built hub application qualification', () => {
     await smokeBinaryApplication(fake.options());
     expect(fake.restarted).toBe(true);
   });
-  test.skipIf(!windowsAliases)(
-    'native Windows accepts 8.3 aliases (requires an available short-path alias)',
+  test.skipIf(!windowsAliases || windowsAliases.kind === 'unavailable')(
+    'native Windows accepts available 8.3 aliases',
     async () => {
-      if (!windowsAliases) throw new Error('expected an available native Windows 8.3 alias');
+      if (!windowsAliases) throw new Error('expected Windows alias discovery');
+      if (windowsAliases.kind === 'failure') throw windowsAliases.error;
+      if (windowsAliases.kind !== 'available')
+        throw new Error('expected available Windows aliases');
       const fake = new FakeBinaryApplication();
-      fake.runtimePath = windowsAliases.binaryAlias;
-      fake.reportedRuntimePath = windowsAliases.binaryPath;
-      fake.home = windowsAliases.homeAlias;
-      fake.reportedHome = windowsAliases.home;
+      fake.runtimePath = windowsAliases.paths.binaryAlias;
+      fake.reportedRuntimePath = windowsAliases.paths.binaryPath;
+      fake.home = windowsAliases.paths.homeAlias;
+      fake.reportedHome = windowsAliases.paths.home;
       await smokeBinaryApplication({ ...fake.options(), canonicalPath: undefined });
       expect(fake.restarted).toBe(true);
     }
   );
+
   test('default resolver accepts the same entries and rejects same-content runtime and empty-home copies', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'application-path-identity-'));
     try {
@@ -172,38 +177,99 @@ describe('built hub application qualification', () => {
   });
 });
 
-function windowsPathAliases():
-  | {
-      binaryPath: string;
-      binaryAlias: string;
-      home: string;
-      homeAlias: string;
-    }
-  | undefined {
-  if (!Bun.which('powershell.exe')) return undefined;
-  const result = Bun.spawnSync(
-    [
-      'powershell.exe',
-      '-NoProfile',
-      '-Command',
-      `$ErrorActionPreference = 'Stop'
-$git = Get-Command git.exe -ErrorAction SilentlyContinue
-$folder = $env:ProgramFiles
-$fs = New-Object -ComObject Scripting.FileSystemObject -ErrorAction SilentlyContinue
-if ($null -eq $git -or $null -eq $fs -or -not (Test-Path -LiteralPath $folder)) { 'null'; exit 0 }
-$file = $git.Source
-@{binaryPath=$file;binaryAlias=$fs.GetFile($file).ShortPath;home=$folder;homeAlias=$fs.GetFolder($folder).ShortPath} | ConvertTo-Json -Compress`,
-    ],
-    { stdout: 'pipe', stderr: 'pipe', timeout: 5000 }
+test('reports alias query termination details', () => {
+  const timeout = Object.assign(new Error('spawnSync cmd.exe ETIMEDOUT'), { code: 'ETIMEDOUT' });
+  const failedQuery = () => ({
+    status: null,
+    signal: 'SIGTERM' as const,
+    error: timeout,
+    stdout: Buffer.alloc(0),
+    stderr: Buffer.from('stopped', 'utf16le'),
+    pid: 1,
+    output: [],
+  });
+  expect(() => shortPath('C:\\fixture', failedQuery)).toThrow(
+    /status.*null.*signal.*SIGTERM.*ETIMEDOUT.*stopped/s
   );
-  expect(result.exitCode, result.stderr.toString()).toBe(0);
-  const paths = JSON.parse(result.stdout.toString());
-  if (!paths) return undefined;
-  const binaryPath = realpathSync.native(paths.binaryPath);
-  const home = realpathSync.native(paths.home);
-  const available =
-    (paths.binaryAlias !== binaryPath && paths.binaryAlias.includes('~')) ||
-    (paths.homeAlias !== home && paths.homeAlias.includes('~'));
-  if (!available) return undefined;
-  return { ...paths, binaryPath, home };
-}
+});
+
+test('rejects invalid alias query input and ambiguous output', () => {
+  const unexpectedQuery = () => {
+    throw new Error('query should not run');
+  };
+  expect(() => shortPath('C:\\bad"path', unexpectedQuery)).toThrow('without quotes or newlines');
+  expect(() => shortPath('C:\\bad\npath', unexpectedQuery)).toThrow('without quotes or newlines');
+  const ambiguousQuery = () => ({
+    status: 0,
+    signal: null,
+    stdout: Buffer.from('one\r\ntwo\r\n', 'utf16le'),
+    stderr: Buffer.alloc(0),
+    pid: 1,
+    output: [],
+  });
+  expect(() => shortPath('C:\\fixture', ambiguousQuery)).toThrow('expected one Windows short path');
+});
+
+test('shares the alias query deadline and stops when it expires', () => {
+  let elapsed = 0;
+  const calls: Array<[string, number]> = [];
+  const clock = () => elapsed;
+  const query = (path: string, timeoutMs: number) => {
+    calls.push([path, timeoutMs]);
+    elapsed += 1_250;
+    return `${path}-alias`;
+  };
+  expect(queryAliasPair('file', 'home', query, clock)).toEqual(['file-alias', 'home-alias']);
+  expect(calls).toEqual([
+    ['file', 5000],
+    ['home', 3750],
+  ]);
+  elapsed = 0;
+  calls.length = 0;
+  const stalledQuery = (path: string, timeoutMs: number) => {
+    calls.push([path, timeoutMs]);
+    elapsed = 5_000;
+    return 'file-alias';
+  };
+  expect(() => queryAliasPair('file', 'home', stalledQuery, clock)).toThrow('deadline expired');
+  expect(calls).toEqual([['file', 5000]]);
+  elapsed = 0;
+  calls.length = 0;
+  const lateSecondQuery = (path: string, timeoutMs: number) => {
+    calls.push([path, timeoutMs]);
+    elapsed += path === 'file' ? 1_250 : 4_000;
+    return `${path}-alias`;
+  };
+  expect(() => queryAliasPair('file', 'home', lateSecondQuery, clock)).toThrow('deadline expired');
+  expect(calls).toEqual([
+    ['file', 5000],
+    ['home', 3750],
+  ]);
+});
+
+test('distinguishes unavailable aliases from failed discovery', () => {
+  const failure = new Error('alias query failed');
+  const unavailable = () => undefined;
+  const failed = () => {
+    throw failure;
+  };
+  expect(discoverWindowsAliases(unavailable)).toEqual({ kind: 'unavailable' });
+  expect(discoverWindowsAliases(failed)).toEqual({ kind: 'failure', error: failure });
+});
+
+test.skipIf(process.platform !== 'win32')(
+  'queries literal Windows paths without interpreting their characters',
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), 'windows-alias-hostile-'));
+    try {
+      const hostile = join(directory, 'spaces & (parentheses) ! %PATH% café');
+      mkdirSync(hostile);
+      const file = join(hostile, 'literal & (file) ! %PATH% café.txt');
+      writeFileSync(file, 'fixture');
+      expect(realpathSync.native(shortPath(hostile))).toBe(realpathSync.native(hostile));
+      expect(realpathSync.native(shortPath(file))).toBe(realpathSync.native(file));
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+);
