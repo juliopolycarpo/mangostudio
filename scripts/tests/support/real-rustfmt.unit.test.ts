@@ -22,7 +22,12 @@ class FormatterDiscovery {
   fallback: string | null = executable;
   fileExists = true;
   queryFailure?: Error;
-  result: { exitCode: number | null; stdout: string; stderr: string } = {
+  result: {
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    exitedDueToMaxBuffer?: boolean;
+  } = {
     exitCode: 0,
     stdout: `${executable}\n`,
     stderr: '',
@@ -60,6 +65,8 @@ class NativeFormatterProbe {
     timeout: number | undefined;
   }[] = [];
 
+  failure?: { command: string; signalCode: NodeJS.Signals; exitedDueToTimeout: boolean };
+
   constructor(private readonly formatter: string) {}
 
   which = (name: string): string | null => {
@@ -73,6 +80,15 @@ class NativeFormatterProbe {
       autoInstall: options.env?.RUSTUP_AUTO_INSTALL,
       timeout: options.timeout,
     });
+    if (this.failure?.command === command[1]) {
+      return {
+        exitCode: null,
+        stdout: new Uint8Array(),
+        stderr: new Uint8Array(),
+        signalCode: this.failure.signalCode,
+        exitedDueToTimeout: this.failure.exitedDueToTimeout,
+      } as unknown as ReturnType<typeof Bun.spawnSync>;
+    }
     let output: string;
     if (command[0] !== rustup) throw new Error(`expected ${rustup} | received: ${command[0]}`);
     if (command[1] === '--help' && command.length === 2) output = 'rustup 1.29.1 (fixture)\n';
@@ -109,6 +125,23 @@ describe('real formatter discovery', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it.each(['--help', 'which'])(
+    'retains native process outcomes for failed %s queries',
+    (command) => {
+      const fake = new NativeFormatterProbe(executable);
+      fake.failure = { command, signalCode: 'SIGTERM', exitedDueToTimeout: true };
+      const which = spyOn(Bun, 'which').mockImplementation(fake.which as typeof Bun.which);
+      const spawn = spyOn(Bun, 'spawnSync').mockImplementation(fake.spawn as typeof Bun.spawnSync);
+      try {
+        expect(() => discoverRealRustfmt()).toThrow('"signalCode":"SIGTERM"');
+        expect(() => discoverRealRustfmt()).toThrow('"exitedDueToTimeout":true');
+      } finally {
+        spawn.mockRestore();
+        which.mockRestore();
+      }
+    }
+  );
 
   it('uses the installed executable returned by the selected rustup', () => {
     const discovery = new FormatterDiscovery();
@@ -151,7 +184,9 @@ describe('real formatter discovery', () => {
   ])('refuses unverifiable rustup help output %# before lookup', (help) => {
     const discovery = new FormatterDiscovery();
     discovery.help = help;
-    expect(() => discoverRealRustfmt(discovery)).toThrow('rustup 1.28.1 or newer');
+    expect(() => discoverRealRustfmt(discovery)).toThrow(
+      help.exitCode === 0 ? 'rustup 1.28.1 or newer' : 'successful rustup help query'
+    );
     expect(discovery.commands).toEqual([[rustup, '--help']]);
   });
 
@@ -204,6 +239,17 @@ describe('real formatter discovery', () => {
     const discovery = new FormatterDiscovery();
     discovery.result = result;
     expect(() => discoverRealRustfmt(discovery)).toThrow('confirmed missing');
+  });
+
+  it('rejects a missing-toolchain diagnostic when a process outcome is ambiguous', () => {
+    const discovery = new FormatterDiscovery();
+    discovery.result = {
+      exitCode: 1,
+      stdout: '',
+      stderr: "error: toolchain 'fixture' is not installed\n",
+      exitedDueToMaxBuffer: true,
+    };
+    expect(() => discoverRealRustfmt(discovery)).toThrow('"exitedDueToMaxBuffer":true');
   });
 
   it('reports a confirmed missing rustfmt component without accepting an output path', () => {

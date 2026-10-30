@@ -1,12 +1,18 @@
 import { statSync } from 'node:fs';
 import { basename, delimiter, dirname, isAbsolute } from 'node:path';
 
+interface QueryResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  signalCode?: NodeJS.Signals | number;
+  exitedDueToTimeout?: boolean;
+  exitedDueToMaxBuffer?: boolean;
+}
+
 interface RustfmtDiscovery {
   which(command: string): string | null;
-  query(
-    command: string[],
-    env: NodeJS.ProcessEnv
-  ): { exitCode: number | null; stdout: string; stderr: string };
+  query(command: string[], env: NodeJS.ProcessEnv): QueryResult;
   isFile(path: string): boolean;
 }
 
@@ -26,6 +32,9 @@ const nativeDiscovery: RustfmtDiscovery = {
     const result = Bun.spawnSync(command, { env, stdout: 'pipe', stderr: 'pipe', timeout: 5000 });
     return {
       exitCode: result.exitCode,
+      signalCode: result.signalCode,
+      exitedDueToTimeout: result.exitedDueToTimeout,
+      exitedDueToMaxBuffer: result.exitedDueToMaxBuffer,
       stdout: new TextDecoder().decode(result.stdout),
       stderr: new TextDecoder().decode(result.stderr),
     };
@@ -66,15 +75,24 @@ function requireNonInstallingRustup(
   const line = result.stdout.split(/\r?\n/, 1)[0];
   const version = /^rustup (\d+)\.(\d+)\.(\d+)(?: \([^\r\n]*\))?$/.exec(line);
   const parts = version?.slice(1).map(Number);
-  if (result.exitCode === 0 && parts?.every(Number.isSafeInteger)) {
+  if (
+    result.exitCode === 0 &&
+    !result.signalCode &&
+    !result.exitedDueToTimeout &&
+    !result.exitedDueToMaxBuffer &&
+    parts?.every(Number.isSafeInteger)
+  ) {
     const [major, minor, patch] = parts;
     if (major > 1 || (major === 1 && (minor > 28 || (minor === 28 && patch >= 1)))) return;
   }
   throw new Error(
-    `real rustfmt discovery: expected rustup 1.28.1 or newer with non-installing lookup | received: ${JSON.stringify(
+    `real rustfmt discovery: expected ${result.exitCode === 0 && !result.signalCode && !result.exitedDueToTimeout && !result.exitedDueToMaxBuffer ? 'rustup 1.28.1 or newer with non-installing lookup' : 'successful rustup help query'} | received: ${JSON.stringify(
       {
         command: command.map(boundedDiagnostic),
         exitCode: result.exitCode,
+        signalCode: result.signalCode,
+        exitedDueToTimeout: result.exitedDueToTimeout,
+        exitedDueToMaxBuffer: result.exitedDueToMaxBuffer,
         stdout: boundedDiagnostic(result.stdout),
         stderr: boundedDiagnostic(result.stderr),
       }
@@ -109,7 +127,12 @@ export function discoverRealRustfmt(
   requireNonInstallingRustup(discovery, rustup, env);
   const result = discovery.query(command, env);
   const selection = { source: 'rustup' as const, command, ...result };
-  if (result.exitCode !== 0) {
+  if (
+    result.exitCode !== 0 ||
+    result.signalCode ||
+    result.exitedDueToTimeout ||
+    result.exitedDueToMaxBuffer
+  ) {
     // Rustup identifies a missing component explicitly. Any other failure,
     // including a timeout or malformed output, must not hide this test.
     const missingComponent =
@@ -120,7 +143,13 @@ export function discoverRealRustfmt(
       /^error: toolchain '[^'\r\n]+' is not installed(?:\r?\nhelp: [^\r\n]+)*(?:\r?\n)?$/.test(
         result.stderr
       );
-    if (result.exitCode === 1 && result.stdout === '') {
+    if (
+      result.exitCode === 1 &&
+      !result.signalCode &&
+      !result.exitedDueToTimeout &&
+      !result.exitedDueToMaxBuffer &&
+      result.stdout === ''
+    ) {
       if (missingComponent)
         return { ...selection, unavailable: 'the pinned rustfmt component is unavailable' };
       if (missingToolchain)
@@ -129,6 +158,9 @@ export function discoverRealRustfmt(
     const diagnostic = {
       command: command.map(boundedDiagnostic),
       exitCode: result.exitCode,
+      signalCode: result.signalCode,
+      exitedDueToTimeout: result.exitedDueToTimeout,
+      exitedDueToMaxBuffer: result.exitedDueToMaxBuffer,
       stdout: boundedDiagnostic(result.stdout),
       stderr: boundedDiagnostic(result.stderr),
     };

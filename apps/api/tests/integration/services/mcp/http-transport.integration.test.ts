@@ -22,6 +22,7 @@ import {
   type McpServerRuntimeConfig,
 } from '../../../../src/services/mcp/types';
 import { createEchoMcpServer } from '../../../support/fixtures/mcp/create-echo-mcp-server';
+import { startSilentMcpHttpEndpoint } from '../../../support/fixtures/mcp/silent-mcp-http-endpoint';
 
 function httpConfig(url: string): McpServerRuntimeConfig {
   return {
@@ -261,13 +262,21 @@ describe('mcp http transport', () => {
     }
   });
 
-  it('reports unreachable servers as McpConnectionError without falling back', async () => {
-    // Port 9 (discard) is unassigned on loopback — connection refused fast.
-    const attempt = connectMcpClient(httpConfig('http://127.0.0.1:9/'), {
-      userId: 'http-transport-user',
-    });
+  it('reports unresponsive servers as McpConnectionError without falling back', async () => {
+    const endpoint = await startSilentMcpHttpEndpoint();
+    try {
+      const attempt = connectMcpClient(
+        { ...httpConfig(endpoint.url), timeoutMs: 250 },
+        {
+          userId: 'http-transport-user',
+        }
+      );
 
-    await expect(attempt).rejects.toBeInstanceOf(McpConnectionError);
+      await expect(attempt).rejects.toBeInstanceOf(McpConnectionError);
+      expect(endpoint.requests).toEqual(['POST /']);
+    } finally {
+      await endpoint.stop();
+    }
   });
 
   for (const [label, answer, fallsBack] of [
