@@ -39,7 +39,8 @@ import {
 } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestChat, insertTestUser } from '../../support/factories';
-import { connectTestRuntime } from '../../support/runtime-fixture';
+import { useLocalConnectDeadlines } from '../../support/local-connect-deadlines';
+import { connectTestRuntime, type TestRuntime } from '../../support/runtime-fixture';
 
 const TEST_MANIFEST: RuntimeCapabilityManifest = {
   platform: 'linux',
@@ -1715,12 +1716,16 @@ describe('RuntimeConnectionManager', () => {
       readonly succeedWith: (connection: ManagedRuntimeConnection) => void;
       readonly fail: (error: Error) => void;
     }> = [];
+    type OpenCall = (typeof calls)[number];
+    const waiters = new Map<number, ReturnType<typeof Promise.withResolvers<OpenCall>>>();
+    let disposed: Error | undefined;
     const open = (options: {
       readonly externalAgentIsolation: 'single-user' | 'withdrawn';
     }): Promise<ManagedRuntimeConnection> => {
+      if (disposed) return Promise.reject(disposed);
       const opened = Promise.withResolvers<ManagedRuntimeConnection>();
       const isolation = options.externalAgentIsolation;
-      calls.push({
+      const pending: OpenCall = {
         isolation,
         succeed: (close = () => undefined) => {
           // eslint-disable-next-line @typescript-eslint/no-misused-promises -- This callback intentionally tests or owns the asynchronous operation described here.
@@ -1732,7 +1737,11 @@ describe('RuntimeConnectionManager', () => {
         fail: (error) => {
           opened.reject(error);
         },
-      });
+      };
+      calls.push(pending);
+      const index = calls.length - 1;
+      waiters.get(index)?.resolve(pending);
+      waiters.delete(index);
       return opened.promise;
     };
     const call = (index: number) => {
@@ -1742,8 +1751,50 @@ describe('RuntimeConnectionManager', () => {
       }
       return found;
     };
-    return { open, call, claims: () => calls.map((entry) => entry.isolation) };
+    const dispose = () => {
+      disposed = new Error('Local open fixture disposed before pending open completed');
+      for (const pending of calls) pending.fail(disposed);
+      for (const waiter of waiters.values()) waiter.reject(disposed);
+      waiters.clear();
+    };
+    const waitForCall = (index: number): Promise<OpenCall> => {
+      if (disposed) return Promise.reject(disposed);
+      const found = calls[index];
+      if (found) return Promise.resolve(found);
+      let waiter = waiters.get(index);
+      if (!waiter) {
+        waiter = Promise.withResolvers<OpenCall>();
+        // Disposal may precede the caller's next await after an assertion fails.
+        void waiter.promise.catch(() => undefined);
+        waiters.set(index, waiter);
+      }
+      return waiter.promise;
+    };
+    return {
+      open,
+      call,
+      waitForCall,
+      dispose,
+      claims: () => calls.map((entry) => entry.isolation),
+    };
   }
+
+  it('settles Local open readiness and rejects late opens when its fixture is disposed', async () => {
+    const opens = scriptedLocalOpen();
+    const pending = opens.open({ externalAgentIsolation: 'single-user' });
+    const outcome = pending.catch((error: unknown) => error);
+    const readiness = opens.waitForCall(1);
+    opens.dispose();
+    expect(await outcome).toBeInstanceOf(Error);
+    expect(String(await outcome)).toContain('Local open fixture disposed');
+    await expect(readiness).rejects.toThrow('Local open fixture disposed');
+    await expect(opens.waitForCall(0)).rejects.toThrow('Local open fixture disposed');
+    await expect(opens.waitForCall(2)).rejects.toThrow('Local open fixture disposed');
+    await expect(opens.open({ externalAgentIsolation: 'withdrawn' })).rejects.toThrow(
+      'Local open fixture disposed'
+    );
+    expect(opens.claims()).toEqual(['single-user']);
+  });
 
   /** Lets the chain deadline lapse so the next attempt starts beside a stuck one. */
   function outlastChainDeadline(): Promise<void> {
@@ -1900,6 +1951,7 @@ describe('RuntimeConnectionManager', () => {
   });
 
   it('keeps withdrawn Local attestation withdrawn through the manager and a manifest refresh', async () => {
+    const { deadlines, restore } = useLocalConnectDeadlines(25);
     const opens = scriptedLocalOpen();
     const local = createLocalRuntimeConnector({
       chainDeadlineMs: 25,
@@ -1908,6 +1960,17 @@ describe('RuntimeConnectionManager', () => {
     // The connector's own outcomes, which the manager hides once it has
     // timed an attempt out and moved on.
     const attempts: Array<Promise<unknown>> = [];
+    const clients: Array<Promise<unknown>> = [];
+    let runtime: TestRuntime | undefined;
+    let runtimeOpening: Promise<TestRuntime> | undefined;
+    let disposed = false;
+    const active = async <T>(pending: Promise<T>): Promise<T> => {
+      const value = await pending;
+      if (disposed)
+        throw new Error('expected active Local attestation fixture | received: disposed');
+      return value;
+    };
+    let originalFailure: { readonly error: unknown } | undefined;
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: (userId) => Promise.resolve(localDefinition(userId)),
       connectors: {
@@ -1920,52 +1983,103 @@ describe('RuntimeConnectionManager', () => {
       connectDeadlinesMs: { 'in-process': 25 },
     });
 
-    const wedged = manager.getClient('user-1', 'local').catch((error: unknown) => error);
-    expect(await wedged).toMatchObject({ message: expect.stringContaining('timed out') });
-    const second = manager.getClient('user-2', 'local');
-    await flushMicrotasks();
-    // A real hub session, so the claim the connector chose is the one the hub
-    // enforces. The peer repeats an attestation in its hello and on health, as
-    // a Local runtime asked to attest would; the withdrawal must outrank both.
-    const runtime = await connectTestRuntime({
-      manifest: { ...TEST_MANIFEST, identityIsolation: ATTESTED },
-      externalAgentIsolation: opens.call(1).isolation,
-      handlers: {
-        'runtime.health': () => ({
-          ...HEALTH_REPORT,
-          externalAgents: {
-            targets: [],
-            identityIsolation: ATTESTED,
-            liveSessionCount: 0,
-            liveSessions: [],
-          },
-        }),
-      },
-    });
-    opens.call(1).succeedWith({ client: runtime.client, close: () => runtime.close() });
-    await second;
-    let lateCloses = 0;
-    opens.call(0).succeed(() => {
-      lateCloses += 1;
-    });
-    await flushMicrotasks();
-    const refreshed = await manager.refreshManifest('user-2', 'local');
+    const scenario = async () => {
+      const wedged = manager.getClient('user-1', 'local').catch((error: unknown) => error);
+      clients.push(wedged);
+      await active(
+        deadlines.within(deadlines.managerAndChainArmed, 'manager and chain registration', 2_000)
+      );
+      expect(deadlines.delays).toEqual([25, 25]);
+      expect(opens.claims()).toEqual(['single-user']);
+      // The manager may time out before the separate Local chain deadline fires.
+      deadlines.fire(0);
+      expect(await active(wedged)).toMatchObject({ message: expect.stringContaining('timed out') });
+      const second = manager.getClient('user-2', 'local');
+      clients.push(second.catch((error: unknown) => error));
+      const nextOpen = opens.waitForCall(1);
+      await active(flushMicrotasks());
+      expect(opens.claims()).toEqual(['single-user']);
+      deadlines.fire(1);
+      const secondOpen = await active(deadlines.within(nextOpen, 'second Local open', 2_000));
+      expect(deadlines.delays).toEqual([25, 25, 25, 25]);
+      // A real hub session, so the claim the connector chose is the one the hub
+      // enforces. The peer repeats an attestation in its hello and on health, as
+      // a Local runtime asked to attest would; the withdrawal must outrank both.
+      runtimeOpening = connectTestRuntime({
+        manifest: { ...TEST_MANIFEST, identityIsolation: ATTESTED },
+        externalAgentIsolation: secondOpen.isolation,
+        handlers: {
+          'runtime.health': () => ({
+            ...HEALTH_REPORT,
+            externalAgents: {
+              targets: [],
+              identityIsolation: ATTESTED,
+              liveSessionCount: 0,
+              liveSessions: [],
+            },
+          }),
+        },
+      });
+      runtime = await active(runtimeOpening);
+      const connectedRuntime = runtime;
+      secondOpen.succeedWith({
+        client: connectedRuntime.client,
+        close: () => connectedRuntime.close(),
+      });
+      await active(second);
+      let lateCloses = 0;
+      opens.call(0).succeed(() => {
+        lateCloses += 1;
+      });
+      const lateOutcome = await active(attempts[0]);
+      const refreshed = await active(manager.refreshManifest('user-2', 'local'));
 
-    try {
       expect(opens.claims()).toEqual(['single-user', 'withdrawn']);
       expect({
         user1: manager.isIdentityAttested('user-1', 'local'),
         user2: manager.isIdentityAttested('user-2', 'local'),
       }).toEqual({ user1: false, user2: false });
       expect(refreshed.manifest?.identityIsolation).toBeUndefined();
-      expect(await attempts[0]).toMatchObject({
+      expect(lateOutcome).toMatchObject({
         message: expect.stringContaining('withdrawn while it was connecting'),
       });
       expect(lateCloses).toBe(1);
-    } finally {
-      manager.disconnect('user-2', 'local');
-      await runtime.close();
+    };
+    try {
+      await deadlines.within(scenario(), 'Local attestation scenario', 5_000);
+    } catch (error) {
+      originalFailure = { error };
     }
+    disposed = true;
+    opens.dispose();
+    const cleanupFailures: unknown[] = [];
+    try {
+      const cleanup = await deadlines.within(
+        Promise.allSettled([
+          Promise.resolve().then(() => manager.shutdown()),
+          Promise.resolve().then(() => runtimeOpening?.then((connection) => connection.close())),
+          ...attempts,
+          ...clients,
+        ]),
+        'Local attestation cleanup',
+        5_000
+      );
+      cleanupFailures.push(
+        ...cleanup.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []))
+      );
+    } catch (error) {
+      cleanupFailures.push(error);
+    } finally {
+      restore();
+    }
+    if (cleanupFailures.length) {
+      throw new AggregateError(
+        [...(originalFailure ? [originalFailure.error] : []), ...cleanupFailures],
+        'Local attestation fixture cleanup failed',
+        { cause: originalFailure?.error }
+      );
+    }
+    if (originalFailure) throw originalFailure.error;
   });
 
   it('re-reads a stale manifest in the background, once, without blocking the read', async () => {
@@ -2317,5 +2431,80 @@ describe('RuntimeConnectionManager — activity transitions', () => {
         state: 'disconnected',
       },
     ]);
+  });
+});
+
+describe('Local deadline fixture lifetime', () => {
+  const nativeSchedule = globalThis.setTimeout;
+  const nativeCancel = globalThis.clearTimeout;
+  let restorePrevious: () => void = () => undefined;
+
+  it('finishes while a missing registration remains observed', () => {
+    const scope = useLocalConnectDeadlines(25);
+    restorePrevious = scope.restore;
+    void scope.deadlines.managerAndChainArmed.then(scope.restore, () => undefined);
+  });
+
+  it('restores native timers before the following test', async () => {
+    let guard: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const fired = new Promise<boolean>((resolve) => {
+        setTimeout(() => resolve(true), 25);
+        guard = nativeSchedule(() => resolve(false), 250);
+      });
+      const value = await fired;
+      restorePrevious();
+      expect(
+        value,
+        'expected following native 25ms timer | received: captured by prior scope'
+      ).toBe(true);
+    } finally {
+      nativeCancel(guard);
+      restorePrevious();
+    }
+  });
+
+  it('does not let a late restore overwrite a newer scope', () => {
+    const first = useLocalConnectDeadlines(25);
+    first.restore();
+    const second = useLocalConnectDeadlines(25);
+    try {
+      first.restore();
+      setTimeout(() => undefined, 25);
+      expect(second.deadlines.delays).toEqual([25]);
+    } finally {
+      second.restore();
+    }
+  });
+
+  it('bounds missing registration and stalled cleanup with native time', async () => {
+    const { deadlines, restore } = useLocalConnectDeadlines(25);
+    const safety = nativeSchedule(restore, 500);
+    try {
+      await expect(
+        deadlines.within(deadlines.managerAndChainArmed, 'missing registration', 25)
+      ).rejects.toThrow('expected missing registration to settle within 25ms | received: pending');
+      const stalledCleanup = Promise.withResolvers<void>();
+      await expect(deadlines.within(stalledCleanup.promise, 'stalled cleanup', 25)).rejects.toThrow(
+        'expected stalled cleanup to settle within 25ms | received: pending'
+      );
+      // Rejection after a native bound expires must remain observed.
+      stalledCleanup.reject(new Error('late cleanup rejection'));
+      expect(await deadlines.within(Promise.resolve('settled'), 'completed cleanup', 25)).toBe(
+        'settled'
+      );
+      const pending = deadlines.within(new Promise<void>(() => undefined), 'disposed cleanup', 25);
+      restore();
+      await expect(pending).rejects.toThrow('Local deadline fixture disposed');
+      await expect(
+        deadlines.within(Promise.reject(new Error('late task')), 'future cleanup', 25)
+      ).rejects.toThrow('expected active Local fixture for future cleanup | received: disposed');
+      expect(() => deadlines.fire(0)).toThrow(
+        'expected active Local deadline #0 | received: missing or cleared'
+      );
+    } finally {
+      nativeCancel(safety);
+      restore();
+    }
   });
 });
