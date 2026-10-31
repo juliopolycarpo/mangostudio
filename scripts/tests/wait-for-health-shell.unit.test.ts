@@ -7,6 +7,10 @@ import { FixtureCommands } from './support/fixture-command';
 const helper = join(import.meta.dir, '../release/wait-for-health.sh');
 const commands = new FixtureCommands(undefined, 8_000);
 const shellTest = test.skipIf(process.platform === 'win32');
+// Check liveness by poll order, independent of the shell clock's starting phase.
+const firstPollAliveCheck =
+  // eslint-disable-next-line no-template-curly-in-string -- Bash expands this literal fixture expression in the child shell.
+  'health_alive_checks=${health_alive_checks:-0}; ((health_alive_checks += 1)); ((health_alive_checks < 2))';
 
 afterEach(async () => {
   await commands.settle();
@@ -149,20 +153,39 @@ describe('scripts/release/wait-for-health.sh', () => {
   );
 
   shellTest.each([
-    { label: 'before the first request', aliveCheck: 'false', requests: 0 },
-    { label: 'between unsuccessful polls', aliveCheck: '((SECONDS < 1))', requests: 1 },
-  ])('returns 2 when alive_check fails $label', async ({ aliveCheck, requests }) => {
-    const endpoint = new FakeHealthEndpoint('unavailable');
-    const url = await endpoint.listen();
-    try {
-      const result = await runHealth(url, aliveCheck, '3');
-      expect(result.exitCode, result.stderr).toBe(2);
-      expect(endpoint.requests).toBe(requests);
-      await endpoint.waitForNoSockets();
-    } finally {
-      await endpoint.stop();
+    {
+      label: 'before the first request',
+      aliveCheck: 'false',
+      requests: 0,
+      initialSeconds: undefined,
+    },
+    {
+      label: 'between unsuccessful polls',
+      aliveCheck: firstPollAliveCheck,
+      requests: 1,
+      initialSeconds: undefined,
+    },
+    {
+      label: 'between unsuccessful polls after a clock tick',
+      aliveCheck: firstPollAliveCheck,
+      requests: 1,
+      initialSeconds: 1,
+    },
+  ])(
+    'returns 2 when alive_check fails $label',
+    async ({ aliveCheck, requests, initialSeconds }) => {
+      const endpoint = new FakeHealthEndpoint('unavailable');
+      const url = await endpoint.listen();
+      try {
+        const result = await runHealth(url, aliveCheck, '3', undefined, false, initialSeconds);
+        expect(result.exitCode, result.stderr).toBe(2);
+        expect(endpoint.requests).toBe(requests);
+        await endpoint.waitForNoSockets();
+      } finally {
+        await endpoint.stop();
+      }
     }
-  });
+  );
 
   shellTest('does not start curl after alive_check consumes the remaining budget', async () => {
     const endpoint = new FakeHealthEndpoint('ready');
@@ -214,8 +237,10 @@ function runHealth(
   aliveCheck: string,
   retries: string,
   override?: string,
-  alignClock = false
+  alignClock = false,
+  initialSeconds?: number
 ) {
+  const clockStart = initialSeconds === undefined ? '' : `SECONDS=${initialSeconds}; `;
   const alignment = alignClock
     ? 'clock=$SECONDS; while [ "$SECONDS" -eq "$clock" ]; do sleep 0.01; done; '
     : '';
@@ -223,7 +248,7 @@ function runHealth(
     [
       'bash',
       '-c',
-      `set -euo pipefail; source "$1"; ${alignment}wait_for_health "$2" "$3" "$4"`,
+      `set -euo pipefail; source "$1"; ${clockStart}${alignment}wait_for_health "$2" "$3" "$4"`,
       '--',
       helper,
       new URL(url).port,
