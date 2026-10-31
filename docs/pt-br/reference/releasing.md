@@ -76,7 +76,7 @@ publica cada canal de forma independente. A tag carrega o próprio
 
 | Secret                      | Usado por                                                | Escopo                                                                                                                      |
 | --------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`                 | `npm-publish` (env opcional), `npm-canary` (repo)        | Token legado só quando `workflow_dispatch` define `allow_legacy_npm_token=true`; secret do repositório para canary          |
+| `NPM_TOKEN`                 | `npm-publish` (env opcional)                             | Token legado só quando `workflow_dispatch` define `allow_legacy_npm_token=true`                                             |
 | `DIST_REPOS_TOKEN`          | `homebrew`, `scoop`                                      | Secret do environment `release` — PAT fine-grained com contents read/write no tap Homebrew e no bucket Scoop                |
 | `CARGO_REGISTRY_TOKEN`      | `cargo-publish` (opcional)                               | Token legado do crates.io usado só quando `workflow_dispatch` define `allow_legacy_cargo_token=true`                        |
 | _(built-in `GITHUB_TOKEN`)_ | `github-release`, `docker`, o canal canary, attestations | Sem setup extra — releases por tag concedem `packages: write` para GHCR e `id-token: write` para OIDC do crates.io e do npm |
@@ -93,8 +93,8 @@ como secrets soltos no repositório:
   `homebrew`, `scoop` e `cargo-publish`. Um novo canal de publish entra neste
   environment; não se adiciona um secret de repositório.
 - **Canary fica de fora:** `.github/workflows/canary.yml` publica a cada push
-  verde em `main`, o que a regra de tag bloquearia. Continua usando o
-  `NPM_TOKEN` com escopo de repositório.
+  verde em `main`, o que a regra de tag bloquearia. Usa Trusted Publishing OIDC
+  pelo workflow chamador `ci.yml`, com environment vazio.
 - **Dispatch manual:** como o environment é restrito a tags, um
   `workflow_dispatch` de `release.yml` precisa apontar para uma ref de tag
   `v*.*.*` (`gh workflow run release.yml --ref v0.2.0`), não para um branch.
@@ -107,9 +107,18 @@ Complete uma vez por fork ou org antes do primeiro push de tag:
 2. Crie o bucket Scoop compartilhado [`juliopolycarpo/scoop-bucket`](https://github.com/juliopolycarpo/scoop-bucket) com diretório `bucket/`.
 3. Reserve o nome do crate `mangostudio` no [crates.io](https://crates.io) e gere um token de API só se ainda precisar do fallback legado temporário.
 4. Configure Trusted Publishing no crates.io para o crate `mangostudio`: **Settings -> Trusted Publishing -> Add -> GitHub**, repository owner `juliopolycarpo`, repository name `mangostudio`, workflow filename `release.yml`, e deixe o campo de environment vazio. O job `cargo-publish` declara `environment: release`, mas configs do crates.io sem environment continuam batendo — só preencha o environment no crates.io se quiser exigir um de propósito.
-5. Crie o GitHub Environment `release` (regra de tag `v*.*.*`, sem reviewers) e adicione `DIST_REPOS_TOKEN` como secret do **environment**. Mantenha `NPM_TOKEN` no environment só enquanto o escape hatch `allow_legacy_npm_token` ainda puder ser necessário. Mantenha um `NPM_TOKEN` com escopo de repositório para o canary. Mantenha `CARGO_REGISTRY_TOKEN` só enquanto o escape hatch `allow_legacy_cargo_token` ainda for necessário. Depois de uma release verde pelo environment, remova o `DIST_REPOS_TOKEN` de nível de repositório.
+5. Crie o GitHub Environment `release` (regra de tag `v*.*.*`, sem reviewers) e adicione `DIST_REPOS_TOKEN` como secret do **environment**. Mantenha `NPM_TOKEN` no environment só enquanto o escape hatch `allow_legacy_npm_token` ainda puder ser necessário. Mantenha `CARGO_REGISTRY_TOKEN` só enquanto o escape hatch `allow_legacy_cargo_token` ainda for necessário. Depois de uma release verde pelo environment, remova o `DIST_REPOS_TOKEN` de nível de repositório.
 6. Depois que uma release provar que `cargo-publish` gerou o token de Trusted Publishing, revogue e remova `CARGO_REGISTRY_TOKEN`.
-7. Configure Trusted Publishing no npm para `mangostudio` e cada pacote `@mangostudio/cli-*` (**Settings -> Trusted Publisher**): repositório `juliopolycarpo/mangostudio`, workflow `release.yml`, environment `release`, ação `npm publish`. O npm permite até 10 trusted publishers por pacote, então uma segunda linha poderia registrar o workflow chamador do canary, `ci.yml` (não `canary.yml`) — mas `.github/workflows/canary.yml` sempre exige e usa o `NPM_TOKEN` do repositório hoje; registrar essa linha não remove a necessidade do token até que o próprio workflow migre para OIDC (fora do escopo aqui). Não ative “disallow tokens” no npm enquanto o canary ainda precisar desse token.
+7. Configure duas entradas de Trusted Publishing no npm para cada pacote abaixo, em **Settings -> Trusted Publisher**. Ambas usam owner `juliopolycarpo`, repository `mangostudio` e ação `npm publish` (habilite publicação direta):
+   - Releases estáveis: workflow `release.yml`, GitHub Environment `release`.
+   - Canary: workflow `ci.yml`, environment vazio. O npm valida o workflow chamador, então use `ci.yml` mesmo que o passo de publish rode no workflow reutilizável `canary.yml`. Ambos concedem `id-token: write`.
+
+   O inventário mantido de empacotamento npm inclui `mangostudio`, `@mangostudio/cli-linux-x64`, `@mangostudio/cli-linux-arm64`, `@mangostudio/cli-darwin-x64`, `@mangostudio/cli-darwin-arm64`, `@mangostudio/cli-win32-x64` e `@mangostudio/cli-win32-arm64`. Configure cada pacote. Veja os [requisitos de Trusted Publishing do npm](https://docs.npmjs.com/trusted-publishers/).
+
+   Uma nova configuração de publisher precisa de um publish bem-sucedido em até 48 horas; esse primeiro publish a valida. Recrie uma configuração expirada, pois editá-la não reinicia o prazo. Veja a [janela de validação do publisher no npm](https://github.blog/changelog/2026-10-02-unvalidated-npm-trusted-publishing-configurations-now-expire/).
+
+   A configuração no registry é separada do workflow no repositório. Verifique o primeiro canary publicado conferindo todas as versões esperadas, a dist-tag `canary` e a proveniência. Check local ou dry run não prova autorização no npm. Após um canary via OIDC bem-sucedido, remova o `NPM_TOKEN` do repositório se nenhum outro workflow o usar. Mantenha publicação por token habilitada apenas enquanto o dispatch legado explícito de release estável for necessário.
+
 8. Após a primeira release estável verde via OIDC no npm, remova o `NPM_TOKEN` do environment `release` se o caminho legado não for mais necessário.
 9. Após o primeiro push no GHCR, defina a visibilidade do pacote `ghcr.io/juliopolycarpo/mangostudio` como **public** nas configurações de pacotes do GitHub.
 10. Não é preciso token extra nem ajuste de proteção de branch para o changelog: `CHANGELOG.md` entra em `main` no commit de preparação da release (`bun run release:prepare`) **antes** do push da tag, e o workflow de release apenas verifica que ele está lá.

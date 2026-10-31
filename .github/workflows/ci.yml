@@ -386,7 +386,7 @@ jobs:
     permissions:
       attestations: write # canary jobs verify build provenance and attest this build's checksums
       contents: write # canary.yml creates this commit's GitHub pre-release
-      id-token: write # npm provenance for the canary dist-tag publish and the checksum attestation
+      id-token: write # npm Trusted Publishing OIDC and canary checksum attestation
     uses: ./.github/workflows/canary.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
@@ -394,8 +394,6 @@ jobs:
       channel: ${{ needs.distribution-identity.outputs.channel }}
       assets_artifact: ${{ needs.distribution.outputs.assets_artifact }}
       npm_artifact: ${{ needs.distribution.outputs.npm_artifact }}
-    secrets:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   runtime-cache-seed:
     # Saves the light-profile cargo cache entry that pull request distribution

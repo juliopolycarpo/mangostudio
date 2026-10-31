@@ -32,10 +32,6 @@ on:
       npm_artifact:
         type: string
         required: true
-    secrets:
-      NPM_TOKEN:
-        description: npm token used to publish under the canary dist-tag.
-        required: true
 
 permissions:
   contents: read
@@ -59,17 +55,11 @@ jobs:
     permissions:
       attestations: read # fetch build provenance for gh attestation verify
       contents: read # checkout only; publish goes to npm, not the repo
-      id-token: write # npm provenance attestation for the canary publish
+      id-token: write # npm Trusted Publishing OIDC and provenance for the canary publish
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Preflight npm canary secret
-        uses: ./.github/actions/require-secret
-        with:
-          name: NPM_TOKEN
-          value: "${{ secrets.NPM_TOKEN }}"
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -94,9 +84,8 @@ jobs:
         name: Publish to npm under the canary dist-tag
         uses: ./.github/actions/publish-npm-distribution
         with:
-          allow-legacy-token: "true"
+          allow-legacy-token: "false"
           dist-tag: canary
-          node-auth-token: ${{ secrets.NPM_TOKEN }}
           node-version: "22.14.0"
 
   github-release-canary:
