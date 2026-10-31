@@ -874,14 +874,29 @@ Complete-NativeJobEvidence $receipt $child $before C:\evidence
 #>
 function Complete-NativeJobEvidence([object]$Receipt, [object]$Child, [object[]]$Before, [string]$Out, [scriptblock]$Census = ${function:Get-NativeJobCensus}, [object]$CensusContext = $null) {
     $receiptPath = Join-Path $Out 'job-receipt.json'
-    $Receipt.finalClose = @{ at = [DateTime]::UtcNow.ToString('o'); preClose = $null; queryError = $null; census = @(); outcomeBeforeClose = $Receipt.status; operation = 'CloseHandle(private kill-on-close job)'; successfulSettlementEvidence = $false }
+    $Receipt.finalClose = @{ at = [DateTime]::UtcNow.ToString('o'); preClose = $null; queryError = $null; censusError = $null; census = @(); outcomeBeforeClose = $Receipt.status; operation = 'CloseHandle(private kill-on-close job)'; successfulSettlementEvidence = $false }
     try {
         $Receipt.finalClose.preClose = $Child.Query()
+        $snapshot = $Receipt.finalClose.preClose
+        $members = @($CensusContext)
+        if ($snapshot.Stable -and $snapshot.Empty -eq ($snapshot.Assigned -eq 0) -and $snapshot.Assigned -eq $snapshot.Returned -and
+            $snapshot.Assigned -eq $snapshot.ActiveBefore -and $snapshot.Assigned -eq $snapshot.ActiveAfter -and
+            $snapshot.Assigned -eq $snapshot.Members.Count -and
+            @($snapshot.Members | Where-Object { -not $_.IsMember -or -not $_.Alive -or -not $_.Identity -or -not $_.CensusIdentity }).Count -eq 0) {
+            $members += @($snapshot.Members)
+        }
+        try {
+            $full = & $Census $members $CensusContext; Assert-NativeJobCensus $full
+            $Receipt.finalClose.census = $full
+        } catch {
+            $Receipt.finalClose.censusError = $_.Exception.ToString()
+            $Receipt.errors += "Final open-job census failed: $($_.Exception.ToString())"
+            $Receipt.status = 'failed'
+        }
         if (-not $Receipt.finalClose.preClose.Empty -or -not $Receipt.finalClose.preClose.Stable -or
             $Receipt.finalClose.preClose.Assigned -ne 0 -or $Receipt.finalClose.preClose.Returned -ne 0 -or
             $Receipt.finalClose.preClose.ActiveBefore -ne 0 -or $Receipt.finalClose.preClose.ActiveAfter -ne 0 -or $Receipt.finalClose.preClose.Members.Count) { throw "Final open-job snapshot retained $($Receipt.finalClose.preClose.Members.Count) members; expected complete stable empty before close" }
-        $full = & $Census $CensusContext; Assert-NativeJobCensus $full
-        $Receipt.finalClose.census = $full
+        if ($Receipt.finalClose.censusError) { throw 'Final open-job census unavailable; expected complete census' }
         $unknown = @(Find-NativeJobAmbiguity $Before $full $Receipt.finalClose.preClose.Members $Child)
         if ($unknown.Count) { throw "Final open-job census has $($unknown.Count) new unattributed MSVC helpers; expected none" }
     } catch { $Receipt.finalClose.queryError = $_.Exception.ToString(); $Receipt.errors += "Final boundary failed: $($_.Exception.ToString())"; $Receipt.status = 'failed' }
@@ -891,7 +906,7 @@ function Complete-NativeJobEvidence([object]$Receipt, [object]$Child, [object[]]
     Write-NativeJobJson $receiptPath $Receipt
     try { $Child.CloseJob(); $Child.Dispose() } catch { $Receipt.errors += "Final exact-job close failed: $($_.Exception.ToString())"; $Receipt.status = 'failed' }
     try {
-        $full = & $Census $CensusContext; Assert-NativeJobCensus $full
+        $full = & $Census $CensusContext $CensusContext; Assert-NativeJobCensus $full
         $Receipt.postCloseCensus = $full; Write-NativeJobJson (Join-Path $Out 'processes-post-close.json') $full
         $unknown = @(Find-NativeJobAmbiguity $Before $full @())
         if ($unknown.Count) { throw "Post-close census has $($unknown.Count) new unattributed MSVC helpers; expected none" }

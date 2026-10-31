@@ -128,7 +128,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/release-trust"
-          git archive refs/remotes/origin/main | tar -x -C "$RUNNER_TEMP/release-trust"
+          git archive --output="$RUNNER_TEMP/release-trust.tar" refs/remotes/origin/main
+          tar -x -C "$RUNNER_TEMP/release-trust" < "$RUNNER_TEMP/release-trust.tar"
+          rm "$RUNNER_TEMP/release-trust.tar"
           echo "Trusted release policy source: $(git rev-parse refs/remotes/origin/main)"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:

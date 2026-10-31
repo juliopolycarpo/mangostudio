@@ -40,8 +40,12 @@ describe('scripts/release/wait-for-health.sh', () => {
     async () => {
       const endpoint = new FakeHealthEndpoint('delayed-unavailable-then-no-headers');
       const url = await endpoint.listen();
-      const pending = runHealth(url, ':', '3');
+      const pending = runHealth(url, ':', '3', undefined, true);
       try {
+        // Exclude clock alignment from the request budget.
+        const startDeadline = performance.now() + 2_000;
+        while (endpoint.requests === 0 && performance.now() < startDeadline) await Bun.sleep(5);
+        expect(endpoint.requests, 'expected the first health request within 2000ms').toBe(1);
         // Three nominal seconds, one quantization tick, and 500ms scheduler slack.
         const observed = await observeWithin(pending, 4_500);
         expect(endpoint.requests, 'expected delayed503 followed by a real stalled request').toBe(2);

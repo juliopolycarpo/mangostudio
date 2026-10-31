@@ -97,7 +97,12 @@ describe('native Windows Job helper census', () => {
     expect(helper).toContain(
       'Complete-NativeJobEvidence $receipt $child $before $out -CensusContext $receipt.observed'
     );
-    expect(helper).toContain('$full = & $Census $CensusContext');
+    expect(helper).toContain('$full = & $Census $members');
+    expect(helper).toContain('$members += @($snapshot.Members)');
+    expect(helper).toContain('$snapshot.Assigned -eq $snapshot.Members.Count');
+    expect(helper).toContain(
+      '-not $_.IsMember -or -not $_.Alive -or -not $_.Identity -or -not $_.CensusIdentity'
+    );
   });
 });
 
@@ -188,7 +193,7 @@ describe('native Windows Job helper wrapper deadline', () => {
       censusCount:
         count(/^\s+\$before = Get-NativeJobCensus; /gm) +
         count(/^\s+\$receipt\.\w+Census = Get-NativeJobCensus @\(\$seen\.Values\)$/gm) +
-        count(/\$full = & \$Census \$CensusContext/g),
+        count(/\$full = & \$Census \$(?:CensusContext|members)/g),
       censusTimeoutMs: Number(/-OperationTimeoutSec (\d+)/.exec(helper)?.[1]) * 1_000,
       ambiguityPassCount: count(/= @\(Find-NativeJobAmbiguity /g),
       imageQueryBudgetMs: Number(/const int MaximumMilliseconds=(\d+);/.exec(helper)?.[1]),

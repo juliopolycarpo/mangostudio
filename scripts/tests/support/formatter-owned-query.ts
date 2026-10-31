@@ -58,6 +58,23 @@ export class FormatterQueryExpiry extends Error {
 }
 
 /**
+ * A private query deadline expired before an incomplete observation was cleaned up.
+ * @example if (error instanceof FormatterQueryObservationExpiry) console.error(error.timeoutMs);
+ */
+export class FormatterQueryObservationExpiry extends Error {
+  constructor(
+    readonly pid: number,
+    readonly timeoutMs: number,
+    reason: unknown
+  ) {
+    super(`formatter ${pid}: native query observation incomplete after ${timeoutMs}ms`, {
+      cause: reason,
+    });
+    this.name = 'FormatterQueryObservationExpiry';
+  }
+}
+
+/**
  * Bound one native ps child with a private signal and retain abort/exit ordering.
  * @example const result = await queryOwnedFormatterProcess(marker.pid, remainingMs);
  */
@@ -185,6 +202,8 @@ export async function queryOwnedFormatterProcess(
       if (!childExited)
         cleanupFailures.push(new Error(`formatter ${pid}: native query exit was not confirmed`));
     }
+    if (incomplete && ownedExpiryBeforeExit && !independent.length && !cleanupFailures.length)
+      throw new FormatterQueryObservationExpiry(pid, timeoutMs, signal.reason);
     if (incomplete)
       cleanupFailures.unshift(
         new Error(`formatter ${pid}: native query observation incomplete after ${timeoutMs}ms`)
