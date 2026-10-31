@@ -21,6 +21,8 @@ export interface NpmCommandResult {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
+  /** Sanitized evidence rendered only after retry classification. */
+  readonly diagnostics?: readonly string[];
 }
 
 export interface NpmRunner {
@@ -473,7 +475,7 @@ function commandOutput(result: NpmCommandResult): string {
 }
 
 function formatOutput(result: NpmCommandResult): string {
-  const output = commandOutput(result);
+  const output = [commandOutput(result), ...(result.diagnostics ?? [])].filter(Boolean).join('\n');
   return output.length > 0 ? `\n${output}` : '';
 }
 

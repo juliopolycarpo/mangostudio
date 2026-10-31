@@ -19,6 +19,7 @@ import {
   type ProvenancePolicy,
   publishPackages,
 } from '../lib/npm-publish';
+import { sanitizeNpmPublishResult } from '../lib/npm-publish-diagnostics';
 import { error, header, log, success, warn } from '../lib/runner';
 
 interface CliArgs {
@@ -34,7 +35,9 @@ class RegistryRunner implements NpmRunner {
     // a pinned npm CLI via npx so provenance/trusted-publishing needs (>=11.5.1)
     // are met without an ad-hoc global install in the workflow.
     const cmd =
-      args[0] === 'view' ? ['bun', 'pm', ...args] : ['npx', '--yes', 'npm@11.5.1', ...args];
+      args[0] === 'view'
+        ? ['bun', 'pm', ...args]
+        : ['npx', '--yes', 'npm@11.5.1', '--loglevel=verbose', ...args];
     const proc = Bun.spawn({
       cmd,
       cwd: options.cwd,
@@ -48,7 +51,8 @@ class RegistryRunner implements NpmRunner {
       new Response(proc.stderr).text(),
       proc.exited,
     ]);
-    return { exitCode, stdout, stderr };
+    const result = { exitCode, stdout, stderr };
+    return args[0] === 'view' ? result : sanitizeNpmPublishResult(result, process.env);
   }
 }
 
