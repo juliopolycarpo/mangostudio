@@ -40,7 +40,8 @@ afterEach(async () => {
       );
     await rm(target.path, { recursive: true, force: true });
   }
-  await Promise.all(scratch.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  for (const path of scratch.splice(0).sort((left, right) => right.length - left.length))
+    await rm(path, { recursive: true, force: true });
 });
 class DiscardedDriverOutput extends Writable {
   override _write(_chunk: Buffer, _encoding: BufferEncoding, done: () => void): void {
@@ -81,6 +82,23 @@ class FakeRustCostCommands {
     await copyFile(
       join(ROOT, 'crates/mangostudio-runtime/src/main.rs'),
       join(this.sourceRoot, 'crates/mangostudio-runtime/src/main.rs')
+    );
+    const driver = join(this.sourceRoot, 'scripts/bench/rust-costs.ts');
+    const driverSource = await readFile(driver, 'utf8');
+    const configCall = 'inspectRustCostCargoConfigs(ROOT, process.env, names)';
+    if (driverSource.split(configCall).length !== 2)
+      throw new Error('Named Cargo config fake: expected one config-file boundary');
+    const reader = `import { OwnedCargoConfigFiles } from '../tests/support/owned-cargo-config-files';
+const OWNED_CONFIG_FILES = new OwnedCargoConfigFiles(${JSON.stringify(this.directory)});
+`;
+    await Bun.write(
+      driver,
+      driverSource
+        .replace('#!/usr/bin/env bun\n', `#!/usr/bin/env bun\n${reader}`)
+        .replace(
+          configCall,
+          'inspectRustCostCargoConfigs(ROOT, process.env, names, OWNED_CONFIG_FILES)'
+        )
     );
     if (this.completedBuildMutation) {
       const resourceHost = join(this.sourceRoot, 'scripts/lib/process-resource-host.ts');
@@ -147,6 +165,40 @@ else if (args[0] === 'build') {
 describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
   'Rust cost driver cancellation',
   () => {
+    it('reaches named metadata despite an unsupported outside-owned ancestor config', async () => {
+      const container = await mkdtemp(join(tmpdir(), 'rust-cost-driver-ancestor-test-'));
+      const root = join(container, 'owned');
+      scratch.push(container, root);
+      const outside = join(container, '.cargo/config.toml');
+      await Bun.write(outside, '[build]\nrustc-wrapper = "outside-owned-wrapper"\n');
+      const fixture = new FakeRustCostCommands(root, true);
+      const bin = await fixture.create();
+      const result = await runNativeCommand({
+        label: 'driver-owned-config-boundary',
+        command: [
+          process.execPath,
+          join(fixture.sourceRoot, 'scripts/bench/rust-costs.ts'),
+          '--execute',
+          '--out',
+          join(root, 'study'),
+        ],
+        root: fixture.sourceRoot,
+        out: root,
+        env: fixture.environment(process.env, bin),
+        timeoutSeconds: 10,
+        stream: new DiscardedDriverOutput(),
+      });
+      const stderr = await readFile(
+        join(root, 'logs/driver-owned-config-boundary.stderr.log'),
+        'utf8'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.timedOut).toBe(false);
+      expect(result.settlement.empty).toBe(true);
+      expect(existsSync(join(root, 'metadata-reached')), stderr).toBe(true);
+      expect(stderr).toContain('metadata-default: expected successful command');
+      expect(stderr).not.toContain(`Rust baseline Cargo config ${outside}`);
+    });
     it('preserves the production guard against an inherited Cargo target', async () => {
       const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-guard-test-'));
       scratch.push(root);

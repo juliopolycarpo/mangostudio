@@ -2,6 +2,15 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
+/** Configuration text I/O; implementations retain filesystem errno codes for absent/read-failure handling. */
+export interface RustCostConfigFiles {
+  read(path: string): Promise<string>;
+}
+
+const CARGO_CONFIG_FILES: RustCostConfigFiles = {
+  read: (path) => readFile(path, 'utf8'),
+};
+
 const PRESENCE_SELECTORS = new Set(['RUSTC_BOOTSTRAP', 'RUSTC_STAGE']);
 
 const EXTERNAL_TABLES = new Set(['net', 'http', 'registry', 'registries', 'credential-alias']);
@@ -53,7 +62,8 @@ export function assertRustCostEnvironment(env: NodeJS.ProcessEnv): void {
 export async function inspectRustCostCargoConfigs(
   root: string,
   env: NodeJS.ProcessEnv,
-  tracked: readonly string[]
+  tracked: readonly string[],
+  files: RustCostConfigFiles = CARGO_CONFIG_FILES
 ): Promise<Record<string, string | null>> {
   const roots = new Set<string>();
   let ancestor = resolve(root);
@@ -67,16 +77,16 @@ export async function inspectRustCostCargoConfigs(
   const trusted = new Set(tracked.map((path) => resolve(root, path)));
   const hashes: Record<string, string | null> = {};
   for (const directory of roots) {
-    const files = await Promise.all(
+    const candidates = await Promise.all(
       ['config', 'config.toml'].map(async (name) => {
         const path = join(directory, name);
-        const content = await optionalConfig(path);
+        const content = await optionalConfig(path, files);
         hashes[path] =
           content === null ? null : new Bun.CryptoHasher('sha256').update(content).digest('hex');
         return { path, content };
       })
     );
-    const active = files.find(({ content }) => content !== null);
+    const active = candidates.find(({ content }) => content !== null);
     if (active && active.content !== null)
       validateConfig(active.path, active.content, trusted.has(active.path));
   }
@@ -85,9 +95,9 @@ export async function inspectRustCostCargoConfigs(
   );
 }
 
-async function optionalConfig(path: string): Promise<string | null> {
+async function optionalConfig(path: string, files: RustCostConfigFiles): Promise<string | null> {
   try {
-    return await readFile(path, 'utf8');
+    return await files.read(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw new Error(

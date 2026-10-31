@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, parse, sep } from 'node:path';
 
 import { assertRustCostEnvironment, inspectRustCostCargoConfigs } from '../lib/rust-cost-inputs';
+import { OwnedCargoConfigFiles } from './support/owned-cargo-config-files';
 
 const scratch: string[] = [];
 afterEach(async () => {
@@ -25,7 +26,12 @@ class CargoConfigFixture {
   inspect(
     tracked: readonly string[] = ['.cargo/config.toml']
   ): Promise<Record<string, string | null>> {
-    return inspectRustCostCargoConfigs(this.root, { CARGO_HOME: this.home }, tracked);
+    return inspectRustCostCargoConfigs(
+      this.root,
+      { CARGO_HOME: this.home },
+      tracked,
+      new OwnedCargoConfigFiles(this.directory)
+    );
   }
 }
 
@@ -96,6 +102,18 @@ describe('Rust cost environment admission', () => {
 });
 
 describe('Rust cost Cargo configuration admission and seal', () => {
+  test('isolates unsupported ancestor configuration outside the owned fixture while production remains strict', async () => {
+    const container = await mkdtemp(join(tmpdir(), 'rust-cost-config-ancestor-'));
+    scratch.push(container);
+    const files = new CargoConfigFixture(join(container, 'owned'));
+    await mkdir(files.root, { recursive: true });
+    const outside = join(container, '.cargo/config.toml');
+    await Bun.write(outside, '[build]\nrustc-wrapper = "outside-owned-wrapper"\n');
+    await expect(
+      inspectRustCostCargoConfigs(files.root, { CARGO_HOME: files.home }, ['.cargo/config.toml'])
+    ).rejects.toThrow(`Rust baseline Cargo config ${outside}`);
+    await expect(files.inspect()).resolves.toMatchObject({ [outside]: null });
+  });
   test('seals ancestor creation, content changes, removal and Cargo-home slots', async () => {
     const files = await fixture();
     const before = await files.inspect();
@@ -213,9 +231,12 @@ describe('Rust cost Cargo configuration admission and seal', () => {
     const files = await fixture();
     const config = join(files.root, '.cargo/config.toml');
     await files.write(config, '[net]\noffline = true\n');
-    const result = await inspectRustCostCargoConfigs(files.root, { CARGO_HOME: '.cargo' }, [
-      '.cargo/config.toml',
-    ]);
+    const result = await inspectRustCostCargoConfigs(
+      files.root,
+      { CARGO_HOME: '.cargo' },
+      ['.cargo/config.toml'],
+      new OwnedCargoConfigFiles(files.directory)
+    );
     expect(result[config]).toMatch(/^[a-f0-9]{64}$/);
     expect(Object.keys(result).filter((path) => path === config)).toHaveLength(1);
   });
@@ -239,4 +260,62 @@ describe('Rust cost Cargo configuration admission and seal', () => {
       expect(String(error)).not.toContain('MALFORMED_CREDENTIAL_SECRET');
     }
   });
+});
+
+describe('Owned Cargo configuration file reader', () => {
+  test('reads an owned file using its real filesystem path', async () => {
+    const files = await fixture();
+    const path = join(files.directory, 'config.toml');
+    await files.write(path, '[net]\noffline = true\n');
+    expect(await new OwnedCargoConfigFiles(files.directory).read(path)).toBe(
+      '[net]\noffline = true\n'
+    );
+  });
+  test.each(['parent', 'sibling-prefix'])(
+    'refuses an existing %s path outside the owned boundary',
+    async (kind) => {
+      const container = await mkdtemp(join(tmpdir(), 'rust-cost-config-boundary-'));
+      scratch.push(container);
+      const directory = join(container, 'owned');
+      await mkdir(join(directory, 'nested'), { recursive: true });
+      const outside =
+        kind === 'parent'
+          ? join(container, 'outside.toml')
+          : join(container, 'owned-sibling/config.toml');
+      await Bun.write(outside, 'OUTSIDE_CONFIG_SECRET');
+      const requested =
+        kind === 'parent' ? `${directory}${sep}nested${sep}..${sep}..${sep}outside.toml` : outside;
+      expect(await readFile(outside, 'utf8')).toBe('OUTSIDE_CONFIG_SECRET');
+      const pending = new OwnedCargoConfigFiles(directory).read(requested);
+      await expect(pending).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(pending).rejects.toThrow('Owned Cargo config fixture: expected path inside');
+    }
+  );
+  test.skipIf(process.platform === 'win32')(
+    'refuses a file symlink that escapes the physical boundary',
+    async () => {
+      const container = await mkdtemp(join(tmpdir(), 'rust-cost-config-symlink-'));
+      scratch.push(container);
+      const directory = join(container, 'owned');
+      await mkdir(directory);
+      const outside = join(container, 'outside.toml');
+      await Bun.write(outside, 'OUTSIDE_CONFIG_SECRET');
+      const path = join(directory, 'config.toml');
+      await symlink(outside, path);
+      await expect(new OwnedCargoConfigFiles(directory).read(path)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    }
+  );
+  test.skipIf(process.platform !== 'win32')(
+    'refuses another drive without trying to read it',
+    async () => {
+      const files = await fixture();
+      const drive = parse(files.directory).root;
+      const other = drive[0].toUpperCase() === 'Z' ? 'Y' : 'Z';
+      await expect(
+        new OwnedCargoConfigFiles(files.directory).read(`${other}:\\outside-config.toml`)
+      ).rejects.toThrow('Owned Cargo config fixture: expected path inside');
+    }
+  );
 });
