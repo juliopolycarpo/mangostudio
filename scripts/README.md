@@ -458,8 +458,7 @@ bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --warm
 
 The startup benchmark gives each run a temp `HOME`, database, uploads, and images directory, so the
 developer's real `~/.mango` is never read or written. Cold (default) measures a
-first run with every migration applying; `--warm` migrates once, discards that
-run, and measures the restart cost — the only mode where framework and
+first run with every migration applying; `--warm` retains its labeled migration warmup and measures the restart cost — the only mode where framework and
 module-load time are visible rather than buried under migration work.
 
 Compare two binaries by building both and running the same command against
@@ -467,15 +466,48 @@ each; a startup claim is only worth as much as its median and spread.
 
 `runtime-handshake.ts` spawns `mangostudio-runtime --stdio` through the protocol SDK's
 launcher, exchanges `hello` as the hub does and asks for `runtime.health`, with a fresh
-`MANGO_HOME` per run. It defaults to the newest `target/` build; `--fresh-copy` runs a new
-copy of the binary each time, which on Windows puts the antivirus and loader's first look at a
-file into every sample. The numbers it produced are recorded under "Runtime startup budgets" in
+`MANGO_HOME`, `HOME` and `USERPROFILE` per run. It defaults to the newest `target/` build; `--fresh-copy` runs a new
+copy of the binary each time, including the copy in the stated page-cache conditions. The numbers it produced are recorded under "Runtime startup budgets" in
 `docs/reference/tooling.md`.
 
 ```bash
 bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --runs 30
 bun run scripts/bench/runtime-handshake.ts target/release/mangostudio-runtime --fresh-copy
 ```
+
+Both startup scripts require POSIX process groups. They reject native Windows before launching
+benchmark children because the benchmark adapter does not provide Windows Job containment. This
+admission change does not requalify historical Windows observations.
+
+Cleanup tracks observed native birth identities and the private process group. A failed census,
+unconfirmed exit, held output pipe or surviving observed child fails the attempt and retains its
+home. Resource errors, missing terminal evidence or remaining resource identities also prevent home
+removal when the separate native scope is empty. Missing pre-readiness samples alone remain a cost
+failure when successful terminal evidence proves no identities remain. These observations do not
+prove containment of previously unseen descendants that detach into
+another session. Untimed runtime version identification uses observation barriers and bounded
+cancellation; failed setup is retained separately from measured samples. Resource initialization,
+readiness observations and output settlement also have explicit bounds. Existing readiness events
+and measurement deadlines remain unchanged.
+
+Both startup scripts accept `--warmups`, `--output` and Linux `--resources`. Receipts retain
+warmups and failures, binary hashes and checkout identity. `--output` enables synced per-attempt JSONL events and atomic checkpoints; `--journal` selects a separate event path. The study driver enables both so an outer timeout preserves earlier samples. Resource observations distinguish sampled
+process-tree RSS/CPU from single-process peak RSS and preserve unavailable data as null. HTTP startup
+also matches the isolated child state before accepting readiness. Run under a process supervisor when
+qualifying cleanup for a complete study.
+
+`rust-costs.ts` prints a fixed baseline schedule by default. `--execute --out <fresh-directory>` runs
+three empty-target releases per Rust artifact, ten no-op runtime builds and ten version-restamp builds,
+with eight jobs and the unchanged shipping profile. `--attribution` qualifies symbol attribution by
+matching code-section hashes. `--startup-hub <compiled-hub>` adds the three startup modes using two
+warmups and twenty measured attempts each. The driver retains raw failed attempts and checks allocated
+disk use between attempts. Run on an idle host after building and qualifying the harness; see
+[`runtime-metrics.md`](../docs/reference/runtime-metrics.md#requalifying-the-current-baseline) for
+cache, disk, resource and artifact-source limits. These are repeated baseline workloads; the driver
+selects no optimization candidate. Executable batches reject inherited compiler/profile/cache/output
+selectors and seal ancestor/Cargo-home configuration slots. `RUSTC_BOOTSTRAP` and `RUSTC_STAGE` must be
+unset; empty values are also rejected. Unsupported includes and external build
+configuration are refused; receipts contain paths and hashes rather than configuration values.
 
 `grep.ts` drives `fs.grep` on the real runtime binary, one fresh child (and `MANGO_HOME`) per
 sample so peak RSS (`VmHWM`, Linux) belongs to that scenario alone. Each sample times only the

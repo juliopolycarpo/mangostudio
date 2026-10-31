@@ -4,6 +4,12 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
+import {
+  assertMachineStdoutLimit,
+  createMachineStdoutCapture,
+  type MachineStdoutCapture,
+} from './native-command-output';
+
 export interface NativeProcess {
   readonly pid: number;
   readonly parentPid: number;
@@ -46,6 +52,8 @@ export interface NativeCommandReceipt {
   readonly exitCode: number | null;
   readonly signal: string | null;
   readonly timedOut: boolean;
+  readonly canceled?: boolean;
+  readonly machineStdoutMaxLineBytes?: number;
   readonly timeoutSeconds: number;
   readonly errors: readonly string[];
   readonly log: string;
@@ -78,6 +86,14 @@ export interface NativeCommandOptions {
   readonly settleMs?: number;
   readonly stream?: NodeJS.WritableStream;
   readonly guardCompilerHelpers?: boolean;
+  /** Cancels only this command’s verified process scope and waits for settlement. */
+  readonly signal?: AbortSignal;
+}
+
+/** Extra capture policy for runNativeCommand; separate Windows Job tooling keeps its own output contract. */
+export interface NativeProcessCommandOptions extends NativeCommandOptions {
+  /** Opt in only for known machine stdout; stderr keeps the default text reporting bound. */
+  readonly machineStdout?: { readonly maxLineBytes: number };
 }
 
 /**
@@ -377,7 +393,7 @@ function pause(ms: number): Promise<void> {
  * @example await runNativeCommand({ label: 'test', command: ['bun', 'run', 'test'], root, out, env, timeoutSeconds: 900 });
  */
 export async function runNativeCommand(
-  options: NativeCommandOptions
+  options: NativeProcessCommandOptions
 ): Promise<NativeCommandReceipt> {
   const command = options.command[0];
   if (!command)
@@ -386,6 +402,10 @@ export async function runNativeCommand(
     throw new Error(
       `Invalid timeout ${options.timeoutSeconds}; expected a positive finite number of seconds`
     );
+  if (options.machineStdout) assertMachineStdoutLimit(options.machineStdout.maxLineBytes);
+  const machineStdoutLimit = options.machineStdout?.maxLineBytes;
+  if (options.signal?.aborted)
+    throw options.signal.reason ?? new Error('Native command canceled before launch');
   const started = Date.now();
   const snapshot = options.snapshot ?? snapshotNativeProcesses;
   const pollIntervalMs = options.pollIntervalMs ?? 1_000;
@@ -409,6 +429,8 @@ export async function runNativeCommand(
       snapshotErrors.push(`Compiler-helper baseline census failed: ${String(error)}`);
     }
   }
+  if (options.signal?.aborted)
+    throw options.signal.reason ?? new Error('Native command canceled before launch');
   let unattributedCompilerHelpers: NativeProcess[] = [];
   const log = `logs/${options.label}.log`;
   const combined = createWriteStream(join(options.out, log));
@@ -423,12 +445,20 @@ export async function runNativeCommand(
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const tee = (source: NodeJS.ReadableStream, writer: NodeJS.WritableStream): void => {
+  const tee = (
+    source: NodeJS.ReadableStream,
+    writer: NodeJS.WritableStream,
+    machine?: MachineStdoutCapture
+  ): void => {
     const decoder = new StringDecoder('utf8');
     let pending = '';
     source.on('data', (chunk: Buffer) => {
       writer.write(chunk);
       stream.write(chunk);
+      if (machine) {
+        machine.write(chunk);
+        return;
+      }
       pending += decoder.write(chunk);
       let newline = pending.indexOf('\n');
       while (newline !== -1) {
@@ -443,11 +473,27 @@ export async function runNativeCommand(
       }
     });
     source.on('end', () => {
+      if (machine) {
+        machine.end();
+        return;
+      }
       pending += decoder.end();
       if (pending) combined.write(`${pending}\n`);
     });
   };
-  tee(child.stdout, rawOut);
+  const machineStdout =
+    machineStdoutLimit !== undefined
+      ? createMachineStdoutCapture(
+          machineStdoutLimit,
+          (text) => {
+            combined.write(text);
+          },
+          (message) => {
+            errors.push(message);
+          }
+        )
+      : undefined;
+  tee(child.stdout, rawOut, machineStdout);
   tee(child.stderr, rawError);
   let exited = false;
   let timedOut = false;
@@ -556,10 +602,20 @@ export async function runNativeCommand(
     await killOwned();
   };
   let timeoutCleanup: Promise<void> | null = null;
+  let canceled = false;
+  const cancel = () => {
+    canceled = true;
+    errors.push('Command canceled by AbortSignal');
+    timeoutCleanup ??= terminate().catch((error) => {
+      errors.push(`Cancellation cleanup failed: ${String(error)}`);
+    });
+  };
+  options.signal?.addEventListener('abort', cancel, { once: true });
+  if (options.signal?.aborted) cancel();
   const timeout = setTimeout(() => {
     if (exited) return;
     timedOut = true;
-    timeoutCleanup = terminate().catch((error) => {
+    timeoutCleanup ??= terminate().catch((error) => {
       errors.push(`Timeout cleanup failed: ${String(error)}`);
     });
   }, options.timeoutSeconds * 1_000);
@@ -589,7 +645,7 @@ export async function runNativeCommand(
     await census();
     if ((!current.length && lastCensusError === null) || Date.now() >= settleUntil) break;
     // A worker that forked after the timeout census is still owned, so it is killed here.
-    if (timedOut)
+    if (timedOut || canceled)
       await killOwned().catch((error) => errors.push(`Timeout cleanup failed: ${String(error)}`));
     await pause(pollIntervalMs);
   } while (Date.now() < settleUntil);
@@ -598,6 +654,8 @@ export async function runNativeCommand(
       (writer) => new Promise<void>((resolve) => writer.end(resolve))
     )
   );
+  options.signal?.removeEventListener('abort', cancel);
+  if (timeoutCleanup) await timeoutCleanup;
   // A failed poll is superseded by the next census; only an unproven terminal census is fatal.
   if (lastCensusError !== null) snapshotErrors.push(lastCensusError);
   const settlement: NativeSettlement = {
@@ -631,6 +689,8 @@ export async function runNativeCommand(
     exitCode,
     signal,
     timedOut,
+    ...(canceled ? { canceled: true } : {}),
+    ...(machineStdoutLimit !== undefined ? { machineStdoutMaxLineBytes: machineStdoutLimit } : {}),
     timeoutSeconds: options.timeoutSeconds,
     errors,
     log,
