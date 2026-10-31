@@ -38,7 +38,7 @@ const ARCHIVE_PAYLOAD = /\.(?:tar(?:\.(?:gz|xz|zst))?|tgz|zip)\b/;
 
 // Jobs that publish a public channel. The tag-restricted `release` environment
 // (deployment rule, reviewers, secrets) is GitHub state and is not asserted
-// here — only that these jobs declare it, and that canary does not.
+// here — only that these jobs declare it. Canary uses its own environment.
 const RELEASE_PUBLISHING_JOBS = [
   'github-release',
   'docker',
@@ -242,7 +242,6 @@ describe('release workflow binary gate', () => {
     expect(canary).not.toContain('uses: ./.github/actions/require-secret');
     expect(canary).not.toContain('NPM_TOKEN');
     expect(canary).toContain('id-token: write');
-    expect(canary).not.toMatch(/^ +environment:/m);
 
     const publishStep = extractStepBlocksAtIndent(action, 4).find((step) =>
       step.includes('scripts/release/publish-npm.ts')
@@ -355,6 +354,13 @@ describe('release workflow binary gate', () => {
       if (!usesChannelSecret) continue;
       expect(publishing.has(job), job).toBe(true);
     }
+  });
+
+  test('npm canary declares the trusted publisher environment on its publishing job', () => {
+    const workflow = Bun.YAML.parse(readText('.github/workflows/canary.yml')) as {
+      jobs: Record<string, { environment?: string }>;
+    };
+    expect(workflow.jobs['npm-canary'].environment).toBe('canary');
   });
 
   test('canary publishes outside the tag-restricted release environment', () => {

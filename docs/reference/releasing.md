@@ -177,7 +177,7 @@ as free-floating repository secrets:
   joining this environment, not adding a repository secret.
 - **Canary is excluded:** `.github/workflows/canary.yml` publishes on every
   green push to `main`, which the tag rule would block. It uses
-  Trusted Publishing OIDC for caller workflow `ci.yml`, with no environment.
+  Trusted Publishing OIDC for caller workflow `ci.yml`, with environment `canary`.
 - **Manual dispatch:** because the environment is tag-restricted, a
   `workflow_dispatch` run of `release.yml` must target a `v*.*.*` tag ref
   (`gh workflow run release.yml --ref v0.2.0`), not a branch.
@@ -194,7 +194,9 @@ Complete these once per fork or org before the first tag push:
 6. After a release proves `cargo-publish` minted a Trusted Publishing token successfully, revoke and delete `CARGO_REGISTRY_TOKEN`. Do not leave a long-lived crates.io write token in the repository once OIDC is proven.
 7. Configure two npm Trusted Publishing rows for every package below in npm package **Settings -> Trusted Publisher**. Both rows use owner `juliopolycarpo`, repository `mangostudio`, and allowed action `npm publish` (direct publishing must be enabled):
    - Stable releases: workflow filename `release.yml`, GitHub Environment `release`.
-   - Canary: workflow filename `ci.yml`, environment left empty. npm validates the calling workflow, so use `ci.yml` even though the publish step runs in reusable `canary.yml`. Both workflows grant `id-token: write`.
+   - Canary: workflow filename `ci.yml`, GitHub Environment `canary`. npm validates the calling workflow, so use `ci.yml` even though the publish step runs in reusable `canary.yml`. Both workflows grant `id-token: write`.
+
+   Create the `canary` GitHub Environment with deployment restricted to branch `main`, no required reviewers and no wait timer. The npm canary job declares this environment; no npm token secret is needed for its OIDC publication. This keeps green-main canary publication automatic.
 
    The maintained npm packaging inventory stages `mangostudio`, `@mangostudio/cli-linux-x64`, `@mangostudio/cli-linux-arm64`, `@mangostudio/cli-darwin-x64`, `@mangostudio/cli-darwin-arm64`, `@mangostudio/cli-win32-x64` and `@mangostudio/cli-win32-arm64`. Configure each package. See [npm's trusted-publishing requirements](https://docs.npmjs.com/trusted-publishers/).
 
@@ -1073,7 +1075,7 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
   packages, used only when a maintainer sets `allow_legacy_npm_token=true` on
   `workflow_dispatch`. Stable releases use Trusted Publishing OIDC
   (`release.yml`, environment `release`); canaries use OIDC through caller
-  `ci.yml`, with no environment. Register both publisher rows on npmjs.com
+  `ci.yml`, environment `canary`. Register both publisher rows on npmjs.com
   using the [one-time setup checklist](#one-time-setup-checklist).
 - **`DIST_REPOS_TOKEN`** — `release` environment secret: fine-grained PAT with
   contents read/write on `juliopolycarpo/homebrew-tap` (see
