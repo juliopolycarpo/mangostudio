@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { readSourceFileBatches } from '../support/source-file-batches';
+
 const API_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const DB_TYPES_RELATIVE_PATH = 'src/db/types.ts';
 const ROW_ALIAS_PATTERN = /^export type (\w+) = (Selectable|Insertable|Updateable)<\w+Table>;/gm;
@@ -11,19 +13,19 @@ async function readDbTypes() {
 }
 
 async function readApiSourceFiles() {
-  const files: string[] = [];
+  const paths: string[] = [];
 
-  await readMatchingSourceFiles('src/**/*.ts', files);
-  await readMatchingSourceFiles('tests/**/*.ts', files);
+  await collectMatchingSourcePaths('src/**/*.ts', paths);
+  await collectMatchingSourcePaths('tests/**/*.ts', paths);
 
-  return files;
+  return await readSourceFileBatches(paths, (path) => Bun.file(join(API_ROOT, path)).text());
 }
 
-async function readMatchingSourceFiles(pattern: string, files: string[]) {
+async function collectMatchingSourcePaths(pattern: string, paths: string[]) {
   for await (const path of new Bun.Glob(pattern).scan({ cwd: API_ROOT, onlyFiles: true })) {
     if (path === DB_TYPES_RELATIVE_PATH) continue;
 
-    files.push(await Bun.file(join(API_ROOT, path)).text());
+    paths.push(path);
   }
 }
 
