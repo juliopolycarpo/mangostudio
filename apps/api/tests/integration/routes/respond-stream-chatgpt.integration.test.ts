@@ -21,7 +21,6 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
-  makeChain,
   makeRegisteredTool,
   mockToolsModule,
   mockVerifiedChatOwnership,
@@ -196,7 +195,7 @@ async function mockChatGptHarness(insertedMessages: Array<Record<string, unknown
   const dbMock = createTestStreamDb({
     userId: TEST_USER.id,
     insertedMessages,
-    selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: null }),
+    chatOverrides: { lastProviderState: null },
   });
   await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 }

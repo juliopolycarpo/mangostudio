@@ -51,6 +51,7 @@ import type {
   RegisteredTool,
   ToolContext,
 } from '../../../src/services/tools/types';
+import { makeStreamChatRow, type StreamChatOverrides } from '../../support/stream-chat-row';
 
 // Snapshot real implementations at module-load time, before any test can call
 // mock.module(). Bun's mock.module() updates live namespace bindings, so
@@ -143,7 +144,7 @@ export async function restoreAllMocks(): Promise<void> {
  * - executeTakeFirst() → firstValue  (ownership checks, single-row lookups)
  * - execute()          → []          (list queries like loadHistory)
  */
-export function makeChain(firstValue: unknown): Record<string, unknown> {
+function makeChain(firstValue: unknown): Record<string, unknown> {
   const terminal = {
     execute: () => Promise.resolve([]),
     executeTakeFirst: () => Promise.resolve(firstValue),
@@ -157,25 +158,6 @@ export function makeChain(firstValue: unknown): Record<string, unknown> {
   return proxy;
 }
 
-/**
- * The row `getOwnedChat` reads before a turn resolves anything. It has to
- * carry the runner columns as well as ownership: the repository maps them
- * into the typed union at that boundary and treats an impossible pairing as
- * a corrupt row, so a bare `{ userId }` now fails the pre-flight.
- */
-function ownedChatRow(userId: string): Record<string, unknown> {
-  return {
-    id: 'chat-1',
-    userId,
-    runnerKind: 'mangostudio',
-    runnerAgentId: 'default',
-    runnerTargetId: null,
-    workdir: null,
-    environmentId: LOCAL_ENVIRONMENT_ID,
-    restrictToolsToWorkdir: null,
-  };
-}
-
 export interface CapturedDbMock {
   insertedMessages: Array<Record<string, unknown>>;
   chatSetCalls: Array<Record<string, unknown>>;
@@ -186,7 +168,8 @@ export interface TestStreamDbOptions {
   userId: string;
   insertedMessages?: Array<Record<string, unknown>>;
   chatSetCalls?: Array<Record<string, unknown>>;
-  selectFrom?: (table: string) => Record<string, unknown>;
+  chatOverrides?: StreamChatOverrides;
+  selectFrom?: (table: string) => Record<string, unknown> | undefined;
   onInsert?: (table: string, values: Record<string, unknown>) => void;
 }
 
@@ -263,19 +246,31 @@ export function mockPassThroughDb(userId: string): () => { getDb: () => Record<s
  * the PATH the spawned process gets. No row exists here, so it reads the same
  * as an environment with no stored selection.
  */
-function defaultSelectFrom(userId: string): (table: string) => Record<string, unknown> {
+function defaultSelectFrom(
+  userId: string,
+  overrides?: StreamChatOverrides
+): (table: string) => Record<string, unknown> {
   return (table) =>
-    table === 'environment_toolchains' ? makeChain(undefined) : makeChain(ownedChatRow(userId));
+    table === 'environment_toolchains' || table === 'activity_events'
+      ? makeChain(undefined)
+      : makeChain(makeStreamChatRow(userId, overrides));
 }
 
-/** Builds a transactional stream DB mock that applies assistant-row updates. */
+/** Builds a stream DB with empty activity and assistant-row capture. Example: createTestStreamDb({ userId: 'u1' }). */
 export function createTestStreamDb(options: TestStreamDbOptions): Record<string, unknown> {
   const insertedMessages = options.insertedMessages ?? [];
   const chatSetCalls = options.chatSetCalls ?? [];
+  const fallbackSelect = defaultSelectFrom(options.userId, options.chatOverrides);
   const db: Record<string, unknown> = {
-    selectFrom: options.selectFrom ?? defaultSelectFrom(options.userId),
+    selectFrom: (table: string) => options.selectFrom?.(table) ?? fallbackSelect(table),
     insertInto: (table: string) => createInsertCapture(table, insertedMessages, options.onInsert),
     updateTable: (table: string) => createUpdateCapture(table, insertedMessages, chatSetCalls),
+    deleteFrom(table: string) {
+      if (table !== 'activity_events') {
+        throw new Error(`stream database: expected activity_events deletion | received: ${table}`);
+      }
+      return makeChain({ numDeletedRows: 0n });
+    },
   };
   db.transaction = () => ({
     execute: (callback: (trx: Record<string, unknown>) => unknown) => callback(db),

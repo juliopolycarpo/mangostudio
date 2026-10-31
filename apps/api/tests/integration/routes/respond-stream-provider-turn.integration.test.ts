@@ -27,7 +27,6 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
-  makeChain,
   mockNoopTools,
   mockVerifiedChatOwnership,
   parsePersistedParts,
@@ -82,7 +81,7 @@ function mockStreamDb(insertedMessages: Array<Record<string, unknown>>) {
   const dbMock = createTestStreamDb({
     userId: TEST_USER.id,
     insertedMessages,
-    selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: null }),
+    chatOverrides: { lastProviderState: null },
   });
 
   return () => ({ getDb: () => dbMock });
