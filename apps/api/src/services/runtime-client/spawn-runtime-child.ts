@@ -205,9 +205,10 @@ export async function spawnRuntimeChild(
       await terminatePeer(peer, launch.command, options.environmentId);
       throw cancelledError(launch.command);
     }
-    // No compensating terminate: `openHubSession` closes the port on the way
-    // out, and the launcher terminates the child whenever its port closes —
-    // including when the port closed on its own and took the session with it.
+    // `openHubSession` closes the port on failure, starting the launcher's
+    // idempotent termination sequence. Join that bounded work so an ordinary
+    // opening rejection cannot discard child ownership before cleanup settles.
+    await terminatePeer(peer, launch.command, options.environmentId);
     const failure = await observeLaunchFailure(peer, launch.command, error);
     throw asRemoteFailure(
       error,
