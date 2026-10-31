@@ -1,18 +1,91 @@
 import { describe, expect, it } from 'bun:test';
 
+import { ActivityEventSchema } from '@mangostudio/shared/activity';
+import Value from 'typebox/value';
+
 import type { getDb } from '../../../src/db/database';
 import {
   ACTIVITY_RETENTION_MS,
   createActivityRepository,
 } from '../../../src/modules/activity/infrastructure/activity-repository';
+import { recordTurnCompletedActivity } from '../../../src/modules/chats/application/record-turn-activity';
+import { ActivityInsertCapture } from '../../support/activity-insert-capture';
 import {
   buildRespondStreamRequest,
   createSubagentDelegationError,
+  createTestStreamDb,
   mockDbWithFullCapture,
   mockPassThroughDb,
 } from './_respond-stream-helpers';
 
 describe('respond stream test helpers', () => {
+  it('records a schema-valid completed activity through the shared stream database', async () => {
+    const capture = new ActivityInsertCapture();
+    const messages: Array<Record<string, unknown>> = [];
+    const db = createTestStreamDb({
+      userId: 'user-1',
+      insertedMessages: messages,
+      onInsert: capture.onInsert,
+    });
+    await insertMessage(db, { role: 'ai', text: 'Still captured' });
+    await recordTurnCompletedActivity(
+      'user-1',
+      'chat-1',
+      db as unknown as ReturnType<typeof getDb>
+    );
+
+    expect(capture.rows).toHaveLength(1);
+    const row = capture.rows[0];
+    const payload = JSON.parse(row?.payloadJson as string) as unknown;
+    expect(
+      Value.Check(ActivityEventSchema, { ...row, payload }),
+      `expected ActivityEventSchema completed turn | received: ${JSON.stringify({ ...row, payload })}`
+    ).toBe(true);
+    expect(row).toMatchObject({ userId: 'user-1', chatId: 'chat-1', kind: 'turn_completed' });
+    expect(payload).toEqual({
+      title: 'Stream test chat',
+      runner: { kind: 'mangostudio', agentId: 'default' },
+    });
+    expect(messages).toEqual([{ role: 'ai', text: 'Still captured' }]);
+  });
+
+  it('records chat overrides and keeps unrelated reads empty', async () => {
+    const capture = new ActivityInsertCapture();
+    const db = createTestStreamDb({
+      userId: 'user-1',
+      chatOverrides: { id: 'renamed-chat', title: 'Renamed', lastProviderState: 'cursor' },
+      onInsert: capture.onInsert,
+    });
+    await recordTurnCompletedActivity(
+      'user-1',
+      'renamed-chat',
+      db as unknown as ReturnType<typeof getDb>
+    );
+    expect(capture.rows).toHaveLength(1);
+    const row = capture.rows[0];
+    const payload = JSON.parse(row?.payloadJson as string) as unknown;
+    expect(
+      Value.Check(ActivityEventSchema, { ...row, payload }),
+      `expected ActivityEventSchema completed turn | received: ${JSON.stringify({ ...row, payload })}`
+    ).toBe(true);
+    expect(row?.chatId).toBe('renamed-chat');
+    expect(payload).toEqual({
+      title: 'Renamed',
+      runner: { kind: 'mangostudio', agentId: 'default' },
+    });
+    const select = db.selectFrom as (table: string) => { executeTakeFirst(): Promise<unknown> };
+    expect(await select('chats').executeTakeFirst()).toMatchObject({ lastProviderState: 'cursor' });
+    expect(await select('activity_events').executeTakeFirst()).toBeUndefined();
+    expect(await select('environment_toolchains').executeTakeFirst()).toBeUndefined();
+  });
+
+  it('captures only bulk activity inserts', () => {
+    const capture = new ActivityInsertCapture();
+    capture.onInsert('messages', { text: 'not activity' });
+    expect(capture.rows).toEqual([]);
+    expect(() => capture.onInsert('activity_events', {})).toThrow('expected an array of rows');
+  });
+
   it('refuses retention deletion from unrelated tables', () => {
     const db = mockPassThroughDb('user-1')().getDb();
     const deleteFrom = db.deleteFrom as (table: string) => unknown;
@@ -65,6 +138,8 @@ describe('respond stream test helpers', () => {
     // `{ userId }` reads as a corrupt runner configuration.
     expect(row).toEqual({
       id: 'chat-1',
+      title: 'Stream test chat',
+      lastProviderState: null,
       userId: 'user-1',
       runnerKind: 'mangostudio',
       runnerAgentId: 'default',

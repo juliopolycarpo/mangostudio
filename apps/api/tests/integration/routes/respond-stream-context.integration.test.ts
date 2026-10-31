@@ -7,7 +7,6 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
-  makeChain,
   makeRegisteredTool,
   mockDbWithFullCapture,
   mockDbWithMessageCapture,
@@ -311,6 +310,7 @@ describe('POST /respond/stream — context and continuation', () => {
 
     const dbMock = createTestStreamDb({
       userId: TEST_USER.id,
+      chatOverrides: { id: 'test-chat' },
       selectFrom: (table: string) => {
         if (table === 'messages') {
           return {
@@ -332,7 +332,7 @@ describe('POST /respond/stream — context and continuation', () => {
           };
         }
 
-        return makeChain({ userId: TEST_USER.id });
+        return undefined;
       },
     });
     await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));

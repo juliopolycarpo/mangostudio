@@ -6,7 +6,6 @@ import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   createTestStreamDb,
-  makeChain,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
@@ -88,7 +87,7 @@ describe('POST /respond/stream — provider cursor and switching', () => {
       userId: TEST_USER.id,
       insertedMessages,
       chatSetCalls,
-      selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: OPENAI_ENVELOPE }),
+      chatOverrides: { lastProviderState: OPENAI_ENVELOPE },
     });
     await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
@@ -197,7 +196,7 @@ describe('POST /respond/stream — provider cursor and switching', () => {
 
     const dbMock = createTestStreamDb({
       userId: TEST_USER.id,
-      selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: GEMINI_ENVELOPE }),
+      chatOverrides: { lastProviderState: GEMINI_ENVELOPE },
     });
     await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
@@ -276,7 +275,7 @@ describe('POST /respond/stream — provider cursor and switching', () => {
     const dbMock = createTestStreamDb({
       userId: TEST_USER.id,
       chatSetCalls,
-      selectFrom: () => makeChain({ userId: TEST_USER.id, lastProviderState: STATELESS_STATE }),
+      chatOverrides: { lastProviderState: STATELESS_STATE },
     });
     await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
