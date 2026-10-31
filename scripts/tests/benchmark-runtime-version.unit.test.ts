@@ -1,28 +1,42 @@
 import { describe, expect, test } from 'bun:test';
-import { chmod, mkdtemp, rm, stat } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { settleBenchmarkWork } from '../bench/benchmark-child-scope';
 import { assertBenchmarkPlatform } from '../bench/benchmark-platform';
 import { runtimeVersion, RuntimeVersionError } from '../bench/runtime-version';
 import {
   type NativeCommandReceipt,
+  type NativeProcess,
   type NativeProcessCommandOptions,
   runNativeCommand,
+  snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
 import { fixtureChildEnvironment } from './support/child-supervision';
 
-async function retainedFailure(promise: Promise<string>): Promise<RuntimeVersionError> {
+async function retainedFailure(
+  promise: Promise<string>,
+  describeUnexpected?: () => string
+): Promise<RuntimeVersionError> {
+  let version: string;
   try {
-    await promise;
-    throw new Error('expected failure');
+    version = await promise;
   } catch (error) {
     expect(error).toBeInstanceOf(RuntimeVersionError);
     if (!(error instanceof RuntimeVersionError)) throw error;
     return error;
   }
+  throw new Error(
+    `version probe: expected RuntimeVersionError | received resolved version: ${JSON.stringify(version)}${describeUnexpected ? `; ${describeUnexpected()}` : ''}`
+  );
 }
+
+test('unexpected version resolution reports the received value', async () => {
+  await expect(retainedFailure(Promise.resolve('resolved-fixture-version'))).rejects.toThrow(
+    'version probe: expected RuntimeVersionError | received resolved version: "resolved-fixture-version"'
+  );
+});
 
 class HeldSupervisor {
   private reject!: (error: Error) => void;
@@ -252,46 +266,208 @@ test('cancellation during version read retains home and preserves abort reason',
   }
 });
 
+const VERSION_DESCENDANT_PROGRAM = `
+import { join } from 'node:path';
+const directory = process.env.VERSION_DESCENDANT_FIXTURE;
+const { snapshotNativeProcesses, captureSnapshot } = await import(process.env.VERSION_PROCESS_MODULE);
+class NativeSelfCensus {
+  run = (_command, budget) => captureSnapshot(['ps', '-p', String(process.pid), '-o', 'pid=,ppid=,pgid=,lstart=,args='], budget);
+}
+const own = (await snapshotNativeProcesses({ platform: process.platform, findExecutable: (name) => Bun.which(name), capture: new NativeSelfCensus().run })).find((row) => row.pid === process.pid);
+if (!own) throw new Error('version fixture: expected native self identity');
+await Bun.write(join(directory, 'descendant-process.json'), JSON.stringify(own));
+await Bun.write(join(directory, 'descendant-ready'), 'ready');
+while (!(await Bun.file(join(directory, 'descendant-release')).exists())) await Bun.sleep(5);
+`;
+
+const VERSION_PARENT_PROGRAM = `#!/usr/bin/env bun
+import { join } from 'node:path';
+const directory = process.env.VERSION_DESCENDANT_FIXTURE;
+const child = Bun.spawn([process.execPath, join(directory, 'descendant.ts')], {
+  stdin: 'ignore', stdout: 'ignore', stderr: 'ignore',
+  env: { ...process.env, BUN_FEATURE_FLAG_NO_ORPHANS: '0' },
+});
+while (!(await Bun.file(join(directory, 'descendant-ready')).exists())) await Bun.sleep(5);
+child.unref();
+console.log('version');
+`;
+
+class ControlledVersionDescendant {
+  readonly binary: string;
+  private identity: Pick<NativeProcess, 'pid' | 'identity'> | undefined;
+
+  constructor(readonly directory: string) {
+    this.binary = join(directory, 'version');
+  }
+
+  async create(): Promise<void> {
+    await Bun.write(this.binary, VERSION_PARENT_PROGRAM);
+    await Bun.write(join(this.directory, 'descendant.ts'), VERSION_DESCENDANT_PROGRAM);
+    await chmod(this.binary, 0o755);
+  }
+
+  async observe(rows: readonly NativeProcess[]): Promise<NativeProcess | undefined> {
+    const own = await this.readIdentity();
+    return rows.find((process) => process.pid === own.pid && process.identity === own.identity);
+  }
+
+  private async readIdentity(): Promise<Pick<NativeProcess, 'pid' | 'identity'>> {
+    if (this.identity) return this.identity;
+    const value: unknown = JSON.parse(
+      await readFile(join(this.directory, 'descendant-process.json'), 'utf8')
+    );
+    if (
+      typeof value !== 'object' ||
+      value === null ||
+      !('pid' in value) ||
+      typeof value.pid !== 'number' ||
+      !Number.isSafeInteger(value.pid) ||
+      value.pid <= 0 ||
+      !('identity' in value) ||
+      typeof value.identity !== 'string'
+    )
+      throw new Error(
+        `version fixture identity: expected native pid and birth identity | received: ${JSON.stringify(value)}`
+      );
+    this.identity = { pid: value.pid, identity: value.identity };
+    return this.identity;
+  }
+
+  async settle(): Promise<void> {
+    await Bun.write(join(this.directory, 'descendant-release'), 'release');
+    if (
+      !this.identity &&
+      (await Bun.file(join(this.directory, 'descendant-process.json')).exists())
+    )
+      await this.readIdentity();
+    if (!this.identity) return;
+    const deadline = performance.now() + 5_000;
+    let row: NativeProcess | undefined;
+    do {
+      row = (await snapshotNativeProcesses()).find(
+        (process) => process.identity === this.identity?.identity
+      );
+      if (!row) return;
+      process.kill(row.pid, 'SIGKILL');
+      await Bun.sleep(20);
+    } while (performance.now() < deadline);
+    throw new Error(
+      `version fixture cleanup: expected exited identity | received: ${row?.identity}; retained ${this.directory}`
+    );
+  }
+}
+
 class FixtureVersionRunner {
-  readonly run = (options: NativeProcessCommandOptions): Promise<NativeCommandReceipt> =>
-    runNativeCommand({ ...options, env: fixtureChildEnvironment(options.env) });
+  private started = false;
+  private decisionHeld = false;
+  home = '';
+  pending: Promise<NativeCommandReceipt> | undefined;
+  receipt: NativeCommandReceipt | undefined;
+  before: NativeProcess | undefined;
+  decision: NativeProcess | undefined;
+  wrapperPid = 0;
+
+  constructor(private readonly fixture: ControlledVersionDescendant) {}
+
+  readonly describe = (): string =>
+    JSON.stringify({
+      retainedFixture: this.fixture.directory,
+      probeHome: this.home,
+      before: this.before ?? null,
+      decision: this.decision ?? null,
+      wrapperPid: this.wrapperPid,
+    });
+
+  readonly run = async (options: NativeProcessCommandOptions): Promise<NativeCommandReceipt> => {
+    this.home = options.out;
+    const original = options.snapshot;
+    if (!original) throw new Error('version fixture: expected production snapshot callback');
+    this.pending = runNativeCommand({
+      ...options,
+      env: fixtureChildEnvironment({
+        ...options.env,
+        VERSION_DESCENDANT_FIXTURE: this.fixture.directory,
+        VERSION_PROCESS_MODULE: resolve(
+          import.meta.dir,
+          '../lib/native-bun-qualification-process.ts'
+        ),
+      }),
+      snapshot: async () => {
+        const decision = this.started && !this.decisionHeld;
+        if (decision) {
+          this.decisionHeld = true;
+          const deadline = performance.now() + 5_000;
+          while (!(await Bun.file(join(this.home, 'version-done')).exists())) {
+            if (performance.now() >= deadline)
+              throw new Error('version fixture: expected direct-child completion before decision');
+            await Bun.sleep(5);
+          }
+          this.before = await this.fixture.observe(await snapshotNativeProcesses());
+          this.wrapperPid = Number(await readFile(join(this.home, 'version-wrapper-pid'), 'utf8'));
+          // The old fixture's 2200 ms timer expires while this decision census is held.
+          await Bun.sleep(2300);
+        }
+        const rows = await original();
+        if (decision) {
+          this.decision = await this.fixture.observe(rows);
+          await Bun.write(
+            join(this.fixture.directory, 'decision.json'),
+            JSON.stringify({
+              before: this.before ?? null,
+              decision: this.decision ?? null,
+              wrapperPid: this.wrapperPid,
+            })
+          );
+        }
+        this.started ||= await Bun.file(join(this.home, 'version-start')).exists();
+        return rows;
+      },
+    });
+    this.receipt = await this.pending;
+    return this.receipt;
+  };
 }
 
 test.skipIf(process.platform === 'win32')(
   'real fast child with a live same-group descendant retains its home',
   async () => {
-    const fixture = await mkdtemp(join(tmpdir(), 'runtime-version-descendant-'));
-    const path = join(fixture, 'version');
-    await Bun.write(
-      path,
-      `#!/usr/bin/env bun\nconst child = Bun.spawn([process.execPath, '-e', "await Bun.write(process.env.MANGO_HOME + '/descendant-ready', 'ready'); setTimeout(() => {}, 2200)"], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });\nawait Bun.write(process.env.MANGO_HOME + '/descendant-pid', String(child.pid));\nwhile (!(await Bun.file(process.env.MANGO_HOME + '/descendant-ready').exists())) await Bun.sleep(5);\nchild.unref();\nconsole.log('version');\n`
-    );
-    await chmod(path, 0o755);
-    let error: RuntimeVersionError | undefined;
+    const directory = await mkdtemp(join(tmpdir(), 'runtime-version-descendant-'));
+    const fixture = new ControlledVersionDescendant(directory);
+    await fixture.create();
+    const runner = new FixtureVersionRunner(fixture);
+    let passed = false;
     try {
-      error = await retainedFailure(
-        runtimeVersion(path, new AbortController().signal, { run: new FixtureVersionRunner().run })
+      const error = await retainedFailure(
+        runtimeVersion(fixture.binary, new AbortController().signal, { run: runner.run }),
+        runner.describe
       );
+      expect(
+        runner.before,
+        `version fixture: expected live descendant before held census; retained ${directory}`
+      ).toBeDefined();
+      expect(
+        runner.decision,
+        `version fixture: expected live descendant at decision; retained ${directory}`
+      ).toBeDefined();
+      expect(runner.decision?.identity).toBe(runner.before?.identity);
+      expect(runner.describe()).toContain(runner.before?.identity ?? 'missing-native-identity');
+      expect(runner.decision?.group).toBe(runner.wrapperPid);
       expect(error.commandReceipt?.settlement.rootObserved).toBe(true);
-      const pid = Number(await Bun.file(join(error.home, 'descendant-pid')).text());
-      expect(pid).toBeGreaterThan(0);
       expect(error.message).toContain('surviving same-group descendants');
       expect(error.commandReceipt?.settlement.empty).toBe(true);
       expect(error.settlement).toBe('confirmed');
+      expect(await stat(error.home)).toBeDefined();
+      passed = true;
     } finally {
-      if (error) {
-        const pid = Number(await Bun.file(join(error.home, 'descendant-pid')).text());
-        const { snapshotNativeProcesses } = await import('../lib/native-bun-qualification-process');
-        const deadline = Date.now() + 5000;
-        while (
-          (await snapshotNativeProcesses()).some((process) => process.pid === pid) &&
-          Date.now() < deadline
-        )
-          await Bun.sleep(25);
-        if (!(await snapshotNativeProcesses()).some((process) => process.pid === pid))
-          await rm(error.home, { recursive: true, force: true });
-      }
-      await rm(fixture, { recursive: true, force: true });
+      await fixture.settle();
+      const runnerError = runner.pending ? await settleBenchmarkWork(runner.pending, 5_000) : null;
+      expect(
+        runnerError,
+        `version fixture supervisor: expected settled command; retained ${directory}`
+      ).toBeNull();
+      const settled = runner.receipt?.settlement.empty && runner.receipt.settlement.rootObserved;
+      if (runner.home && settled) await rm(runner.home, { recursive: true, force: true });
+      if (passed && settled) await rm(directory, { recursive: true, force: true });
     }
   }
 );
