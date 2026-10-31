@@ -396,8 +396,7 @@ async function main(): Promise<void> {
         qualifiesRustStudyCommand(result) &&
         resources !== null &&
         resources.sampleCount > 0 &&
-        resources.remainingIdentities.length === 0 &&
-        (await sourceInputs()).seal === seal;
+        resources.remainingIdentities.length === 0;
       const attempt: {
         label: string;
         valid: boolean;
@@ -424,6 +423,14 @@ async function main(): Promise<void> {
         at: new Date().toISOString(),
       });
       await save(null); // Keep terminal raw command even if inspection fails.
+      if (valid) {
+        try {
+          valid = (await sourceInputs()).seal === seal;
+        } catch (error) {
+          attempt.inputFailure = error instanceof Error ? error.message : String(error);
+          throw error;
+        }
+      }
       if (!valid)
         throw new Error(
           `${workload.label}: expected successful, sampled, source-sealed build with empty terminal scope and no historical census failures`

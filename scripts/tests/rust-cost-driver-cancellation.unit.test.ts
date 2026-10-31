@@ -64,7 +64,8 @@ class FakeRustCostCommands {
   }
   constructor(
     private readonly directory: string,
-    private readonly stopAtMetadata = false
+    private readonly stopAtMetadata = false,
+    private readonly completedBuildMutation?: 'include' | 'invalid-toml'
   ) {
     this.sourceRoot = join(directory, 'source');
   }
@@ -79,6 +80,18 @@ class FakeRustCostCommands {
       join(ROOT, 'crates/mangostudio-runtime/src/main.rs'),
       join(this.sourceRoot, 'crates/mangostudio-runtime/src/main.rs')
     );
+    if (this.completedBuildMutation) {
+      const resourceHost = join(this.sourceRoot, 'scripts/lib/process-resource-host.ts');
+      const source = await readFile(resourceHost, 'utf8');
+      const anchor = "names: () => readdir('/proc'),";
+      if (source.split(anchor).length !== 2)
+        throw new Error('Named resource fake: expected one procfs names boundary');
+      const names = `names: async () => {
+        try { return JSON.parse(await readFile(${JSON.stringify(join(this.directory, 'build-resource-pids'))}, 'utf8')); }
+        catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+      },`;
+      await Bun.write(resourceHost, source.replace(anchor, names));
+    }
     const bin = join(this.directory, 'bin');
     await mkdir(bin);
     const sources: Record<string, string> = {
@@ -92,6 +105,24 @@ else if (args[0] === '-V') console.log('cargo fixture');
 else if (args[0] === 'metadata') { if (${this.stopAtMetadata}) { await Bun.write(${JSON.stringify(join(this.directory, 'metadata-reached'))}, 'metadata'); process.exit(23); } console.log(JSON.stringify({ packages: [{ name: 'fixture', description: 'x'.repeat(2 * 2 ** 20) }], workspace_members: [], resolve: { nodes: [] } })); }
 else if (args[0] === 'tree') console.log('fixture locked dependency graph');
 else if (args[0] === 'build') {
+  if (${Boolean(this.completedBuildMutation)}) {
+    await Bun.write(${JSON.stringify(join(this.directory, 'build-resource-pids'))}, JSON.stringify([String(process.ppid), String(process.pid)]));
+    const terminal = ${JSON.stringify(join(this.directory, 'study/runtime-empty-1/terminal-runtime-empty-1.jsonl'))};
+    const deadline = Date.now() + 5000;
+    let sampled = false;
+    while (Date.now() < deadline) {
+      const text = await Bun.file(terminal).text().catch(() => '');
+      sampled = text.trim().split('\\n').filter(Boolean).some((line) => {
+        try { return JSON.parse(line).processes.some((row) => row.pid === process.ppid && row.command === 'time'); } catch { return false; }
+      });
+      if (sampled) break;
+      await Bun.sleep(5);
+    }
+    if (!sampled) throw new Error('Named build fake: expected sampled GNU time root before mutation');
+    await Bun.write(${JSON.stringify(join(this.directory, 'sample-observed'))}, 'sampled');
+    await Bun.write(${JSON.stringify(join(this.directory, 'cargo-home/config.toml'))}, ${JSON.stringify(this.completedBuildMutation === 'include' ? 'include = ["included.toml"]\n' : '[http]\nproxy = "POST_BUILD_CONFIG_SECRET')});
+    process.exit(0);
+  }
   const worker = Bun.spawn([process.execPath, import.meta.path, '--worker'], { stdio: ['ignore', 'ignore', 'ignore'] });
   const stat = await Bun.file('/proc/'+process.ppid+'/stat').text();
   const driverPid = Number(stat.slice(stat.lastIndexOf(')')+2).split(' ')[1]);
@@ -224,6 +255,69 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
         expect(existsSync(join(root, 'study'))).toBe(false);
         expect(existsSync(join(fixture.sourceRoot, 'target'))).toBe(false);
       }
+    );
+    it.each(['include', 'invalid-toml'] as const)(
+      'retains the successful raw build when post-build input validation rejects %s',
+      async (mutation) => {
+        const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-post-input-test-'));
+        scratch.push(root);
+        const fixture = new FakeRustCostCommands(root, false, mutation);
+        const bin = await fixture.create();
+        const out = join(root, 'study');
+        const result = await runNativeCommand({
+          label: 'driver-post-input-rejected',
+          command: [
+            process.execPath,
+            join(fixture.sourceRoot, 'scripts/bench/rust-costs.ts'),
+            '--execute',
+            '--out',
+            out,
+          ],
+          root: fixture.sourceRoot,
+          out: root,
+          env: fixture.environment(process.env, bin),
+          timeoutSeconds: 20,
+          stream: new DiscardedDriverOutput(),
+        });
+        const receipt = JSON.parse(await readFile(join(out, 'receipt.json'), 'utf8'));
+        expect(result.timedOut).toBe(false);
+        expect(result.exitCode).toBe(1);
+        expect(result.settlement.empty).toBe(true);
+        expect(existsSync(join(root, 'sample-observed'))).toBe(true);
+        expect(receipt.complete).toBe(false);
+        expect(receipt.attempts).toHaveLength(1);
+        const attempt = receipt.attempts[0];
+        expect(attempt).toMatchObject({
+          label: 'runtime-empty-1',
+          status: 'completed',
+          valid: false,
+          command: { exitCode: 0, timedOut: false, settlement: { empty: true } },
+        });
+        expect(attempt.resources.sampleCount).toBeGreaterThan(0);
+        expect(attempt.resources.remainingIdentities).toEqual([]);
+        expect(attempt.command.errors).toEqual([]);
+        expect(attempt.command.settlement.pollErrors).toEqual([]);
+        expect(receipt.failure).toContain(
+          mutation === 'include' ? 'received: include' : 'expected valid TOML'
+        );
+        expect(attempt.inputFailure).toContain(
+          mutation === 'include' ? 'received: include' : 'expected valid TOML'
+        );
+        expect(JSON.stringify(receipt)).not.toContain('POST_BUILD_CONFIG_SECRET');
+        const events = (await readFile(join(out, 'attempts.jsonl'), 'utf8'))
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+        expect(events.map((event) => event.kind)).toEqual(['started', 'finished']);
+        expect(events[1]).toMatchObject({
+          label: 'runtime-empty-1',
+          status: 'completed',
+          valid: false,
+          command: { exitCode: 0 },
+          resources: { remainingIdentities: [] },
+        });
+      },
+      30_000
     );
     it('cancels the actual driver build, retains its interrupted attempt and settles the Cargo family', async () => {
       const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-cancel-test-'));
