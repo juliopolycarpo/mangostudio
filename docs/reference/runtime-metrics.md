@@ -304,7 +304,9 @@ attempts. Disk allocation is checked between attempts against a 40 GiB target/ar
 a three-hour batch deadline; keep additional disk headroom for an individual build.
 
 Executable batches reject Cargo build/cache/profile environment selectors, target linker/rustflags
-selectors and direct compiler/output/incremental overrides. The input seal covers both Cargo config
+selectors and direct compiler/output/incremental overrides.
+`RUSTC_BOOTSTRAP` and `RUSTC_STAGE` must be unset. Empty values are also rejected because build scripts
+use their presence when selecting feature probes. The input seal covers both Cargo config
 filename slots in every ancestor directory and Cargo home, including absent and shadowed files.
 Extensionless `config` takes precedence over `config.toml`. Active external configs may contain only
 registry/network/credential settings; includes and compiler/profile/output overrides are refused.

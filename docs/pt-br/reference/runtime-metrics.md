@@ -184,7 +184,9 @@ orçamento de 40 GiB para targets e artefatos, e limite de três horas para o lo
 para um build individual. O diretório de recibos deve ser novo; tentativas anteriores não são apagadas.
 
 Os lotes executáveis recusam seletores de ambiente Cargo de build/cache/perfil, seletores de
-linker/rustflags por target e substituições diretas de compilador/saída/incremental. O selo inclui os
+linker/rustflags por target e substituições diretas de compilador/saída/incremental.
+`RUSTC_BOOTSTRAP` e `RUSTC_STAGE` não podem estar definidos. Valores vazios também são recusados, pois
+scripts de build usam a presença dessas variáveis para escolher testes de features. O selo inclui os
 dois nomes de configuração Cargo em cada diretório ancestral e no Cargo home, inclusive arquivos
 ausentes ou ignorados pela precedência. `config` sem extensão precede `config.toml`. Configurações
 externas ativas só podem conter ajustes de registro/rede/credenciais; includes e substituições de

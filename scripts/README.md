@@ -505,7 +505,8 @@ disk use between attempts. Run on an idle host after building and qualifying the
 [`runtime-metrics.md`](../docs/reference/runtime-metrics.md#requalifying-the-current-baseline) for
 cache, disk, resource and artifact-source limits. These are repeated baseline workloads; the driver
 selects no optimization candidate. Executable batches reject inherited compiler/profile/cache/output
-selectors and seal ancestor/Cargo-home configuration slots. Unsupported includes and external build
+selectors and seal ancestor/Cargo-home configuration slots. `RUSTC_BOOTSTRAP` and `RUSTC_STAGE` must be
+unset; empty values are also rejected. Unsupported includes and external build
 configuration are refused; receipts contain paths and hashes rather than configuration values.
 
 `grep.ts` drives `fs.grep` on the real runtime binary, one fresh child (and `MANGO_HOME`) per
