@@ -213,6 +213,8 @@ interface RuntimeConnectionEntry {
   connecting?: Promise<RuntimeClient>;
   /** Openers and closes still owning resources, even after callers stop waiting. */
   pendingTeardowns?: Set<Promise<void>>;
+  /** Failed resource releases remain observable after their pending work settles. */
+  failedTeardowns?: Set<Promise<void>>;
   /** Starts a bounded cancellation wait for each raw opener that has not settled. */
   pendingOpenings?: Set<() => void>;
   /** Shared by releases until every resource they observed has settled. */
@@ -1024,7 +1026,13 @@ export class RuntimeConnectionManager {
   #trackTeardown(entry: RuntimeConnectionEntry, work: Promise<void>): Promise<void> {
     entry.pendingTeardowns ??= new Set();
     const pending = entry.pendingTeardowns;
-    const tracked = work.finally(() => pending.delete(tracked));
+    const tracked = work
+      .catch((error: unknown) => {
+        entry.failedTeardowns ??= new Set();
+        entry.failedTeardowns.add(tracked);
+        throw error;
+      })
+      .finally(() => pending.delete(tracked));
     pending.add(tracked);
     // Disconnect and transport loss have no waiter. Keep failures contained,
     // while releases still observe the original rejecting promise.
@@ -1134,7 +1142,7 @@ export class RuntimeConnectionManager {
     for (const boundOpening of entry.pendingOpenings ?? []) boundOpening();
     abort?.abort(unavailable('Runtime connection was closed.'));
     if (connection) void this.#closeConnection(entry, connection, 'released');
-    const teardowns = [...(entry.pendingTeardowns ?? [])];
+    const teardowns = [...(entry.failedTeardowns ?? []), ...(entry.pendingTeardowns ?? [])];
     if (previousRelease) teardowns.push(previousRelease);
     void this.#awaitTeardowns(teardowns).then(release.resolve, release.reject);
     // Fire-and-forget disconnects must not create an unhandled rejection.

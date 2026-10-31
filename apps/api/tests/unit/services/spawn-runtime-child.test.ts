@@ -14,7 +14,10 @@ import { HUB_WORKSPACE_AUTHORIZE_METHOD } from '@mangostudio/shared/runtime-cont
 import { getDb } from '../../../src/db/database';
 import type { HubWorkspaceBinding } from '../../../src/services/runtime-client/hub-workspace-authority';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
-import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
+import {
+  RuntimeConnectionManager,
+  type RuntimeEnvironmentConnector,
+} from '../../../src/services/runtime-client/runtime-connection-manager';
 import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { DeferredSpawnPort } from '../../support/mocks/deferred-spawn-port';
@@ -36,7 +39,116 @@ class IncompleteTerminationPeer extends DeferredSpawnPort {
   };
 }
 
+/** Wires a controlled launched peer through the real adapter and manager callback. */
+class ManagedSpawnPeer {
+  runtime: ReturnType<DeferredSpawnPort['release']>;
+
+  constructor(
+    readonly peer: DeferredSpawnPort,
+    readonly launch: () => LaunchedPeer = peer.spawnPort
+  ) {}
+
+  readonly resolveEnvironment = () =>
+    Promise.resolve({
+      id: 'devbox',
+      userId: 'user-1',
+      name: 'Devbox',
+      transportKind: 'stdio' as const,
+      config: {},
+      enabled: true,
+    });
+
+  readonly connect: RuntimeEnvironmentConnector = async (_environment, onClosed, context) => {
+    const connecting = spawnRuntimeChild(
+      {
+        environmentId: 'devbox',
+        launch: { command: 'fake-runtime', args: [] },
+        workspaceBinding: null,
+        hubVersion: 'hub-test',
+        onClosed,
+        signal: context.signal,
+      },
+      { spawnPort: this.launch }
+    );
+    this.runtime = this.peer.release();
+    const connection = await connecting;
+    return {
+      client: { manifest: TEST_RUNTIME_MANIFEST } as RuntimeClient,
+      close: connection.close,
+    };
+  };
+
+  readonly manager = new RuntimeConnectionManager({
+    resolveEnvironment: this.resolveEnvironment,
+    connectors: { stdio: this.connect },
+  });
+
+  async closeRuntime(): Promise<void> {
+    if (!this.runtime) throw new Error('expected runtime session: connected | received: none');
+    await this.runtime.close();
+  }
+}
+
+/** Signals only after the manager has observed a rejected teardown. */
+class RuntimeTeardownWarnings {
+  readonly observed = Promise.withResolvers<void>();
+  readonly messages: string[] = [];
+  readonly capture = (message?: unknown, ...details: unknown[]): void => {
+    if (message !== '[runtime] Releasing a runtime connection failed:') return;
+    this.messages.push(String(details[0]));
+    this.observed.resolve();
+  };
+  readonly spy = spyOn(console, 'warn').mockImplementation(this.capture);
+
+  restore(): void {
+    this.spy.mockRestore();
+  }
+}
+
 describe('spawnRuntimeChild — incomplete termination', () => {
+  it('retains a settled spontaneous teardown failure for later releases and shutdown', async () => {
+    const peer = new IncompleteTerminationPeer();
+    const fake = new ManagedSpawnPeer(peer, peer.launch);
+    const warnings = new RuntimeTeardownWarnings();
+    try {
+      await fake.manager.connect('user-1', 'devbox');
+      await fake.closeRuntime();
+      await warnings.observed.promise;
+      expect(warnings.messages).toEqual([expect.stringContaining('expected exit status')]);
+      const first = await fake.manager.closeAll().catch((error: unknown) => error);
+      expect(
+        first,
+        'expected retained incomplete-termination error after spontaneous close'
+      ).toBeInstanceOf(Error);
+      expect((first as Error).message).toContain('expected exit status');
+      expect(await fake.manager.closeAll().catch((error: unknown) => error)).toBe(first);
+      await fake.manager.connect('user-1', 'devbox', { force: true });
+      expect(await fake.manager.shutdown().catch((error: unknown) => error)).toBe(first);
+      expect(peer.terminationCalls).toBe(2);
+    } finally {
+      await fake.manager.shutdown().catch(() => undefined);
+      warnings.restore();
+    }
+  });
+
+  it('allows later release after a successful spontaneous teardown', async () => {
+    const peer = new DeferredSpawnPort();
+    const fake = new ManagedSpawnPeer(peer);
+    const warnings = new RuntimeTeardownWarnings();
+    try {
+      await fake.manager.connect('user-1', 'devbox');
+      await fake.closeRuntime();
+      await expect(fake.manager.closeAll()).resolves.toBeUndefined();
+      await expect(fake.manager.closeAll()).resolves.toBeUndefined();
+      await expect(fake.manager.shutdown()).resolves.toBeUndefined();
+      expect(peer.terminateCallCount).toBe(1);
+      expect(warnings.messages).toEqual([]);
+    } finally {
+      await fake.manager.shutdown().catch(() => undefined);
+      warnings.restore();
+    }
+  });
+
   it('reports incomplete termination when a handshake is cancelled', async () => {
     const fake = new IncompleteTerminationPeer();
     const controller = new AbortController();
