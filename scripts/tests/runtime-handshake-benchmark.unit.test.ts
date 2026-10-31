@@ -10,6 +10,7 @@ import {
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
 import { FakeBenchmarkCancelBarrier } from './support/benchmark-cancel-barrier';
+import { fakeBenchmarkResources } from './support/benchmark-resource-observation';
 import { fixtureChildEnvironment } from './support/child-supervision';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -56,6 +57,7 @@ if (process.env.HOME !== process.env.MANGO_HOME || process.env.USERPROFILE !== p
 const fixtureRoot = process.env.BENCHMARK_FIXTURE_ROOT;
 const successfulBeforeFailure = Number(process.env.BENCHMARK_FIXTURE_SUCCESSFUL_BEFORE_FAILURE);
 const stall = process.env.BENCHMARK_FIXTURE_STALL === 'true';
+await Bun.write(join(fixtureRoot, 'runtime-home'), process.env.MANGO_HOME);
 const counterPath = join(fixtureRoot, 'counter');
 const count = Number(await Bun.file(counterPath).text().catch(() => '0')) + 1;
 await Bun.write(counterPath, String(count));
@@ -124,6 +126,114 @@ new Session(stdioPort(), {peer:{name:'fixture-runtime',version:'0.1.1',role:'too
   }
 }
 describe.skipIf(process.platform === 'win32')('protocol startup receipts', () => {
+  it.skipIf(process.platform !== 'linux')(
+    'retains protocol scratch when the resource observer disagrees with settled scope',
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'mango-handshake-resource-retention-'));
+      scratch.push(directory);
+      const fixture = new FakeRuntimeRefusingHandshake(directory, 10);
+      const binary = await fixture.create();
+      const monitor = await fakeBenchmarkResources(directory, 'remaining');
+      const result = await runNativeCommand({
+        label: 'handshake-resource-retention',
+        command: [
+          process.execPath,
+          '--preload',
+          monitor.preload,
+          'scripts/bench/runtime-handshake.ts',
+          binary,
+          '--runs',
+          '1',
+          '--warmups',
+          '0',
+          '--resources',
+          '--json',
+        ],
+        root: ROOT,
+        out: directory,
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, ...monitor.env }),
+        timeoutSeconds: 10,
+        pollIntervalMs: 20,
+        settleMs: 500,
+        stream: new DiscardedHandshakeOutput(),
+      });
+      expect(result.timedOut).toBe(false);
+      expect(result.settlement.empty).toBe(true);
+      expect(result.exitCode).toBe(1);
+      const receipt = JSON.parse(
+        await readFile(join(directory, 'logs/handshake-resource-retention.stdout.log'), 'utf8')
+      );
+      const home = await readFile(join(directory, 'runtime-home'), 'utf8');
+      scratch.push(resolve(home, '..'));
+      expect(receipt.attempts[0].resources.summary.remainingIdentities).toEqual(['900001:100']);
+      expect(
+        await stat(home).then(
+          () => true,
+          () => false
+        ),
+        `resource survivor: expected retained runtime home ${home}`
+      ).toBe(true);
+      expect(receipt.attempts[0].cleanupProven).toBe(false);
+      expect(receipt.attempts[0].cleanupErrors.join(' ')).toContain('resource');
+      expect(receipt.cleanupError).toContain(`retained scratch ${resolve(home, '..')}`);
+    }
+  );
+
+  it.skipIf(process.platform !== 'linux')(
+    'removes settled protocol scratch when resource samples only missed the readiness window',
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'mango-handshake-late-resource-'));
+      scratch.push(directory);
+      const fixture = new FakeRuntimeRefusingHandshake(directory, 10);
+      const binary = await fixture.create();
+      const monitor = await fakeBenchmarkResources(directory, 'late-sample');
+      const result = await runNativeCommand({
+        label: 'handshake-late-resource',
+        command: [
+          process.execPath,
+          '--preload',
+          monitor.preload,
+          'scripts/bench/runtime-handshake.ts',
+          binary,
+          '--runs',
+          '1',
+          '--warmups',
+          '0',
+          '--resources',
+          '--json',
+        ],
+        root: ROOT,
+        out: directory,
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, ...monitor.env }),
+        timeoutSeconds: 10,
+        pollIntervalMs: 20,
+        settleMs: 500,
+        stream: new DiscardedHandshakeOutput(),
+      });
+      expect(result.timedOut).toBe(false);
+      expect(result.settlement.empty).toBe(true);
+      expect(result.exitCode).toBe(1);
+      const receipt = JSON.parse(
+        await readFile(join(directory, 'logs/handshake-late-resource.stdout.log'), 'utf8')
+      );
+      const home = await readFile(join(directory, 'runtime-home'), 'utf8');
+      scratch.push(resolve(home, '..'));
+      expect(receipt.attempts[0]).toMatchObject({
+        status: 'failed',
+        cleanupProven: true,
+        cleanupErrors: [],
+        resources: { summary: { sampleCount: 0, remainingIdentities: [] } },
+      });
+      expect(
+        await stat(home).then(
+          () => true,
+          () => false
+        )
+      ).toBe(false);
+      expect(receipt.cleanupError).toBeNull();
+    }
+  );
+
   it('does not accept a handshake or remove its home while an owned descendant survives', async () => {
     const root = await mkdtemp(join(tmpdir(), 'runtime-handshake-held-output-'));
     const binary = await new FakeHeldOutputRuntime(root).create();

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import {
   BenchmarkChildScope,
+  benchmarkResourceCleanupError,
   type BenchmarkScopeHost,
   pumpBenchmarkStream,
   recordBenchmarkCleanup,
@@ -14,6 +15,7 @@ import {
   type NativeProcess,
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
+import type { ProcessResourceObservation } from '../lib/process-resource-monitor';
 import { fixtureChildEnvironment } from './support/child-supervision';
 
 const root: NativeProcess = {
@@ -206,3 +208,68 @@ test.skipIf(process.platform === 'win32')(
   },
   15_000
 );
+
+function settledResourceObservation(): ProcessResourceObservation {
+  return {
+    intervalMs: 10,
+    clockOriginMs: 0,
+    readinessAtMs: 1,
+    measurementEndMs: 1,
+    errors: [],
+    frames: [],
+    summary: {
+      sampleCount: 1,
+      observedProcessCount: 1,
+      peakSampledRssBytes: 4096,
+      sampledUserCpuMs: 0,
+      sampledSystemCpuMs: 0,
+      cpuResolutionMs: 10,
+      remainingIdentities: [],
+      frames: [],
+    },
+  };
+}
+
+describe('benchmark resource cleanup evidence', () => {
+  test('requires available terminal evidence and retains census failure details', () => {
+    expect(benchmarkResourceCleanupError(null)).toContain('received: unavailable');
+    const observation = settledResourceObservation();
+    expect(benchmarkResourceCleanupError({ ...observation, summary: null })).toContain(
+      'terminal summary'
+    );
+    expect(
+      benchmarkResourceCleanupError({ ...observation, errors: ['named terminal census failure'] })
+    ).toContain('named terminal census failure');
+  });
+
+  test('refuses resource-owned remaining identities even when the native child scope is empty', () => {
+    const observation = settledResourceObservation();
+    if (!observation.summary)
+      throw new Error('fixture summary: expected available | received: null');
+    expect(
+      benchmarkResourceCleanupError({
+        ...observation,
+        summary: { ...observation.summary, remainingIdentities: ['900001:100'] },
+      })
+    ).toContain('900001:100');
+    expect(benchmarkResourceCleanupError(observation)).toBeNull();
+  });
+
+  test('keeps empty terminal evidence valid when no sample fell within the readiness window', () => {
+    const observation = settledResourceObservation();
+    if (!observation.summary)
+      throw new Error('fixture summary: expected available | received: null');
+    expect(
+      benchmarkResourceCleanupError({
+        ...observation,
+        summary: {
+          ...observation.summary,
+          sampleCount: 0,
+          peakSampledRssBytes: null,
+          sampledUserCpuMs: null,
+          sampledSystemCpuMs: null,
+        },
+      })
+    ).toBeNull();
+  });
+});

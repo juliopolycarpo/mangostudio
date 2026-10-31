@@ -54,6 +54,7 @@ import { homeEnv } from '../lib/temp-home';
 import { sha256File } from '../release/verify-checksum';
 import {
   BenchmarkChildScope,
+  benchmarkResourceCleanupError,
   recordBenchmarkCleanup,
   settleBenchmarkWork,
 } from './benchmark-child-scope';
@@ -241,6 +242,11 @@ async function measureOnce(
     }
   }
   const resources = cleanupState.resources;
+  const resourceCleanupError = units ? benchmarkResourceCleanupError(resources) : null;
+  if (resourceCleanupError) {
+    cleanupProven = false;
+    failure = recordBenchmarkCleanup(cleanupErrors, failure, 'Runtime', resourceCleanupError);
+  }
   if (
     resources &&
     (resources.errors.length ||

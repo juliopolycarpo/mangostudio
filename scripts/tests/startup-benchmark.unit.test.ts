@@ -11,6 +11,7 @@ import {
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
 import { FakeBenchmarkCancelBarrier } from './support/benchmark-cancel-barrier';
+import { fakeBenchmarkResources } from './support/benchmark-resource-observation';
 import { fixtureChildEnvironment } from './support/child-supervision';
 
 const ROOT = resolve(import.meta.dir, '../..');
@@ -55,6 +56,7 @@ import { join } from 'node:path';
 const home = process.env.HOME;
 const fixtureRoot = process.env.BENCHMARK_FIXTURE_ROOT;
 const stall = process.env.BENCHMARK_FIXTURE_STALL === 'true';
+if (fixtureRoot) await Bun.write(join(fixtureRoot, 'runtime-home'), home);
 const counterPath = join(home, 'startup-counter');
 const count = Number(await Bun.file(counterPath).text().catch(() => '0')) + 1;
 await Bun.write(counterPath, String(count));
@@ -105,6 +107,105 @@ process.on('SIGTERM',()=>{ writeFileSync(join(root,'hub-stopped'),'stopped'); se
 }
 
 describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () => {
+  it.skipIf(process.platform !== 'linux').each([false, true])(
+    'retains the startup home when the resource observer disagrees with settled scope, warm=%s',
+    async (warm) => {
+      const directory = await mkdtemp(join(tmpdir(), 'mango-startup-resource-retention-'));
+      scratch.push(directory);
+      const fixture = new FakeStartupBinary(directory);
+      const binary = await fixture.create();
+      const monitor = await fakeBenchmarkResources(directory, 'remaining');
+      const result = await runNativeCommand({
+        label: 'startup-resource-retention',
+        command: [
+          process.execPath,
+          '--preload',
+          monitor.preload,
+          'scripts/bench/startup.ts',
+          binary,
+          '--runs',
+          '1',
+          '--resources',
+          '--json',
+          ...(warm ? ['--warm'] : []),
+        ],
+        root: ROOT,
+        out: directory,
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, ...monitor.env }),
+        timeoutSeconds: 10,
+        pollIntervalMs: 20,
+        settleMs: 500,
+        stream: new DiscardedBenchmarkOutput(),
+      });
+      const output = await readFile(
+        join(directory, 'logs/startup-resource-retention.stdout.log'),
+        'utf8'
+      );
+      expect(result.timedOut).toBe(false);
+      expect(result.settlement.empty).toBe(true);
+      expect(result.exitCode).toBe(1);
+      const receipt = JSON.parse(output);
+      const home = await readFile(join(directory, 'runtime-home'), 'utf8');
+      scratch.push(home);
+      expect(receipt.attempts[0].resources.summary.remainingIdentities).toEqual(['900001:100']);
+      expect(
+        await Bun.file(join(home, 'startup-counter')).exists(),
+        `resource survivor: expected retained startup home ${home}`
+      ).toBe(true);
+      expect(receipt.attempts[0].cleanupProven).toBe(false);
+      expect(receipt.attempts[0].cleanupErrors.join(' ')).toContain('resource');
+      expect(receipt.cleanupError).toContain(`retained home ${home}`);
+    }
+  );
+
+  it.skipIf(process.platform !== 'linux')(
+    'removes a settled startup home when resource samples only missed the readiness window',
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'mango-startup-late-resource-'));
+      scratch.push(directory);
+      const fixture = new FakeStartupBinary(directory);
+      const binary = await fixture.create();
+      const monitor = await fakeBenchmarkResources(directory, 'late-sample');
+      const result = await runNativeCommand({
+        label: 'startup-late-resource',
+        command: [
+          process.execPath,
+          '--preload',
+          monitor.preload,
+          'scripts/bench/startup.ts',
+          binary,
+          '--runs',
+          '1',
+          '--resources',
+          '--json',
+        ],
+        root: ROOT,
+        out: directory,
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, ...monitor.env }),
+        timeoutSeconds: 10,
+        pollIntervalMs: 20,
+        settleMs: 500,
+        stream: new DiscardedBenchmarkOutput(),
+      });
+      expect(result.timedOut).toBe(false);
+      expect(result.settlement.empty).toBe(true);
+      expect(result.exitCode).toBe(1);
+      const receipt = JSON.parse(
+        await readFile(join(directory, 'logs/startup-late-resource.stdout.log'), 'utf8')
+      );
+      const home = await readFile(join(directory, 'runtime-home'), 'utf8');
+      scratch.push(home);
+      expect(receipt.attempts[0]).toMatchObject({
+        status: 'failed',
+        cleanupProven: true,
+        cleanupErrors: [],
+        resources: { summary: { sampleCount: 0, remainingIdentities: [] } },
+      });
+      expect(await Bun.file(join(home, 'startup-counter')).exists()).toBe(false);
+      expect(receipt.cleanupError).toBeNull();
+    }
+  );
+
   it('settles descendants that retain startup output after the hub exits', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mango-startup-held-output-'));
     const binary = await new FakeHeldOutputHub(directory).create();

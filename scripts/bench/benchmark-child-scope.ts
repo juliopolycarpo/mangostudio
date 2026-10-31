@@ -5,6 +5,7 @@ import {
   snapshotNativeProcesses,
   WINDOWS_CENSUS_TIMEOUT_MS,
 } from '../lib/native-bun-qualification-process';
+import type { ProcessResourceObservation } from '../lib/process-resource-monitor';
 
 /** A retained direct child; `kill` always acts through the original process handle. */
 export interface BenchmarkChildHandle {
@@ -262,4 +263,21 @@ export function recordBenchmarkCleanup(
 ): string {
   errors.push(cause);
   return failure ?? `${label} cleanup: ${cause}`;
+}
+
+/** Report resource evidence that cannot confirm cleanup without rejecting cost-only late samples.
+ * @example const error = benchmarkResourceCleanupError(await monitor.stop());
+ */
+export function benchmarkResourceCleanupError(
+  observation: ProcessResourceObservation | null
+): string | null {
+  if (!observation)
+    return 'resource terminal observation: expected available | received: unavailable';
+  if (observation.errors.length)
+    return `resource cleanup evidence: expected error-free observation | received: ${JSON.stringify(observation.errors)}`;
+  if (!observation.summary)
+    return 'resource terminal summary: expected available | received: unavailable';
+  if (observation.summary.remainingIdentities.length)
+    return `resource terminal identities: expected none | received: ${JSON.stringify(observation.summary.remainingIdentities)}`;
+  return null;
 }
