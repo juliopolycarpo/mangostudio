@@ -2,6 +2,8 @@ import { describe, expect, it, spyOn } from 'bun:test';
 
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
+  createLocalRuntimeConnector,
+  type LocalRuntimeOpenOptions,
   type ManagedRuntimeConnection,
   RuntimeConnectionManager,
   type RuntimeConnectionManagerOptions,
@@ -61,6 +63,19 @@ class DeferredConnector {
   };
 }
 
+/** Holds the first Local handshake while a second user withdraws its claim. */
+class WithdrawnLocalOpening {
+  readonly started = Promise.withResolvers<void>();
+  readonly opening = Promise.withResolvers<ManagedRuntimeConnection>();
+  readonly replacement = closedConnection();
+
+  readonly open = (options: LocalRuntimeOpenOptions): Promise<ManagedRuntimeConnection> => {
+    if (options.workspaceBinding.userId !== 'user-1') return Promise.resolve(this.replacement);
+    this.started.resolve();
+    return this.opening.promise;
+  };
+}
+
 function managerWith(
   connector: DeferredConnector,
   options: Partial<RuntimeConnectionManagerOptions> = {}
@@ -98,6 +113,53 @@ describe('Runtime connection teardown ownership', () => {
     connector.opening.reject(new Error('child exited after cancellation'));
     await release;
     expect(await attempt).toMatchObject({ code: 'UNAVAILABLE' });
+  });
+
+  it('rejects shutdown when a withdrawn Local handshake is still closing at the opening bound', async () => {
+    const opener = new WithdrawnLocalOpening();
+    const local = createLocalRuntimeConnector({ open: opener.open, chainDeadlineMs: 1 });
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: (userId) =>
+        Promise.resolve({ ...definition, id: 'local', userId, transportKind: 'in-process' }),
+      connectors: { 'in-process': local },
+      openerReleaseTimeoutMs: 10,
+    });
+    const closing = new DeferredConnection();
+    const attempt = manager.connect('user-1', 'local').catch(failure);
+    await opener.started.promise;
+    await manager.connect('user-2', 'local');
+    opener.opening.resolve(closing);
+    await closing.closeStarted.promise;
+    const warning = spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const shutdown = manager.shutdown();
+      const outcome = await shutdown.then(
+        () => ({ status: 'fulfilled' as const }),
+        (reason: unknown) => ({ status: 'rejected' as const, reason })
+      );
+      expect(outcome).toMatchObject({
+        status: 'rejected',
+        reason: {
+          code: 'UNAVAILABLE',
+          message: expect.stringContaining(
+            'user "user-1", environment "local" after 10ms; expected opening cleanup to complete'
+          ),
+        },
+      });
+      const error = outcome.status === 'rejected' ? outcome.reason : undefined;
+      expect(closing.closeCalls).toBe(1);
+      expect(opener.replacement.closeCalls).toBe(1);
+      closing.closing.resolve();
+      expect(await attempt).toMatchObject({ code: 'UNAVAILABLE' });
+      expect(await manager.closeAll().catch(failure)).toBe(error);
+      expect(manager.shutdown()).toBe(shutdown);
+      expect(closing.closeCalls).toBe(1);
+    } finally {
+      closing.closing.resolve();
+      await attempt;
+      await manager.closeAll().catch(failure);
+      warning.mockRestore();
+    }
   });
 
   it('awaits a late connection and its close without closing it twice', async () => {
@@ -230,12 +292,13 @@ describe('Runtime connection teardown ownership', () => {
       await expect(manager.connect('user-1', 'devbox')).rejects.toThrow('timed out after 1ms');
       const warning = spyOn(console, 'warn').mockImplementation(() => undefined);
       try {
-        await manager[method]();
-        expect(warning).toHaveBeenCalledWith(
-          expect.stringContaining(
-            'cancelled opener for user "user-1", environment "devbox" after 10ms'
-          )
-        );
+        const expired = await manager[method]().catch(failure);
+        expect(expired).toMatchObject({
+          code: 'UNAVAILABLE',
+          message: expect.stringContaining(
+            'user "user-1", environment "devbox" after 10ms; expected opening cleanup to complete'
+          ),
+        });
         // Expiring the wait must preserve late-arrival cleanup and contain its failure.
         const late = new DeferredConnection();
         connector.opening.resolve(late);
@@ -243,7 +306,11 @@ describe('Runtime connection teardown ownership', () => {
         const release = manager.closeAll().catch(failure);
         const error = new Error('late close failed after opener budget');
         late.closing.reject(error);
-        expect(await release).toBe(error);
+        expect(await release).toBe(expired);
+        expect(warning).toHaveBeenCalledWith(
+          '[runtime] Releasing a runtime connection failed:',
+          error.message
+        );
         expect(late.closeCalls).toBe(1);
       } finally {
         warning.mockRestore();

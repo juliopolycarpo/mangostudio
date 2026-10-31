@@ -164,7 +164,7 @@ export interface RuntimeConnectionManagerOptions {
   readonly discoveryCache?: RuntimeDiscoveryCache;
   /**
    * Maximum release wait for an opener ignoring cancellation, defaulting to 6s.
-   * Live connection closes remain awaited.
+   * Expiry rejects incomplete cleanup. Live connection closes remain awaited.
    */
   readonly openerReleaseTimeoutMs?: number;
   /**
@@ -986,7 +986,8 @@ export class RuntimeConnectionManager {
   /**
    * Releases live connections and pending opens, waiting for their teardown.
    * Unsettled openers get a bounded cancellation wait so an unresponsive connector
-   * cannot prevent server cleanup. Connections that arrive later are still closed.
+   * cannot prevent server cleanup. Expiry rejects incomplete cleanup, and connections
+   * that arrive later are still closed.
    */
   async closeAll(): Promise<void> {
     await this.#awaitTeardowns([...this.#entries.values()].map((entry) => this.#release(entry)));
@@ -1061,10 +1062,11 @@ export class RuntimeConnectionManager {
       if (timer !== undefined) return;
       timer = setTimeout(() => {
         pending.delete(boundOpening);
-        console.warn(
-          `[runtime] Stopped waiting for cancelled opener for user "${entry.userId}", environment "${entry.environmentId}" after ${this.#openerReleaseTimeoutMs}ms; expected the opener to settle after cancellation. Any late connection will still be closed.`
+        expired.reject(
+          unavailable(
+            `Runtime opening cleanup incomplete for user "${entry.userId}", environment "${entry.environmentId}" after ${this.#openerReleaseTimeoutMs}ms; expected opening cleanup to complete after cancellation. Any late connection will still be closed.`
+          )
         );
-        expired.resolve();
       }, this.#openerReleaseTimeoutMs);
     };
     pending.add(boundOpening);
