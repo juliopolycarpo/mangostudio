@@ -39,6 +39,25 @@ async function fixture(): Promise<CargoConfigFixture> {
 
 describe('Rust cost environment admission', () => {
   test.each([
+    ['RUSTC_BOOTSTRAP', '1'],
+    ['RUSTC_BOOTSTRAP', ''],
+    ['RUSTC_STAGE', '1'],
+    ['RUSTC_STAGE', ''],
+  ])('rejects present compiler input %s=%j', (name, value) => {
+    expect(() => assertRustCostEnvironment({ [name]: value })).toThrow(
+      `received override names: ${name}`
+    );
+  });
+  test('admits absent bootstrap and stage selectors without changing other empty-input semantics', () => {
+    expect(() =>
+      assertRustCostEnvironment({
+        RUSTC_BOOTSTRAP: undefined,
+        RUSTC_STAGE: undefined,
+        CARGO_BUILD_RUSTC: '',
+      })
+    ).not.toThrow();
+  });
+  test.each([
     'RUSTC',
     'RUSTC_WRAPPER',
     'RUSTC_WORKSPACE_WRAPPER',

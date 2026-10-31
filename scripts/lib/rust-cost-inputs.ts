@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
+const PRESENCE_SELECTORS = new Set(['RUSTC_BOOTSTRAP', 'RUSTC_STAGE']);
+
 const EXTERNAL_TABLES = new Set(['net', 'http', 'registry', 'registries', 'credential-alias']);
 const COMPILER_KEYS = new Set([
   'rustc',
@@ -17,8 +19,9 @@ const COMPILER_KEYS = new Set([
  * @example assertRustCostEnvironment(process.env);
  */
 export function assertRustCostEnvironment(env: NodeJS.ProcessEnv): void {
-  const names = Object.keys(env).filter(
-    (name) =>
+  const names = Object.keys(env).filter((name) => {
+    if (PRESENCE_SELECTORS.has(name)) return env[name] !== undefined;
+    return (
       env[name] &&
       (name.startsWith('CARGO_PROFILE_') ||
         name.startsWith('CARGO_BUILD_') ||
@@ -34,7 +37,8 @@ export function assertRustCostEnvironment(env: NodeJS.ProcessEnv): void {
           'CARGO_INCREMENTAL',
           'RUSTC',
         ].includes(name))
-  );
+    );
+  });
   if (names.length)
     throw new Error(
       `Rust baseline environment: expected repository profile and compiler | received override names: ${names.join(', ')}`

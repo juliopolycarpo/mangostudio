@@ -56,6 +56,8 @@ class FakeRustCostCommands {
     delete environment.RUSTC;
     delete environment.RUSTC_WRAPPER;
     delete environment.RUSTC_WORKSPACE_WRAPPER;
+    delete environment.RUSTC_BOOTSTRAP;
+    delete environment.RUSTC_STAGE;
     return {
       ...environment,
       CARGO_HOME: join(this.directory, 'cargo-home'),
@@ -214,6 +216,42 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
       expect(result.timedOut).toBe(false);
       expect(result.settlement.empty).toBe(true);
       expect(await Bun.file(join(root, 'metadata-reached')).exists()).toBe(false);
+      expect(stderr).toContain(`received override names: ${selector}`);
+    });
+    it.each([
+      ['RUSTC_BOOTSTRAP', '1'],
+      ['RUSTC_BOOTSTRAP', ''],
+      ['RUSTC_STAGE', '1'],
+      ['RUSTC_STAGE', ''],
+    ])('rejects presence-sensitive %s=%j before Cargo metadata starts', async (selector, value) => {
+      const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-bootstrap-test-'));
+      scratch.push(root);
+      const fixture = new FakeRustCostCommands(root, true);
+      const bin = await fixture.create();
+      const environment = fixture.environment(process.env, bin);
+      const result = await runNativeCommand({
+        label: 'driver-rejected-bootstrap',
+        command: [
+          process.execPath,
+          join(fixture.sourceRoot, 'scripts/bench/rust-costs.ts'),
+          '--execute',
+          '--out',
+          join(root, 'study'),
+        ],
+        root: fixture.sourceRoot,
+        out: root,
+        env: { ...environment, [selector]: value },
+        timeoutSeconds: 10,
+        stream: new DiscardedDriverOutput(),
+      });
+      const stderr = await readFile(
+        join(root, 'logs/driver-rejected-bootstrap.stderr.log'),
+        'utf8'
+      );
+      expect(result.exitCode).toBe(1);
+      expect(result.timedOut).toBe(false);
+      expect(result.settlement.empty).toBe(true);
+      expect(existsSync(join(root, 'metadata-reached'))).toBe(false);
       expect(stderr).toContain(`received override names: ${selector}`);
     });
     it.each(['ancestor', 'home', 'root'])(
