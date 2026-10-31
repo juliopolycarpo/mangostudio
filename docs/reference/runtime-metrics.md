@@ -303,6 +303,14 @@ toolchain and OS page caches remain populated. A fresh receipt directory prevent
 attempts. Disk allocation is checked between attempts against a 40 GiB target/artifact budget, with
 a three-hour batch deadline; keep additional disk headroom for an individual build.
 
+Executable batches reject Cargo build/cache/profile environment selectors, target linker/rustflags
+selectors and direct compiler/output/incremental overrides. The input seal covers both Cargo config
+filename slots in every ancestor directory and Cargo home, including absent and shadowed files.
+Extensionless `config` takes precedence over `config.toml`. Active external configs may contain only
+registry/network/credential settings; includes and compiler/profile/output overrides are refused.
+Receipts retain paths and hashes, not config values. These rules apply to new batches; preserved
+studies keep their original source identities and admission rules.
+
 Receipts include the source head and Rust/Cargo input seal, toolchain, all-target dependency tree,
 stable default/all-feature metadata and the excluded fuzz graph. Every accepted build must exit
 successfully with a settled process tree and unchanged inputs. No-op builds require no new compiler
@@ -340,9 +348,16 @@ sampled: zero observed ticks does not mean zero actual CPU cost. The recorded ch
 checkout; the executable hash must be linked to its separate build receipt. WSL measurements qualify
 that host only; native Windows and macOS remain unperformed until separately measured.
 
+Resource errors, missing terminal observations or remaining identities leave cleanup unconfirmed and
+retain the private home, even when the separate native child scope is empty. A sample with no
+pre-readiness observations remains a cost failure; successful empty terminal evidence still permits
+normal cleanup.
+
 The build driver handles SIGINT/SIGTERM by canceling the active supervised command, settling its
 verified process scope, journaling the interrupted attempt and stopping the batch. External hard
 timeouts still need an outer process supervisor: SIGKILL cannot run cleanup inside the killed process.
+Overlapping abort and deadline stops share the admitted cleanup operation, and terminal reporting
+waits for it while retaining both stop causes.
 
 The locked metadata commands use an explicit machine-stdout limit of 8 MiB per UTF-8 line, with a
 16 MiB hard ceiling. This preserves complete compact Cargo JSON without changing the default text

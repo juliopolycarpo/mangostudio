@@ -183,6 +183,14 @@ toolchain e páginas do SO continuam aquecidos. A alocação em disco é verific
 orçamento de 40 GiB para targets e artefatos, e limite de três horas para o lote. Reserve espaço extra
 para um build individual. O diretório de recibos deve ser novo; tentativas anteriores não são apagadas.
 
+Os lotes executáveis recusam seletores de ambiente Cargo de build/cache/perfil, seletores de
+linker/rustflags por target e substituições diretas de compilador/saída/incremental. O selo inclui os
+dois nomes de configuração Cargo em cada diretório ancestral e no Cargo home, inclusive arquivos
+ausentes ou ignorados pela precedência. `config` sem extensão precede `config.toml`. Configurações
+externas ativas só podem conter ajustes de registro/rede/credenciais; includes e substituições de
+compilador/perfil/saída são recusados. Os recibos guardam caminhos e hashes, não os valores. Essas
+regras valem para novos lotes; estudos preservados mantêm suas fontes e regras de admissão originais.
+
 Os recibos guardam revisão, selo das entradas Rust/Cargo, toolchain, árvore de todos os alvos,
 metadados estáveis com features padrão/completas e árvore fuzz separada. Uma tentativa aceita precisa
 terminar com sucesso, entradas inalteradas e árvore de processos vazia. Builds sem alteração não podem
@@ -216,9 +224,16 @@ observados não significa custo real zero. A revisão registrada pertence ao che
 hash do executável precisa ser ligado ao seu recibo de build. WSL não qualifica Windows ou macOS
 nativos, que continuam não medidos.
 
+Erros de recursos, ausência de observações terminais ou identidades restantes deixam a limpeza sem
+confirmação e preservam o diretório privado, mesmo quando o escopo nativo separado está vazio. Sem
+observações anteriores à prontidão, a amostra continua sendo uma falha de custo; evidência terminal
+vazia e bem-sucedida ainda permite a limpeza normal.
+
 O driver trata SIGINT/SIGTERM cancelando o comando supervisionado ativo, encerrando sua árvore
 verificada, registrando a tentativa interrompida e parando o lote. Timeouts externos com SIGKILL
 exigem um supervisor externo: o processo morto não consegue executar sua própria limpeza.
+Cancelamento e prazo simultâneos compartilham a operação de limpeza iniciada; o relato terminal
+aguarda seu término e preserva as duas causas de parada.
 
 Os comandos de metadados travados usam limite explícito de stdout de máquina: 8 MiB por linha UTF-8,
 com teto de 16 MiB. Isso preserva o JSON compacto completo do Cargo sem alterar os limites padrão do

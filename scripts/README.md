@@ -481,7 +481,10 @@ admission change does not requalify historical Windows observations.
 
 Cleanup tracks observed native birth identities and the private process group. A failed census,
 unconfirmed exit, held output pipe or surviving observed child fails the attempt and retains its
-home. These observations do not prove containment of previously unseen descendants that detach into
+home. Resource errors, missing terminal evidence or remaining resource identities also prevent home
+removal when the separate native scope is empty. Missing pre-readiness samples alone remain a cost
+failure when successful terminal evidence proves no identities remain. These observations do not
+prove containment of previously unseen descendants that detach into
 another session. Untimed runtime version identification uses observation barriers and bounded
 cancellation; failed setup is retained separately from measured samples. Resource initialization,
 readiness observations and output settlement also have explicit bounds. Existing readiness events
@@ -501,7 +504,9 @@ warmups and twenty measured attempts each. The driver retains raw failed attempt
 disk use between attempts. Run on an idle host after building and qualifying the harness; see
 [`runtime-metrics.md`](../docs/reference/runtime-metrics.md#requalifying-the-current-baseline) for
 cache, disk, resource and artifact-source limits. These are repeated baseline workloads; the driver
-selects no optimization candidate.
+selects no optimization candidate. Executable batches reject inherited compiler/profile/cache/output
+selectors and seal ancestor/Cargo-home configuration slots. Unsupported includes and external build
+configuration are refused; receipts contain paths and hashes rather than configuration values.
 
 `grep.ts` drives `fs.grep` on the real runtime binary, one fresh child (and `MANGO_HOME`) per
 sample so peak RSS (`VmHWM`, Linux) belongs to that scenario alone. Each sample times only the
