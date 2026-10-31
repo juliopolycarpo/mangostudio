@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { chmod, copyFile, cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
 
 import { nativeQualificationEnvironment } from '../lib/native-bun-qualification';
@@ -30,7 +31,8 @@ afterEach(async () => {
   }
   for (const target of targets.splice(0)) {
     if (
-      !target.path.startsWith(join(ROOT, 'target/rust-cost-baseline-')) ||
+      !scratch.includes(dirname(target.owner)) ||
+      !target.path.startsWith(join(dirname(target.owner), 'source/target/rust-cost-baseline-')) ||
       (await readFile(join(target.path, '.rust-cost-baseline-owner'), 'utf8')) !== target.owner
     )
       throw new Error(
@@ -48,25 +50,46 @@ class DiscardedDriverOutput extends Writable {
 
 /** No Rust compilation: a named Cargo fake stops inside the first declared build. */
 class FakeRustCostCommands {
+  readonly sourceRoot: string;
   environment(ambient: NodeJS.ProcessEnv, bin: string): NodeJS.ProcessEnv {
     const environment = nativeQualificationEnvironment(ambient);
     delete environment.RUSTC;
     delete environment.RUSTC_WRAPPER;
     delete environment.RUSTC_WORKSPACE_WRAPPER;
-    return { ...environment, PATH: `${bin}:${environment.PATH}` };
+    return {
+      ...environment,
+      CARGO_HOME: join(this.directory, 'cargo-home'),
+      PATH: `${bin}:${environment.PATH}`,
+    };
   }
-  constructor(private readonly directory: string) {}
+  constructor(
+    private readonly directory: string,
+    private readonly stopAtMetadata = false
+  ) {
+    this.sourceRoot = join(directory, 'source');
+  }
   async create(): Promise<string> {
+    await cp(join(ROOT, 'scripts'), join(this.sourceRoot, 'scripts'), { recursive: true });
+    await mkdir(join(this.sourceRoot, '.cargo'), { recursive: true });
+    await copyFile(join(ROOT, '.cargo/config.toml'), join(this.sourceRoot, '.cargo/config.toml'));
+    for (const name of ['package.json', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml'])
+      await copyFile(join(ROOT, name), join(this.sourceRoot, name));
+    await mkdir(join(this.sourceRoot, 'crates/mangostudio-runtime/src'), { recursive: true });
+    await copyFile(
+      join(ROOT, 'crates/mangostudio-runtime/src/main.rs'),
+      join(this.sourceRoot, 'crates/mangostudio-runtime/src/main.rs')
+    );
     const bin = join(this.directory, 'bin');
     await mkdir(bin);
     const sources: Record<string, string> = {
-      git: `const args = process.argv.slice(2); if (args[0] === 'rev-parse') console.log('0000000000000000000000000000000000000000'); else if (args[0] === 'ls-files') console.log('Cargo.toml\\nCargo.lock\\nrust-toolchain.toml\\ncrates/mangostudio-runtime/src/main.rs'); else if (args[0] !== 'status') throw new Error('Unexpected fake git command: '+args);`,
+      stat: `console.log('ext2/ext3');`,
+      git: `const args = process.argv.slice(2); if (args[0] === 'rev-parse') console.log('0000000000000000000000000000000000000000'); else if (args[0] === 'ls-files') console.log('Cargo.toml\\nCargo.lock\\nrust-toolchain.toml\\n.cargo/config.toml\\ncrates/mangostudio-runtime/src/main.rs'); else if (args[0] !== 'status') throw new Error('Unexpected fake git command: '+args);`,
       rustc: `console.log('rustc 1.99.0 (fixture)\\nhost: x86_64-unknown-linux-gnu');`,
       cargo: `
 const args = process.argv.slice(2);
 if (args.includes('--worker')) { setInterval(() => {}, 1000); await new Promise(() => {}); }
 else if (args[0] === '-V') console.log('cargo fixture');
-else if (args[0] === 'metadata') console.log(JSON.stringify({ packages: [{ name: 'fixture', description: 'x'.repeat(2 * 2 ** 20) }], workspace_members: [], resolve: { nodes: [] } }));
+else if (args[0] === 'metadata') { if (${this.stopAtMetadata}) { await Bun.write(${JSON.stringify(join(this.directory, 'metadata-reached'))}, 'metadata'); process.exit(23); } console.log(JSON.stringify({ packages: [{ name: 'fixture', description: 'x'.repeat(2 * 2 ** 20) }], workspace_members: [], resolve: { nodes: [] } })); }
 else if (args[0] === 'tree') console.log('fixture locked dependency graph');
 else if (args[0] === 'build') {
   const worker = Bun.spawn([process.execPath, import.meta.path, '--worker'], { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -101,12 +124,12 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
         label: 'driver-rejected-environment',
         command: [
           process.execPath,
-          'scripts/bench/rust-costs.ts',
+          join(fixture.sourceRoot, 'scripts/bench/rust-costs.ts'),
           '--execute',
           '--out',
           join(root, 'study'),
         ],
-        root: ROOT,
+        root: fixture.sourceRoot,
         out: root,
         env: { ...environment, CARGO_TARGET_DIR: join(root, 'inherited-target') },
         timeoutSeconds: 10,
@@ -125,6 +148,83 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
       );
       expect(await Bun.file(join(root, 'stall-reached')).exists()).toBe(false);
     });
+    it.each([
+      'CARGO_BUILD_RUSTC',
+      'CARGO_BUILD_RUSTC_WRAPPER',
+      'CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER',
+      'CARGO_INCREMENTAL',
+      'CARGO_BUILD_INCREMENTAL',
+      'CARGO_BUILD_BUILD_DIR',
+      'CARGO_CACHE_RUSTC_INFO',
+      'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER',
+    ])('rejects %s before Cargo metadata starts', async (selector) => {
+      const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-selector-test-'));
+      scratch.push(root);
+      const fixture = new FakeRustCostCommands(root, true);
+      const bin = await fixture.create();
+      const environment = fixture.environment(process.env, bin);
+      const result = await runNativeCommand({
+        label: 'driver-rejected-selector',
+        command: [
+          process.execPath,
+          join(fixture.sourceRoot, 'scripts/bench/rust-costs.ts'),
+          '--execute',
+          '--out',
+          join(root, 'study'),
+        ],
+        root: fixture.sourceRoot,
+        out: root,
+        env: { ...environment, [selector]: 'unsupported-selector' },
+        timeoutSeconds: 10,
+        stream: new DiscardedDriverOutput(),
+      });
+      const stderr = await readFile(join(root, 'logs/driver-rejected-selector.stderr.log'), 'utf8');
+      expect(result.exitCode).toBe(1);
+      expect(result.timedOut).toBe(false);
+      expect(result.settlement.empty).toBe(true);
+      expect(await Bun.file(join(root, 'metadata-reached')).exists()).toBe(false);
+      expect(stderr).toContain(`received override names: ${selector}`);
+    });
+    it.each(['ancestor', 'home', 'root'])(
+      'refuses %s Cargo includes before creating batch outputs or invoking metadata',
+      async (location) => {
+        const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-config-test-'));
+        scratch.push(root);
+        const fixture = new FakeRustCostCommands(root, true);
+        const bin = await fixture.create();
+        const path =
+          location === 'root'
+            ? join(fixture.sourceRoot, '.cargo/config.toml')
+            : location === 'home'
+              ? join(root, 'cargo-home/config.toml')
+              : join(root, '.cargo/config.toml');
+        await Bun.write(path, 'include = ["included.toml"]\n');
+        const result = await runNativeCommand({
+          label: 'driver-rejected-config',
+          command: [
+            process.execPath,
+            join(fixture.sourceRoot, 'scripts/bench/rust-costs.ts'),
+            '--execute',
+            '--out',
+            join(root, 'study'),
+          ],
+          root: fixture.sourceRoot,
+          out: root,
+          env: fixture.environment(process.env, bin),
+          timeoutSeconds: 10,
+          stream: new DiscardedDriverOutput(),
+        });
+        const stderr = await readFile(join(root, 'logs/driver-rejected-config.stderr.log'), 'utf8');
+        expect(result.exitCode).toBe(1);
+        expect(result.timedOut).toBe(false);
+        expect(result.settlement.empty).toBe(true);
+        expect(stderr).toContain(`Rust baseline Cargo config ${path}: expected`);
+        expect(stderr).toContain('received: include');
+        expect(existsSync(join(root, 'metadata-reached'))).toBe(false);
+        expect(existsSync(join(root, 'study'))).toBe(false);
+        expect(existsSync(join(fixture.sourceRoot, 'target'))).toBe(false);
+      }
+    );
     it('cancels the actual driver build, retains its interrupted attempt and settles the Cargo family', async () => {
       const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-cancel-test-'));
       scratch.push(root);
@@ -133,8 +233,14 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
       const out = join(root, 'study');
       const pending = runNativeCommand({
         label: 'driver-cancel',
-        command: [process.execPath, 'scripts/bench/rust-costs.ts', '--execute', '--out', out],
-        root: ROOT,
+        command: [
+          process.execPath,
+          join(fixture.sourceRoot, 'scripts/bench/rust-costs.ts'),
+          '--execute',
+          '--out',
+          out,
+        ],
+        root: fixture.sourceRoot,
         out: root,
         env: fixture.environment(
           { ...process.env, CARGO_TARGET_DIR: join(root, 'inherited-qualification-target') },

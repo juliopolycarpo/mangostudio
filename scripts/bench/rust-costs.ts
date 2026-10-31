@@ -5,7 +5,7 @@
  * Example: bun scripts/bench/rust-costs.ts --execute --out /tmp/rust-cost-receipts
  */
 import { mkdir, readFile, rm } from 'node:fs/promises';
-import { arch, cpus, homedir, platform, release, totalmem } from 'node:os';
+import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
 
@@ -30,6 +30,7 @@ import {
   type RustArtifactReceipt,
   rustLibraryHashes,
 } from '../lib/rust-artifact-receipt';
+import { assertRustCostEnvironment, inspectRustCostCargoConfigs } from '../lib/rust-cost-inputs';
 import {
   parseBuildCpu,
   qualifiesRustIncremental,
@@ -62,7 +63,10 @@ function syncText(command: readonly string[]): string {
   return result.stdout.toString().trim();
 }
 
-async function sourceSeal(): Promise<string> {
+async function sourceInputs(): Promise<{
+  seal: string;
+  cargoConfigHashes: Record<string, string | null>;
+}> {
   const names = syncText([
     'git',
     'ls-files',
@@ -81,13 +85,11 @@ async function sourceSeal(): Promise<string> {
     hasher.update(`${name}\0`);
     hasher.update(await Bun.file(join(ROOT, name)).arrayBuffer());
   }
-  const cargoHome = process.env.CARGO_HOME || join(homedir(), '.cargo');
-  for (const name of ['config', 'config.toml']) {
-    const file = Bun.file(join(cargoHome, name));
-    hasher.update(`external-cargo-config/${name}\0`);
-    hasher.update((await file.exists()) ? await file.arrayBuffer() : 'absent');
+  const cargoConfigHashes = await inspectRustCostCargoConfigs(ROOT, process.env, names);
+  for (const [path, hash] of Object.entries(cargoConfigHashes)) {
+    hasher.update(`${path}\0${hash ?? 'absent'}\0`);
   }
-  return hasher.digest('hex');
+  return { seal: hasher.digest('hex'), cargoConfigHashes };
 }
 
 function allocatedBytes(path: string): number {
@@ -155,26 +157,8 @@ async function main(): Promise<void> {
     fatal(
       'Rust baseline source: expected a clean committed worktree | received: uncommitted changes'
     );
-  const forbidden = Object.keys(process.env)
-    .filter(
-      (name) =>
-        name.startsWith('CARGO_PROFILE_') ||
-        name.endsWith('_RUSTFLAGS') ||
-        [
-          'RUSTFLAGS',
-          'CARGO_ENCODED_RUSTFLAGS',
-          'RUSTC_WRAPPER',
-          'RUSTC_WORKSPACE_WRAPPER',
-          'CARGO_BUILD_TARGET',
-          'CARGO_TARGET_DIR',
-          'RUSTC',
-        ].includes(name)
-    )
-    .filter((name) => process.env[name]);
-  if (forbidden.length)
-    fatal(
-      `Rust baseline environment: expected repository profile and compiler | received override names: ${forbidden.join(', ')}`
-    );
+  assertRustCostEnvironment(process.env);
+  const { seal, cargoConfigHashes } = await sourceInputs();
   const out = resolve(values['--out']);
   await mkdir(out); // Never overwrite an earlier complete or failed batch.
   const targetRoot = join(ROOT, 'target', `rust-cost-baseline-${Date.now()}`);
@@ -187,7 +171,6 @@ async function main(): Promise<void> {
       `Rust baseline target: expected private ext4 storage | received filesystem: ${targetFileSystem}`
     );
   const units = linuxProcessResourceUnits();
-  const seal = await sourceSeal();
   const started = Date.now();
   const attempts: Array<{
     label: string;
@@ -203,15 +186,9 @@ async function main(): Promise<void> {
     fatal(
       `Rust baseline compiler: expected pinned ${pinnedToolchain} | received: ${rustc.split('\n')[0]}`
     );
-  const cargoHome = process.env.CARGO_HOME || join(homedir(), '.cargo');
-  const cargoConfigHashes: Record<string, string> = {};
-  for (const name of ['config', 'config.toml']) {
-    const path = join(cargoHome, name);
-    if (await Bun.file(path).exists()) cargoConfigHashes[path] = await sha256File(path);
-  }
   const environment = {
     inputSealScope:
-      'tracked Rust/Cargo/toolchain/config plus benchmark scripts and shared script helpers',
+      'tracked Rust/Cargo/toolchain and benchmark inputs plus all ancestor/Cargo-home configuration slots; includes and external build selectors refused',
     sourceHead: syncText(['git', 'rev-parse', 'HEAD']),
     sourceSeal: seal,
     rustc,
@@ -338,7 +315,7 @@ async function main(): Promise<void> {
     for (const workload of workloads) {
       if (cancellation.signal.aborted) throw cancellation.signal.reason;
       await checkBudget();
-      if ((await sourceSeal()) !== seal)
+      if ((await sourceInputs()).seal !== seal)
         throw new Error('Rust study source: expected unchanged Rust/Cargo seal before attempt');
       const targetDir = join(targetRoot, workload.target);
       const attemptOut = join(out, workload.label);
@@ -420,7 +397,7 @@ async function main(): Promise<void> {
         resources !== null &&
         resources.sampleCount > 0 &&
         resources.remainingIdentities.length === 0 &&
-        (await sourceSeal()) === seal;
+        (await sourceInputs()).seal === seal;
       const attempt: {
         label: string;
         valid: boolean;
@@ -658,7 +635,7 @@ async function main(): Promise<void> {
       }
     }
     await checkBudget();
-    if ((await sourceSeal()) !== seal)
+    if ((await sourceInputs()).seal !== seal)
       throw new Error('Rust study source: expected unchanged final Rust/Cargo seal');
     await save(null, true);
   } catch (error) {
