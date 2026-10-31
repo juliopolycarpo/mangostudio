@@ -94,7 +94,7 @@ como secrets soltos no repositório:
   environment; não se adiciona um secret de repositório.
 - **Canary fica de fora:** `.github/workflows/canary.yml` publica a cada push
   verde em `main`, o que a regra de tag bloquearia. Usa Trusted Publishing OIDC
-  pelo workflow chamador `ci.yml`, com environment vazio.
+  pelo workflow chamador `ci.yml`, com environment `canary`.
 - **Dispatch manual:** como o environment é restrito a tags, um
   `workflow_dispatch` de `release.yml` precisa apontar para uma ref de tag
   `v*.*.*` (`gh workflow run release.yml --ref v0.2.0`), não para um branch.
@@ -111,7 +111,9 @@ Complete uma vez por fork ou org antes do primeiro push de tag:
 6. Depois que uma release provar que `cargo-publish` gerou o token de Trusted Publishing, revogue e remova `CARGO_REGISTRY_TOKEN`.
 7. Configure duas entradas de Trusted Publishing no npm para cada pacote abaixo, em **Settings -> Trusted Publisher**. Ambas usam owner `juliopolycarpo`, repository `mangostudio` e ação `npm publish` (habilite publicação direta):
    - Releases estáveis: workflow `release.yml`, GitHub Environment `release`.
-   - Canary: workflow `ci.yml`, environment vazio. O npm valida o workflow chamador, então use `ci.yml` mesmo que o passo de publish rode no workflow reutilizável `canary.yml`. Ambos concedem `id-token: write`.
+   - Canary: workflow `ci.yml`, GitHub Environment `canary`. O npm valida o workflow chamador, então use `ci.yml` mesmo que o passo de publish rode no workflow reutilizável `canary.yml`. Ambos concedem `id-token: write`.
+
+   Crie o GitHub Environment `canary` com deployment restrito ao branch `main`, sem reviewers obrigatórios e sem tempo de espera. O job npm canary declara esse environment; seu publish via OIDC não precisa de secret de token npm. Assim, um `main` verde continua publicando o canary automaticamente.
 
    O inventário mantido de empacotamento npm inclui `mangostudio`, `@mangostudio/cli-linux-x64`, `@mangostudio/cli-linux-arm64`, `@mangostudio/cli-darwin-x64`, `@mangostudio/cli-darwin-arm64`, `@mangostudio/cli-win32-x64` e `@mangostudio/cli-win32-arm64`. Configure cada pacote. Veja os [requisitos de Trusted Publishing do npm](https://docs.npmjs.com/trusted-publishers/).
 

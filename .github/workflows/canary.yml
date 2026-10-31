@@ -46,6 +46,7 @@ concurrency:
 jobs:
   npm-canary:
     name: Publish npm (canary dist-tag)
+    environment: canary
     runs-on: ubuntu-latest
     # Seven sequential publishes reached the old 10-minute job limit after setup.
     timeout-minutes: 15
