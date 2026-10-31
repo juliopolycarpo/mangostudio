@@ -49,9 +49,9 @@ function describeFetchCall([input, init]: Parameters<FetchScenarioMock>) {
   const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
   try {
     const url = new URL(rawUrl, 'http://localhost');
-    return { method, path: `${url.pathname}${url.search}` };
-  } catch (error) {
-    return { method, url: rawUrl, urlError: String(error) };
+    return { method, path: url.pathname };
+  } catch {
+    return { method, urlError: 'invalid URL' };
   }
 }
 
@@ -128,9 +128,7 @@ describe('terminal-service', () => {
         environmentId: ENVIRONMENT_ID,
         observer: { status: 'pending', fetchStatus: 'fetching', error: null },
         cache: { status: 'success', fetchStatus: 'idle', error: null },
-        requests: [
-          { method: 'GET', path: `/api/terminals/availability?environmentId=${ENVIRONMENT_ID}` },
-        ],
+        requests: [{ method: 'GET', path: '/api/terminals/availability' }],
       });
     });
 
@@ -169,15 +167,44 @@ describe('terminal-service', () => {
       });
     });
 
-    it('retains an invalid request URL without masking the query failure', () => {
+    it('omits query, fragment and credential sentinels from every request input shape', () => {
       const context = describeAvailabilityQuery(
         { status: 'pending', fetchStatus: 'fetching', error: null },
         undefined,
-        [['http://[']]
+        [
+          [
+            'https://user-sentinel:password-sentinel@fixture.invalid/string?secret=query-sentinel#fragment-sentinel',
+          ],
+          [new URL('https://fixture.invalid/url?secret=url-query-sentinel')],
+          [
+            new Request('https://fixture.invalid/request?secret=request-query-sentinel', {
+              method: 'POST',
+            }),
+            {
+              method: 'patch',
+              headers: { authorization: 'header-sentinel' },
+              body: 'body-sentinel',
+            },
+          ],
+        ]
       );
+      expect(JSON.stringify(context)).not.toContain('sentinel');
       expect(context.requests).toEqual([
-        { method: 'GET', url: 'http://[', urlError: expect.any(String) },
+        { method: 'GET', path: '/string' },
+        { method: 'GET', path: '/url' },
+        { method: 'PATCH', path: '/request' },
       ]);
+    });
+
+    it('marks an invalid request URL without retaining its input or parser message', () => {
+      const context = describeAvailabilityQuery(
+        { status: 'pending', fetchStatus: 'fetching', error: null },
+        undefined,
+        [['http://[malformed-secret-sentinel', { method: 'post' }]]
+      );
+      expect(JSON.stringify(context)).not.toContain('malformed-secret-sentinel');
+      expect(context.requests).toEqual([{ method: 'POST', urlError: 'invalid URL' }]);
+      expect(context.observer).toEqual({ status: 'pending', fetchStatus: 'fetching', error: null });
     });
   });
 
@@ -264,9 +291,7 @@ describe('terminal-service', () => {
           fetchStatus: 'idle',
           error: 'ApiError: availability fixture unavailable',
         },
-        requests: [
-          { method: 'GET', path: `/api/terminals/availability?environmentId=${ENVIRONMENT_ID}` },
-        ],
+        requests: [{ method: 'GET', path: '/api/terminals/availability' }],
       });
     });
 
