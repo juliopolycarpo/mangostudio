@@ -68,7 +68,7 @@ class FakeRustCostCommands {
   constructor(
     private readonly directory: string,
     private readonly stopAtMetadata = false,
-    private readonly completedBuildMutation?: 'include' | 'invalid-toml'
+    private readonly completedBuildMutation?: 'include' | 'invalid-toml' | 'invalid-utf8'
   ) {
     this.sourceRoot = join(directory, 'source');
   }
@@ -140,7 +140,7 @@ else if (args[0] === 'build') {
     }
     if (!sampled) throw new Error('Named build fake: expected sampled GNU time root before mutation');
     await Bun.write(${JSON.stringify(join(this.directory, 'sample-observed'))}, 'sampled');
-    await Bun.write(${JSON.stringify(join(this.directory, 'cargo-home/config.toml'))}, ${JSON.stringify(this.completedBuildMutation === 'include' ? 'include = ["included.toml"]\n' : '[http]\nproxy = "POST_BUILD_CONFIG_SECRET')});
+    await Bun.write(${JSON.stringify(join(this.directory, 'cargo-home/config.toml'))}, ${this.completedBuildMutation === 'invalid-utf8' ? 'new Uint8Array([35, 32, 128, 10])' : JSON.stringify(this.completedBuildMutation === 'include' ? 'include = ["included.toml"]\n' : '[http]\nproxy = "POST_BUILD_CONFIG_SECRET')});
     process.exit(0);
   }
   const worker = Bun.spawn([process.execPath, import.meta.path, '--worker'], { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -346,7 +346,7 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
         expect(existsSync(join(fixture.sourceRoot, 'target'))).toBe(false);
       }
     );
-    it.each(['include', 'invalid-toml'] as const)(
+    it.each(['include', 'invalid-toml', 'invalid-utf8'] as const)(
       'retains the successful raw build when post-build input validation rejects %s',
       async (mutation) => {
         const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-post-input-test-'));
@@ -388,10 +388,18 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
         expect(attempt.command.errors).toEqual([]);
         expect(attempt.command.settlement.pollErrors).toEqual([]);
         expect(receipt.failure).toContain(
-          mutation === 'include' ? 'received: include' : 'expected valid TOML'
+          mutation === 'include'
+            ? 'received: include'
+            : mutation === 'invalid-utf8'
+              ? 'expected valid UTF-8'
+              : 'expected valid TOML'
         );
         expect(attempt.inputFailure).toContain(
-          mutation === 'include' ? 'received: include' : 'expected valid TOML'
+          mutation === 'include'
+            ? 'received: include'
+            : mutation === 'invalid-utf8'
+              ? 'expected valid UTF-8'
+              : 'expected valid TOML'
         );
         expect(JSON.stringify(receipt)).not.toContain('POST_BUILD_CONFIG_SECRET');
         const events = (await readFile(join(out, 'attempts.jsonl'), 'utf8'))

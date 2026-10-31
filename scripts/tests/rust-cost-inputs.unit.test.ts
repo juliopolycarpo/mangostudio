@@ -20,7 +20,7 @@ class CargoConfigFixture {
     this.home = join(directory, 'cargo-home');
     this.parentConfig = join(directory, 'parent/.cargo/config.toml');
   }
-  async write(path: string, content: string): Promise<void> {
+  async write(path: string, content: string | Uint8Array): Promise<void> {
     await Bun.write(path, content);
   }
   inspect(
@@ -102,6 +102,38 @@ describe('Rust cost environment admission', () => {
 });
 
 describe('Rust cost Cargo configuration admission and seal', () => {
+  test('rejects active invalid UTF-8 instead of accepting a replacement-decoded comment', async () => {
+    const files = await fixture();
+    const path = join(files.home, 'config.toml');
+    const encoder = new TextEncoder();
+    await files.write(path, encoder.encode('# \uFFFD INVALID_ENCODING_SECRET\n'));
+    await files.inspect();
+    await files.write(
+      path,
+      new Uint8Array([35, 32, 128, ...encoder.encode(' INVALID_ENCODING_SECRET\n')])
+    );
+    const pending = files.inspect();
+    await expect(pending).rejects.toThrow(
+      `Rust baseline Cargo config ${path}: expected valid UTF-8`
+    );
+    try {
+      await pending;
+    } catch (error) {
+      expect(String(error)).not.toContain('INVALID_ENCODING_SECRET');
+    }
+  });
+  test('hashes raw bytes of a shadowed config without decoding or refusing it', async () => {
+    const files = await fixture();
+    await files.write(join(files.home, 'config'), '[net]\noffline = true\n');
+    const path = join(files.home, 'config.toml');
+    await files.write(path, new TextEncoder().encode('# \uFFFD\n'));
+    const valid = await files.inspect();
+    await files.write(path, new Uint8Array([35, 32, 128, 10]));
+    const firstInvalid = await files.inspect();
+    expect(firstInvalid[path]).not.toBe(valid[path]);
+    await files.write(path, new Uint8Array([35, 32, 129, 10]));
+    expect((await files.inspect())[path]).not.toBe(firstInvalid[path]);
+  });
   test('isolates unsupported ancestor configuration outside the owned fixture while production remains strict', async () => {
     const container = await mkdtemp(join(tmpdir(), 'rust-cost-config-ancestor-'));
     scratch.push(container);
@@ -263,12 +295,21 @@ describe('Rust cost Cargo configuration admission and seal', () => {
 });
 
 describe('Owned Cargo configuration file reader', () => {
+  test('retains undecodable raw bytes for the configuration admission boundary', async () => {
+    const files = await fixture();
+    const path = join(files.directory, 'config.toml');
+    const bytes = new Uint8Array([35, 32, 128, 10]);
+    await files.write(path, bytes);
+    expect(Array.from(await new OwnedCargoConfigFiles(files.directory).read(path))).toEqual(
+      Array.from(bytes)
+    );
+  });
   test('reads an owned file using its real filesystem path', async () => {
     const files = await fixture();
     const path = join(files.directory, 'config.toml');
     await files.write(path, '[net]\noffline = true\n');
-    expect(await new OwnedCargoConfigFiles(files.directory).read(path)).toBe(
-      '[net]\noffline = true\n'
+    expect(Array.from(await new OwnedCargoConfigFiles(files.directory).read(path))).toEqual(
+      Array.from(new TextEncoder().encode('[net]\noffline = true\n'))
     );
   });
   test.each(['parent', 'sibling-prefix'])(

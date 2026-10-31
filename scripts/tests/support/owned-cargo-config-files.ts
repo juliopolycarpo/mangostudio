@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 import type { RustCostConfigFiles } from '../../lib/rust-cost-inputs';
 
-/** Read real configuration files only inside one fixture's lexical and physical directory.
+/** Read raw configuration bytes only inside one fixture's lexical and physical directory.
  * @example const files = new OwnedCargoConfigFiles(fixtureDirectory);
  */
 export class OwnedCargoConfigFiles implements RustCostConfigFiles {
@@ -13,15 +13,15 @@ export class OwnedCargoConfigFiles implements RustCostConfigFiles {
     this.directory = resolve(directory);
   }
 
-  /** Read an owned config while presenting every outside path as an absent slot.
-   * @example const text = await files.read(join(fixtureDirectory, '.cargo/config.toml'));
+  /** Read raw bytes of an owned config while presenting every outside path as an absent slot.
+   * @example const bytes = await files.read(join(fixtureDirectory, '.cargo/config.toml'));
    */
-  async read(path: string): Promise<string> {
+  async read(path: string): Promise<Uint8Array> {
     const requested = resolve(path);
     if (!this.owns(this.directory, requested)) throw this.outside(path);
     const [directory, actual] = await Promise.all([realpath(this.directory), realpath(requested)]);
     if (!this.owns(directory, actual)) throw this.outside(path);
-    return readFile(actual, 'utf8');
+    return readFile(actual);
   }
 
   private owns(directory: string, path: string): boolean {

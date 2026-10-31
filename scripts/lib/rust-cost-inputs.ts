@@ -2,13 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
-/** Configuration text I/O; implementations retain filesystem errno codes for absent/read-failure handling. */
+/** Raw configuration byte I/O; implementations retain filesystem errno codes for absent/read-failure handling. */
 export interface RustCostConfigFiles {
-  read(path: string): Promise<string>;
+  read(path: string): Promise<Uint8Array>;
 }
 
 const CARGO_CONFIG_FILES: RustCostConfigFiles = {
-  read: (path) => readFile(path, 'utf8'),
+  read: (path) => readFile(path),
 };
 
 const PRESENCE_SELECTORS = new Set(['RUSTC_BOOTSTRAP', 'RUSTC_STAGE']);
@@ -95,7 +95,10 @@ export async function inspectRustCostCargoConfigs(
   );
 }
 
-async function optionalConfig(path: string, files: RustCostConfigFiles): Promise<string | null> {
+async function optionalConfig(
+  path: string,
+  files: RustCostConfigFiles
+): Promise<Uint8Array | null> {
   try {
     return await files.read(path);
   } catch (error) {
@@ -106,7 +109,15 @@ async function optionalConfig(path: string, files: RustCostConfigFiles): Promise
   }
 }
 
-function validateConfig(path: string, text: string, trusted: boolean): void {
+function validateConfig(path: string, bytes: Uint8Array, trusted: boolean): void {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    throw new Error(
+      `Rust baseline Cargo config ${path}: expected valid UTF-8 | received: invalid configuration encoding`
+    );
+  }
   let config: Record<string, unknown>;
   try {
     config = Bun.TOML.parse(text) as Record<string, unknown>;
