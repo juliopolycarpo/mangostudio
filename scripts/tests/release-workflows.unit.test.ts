@@ -205,11 +205,10 @@ describe('release workflow binary gate', () => {
     }
   });
 
-  test('release and canary publish through one composite, differing only by dist-tag', () => {
+  test('release and canary share the publisher with explicit channel and auth policy', () => {
     const release = extractJobBlock(readText('.github/workflows/release.yml'), 'npm-publish');
     const canary = extractJobBlock(readText('.github/workflows/canary.yml'), 'npm-canary');
     const action = readText('.github/actions/publish-npm-distribution/action.yml');
-    const secretPrefix = '$' + '{{ secrets.';
     const inputPrefix = '$' + '{{ inputs.';
 
     for (const block of [release, canary]) {
@@ -238,8 +237,12 @@ describe('release workflow binary gate', () => {
     // a second, unconditional `dist-tag:` be added elsewhere in the workflow.
     expect(release.match(/^ +dist-tag:/gm) ?? []).toHaveLength(1);
     expect(canary).toContain('dist-tag: canary');
-    expect(canary).toContain('allow-legacy-token: "true"');
-    expect(canary).toContain(`node-auth-token: ${secretPrefix}NPM_TOKEN }}`);
+    expect(canary).toContain('allow-legacy-token: "false"');
+    expect(canary).not.toContain('node-auth-token:');
+    expect(canary).not.toContain('uses: ./.github/actions/require-secret');
+    expect(canary).not.toContain('NPM_TOKEN');
+    expect(canary).toContain('id-token: write');
+    expect(canary).not.toMatch(/^ +environment:/m);
 
     const publishStep = extractStepBlocksAtIndent(action, 4).find((step) =>
       step.includes('scripts/release/publish-npm.ts')
@@ -290,7 +293,6 @@ describe('release workflow binary gate', () => {
     for (const [workflow, job, secret] of [
       [release, 'homebrew', 'DIST_REPOS_TOKEN'],
       [release, 'scoop', 'DIST_REPOS_TOKEN'],
-      [canary, 'npm-canary', 'NPM_TOKEN'],
     ] as const) {
       const block = extractJobBlock(workflow, job);
       expect(block, job).toContain('uses: ./.github/actions/require-secret');
@@ -302,7 +304,7 @@ describe('release workflow binary gate', () => {
     }
     expect(
       `${release}\n${canary}`.match(/uses: \.\/\.github\/actions\/require-secret/g)
-    ).toHaveLength(3);
+    ).toHaveLength(2);
     expect(`${release}\n${canary}`).not.toMatch(
       /if \[ -z "\$(?:NPM_TOKEN|DIST_REPOS_TOKEN)" \]; then/
     );
@@ -1254,10 +1256,10 @@ describe('release workflow binary gate', () => {
     expect(canaryBlock).toContain('uses: ./.github/workflows/canary.yml');
     expect(canaryBlock).toContain('assets_artifact:');
     expect(canaryBlock).toContain('npm_artifact:');
-    // Explicit secret pass-through: the called workflow sees only what it
-    // declares, never the caller's full secret set (zizmor secrets-inherit).
-    expect(canaryBlock).not.toContain('secrets: inherit');
-    expect(canaryBlock).toContain(`NPM_TOKEN: ${'$'}{{ secrets.NPM_TOKEN }}`);
+    // The reusable publisher exchanges its OIDC identity without a publish token.
+    expect(canaryBlock).not.toContain('secrets:');
+    expect(canaryBlock).not.toContain('NPM_TOKEN');
+    expect(readText('.github/workflows/canary.yml')).not.toContain('NPM_TOKEN');
 
     // The calling job's permissions are the ceiling for the reusable workflow,
     // since ci.yml's top-level grant is read-only.
