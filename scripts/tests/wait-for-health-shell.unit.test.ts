@@ -22,8 +22,12 @@ describe('scripts/release/wait-for-health.sh', () => {
     async (behavior) => {
       const endpoint = new FakeHealthEndpoint(behavior);
       const url = await endpoint.listen();
-      const pending = runHealth(url, ':', '1');
+      const pending = runHealth(url, ':', '1', undefined, true);
       try {
+        // Exclude shell-clock alignment from the transport observation budget.
+        const startDeadline = performance.now() + 2_000;
+        while (endpoint.requests === 0 && performance.now() < startDeadline) await Bun.sleep(5);
+        expect(endpoint.requests, 'expected the first health request within 2000ms').toBe(1);
         const observed = await observeWithin(pending, 1_600);
         expect(endpoint.requests, 'expected curl to reach the owned health endpoint').toBe(1);
         expect(
