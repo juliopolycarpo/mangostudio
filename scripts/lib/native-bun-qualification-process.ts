@@ -615,7 +615,7 @@ export async function runNativeCommand(
   const timeout = setTimeout(() => {
     if (exited) return;
     timedOut = true;
-    timeoutCleanup = terminate().catch((error) => {
+    timeoutCleanup ??= terminate().catch((error) => {
       errors.push(`Timeout cleanup failed: ${String(error)}`);
     });
   }, options.timeoutSeconds * 1_000);

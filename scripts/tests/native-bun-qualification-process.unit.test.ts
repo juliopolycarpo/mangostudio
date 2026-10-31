@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import { ChildProcess } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -183,6 +184,84 @@ class LiveFixtureBarrierCensus {
   };
 }
 
+/** Holds one admitted cleanup while later observations can settle normally. */
+class HeldCleanupCensus {
+  readonly ready = Promise.withResolvers<void>();
+  readonly held = Promise.withResolvers<void>();
+  readonly release = Promise.withResolvers<void>();
+  completed = false;
+  calls = 0;
+  active = 0;
+  holdNext = false;
+  private observations = 0;
+
+  constructor(private readonly inner: FixtureProcessCensus) {}
+
+  read = async (): Promise<NativeProcess[]> => {
+    this.calls += 1;
+    this.active += 1;
+    try {
+      return await this.observe();
+    } finally {
+      this.active -= 1;
+    }
+  };
+
+  private async observe(): Promise<NativeProcess[]> {
+    if (this.holdNext) {
+      this.holdNext = false;
+      this.held.resolve();
+      await this.release.promise;
+      this.completed = true;
+      return [];
+    }
+    const rows = await this.inner.read();
+    if (rows.length && ++this.observations >= 2) this.ready.resolve();
+    return rows;
+  }
+}
+
+/** Keeps the owned root alive until the test releases its normal exit barrier. */
+class ControlledCleanupSignals {
+  private readonly originalSignal = process.kill;
+  private readonly originalChildKill = ChildProcess.prototype.kill;
+  readonly childSignals: Array<NodeJS.Signals | number | undefined> = [];
+  constructor(private readonly pid: number) {}
+
+  signal = (pid: number, signal?: NodeJS.Signals | number): true => {
+    if ((pid === this.pid || pid === -this.pid) && signal !== 0) return true;
+    return this.originalSignal(pid, signal);
+  };
+
+  childKill(child: ChildProcess, signal?: NodeJS.Signals | number): boolean {
+    if (child.pid !== this.pid) return this.originalChildKill.call(child, signal);
+    this.childSignals.push(signal);
+    return true;
+  }
+}
+
+/** Fires the declared command deadline after cleanup admission, without startup timing races. */
+class ControlledCommandDeadline {
+  private readonly original = globalThis.setTimeout;
+  private callback: (() => void) | undefined;
+  constructor(private readonly milliseconds: number) {}
+
+  schedule = ((
+    callback: Parameters<typeof setTimeout>[0],
+    delay: number | undefined,
+    ...args: unknown[]
+  ) => {
+    if (delay === this.milliseconds) this.callback = callback as () => void;
+    return this.original(callback, delay, ...args);
+  }) as typeof setTimeout;
+
+  fire(): void {
+    if (!this.callback)
+      throw new Error('Command deadline: expected registered timer | received: absent');
+    this.callback();
+  }
+}
+
 /** A census that fails exactly once, on the first call its trigger accepts. */
 class FailingOnceCensus {
   private calls = 0;
@@ -282,6 +361,81 @@ describe('native command cancellation', () => {
     ).rejects.toThrow('intended pre-launch cancellation');
     expect(await Bun.file(marker).exists()).toBe(false);
   });
+  test.skipIf(process.platform === 'win32')(
+    'deadline preserves and drains cleanup already admitted by abort',
+    async () => {
+      const dir = await temporaryDirectory();
+      const pidFile = join(dir, 'pid');
+      const exitFile = join(dir, 'exit');
+      const controller = new AbortController();
+      const census = new HeldCleanupCensus(new FixtureProcessCensus(pidFile));
+      const deadline = new ControlledCommandDeadline(9_137);
+      const timer = spyOn(globalThis, 'setTimeout').mockImplementation(deadline.schedule);
+      let signal: ReturnType<typeof spyOn> | undefined;
+      let childSignal: ReturnType<typeof spyOn> | undefined;
+      let returned = false;
+      let pid: number | undefined;
+      const pending = runNativeCommand({
+        label: 'abort-deadline-overlap',
+        command: exitingFixtureCommand(pidFile, exitFile),
+        root: dir,
+        out: dir,
+        env: { ...process.env },
+        timeoutSeconds: 9.137,
+        pollIntervalMs: 5,
+        settleMs: 100,
+        signal: controller.signal,
+        guardCompilerHelpers: false,
+        snapshot: census.read,
+        stream: new CapturedOutput(),
+      }).then((receipt) => {
+        returned = true;
+        return receipt;
+      });
+      try {
+        pid = await waitForFixturePid(pidFile);
+        await census.ready.promise;
+        const signals = new ControlledCleanupSignals(pid);
+        signal = spyOn(process, 'kill').mockImplementation(signals.signal);
+        childSignal = spyOn(ChildProcess.prototype, 'kill').mockImplementation(
+          function controlledKill(this: ChildProcess, signal) {
+            return signals.childKill(this, signal);
+          }
+        );
+        census.holdNext = true;
+        controller.abort(new Error('intended abort before controlled deadline'));
+        await census.held.promise;
+        deadline.fire();
+        await writeFile(exitFile, 'exit');
+        await waitForFixtureExit(pid);
+        await Promise.race([pending, Bun.sleep(500)]);
+        expect(
+          returned,
+          'command receipt: expected pending held abort cleanup | received: returned before release'
+        ).toBe(false);
+        expect(census.completed).toBe(false);
+        census.release.resolve();
+        const receipt = await pending;
+        expect(census.completed).toBe(true);
+        expect(receipt.canceled).toBe(true);
+        expect(receipt.timedOut).toBe(true);
+        expect(receipt.settlement.empty).toBe(true);
+        expect(receipt.errors).toContain('Command canceled by AbortSignal');
+        expect(signals.childSignals).toEqual(['SIGKILL']);
+        expect(census.active).toBe(0);
+        const terminalCalls = census.calls;
+        await Bun.sleep(20);
+        expect(census.calls).toBe(terminalCalls);
+      } finally {
+        census.release.resolve();
+        signal?.mockRestore();
+        childSignal?.mockRestore();
+        timer.mockRestore();
+        if (pid !== undefined && isAlive(pid)) process.kill(pid, 'SIGKILL');
+        await pending;
+      }
+    }
+  );
   test.skipIf(process.platform === 'win32')(
     'active abort terminates the verified command family and proves empty scope',
     async () => {
