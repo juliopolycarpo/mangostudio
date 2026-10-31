@@ -52,6 +52,21 @@ const SPAWN_ERROR_CODES = ['ENOENT', 'EACCES'] as const;
 
 const logger = createDiagnosticLogger('runtime-stdio');
 
+/**
+ * The launcher exhausted its termination budget without observing an exit.
+ *
+ * @example
+ * throw new RuntimeTerminationIncompleteError('runtime', 'devbox');
+ */
+export class RuntimeTerminationIncompleteError extends RemoteError {
+  constructor(command: string, environmentId: string) {
+    super(
+      RESERVED_ERROR_CODES.UNAVAILABLE,
+      `Runtime ${command} for environment ${environmentId}: expected exit status after termination | received: none.`
+    );
+  }
+}
+
 export interface SpawnedRuntimeConnection {
   readonly hub: HubSession;
   /** Resolves once the child process is gone, so shutdown can wait for it. */
@@ -187,12 +202,13 @@ export async function spawnRuntimeChild(
       // Reject only once the child is actually being torn down, not merely
       // requested to be — a caller that gave up must not see this settle
       // before the process it named is on its way out.
-      await peer.terminate();
+      await terminatePeer(peer, launch.command, options.environmentId);
       throw cancelledError(launch.command);
     }
-    // No compensating terminate: `openHubSession` closes the port on the way
-    // out, and the launcher terminates the child whenever its port closes —
-    // including when the port closed on its own and took the session with it.
+    // `openHubSession` closes the port on failure, starting the launcher's
+    // idempotent termination sequence. Join that bounded work so an ordinary
+    // opening rejection cannot discard child ownership before cleanup settles.
+    await terminatePeer(peer, launch.command, options.environmentId);
     const failure = await observeLaunchFailure(peer, launch.command, error);
     throw asRemoteFailure(
       error,
@@ -218,7 +234,7 @@ export async function spawnRuntimeChild(
     // runtime is asked to unwind; the launcher's escalation covers one that
     // will not.
     hub.close();
-    exited = peer.terminate().then(() => undefined);
+    exited = terminatePeer(peer, launch.command, options.environmentId);
     if (notify) options.onClosed();
     return exited;
   };
@@ -226,13 +242,27 @@ export async function spawnRuntimeChild(
   // attempt above; only a connection the hub already handed out needs the loss
   // pushed back to it.
   hub.onClose((closure) => {
-    void release(true, describeSessionClosure(closure));
+    void release(true, describeSessionClosure(closure)).catch((error: unknown) => {
+      logger.error('termination_incomplete', { environmentId: options.environmentId, error });
+    });
   });
 
   return {
     hub,
     close: () => release(false, 'closed by the hub'),
   };
+}
+
+/** Waits only for the launcher's bounded termination and requires an exit status. */
+async function terminatePeer(
+  peer: LaunchedPeer,
+  command: string,
+  environmentId: string
+): Promise<void> {
+  const status = await peer.terminate();
+  if (status === undefined) {
+    throw new RuntimeTerminationIncompleteError(command, environmentId);
+  }
 }
 
 /**
