@@ -9,6 +9,8 @@
         ".codex/hooks/*.mjs",
         "scripts/bench/startup.ts",
         "scripts/bench/runtime-handshake.ts",
+        "scripts/bench/runtime-version-child.ts",
+        "scripts/bench/rust-costs.ts",
         "scripts/bench/grep.ts",
         "scripts/bench/library-walk.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,native-bun-qualification,verify-cross-runtimes}.ts",

@@ -168,6 +168,21 @@ class FixtureProcessCensus {
   };
 }
 
+/** Resolves only after two completed live-root observations, independent of startup speed. */
+class LiveFixtureBarrierCensus {
+  readonly ready = Promise.withResolvers<void>();
+  private observations = 0;
+  constructor(private readonly pidFile: string) {}
+  read = async (): Promise<NativeProcess[]> => {
+    const rows = await snapshotNativeProcesses();
+    if (rows.some((row) => row.command.includes(this.pidFile))) {
+      this.observations += 1;
+      if (this.observations >= 2) this.ready.resolve();
+    }
+    return rows;
+  };
+}
+
 /** A census that fails exactly once, on the first call its trigger accepts. */
 class FailingOnceCensus {
   private calls = 0;
@@ -246,6 +261,74 @@ async function temporaryDirectory(): Promise<string> {
   temporary.push(dir);
   return dir;
 }
+
+describe('native command cancellation', () => {
+  test('an already-aborted command never launches its executable', async () => {
+    const dir = await temporaryDirectory();
+    const marker = join(dir, 'unexpected-launch');
+    const controller = new AbortController();
+    controller.abort(new Error('intended pre-launch cancellation'));
+    await expect(
+      runNativeCommand({
+        label: 'already-canceled',
+        command: [process.execPath, '-e', 'await Bun.write(process.argv[1], "launched")', marker],
+        root: dir,
+        out: dir,
+        env: { ...process.env },
+        timeoutSeconds: 3,
+        signal: controller.signal,
+        stream: new CapturedOutput(),
+      })
+    ).rejects.toThrow('intended pre-launch cancellation');
+    expect(await Bun.file(marker).exists()).toBe(false);
+  });
+  test.skipIf(process.platform === 'win32')(
+    'active abort terminates the verified command family and proves empty scope',
+    async () => {
+      const dir = await temporaryDirectory();
+      const pidFile = join(dir, 'pid');
+      const workerFile = join(dir, 'worker');
+      const controller = new AbortController();
+      const census = new LiveFixtureBarrierCensus(pidFile);
+      let worker: number | undefined;
+      try {
+        const pending = runNativeCommand({
+          label: 'active-cancel',
+          command: hangingFamilyCommand(pidFile, workerFile),
+          root: dir,
+          out: dir,
+          env: { ...process.env },
+          timeoutSeconds: 3,
+          pollIntervalMs: 20,
+          signal: controller.signal,
+          guardCompilerHelpers: false,
+          snapshot: census.read,
+          stream: new CapturedOutput(),
+        });
+        worker = await waitForFixturePid(workerFile);
+        await waitForFixturePid(pidFile);
+        await Promise.race([
+          census.ready.promise,
+          pending.then(() => {
+            throw new Error(
+              'Active abort fixture: expected two live-root observations before command settlement'
+            );
+          }),
+        ]);
+        controller.abort(new Error('intended active cancellation'));
+        const result = await pending;
+        expect(result.canceled).toBe(true);
+        expect(result.timedOut).toBe(false);
+        expect(result.exitCode).not.toBe(0);
+        expect(result.settlement.rootObserved).toBe(true);
+        expect(result.settlement.empty).toBe(true);
+        expect(await aliveAfterGrace(worker)).toBe(false);
+      } finally {
+        if (worker !== undefined && isAlive(worker)) process.kill(worker, 'SIGKILL');
+      }
+    }
+  );
+});
 
 describe('native process identity', () => {
   test('reads exact Linux start ticks and current ancestry from the stat file', async () => {
