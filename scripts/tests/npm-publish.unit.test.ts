@@ -536,3 +536,21 @@ describe('publishPackages', () => {
     }
   });
 });
+
+test('optional provenance does not retry fatal authentication failure because diagnostics mention OIDC', async () => {
+  const runner = new FakeNpmRunner([
+    missing(),
+    {
+      ...fail('npm error code ENEEDAUTH'),
+      diagnostics: ['npm authentication: OIDC client operation failed.'],
+    },
+  ]);
+  const { result, sleeper, logger } = publishWithFakes(runner, [PLATFORM_PACKAGE], {
+    provenancePolicy: 'optional',
+  });
+  await expect(result).rejects.toThrow('npm authentication: OIDC client operation failed.');
+  expect(runner.calls).toHaveLength(2);
+  expect(runner.calls[1]?.args).toContain('--provenance');
+  expect(sleeper.delays).toEqual([]);
+  expect(logger.messages.join('\n')).not.toContain('retrying without it');
+});
