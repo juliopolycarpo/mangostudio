@@ -18,19 +18,25 @@ import { insertTestChat, insertTestUser } from '../../support/factories';
 import { buildFakeGh, installFakeGh } from '../../support/fake-gh/install';
 import { DEFAULT_PR_OUTPUT, type FakeGhScenario } from '../../support/fake-gh/program';
 import {
+  cleanupGithubFixtureDirectories,
+  type GithubFixtureDirectory,
+} from '../../support/github-fixture-cleanup';
+import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
 } from '../../support/harness/create-api-test-app';
 
-const tempDirs: string[] = [];
+let tempDirs: GithubFixtureDirectory[] = [];
+const buildDirs: GithubFixtureDirectory[] = [];
+const retainedDirs: GithubFixtureDirectory[] = [];
 let restoreAuth: (() => void) | null = null;
 let originalPath: string | undefined;
 let buildDir: string;
 let built: string;
 
-async function createTempDir(): Promise<string> {
+async function createTempDir(role: 'workdir' | 'fake-gh-bin'): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), 'mango-github-routes-'));
-  tempDirs.push(path);
+  tempDirs.push({ role, path });
   return path;
 }
 
@@ -52,7 +58,7 @@ async function createTempDir(): Promise<string> {
  * other spawn the in-process runtime makes.
  */
 async function installGhShim(scenario: FakeGhScenario): Promise<void> {
-  const binDir = await installFakeGh(built, scenario, await createTempDir());
+  const binDir = await installFakeGh(built, scenario, await createTempDir('fake-gh-bin'));
 
   originalPath ??= process.env.PATH;
   // Prepended, never replaced: the runtime still needs the rest of PATH to find
@@ -79,12 +85,31 @@ function getContext(app: ReturnType<typeof createAuthenticatedApiTestApp>['app']
 
 beforeAll(async () => {
   buildDir = await mkdtemp(join(tmpdir(), 'mango-github-fake-gh-'));
+  buildDirs.push({ role: 'fake-gh-build', path: buildDir });
   // One build writes an executable the size of Bun, which Windows also scans on first write.
   built = await buildFakeGh(buildDir);
 }, 60_000);
 
+async function closeFixtureRuntime(): Promise<void> {
+  await closeAllRuntimeConnections();
+  setRuntimeConnectionManagerForTests(undefined);
+}
+
+const cleanupDependencies = {
+  closeRuntime: closeFixtureRuntime,
+  removeDirectory: (path: string) => rm(path, { recursive: true, force: true }),
+};
+
 afterAll(async () => {
-  await rm(buildDir, { recursive: true, force: true });
+  try {
+    // Keep the shared executable with failed workdirs/scenarios as cleanup evidence.
+    if (retainedDirs.length === 0)
+      await cleanupGithubFixtureDirectories(buildDirs, cleanupDependencies);
+  } finally {
+    retainedDirs.push(...buildDirs);
+    if (retainedDirs.length)
+      console.error('[github-fixture-cleanup] retained fixture roots', retainedDirs);
+  }
 });
 
 afterEach(async () => {
@@ -94,14 +119,18 @@ afterEach(async () => {
   // manager so the next connection re-probes against the restored PATH.
   if (originalPath !== undefined) process.env.PATH = originalPath;
   originalPath = undefined;
-  await closeAllRuntimeConnections();
-  setRuntimeConnectionManagerForTests(undefined);
-  await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  try {
+    await cleanupGithubFixtureDirectories(tempDirs, cleanupDependencies);
+  } finally {
+    // Failed entries remain tracked, but a later hook must not retry their removal.
+    retainedDirs.push(...tempDirs);
+    tempDirs = [];
+  }
 });
 
 describe('GitHub context routes', () => {
   it('returns schema-valid repository and pull request context from a fake gh', async () => {
-    const workdir = await createTempDir();
+    const workdir = await createTempDir('workdir');
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
     await bindWorkdir(chat.id, workdir);
@@ -126,7 +155,7 @@ describe('GitHub context routes', () => {
   });
 
   it('treats a branch without a pull request as successful repository context', async () => {
-    const workdir = await createTempDir();
+    const workdir = await createTempDir('workdir');
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
     await bindWorkdir(chat.id, workdir);
@@ -142,7 +171,7 @@ describe('GitHub context routes', () => {
   });
 
   it('degrades cleanly when the runtime manifest reports no usable gh', async () => {
-    const workdir = await createTempDir();
+    const workdir = await createTempDir('workdir');
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
     await bindWorkdir(chat.id, workdir);
@@ -182,7 +211,7 @@ describe('GitHub context routes', () => {
     ];
 
     for (const { scenario, expected } of cases) {
-      const workdir = await createTempDir();
+      const workdir = await createTempDir('workdir');
       const user = await insertTestUser();
       const chat = await insertTestChat(user.id);
       await bindWorkdir(chat.id, workdir);
@@ -239,7 +268,7 @@ describe('GitHub context routes', () => {
   });
 
   it('returns a typed API error when gh emits invalid JSON', async () => {
-    const workdir = await createTempDir();
+    const workdir = await createTempDir('workdir');
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
     await bindWorkdir(chat.id, workdir);
