@@ -188,13 +188,13 @@ export async function connectContainerRuntime(
   return {
     client: new RuntimeClient(connection.hub, onUnavailable, definition.id),
     close: async () => {
-      await connection.close();
-      // Closing the child's stdin ends the runtime, which ends the container,
-      // which `--rm` removes — that is the ordinary path and this does nothing.
-      // It exists for the other one: killing the engine's client process does
-      // not stop the container it started, so without this a crashed hub would
-      // leave one running per lost connection.
-      await killQuietly(deps.engines, engine, name);
+      try {
+        await connection.close();
+      } finally {
+        // The container can outlive its engine client. Run its exact-name
+        // backstop even when client termination is incomplete.
+        await killQuietly(deps.engines, engine, name);
+      }
     },
   };
 }
