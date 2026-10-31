@@ -51,9 +51,15 @@ describe('respond stream test helpers', () => {
 
   it('records chat overrides and keeps unrelated reads empty', async () => {
     const capture = new ActivityInsertCapture();
+    const messageRows = [{ id: 'message-1', text: 'Retained history' }];
+    function selectMessages(table: string): Record<string, unknown> | undefined {
+      if (table !== 'messages') return undefined;
+      return { execute: () => Promise.resolve(messageRows) };
+    }
     const db = createTestStreamDb({
       userId: 'user-1',
       chatOverrides: { id: 'renamed-chat', title: 'Renamed', lastProviderState: 'cursor' },
+      selectFrom: selectMessages,
       onInsert: capture.onInsert,
     });
     await recordTurnCompletedActivity(
@@ -73,7 +79,11 @@ describe('respond stream test helpers', () => {
       title: 'Renamed',
       runner: { kind: 'mangostudio', agentId: 'default' },
     });
-    const select = db.selectFrom as (table: string) => { executeTakeFirst(): Promise<unknown> };
+    const select = db.selectFrom as (table: string) => {
+      execute(): Promise<unknown>;
+      executeTakeFirst(): Promise<unknown>;
+    };
+    expect(await select('messages').execute()).toEqual(messageRows);
     expect(await select('chats').executeTakeFirst()).toMatchObject({ lastProviderState: 'cursor' });
     expect(await select('activity_events').executeTakeFirst()).toBeUndefined();
     expect(await select('environment_toolchains').executeTakeFirst()).toBeUndefined();
