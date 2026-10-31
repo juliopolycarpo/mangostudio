@@ -296,7 +296,13 @@ class ControlledVersionDescendant {
   readonly binary: string;
   private identity: Pick<NativeProcess, 'pid' | 'identity'> | undefined;
 
-  constructor(readonly directory: string) {
+  constructor(
+    readonly directory: string,
+    private readonly host = {
+      snapshot: snapshotNativeProcesses,
+      kill: (pid: number) => process.kill(pid, 'SIGKILL'),
+    }
+  ) {
     this.binary = join(directory, 'version');
   }
 
@@ -344,11 +350,15 @@ class ControlledVersionDescendant {
     const deadline = performance.now() + 5_000;
     let row: NativeProcess | undefined;
     do {
-      row = (await snapshotNativeProcesses()).find(
+      row = (await this.host.snapshot()).find(
         (process) => process.identity === this.identity?.identity
       );
       if (!row) return;
-      process.kill(row.pid, 'SIGKILL');
+      try {
+        this.host.kill(row.pid);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
       await Bun.sleep(20);
     } while (performance.now() < deadline);
     throw new Error(
@@ -356,6 +366,77 @@ class ControlledVersionDescendant {
     );
   }
 }
+
+async function settleVersionFixture(
+  fixture: Pick<ControlledVersionDescendant, 'settle'>,
+  pending: Promise<NativeCommandReceipt> | undefined,
+  drain = settleBenchmarkWork
+): Promise<unknown[]> {
+  const errors: unknown[] = [];
+  try {
+    await fixture.settle();
+  } catch (error) {
+    errors.push(error);
+  }
+  if (pending) {
+    const error = await drain(pending, 5_000);
+    if (error) errors.push(error);
+  }
+  return errors;
+}
+
+class ExitingDescendantHost {
+  calls = 0;
+  readonly row: NativeProcess = {
+    pid: 12345,
+    parentPid: 1,
+    group: 12344,
+    identity: '12345:fixture-birth',
+    command: 'fixture',
+  };
+  readonly snapshot = (): Promise<NativeProcess[]> => Promise.resolve(this.calls ? [] : [this.row]);
+  readonly kill = (_pid: number): never => {
+    this.calls++;
+    throw Object.assign(new Error('fixture exited after census'), { code: 'ESRCH' });
+  };
+}
+
+test('descendant cleanup accepts exit between census and signal', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'runtime-version-cleanup-'));
+  const host = new ExitingDescendantHost();
+  const fixture = new ControlledVersionDescendant(directory, host);
+  try {
+    await Bun.write(join(directory, 'descendant-process.json'), JSON.stringify(host.row));
+    await fixture.settle();
+    expect(host.calls).toBe(1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+class FailedDescendantCleanup {
+  readonly error = Object.assign(new Error('fixture signal refused'), { code: 'EPERM' });
+  readonly settle = (): Promise<void> => Promise.reject(this.error);
+}
+
+class SupervisorDrainWitness {
+  drained = false;
+  readonly pending = Promise.resolve(receipt());
+  readonly drain = async (operation: Promise<unknown>, budget: number): Promise<string | null> => {
+    expect(operation).toBe(this.pending);
+    expect(budget).toBe(5_000);
+    this.drained = true;
+    return settleBenchmarkWork(operation, budget);
+  };
+}
+
+test('descendant cleanup failure still drains the supervisor and retains its cause', async () => {
+  const fixture = new FailedDescendantCleanup();
+  const supervisor = new SupervisorDrainWitness();
+  const errors = await settleVersionFixture(fixture, supervisor.pending, supervisor.drain);
+  expect(supervisor.drained).toBe(true);
+  expect(errors).toEqual([fixture.error]);
+});
 
 class FixtureVersionRunner {
   private started = false;
@@ -436,6 +517,8 @@ test.skipIf(process.platform === 'win32')(
     await fixture.create();
     const runner = new FixtureVersionRunner(fixture);
     let passed = false;
+    let primary: Error | undefined;
+    let cleanupErrors: unknown[];
     try {
       const error = await retainedFailure(
         runtimeVersion(fixture.binary, new AbortController().signal, { run: runner.run }),
@@ -458,17 +541,22 @@ test.skipIf(process.platform === 'win32')(
       expect(error.settlement).toBe('confirmed');
       expect(await stat(error.home)).toBeDefined();
       passed = true;
+    } catch (error) {
+      primary = error instanceof Error ? error : new Error(String(error), { cause: error });
     } finally {
-      await fixture.settle();
-      const runnerError = runner.pending ? await settleBenchmarkWork(runner.pending, 5_000) : null;
-      expect(
-        runnerError,
-        `version fixture supervisor: expected settled command; retained ${directory}`
-      ).toBeNull();
+      cleanupErrors = await settleVersionFixture(fixture, runner.pending);
       const settled = runner.receipt?.settlement.empty && runner.receipt.settlement.rootObserved;
-      if (runner.home && settled) await rm(runner.home, { recursive: true, force: true });
-      if (passed && settled) await rm(directory, { recursive: true, force: true });
+      if (!cleanupErrors.length && runner.home && settled)
+        await rm(runner.home, { recursive: true, force: true });
+      if (!cleanupErrors.length && passed && settled)
+        await rm(directory, { recursive: true, force: true });
     }
+    if (cleanupErrors.length)
+      throw new AggregateError(
+        primary === undefined ? cleanupErrors : [primary, ...cleanupErrors],
+        `version fixture cleanup: expected settled child and supervisor; retained ${directory}`
+      );
+    if (primary !== undefined) throw primary;
   }
 );
 
