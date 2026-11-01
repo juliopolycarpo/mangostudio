@@ -1450,6 +1450,18 @@ mod tests {
 
     #[test]
     fn termination_owner_dropped_before_first_poll_settles_waiters() {
+        use std::future::Future;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::task::{Context, Wake, Waker};
+
+        struct WakeCount(AtomicUsize);
+
+        impl Wake for WakeCount {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
         let mut child = StalledChild::new();
         let owner = observer_runtime();
         {
@@ -1462,13 +1474,40 @@ mod tests {
         let second = child.terminator.outcome();
         let mut first = std::pin::pin!(first);
         let mut second = std::pin::pin!(second);
-        {
-            use std::future::Future;
-            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-            assert!(first.as_mut().poll(&mut context).is_pending());
-            assert!(second.as_mut().poll(&mut context).is_pending());
-        }
+        let first_wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
+        let second_wakes = Arc::new(WakeCount(AtomicUsize::new(0)));
+        let first_waker = Waker::from(Arc::clone(&first_wakes));
+        let second_waker = Waker::from(Arc::clone(&second_wakes));
+        assert!(
+            first
+                .as_mut()
+                .poll(&mut Context::from_waker(&first_waker))
+                .is_pending()
+        );
+        assert!(
+            second
+                .as_mut()
+                .poll(&mut Context::from_waker(&second_waker))
+                .is_pending()
+        );
+        assert_eq!(
+            (
+                first_wakes.0.load(Ordering::SeqCst),
+                second_wakes.0.load(Ordering::SeqCst)
+            ),
+            (0, 0)
+        );
         drop(owner);
+        // Check notifications before either waiter is polled again. A
+        // terminal value alone must not satisfy the wakeup claim.
+        assert!(
+            first_wakes.0.load(Ordering::SeqCst) > 0,
+            "first parked waiter was not notified"
+        );
+        assert!(
+            second_wakes.0.load(Ordering::SeqCst) > 0,
+            "second parked waiter was not notified"
+        );
         observer_runtime().block_on(async {
             assert_eq!(
                 tokio::time::timeout(Duration::from_secs(1), async {
