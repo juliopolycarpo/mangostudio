@@ -33,10 +33,12 @@ import { useToast } from '@/components/ui/Toast';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
 import {
+  appSettingsConflictEpoch,
   appSettingsKeys,
   appSettingsQueryOptions,
   isAppSettingsConflict,
   keepLibraryDefaultsPending,
+  recordAppSettingsConflict,
   refreshAppSettingsAfterConflict,
 } from '@/features/settings/app/queries';
 import { useI18n } from '@/hooks/use-i18n';
@@ -78,7 +80,10 @@ export function useGlobalSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { t } = useI18n();
-  const pendingSaveRef = useRef<AppSettings | null>(null);
+  const pendingSaveRef = useRef<{
+    readonly settings: AppSettings;
+    readonly conflictEpoch: number;
+  } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
    * State to restore when a save fails, captured when an edit burst starts.
@@ -133,6 +138,10 @@ export function useGlobalSettings() {
           rollbackRef.current = null;
         }
         await refreshAppSettingsAfterConflict(queryClient, error);
+      } else if (isAppSettingsConflict(error)) {
+        // Do not refetch over a newer submission, but every cache owner must
+        // still discard work queued before this observed conflict.
+        recordAppSettingsConflict(queryClient);
       }
     },
     onSuccess: (savedSettings, _nextSettings, context) => {
@@ -177,11 +186,17 @@ export function useGlobalSettings() {
     if (!pendingSettings) return;
 
     pendingSaveRef.current = null;
+    if (pendingSettings.conflictEpoch !== appSettingsConflictEpoch(queryClient)) {
+      // Another mounted owner already reported a conflict. Its refetch may
+      // have finished, so query invalidation alone cannot reject this queue.
+      rollbackRef.current = null;
+      return;
+    }
     // The settings surface owns none of `profileSettings` — library locations
     // and first-run progress are written by their own screens — so the snapshot
     // it read at mount must not travel with the edit.
-    mutate(appSettingsPatchExcludingProfiles(pendingSettings));
-  }, [mutate]);
+    mutate(appSettingsPatchExcludingProfiles(pendingSettings.settings));
+  }, [mutate, queryClient]);
 
   useEffect(
     () => () => {
@@ -201,6 +216,12 @@ export function useGlobalSettings() {
           .catch(() => undefined);
         return false;
       }
+      const conflictEpoch = appSettingsConflictEpoch(queryClient);
+      if (pendingSaveRef.current && pendingSaveRef.current.conflictEpoch !== conflictEpoch) {
+        // A new edit after a successful refetch needs the winner as its
+        // rollback baseline, not this hook's rejected earlier burst.
+        rollbackRef.current = null;
+      }
       const cachedSettings = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
       const currentSettings = normalizeAppSettings(cachedSettings ?? DEFAULT_APP_SETTINGS);
 
@@ -216,7 +237,7 @@ export function useGlobalSettings() {
         appSettingsKeys.current(),
         keepLibraryDefaultsPending(cachedSettings, nextSettings)
       );
-      pendingSaveRef.current = nextSettings;
+      pendingSaveRef.current = { settings: nextSettings, conflictEpoch };
       // Opens the echo window at the first keystroke, not at the PUT, so the
       // whole debounce is protected too.
       markAppSettingsLocalWrite();
@@ -259,7 +280,7 @@ export function useGlobalSettings() {
       const pendingSettings = pendingSaveRef.current;
       if (!pendingSettings) return;
       pendingSaveRef.current = null;
-      await mutateAsync(appSettingsPatchExcludingProfiles(pendingSettings));
+      await mutateAsync(appSettingsPatchExcludingProfiles(pendingSettings.settings));
     },
     [mutateAsync, saveSettings, t]
   );
