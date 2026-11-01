@@ -115,6 +115,93 @@ describe('useOnboardingProgress', () => {
     expect(result.current.state.skippedSteps).toEqual(['toolchain']);
   });
 
+  it('refreshes a conflict and rebuilds the next edit on the winning progress', async () => {
+    const { result } = renderHook(() => useOnboardingProgress());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    scenario.respondWithJson('PUT', '/api/settings/app', {
+      status: 409,
+      body: { error: 'Settings changed', code: 'CONFLICT' },
+    });
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: onboardingSettings({ completedAt: 1234, welcomeAcknowledged: true }),
+    });
+    await act(async () => {
+      await result.current
+        .update((current) => ({ ...current, skippedSteps: ['service'] }))
+        .catch(() => undefined);
+    });
+    await waitFor(() => expect(result.current.saveFailed).toBe(true));
+    expect(result.current.state.completedAt).toBe(1234);
+    expect(scenario.fetchMock.mock.calls.filter((call) => call[1]?.method === 'PUT')).toHaveLength(
+      1
+    );
+    scenario.respondWithJson('PUT', '/api/settings/app', {
+      body: onboardingSettings({
+        completedAt: 1234,
+        welcomeAcknowledged: true,
+        skippedSteps: ['service'],
+      }),
+    });
+    await act(async () => {
+      await result.current.update((current) => ({ ...current, skippedSteps: ['service'] }));
+    });
+    const lastPut = scenario.fetchMock.mock.calls.reduce(
+      (last, call, index) => (call[1]?.method === 'PUT' ? index : last),
+      -1
+    );
+    expect(bodyOf(lastPut)).toMatchObject({
+      profileSettings: {
+        default: {
+          onboarding: { completedAt: 1234, welcomeAcknowledged: true, skippedSteps: ['service'] },
+        },
+      },
+    });
+  });
+
+  it('does not replay progress after a failed conflict refresh', async () => {
+    const { result } = renderHook(() => useOnboardingProgress());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    scenario.respondWithJson('PUT', '/api/settings/app', {
+      status: 409,
+      body: { error: 'Settings changed', code: 'CONFLICT' },
+    });
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      status: 500,
+      body: { error: 'Refresh unavailable' },
+    });
+    await act(async () => {
+      await result.current
+        .update((current) => ({ ...current, welcomeAcknowledged: true }))
+        .catch(() => undefined);
+    });
+    scenario.respondWithJson('PUT', '/api/settings/app', { body: DEFAULT_APP_SETTINGS });
+    await act(async () => {
+      await result.current
+        .update((current) => ({ ...current, skippedSteps: ['service'] }))
+        .catch(() => undefined);
+    });
+    expect(scenario.fetchMock.mock.calls.filter((call) => call[1]?.method === 'PUT')).toHaveLength(
+      1
+    );
+    scenario.respondWithJson('GET', '/api/settings/app', {
+      body: onboardingSettings({ completedAt: 1234, welcomeAcknowledged: true }),
+    });
+    await act(async () => {
+      await result.current.update((current) => ({ ...current, skippedSteps: ['service'] }));
+    });
+    const lastPut = scenario.fetchMock.mock.calls.reduce(
+      (last, call, index) => (call[1]?.method === 'PUT' ? index : last),
+      -1
+    );
+    expect(bodyOf(lastPut)).toMatchObject({
+      profileSettings: {
+        default: {
+          onboarding: { completedAt: 1234, welcomeAcknowledged: true, skippedSteps: ['service'] },
+        },
+      },
+    });
+  });
+
   it('surfaces a failed save without losing the local answer', async () => {
     scenario.respondWithJson('PUT', '/api/settings/app', { status: 500, body: { error: 'nope' } });
 

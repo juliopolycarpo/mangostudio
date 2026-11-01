@@ -77,11 +77,10 @@ export async function requiresWorkspaceTrust(
  * is capped, so an unreadable row can still evict a grant somebody actually
  * gave — paying for a Codex grant with a Cursor re-prompt.
  *
- * Read-modify-write on the whole settings row, which is what every other
- * settings mutation does; two concurrent trust grants for different workspaces
- * would have one overwrite the other, and the loser re-prompts. That is
- * acceptable here and only here: the operation is user-initiated, one dialog at
- * a time, and the failure mode is a second dialog rather than a silent grant.
+ * Only the external-agent subtree travels with this acknowledgement. A
+ * concurrent write to an unrelated preference must survive the earlier read
+ * this grant used to build its trust list. Competing writes during the
+ * repository read/merge/write fail explicitly and must be retried by the user.
  */
 export async function grantWorkspaceTrust(
   scope: ExternalWorkspaceTrustScope,
@@ -89,11 +88,8 @@ export async function grantWorkspaceTrust(
   now: () => number = Date.now
 ): Promise<void> {
   if (!targetLoadsWorkspaceConfiguration(scope.targetId)) return;
-  // The full `getAppSettings` here and not on the read above: this one writes
-  // the whole settings row back, so it has to read the same defaults the write
-  // path would otherwise discard — dropping the detection-derived library
-  // locations would turn a trust grant into a silent library reconfiguration.
-  // It is also a dialog rather than a send, so the probe is affordable.
+  // The trust list belongs to externalAgentSettings, whose remaining fields
+  // this read preserves. No other settings may travel back with the grant.
   const settings = await getAppSettings(db, scope.userId);
   const workspaceTrust = withWorkspaceTrust(
     settings.externalAgentSettings.workspaceTrust,
@@ -105,7 +101,6 @@ export async function grantWorkspaceTrust(
     now()
   );
   await updateAppSettings(db, scope.userId, {
-    ...settings,
     externalAgentSettings: { ...settings.externalAgentSettings, workspaceTrust },
   });
 }

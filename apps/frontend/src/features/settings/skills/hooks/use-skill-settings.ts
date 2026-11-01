@@ -13,7 +13,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-invalidation';
 import { updateAppSettings } from '@/features/settings/app/api';
-import { appSettingsForLocationWrite, appSettingsKeys } from '@/features/settings/app/queries';
+import {
+  appSettingsForLocationWrite,
+  appSettingsKeys,
+  refreshAppSettingsAfterConflict,
+} from '@/features/settings/app/queries';
 
 import { rescanLibrary, updateSkillSetting } from '../api';
 import { skillSettingsKeys, skillSettingsListQueryOptions } from '../queries';
@@ -90,6 +94,7 @@ export function useToggleSkillSource() {
         })
       );
     },
+    onError: (error) => refreshAppSettingsAfterConflict(queryClient, error),
     onSuccess: async (savedSettings) => {
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
       await queryClient.invalidateQueries({ queryKey: skillSettingsKeys.all });

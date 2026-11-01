@@ -50,7 +50,27 @@ Settings are stored as a single JSON blob in the `settingsJson` column. On read,
 overlays what arrives on the row it already holds, then normalizes. Two things
 follow, and both are the point: a client survives every field the schema grows
 later instead of being rejected for omitting one it has never heard of, and clients avoid sending unrelated fields. This patch shape does not guarantee
-atomic concurrent read/merge/write operations.
+atomic concurrent read/merge/write operations by itself. The repository uses
+compare-and-swap on the exact JSON it read, with a fresh private write version
+on every save (not `updatedAt`). Concurrent creation uses insert-or-do-nothing;
+updates only replace the matching row. A loser returns HTTP 409 with the shared
+`ApiErrorResponse` code `CONFLICT`, and does not publish a settings invalidation.
+The frontend reports the failed save and fetches current settings; the next
+user action rebuilds only its intended patch. It never automatically replays a
+stale onboarding or library subtree. A failed refresh keeps the cache
+invalidated: onboarding and location writers must read successfully before
+building another patch, while auto-save rejects edits and starts another read.
+An awaited save also rejects instead of allowing a consent-gated action to
+continue without a confirmed write. Queued auto-save bursts based on the
+rejected snapshot are discarded and reported as failed.
+
+Existing request and success-response shapes remain compatible; clients must
+handle 409 by reading current settings and rebuilding their edit. This is a
+server read/merge/write concurrency guarantee, not a client revision
+precondition. A request whose repository read starts after another write has
+committed can still replace the same complete field, even when its payload
+was built earlier. That case remains last-writer-wins; the guarantee rejects
+a stale repository snapshot, not every stale client snapshot.
 
 The rule, in full:
 
