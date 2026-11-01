@@ -730,8 +730,27 @@ enum TerminationOutcome {
     Pending,
     /// The child exited before the exit grace ran out.
     Exited(ExitStatus),
-    /// The exit grace ran out after `SIGKILL`; the child had not exited.
+    /// No exit was observed before the deadline or the owner was abandoned.
     GaveUp,
+}
+
+/// Publishes an incomplete result even when a task is dropped before its
+/// first poll or unwinds. Constructed before spawning, not inside the task.
+struct EscalationCompletion {
+    outcome: watch::Sender<TerminationOutcome>,
+}
+
+impl Drop for EscalationCompletion {
+    fn drop(&mut self) {
+        self.outcome.send_if_modified(|outcome| {
+            if *outcome == TerminationOutcome::Pending {
+                *outcome = TerminationOutcome::GaveUp;
+                true
+            } else {
+                false
+            }
+        });
+    }
 }
 
 /// Runs the termination sequence once, however many callers ask for it.
@@ -798,13 +817,24 @@ impl Terminator {
             }
             *started = true;
         }
+        let completion = EscalationCompletion {
+            outcome: self.outcome.clone(),
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            // The sequence was claimed but cannot run here. Dropping the
+            // completion records GaveUp; a later caller must not retry it.
+            return;
+        };
         let terminator = Arc::clone(self);
-        tokio::spawn(async move {
+        runtime.spawn(async move {
+            let _completion = completion;
             let outcome = match terminator.escalate().await {
                 Some(status) => TerminationOutcome::Exited(status),
                 None => TerminationOutcome::GaveUp,
             };
-            let _ = terminator.outcome.send(outcome);
+            // Retain the result even if port closure started escalation
+            // before any terminate() caller subscribed.
+            terminator.outcome.send_replace(outcome);
         });
     }
 
@@ -844,9 +874,8 @@ impl Terminator {
                 TerminationOutcome::Pending => {}
             }
             if outcome.changed().await.is_err() {
-                // The sender lives as long as this `Terminator`, and `self`
-                // borrows it for the whole call — this arm is unreachable in
-                // practice, not a real "gave up before starting".
+                // Defensive only: the completion guard reports an abandoned
+                // owner while this Terminator still retains its sender.
                 return None;
             }
         }
@@ -1005,14 +1034,17 @@ impl LaunchedPeer {
     }
 
     /// Runs the termination sequence and resolves once the child has exited,
-    /// or `None` once the exit grace has run out after `SIGKILL` without the
-    /// child leaving. The escalation itself runs once and is not repeated,
+    /// or `None` when no exit was observed before the exit grace ran out or
+    /// its background owner was dropped or failed. An incomplete result is
+    /// not proof of cleanup: the caller still owns recovery of the child.
+    /// Observers require a running executor; a retained but undriven runtime
+    /// cannot complete an async call. The escalation runs once and is not repeated,
     /// but a call after it gave up rechecks the exit watch rather than
     /// replaying the stale answer: a child that outlived every grace and
     /// left afterwards has an exit status now, matching the TypeScript
     /// launcher, whose `terminate()` does not cache `undefined` either.
-    /// `None` from this call means the grace had run out *and* the child
-    /// still had not exited by the time this call was made — an unspawned
+    /// `None` means escalation ended without an observed exit and none was
+    /// available when this call rechecked — an unspawned
     /// child (one that never became a process) still resolves
     /// `Some(ExitStatus::default())`, the same sentinel
     /// [`LaunchedPeer::exited`] reports for it, because there is nothing
@@ -1051,8 +1083,8 @@ impl LaunchedPeer {
         self.terminator.start();
         match self.terminator.outcome().await {
             Some(status) => Some(status),
-            // `GaveUp` is what the escalation recorded when its own grace
-            // ran out; it says nothing about now. A plain, non-blocking
+            // `GaveUp` records a deadline or abandoned owner, not the
+            // child's current state. A plain, non-blocking
             // `borrow` is deliberate here — this must never wait, or a
             // caller who already saw one `None` could hang on a second call
             // forever, exactly what `exit_grace` exists to bound against.
@@ -1368,6 +1400,231 @@ mod tests {
         let mut options = SpawnOptions::new(["mango-no-such-command-exists-anywhere"]);
         options.max_frame_bytes = Some(512);
         let _ = spawn_port(options);
+    }
+
+    /// A named child observation fixture: no exit is published unless the test
+    /// explicitly does so; every signal is observable and cleanup stays owned.
+    struct StalledChild {
+        terminator: Arc<Terminator>,
+        exit: watch::Sender<Option<ExitStatus>>,
+        signals: mpsc::UnboundedReceiver<super::KillRequest>,
+    }
+
+    impl StalledChild {
+        fn new() -> Self {
+            let (kill, signals) = mpsc::unbounded_channel();
+            let (exit, observation) = watch::channel(None);
+            Self {
+                terminator: Arc::new(Terminator::new(
+                    kill,
+                    observation,
+                    Duration::from_millis(10),
+                    Duration::from_millis(10),
+                    Duration::from_millis(20),
+                )),
+                exit,
+                signals,
+            }
+        }
+
+        async fn incomplete(&mut self) {
+            let (first, second) = tokio::time::timeout(Duration::from_secs(1), async {
+                tokio::join!(self.terminator.outcome(), self.terminator.outcome())
+            })
+            .await
+            .expect("abandoned escalation stranded multiple outcome waiters");
+            assert_eq!((first, second), (None, None));
+            assert_eq!(*self.exit.borrow(), None, "reporting is not cleanup proof");
+            self.terminator.start();
+            assert_eq!(self.terminator.outcome().await, None);
+            assert!(self.signals.try_recv().is_err(), "no second kill sequence");
+        }
+    }
+
+    fn observer_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("observer runtime")
+    }
+
+    #[test]
+    fn termination_owner_dropped_before_first_poll_settles_waiters() {
+        let mut child = StalledChild::new();
+        let owner = observer_runtime();
+        {
+            let _entered = owner.enter();
+            child.terminator.start();
+        }
+        // Subscribe and poll before owner loss, so this proves waking live
+        // waiters as well as retaining an outcome for later subscribers.
+        let first = child.terminator.outcome();
+        let second = child.terminator.outcome();
+        let mut first = std::pin::pin!(first);
+        let mut second = std::pin::pin!(second);
+        {
+            use std::future::Future;
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            assert!(first.as_mut().poll(&mut context).is_pending());
+            assert!(second.as_mut().poll(&mut context).is_pending());
+        }
+        drop(owner);
+        observer_runtime().block_on(async {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    tokio::join!(first, second)
+                })
+                .await
+                .expect("existing waiters must settle"),
+                (None, None)
+            );
+        });
+        // The pinned waiters still borrow the terminator here; independently
+        // confirm the result was cached without restarting escalation.
+        observer_runtime().block_on(async {
+            child.terminator.start();
+            assert_eq!(child.terminator.outcome().await, None);
+            assert_eq!(*child.exit.borrow(), None);
+            assert!(child.signals.try_recv().is_err());
+        });
+    }
+
+    #[test]
+    fn termination_owner_canceled_during_escalation_settles_waiters() {
+        let mut child = StalledChild::new();
+        let owner = observer_runtime();
+        owner.block_on(async {
+            child.terminator.start();
+            assert!(matches!(
+                tokio::time::timeout(Duration::from_secs(1), child.signals.recv()).await,
+                Ok(Some(super::KillRequest::Terminate))
+            ));
+        });
+        drop(owner);
+        observer_runtime().block_on(child.incomplete());
+    }
+
+    #[test]
+    fn termination_owner_without_runtime_settles_waiters() {
+        let mut child = StalledChild::new();
+        child.terminator.start();
+        observer_runtime().block_on(child.incomplete());
+    }
+
+    #[test]
+    fn termination_owner_on_shutdown_runtime_settles_waiters() {
+        let mut child = StalledChild::new();
+        let owner = observer_runtime();
+        let handle = owner.handle().clone();
+        drop(owner);
+        {
+            let _entered = handle.enter();
+            child.terminator.start();
+        }
+        observer_runtime().block_on(child.incomplete());
+    }
+
+    #[test]
+    fn termination_owner_task_failure_settles_waiters() {
+        let mut child = StalledChild::new();
+        // A runnable task whose first timed wait fails: Tokio panics when
+        // the host did not enable timers. The observer has working timers.
+        let owner = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime without timer driver");
+        owner.block_on(async {
+            child.terminator.start();
+            tokio::task::yield_now().await;
+        });
+        // Keep the owner alive to distinguish task failure from shutdown.
+        observer_runtime().block_on(child.incomplete());
+        drop(owner);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn termination_waiter_cancellation_keeps_owner_and_late_exit_visible() {
+        let mut child = StalledChild::new();
+        let peer = LaunchedPeer {
+            pid: Some(1),
+            exit: child.exit.subscribe(),
+            tail: Arc::new(Mutex::new(BoundedTail::new(0))),
+            spawn_error: None,
+            kill: child.terminator.kill.as_ref().expect("live child").clone(),
+            terminator: Arc::clone(&child.terminator),
+        };
+        {
+            let waiter = peer.terminate();
+            let mut waiter = std::pin::pin!(waiter);
+            std::future::poll_fn(|context| {
+                assert!(std::future::Future::poll(waiter.as_mut(), context).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+        }
+        // Abandoning the caller did not abandon the escalation owner.
+        assert!(matches!(
+            child.signals.recv().await,
+            Some(super::KillRequest::Terminate)
+        ));
+        assert!(matches!(
+            child.signals.recv().await,
+            Some(super::KillRequest::Kill)
+        ));
+        assert_eq!(peer.terminate().await, None);
+        let late = ExitStatus {
+            code: Some(3),
+            signal: None,
+        };
+        child.exit.send_replace(Some(late));
+        assert_eq!(peer.terminate().await, Some(late));
+        assert!(child.signals.try_recv().is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn termination_deadline_is_shared_and_cached_without_waiters() {
+        let mut child = StalledChild::new();
+        child.terminator.start();
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_millis(10)).await;
+        assert!(matches!(
+            child.signals.recv().await,
+            Some(super::KillRequest::Terminate)
+        ));
+        tokio::time::advance(Duration::from_millis(10)).await;
+        assert!(matches!(
+            child.signals.recv().await,
+            Some(super::KillRequest::Kill)
+        ));
+        tokio::time::advance(Duration::from_millis(19)).await;
+        assert!(matches!(
+            *child.terminator.outcome.borrow(),
+            super::TerminationOutcome::Pending
+        ));
+        tokio::time::advance(Duration::from_millis(1)).await;
+        tokio::task::yield_now().await;
+        child.incomplete().await;
+    }
+
+    #[tokio::test]
+    async fn termination_already_exited_and_unspawned_need_no_signals() {
+        let mut child = StalledChild::new();
+        let status = ExitStatus {
+            code: Some(7),
+            signal: None,
+        };
+        child.exit.send_replace(Some(status));
+        child.terminator.start();
+        let (first, second) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(child.terminator.outcome(), child.terminator.outcome())
+        })
+        .await
+        .expect("settled exit");
+        assert_eq!((first, second), (Some(status), Some(status)));
+        assert!(child.signals.try_recv().is_err());
+        assert_eq!(
+            Terminator::unspawned().outcome().await,
+            Some(ExitStatus::default())
+        );
     }
 
     #[tokio::test]

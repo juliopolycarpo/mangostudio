@@ -46,6 +46,20 @@ either way.
    blocked by one. A launcher that gives up reports that the child had not exited; it does not
    invent an exit status.
 
+All callers share one escalation and its result. If the asynchronous owner is canceled,
+dropped, or fails before completing the sequence, a caller that can still run must receive
+an incomplete result rather than remain pending. The Rust SDK reports this as `None`, the
+same shape it uses for an elapsed exit deadline; neither result proves that the child exited
+or that cleanup completed. A subsequent call may report a real exit observed later, but must
+not restart escalation. Child ownership and cleanup remain the launcher's responsibility.
+
+This guarantee requires an executor that can run the observer. It does not promise that an
+asynchronous call completes while its executor is stopped. In Rust, dropping the owner task
+(including during runtime shutdown) publishes the incomplete result for observers on a running
+executor; starting without a runtime also records that result. A retained but undriven runtime
+cannot provide an asynchronous completion guarantee. JavaScript callers abandoning a promise
+do not cancel its shared escalation; the event loop must still run it.
+
 Windows has no POSIX signals: step 2 and 3 collapse into terminating the process. Descendants
 the child spawned are not reached; the child's own cancellation path is what reaps them.
 
