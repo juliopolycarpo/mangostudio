@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
+import { extractJobBlock, extractStepBlocks, parseNeedsList } from './support/workflow-blocks';
 
 // Neither release path is reachable from a branch build, and a scratch tag is
 // not an option: immutable releases are enabled on this repository, so a
@@ -220,6 +220,76 @@ describe('the resolve step classifies the version it is releasing', () => {
     expect(outputLines.filter((line) => line.startsWith('version='))).toEqual([
       'version=0.2.0malicious=true',
     ]);
+  });
+});
+
+// Exercise the workflow's classification gate before its real publishing scripts.
+function classificationScript(): string {
+  return stepScript('validate-classification', 'Validate prerelease classification');
+}
+
+describe('release classification fails before any channel can publish', () => {
+  test.each(['github-release', 'docker', 'npm-publish', 'homebrew', 'scoop'])(
+    '%s cannot bypass validation through the build dependency',
+    (channel) => {
+      const block = extractJobBlock(releaseWorkflow, channel);
+      expect(parseNeedsList(block)).toContain('build');
+      expect(block).not.toMatch(/(?:always|failure)\(\)/);
+      expect(parseNeedsList(extractJobBlock(releaseWorkflow, 'build'))).toContain(
+        'validate-classification'
+      );
+      const gate = extractJobBlock(releaseWorkflow, 'validate-classification');
+      expect(gate).toContain('needs: prepare');
+      expect(gate).toContain('if: $' + '{{ always() }}');
+      expect(extractJobBlock(releaseWorkflow, 'build')).not.toMatch(/(?:always|failure)\(\)/);
+      expect(gate).toContain('PRERELEASE: $' + '{{ needs.prepare.outputs.prerelease }}');
+      expect(gate).not.toContain('continue-on-error:');
+    }
+  );
+
+  test.each(['', 'TRUE', 'False', 'yes', '0', ' true', 'false\n'])(
+    'rejects %j before GitHub Release or Docker publication',
+    (prerelease) => {
+      for (const [job, step, bin] of [
+        [
+          'github-release',
+          'Create the GitHub Release',
+          {
+            gh: argvRecorder('[ "$1" = "release" ] && [ "$2" = "view" ] && exit 1'),
+          },
+        ],
+        [
+          'docker',
+          'Build and publish images (retrying transient registry failures)',
+          {
+            docker: argvRecorder(),
+          },
+        ],
+      ] as const) {
+        const result = runStepScript(`${classificationScript()}\n${stepScript(job, step)}`, {
+          env: {
+            PRERELEASE: prerelease,
+            VERSION: '0.2.0-rc.1',
+            IMAGE: 'ghcr.io/example/mangostudio',
+            GH_TOKEN: 'fake',
+          },
+          bin,
+        });
+        expect(result.exitCode, `${job} published as stable: ${result.argv.join('\n')}`).not.toBe(
+          0
+        );
+        expect(result.output).toContain('Invalid prerelease classification');
+        expect(result.argv).toEqual([]);
+      }
+    }
+  );
+
+  test.each(['true', 'false'])('accepts exactly %s', (prerelease) => {
+    const result = runStepScript(classificationScript(), {
+      env: { PRERELEASE: prerelease },
+      bin: {},
+    });
+    expect(result.exitCode, result.output).toBe(0);
   });
 });
 
