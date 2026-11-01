@@ -192,8 +192,11 @@ export function githubScripts(source: string): Array<{ path: string; script: str
   const collect = (steps: GithubScriptStep[] | undefined, path: string) => {
     for (const [index, step] of (steps ?? []).entries()) {
       if (!step.uses?.startsWith('actions/github-script@')) continue;
-      if (typeof step.with?.script !== 'string') continue;
-      found.push({ path: `${path}.steps[${index}]`, script: step.with.script });
+      // The runner treats input names case-insensitively and exports INPUT_SCRIPT.
+      for (const [input, script] of Object.entries(step.with ?? {})) {
+        if (input.toLowerCase() !== 'script' || typeof script !== 'string') continue;
+        found.push({ path: `${path}.steps[${index}]`, script });
+      }
     }
   };
   for (const [job, value] of Object.entries(document.jobs ?? {})) {
@@ -205,5 +208,5 @@ export function githubScripts(source: string): Array<{ path: string; script: str
 
 interface GithubScriptStep {
   uses?: string;
-  with?: { script?: unknown };
+  with?: Record<string, unknown>;
 }
