@@ -555,6 +555,100 @@ describe('useGlobalSettings', () => {
       }
     });
 
+    for (const refetch of ['finished', 'pending'] as const) {
+      it(`discards another hook's queued snapshot when the conflict refetch is ${refetch}`, async () => {
+        const settlePut = holdEveryPut();
+        const { result } = renderHook(() => ({
+          layout: useGlobalSettings(),
+          outlet: useGlobalSettings(),
+        }));
+        await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+        const refresh = Promise.withResolvers<MockGetResult>();
+        const winner = mockQueryResult({
+          ...DEFAULT_APP_SETTINGS,
+          promptSettings: {
+            ...DEFAULT_APP_SETTINGS.promptSettings,
+            textSystemPrompt: 'external winner',
+          },
+        });
+        mockGet.mockImplementation(() => refresh.promise);
+        useFakeTimers();
+        try {
+          act(() => result.current.layout.setTextSystemPrompt('layout edit'));
+          await advanceTimersByTimeAsync(300);
+          expect(mockPut).toHaveBeenCalledTimes(1);
+          act(() => result.current.outlet.setTextSystemPrompt('outlet queued before conflict'));
+          if (refetch === 'finished') refresh.resolve(winner);
+          await settle(
+            settlePut[0],
+            mockMutationResult(null, {
+              value: { error: 'Settings changed', code: 'CONFLICT' },
+            })
+          );
+          expect(mockGet).toHaveBeenCalledTimes(2);
+          await advanceTimersByTimeAsync(300);
+          expect(mockPut).toHaveBeenCalledTimes(1);
+          await act(async () => {
+            refresh.resolve(winner);
+            await refresh.promise;
+          });
+          await advanceTimersByTimeAsync(0);
+          expect(result.current.outlet.promptSettings.textSystemPrompt).toBe('external winner');
+        } finally {
+          refresh.resolve(winner);
+          // A failing red run may have submitted the stale second PUT. Settle
+          // that held request as well so the regression never strands a save.
+          for (const complete of settlePut.slice(1)) complete(savedPut('external winner'));
+          await restoreRealTimers();
+        }
+      });
+    }
+
+    it('builds a fresh edit and rollback baseline after another hook refreshes a conflict', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => ({
+        layout: useGlobalSettings(),
+        outlet: useGlobalSettings(),
+      }));
+      await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+      useFakeTimers();
+      try {
+        act(() => result.current.layout.setTextSystemPrompt('layout edit'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.outlet.setTextSystemPrompt('old queued edit'));
+        mockGet.mockResolvedValue(
+          mockQueryResult({
+            ...DEFAULT_APP_SETTINGS,
+            globalImageQuality: '4K',
+            promptSettings: {
+              ...DEFAULT_APP_SETTINGS.promptSettings,
+              textSystemPrompt: 'external winner',
+            },
+          })
+        );
+        await settle(
+          settlePut[0],
+          mockMutationResult(null, {
+            value: { error: 'Settings changed', code: 'CONFLICT' },
+          })
+        );
+        act(() => result.current.outlet.setTextSystemPrompt('fresh edit'));
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(2);
+        expect(mockPut.mock.calls[1]?.[0]).toMatchObject({
+          globalImageQuality: '4K',
+          promptSettings: { textSystemPrompt: 'fresh edit' },
+        });
+        await settle(settlePut[1], failedPut());
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.outlet.promptSettings.textSystemPrompt).toBe('external winner');
+        expect(result.current.outlet.globalImageQuality).toBe('4K');
+      } finally {
+        for (const complete of settlePut.slice(1)) complete(savedPut('external winner'));
+        await restoreRealTimers();
+      }
+    });
+
     it('rolls back to the last confirmed value, not to an unconfirmed one', async () => {
       const burstStart = 'persisted baseline';
       mockGet.mockResolvedValue(

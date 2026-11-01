@@ -94,6 +94,21 @@ export async function appSettingsForLocationWrite(queryClient: QueryClient): Pro
   );
 }
 
+// A refetch clears isInvalidated, but must not make another mounted
+// auto-save owner's already-queued snapshot valid again. Weak ownership keeps
+// this coordination scoped to the same cache and its lifetime.
+const conflictEpochs = new WeakMap<QueryClient, number>();
+
+/** The conflict generation a queued app-settings snapshot was built against. */
+export function appSettingsConflictEpoch(queryClient: QueryClient): number {
+  return conflictEpochs.get(queryClient) ?? 0;
+}
+
+/** Reject older queued snapshots without storing a second settings value. */
+export function recordAppSettingsConflict(queryClient: QueryClient): void {
+  conflictEpochs.set(queryClient, appSettingsConflictEpoch(queryClient) + 1);
+}
+
 /**
  * A rejected compare-and-swap never replays its old subtree. Refresh before
  * the surface offers another edit so its updater runs against current state.
@@ -104,6 +119,7 @@ export async function refreshAppSettingsAfterConflict(
   error: unknown
 ): Promise<void> {
   if (!isAppSettingsConflict(error)) return;
+  recordAppSettingsConflict(queryClient);
   // Keep a failed or still-pending refresh visible to every writer. Cached
   // preferences from before the conflict are not a valid retry baseline.
   await queryClient.invalidateQueries({
