@@ -97,16 +97,44 @@ export async function appSettingsForLocationWrite(queryClient: QueryClient): Pro
 // A refetch clears isInvalidated, but must not make another mounted
 // auto-save owner's already-queued snapshot valid again. Weak ownership keeps
 // this coordination scoped to the same cache and its lifetime.
-const conflictEpochs = new WeakMap<QueryClient, number>();
+const conflictEpochs = new WeakMap<
+  QueryClient,
+  { epoch: number; refreshEpoch: number; rejectedWrite: number }
+>();
 
 /** The conflict generation a queued app-settings snapshot was built against. */
 export function appSettingsConflictEpoch(queryClient: QueryClient): number {
-  return conflictEpochs.get(queryClient) ?? 0;
+  return conflictEpochs.get(queryClient)?.epoch ?? 0;
 }
 
-/** Reject older queued snapshots without storing a second settings value. */
-export function recordAppSettingsConflict(queryClient: QueryClient): void {
-  conflictEpochs.set(queryClient, appSettingsConflictEpoch(queryClient) + 1);
+/**
+ * Reject older queues. A superseded request identifies its submission, so a
+ * queue derived from a later confirmed write may survive without a refetch.
+ */
+export function recordAppSettingsConflict(queryClient: QueryClient, rejectedWrite?: number): void {
+  const previous = conflictEpochs.get(queryClient);
+  const epoch = (previous?.epoch ?? 0) + 1;
+  conflictEpochs.set(queryClient, {
+    epoch,
+    refreshEpoch: rejectedWrite !== undefined ? (previous?.refreshEpoch ?? 0) : epoch,
+    rejectedWrite: Math.max(previous?.rejectedWrite ?? 0, rejectedWrite ?? 0),
+  });
+}
+
+/** A queue must survive every refresh boundary, even if a later save succeeds. */
+export function appSettingsQueueCanSave(
+  queryClient: QueryClient,
+  epoch: number,
+  confirmedWrite: number | undefined
+): boolean {
+  const current = conflictEpochs.get(queryClient);
+  return (
+    !current ||
+    epoch === current.epoch ||
+    (epoch >= current.refreshEpoch &&
+      confirmedWrite !== undefined &&
+      confirmedWrite > current.rejectedWrite)
+  );
 }
 
 /**
