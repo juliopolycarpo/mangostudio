@@ -36,6 +36,7 @@ import {
   appSettingsConflictEpoch,
   appSettingsKeys,
   appSettingsQueryOptions,
+  appSettingsQueueCanSave,
   isAppSettingsConflict,
   keepLibraryDefaultsPending,
   recordAppSettingsConflict,
@@ -53,6 +54,13 @@ export {
 };
 
 const SETTINGS_SAVE_DEBOUNCE_MS = 300;
+
+// Cache object provenance, shared across mounted hooks without retaining another
+// settings snapshot. Optimistic edits inherit the confirmed response they used.
+const confirmedCacheWrites = new WeakMap<object, number>();
+// Shared ordering lets a delayed conflict recognize confirmed writes from any
+// mounted owner. This is client bookkeeping, never a server revision precondition.
+let writeSequence = 0;
 
 function createCustomRule(): RuleFileSetting {
   return {
@@ -83,6 +91,7 @@ export function useGlobalSettings() {
   const pendingSaveRef = useRef<{
     readonly settings: AppSettings;
     readonly conflictEpoch: number;
+    readonly confirmedWrite: number | undefined;
   } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
@@ -108,7 +117,12 @@ export function useGlobalSettings() {
     mutationFn: updateAppSettings,
     onMutate: () => {
       saveSequenceRef.current += 1;
-      return { previousSettings: rollbackRef.current, sequence: saveSequenceRef.current };
+      writeSequence += 1;
+      return {
+        previousSettings: rollbackRef.current,
+        sequence: saveSequenceRef.current,
+        write: writeSequence,
+      };
     },
     onError: async (error, _nextSettings, context) => {
       // A superseded save must not roll back: a newer submission either already
@@ -139,9 +153,9 @@ export function useGlobalSettings() {
         }
         await refreshAppSettingsAfterConflict(queryClient, error);
       } else if (isAppSettingsConflict(error)) {
-        // Do not refetch over a newer submission, but every cache owner must
-        // still discard work queued before this observed conflict.
-        recordAppSettingsConflict(queryClient);
+        // Do not refetch over a newer submission. A queue derived from its
+        // confirmed success is still fresh; older queues must be discarded.
+        recordAppSettingsConflict(queryClient, context?.write);
       }
     },
     onSuccess: (savedSettings, _nextSettings, context) => {
@@ -151,7 +165,11 @@ export function useGlobalSettings() {
       // and the next invalidation is free to repair the rolled-back cache.
       markAppSettingsLocalWrite();
       if (context.sequence !== saveSequenceRef.current) return;
-      queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
+      const cached = queryClient.setQueryData(
+        appSettingsKeys.current(),
+        normalizeAppSettings(savedSettings)
+      );
+      if (cached) confirmedCacheWrites.set(cached, context.write);
     },
     onSettled: (_savedSettings, _error, _nextSettings, context) => {
       // A newer submission still in flight keeps the burst open just as a queued
@@ -186,7 +204,13 @@ export function useGlobalSettings() {
     if (!pendingSettings) return;
 
     pendingSaveRef.current = null;
-    if (pendingSettings.conflictEpoch !== appSettingsConflictEpoch(queryClient)) {
+    if (
+      !appSettingsQueueCanSave(
+        queryClient,
+        pendingSettings.conflictEpoch,
+        pendingSettings.confirmedWrite
+      )
+    ) {
       // Another mounted owner already reported a conflict. Its refetch may
       // have finished, so query invalidation alone cannot reject this queue.
       rollbackRef.current = null;
@@ -217,12 +241,20 @@ export function useGlobalSettings() {
         return false;
       }
       const conflictEpoch = appSettingsConflictEpoch(queryClient);
-      if (pendingSaveRef.current && pendingSaveRef.current.conflictEpoch !== conflictEpoch) {
-        // A new edit after a successful refetch needs the winner as its
-        // rollback baseline, not this hook's rejected earlier burst.
+      const cachedSettings = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
+      const confirmedWrite = cachedSettings ? confirmedCacheWrites.get(cachedSettings) : undefined;
+      if (
+        pendingSaveRef.current &&
+        (!appSettingsQueueCanSave(
+          queryClient,
+          pendingSaveRef.current.conflictEpoch,
+          pendingSaveRef.current.confirmedWrite
+        ) ||
+          pendingSaveRef.current.confirmedWrite !== confirmedWrite)
+      ) {
+        // A refreshed or newly confirmed cache starts a new rollback baseline.
         rollbackRef.current = null;
       }
-      const cachedSettings = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
       const currentSettings = normalizeAppSettings(cachedSettings ?? DEFAULT_APP_SETTINGS);
 
       // Both cache writes keep the "library defaults pending" flag the
@@ -233,11 +265,14 @@ export function useGlobalSettings() {
       // out-of-range value: every clamp the schema declares is applied to the
       // local edit before it is queued.
       const nextSettings = normalizeAppSettings(updater(currentSettings));
-      queryClient.setQueryData(
+      const optimisticCache = queryClient.setQueryData(
         appSettingsKeys.current(),
         keepLibraryDefaultsPending(cachedSettings, nextSettings)
       );
-      pendingSaveRef.current = { settings: nextSettings, conflictEpoch };
+      if (optimisticCache && confirmedWrite) {
+        confirmedCacheWrites.set(optimisticCache, confirmedWrite);
+      }
+      pendingSaveRef.current = { settings: nextSettings, conflictEpoch, confirmedWrite };
       // Opens the echo window at the first keystroke, not at the PUT, so the
       // whole debounce is protected too.
       markAppSettingsLocalWrite();
