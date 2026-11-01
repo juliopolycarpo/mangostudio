@@ -232,6 +232,30 @@ describe('workflow hygiene', () => {
     expect(scripts.every(({ script }) => script.includes(expression))).toBe(true);
   });
 
+  for (const input of ['SCRIPT', 'Script']) {
+    for (const [header, path] of [
+      [['jobs:', '  build:', '    steps:'], 'jobs.build.steps[0]'],
+      [['runs:', '  using: composite', '  steps:'], 'runs.steps[0]'],
+    ] as const) {
+      test(`github-script input names ignore case: ${input} in ${path}`, () => {
+        const expression = `${EXPRESSION_OPEN} github.event.issue.title }}`;
+        const steps = [
+          '      - uses: actions/github-script@v9',
+          '        with:',
+          `          ${input}: core.info('${expression}')`,
+          '        env:',
+          `          TITLE: ${expression}`,
+          '      - uses: other/action@v1',
+          '        with:',
+          `          ${input}: ${expression}`,
+        ];
+        expect(githubScripts([...header, ...steps].join('\n'))).toEqual([
+          { path, script: `core.info('${expression}')` },
+        ]);
+      });
+    }
+  }
+
   test('the expression scan reads block scalars, not just inline run: lines', () => {
     // The failure this guards against is silent: a walk that only matched
     // `run: <command>` on one line would report a clean repository while every
