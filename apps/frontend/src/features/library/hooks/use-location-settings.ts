@@ -29,7 +29,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { updateAppSettings } from '@/features/settings/app/api';
-import { appSettingsForLocationWrite, appSettingsKeys } from '@/features/settings/app/queries';
+import {
+  appSettingsForLocationWrite,
+  appSettingsKeys,
+  refreshAppSettingsAfterConflict,
+} from '@/features/settings/app/queries';
 import { useLibraryDefaultsDetection } from '@/features/settings/app/use-library-defaults-detection';
 
 import { libraryKeys, libraryLocationsQueryOptions } from '../queries';
@@ -91,6 +95,7 @@ export function useLocationSettings(environmentId?: string): LocationSettingsSta
         })
       );
     },
+    onError: (error) => refreshAppSettingsAfterConflict(queryClient, error),
     onSuccess: async (saved) => {
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(saved));
       // The scan answer changes with the enabled set, so every matrix built on
@@ -111,7 +116,7 @@ export function useLocationSettings(environmentId?: string): LocationSettingsSta
     groups,
     isPending: locationsQuery.isPending || settingsQuery.isPending,
     defaultsPending,
-    error: locationsQuery.error ?? settingsQuery.error,
+    error: save.error ?? locationsQuery.error ?? settingsQuery.error,
     isSaving: save.isPending,
     setEnabled: (locationId, enabled) => save.mutate({ locationId, enabled }),
     refetch: () => {

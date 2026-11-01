@@ -80,7 +80,11 @@ export async function appSettingsForLocationWrite(queryClient: QueryClient): Pro
   const cached = queryClient.getQueryData<AppSettings | AppSettingsResponse>(
     appSettingsKeys.current()
   );
-  if (cached !== undefined && !libraryLocationDefaultsPending(cached)) {
+  if (
+    cached !== undefined &&
+    !libraryLocationDefaultsPending(cached) &&
+    !queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated
+  ) {
     return normalizeAppSettings(cached);
   }
   const fetched = await queryClient.fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 });
@@ -88,4 +92,92 @@ export async function appSettingsForLocationWrite(queryClient: QueryClient): Pro
   throw new Error(
     'expected app settings with detected library-location defaults | received: libraryLocationDefaultsPending: true (the hub is still detecting installed agent CLIs)'
   );
+}
+
+// A refetch clears isInvalidated, but must not make another mounted
+// auto-save owner's already-queued snapshot valid again. Weak ownership keeps
+// this coordination scoped to the same cache and its lifetime.
+const conflictEpochs = new WeakMap<
+  QueryClient,
+  { epoch: number; refreshEpoch: number; rejectedWrite: number }
+>();
+
+/** The conflict generation a queued app-settings snapshot was built against. */
+export function appSettingsConflictEpoch(queryClient: QueryClient): number {
+  return conflictEpochs.get(queryClient)?.epoch ?? 0;
+}
+
+/**
+ * Reject older queues. A superseded request identifies its submission, so a
+ * queue derived from a later confirmed write may survive without a refetch.
+ */
+export function recordAppSettingsConflict(queryClient: QueryClient, rejectedWrite?: number): void {
+  const previous = conflictEpochs.get(queryClient);
+  const epoch = (previous?.epoch ?? 0) + 1;
+  conflictEpochs.set(queryClient, {
+    epoch,
+    refreshEpoch: rejectedWrite !== undefined ? (previous?.refreshEpoch ?? 0) : epoch,
+    rejectedWrite: Math.max(previous?.rejectedWrite ?? 0, rejectedWrite ?? 0),
+  });
+}
+
+/** A queue must survive every refresh boundary, even if a later save succeeds. */
+export function appSettingsQueueCanSave(
+  queryClient: QueryClient,
+  epoch: number,
+  confirmedWrite: number | undefined
+): boolean {
+  const current = conflictEpochs.get(queryClient);
+  return (
+    !current ||
+    epoch === current.epoch ||
+    (epoch >= current.refreshEpoch &&
+      confirmedWrite !== undefined &&
+      confirmedWrite > current.rejectedWrite)
+  );
+}
+
+/**
+ * A rejected compare-and-swap never replays its old subtree. Refresh before
+ * the surface offers another edit so its updater runs against current state.
+ * Keep the original mutation error visible even if this refresh also fails.
+ */
+export async function refreshAppSettingsAfterConflict(
+  queryClient: QueryClient,
+  error: unknown
+): Promise<void> {
+  if (!isAppSettingsConflict(error)) return;
+  recordAppSettingsConflict(queryClient);
+  // Keep a failed or still-pending refresh visible to every writer. Cached
+  // preferences from before the conflict are not a valid retry baseline.
+  await queryClient.invalidateQueries({
+    queryKey: appSettingsKeys.current(),
+    refetchType: 'none',
+  });
+  // Default cancellation restores the state from before the canceled read,
+  // which can clear the conflict invalidation while the new read is pending.
+  await queryClient.cancelQueries({ queryKey: appSettingsKeys.current() }, { revert: false });
+  await queryClient.fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 }).catch(() => {
+    void queryClient.invalidateQueries({
+      queryKey: appSettingsKeys.current(),
+      refetchType: 'none',
+    });
+  });
+}
+
+/** The app-settings endpoint rejected an outdated repository snapshot. */
+export function isAppSettingsConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'CONFLICT';
+}
+
+/** Re-read a rejected baseline before an updater constructs its next patch. */
+export async function appSettingsForWrite(queryClient: QueryClient): Promise<AppSettings> {
+  const cached = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
+  if (
+    cached !== undefined &&
+    !queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated
+  ) {
+    return cached;
+  }
+  return queryClient.fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 });
 }

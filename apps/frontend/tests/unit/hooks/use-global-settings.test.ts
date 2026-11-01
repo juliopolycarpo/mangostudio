@@ -505,6 +505,305 @@ describe('useGlobalSettings', () => {
       expect(screen.queryByText(en.settings.autoSave.errorRevertedToast)).toBeNull();
     });
 
+    it('does not refetch over a newer edit when a superseded save conflicts', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => useGlobalSettings());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      act(() => result.current.setTextSystemPrompt('first'));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+      act(() => result.current.setTextSystemPrompt('second'));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
+      const reads = mockGet.mock.calls.length;
+      await settle(
+        settlePut[0],
+        mockMutationResult(null, {
+          value: { error: 'Settings changed', code: 'CONFLICT' },
+        })
+      );
+      expect(result.current.promptSettings.textSystemPrompt).toBe('second');
+      expect(mockGet.mock.calls).toHaveLength(reads);
+      await settle(settlePut[1], savedPut('second'));
+    });
+
+    for (const owner of ['layout', 'outlet'] as const) {
+      it(`persists ${owner}'s edit based on a confirmed newer save after a delayed conflict`, async () => {
+        const settlePut = holdEveryPut();
+        const { result } = renderHook(() => ({
+          layout: useGlobalSettings(),
+          outlet: useGlobalSettings(),
+        }));
+        await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+        const reads = mockGet.mock.calls.length;
+        useFakeTimers();
+        try {
+          act(() => result.current.layout.setTextSystemPrompt('first'));
+          await advanceTimersByTimeAsync(300);
+          act(() => result.current.layout.setTextSystemPrompt('second'));
+          await advanceTimersByTimeAsync(300);
+          expect(mockPut).toHaveBeenCalledTimes(2);
+          if (owner === 'outlet') {
+            act(() => result.current.outlet.setTextSystemPrompt('queue before confirmation'));
+          }
+          await settle(settlePut[1], savedPut('second'));
+          await advanceTimersByTimeAsync(0);
+          act(() => result.current[owner].setTextSystemPrompt('third'));
+          await advanceTimersByTimeAsync(0);
+          expect(result.current[owner].promptSettings.textSystemPrompt).toBe('third');
+          await settle(
+            settlePut[0],
+            mockMutationResult(null, { value: { error: 'Settings changed', code: 'CONFLICT' } })
+          );
+          await advanceTimersByTimeAsync(300);
+          // This intent was built from confirmed PUT2, not PUT1's rejected base.
+          // Keeping it on screen requires actually submitting it to the server.
+          expect(mockPut).toHaveBeenCalledTimes(3);
+          expect(mockPut.mock.calls[2]?.[0]).toMatchObject({
+            promptSettings: { textSystemPrompt: 'third' },
+          });
+          expect(mockGet.mock.calls).toHaveLength(reads);
+          await settle(settlePut[2], failedPut());
+          await advanceTimersByTimeAsync(0);
+          expect(result.current[owner].promptSettings.textSystemPrompt).toBe('second');
+          // A subsequent field edit cannot inherit a discarded optimistic value.
+          act(() => result.current[owner].setGlobalImageQuality('4K'));
+          await advanceTimersByTimeAsync(300);
+          expect(mockPut.mock.calls[3]?.[0]).toMatchObject({
+            globalImageQuality: '4K',
+            promptSettings: { textSystemPrompt: 'second' },
+          });
+        } finally {
+          for (const complete of settlePut) complete(savedPut('second'));
+          await restoreRealTimers();
+        }
+      });
+    }
+
+    it('preserves a queue based on another hook confirmed success after the replacement save', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => ({
+        layout: useGlobalSettings(),
+        outlet: useGlobalSettings(),
+      }));
+      await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+      useFakeTimers();
+      try {
+        act(() => result.current.layout.setTextSystemPrompt('first'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.layout.setTextSystemPrompt('second'));
+        await advanceTimersByTimeAsync(300);
+        await settle(settlePut[1], savedPut('second'));
+        act(() => result.current.outlet.setTextSystemPrompt('third confirmed'));
+        await advanceTimersByTimeAsync(300);
+        await settle(settlePut[2], savedPut('third confirmed'));
+        act(() => result.current.outlet.setTextSystemPrompt('fourth queued'));
+        await settle(
+          settlePut[0],
+          mockMutationResult(null, { value: { error: 'Settings changed', code: 'CONFLICT' } })
+        );
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(4);
+        expect(mockPut.mock.calls[3]?.[0]).toMatchObject({
+          promptSettings: { textSystemPrompt: 'fourth queued' },
+        });
+        await settle(settlePut[3], failedPut());
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.outlet.promptSettings.textSystemPrompt).toBe('third confirmed');
+      } finally {
+        for (const complete of settlePut) complete(savedPut('third confirmed'));
+        await restoreRealTimers();
+      }
+    });
+
+    it('still discards another hook queue built before the newer confirmed save', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => ({
+        layout: useGlobalSettings(),
+        outlet: useGlobalSettings(),
+      }));
+      await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+      useFakeTimers();
+      try {
+        act(() => result.current.layout.setTextSystemPrompt('first'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.layout.setTextSystemPrompt('second'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.outlet.setTextSystemPrompt('older queued intent'));
+        await settle(settlePut[1], savedPut('second'));
+        await settle(
+          settlePut[0],
+          mockMutationResult(null, { value: { error: 'Settings changed', code: 'CONFLICT' } })
+        );
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(2);
+        expect(result.current.outlet.promptSettings.textSystemPrompt).toBe('second');
+      } finally {
+        for (const complete of settlePut) complete(savedPut('second'));
+        await restoreRealTimers();
+      }
+    });
+
+    it('does not revive an older queue across a refresh when a delayed conflict is superseded', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => ({
+        layout: useGlobalSettings(),
+        outlet: useGlobalSettings(),
+        other: useGlobalSettings(),
+      }));
+      await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+      useFakeTimers();
+      try {
+        act(() => result.current.layout.setTextSystemPrompt('first'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.layout.setTextSystemPrompt('second'));
+        await advanceTimersByTimeAsync(300);
+        await settle(settlePut[1], savedPut('second'));
+        act(() => result.current.other.setTextSystemPrompt('conflicting other save'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.outlet.setTextSystemPrompt('queued on second'));
+        mockGet.mockResolvedValue(
+          mockQueryResult({
+            ...DEFAULT_APP_SETTINGS,
+            promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt: 'winner' },
+          })
+        );
+        const conflict = mockMutationResult(null, {
+          value: { error: 'Settings changed', code: 'CONFLICT' },
+        });
+        await settle(settlePut[2], conflict);
+        await settle(settlePut[0], conflict);
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(3);
+        expect(result.current.outlet.promptSettings.textSystemPrompt).toBe('winner');
+      } finally {
+        for (const complete of settlePut) complete(savedPut('winner'));
+        await restoreRealTimers();
+      }
+    });
+
+    it('discards a queued stale burst instead of replaying it after a conflict', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => useGlobalSettings());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      useFakeTimers();
+      try {
+        act(() => result.current.setTextSystemPrompt('first'));
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(1);
+        act(() => result.current.setTextSystemPrompt('queued stale burst'));
+        mockGet.mockResolvedValue(
+          mockQueryResult({
+            ...DEFAULT_APP_SETTINGS,
+            promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt: 'winner' },
+          })
+        );
+        await settle(
+          settlePut[0],
+          mockMutationResult(null, {
+            value: { error: 'Settings changed', code: 'CONFLICT' },
+          })
+        );
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(1);
+        expect(result.current.promptSettings.textSystemPrompt).toBe('winner');
+      } finally {
+        await restoreRealTimers();
+      }
+    });
+
+    for (const refetch of ['finished', 'pending'] as const) {
+      it(`discards another hook's queued snapshot when the conflict refetch is ${refetch}`, async () => {
+        const settlePut = holdEveryPut();
+        const { result } = renderHook(() => ({
+          layout: useGlobalSettings(),
+          outlet: useGlobalSettings(),
+        }));
+        await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+        const refresh = Promise.withResolvers<MockGetResult>();
+        const winner = mockQueryResult({
+          ...DEFAULT_APP_SETTINGS,
+          promptSettings: {
+            ...DEFAULT_APP_SETTINGS.promptSettings,
+            textSystemPrompt: 'external winner',
+          },
+        });
+        mockGet.mockImplementation(() => refresh.promise);
+        useFakeTimers();
+        try {
+          act(() => result.current.layout.setTextSystemPrompt('layout edit'));
+          await advanceTimersByTimeAsync(300);
+          expect(mockPut).toHaveBeenCalledTimes(1);
+          act(() => result.current.outlet.setTextSystemPrompt('outlet queued before conflict'));
+          if (refetch === 'finished') refresh.resolve(winner);
+          await settle(
+            settlePut[0],
+            mockMutationResult(null, {
+              value: { error: 'Settings changed', code: 'CONFLICT' },
+            })
+          );
+          expect(mockGet).toHaveBeenCalledTimes(2);
+          await advanceTimersByTimeAsync(300);
+          expect(mockPut).toHaveBeenCalledTimes(1);
+          await act(async () => {
+            refresh.resolve(winner);
+            await refresh.promise;
+          });
+          await advanceTimersByTimeAsync(0);
+          expect(result.current.outlet.promptSettings.textSystemPrompt).toBe('external winner');
+        } finally {
+          refresh.resolve(winner);
+          // A failing red run may have submitted the stale second PUT. Settle
+          // that held request as well so the regression never strands a save.
+          for (const complete of settlePut.slice(1)) complete(savedPut('external winner'));
+          await restoreRealTimers();
+        }
+      });
+    }
+
+    it('builds a fresh edit and rollback baseline after another hook refreshes a conflict', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => ({
+        layout: useGlobalSettings(),
+        outlet: useGlobalSettings(),
+      }));
+      await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+      useFakeTimers();
+      try {
+        act(() => result.current.layout.setTextSystemPrompt('layout edit'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.outlet.setTextSystemPrompt('old queued edit'));
+        mockGet.mockResolvedValue(
+          mockQueryResult({
+            ...DEFAULT_APP_SETTINGS,
+            globalImageQuality: '4K',
+            promptSettings: {
+              ...DEFAULT_APP_SETTINGS.promptSettings,
+              textSystemPrompt: 'external winner',
+            },
+          })
+        );
+        await settle(
+          settlePut[0],
+          mockMutationResult(null, {
+            value: { error: 'Settings changed', code: 'CONFLICT' },
+          })
+        );
+        act(() => result.current.outlet.setTextSystemPrompt('fresh edit'));
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(2);
+        expect(mockPut.mock.calls[1]?.[0]).toMatchObject({
+          globalImageQuality: '4K',
+          promptSettings: { textSystemPrompt: 'fresh edit' },
+        });
+        await settle(settlePut[1], failedPut());
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.outlet.promptSettings.textSystemPrompt).toBe('external winner');
+        expect(result.current.outlet.globalImageQuality).toBe('4K');
+      } finally {
+        for (const complete of settlePut.slice(1)) complete(savedPut('external winner'));
+        await restoreRealTimers();
+      }
+    });
+
     it('rolls back to the last confirmed value, not to an unconfirmed one', async () => {
       const burstStart = 'persisted baseline';
       mockGet.mockResolvedValue(
@@ -541,6 +840,29 @@ describe('useGlobalSettings', () => {
       // server rejected on screen, with refetch-on-focus off to correct it.
       await waitFor(() => expect(result.current.promptSettings.textSystemPrompt).toBe(burstStart));
     });
+  });
+
+  it('blocks another awaited save after a failed conflict refresh', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    mockPut.mockResolvedValue(
+      mockMutationResult(null, {
+        value: { error: 'Settings changed', code: 'CONFLICT' },
+      })
+    );
+    mockGet.mockResolvedValue(mockQueryResult(null, { value: { error: 'Refresh unavailable' } }));
+    await act(async () => {
+      await result.current.updateExternalAgentSettings({}).catch(() => undefined);
+    });
+    mockPut.mockResolvedValue(mockMutationResult(DEFAULT_APP_SETTINGS));
+    let retryError: unknown;
+    await act(async () => {
+      await result.current.updateExternalAgentSettings({}).catch((error) => {
+        retryError = error;
+      });
+    });
+    expect(retryError).toBeInstanceOf(Error);
+    expect(mockPut).toHaveBeenCalledTimes(1);
   });
 
   it('adds and removes custom rules through the cached app settings state', async () => {

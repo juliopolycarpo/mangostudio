@@ -49,6 +49,7 @@ import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getRuntimeClient } from '../../../services/runtime-client';
+import { AppSettingsConflict } from '../../app-settings/domain/app-settings-conflict';
 import { toPublicChat } from '../../chats/application/public-chat';
 import { createChat, getOwnedChat, updateChat } from '../../chats/infrastructure/chat-repository';
 import {
@@ -156,12 +157,15 @@ export interface ExternalAgentTurnRouteDependencies {
   readonly resolveRuntimeClient?: typeof getRuntimeClient;
   /** The turn stream a review runs on. Injectable for the same reason. */
   readonly streamExternalTurn?: typeof streamExternalTurn;
+  /** Persist the grant, including an explicit settings write conflict. */
+  readonly grantWorkspaceTrust?: typeof grantWorkspaceTrust;
 }
 
 export function createExternalAgentTurnRoutes(
   controller: ExternalTurnController = externalTurnController,
   dependencies: ExternalAgentTurnRouteDependencies = {}
 ) {
+  const persistWorkspaceTrust = dependencies.grantWorkspaceTrust ?? grantWorkspaceTrust;
   const resolveRuntimeClient = dependencies.resolveRuntimeClient ?? getRuntimeClient;
   const runExternalTurnStream = dependencies.streamExternalTurn ?? streamExternalTurn;
   return new Elysia()
@@ -393,15 +397,21 @@ export function createExternalAgentTurnRoutes(
           };
         }
 
-        await grantWorkspaceTrust(
-          {
-            userId,
-            targetId: chat.runner.targetId,
-            environmentId: chat.environmentId,
-            workspacePath,
-          },
-          db
-        );
+        try {
+          await persistWorkspaceTrust(
+            {
+              userId,
+              targetId: chat.runner.targetId,
+              environmentId: chat.environmentId,
+              workspacePath,
+            },
+            db
+          );
+        } catch (error) {
+          if (!(error instanceof AppSettingsConflict)) throw error;
+          set.status = 409;
+          return { error: error.message, code: ERROR_CODES.CONFLICT };
+        }
         return { workspacePath };
       }
     );

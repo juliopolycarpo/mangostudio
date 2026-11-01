@@ -7,6 +7,7 @@ import { EXTERNAL_WORKSPACE_TRUST_VERSION } from '@mangostudio/shared/external-a
 
 import { getDb } from '../../../src/db/database';
 import { getAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
+import { AppSettingsConflict } from '../../../src/modules/app-settings/domain/app-settings-conflict';
 import type { AnswerExternalApprovalResult } from '../../../src/modules/external-agents/application/external-approval-registry';
 import type { ExternalTurnController } from '../../../src/modules/external-agents/application/external-turn-controller';
 import type {
@@ -421,6 +422,24 @@ describe('trusting a workspace for an external agent', () => {
         acceptedAt: expect.any(Number),
       },
     ]);
+  });
+
+  it('returns a settings conflict without silently retrying a workspace grant', async () => {
+    const cursorChatId = await insertExternalChat('/work/repo', 'cursor');
+    let grants = 0;
+    const app = mount(anyController(), {
+      resolveRuntimeClient: stubRuntimeClient,
+      grantWorkspaceTrust: () => {
+        grants += 1;
+        return Promise.reject(new AppSettingsConflict());
+      },
+    });
+    const response = await app.handle(
+      post(`/chats/${cursorChatId}/external-agent/trust-workspace`, trustBody())
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: ERROR_CODES.CONFLICT });
+    expect(grants).toBe(1);
   });
 
   it('turns the recorded grant into a turn the gate lets through', async () => {

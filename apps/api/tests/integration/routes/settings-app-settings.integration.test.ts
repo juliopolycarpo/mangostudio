@@ -7,11 +7,18 @@ import {
   DEFAULT_APP_SETTINGS,
   onboardingFor,
 } from '@mangostudio/shared/app-settings';
+import { ApiErrorResponseSchema } from '@mangostudio/shared/errors';
 import { DEFAULT_ONBOARDING_STATE } from '@mangostudio/shared/onboarding';
 import Value from 'typebox/value';
 
 import { getDb } from '../../../src/db/database';
+import { createAppSettingsRoutes } from '../../../src/modules/app-settings/http/app-settings-routes';
+import {
+  getSavedAppSettings,
+  patchAppSettings,
+} from '../../../src/modules/app-settings/infrastructure/app-settings-repository';
 import { settingsRoutes } from '../../../src/routes/settings';
+import { holdFirstAppSettingsRead } from '../../support/app-settings-read-barrier';
 import { makeTestIdentity, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
@@ -413,5 +420,38 @@ describe('settings app settings partial updates', () => {
     const payload = (await response.json()) as AppSettings;
 
     expect(onboardingFor(payload)).toEqual(DEFAULT_ONBOARDING_STATE);
+  });
+});
+
+describe('settings app settings conflict response', () => {
+  it('returns a typed 409 instead of overwriting a winning patch', async () => {
+    const barrier = holdFirstAppSettingsRead();
+    const db = getDb();
+    const { app, restore } = createAuthenticatedApiTestApp(
+      testUser,
+      createAppSettingsRoutes(() => db.withPlugin(barrier.plugin))
+    );
+    restoreAuth = restore;
+    const stale = app.handle(
+      new Request('http://localhost/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thinkingEnabled: true }),
+      })
+    );
+    try {
+      await barrier.read;
+      await patchAppSettings(db, testUser.id, { globalImageQuality: '4K' });
+    } finally {
+      barrier.release();
+    }
+    const response = await stale;
+    const payload: unknown = await response.json();
+    expect(response.status).toBe(409);
+    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+    expect(payload).toMatchObject({ code: 'CONFLICT' });
+    const stored = await getSavedAppSettings(db, testUser.id);
+    expect(stored.globalImageQuality).toBe('4K');
+    expect(stored.thinkingEnabled).toBe(false);
   });
 });
